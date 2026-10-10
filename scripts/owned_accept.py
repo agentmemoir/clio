@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from integration_targets import declared_targets  # noqa: E402
+from gate_kinds import ANSI_ESCAPE  # noqa: E402
 from owned_scanner import (  # noqa: E402
     PLATFORM_SKIPPED,
     SourceError,
@@ -65,9 +66,13 @@ def runner_test_modules() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     )
     if proc.returncode != 0:
         raise ResolutionError(f"'cargo nextest list' failed: {proc.stderr.strip()}")
+    # A tool colours its output at the caller's setting (CI sets
+    # CARGO_TERM_COLOR=always), so colour bytes are stripped before parsing:
+    # a coloured binary id would otherwise key every module under a name the
+    # predictions never use, and the whole workspace would report unclaimed.
     unit: dict[str, set[str]] = {}
     integration: dict[str, set[str]] = {}
-    for line in proc.stdout.splitlines():
+    for line in ANSI_ESCAPE.sub("", proc.stdout).splitlines():
         parts = line.split()
         if len(parts) != 2:
             continue
