@@ -89,13 +89,14 @@ fail to compile against a signature you changed.
 Run them before you commit:
 
 ```
-make precommit          # run every hook
-make precommit-list     # show which hooks would run
+make precommit          # run the commit-scoped hooks over every tracked file
+make precommit-list     # show which hooks that runs, and which it leaves out
 ```
 
-`precommit` is separate from the gate and CI does not run it. It reads the staged
-files rather than building anything, so it is quick; the gate is the expensive
-half.
+`precommit` is separate from the gate and CI does not run it. It builds nothing, so
+it is quick; the gate is the expensive half. It leaves out the `manual` hooks (see
+below), which run in CI as steps of their own. `python3 scripts/precommit.py` runs
+every hook, manual ones included.
 
 ### The commit hook
 
@@ -116,12 +117,13 @@ needs conflict resolution is the other way round: git does not run
 `pre-merge-commit` there, and runs `pre-commit` when you commit the resolved
 result. Between the two, every merge is checked once.
 
-`make precommit` and the commit hooks run the same checks. The difference is
-scope. The commit hooks take only the checks that read the staged files, because
-a commit hook cannot afford to be slow: a check that runs a test suite is not
-bounded by the size of a commit, and a hook that costs twenty seconds is a hook
-that gets passed with `--no-verify`. The slower checks still run when you ask for
-them by name, and in CI.
+`make precommit` and the commit hooks run the same checks. The difference is the
+files: the commit hooks read the staged files, and `make precommit` reads every
+tracked file. Both take only the commit-scoped checks, because a commit hook
+cannot afford to be slow: a check that runs a test suite is not bounded by the
+size of a commit, and a hook that costs twenty seconds is a hook that gets passed
+with `--no-verify`. The manual checks still run when you ask for them by name,
+and in CI.
 
 What the hooks cover, precisely: `git commit`, `git commit -a`,
 `git commit --amend`, `git commit --allow-empty`, an automatic `git merge`, and
@@ -156,7 +158,7 @@ variables:
 | Variable | Value |
 |----------|-------|
 | `CLIO_PRECOMMIT_ROOT` | absolute path of the repository root |
-| `CLIO_PRECOMMIT_MODE` | `all`, or `staged` under `--staged` |
+| `CLIO_PRECOMMIT_MODE` | `all`, or `staged` under `--staged` and under `--commit` without `--all-files` |
 
 A hook that does not care about files can ignore the arguments. One that needs
 the files should read them from the argument list rather than walking the tree,

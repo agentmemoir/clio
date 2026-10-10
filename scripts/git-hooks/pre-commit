@@ -24,8 +24,9 @@
 # ------------
 # Only the commit-scoped checks, over the staged files. A check that runs a test
 # suite is not bounded by the size of a commit, and a commit hook that costs
-# twenty seconds is a commit hook that gets passed with --no-verify. The slower
-# checks run when they are asked for: make precommit.
+# twenty seconds is a commit hook that gets passed with --no-verify. The manual
+# checks run when they are asked for (python3 scripts/precommit.py), and in CI.
+# make precommit runs these same commit-scoped checks over every tracked file.
 #
 # A missing runner is a failure, not a pass. This hook exists so a check cannot
 # be skipped by accident, and staying quiet when the runner is gone would be
