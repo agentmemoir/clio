@@ -109,6 +109,33 @@ fn scenario(tag: &str) -> PathBuf {
     temp_dir(tag).join("clio.db")
 }
 
+/// One `remember` of a repeated `text`, asserting the gate refused it with exit 1,
+/// and returning the refusal envelope the CLI writes to stderr.
+fn remember_refused(db: &Path, text: &str) -> Value {
+    let output = run(
+        db,
+        &[
+            "remember",
+            text,
+            "--category",
+            "persona",
+            "--output",
+            "json",
+        ],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a duplicate must exit 1: {}",
+        stderr_of(&output)
+    );
+    // The admission telemetry line comes first on stderr; the refusal envelope is the last line.
+    let stderr = stderr_of(&output);
+    let envelope = stderr.lines().last().unwrap_or_default();
+    serde_json::from_str(envelope)
+        .unwrap_or_else(|error| panic!("refusal is not JSON: {error}\nstderr: {stderr}"))
+}
+
 /// One `remember` of `text`, asserting the write succeeded, and returning the
 /// parsed payload.
 fn remember(db: &Path, text: &str, extra: &[&str]) -> Value {
@@ -158,24 +185,20 @@ fn seven_identical_remembers_store_one_item_and_recall_returns_it_once() {
         .expect("first write has an id")
         .to_owned();
 
-    // Six repeats of the identical sentence. Each must be a no-op that still
-    // exits 0, so an agent that repeats itself never sees a failure.
+    // Six repeats of the identical sentence. Each is refused with exit 1 and a
+    // stated reason, and none stores an item.
     for attempt in 2..=7 {
-        let repeat = remember(&db, FACT, &[]);
+        let refusal = remember_refused(&db, FACT);
         assert_eq!(
-            repeat["duplicate"],
-            Value::Bool(true),
-            "repeat {attempt} was not reported as a duplicate: {repeat}"
+            refusal["ok"],
+            Value::Bool(false),
+            "repeat {attempt}: {refusal}"
         );
-        assert_eq!(repeat["pass"], Value::Bool(false));
+        assert_eq!(refusal["code"], "duplicate", "repeat {attempt}: {refusal}");
+        let message = refusal["message"].as_str().unwrap_or_default();
         assert!(
-            repeat["id"].is_null(),
-            "repeat {attempt} must not store an item: {repeat}"
-        );
-        let reason = repeat["rejection_reason"].as_str().unwrap_or_default();
-        assert!(
-            reason.starts_with("exact_duplicate"),
-            "repeat {attempt} reason: {reason}"
+            message.starts_with("duplicate: nothing stored (exact_duplicate"),
+            "repeat {attempt} message: {message}"
         );
     }
 
@@ -194,7 +217,7 @@ fn seven_identical_remembers_store_one_item_and_recall_returns_it_once() {
 }
 
 #[test]
-fn a_repeat_exits_zero_and_says_nothing_was_stored() {
+fn a_repeat_text_view_exits_one_and_names_the_reason() {
     let db = scenario("exit-code");
     remember(&db, FACT, &[]);
 
@@ -209,20 +232,15 @@ fn a_repeat_exits_zero_and_says_nothing_was_stored() {
             "text",
         ],
     );
-    let text = stdout_of(&output);
-    assert!(
-        output.status.success(),
-        "a duplicate must exit 0, got {:?}: {}",
+    let text = stderr_of(&output);
+    assert_eq!(
         output.status.code(),
-        stderr_of(&output)
+        Some(1),
+        "a duplicate must exit 1: {text}"
     );
     assert!(
         text.contains("duplicate: nothing stored"),
         "unexpected text output: {text}"
-    );
-    assert!(
-        !text.contains("error"),
-        "a duplicate is not an error: {text}"
     );
 }
 
@@ -237,11 +255,10 @@ fn case_punctuation_and_whitespace_variants_are_duplicates() {
         "  Tom   goes on a walk   every   Friday  ",
         "TOM GOES ON A WALK EVERY FRIDAY",
     ] {
-        let payload = remember(&db, variant, &[]);
+        let refusal = remember_refused(&db, variant);
         assert_eq!(
-            payload["duplicate"],
-            Value::Bool(true),
-            "{variant:?} should be a duplicate: {payload}"
+            refusal["code"], "duplicate",
+            "{variant:?} should be a duplicate: {refusal}"
         );
     }
 }

@@ -229,11 +229,7 @@ pub(crate) fn build_item(
         admission_score: None,
         source_ref: None,
         snapshot: shell.get("snapshot").cloned().filter(|v| !v.is_null()),
-        gist: shell
-            .get("gist")
-            .and_then(Value::as_str)
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned),
+        gist: crate::store_write::gist_of(&shell)?,
         valid_from: ts.clone(),
         valid_until: None,
         tx_from: ts.clone(),
