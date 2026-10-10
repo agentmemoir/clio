@@ -192,7 +192,10 @@ fn an_empty_store_loads_but_authorizes_nobody() {
     let scratch = Scratch::new("norecords");
     scratch.write(&[]);
     let store = CredentialStore::load(scratch.path()).expect("load");
-    assert!(store.is_empty());
+    assert!(
+        store.is_empty(),
+        "an empty record file loads no credentials"
+    );
     assert!(store.resolve(&secret("any")).is_none());
 }
 

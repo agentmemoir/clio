@@ -142,8 +142,14 @@ fn patch_without_new_knobs_fills_their_defaults() {
     .expect("coactivation group with omitted bounds is accepted");
     let env = preview_patch(&RankingEnv::system_defaults(), &patch).expect("patch applies");
     assert!((env.recency_tau_days - 30.0).abs() < 1e-9);
-    assert!(env.theta_overrides.is_empty());
-    assert!(env.type_prior_overrides.is_empty());
+    assert!(
+        env.theta_overrides.is_empty(),
+        "omitted theta bounds leave no overrides"
+    );
+    assert!(
+        env.type_prior_overrides.is_empty(),
+        "omitted type-prior bounds leave no overrides"
+    );
     // New association bounds fall back to their documented defaults.
     assert_eq!(env.coactivation.hub_degree_limit, 16);
     assert_eq!(env.coactivation.max_hops, 2);

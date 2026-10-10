@@ -148,5 +148,8 @@ fn reading_attributes_of_a_missing_entry_is_empty_rather_than_a_failure() {
 
     let attributes = store.attributes().expect("no entry means no attributes");
 
-    assert!(attributes.is_empty());
+    assert!(
+        attributes.is_empty(),
+        "an empty credential carries no attributes"
+    );
 }

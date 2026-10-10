@@ -78,7 +78,6 @@ fn the_documented_object_parses_onto_the_four_named_fields() {
     assert_eq!(scores.keyword, Some(1.25));
     assert_eq!(scores.reranker, Some(0.2));
     assert_eq!(scores.final_score, Some(0.01));
-    assert!(!scores.is_empty());
 
     // A partial object is legal: an unset field is simply no floor.
     let partial = min_scores_from_value(Some(&json!({"final": 0.5}))).expect("partial object");

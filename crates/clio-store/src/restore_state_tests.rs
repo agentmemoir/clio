@@ -89,7 +89,7 @@ fn a_populated_store_reports_its_tables_and_is_not_empty() {
         "every user table is counted: {}",
         state.table_count()
     );
-    assert!(!state.is_empty());
+    assert!(!state.is_empty(), "the restored state holds tables");
 }
 
 #[test]
@@ -207,5 +207,5 @@ fn a_snapshot_copy_measures_like_the_store_it_came_from() {
     let state = sqlite_file_state(&staged).expect("measure the copy");
     assert_eq!(state.count_of("items"), Some(4));
     assert_eq!(facts.count_of("items"), Some(4));
-    assert!(!state.is_empty());
+    assert!(!state.is_empty(), "the snapshot copy holds tables");
 }
