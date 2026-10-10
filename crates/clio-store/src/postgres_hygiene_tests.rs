@@ -127,12 +127,12 @@ fn parity_body<S: Store + HygieneStore>(s: &S, bank: &str, id: &str) {
         clio_types::ErrorCode::InvalidArgument
     );
 
-    // Unknown items are NotFound; empty ids are InvalidArgument.
+    // Unknown items are ItemNotFound; empty ids are InvalidArgument.
     assert_eq!(
         s.archive_item(bank, &unique("ghost"), "2026-09-20T00:00:00Z", "agent")
             .unwrap_err()
             .code,
-        clio_types::ErrorCode::NotFound
+        clio_types::ErrorCode::ItemNotFound
     );
     assert_eq!(
         s.set_hygiene_flag("", id, Some("x"), "agent", "2026-09-20T00:00:00Z")

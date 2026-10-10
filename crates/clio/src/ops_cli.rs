@@ -36,13 +36,14 @@ use std::sync::Arc;
 
 /// Exit-code contract for the operator commands.
 ///
-/// - `0`: success — `diagnose` ok, `verify` ok, `doctor` plan composed,
-///   `repair` applied, or `reindex` completed.
-/// - `1`: `verify` reported error-severity findings, a store/index read failed
-///   during `verify`/`diagnose`/`doctor`, the `diagnose` backend was
-///   unreachable, or the store could not be opened.
-/// - `2`: `repair` refused (missing confirm, unknown action, or missing plan
-///   id) or a repair action failed; also an unknown `clio ops` subcommand.
+/// - `0`: success — `diagnose` and `verify` are healthy, `doctor` composed a
+///   clean plan, `repair` applied, or `reindex` completed.
+/// - `1`: `verify` or `doctor` reported error-severity findings, a store/index
+///   read failed, a referenced repair plan was not found, the `diagnose`
+///   backend was unreachable, a repair action failed, or the store could not
+///   be opened.
+/// - `2`: a repair was refused (missing confirm or unknown action), the
+///   backend value is invalid, or the `clio ops` subcommand is unknown.
 /// - `3`: `reindex` failed or aborted (including a dense target with no
 ///   embedding sidecar).
 ///
@@ -143,7 +144,7 @@ where
         Err(reason) => {
             return emit_error(
                 &AmError::new(clio_types::ErrorCode::ConfigCorrupt, reason),
-                2,
+                1,
             );
         }
     };
@@ -188,13 +189,7 @@ where
             },
             Err(e) => emit_error(&e, 1),
         },
-        other => emit_error(
-            &AmError::new(
-                clio_types::ErrorCode::OutOfRange,
-                format!("backend must be sqlite|postgres, got `{other}`"),
-            ),
-            1,
-        ),
+        other => emit_usage_error(format!("backend must be sqlite|postgres, got `{other}`")),
     }
 }
 
@@ -306,7 +301,11 @@ fn run_doctor<S: OpsRepos>(
     }) {
         Ok(plan) => {
             print_json(&plan);
-            ExitCode::SUCCESS
+            if plan.ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
         }
         Err(e) => emit_error(&e, 1),
     }
@@ -346,11 +345,19 @@ fn run_repair<S: OpsRepos>(
             print_json(&outcome);
             if outcome.ok {
                 ExitCode::SUCCESS
-            } else {
+            } else if outcome
+                .findings
+                .iter()
+                .any(|finding| finding.code == clio_ops::codes::PLAN_NOT_FOUND)
+            {
+                ExitCode::from(1)
+            } else if !outcome.findings.is_empty() {
                 ExitCode::from(2)
+            } else {
+                ExitCode::from(1)
             }
         }
-        Err(e) => emit_error(&e, 2),
+        Err(e) => emit_error(&e, 1),
     }
 }
 
@@ -363,7 +370,7 @@ fn run_reindex<S: OpsRepos>(
     let target = match flags.get("target") {
         Some(raw) => match clio_index::RebuildTargets::parse(raw) {
             Ok(target) => target,
-            Err(e) => return emit_error(&e, 3),
+            Err(e) => return emit_usage_error(e.message),
         },
         None => clio_index::RebuildTargets::All,
     };
@@ -397,6 +404,16 @@ fn emit_error(error: &AmError, code: u8) -> ExitCode {
         "message": redact(&error.message),
     }));
     ExitCode::from(code)
+}
+
+/// Render a bad flag value with the shared usage code and exit group.
+fn emit_usage_error(message: impl AsRef<str>) -> ExitCode {
+    print_json(&serde_json::json!({
+        "ok": false,
+        "code": "usage",
+        "message": redact(message.as_ref()),
+    }));
+    ExitCode::from(2)
 }
 
 /// Print a serializable value as one JSON line.

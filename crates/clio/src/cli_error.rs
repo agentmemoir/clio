@@ -36,9 +36,8 @@ pub(crate) const EXIT_OK: u8 = 0;
 pub(crate) const EXIT_OPERATIONAL: u8 = 1;
 /// Process exit code for a usage error (bad flag, missing argument, unknown command).
 pub(crate) const EXIT_USAGE: u8 = 2;
-/// Process exit code for a restore that replaced the database but not the key
-/// store. Distinct from both success and a refusal: the operator must be able
-/// to tell a partial restore from either.
+/// Process exit code for a command-specific degraded outcome. Distinct from
+/// success and a refusal so scripts can identify partial or incomplete work.
 pub(crate) const EXIT_PARTIAL: u8 = 3;
 
 /// One CLI failure: a machine code, a human message, an optional hint, an

@@ -46,9 +46,8 @@ pub(crate) enum RestoreFailure {
     RestoredOrPlanned,
     /// A restore that replaced the database but not everything it promised:
     /// a failed key swap, or a post-commit count check that did not match.
-    /// A rename that could not be fsynced also lands here: the store really was
-    /// replaced, so the code stays 0 and the report's `ok` field is what says
-    /// the run was not fully durable.
+    /// A rename that could not be fsynced also lands here: the store was
+    /// replaced but the report is degraded and must not exit 0.
     RestoredNotDurable,
     /// The database was replaced but the run did not fully complete.
     PartialOrCountMismatch,
@@ -57,8 +56,6 @@ pub(crate) enum RestoreFailure {
     // nothing live was touched. Exit 2.
     /// A flag, selector, typed id, or output mode the command does not accept.
     BadArguments,
-    /// The named snapshot is not in the backup directory.
-    UnknownSnapshot,
     /// A member the archive declares is missing, truncated, or does not match
     /// the manifest that declares it.
     ArchiveDamaged,
@@ -119,14 +116,13 @@ pub(crate) enum RestoreFailure {
 ///
 /// Data rather than a chain of `if`s, so the whole contract is readable in one
 /// place and a test can assert one row at a time. The codes are the documented
-/// `0` ok / `1` operational / `2` usage / `3` partial contract; this phase routes
+/// `0` ok / `1` operational / `2` usage / `3` degraded contract; this phase routes
 /// conditions to that contract and does not add to it.
 const RESTORE_EXIT_CODES: &[(RestoreFailure, u8)] = &[
     (RestoreFailure::RestoredOrPlanned, EXIT_OK),
-    (RestoreFailure::RestoredNotDurable, EXIT_OK),
+    (RestoreFailure::RestoredNotDurable, EXIT_PARTIAL),
     (RestoreFailure::PartialOrCountMismatch, EXIT_PARTIAL),
     (RestoreFailure::BadArguments, EXIT_USAGE),
-    (RestoreFailure::UnknownSnapshot, EXIT_USAGE),
     (RestoreFailure::ArchiveDamaged, EXIT_USAGE),
     (RestoreFailure::BackendMismatch, EXIT_USAGE),
     (RestoreFailure::SchemaTooNew, EXIT_USAGE),
@@ -259,7 +255,7 @@ pub(crate) fn extraction_failure(error: &AmError) -> RestoreFailure {
 /// The condition a manifest read maps to, from the error's own code.
 ///
 /// A missing archive is not a usage error: the listing named an id, the file
-/// was there, and by the time it was read it was not. A script reading exit 2
+/// was there, and by the time it was read it was not. A script reading exit 1
 /// would conclude it had asked for the wrong thing.
 #[must_use]
 pub(crate) fn manifest_failure(error: &AmError) -> RestoreFailure {

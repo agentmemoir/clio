@@ -110,6 +110,37 @@ fn update_requires_the_rule_flag() {
 }
 
 #[test]
+fn missing_item_mutations_report_one_not_found_code() {
+    let s = seeded("demo", "itm-seed", "value");
+    for (verb, args) in [
+        (
+            "update",
+            &["itm-nope", "value", "--rule", "discrete", "--bank", "demo"][..],
+        ),
+        ("invalidate", &["itm-nope", "--bank", "demo"]),
+        (
+            "discard",
+            &[
+                "itm-nope",
+                "--reason",
+                "cleanup",
+                "--confirm",
+                "--bank",
+                "demo",
+            ],
+        ),
+    ] {
+        let (code, out, err) = run_write_state(verb, args, &s, false);
+        assert_eq!(code, ExitCode::from(1), "{verb}: {out}{err}");
+        assert_eq!(
+            json_of(&err)["code"],
+            json!("item_not_found"),
+            "{verb}: {err}"
+        );
+    }
+}
+
+#[test]
 fn update_dry_run_writes_nothing() {
     let s = seeded("demo", "itm-u4", "value");
     let (code, out, err) = run_write_state(

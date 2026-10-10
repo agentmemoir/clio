@@ -3,15 +3,15 @@
 //
 //! # Responsibility
 //!
-//! This module tests the `verify` failure exit path of the `clio ops` CLI: a
-//! planted integrity fault must report `ok:false` and exit 1.
+//! This module tests the `verify` and `doctor` failure exit paths of the
+//! `clio ops` CLI: a planted integrity fault must report `ok:false` and exit 1.
 //!
 //! ## Owns
-//! - The failing-verify CLI end-to-end test over a temp-file SQLite store
+//! - The failing-verify and failing-doctor CLI paths over a temp-file SQLite store
 //!
 //! ## Does not own
 //! - The verify checks themselves (`clio-ops`)
-//! - Other `clio ops` exit-code tests (`ops_cli.rs`)
+//! - Other `clio ops` exit-code tests (`ops_cli_tests.rs`)
 //!
 //! ## Boundary
 //!
@@ -25,14 +25,8 @@ use std::sync::Arc;
 
 #[test]
 fn verify_with_planted_fault_exits_1() {
-    let db = std::env::temp_dir().join(format!(
-        "am-ops-verify-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let scratch = crate::backup_cli_fixtures::Scratch::new("ops-verify-fault");
+    let db = scratch.join("clio.db");
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     let store = SqliteStore::open(&db, Arc::clone(&kms)).expect("temp store");
     store
@@ -48,8 +42,8 @@ fn verify_with_planted_fault_exits_1() {
         })
         .expect("plant orphan edge");
     drop(store);
+    let env = |_key: &str| None;
     let args = [
-        "ops",
         "verify",
         "--backend",
         "sqlite",
@@ -57,6 +51,14 @@ fn verify_with_planted_fault_exits_1() {
         &db.to_string_lossy(),
     ]
     .map(str::to_owned);
-    assert_eq!(crate::run(args), ExitCode::from(1));
-    let _ = std::fs::remove_file(&db);
+    assert_eq!(ops_with(args, &env), ExitCode::from(1));
+    let doctor_args = [
+        "doctor",
+        "--backend",
+        "sqlite",
+        "--db",
+        &db.to_string_lossy(),
+    ]
+    .map(str::to_owned);
+    assert_eq!(ops_with(doctor_args, &env), ExitCode::from(1));
 }

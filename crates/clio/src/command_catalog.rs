@@ -55,7 +55,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ),
     (
         "ops reindex",
-        "Rebuild derived indexes (live run requires --confirm); a lexical rebuild replaces legacy plaintext index rows with keyed term digests. Exit codes: 0 ok, 1 verify/health failure, 2 repair refused or failed, 3 reindex failed",
+        "Rebuild derived indexes (live run requires --confirm); a lexical rebuild replaces legacy plaintext index rows with keyed term digests. Ops exit codes: 0 healthy or completed, 1 domain/runtime failure or findings, 2 usage or repair refusal, 3 reindex failed",
     ),
     (
         "status",
@@ -216,7 +216,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ),
     (
         "backup create",
-        "Snapshot the store into one owner-only archive: a SQLite store is a compacted, transactionally consistent copy (one VACUUM INTO, logically equivalent, never a byte-for-byte clone, and it does not retain deleted pages); a Postgres store is a row-level dump in COPY text format, whose schema is owned by this build; --keep N then prunes the backup directory to the newest N (nothing without --confirm)",
+        "Snapshot the store into one owner-only archive: a SQLite store is a compacted, transactionally consistent copy (one VACUUM INTO, logically equivalent, never a byte-for-byte clone, and it does not retain deleted pages); a Postgres store is a row-level dump in COPY text format, whose schema is owned by this build; --keep N then prunes the backup directory to the newest N (nothing without --confirm); exit 3 means pruning could not remove every candidate",
     ),
     (
         "backup list",
@@ -224,11 +224,11 @@ const ENTRIES: &[(&str, &str)] = &[
     ),
     (
         "backup prune",
-        "Delete all but the newest N snapshots by manifest time: the newest snapshot is never deleted, an unreadable archive is reported and kept, and without --confirm nothing is removed",
+        "Delete all but the newest N snapshots by manifest time: the newest snapshot is never deleted, an unreadable archive is reported and kept, and without --confirm nothing is removed. Exit codes: 0 report-only or complete prune, 3 confirmed prune could not remove every candidate",
     ),
     (
         "backup restore",
-        "Replace the selected store with the archive (never a merge); a pre-restore snapshot is taken first unless --no-pre-backup; for a SQLite store the swap removes the target's write-ahead log before it renames the new store in, so a crash in that window loses whatever that log had not yet written; a Postgres restore replaces the target in one transaction and has no such window; --no-pre-backup is what leaves that window with no way back. Exit codes: 0 ok, 1 operational (no room, a vanished archive, a staging failure), 2 refused, 3 partial; a rename whose directory entry could not be fsynced still exits 0 and reports ok: false with a durability_warning field",
+        "Replace the selected store with the archive (never a merge); a pre-restore snapshot is taken first unless --no-pre-backup; for a SQLite store the swap removes the target's write-ahead log before it renames the new store in, so a crash in that window loses whatever that log had not yet written; a Postgres restore replaces the target in one transaction and has no such window; --no-pre-backup is what leaves that window with no way back. Exit codes: 0 clean restore, 1 operational failure, 2 refused, 3 partial or not-durable restore",
     ),
     (
         "backup verify",
@@ -256,7 +256,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ),
     (
         "help",
-        "Global flags: --db --backend --bank --actor --output (-o). Output mode: an explicit `--output`/`-o` always wins; otherwise text on a terminal (TTY) and JSON when piped. Forms: `--output json`, `--output=json`, `-o json`, `-o=json`. Empty values: a value flag given an empty value (`--bank ''`) is refused on every command; leave the flag off to take the default. Use -- after the command before positional text that starts with -; keep flags before it. Exit codes: 0 ok, 1 operational failure, 2 usage error; 3 is a command-specific degraded outcome (clio ops reindex aborted, clio backup restore partial). A command whose stdout reader goes away is ended by SIGPIPE before it can report any of these; the shell shows that as 141, and it is not one of these exit codes",
+        "Global flags: --db --backend --bank --actor --output (-o). Output mode: an explicit `--output`/`-o` always wins; otherwise text on a terminal (TTY) and JSON when piped. Forms: `--output json`, `--output=json`, `-o json`, `-o=json`. Empty values: a value flag given an empty value (`--bank ''`) is refused on every command; leave the flag off to take the default. Use -- after the command before positional text that starts with -; keep flags before it. Exit codes: 0 ok, 1 domain or runtime failure, 2 usage error or documented command refusal (ops repair or backup restore), 3 is a command-specific degraded outcome (clio ops reindex, backup prune or backup create --keep, or backup restore). Process stops caused by SIGPIPE, SIGINT, or SIGTERM cannot report a CLI error; shells that use the 128+signal convention show these as 141, 130, or 143, outside the command exit codes",
     ),
 ];
 

@@ -103,7 +103,7 @@ impl IndexStore for PostgresStore {
         })?;
         if n == 0 {
             return Err(AmError::new(
-                ErrorCode::NotFound,
+                ErrorCode::ItemNotFound,
                 format!("item `{item_id}` not found in bank `{bank_id}`"),
             ));
         }
