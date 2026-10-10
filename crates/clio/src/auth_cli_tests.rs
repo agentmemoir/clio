@@ -411,9 +411,13 @@ fn repeated_flag_parsing_keeps_every_occurrence() {
     .expect("parse");
     assert_eq!(parsed.values_of("bank"), &["a".to_owned(), "b".to_owned()]);
     assert_eq!(parsed.value("label"), Some("l"));
-    // A repeated non-repeatable flag still keeps only its last value.
+    // A repeated non-repeatable flag is refused, not last-wins.
     let plain_spec = spec("auth token revoke");
-    let parsed =
-        cli_args::parse(&plain_spec, tokens(&["--label", "x", "--label", "y"])).expect("parse");
-    assert_eq!(parsed.value("label"), Some("y"));
+    let error = cli_args::parse(&plain_spec, tokens(&["--label", "x", "--label", "y"]))
+        .expect_err("repeated --label");
+    assert!(
+        error.message().contains("--label was given more than once"),
+        "{}",
+        error.message()
+    );
 }
