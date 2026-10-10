@@ -21,24 +21,24 @@
 
 use crate::protocol::McpHandler;
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
 use crate::schema::schema_pack;
 use crate::write_tools::dispatch;
 use clio_config::retention::{RecallScope, RetentionProfile};
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
-use std::sync::Arc;
 
-fn state() -> Arc<McpState> {
+fn state() -> RetentionStoreFixture {
     // Hermetic: `open` layers the machine's deployment file, which turns
-    // these parity tests into timing flakes where sidecars live.
-    McpState::open_with_effective(
+    // these parity tests into timing flakes where sidecars live. The retention
+    // store is redirected to a file this fixture owns.
+    RetentionStoreFixture::open_with_effective(
         &McpOpenOptions {
             default_bank: "bank-a".into(),
             ..McpOpenOptions::default()
         },
         &json!({}),
     )
-    .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -420,7 +420,7 @@ fn protocol_handler_matches_direct_dispatch_for_scoped_retrieve() {
     });
     let direct = call(&direct_state, "retrieve", args.clone());
 
-    let handler = McpHandler::new(handler_state);
+    let handler = McpHandler::new(handler_state.state_arc());
     let response = handler
         .handle_message(&json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",

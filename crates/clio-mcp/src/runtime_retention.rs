@@ -120,3 +120,7 @@ fn restore_override(store: &mut RetentionStore, bank: &str, previous: Option<Ret
 #[cfg(test)]
 #[path = "runtime_retention_tests.rs"]
 mod runtime_retention_tests;
+
+#[cfg(test)]
+#[path = "retention_test_support.rs"]
+pub(crate) mod retention_test_support;

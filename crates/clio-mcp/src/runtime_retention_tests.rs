@@ -4,12 +4,13 @@
 
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::runtime_open::load_retention_store_from;
+use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
 use clio_config::retention::{RetentionProfile, Verbosity};
 use clio_config::retention_store::{ProfileSource, RetentionStore};
 use std::sync::Arc;
 
-fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+fn state() -> RetentionStoreFixture {
+    RetentionStoreFixture::open(&McpOpenOptions::default())
 }
 
 #[test]
@@ -58,7 +59,7 @@ fn set_retention_changes_only_the_named_bank() {
             },
         )
         .expect("set");
-    assert!(!persisted, "no store path configured means in-memory only");
+    assert!(persisted, "the fixture's configured store path is written");
     assert!(s.resolved_retention("bank-a").theta_delta() > 0.0);
     assert!(s.resolved_retention("bank-b").theta_delta().abs() < 1e-12);
     assert_eq!(s.retention_effective("bank-a").1, ProfileSource::Bank);
@@ -69,7 +70,7 @@ fn set_retention_changes_only_the_named_bank() {
             ..RetentionProfile::default()
         })
         .expect("deploy");
-    assert!(!deploy);
+    assert!(deploy);
     assert_eq!(s.retention_effective("bank-b").1, ProfileSource::Deployment);
     assert!(s.resolved_retention("bank-b").theta_delta() > 0.0);
 

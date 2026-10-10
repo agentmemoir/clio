@@ -22,11 +22,11 @@
 //!
 //! Keep this module focused on the duplicate-rejection write contract.
 
-use crate::runtime::{McpOpenOptions, McpState};
-use std::sync::Arc;
+use crate::runtime::McpOpenOptions;
+use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
 
-fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+fn state() -> RetentionStoreFixture {
+    RetentionStoreFixture::open(&McpOpenOptions::default())
 }
 
 #[test]
