@@ -208,7 +208,7 @@ impl IndexStore for SqliteStore {
             let fetched = hits.len();
             let mut out = Vec::new();
             for hit in hits {
-                if self.sqlite_item_visible(&hit.item_id, bank_id, &dom)? {
+                if self.sqlite_item_in_domains(&hit.item_id, bank_id, &dom)? {
                     out.push(hit);
                 }
                 if out.len() >= limit {
@@ -385,8 +385,9 @@ impl IndexStore for SqliteStore {
 }
 
 impl SqliteStore {
-    /// Domain + current-belief visibility of one item row.
-    fn sqlite_item_visible(
+    /// Domain membership of one item row. Visibility (current belief, not
+    /// discarded, not archived) is the KNN primitive's filter, not this one's.
+    fn sqlite_item_in_domains(
         &self,
         item_id: &str,
         bank_id: &str,
@@ -395,13 +396,11 @@ impl SqliteStore {
         let sql = format!(
             "SELECT COUNT(*) FROM items
              WHERE id = ?1 AND bank_id = ?2
-               AND items.discarded_at IS NULL AND items.tx_until IS NULL
-               AND items.archived_at IS NULL
                AND {dom}"
         );
         let n: i64 = self.with_conn(|conn| {
             conn.query_row(&sql, params![item_id, bank_id], |r| r.get(0))
-                .am("dense visibility")
+                .am("dense domain")
         })?;
         Ok(n > 0)
     }
