@@ -103,7 +103,8 @@ pub struct SignalInputs {
     pub source_type: Option<clio_types::SourceType>,
     /// Neighbor texts for novelty; `None` means the store backend is down.
     pub neighbors: Option<Vec<String>>,
-    /// Age of the nearest prior in days; `None` means no prior exists.
+    /// Age of the nearest prior in days; `None` when there is no prior or the
+    /// source reports no age (see `SignalSource::prior_age_days`).
     pub prior_age_days: Option<f64>,
     /// Set when the recency backend itself is down (distinct from no prior).
     pub recency_unavailable: bool,

@@ -138,15 +138,22 @@ pub trait SignalSource: std::fmt::Debug {
 
     /// Age of the nearest prior in days; `None` means no prior exists.
     ///
+    /// A source MAY report no age without reading any backend. The store-backed
+    /// source does: an age measured against the write clock would make the
+    /// stamped `admission_score` depend on write timing, so recency is a
+    /// constant `1.0` on the store-backed write path.
+    ///
     /// # Errors
-    /// `factor_unavailable` when the store backend is down.
+    /// `factor_unavailable` when a backend this source does read is down.
     fn prior_age_days(&self, item: &MemoryItem) -> Result<Option<f64>, AmError>;
 
     /// Neighbor texts and prior age from one lookup.
     ///
     /// Hosts whose lookup is expensive (a store scan) SHOULD override this so a
-    /// single scan serves both the novelty and recency factors. The default
-    /// calls the two accessors above, so existing sources keep their behavior.
+    /// single scan serves every factor that needs one. A source whose age
+    /// accessor reads no backend needs no override, because the default already
+    /// scans once. The default calls the two accessors above, so existing
+    /// sources keep their behavior.
     ///
     /// # Errors
     /// `factor_unavailable` when the store backend is down.
