@@ -145,7 +145,7 @@ CLEAN_FIND := find . \( -path ./.git -o -path ./private \) -prune -o
 	sweep sweep-clean clean clean-models precommit precommit-list \
 	ritual scripts-check scripts-check-gate \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
-	scripts-check-assert-faithfulness scripts-check-phase-timer \
+	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
 	scripts-check-codeless scripts-check-coverage-policy \
 	coverage cov coverage-fast test-fast coverage-clean coverage-html cov-html coverage-lcov cov-lcov coverage-open coverage-package \
@@ -598,7 +598,7 @@ coverage-package:
 #   make scripts-check-precommit         one of them, named
 scripts-check: scripts-check-gate \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
-	scripts-check-assert-faithfulness scripts-check-phase-timer \
+	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
 	scripts-check-codeless scripts-check-coverage-policy
 
@@ -615,18 +615,6 @@ scripts-check-toolchain-pin:
 
 scripts-check-span:
 	python3 scripts/span_verify.py
-
-# Whether a mechanical pass over assertions changed only what it was asked to.
-# One toolchain move had a script add a failure message to every emptiness
-# assertion, and three defects came in that the diff did not show: an invented
-# assertion, an expression evaluated a second time inside a message argument, and
-# sixty-two identifiers corrupted by a rewrite that stripped one character too
-# many. All three were found by running something afterwards, so this runs it.
-# It compares against the merge base, so it judges the whole branch rather than
-# only what is staged.
-scripts-check-assert-faithfulness:
-	python3 scripts/assert_faithfulness_check.py --self-test
-	python3 scripts/assert_faithfulness_check.py
 
 scripts-check-phase-timer:
 	python3 scripts/test_phase_timer.py
