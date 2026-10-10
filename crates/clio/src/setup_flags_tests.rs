@@ -50,6 +50,21 @@ fn a_repeatable_flag_accumulates_rather_than_replacing() {
 }
 
 #[test]
+fn a_non_repeatable_value_flag_given_twice_is_refused_by_name() {
+    let error = parse_setup_args(&[
+        "--config".to_owned(),
+        "a.json".to_owned(),
+        "--config".to_owned(),
+        "b.json".to_owned(),
+    ])
+    .expect_err("repeated --config");
+    assert!(
+        error.contains("--config was given more than once"),
+        "{error}"
+    );
+}
+
+#[test]
 fn an_unknown_flag_positional_or_missing_value_is_a_refusal() {
     assert!(parse_setup_args(&["--nope".to_owned()]).is_err());
     assert!(parse_setup_args(&["stray".to_owned()]).is_err());

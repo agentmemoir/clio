@@ -134,6 +134,8 @@ pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>
                     .or_insert_with(|| value.clone());
                 continue;
             }
+            crate::cli_error::reject_repeated_flag(&format!("--{name}"), flags.contains_key(name))
+                .map_err(|error| error.message().to_owned())?;
             flags.insert(name.to_owned(), value.clone());
             continue;
         }

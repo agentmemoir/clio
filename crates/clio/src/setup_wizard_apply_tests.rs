@@ -98,11 +98,6 @@ impl Fixture {
         tty: bool,
         runner: &dyn DockerRunner,
     ) -> SetupRun {
-        let mut args = args;
-        args.push("--config".to_owned());
-        args.push(self.config.to_string_lossy().into_owned());
-        args.push("--compose-dir".to_owned());
-        args.push(self.compose.to_string_lossy().into_owned());
         self.run_with(
             args,
             input,

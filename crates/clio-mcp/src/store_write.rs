@@ -27,12 +27,25 @@ use crate::write_tools::{
 };
 use clio_admission::is_exact_duplicate_reason;
 use clio_admission::policy::AdmissionPolicy;
-use clio_types::{AmError, MemoryItem};
+use clio_types::{AmError, ErrorCode, MemoryItem};
 use clio_write::store_path::VerifiedStoreRequest;
 use clio_write::verify::VerifyConfig;
 use clio_write::{default_event_fields, gated_store_verified};
 use serde_json::{Map, Value};
 use std::sync::Arc;
+
+/// The item's gist for a store-path write. An absent gist stays absent. An empty
+/// or whitespace-only gist is refused, so no write path stores blank text.
+pub(crate) fn gist_of(shell: &Value) -> Result<Option<String>, AmError> {
+    match shell.get("gist").and_then(Value::as_str) {
+        Some(text) if text.trim().is_empty() => Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "item.gist must not be empty or whitespace-only",
+        )),
+        Some(text) if !text.is_empty() => Ok(Some(text.to_owned())),
+        _ => Ok(None),
+    }
+}
 
 /// Store-path core shared by `admit_preview` (never writes), `store`, and the
 /// batch preview. `retention` overrides the resolved bank profile when present.
@@ -129,3 +142,7 @@ pub(crate) fn admit_preview(state: &McpState, args: &Value) -> Result<Value, AmE
 pub(crate) fn store(state: &McpState, args: &Value) -> Result<Value, AmError> {
     store_path(state, args, true, None)
 }
+
+#[cfg(test)]
+#[path = "store_write_tests.rs"]
+mod tests;

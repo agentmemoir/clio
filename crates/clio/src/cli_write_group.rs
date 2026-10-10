@@ -126,3 +126,30 @@ pub(crate) fn decision_refusal(payload: &Value) -> Option<Refusal> {
         message,
     })
 }
+
+/// Map an `admit --file` batch preview to a refusal when every item failed
+/// validation. Such a preview previewed nothing, so it is not a success. The
+/// refusal names the first failing item by index. Items refused by the
+/// admission gates, with no validation error, keep the normal preview output.
+pub(crate) fn batch_preview_refusal(payload: &Value) -> Option<Refusal> {
+    let items = payload.get("items").and_then(Value::as_array)?;
+    if items.is_empty() || items.iter().any(|item| item.get("error").is_none()) {
+        return None;
+    }
+    let (index, first) = items.iter().enumerate().next()?;
+    let reason = first
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or("invalid item");
+    Some(Refusal {
+        code: "invalid_argument",
+        message: format!(
+            "no item previewed: all {} items failed validation; item {index}: {reason}",
+            items.len()
+        ),
+    })
+}
+
+#[cfg(test)]
+#[path = "cli_write_group_tests.rs"]
+mod tests;
