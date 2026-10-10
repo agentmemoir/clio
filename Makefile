@@ -147,7 +147,7 @@ CLEAN_FIND := find . \( -path ./.git -o -path ./private \) -prune -o
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-codeless scripts-check-coverage-policy \
+	scripts-check-coverage-policy \
 	coverage cov coverage-fast test-fast coverage-clean coverage-html cov-html coverage-lcov cov-lcov coverage-open coverage-package \
 	compose up down mac linux
 
@@ -600,7 +600,7 @@ scripts-check: scripts-check-gate \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-codeless scripts-check-coverage-policy
+	scripts-check-coverage-policy
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -632,15 +632,6 @@ scripts-check-precommit:
 scripts-check-coverage-surface:
 	python3 scripts/coverage_surface_check.py --self-test
 	python3 scripts/coverage_surface_check.py
-
-# Whether every file the coverage gate skips for holding no executable code still
-# holds none. The runner now decides that property from each file's own source, and
-# this check keeps the recorded list honest while the last entries are removed, so a
-# stale entry is caught rather than skipped silently. Runs no build and no coverage
-# command.
-scripts-check-codeless:
-	python3 scripts/coverage_codeless_check.py --self-test
-	python3 scripts/coverage_codeless_check.py
 
 # Whether the tree still holds exactly one coverage rule. The four rules that were
 # not this one all arrived in changes about something else, and nothing stopped

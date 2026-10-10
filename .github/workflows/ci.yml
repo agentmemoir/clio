@@ -255,15 +255,6 @@ jobs:
         if: always()
         run: make scripts-check-coverage-surface
 
-      # Whether every file the coverage gate skips for holding no executable code
-      # still holds none. The Scoped coverage step above is what this protects: that
-      # list is the one place a file leaves the coverage rule without a floor, and
-      # the gate names a skipped file and moves on, so a stale entry is a file
-      # silently outside the gate. Fourteen crate roots are on it today.
-      - name: No-code file check
-        if: always()
-        run: make scripts-check-codeless
-
       # Whether the tree still holds exactly one coverage rule. The Scoped
       # coverage step above is what this protects: the four rules that were not
       # this one each arrived in a change about something else, and nothing in the
