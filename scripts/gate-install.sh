@@ -65,6 +65,9 @@ if [ "$mode" = install ]; then
     # runs, and the old containment test ("PATH contains $dest") reported
     # success anyway. Resolve each name and say where it landed, so a shim that
     # is installed but shadowed reads as inactive rather than as a clean install.
+    # A dead shim is a failed install, so this exits non-zero: a caller that
+    # checks the exit code must not read the dead state as success.
+    inactive=0
     for name in cargo make; do
         resolved=$(command -v "$name" 2>/dev/null || true)
         case "$resolved" in
@@ -72,11 +75,17 @@ if [ "$mode" = install ]; then
             "")
                 printf 'gate-install: NOT ACTIVE: %s is not on PATH; add %s to your shell profile:\n' "$name" "$dest"
                 printf '  export PATH="%s:$PATH"\n' "$dest"
+                inactive=1
                 ;;
             *)
                 printf 'gate-install: NOT ACTIVE: this shell resolves %s as %s; %s comes later on PATH\n' "$name" "$resolved" "$dest"
                 printf '  export PATH="%s:$PATH"\n' "$dest"
+                inactive=1
                 ;;
         esac
     done
+    if [ "$inactive" = 1 ]; then
+        echo "gate-install: the shim is linked but not active; fix PATH and run this again" >&2
+        exit 1
+    fi
 fi
