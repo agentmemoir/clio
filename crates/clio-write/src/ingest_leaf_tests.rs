@@ -72,6 +72,18 @@ impl BlockingMaintenance {
         self.cv.notify_all();
     }
 
+    /// Block until [`BlockingMaintenance::release`] is called or `timeout`
+    /// elapses. Returns whether it was released, so a hang guard can unblock
+    /// only when the test never does.
+    fn wait_for_release(&self, timeout: Duration) -> bool {
+        let released = self.released.lock().expect("release lock");
+        let (released, _) = self
+            .cv
+            .wait_timeout_while(released, timeout, |released| !*released)
+            .expect("release wait");
+        *released
+    }
+
     fn signals(&self) -> Vec<MaintenanceSignal> {
         self.inner.signals()
     }
@@ -186,11 +198,13 @@ fn t05_t06_leaf_readable_before_slow_maintenance() {
     let leaves = LeafIndex::new();
     let hook = Arc::new(BlockingMaintenance::new());
     // Watchdog: if dispatch ever regresses to synchronous, unblock after 5s so
-    // the suite still terminates; the assertions below then fail instead.
+    // the suite still terminates; the assertions below then fail instead. In the
+    // normal path the test releases the hook and this wakes at once.
     let watchdog = Arc::clone(&hook);
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(5));
-        watchdog.release();
+        if !watchdog.wait_for_release(Duration::from_secs(5)) {
+            watchdog.release();
+        }
     });
     let response_started = Instant::now();
     let out = run_ingest(

@@ -137,7 +137,6 @@ fn coverage_maint_tools_and_force() {
     assert!(st.leaf_queryable);
     assert!(st.dirty_ancestors.is_empty(), "{:?}", st.dirty_ancestors);
     maint.on_leaf_attached(MaintenanceSignal::leaf_attached("i1", "b1"));
-    std::thread::sleep(Duration::from_millis(20));
     let _ = consolidate_tool(
         &maint,
         None,
