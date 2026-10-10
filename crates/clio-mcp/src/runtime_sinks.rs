@@ -4,9 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for the MCP runtime signal sources and telemetry
-//! sinks: the store-backed neighbor/recency signal source, the empty
-//! neighbor/recency signal source, and the stderr event sink set that keeps
-//! Telemetry off the JSON-RPC stdout stream.
+//! sinks: the store-backed neighbor signal source, whose recency stays neutral,
+//! the empty signal source, and the stderr event sink set that keeps telemetry
+//! off the JSON-RPC stdout stream.
 //!
 //! ## Owns
 //! - `StoreSignals` (store-backed `SignalSource` / `BeliefSignalSource`)
@@ -93,11 +93,12 @@ impl BeliefSignalSource for NoSignals {
 ///
 /// # Recency
 ///
-/// `prior_age_days` is the age of the bank's most recent existing item (self
-/// excluded), or `None` when the bank has none or timestamps do not parse. This
-/// is deliberate: the recency factor is `exp(-ln2 * age / tau)`, so a bank whose
-/// last write is old lowers recency for the next one. An empty bank scores
-/// recency `1.0` exactly as before.
+/// `prior_age_days` is always `None` here, so a store-backed write scores
+/// recency `1.0`. A stored neighbor's age is a wall-clock quantity: reading it
+/// would make the stamped `admission_score` depend on how far apart two writes
+/// happened rather than on their content, so byte-identical banks would score
+/// differently and near-tied hits could swap in recall. Read-time age is the
+/// retention curve's job, applied once per hit against the query clock.
 ///
 /// # Novelty
 ///
@@ -252,12 +253,6 @@ impl StoreSignals {
             Some(item.id.as_str()),
         )
     }
-
-    /// Age of the most recent neighbor relative to `now`.
-    fn age_of_latest(items: &[MemoryItem], now: &str) -> Option<f64> {
-        let latest = items.iter().map(|e| e.created_at.as_str()).max()?;
-        clio_retrieve::age_days(latest, now)
-    }
 }
 
 impl SignalSource for StoreSignals {
@@ -269,16 +264,10 @@ impl SignalSource for StoreSignals {
             .collect())
     }
 
-    fn prior_age_days(&self, item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        let items = self.bounded_neighbors(item)?;
-        Ok(Self::age_of_latest(&items, item.created_at.as_str()))
-    }
-
-    fn neighbor_signals(&self, item: &MemoryItem) -> Result<(Vec<String>, Option<f64>), AmError> {
-        let items = self.bounded_neighbors(item)?;
-        let neighbors = items.iter().map(candidate_text).collect();
-        let prior_age_days = Self::age_of_latest(&items, item.created_at.as_str());
-        Ok((neighbors, prior_age_days))
+    /// Neutral: the store-backed write path never reports an age, so the
+    /// stamped score cannot depend on the write clock. See the type docs.
+    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
+        Ok(None)
     }
 }
 
