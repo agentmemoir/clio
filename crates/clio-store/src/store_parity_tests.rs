@@ -21,6 +21,7 @@
 //!
 //! Keep this module focused on the shared parity suite.
 
+use crate::audit_model::CorrectionSpec;
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::distill_intent::DistillIntent;
 use crate::model::{AssocEdgeRecord, AssocKind, EMBEDDING_DIMS, VectorSlot};
@@ -147,6 +148,10 @@ pub fn run_parity_suite(store: &dyn Store, kms: &dyn DekProvider) {
     assert!(store.delete_item(&bank_a, &item_1).unwrap());
     assert!(!store.delete_item(&bank_a, &item_1).unwrap());
 
+    // The KNN primitive carries the same current-belief visibility rule as the
+    // index legs: a corrected prior keeps its vector but never returns.
+    knn_visibility_parity(store);
+
     // The claim row is part of the same contract on both backends: the same
     // write, the same read, the same refusals, and the same bank scope.
     distill_intent_parity(store, &bank_a, &bank_b);
@@ -247,6 +252,61 @@ fn distill_intent_parity(store: &dyn Store, bank_a: &str, bank_b: &str) {
         completed.revision_item_id, revision,
         "the first revision stands: a claim is never downgraded"
     );
+}
+
+/// KNN visibility parity: a corrected prior keeps its vector row but is never
+/// returned, and the live revision is reachable even when the prior ranks
+/// nearer. The primitive carries the same rule as the index legs.
+fn knn_visibility_parity(store: &dyn Store) {
+    let bank = unique("bank-knn");
+    let subject = unique("subj");
+    let prior_id = unique("knn-prior");
+    let live_id = unique("knn-live");
+
+    let prior = memory_item(&prior_id, &bank, &subject, "old belief");
+    store.create_memory_item(&prior, "actor").expect("prior");
+    let mut corrected = prior.clone();
+    corrected.id = live_id.clone();
+    corrected.gist = Some("current belief".into());
+    corrected.tx_from = "t1".into();
+    corrected.valid_from = "t1".into();
+    corrected.created_at = "t1".into();
+    corrected.updated_at = "t1".into();
+    store
+        .correct_item(&CorrectionSpec {
+            bank_id: bank.clone(),
+            prior_item_id: prior_id.clone(),
+            new_item: corrected,
+            reason: "belief changed".into(),
+            actor: "actor".into(),
+            timestamp: "t1".into(),
+        })
+        .expect("correct");
+
+    let mut emb_prior = vec![0.0_f32; EMBEDDING_DIMS];
+    emb_prior[0] = 1.0;
+    let mut emb_live = vec![0.0_f32; EMBEDDING_DIMS];
+    emb_live[1] = 1.0;
+    store
+        .upsert_vector(&VectorSlot {
+            item_id: prior_id,
+            bank_id: bank.clone(),
+            model_id: "BAAI/bge-small-en-v1.5".into(),
+            embedding: emb_prior.clone(),
+        })
+        .unwrap();
+    store
+        .upsert_vector(&VectorSlot {
+            item_id: live_id.clone(),
+            bank_id: bank.clone(),
+            model_id: "BAAI/bge-small-en-v1.5".into(),
+            embedding: emb_live,
+        })
+        .unwrap();
+
+    let hits = store.knn(&bank, &emb_prior, 1).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].item_id, live_id, "{hits:?}");
 }
 
 #[cfg(test)]

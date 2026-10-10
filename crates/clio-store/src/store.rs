@@ -14,17 +14,11 @@ use clio_types::{
 };
 use serde_json::Value;
 
-/// Upper bound on [`Store::item_ids_in_window`] results.
-///
-/// A retrieval arm never needs more than its candidate fetch, and the bound
-/// keeps a caller-supplied limit from turning one query into an unbounded scan.
-pub const MAX_WINDOW_ITEMS: usize = 1000;
-
 /// Backend-agnostic repository for memory items, assoc edges, and vector hooks.
 ///
 /// Memory-item create/update methods are **ungated repository primitives**; public
 /// long-term write tools must wrap them with admission gates before commit. This
-/// file is at the 450-line cap: the next addition needs a module split, not another reflow.
+/// file is near the 450-line cap: the next addition needs a module split, not another reflow.
 pub trait Store:
     crate::distilled_unit_store::DistilledUnitStore + TripleAssertion + Send + Sync
 {
@@ -183,7 +177,10 @@ pub trait Store:
     /// Storage failures.
     fn delete_vector(&self, bank_id: &str, item_id: &str) -> Result<bool, AmError>;
 
-    /// Exact/brute-force KNN (cosine). ANN throughput parity is not required.
+    /// Exact/brute-force KNN (cosine) over the current belief: the same
+    /// visibility rule as the index legs (`tx_until IS NULL`, not discarded,
+    /// not archived), so a corrected prior never returns. ANN throughput
+    /// parity is not required.
     ///
     /// A query whose length is not the active space width fails closed.
     ///
@@ -366,7 +363,7 @@ pub trait Store:
     ///
     /// # Errors
     /// Empty bank or bounds, `start >= end`, a zero limit, a limit above
-    /// [`MAX_WINDOW_ITEMS`], or storage failures.
+    /// the window cap (`MAX_WINDOW_ITEMS`), or storage failures.
     fn item_ids_in_window(
         &self,
         bank_id: &str,

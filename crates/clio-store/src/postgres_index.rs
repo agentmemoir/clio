@@ -83,8 +83,10 @@ pub(crate) fn enqueue_index_pending_tx(
     Ok(())
 }
 
-/// Current-belief + not-discarded filter shared by both search legs.
-const VISIBLE: &str =
+/// Current-belief visibility shared by both search legs and the raw KNN:
+/// not discarded, the current transaction belief (`tx_until IS NULL`), not
+/// archived.
+pub(crate) const VISIBLE: &str =
     "items.discarded_at IS NULL AND items.tx_until IS NULL AND items.archived_at IS NULL";
 
 impl IndexStore for PostgresStore {

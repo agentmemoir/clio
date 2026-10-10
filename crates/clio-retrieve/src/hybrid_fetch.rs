@@ -40,9 +40,12 @@ use std::collections::BTreeMap;
 /// Each id is resolved by bank; a missing item, an item outside the requested
 /// domains, an item not visible at `as_of` on `time_axis`, an archived item,
 /// and an item below the request's provenance floor are all dropped from the
-/// map. The arms then keep only the stage hits whose ids survived, so all
-/// filtering happens in one place: one prune removes the item from the returned
-/// page, the dedup scope, graph inclusion, and the reinforced set alike.
+/// map. Without `as_of`, a closed row is not visible either: only the current
+/// transaction belief (`tx_until IS NULL`) may re-enter the page, the same rule
+/// the search legs and the store's KNN apply. The arms then keep only the stage
+/// hits whose ids survived, so all filtering happens in one place: one prune
+/// removes the item from the returned page, the dedup scope, graph inclusion,
+/// and the reinforced set alike.
 pub(crate) fn fetch_items(
     store: &dyn Store,
     bank: &str,
@@ -72,7 +75,9 @@ pub(crate) fn fetch_items(
         };
         if let Some(item) = item {
             let visible = match &req.as_of {
-                None => true,
+                // No `as_of`: the current transaction belief is the visible
+                // set, matching the lexical/dense/temporal legs and store KNN.
+                None => item.tx_until.is_none(),
                 Some(as_of) => item_visible_at(&item, req.time_axis, as_of),
             };
             if visible
@@ -86,3 +91,7 @@ pub(crate) fn fetch_items(
     }
     Ok(items)
 }
+
+#[cfg(test)]
+#[path = "hybrid_fetch_tests.rs"]
+mod hybrid_fetch_tests;
