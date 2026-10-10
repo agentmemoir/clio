@@ -13,7 +13,7 @@ run: a hook whose file mode was lost, a hook link whose target moved, an
 unknown `--only` name, an empty file list. That is worse than having no runner,
 because the reader cannot tell the difference.
 
-`scripts/test_precommit.py` is 63 tests over exactly those paths, each built
+The `scripts/test_precommit*.py` suites test exactly those paths, each case built
 against a throwaway git repository so the answer is the same on any machine.
 That last part is the repository carrying a git configuration of its own: a
 throwaway repository still reads the machine's identity, hook directory and
@@ -35,13 +35,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-SUITE = "scripts/test_precommit.py"
+TARGET = "scripts-check-precommit"
 
 
 def main() -> int:
     root = Path(os.environ.get("CLIO_PRECOMMIT_ROOT", Path.cwd()))
     done = subprocess.run(  # noqa: S603
-        [sys.executable, str(root / SUITE)],
+        ["make", "-C", str(root), TARGET],
         capture_output=True,
         text=True,
         check=False,
