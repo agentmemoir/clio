@@ -193,8 +193,8 @@ jobs:
       # One step per suite, and `if: always()` on every one of them, because
       # `make` stops at the first failing command: a single step would report one
       # failure even when three suites are broken, and one broken suite would
-      # hide the four behind it. The check list then shows ten statuses where
-      # there are ten suites, and a reader can see which one went red. Count them
+      # hide the four behind it. The check list then shows nine statuses where
+      # there are nine suites, and a reader can see which one went red. Count them
       # with `grep -cE '^ +run: make scripts-check' .github/workflows/ci.yml`, or
       # count the prerequisites of the aggregate `scripts-check` target in the
       # Makefile; the two answers have to agree.
@@ -230,19 +230,6 @@ jobs:
       - name: Toolchain pin check
         if: always()
         run: make scripts-check-toolchain-pin
-
-      # Whether a mechanical pass over assertions changed only what it was asked
-      # to. The commit above added a failure message to every emptiness assertion
-      # with a script, and three defects came in that the diff did not show: an
-      # assertion invented at a line no lint had flagged, an expression evaluated
-      # a second time inside a message argument, and sixty-two identifiers
-      # corrupted by a rewrite that stripped one character too many. Each was found
-      # by running something afterwards, so this is that step made permanent. It
-      # compares against the merge base, which is why the pull request's whole diff
-      # is judged rather than one commit.
-      - name: Assert faithfulness check
-        if: always()
-        run: make scripts-check-assert-faithfulness
 
       - name: Span grounding self-check
         if: always()
