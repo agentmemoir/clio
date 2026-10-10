@@ -236,7 +236,10 @@ fn t06_consolidate_nonblocking_with_writes() {
     });
     let (nid, _) = handle.join().unwrap();
     assert!(!nid.is_empty(), "{nid:?}");
-    thread::sleep(Duration::from_millis(50));
+    // `consolidate_tool(wait=false)` claimed a wave slot before spawning the
+    // detached refresh, so this waits on that observable slot instead of a
+    // fixed guess at how long the wave takes.
+    maint.wait_for_quiescence();
 }
 
 #[test]

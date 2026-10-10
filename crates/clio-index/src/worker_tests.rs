@@ -402,7 +402,7 @@ fn exhausted_jobs_do_not_starve_newer_work() {
     let coordinator = coordinator(&store, Arc::new(FakeEmbedder::new()));
     let bank = "exhausted";
 
-    // A full batch of capped rows, queued strictly before the new item.
+    // A full batch of capped rows, created before the new item.
     for i in 0..DEFAULT_JOB_BATCH {
         let id = format!("itm-exhausted-{i}");
         store
@@ -414,7 +414,6 @@ fn exhausted_jobs_do_not_starve_newer_work() {
                 .unwrap();
         }
     }
-    std::thread::sleep(Duration::from_millis(2));
     store
         .create_memory_item(&leaf("itm-fresh", bank, "fresh work"), "actor")
         .unwrap();
