@@ -1,0 +1,450 @@
+// Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+// SPDX-License-Identifier: Apache-2.0
+//
+//! # Responsibility
+//!
+//! This module is responsible for the sync client:
+//! `sync_push` / `sync_pull` / bidirectional modes over the HTTP transport,
+//! the durable cursor policy (advance only after durable apply or ack-skip),
+//! and the masked `sync_status` report.
+//!
+//! ## Owns
+//! - Outgoing change-feed packaging into `sync_payload` batches
+//! - Pull apply loop with the never-advance-past-failures cursor policy
+//! - Bidirectional mode (documented order: pull then push)
+//! - `sync_status` surface (device id, cursors, pending, conflicts, DLQ)
+//! - Minimal HTTP/1.1 JSON client for the server transport
+//!
+//! ## Does not own
+//! - Apply matrix / conflict / DLQ semantics (see `apply`)
+//! - Server transport (`server`)
+//! - Persistence of cursors (`clio-store` `SyncStore`)
+//!
+//! ## Boundary
+//!
+//! Changes to client modes, cursor policy, or the status shape should normally
+//! require changes here. Changes to apply semantics should not require changes
+//! here.
+//!
+//! Keep this module focused on the sync client.
+
+use crate::apply::{ApplyEngine, ApplyOutcome, admission_score, apply_mutation, quarantine};
+use crate::client_feed::push_bank;
+use crate::http::post_json;
+use crate::protocol::{
+    BankSyncStatus, PullRequest, PullResponse, SyncContent, SyncMutation, SyncStatusReport,
+};
+use clio_store::{DeadLetterStatus, Store, SyncStore};
+use clio_types::{AmError, ErrorCode};
+use serde_json::Value;
+use std::sync::Arc;
+
+/// Client construction options.
+pub struct SyncClientConfig {
+    /// This node's device id.
+    pub device_id: String,
+    /// Local durable store.
+    pub store: Arc<dyn Store>,
+    /// Sync journal / cursors / conflicts / DLQ view of the same backend.
+    pub sync: Arc<dyn SyncStore>,
+    /// Remote endpoint `host:port` (push works without any local serve).
+    pub remote: Option<String>,
+    /// Bearer token for the remote (masked on status).
+    pub token: Option<String>,
+    /// Optional client-side encryption keys, newest first: content leaves the
+    /// node as ciphertext sealed with the newest key and the server stores
+    /// opaque bytes. An empty list means encryption off, which is what every
+    /// existing deployment has today.
+    pub cipher: Vec<crate::crypto::SyncCipherKey>,
+}
+
+/// One sync operation mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncModes {
+    /// Send local mutations since `push_cursor`.
+    Push,
+    /// Fetch/apply remote mutations since `pull_cursor`.
+    Pull,
+    /// Pull then push in one operator action.
+    Bidirectional,
+}
+
+impl SyncModes {
+    /// Parse the mode argument (`push` | `pull` | `bidirectional`).
+    ///
+    /// # Errors
+    /// Unknown mode.
+    pub fn parse(raw: &str) -> Result<Self, AmError> {
+        match raw {
+            "push" => Ok(Self::Push),
+            "pull" => Ok(Self::Pull),
+            "bidirectional" => Ok(Self::Bidirectional),
+            other => Err(AmError::new(
+                ErrorCode::InvalidArgument,
+                format!("unknown sync mode: {other}"),
+            )),
+        }
+    }
+}
+
+/// Push local mutations for the given banks (default: all banks on device).
+///
+/// # Errors
+/// Transport, auth, or transient storage failures (cursors unchanged).
+pub fn push(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStatus>, AmError> {
+    let remote = required_remote(cfg)?;
+    let mut out = Vec::new();
+    for bank in banks {
+        out.push(push_bank(cfg, &remote, bank)?);
+    }
+    Ok(out)
+}
+
+/// Pull remote mutations and apply them (pull mode).
+///
+/// # Errors
+/// Transport, auth, or transient storage failures (cursor unchanged).
+pub fn pull(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStatus>, AmError> {
+    let remote = required_remote(cfg)?;
+    let mut out = Vec::new();
+    for bank in banks {
+        out.push(pull_bank(cfg, &remote, bank)?);
+    }
+    Ok(out)
+}
+
+/// Bidirectional mode: pull first, then push (documented order).
+///
+/// # Errors
+/// Transport, auth, or transient storage failures (cursors unchanged).
+pub fn bidirectional(
+    cfg: &SyncClientConfig,
+    banks: &[String],
+) -> Result<Vec<BankSyncStatus>, AmError> {
+    let mut out = pull(cfg, banks)?;
+    out.extend(push(cfg, banks)?);
+    Ok(out)
+}
+
+/// Operator ack-skip for one permanently rejected mutation.
+/// After the ack the `pull_cursor` may advance past that id.
+///
+/// # Errors
+/// Storage failures.
+pub fn ack_skip(cfg: &SyncClientConfig, sync_mutation_id: &str, at: &str) -> Result<bool, AmError> {
+    cfg.sync.dead_letter_ack_skip(sync_mutation_id, at)
+}
+
+/// Masked status report (device id, cursors, pending counts, endpoint, auth
+/// and encryption state, conflicts, dead letters). No secrets, no DEKs.
+///
+/// # Errors
+/// Storage failures.
+pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatusReport, AmError> {
+    let mut rows = Vec::new();
+    for bank in banks {
+        let push_cursor = cfg.sync.cursor_get(bank, "push")?;
+        let pull_cursor = cfg.sync.cursor_get(bank, "pull")?;
+        let pending = pending_push(cfg, bank)?;
+        let conflicts = cfg.sync.conflict_count(bank)?;
+        let sample = cfg
+            .sync
+            .conflict_list(bank, 3)?
+            .iter()
+            .map(|c| format!("{} / {}", c.entity_id, c.loser_mutation_id))
+            .collect();
+        rows.push(BankSyncStatus {
+            bank_id: bank.clone(),
+            push_cursor,
+            pull_cursor,
+            pending_push: pending,
+            dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
+            conflicts,
+            conflict_sample: sample,
+        });
+    }
+    Ok(SyncStatusReport {
+        device_id: cfg.device_id.clone(),
+        banks: rows,
+        remote: cfg.remote.clone(),
+        auth: if cfg.token.is_some() { "token" } else { "none" }.to_owned(),
+        encryption: !cfg.cipher.is_empty(),
+        encryption_summary: (!cfg.cipher.is_empty()).then_some(
+            crate::protocol::EncryptionSummary {
+                key_count: cfg.cipher.len(),
+                store: None,
+                current_fingerprint: None,
+            },
+        ),
+        last_error: cfg.sync.cursor_get("__status", "last_error")?,
+    })
+}
+
+/// Outbound mutation count for `bank`, counted per feed kind against that
+/// kind's own push watermark (item, assoc edge, triple, persona stable/
+/// preference, belief, task, failure) after the one-shot conversion of the
+/// retired shared `push_wm` cursor. `push_bank`, `pull_bank`, and
+/// `sync_status` all report it rather than a hard-coded zero. The count is a
+/// bounded next-page size (`PULL_PAGE_LIMIT` per kind) and stays approximate:
+/// it never subtracts rows a push would skip for a missing carrier.
+pub(crate) fn pending_push(cfg: &SyncClientConfig, bank: &str) -> Result<i64, AmError> {
+    let mut count = 0usize;
+    for kind in crate::client_feed::PUSH_KINDS {
+        let since = crate::client_feed::kind_watermark(cfg, bank, kind)?;
+        count += crate::client_feed::feed_kind_count(cfg, bank, kind, &since)?;
+    }
+    Ok(i64::try_from(count).unwrap_or(i64::MAX))
+}
+
+fn required_remote(cfg: &SyncClientConfig) -> Result<String, AmError> {
+    cfg.remote.clone().ok_or_else(|| {
+        AmError::new(
+            ErrorCode::InvalidArgument,
+            "sync remote endpoint is required",
+        )
+    })
+}
+
+fn pull_bank(cfg: &SyncClientConfig, remote: &str, bank: &str) -> Result<BankSyncStatus, AmError> {
+    let mut cursor = cfg.sync.cursor_get(bank, "pull")?.unwrap_or_default();
+    let engine = ApplyEngine {
+        store: cfg.store.as_ref(),
+        sync: cfg.sync.as_ref(),
+        device_id: cfg.device_id.clone(),
+        kms: None,
+    };
+    loop {
+        let request = PullRequest {
+            bank: bank.to_owned(),
+            cursor: cursor.clone(),
+            limit: crate::PULL_PAGE_LIMIT,
+        };
+        let response: PullResponse = post_json(
+            remote,
+            "/sync/pull",
+            cfg.token.as_deref(),
+            &serde_json::to_value(&request).expect("serialize pull request"),
+        )?;
+        let mut frozen = false;
+        for m in &response.mutations {
+            let envelope = serde_json::to_string(m).expect("serialize mutation");
+            let Some(m) = decrypt_for_apply(cfg, m, &envelope)? else {
+                // Unusable row quarantined: freeze at the last durable
+                // position; the operator must ack_skip.
+                frozen = true;
+                break;
+            };
+            if matches!(
+                apply_mutation(&engine, &m, &envelope)?,
+                ApplyOutcome::DeadLettered { .. }
+            ) {
+                frozen = true;
+                break;
+            }
+        }
+        if frozen {
+            break;
+        }
+        cursor.clone_from(&response.next_cursor);
+        cfg.sync.cursor_set(bank, "pull", &cursor)?;
+        if !response.has_more {
+            break;
+        }
+    }
+    Ok(BankSyncStatus {
+        bank_id: bank.to_owned(),
+        push_cursor: cfg.sync.cursor_get(bank, "push")?,
+        pull_cursor: Some(cursor),
+        pending_push: pending_push(cfg, bank)?,
+        dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
+        conflicts: cfg.sync.conflict_count(bank)?,
+        conflict_sample: Vec::new(),
+    })
+}
+
+/// Decrypt a pulled cipher mutation with the local sync keys before apply,
+/// restore its origin admission receipt, and resolve its identifier handle back
+/// to the real identifier from the opened payload. Returns `None` when the row
+/// was quarantined (unusable content, or an identifier that cannot be
+/// resolved). Rows the operator already ack-skipped pass through unchanged so
+/// apply treats them as duplicates and the cursor may advance.
+fn decrypt_for_apply(
+    cfg: &SyncClientConfig,
+    m: &SyncMutation,
+    envelope_json: &str,
+) -> Result<Option<SyncMutation>, AmError> {
+    if cfg
+        .sync
+        .dead_letter_status(&m.sync_mutation_id)?
+        .is_some_and(|status| status == DeadLetterStatus::AckedSkip)
+    {
+        return Ok(Some(m.clone()));
+    }
+    let SyncContent::Cipher(cipher) = &m.content else {
+        return Ok(Some(m.clone()));
+    };
+    let engine = ApplyEngine {
+        store: cfg.store.as_ref(),
+        sync: cfg.sync.as_ref(),
+        device_id: cfg.device_id.clone(),
+        kms: None,
+    };
+    let held: Vec<String> = cfg
+        .cipher
+        .iter()
+        .map(crate::crypto::SyncCipherKey::key_id)
+        .collect();
+    if cfg.cipher.is_empty() {
+        quarantine(
+            &engine,
+            &m.bank,
+            m,
+            envelope_json,
+            crate::protocol::REASON_MALFORMED,
+            "no sync cipher key configured",
+        )?;
+        return Ok(None);
+    }
+    // A row with no key identifier no longer opens: current writes always
+    // stamp one, and trial-opening every held key widens the wrong-key
+    // surface. The refusal is a stable quarantine the operator discards.
+    let Some(stamped) = &cipher.key_id else {
+        quarantine(
+            &engine,
+            &m.bank,
+            m,
+            envelope_json,
+            crate::protocol::REASON_MALFORMED,
+            "sync cipher carries no key identifier; this release opens only ciphertext stamped \
+             with a held key identifier. Discard the row deliberately with `clio sync ack-skip`",
+        )?;
+        return Ok(None);
+    };
+    // A row stamped with an identifier none of the held keys produce was
+    // written by a key this node does not hold. Refusing before any open
+    // attempt is what makes the reason name the missing key instead of a
+    // generic open failure. Both the stamped and the held values are derived
+    // and non-reversible; neither is ever a key or a prefix of one.
+    let Some(key) = cfg.cipher.iter().find(|k| k.key_id() == *stamped) else {
+        quarantine(
+            &engine,
+            &m.bank,
+            m,
+            envelope_json,
+            crate::protocol::REASON_MALFORMED,
+            &missing_key_reason(stamped, &held),
+        )?;
+        return Ok(None);
+    };
+    // A ciphertext the stamped key cannot open (wrong key, tampering,
+    // corruption) is a permanent per-row failure: quarantine it so
+    // `pull_cursor` freezes at the prior id and the operator can `ack_skip`.
+    let Ok(bytes) = key.open(cipher) else {
+        quarantine(
+            &engine,
+            &m.bank,
+            m,
+            envelope_json,
+            crate::protocol::REASON_MALFORMED,
+            &open_failed_reason(stamped),
+        )?;
+        return Ok(None);
+    };
+    let Ok(plain) = serde_json::from_slice::<Value>(&bytes) else {
+        quarantine(
+            &engine,
+            &m.bank,
+            m,
+            envelope_json,
+            crate::protocol::REASON_MALFORMED,
+            "decrypted sync content was not JSON",
+        )?;
+        return Ok(None);
+    };
+    let mut opened = m.clone();
+    opened.content = SyncContent::Plain(plain.clone());
+    // The opaque identifier handle, if this row has one, is resolved here:
+    // the ciphertext is open, the real identifier is inside the payload, and
+    // `apply_mutation` has not run yet in this same loop iteration. A handled
+    // row whose payload carries no identifier is refused rather than applied
+    // with the handle still in place.
+    let kind = opened.entity_kind.clone();
+    let bank = opened.bank.clone();
+    if let Err(failure) = crate::handle_resolution::resolve_entity_id(&mut opened, &plain) {
+        quarantine(
+            &engine,
+            &bank,
+            m,
+            envelope_json,
+            crate::protocol::REASON_MALFORMED,
+            &failure.reason(&kind, &bank),
+        )?;
+        return Ok(None);
+    }
+    restore_admission_receipt(&mut opened, &plain);
+    Ok(Some(opened))
+}
+
+/// Lift the origin admission receipt out of an opened sealed payload and put it
+/// back on the mutation before apply, so the conflict comparison sees the same
+/// receipt a plaintext row carries on the wire. A payload with no usable
+/// receipt leaves the wire value, which is the documented absent-score fallback
+/// (`lww_compare` maps `None` to `0.0`) and not an error.
+fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
+    let Some(receipt) = plain.get(crate::client_feed::package::ADMISSION_RECEIPT_KEY) else {
+        return;
+    };
+    if admission_score(receipt).is_some() {
+        opened.admission_receipt = Some(receipt.clone());
+    }
+}
+
+/// The refusal for a row sealed under a key this node does not hold. It names
+/// the stamped identifier and the identifiers held, both derived and
+/// non-reversible, and the recovery. It never carries a key or a prefix of
+/// one; the identifier is the operator's clue, the store-byte fingerprint is
+/// what `clio sync key status` prints.
+fn missing_key_reason(stamped: &str, held: &[String]) -> String {
+    format!(
+        "sync content is sealed under key {stamped}, which this node does not hold; held keys: \
+         {}. Add the missing key on this node and pull again, or discard the row deliberately \
+         with `clio sync ack-skip`",
+        held.join(", "),
+    )
+}
+
+/// The refusal for a stamped row its own matching held key cannot open: a
+/// failed open means the bytes are damaged or were altered, so the message
+/// names the deliberate discard.
+fn open_failed_reason(stamped: &str) -> String {
+    format!(
+        "sync cipher stamped with key {stamped} could not be opened with the matching held key; \
+         the ciphertext may be corrupted or tampered with. Discard the row deliberately with \
+         `clio sync ack-skip`"
+    )
+}
+
+#[cfg(test)]
+#[path = "client_receipt_tests.rs"]
+mod client_receipt_tests;
+#[cfg(test)]
+#[path = "client_resolve_fault_tests.rs"]
+mod client_resolve_fault_tests;
+#[cfg(test)]
+#[path = "client_resolve_tests.rs"]
+mod client_resolve_tests;
+#[cfg(test)]
+#[path = "client_rotation_tests.rs"]
+mod client_rotation_tests;
+#[cfg(test)]
+#[path = "client_status_tests.rs"]
+mod client_status_tests;
+#[cfg(test)]
+#[path = "client_tests.rs"]
+pub(crate) mod client_tests;
+#[cfg(test)]
+#[path = "client_wire_blindness_tests.rs"]
+mod client_wire_blindness_tests;
+#[cfg(test)]
+#[path = "client_wire_digest_tests.rs"]
+mod client_wire_digest_tests;

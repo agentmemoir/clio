@@ -1,0 +1,47 @@
+#!/bin/sh
+# Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+# SPDX-License-Identifier: Apache-2.0
+#
+# Git merge hook: run the same commit-scoped checks for a merge commit.
+#
+# Install as a symlink at .git/hooks/pre-merge-commit, once per machine:
+#
+#   ln -s ../../scripts/git-hooks/pre-merge-commit .git/hooks/pre-merge-commit
+#
+# Why this is not a duplicate of pre-commit
+# -----------------------------------------
+# git does not consult pre-commit for a merge that completes on its own.
+# githooks(5) says a merge which carries out successfully invokes
+# pre-merge-commit instead, and that the *default* pre-merge-commit -- the
+# sample template git installs commented out, and which nothing here installs --
+# would run pre-commit. Nothing runs it in its place, so without this file an
+# automatic merge commits with no check at all.
+#
+# That path is not hypothetical here: bringing the integration branch into a
+# phase branch is a `git merge`, so without this hook the checks would be
+# skipped on one of the most common commits the system makes.
+#
+# A merge that needs conflict resolution is different. git documents that
+# pre-merge-commit "will not be executed" in that case, and that the pre-commit
+# hook runs instead when the resolved result is committed. So this file covers
+# the automatic merge and defers to pre-commit for the manual one, and between
+# them every merge is checked once.
+#
+# It reads no arguments and passes none on. git invokes pre-merge-commit after
+# the merge has been carried out and before the commit exists, so the staged
+# files it hands the runner are the merge result.
+set -u
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    printf 'pre-merge-commit: not inside a git repository, so no check ran\n' >&2
+    exit 1
+}
+
+shim="$root/scripts/git-hooks/pre-commit"
+if [ ! -f "$shim" ]; then
+    printf 'pre-merge-commit: %s is missing, so no check ran. The commit hook it\n' "$shim" >&2
+    printf 'pre-merge-commit: delegates to cannot pass without it.\n' >&2
+    exit 1
+fi
+
+exec "$shim" "$@"

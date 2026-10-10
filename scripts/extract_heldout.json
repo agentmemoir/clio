@@ -1,0 +1,423 @@
+{
+  "format": "clio-extract-fixture-v1",
+  "set": "heldout",
+  "frozen": true,
+  "freeze_id": "synthetic-heldout-v2-2026-09-24",
+  "evidence": "fixture_contract_replay",
+  "provenance": {
+    "fixed": "Hand-authored synthetic responses used to check the held-out fixture contract; not a live or provider capture."
+  },
+  "construction": "Separately hand-authored synthetic cases generated from a fixed fact grammar. The values are frozen fixture expectations; no provider response is used or asserted. Expected values were written from the source grammar, not copied or adjusted from an endpoint response. This set was re-frozen before any live evaluation to use the production verifier's T-separated date-time source token without sentence punctuation. Names, projects, numbers, and dates are fictional test values; this file is not used by the default tuning run.",
+  "cases": [
+    {
+      "id": "heldout-rust-version",
+      "class": "rust_version",
+      "source_text": "The verification image uses rustc 1.80.1 and records 2026-02-14",
+      "schema": {
+        "rust_version": "",
+        "record_date": ""
+      },
+      "fields": [
+        {
+          "path": "rust_version",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "record_date",
+          "kind": "date",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "rust_version": "rustc 1.80.1",
+        "record_date": "2026-02-14"
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "rust_version": "rustc 1.80.1",
+          "record_date": "2026-02-14"
+        },
+        "gist": "The verification image uses rustc 1.80.1 and records 2026-02-14.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-release-facts",
+      "class": "release_facts",
+      "source_text": "Tavi North published Cedar 7.0 on 2025-12-03 after 29 checks.",
+      "schema": {
+        "person": "",
+        "release": "",
+        "release_date": "",
+        "check_count": ""
+      },
+      "fields": [
+        {
+          "path": "person",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "release",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "release_date",
+          "kind": "date",
+          "required": true
+        },
+        {
+          "path": "check_count",
+          "kind": "number",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "person": "Tavi North",
+        "release": "Cedar 7.0",
+        "release_date": "2025-12-03",
+        "check_count": 29
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "person": "Tavi North",
+          "release": "Cedar 7.0",
+          "release_date": "2025-12-03",
+          "check_count": 29
+        },
+        "gist": "Tavi North published Cedar 7.0 on 2025-12-03 after 29 checks.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-grouped-budget",
+      "class": "budget_facts",
+      "source_text": "The approved budget is 3,500 credits on 2026-01-27",
+      "schema": {
+        "budget": "",
+        "budget_date": ""
+      },
+      "fields": [
+        {
+          "path": "budget",
+          "kind": "number",
+          "required": true
+        },
+        {
+          "path": "budget_date",
+          "kind": "date",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "budget": 3500,
+        "budget_date": "2026-01-27"
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "budget": 3500,
+          "budget_date": "2026-01-27"
+        },
+        "gist": "The approved budget is 3,500 credits on 2026-01-27.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-deployment-facts",
+      "class": "deployment_facts",
+      "source_text": "Orchid will launch on 2026-04-22 with 12 workers.",
+      "tool_payload": {
+        "environment": "staging",
+        "worker_count": 12
+      },
+      "schema": {
+        "service": "",
+        "launch_date": "",
+        "worker_count": ""
+      },
+      "fields": [
+        {
+          "path": "service",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "launch_date",
+          "kind": "date",
+          "required": true
+        },
+        {
+          "path": "worker_count",
+          "kind": "number",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "service": "Orchid",
+        "launch_date": "2026-04-22",
+        "worker_count": 12
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "service": "Orchid",
+          "launch_date": "2026-04-22",
+          "worker_count": 12
+        },
+        "gist": "Orchid will launch on 2026-04-22 with 12 workers.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-decimal-latency",
+      "class": "measurement_facts",
+      "source_text": "The measured latency was 2.75 seconds on 2026-05-06",
+      "schema": {
+        "latency_seconds": "",
+        "measurement_date": ""
+      },
+      "fields": [
+        {
+          "path": "latency_seconds",
+          "kind": "number",
+          "required": true
+        },
+        {
+          "path": "measurement_date",
+          "kind": "date",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "latency_seconds": 2.75,
+        "measurement_date": "2026-05-06"
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "latency_seconds": 2.75,
+          "measurement_date": "2026-05-06"
+        },
+        "gist": "The measured latency was 2.75 seconds on 2026-05-06.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-date-time-window",
+      "class": "schedule_facts",
+      "source_text": "The window opens at 2026-06-18T08:15:00",
+      "schema": {
+        "opens_at": ""
+      },
+      "fields": [
+        {
+          "path": "opens_at",
+          "kind": "date",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "opens_at": "2026-06-18T08:15:00"
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "opens_at": "2026-06-18T08:15:00"
+        },
+        "gist": "The window opens at 2026-06-18T08:15:00.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-unicode-review",
+      "class": "unicode_facts",
+      "source_text": "Jules North signed the memo on 2026-07-09 for 4 items.",
+      "schema": {
+        "person": "",
+        "memo_date": "",
+        "item_count": ""
+      },
+      "fields": [
+        {
+          "path": "person",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "memo_date",
+          "kind": "date",
+          "required": true
+        },
+        {
+          "path": "item_count",
+          "kind": "number",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "person": "Jules North",
+        "memo_date": "2026-07-09",
+        "item_count": 4
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "person": "Jules North",
+          "memo_date": "2026-07-09",
+          "item_count": 4
+        },
+        "gist": "Jules North signed the memo on 2026-07-09 for 4 items.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-large-number",
+      "class": "number_facts",
+      "source_text": "The archive contains 8750 records from 2025-08-14",
+      "schema": {
+        "record_count": "",
+        "archive_date": ""
+      },
+      "fields": [
+        {
+          "path": "record_count",
+          "kind": "number",
+          "required": true
+        },
+        {
+          "path": "archive_date",
+          "kind": "date",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "record_count": 8750,
+        "archive_date": "2025-08-14"
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "record_count": 8750,
+          "archive_date": "2025-08-14"
+        },
+        "gist": "The archive contains 8750 records from 2025-08-14.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-service-release",
+      "class": "service_facts",
+      "source_text": "Sable Finch released Beacon 5.1 on 2026-02-28 for 18 regions.",
+      "schema": {
+        "person": "",
+        "service": "",
+        "service_date": "",
+        "region_count": ""
+      },
+      "fields": [
+        {
+          "path": "person",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "service",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "service_date",
+          "kind": "date",
+          "required": true
+        },
+        {
+          "path": "region_count",
+          "kind": "number",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "person": "Sable Finch",
+        "service": "Beacon 5.1",
+        "service_date": "2026-02-28",
+        "region_count": 18
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "person": "Sable Finch",
+          "service": "Beacon 5.1",
+          "service_date": "2026-02-28",
+          "region_count": 18
+        },
+        "gist": "Sable Finch released Beacon 5.1 on 2026-02-28 for 18 regions.",
+        "source_ref": "synthetic-heldout"
+      }
+    },
+    {
+      "id": "heldout-review-meeting",
+      "class": "meeting_facts",
+      "source_text": "Nia Aster will review Aster Desk on 2026-09-03 with 9 reviewers.",
+      "schema": {
+        "person": "",
+        "project": "",
+        "review_date": "",
+        "reviewer_count": ""
+      },
+      "fields": [
+        {
+          "path": "person",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "project",
+          "kind": "entity",
+          "required": true
+        },
+        {
+          "path": "review_date",
+          "kind": "date",
+          "required": true
+        },
+        {
+          "path": "reviewer_count",
+          "kind": "number",
+          "required": true
+        }
+      ],
+      "expected_snapshot": {
+        "person": "Nia Aster",
+        "project": "Aster Desk",
+        "review_date": "2026-09-03",
+        "reviewer_count": 9
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "person": "Nia Aster",
+          "project": "Aster Desk",
+          "review_date": "2026-09-03",
+          "reviewer_count": 9
+        },
+        "gist": "Nia Aster will review Aster Desk on 2026-09-03 with 9 reviewers.",
+        "source_ref": "synthetic-heldout"
+      }
+    }
+  ]
+}

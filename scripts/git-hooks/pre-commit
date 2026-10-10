@@ -1,0 +1,67 @@
+#!/bin/sh
+# Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+# SPDX-License-Identifier: Apache-2.0
+#
+# Git commit hook: run the commit-scoped pre-commit checks.
+#
+# Install as a symlink at .git/hooks/pre-commit, once per machine:
+#
+#   ln -s ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
+#
+# Why a symlink into .git/hooks and not core.hooksPath
+# ----------------------------------------------------
+# Setting core.hooksPath moves where git looks and stops it looking in
+# .git/hooks, so every other hook a person or a tool had put there stops
+# running without a word. This file adds a gate and disables nothing, which is
+# the only safe direction for a change made on someone else's machine.
+#
+# Why it lives outside hooks.d/
+# ------------------------------
+# hooks.d/ holds checks. This is the thing that runs the checks, so putting it
+# there would make the runner discover its own caller and run it as a check.
+#
+# What it runs
+# ------------
+# Only the commit-scoped checks, over the staged files. A check that runs a test
+# suite is not bounded by the size of a commit, and a commit hook that costs
+# twenty seconds is a commit hook that gets passed with --no-verify. The slower
+# checks run when they are asked for: make precommit.
+#
+# A missing runner is a failure, not a pass. This hook exists so a check cannot
+# be skipped by accident, and staying quiet when the runner is gone would be
+# the exact state it is meant to prevent.
+set -u
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    printf 'pre-commit: not inside a git repository, so no check ran\n' >&2
+    exit 1
+}
+
+runner="$root/scripts/precommit.py"
+if [ ! -f "$runner" ]; then
+    printf 'pre-commit: %s is missing, so no check ran. A commit hook that\n' "$runner" >&2
+    printf 'pre-commit: cannot pass without it is worse than no hook at all.\n' >&2
+    exit 1
+fi
+
+# A linked worktree has its own top level, and the machine-local hook directory
+# is registered in the main checkout rather than in each worktree, so a commit
+# made in a worktree would otherwise find no hook at all and pass. git shares
+# the hooks directory across worktrees, which is why the hook is running here at
+# all; the checks it points at are not shared the same way, so they are named
+# explicitly. The runner already knows this directory name, so nothing private is
+# written down by using it.
+common=$(git rev-parse --git-common-dir 2>/dev/null) || common=""
+if [ -n "$common" ]; then
+    case "$common" in
+        /*) ;;
+        *) common="$root/$common" ;;
+    esac
+    main_hooks="$(dirname "$common")/.clio-hooks"
+    if [ "$main_hooks" != "$root/.clio-hooks" ] && [ -d "$main_hooks" ]; then
+        CLIO_PRECOMMIT_HOOKS="$main_hooks${CLIO_PRECOMMIT_HOOKS:+:$CLIO_PRECOMMIT_HOOKS}"
+        export CLIO_PRECOMMIT_HOOKS
+    fi
+fi
+
+exec python3 "$runner" --commit

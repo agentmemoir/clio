@@ -1,0 +1,67 @@
+{
+  "suites": {
+    "locomo": {
+      "name": "LoCoMo-style (Snap Research)",
+      "identity": "Evaluating Very Long-Term Conversational Memory of LLM Agents (arXiv:2402.17753)",
+      "license": "CC BY-NC 4.0",
+      "redistribute": false,
+      "filename": "locomo10.json",
+      "url": "https://raw.githubusercontent.com/snap-research/locomo/3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376/data/locomo10.json",
+      "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+      "git_blob": "d95b872480b413d935821fdc3c84f8a8f5f29e73",
+      "size_bytes": 2805274,
+      "partition_unit": "conversation",
+      "categories": {
+        "1": "single-hop",
+        "2": "temporal-reasoning",
+        "3": "multi-hop",
+        "4": "open-domain",
+        "5": "adversarial-abstention"
+      }
+    },
+    "longmemeval": {
+      "name": "LongMemEval-style (Wu et al.)",
+      "identity": "LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive Memory (arXiv:2410.10813)",
+      "license": "MIT",
+      "redistribute": true,
+      "filename": "longmemeval_oracle.json",
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json",
+      "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+      "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+      "size_bytes": 15388478,
+      "partition_unit": "haystack-item",
+      "categories": {
+        "single-session-user": "single-hop",
+        "single-session-assistant": "single-hop",
+        "single-session-preference": "single-hop-preference",
+        "multi-session": "multi-hop",
+        "temporal-reasoning": "temporal-reasoning",
+        "knowledge-update": "knowledge-update"
+      }
+    }
+  },
+  "partition": {
+    "seed": 100480,
+    "train": 0.6,
+    "canary": 0.2,
+    "blind": 0.2,
+    "kfold": 5
+  },
+  "judge": {
+    "tier1": {
+      "model": "qwen2.5-1.5b-instruct",
+      "base_url": "http://127.0.0.1:8899",
+      "temperature": 0.0,
+      "role": "inner optimization loop and offline first baseline"
+    },
+    "tier2": {
+      "model": "gpt-4o-2024-08-06",
+      "base_url": "https://api.openai.com",
+      "temperature": 0.0,
+      "role": "canary gate and official scorecard",
+      "requires": "CLIO_BENCH_API_KEY or OPENAI_API_KEY"
+    },
+    "tokenizer": "cl100k_base",
+    "bias_mitigation": "swap-position geometric mean over two passes"
+  }
+}

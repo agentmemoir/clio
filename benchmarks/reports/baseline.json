@@ -1,0 +1,189 @@
+{
+  "harness": {
+    "name": "clio-bench",
+    "version": "0.1.0",
+    "python": "3.14.4",
+    "generated_at": "2026-10-02T20:09:13.385261+00:00"
+  },
+  "status": "blocked",
+  "blocked_gate": {
+    "gate": "quotable-baseline",
+    "reason": "frontier judge key absent",
+    "systems": [
+      "clio",
+      "mnemosyne"
+    ],
+    "requested": {
+      "judge": "tier2",
+      "generator": "tier2"
+    },
+    "requires_env": [
+      "CLIO_BENCH_API_KEY",
+      "OPENAI_API_KEY"
+    ],
+    "present_env": {
+      "CLIO_BENCH_API_KEY": false,
+      "OPENAI_API_KEY": false
+    },
+    "detail": "the two-system baseline needs a tier-2 judge and no frontier key is set; no probe was run, no score was produced, and tier 1 was not substituted"
+  },
+  "systems": {
+    "clio": {
+      "system": "clio",
+      "version": "0.1.2",
+      "settings": {
+        "retention_profile": {
+          "status": "read",
+          "value": {
+            "bank": "clio-bench-fingerprint",
+            "source": "builtin",
+            "verbosity": "balanced",
+            "theta_offsets": {},
+            "duplicate_tolerance_write": "balanced",
+            "version": 2,
+            "accepted_but_inert": {
+              "duplicate_tolerance_read": "balanced",
+              "honored_by": "recall_scope_and_dedup",
+              "note": "read-side scope and dedup are active; these values apply to retrieve/compose unless the call overrides them",
+              "recall_scope_default": "full",
+              "status": "active"
+            }
+          },
+          "surface": "clio retention get --bank clio-bench-fingerprint (no store configured; builtin profile at the pinned benchmark data directory)"
+        },
+        "ranking_environment": {
+          "status": "read",
+          "value": {
+            "admission": {
+              "w1": 0.2,
+              "w2": 0.2,
+              "w3": 0.2,
+              "w4": 0.2,
+              "w5": 0.2
+            },
+            "coactivation": {
+              "eta": 0.15,
+              "half_life_days": 30.0,
+              "hub_degree_limit": 16,
+              "max_hops": 2,
+              "w_min": 0.05
+            },
+            "hygiene": {
+              "dup": 0.15,
+              "pattern": 0.25,
+              "secret": 0.35,
+              "staleness": 0.1,
+              "utility": 0.15
+            },
+            "hygiene_stale_half_life_days": 90.0,
+            "intent_gate": {
+              "skip_confidence": null
+            },
+            "ok": true,
+            "recency_tau_days": 30.0,
+            "retrieval": {
+              "dense": 0.25,
+              "importance": 0.25,
+              "lexical": 0.25,
+              "temporal": 0.25
+            },
+            "theta_admit": 0.55,
+            "theta_overrides": {},
+            "type_prior_overrides": {}
+          },
+          "surface": "clio ranking get --output json"
+        },
+        "trigger_state": {
+          "status": "unreadable",
+          "tried": [
+            "clio maintenance status --output json (index pipeline fields only; no trigger state field exists yet)"
+          ]
+        },
+        "engine_profile": {
+          "status": "unreadable",
+          "tried": [
+            "clio config get engine_profile (unknown config path `engine_profile`)"
+          ]
+        }
+      },
+      "fingerprint_complete": true
+    },
+    "mnemosyne": {
+      "system": "mnemosyne",
+      "version": "3.15.1",
+      "settings": {
+        "vec_weight": {
+          "status": "read",
+          "value": 0.5,
+          "surface": "mnemosyne config get vec_weight"
+        },
+        "fts_weight": {
+          "status": "read",
+          "value": 0.3,
+          "surface": "mnemosyne config get fts_weight"
+        },
+        "importance_weight": {
+          "status": "read",
+          "value": 0.2,
+          "surface": "mnemosyne config get importance_weight"
+        },
+        "recency_halflife": {
+          "status": "read",
+          "value": 168,
+          "surface": "mnemosyne config get recency_halflife"
+        },
+        "tier2_days": {
+          "status": "read",
+          "value": 30,
+          "surface": "mnemosyne config get tier2_days"
+        },
+        "tier2_weight": {
+          "status": "read",
+          "value": 0.5,
+          "surface": "mnemosyne config get tier2_weight"
+        },
+        "tier3_days": {
+          "status": "read",
+          "value": 180,
+          "surface": "mnemosyne config get tier3_days"
+        },
+        "tier3_weight": {
+          "status": "read",
+          "value": 0.25,
+          "surface": "mnemosyne config get tier3_weight"
+        },
+        "wm_max_items": {
+          "status": "read",
+          "value": 10000,
+          "surface": "mnemosyne config get wm_max_items"
+        },
+        "wm_ttl_hours": {
+          "status": "read",
+          "value": 168,
+          "surface": "mnemosyne config get wm_ttl_hours"
+        },
+        "cross_session": {
+          "status": "read",
+          "value": false,
+          "surface": "mnemosyne config get cross_session"
+        },
+        "embedding_model": {
+          "status": "read",
+          "value": "BAAI/bge-small-en-v1.5",
+          "surface": "mnemosyne config get embedding_model"
+        },
+        "embedding_dim": {
+          "status": "read",
+          "value": 384,
+          "surface": "mnemosyne config get embedding_dim"
+        },
+        "vec_type": {
+          "status": "read",
+          "value": "int8",
+          "surface": "mnemosyne config get vec_type"
+        }
+      },
+      "fingerprint_complete": true
+    }
+  }
+}

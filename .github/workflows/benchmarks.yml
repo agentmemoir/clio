@@ -1,0 +1,30 @@
+# The clio-bench harness is Python, and no Rust gate compiles a line of it, so
+# the harness runs its own suite here. The path filters mirror ci.yml's rule:
+# this workflow starts only when the benchmark tree itself changes, and a
+# benchmarks-only change does not start the Rust jobs next door. The suite is
+# hermetic: no dataset is downloaded, and the live Mnemosyne tests skip when
+# no binary is installed on the runner.
+name: Benchmarks
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'benchmarks/**'
+      - '.github/workflows/benchmarks.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'benchmarks/**'
+      - '.github/workflows/benchmarks.yml'
+
+jobs:
+  tests:
+    name: clio-bench suite (unittest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the benchmark suite
+        run: python3 -m unittest discover -s benchmarks/tests -t .

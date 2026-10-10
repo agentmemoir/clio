@@ -1,0 +1,27 @@
+# A Linux (Ubuntu 24.04) box for the hardened `noexec` checks.
+#
+# Build the image once, then run a one-off command:
+#   docker compose -f compose.dev.yaml build
+#   docker compose -f compose.dev.yaml run --rm cliobuntu <command>
+#
+# `/tmp` and `/dev/shm` are mounted noexec, which is the hardened case the
+# checks exist for. The checkout is mounted read-only at /workspace.
+#
+# macOS only. On Linux, run the checks on the host.
+name: clio-dev
+
+services:
+  cliobuntu:
+    build:
+      context: .
+      dockerfile: dev/Dockerfile
+    image: cliobuntu:24.04
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=2g
+      - /dev/shm:noexec,nosuid,nodev,size=2g
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro
+    environment:
+      TMPDIR: /tmp
+    command: sleep infinity

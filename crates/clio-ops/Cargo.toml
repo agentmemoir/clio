@@ -1,0 +1,18 @@
+[package]
+name = "clio-ops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Operator health surfaces: diagnose / verify / doctor / repair / reindex"
+
+[dependencies]
+clio-index = { workspace = true }
+clio-store = { workspace = true }
+clio-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

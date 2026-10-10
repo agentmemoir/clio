@@ -1,0 +1,755 @@
+{
+  "harness": {
+    "name": "am-bench",
+    "version": "0.1.0",
+    "python": "3.14.4",
+    "tokenizer": "cl100k_base(am-bench-fallback)",
+    "generated_at": "2026-10-07T00:36:44.619146+00:00"
+  },
+  "run": {
+    "suites": [
+      "locomo"
+    ],
+    "partition": "canary",
+    "seed": 100480,
+    "max_probes": 20,
+    "max_instances": 2,
+    "token_budget": 4096,
+    "adapter": "clio",
+    "judge": {
+      "tier": "stub",
+      "model": "stub-exact-match",
+      "base_url": "",
+      "quotable": false
+    },
+    "generator": {
+      "model": "stub-context-echo",
+      "base_url": ""
+    }
+  },
+  "pins": {
+    "locomo": {
+      "name": "LoCoMo-style (Snap Research)",
+      "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+      "sha256": null,
+      "git_blob": "d95b872480b413d935821fdc3c84f8a8f5f29e73"
+    },
+    "longmemeval": {
+      "name": "LongMemEval-style (Wu et al.)",
+      "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+      "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+      "git_blob": null
+    }
+  },
+  "systems": {
+    "clio": {
+      "system": "clio",
+      "version": "0.1.2",
+      "settings": {
+        "retention_profile": {
+          "status": "read",
+          "value": {
+            "bank": "am-bench-fingerprint",
+            "source": "deployment",
+            "verbosity": "selective",
+            "theta_offsets": {},
+            "duplicate_tolerance_write": "strict",
+            "version": 3,
+            "accepted_but_inert": {
+              "duplicate_tolerance_read": "strict",
+              "honored_by": "recall_scope_and_dedup",
+              "note": "read-side scope and dedup are active; these values apply to retrieve/compose unless the call overrides them",
+              "recall_scope_default": "consolidated_only",
+              "status": "active"
+            }
+          },
+          "surface": "clio retention get --bank am-bench-fingerprint (store named by CLIO_RETENTION_PROFILES)"
+        },
+        "ranking_environment": {
+          "status": "read",
+          "value": {
+            "admission": {
+              "w1": 0.2,
+              "w2": 0.2,
+              "w3": 0.2,
+              "w4": 0.2,
+              "w5": 0.2
+            },
+            "coactivation": {
+              "eta": 0.15,
+              "half_life_days": 30.0,
+              "hub_degree_limit": 16,
+              "max_hops": 2,
+              "w_min": 0.05
+            },
+            "hygiene": {
+              "dup": 0.15,
+              "pattern": 0.25,
+              "secret": 0.35,
+              "staleness": 0.1,
+              "utility": 0.15
+            },
+            "hygiene_stale_half_life_days": 90.0,
+            "intent_gate": {
+              "skip_confidence": null
+            },
+            "maintenance_triggers": {
+              "cooldown_seconds": 300,
+              "dirty_ancestor_threshold": 1,
+              "eligible_hub_threshold": 1,
+              "hub_budget_per_wave": 16,
+              "max_waves_per_hour": 12,
+              "stale_unit_threshold": 1
+            },
+            "ok": true,
+            "recency_tau_days": 30.0,
+            "retention": {
+              "half_life_days": 30.0
+            },
+            "retrieval": {
+              "dense": 0.3333333333333333,
+              "importance": 0.3333333333333333,
+              "lexical": 0.3333333333333333
+            },
+            "theta_admit": 0.55,
+            "theta_overrides": {},
+            "trust": {
+              "agent_inferred": 0.85,
+              "third_party": 0.95,
+              "user_stated": 1.0
+            },
+            "type_prior_overrides": {}
+          },
+          "surface": "clio ranking get --output json"
+        },
+        "trigger_state": {
+          "status": "unreadable",
+          "tried": [
+            "clio maintenance status --output json (index pipeline fields only; no trigger state field exists yet)"
+          ]
+        },
+        "engine_profile": {
+          "status": "unreadable",
+          "tried": [
+            "clio config get engine_profile (unknown config path `engine_profile`)"
+          ]
+        }
+      }
+    }
+  },
+  "overall": {
+    "scored_probes": 20,
+    "failed_probes": 0,
+    "overall": {
+      "count": 20,
+      "accuracy": 0.2,
+      "token_f1": 0.005263157894736843,
+      "tokens_retrieved_mean": 0.0,
+      "retrieval_latency_ms_p50": 152.49316499830456,
+      "retrieval_latency_ms_p95": 166.66906899627065,
+      "generation_latency_ms_mean": 0.0062044502556091174
+    },
+    "per_category": {
+      "adversarial-abstention": {
+        "count": 4,
+        "accuracy": 1.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 0.0,
+        "retrieval_latency_ms_p50": 148.91334999992978,
+        "retrieval_latency_ms_p95": 149.38105500186794,
+        "generation_latency_ms_mean": 0.0062945000536274165
+      },
+      "multi-hop": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.026315789473684213,
+        "tokens_retrieved_mean": 0.0,
+        "retrieval_latency_ms_p50": 154.14843700273195,
+        "retrieval_latency_ms_p95": 166.32823400141206,
+        "generation_latency_ms_mean": 0.006870750439702533
+      },
+      "open-domain": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 0.0,
+        "retrieval_latency_ms_p50": 166.64960300113307,
+        "retrieval_latency_ms_p95": 166.69482799625257,
+        "generation_latency_ms_mean": 0.005878498996025883
+      },
+      "single-hop": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 0.0,
+        "retrieval_latency_ms_p50": 154.5168439988629,
+        "retrieval_latency_ms_p95": 166.66906899627065,
+        "generation_latency_ms_mean": 0.00615450153418351
+      },
+      "temporal-reasoning": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 0.0,
+        "retrieval_latency_ms_p50": 153.8951780021307,
+        "retrieval_latency_ms_p95": 155.27132200077176,
+        "generation_latency_ms_mean": 0.005824000254506245
+      }
+    },
+    "tier": "stub",
+    "quotable": false
+  },
+  "suites": {
+    "locomo": {
+      "aggregate": {
+        "scored_probes": 20,
+        "failed_probes": 0,
+        "overall": {
+          "count": 20,
+          "accuracy": 0.2,
+          "token_f1": 0.005263157894736843,
+          "tokens_retrieved_mean": 0.0,
+          "retrieval_latency_ms_p50": 152.49316499830456,
+          "retrieval_latency_ms_p95": 166.66906899627065,
+          "generation_latency_ms_mean": 0.0062044502556091174
+        },
+        "per_category": {
+          "adversarial-abstention": {
+            "count": 4,
+            "accuracy": 1.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 0.0,
+            "retrieval_latency_ms_p50": 148.91334999992978,
+            "retrieval_latency_ms_p95": 149.38105500186794,
+            "generation_latency_ms_mean": 0.0062945000536274165
+          },
+          "multi-hop": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.026315789473684213,
+            "tokens_retrieved_mean": 0.0,
+            "retrieval_latency_ms_p50": 154.14843700273195,
+            "retrieval_latency_ms_p95": 166.32823400141206,
+            "generation_latency_ms_mean": 0.006870750439702533
+          },
+          "open-domain": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 0.0,
+            "retrieval_latency_ms_p50": 166.64960300113307,
+            "retrieval_latency_ms_p95": 166.69482799625257,
+            "generation_latency_ms_mean": 0.005878498996025883
+          },
+          "single-hop": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 0.0,
+            "retrieval_latency_ms_p50": 154.5168439988629,
+            "retrieval_latency_ms_p95": 166.66906899627065,
+            "generation_latency_ms_mean": 0.00615450153418351
+          },
+          "temporal-reasoning": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 0.0,
+            "retrieval_latency_ms_p50": 153.8951780021307,
+            "retrieval_latency_ms_p95": 155.27132200077176,
+            "generation_latency_ms_mean": 0.005824000254506245
+          }
+        },
+        "tier": "stub",
+        "quotable": false
+      },
+      "ingestion": {
+        "instances": 2,
+        "turns_ingested": 928,
+        "turns_rejected": 1
+      },
+      "probes": [
+        {
+          "probe_id": "conv-26:q156",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "adversarial-abstention",
+          "question": "What is Melanie excited about in her adoption process?",
+          "gold_answer": "",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 1.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 146.38942499732366,
+          "generation_latency_ms": 0.007613998604938388,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q042",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "multi-hop",
+          "question": "Would Melanie be more interested in going to a national park or a theme park?",
+          "gold_answer": "National park; she likes the outdoors",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 151.0684989989386,
+          "generation_latency_ms": 0.011412004823796451,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q186",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "adversarial-abstention",
+          "question": "Who is Caroline a fan of in terms of modern music?",
+          "gold_answer": "",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 1.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 148.91334999992978,
+          "generation_latency_ms": 0.005660003807861358,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q030",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "multi-hop",
+          "question": "Would Melanie be considered a member of the LGBTQ community?",
+          "gold_answer": "Likely no, she does not refer to herself as part of it",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.10526315789473685,
+          "retrieval_latency_ms": 154.14843700273195,
+          "generation_latency_ms": 0.0048190049710683525,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q130",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "open-domain",
+          "question": "Which  classical musicians does Melanie enjoy listening to?",
+          "gold_answer": "Bach and Mozart",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 152.49316499830456,
+          "generation_latency_ms": 0.004799003363586962,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q080",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "temporal-reasoning",
+          "question": "When did Melanie buy the figurines?",
+          "gold_answer": "21 October 2023",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 155.27132200077176,
+          "generation_latency_ms": 0.006552996637765318,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q144",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "open-domain",
+          "question": "How did Melanie's son handle the accident?",
+          "gold_answer": "He was scared but reassured by his family",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 146.07912700012093,
+          "generation_latency_ms": 0.0056399949244223535,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q031",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "temporal-reasoning",
+          "question": "When did Melanie go camping in June?",
+          "gold_answer": "The week before 27 June 2023",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 138.55455799784977,
+          "generation_latency_ms": 0.005560999852605164,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q176",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "adversarial-abstention",
+          "question": "How did Caroline feel while watching the meteor shower?",
+          "gold_answer": "",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 1.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 146.6545759976725,
+          "generation_latency_ms": 0.007094000466167927,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q022",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "multi-hop",
+          "question": "Would Caroline likely have Dr. Seuss books on her bookshelf?",
+          "gold_answer": "Yes, since she collects classic children's books",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 166.32823400141206,
+          "generation_latency_ms": 0.00607199763180688,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q095",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "open-domain",
+          "question": "What did Melanie and her family do while camping?",
+          "gold_answer": "explored nature, roasted marshmallows, and went on a hike",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 166.69482799625257,
+          "generation_latency_ms": 0.006862996087875217,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q073",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "temporal-reasoning",
+          "question": "When did Melanie get hurt?",
+          "gold_answer": "September 2023",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 138.00722299492918,
+          "generation_latency_ms": 0.0057110009947791696,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q089",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "open-domain",
+          "question": "What habit is Sam trying to change in terms of diet?",
+          "gold_answer": "consuming soda and candy",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 166.64960300113307,
+          "generation_latency_ms": 0.006212001608218998,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q056",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What is Sam's persistent problem with his phone?",
+          "gold_answer": "His new phone malfunctioning, particularly with the navigation app.",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 154.5168439988629,
+          "generation_latency_ms": 0.006643000233452767,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q073",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "temporal-reasoning",
+          "question": "When is Evan planning a big family reunion?",
+          "gold_answer": "Summer 2024",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 153.8951780021307,
+          "generation_latency_ms": 0.005471003532875329,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q036",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What kind of foods or recipes has Sam recommended to Evan?",
+          "gold_answer": "grilled vegetables, grilled chicken and veggie stir-fry, poutine",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 153.12100300070597,
+          "generation_latency_ms": 0.006553003913722932,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q167",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "adversarial-abstention",
+          "question": "What class is Evan taking to learn how to make healthier meals?",
+          "gold_answer": "",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 1.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 149.38105500186794,
+          "generation_latency_ms": 0.004809997335541993,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q020",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "multi-hop",
+          "question": "In light of the health and dietary changes discussed, what would be an appropriate gift for both Evan and Sam to encourage their healthy lifestyles?",
+          "gold_answer": "a cookbook with healthy recipes or a subscription to a healthy meal delivery service.",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 151.81624399701832,
+          "generation_latency_ms": 0.005179994332138449,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q048",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What new diet and lifestyle change did Sam adopt over time?",
+          "gold_answer": "Healthy eating, exercise routine, running, hiking",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 149.41254499717616,
+          "generation_latency_ms": 0.006071000825613737,
+          "tokens_retrieved": 0,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q014",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What is Evan's favorite food?",
+          "gold_answer": "Ginger snaps",
+          "candidate_answer": "The answer is not known from the provided context.",
+          "retrieved_context": "",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 166.66906899627065,
+          "generation_latency_ms": 0.005351001163944602,
+          "tokens_retrieved": 0,
+          "error": null
+        }
+      ]
+    }
+  }
+}

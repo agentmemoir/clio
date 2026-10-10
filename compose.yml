@@ -1,0 +1,227 @@
+# Agent Memoir — Compose sidecars for hardware profiles
+#
+# Always pass an arch file (-f) for Profile B/C (TEI images differ by CPU).
+#
+# Profile A  api-inference:
+#   docker compose -f compose.yml -f compose.amd64.yml up -d
+#   docker compose -f compose.yml -f compose.arm64.yml up -d
+#
+# Profile B  local-retrieval:
+#   docker compose -f compose.yml -f compose.amd64.yml --profile local-retrieval up -d
+#   docker compose -f compose.yml -f compose.arm64.yml --profile local-retrieval up -d
+#
+# Profile C  local-rft:
+#   docker compose -f compose.yml -f compose.amd64.yml --profile local-rft up -d
+#   docker compose -f compose.yml -f compose.arm64.yml --profile local-rft up -d
+#
+# Ops        ops (Postgres client tools, opt-in, not part of any runtime profile):
+#   docker compose -f compose.yml -f compose.amd64.yml --profile ops run --rm pg-tools <command>
+#   physical backup and restore: take a filesystem-level copy of the Postgres
+#   data directory with the server stopped, or a logical dump with pg_dumpall
+#
+# CLI is source in this repo (not a Compose service). Runtime sidecars only.
+# Point the built binary at CLIO_DATABASE_URL / CLIO_EMBED_URL / CLIO_RERANK_URL /
+# CLIO_EXTRACT_URL from .env.example.
+
+name: clio
+
+services:
+  postgres:
+    # Pinned (was the floating pg16 tag): pgvector 0.8.6 ships the halfvec
+    # width/index features the multi-model work relies on.
+    image: pgvector/pgvector:0.8.6-pg16
+    restart: unless-stopped
+    # Loopback only. A bare "PORT:5432" is shorthand for 0.0.0.0:PORT:5432,
+    # which publishes the store on every host address and makes it reachable
+    # from the local network. The managed database is a single-user local store,
+    # so the bind is the boundary that matters.
+    ports:
+      - "127.0.0.1:${CLIO_POSTGRES_PORT:-34310}:5432"
+    environment:
+      POSTGRES_USER: ${CLIO_POSTGRES_USER:-clio}
+      POSTGRES_DB: ${CLIO_POSTGRES_DB:-clio}
+      # No password. The image's own switch for this, and the one it documents:
+      # with trust set, POSTGRES_PASSWORD is not required, and the role Clio
+      # creates has no password at all. This is only safe because the port above
+      # is published on loopback — see the pg_hba caveat this relies on.
+      #
+      # The image applies this when it creates the data folder, and never again.
+      # A volume created before this line existed keeps its own rules — in
+      # practice scram-sha-256 plus a password on the role — so an existing data
+      # folder has to be removed and recreated to pick trust up. That deletes
+      # every memory in it; delete it yourself once you have confirmed the new
+      # server starts and answers.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/001_core.sql:/docker-entrypoint-initdb.d/01_core.sql:ro
+      - ./sql/002_vectors_postgres.sql:/docker-entrypoint-initdb.d/02_vectors.sql:ro
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${CLIO_PG_SHARED_BUFFERS:-128MB}
+      - -c
+      - work_mem=${CLIO_PG_WORK_MEM:-4MB}
+      - -c
+      - max_connections=${CLIO_PG_MAX_CONNECTIONS:-50}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CLIO_POSTGRES_USER:-clio} -d ${CLIO_POSTGRES_DB:-clio}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # A deliberate stop must be a clean shutdown, not a kill. The image's stop
+    # signal is SIGINT, which Postgres treats as a fast shutdown: checkpoint
+    # and exit, without waiting for clients. The 10s default can still cut a
+    # busy server short and SIGKILL it, which forces crash recovery on the
+    # next start; 60s is headroom for that checkpoint and WAL flush, which is
+    # what an offline copy of the data directory needs.
+    stop_grace_period: 1m
+    # Always on for every profile (Compose default data plane).
+
+  embed:
+    profiles: ["local-retrieval", "local-rft"]
+    # Default amd64; override with -f compose.arm64.yml (or set CLIO_TEI_IMAGE).
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    restart: unless-stopped
+    ports:
+      - "${CLIO_EMBED_PORT:-34311}:80"
+    volumes:
+      - tei_embed_cache:/data
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${CLIO_HF_TOKEN:-}
+    command:
+      - --model-id
+      - ${CLIO_EMBED_MODEL:-BAAI/bge-small-en-v1.5}
+      - --dtype
+      - float32
+      # Cap batch tokens so CPU ORT warmup/runtime stay small (same lesson as rerank).
+      - --max-batch-tokens
+      - ${CLIO_EMBED_MAX_BATCH_TOKENS:-1024}
+      - --tokenization-workers
+      - ${CLIO_EMBED_TOKENIZATION_WORKERS:-1}
+      - --max-concurrent-requests
+      - ${CLIO_EMBED_MAX_CONCURRENT:-32}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: ${CLIO_EMBED_MEM_LIMIT:-1G}
+
+  rerank:
+    profiles: ["local-retrieval", "local-rft"]
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    restart: unless-stopped
+    ports:
+      - "${CLIO_RERANK_PORT:-34312}:80"
+    volumes:
+      - tei_rerank_cache:/data
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${CLIO_HF_TOKEN:-}
+    command:
+      - --model-id
+      - ${CLIO_RERANK_MODEL:-onnx-community/gte-multilingual-reranker-base}
+      - --dtype
+      - float32
+      # Default max-batch-tokens=16384 makes CPU ORT warmup OOM (~6GB+). Cap for laptop.
+      # See TEI #819 / #280 / PR #884. Rerank top ~30–50 candidates.
+      - --max-batch-tokens
+      - ${CLIO_RERANK_MAX_BATCH_TOKENS:-2048}
+      - --max-client-batch-size
+      - ${CLIO_RERANK_MAX_CLIENT_BATCH:-32}
+      - --tokenization-workers
+      - ${CLIO_RERANK_TOKENIZATION_WORKERS:-2}
+      - --max-concurrent-requests
+      - ${CLIO_RERANK_MAX_CONCURRENT:-64}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: ${CLIO_RERANK_MEM_LIMIT:-3G}
+
+  # Profile C: NuExtract-1.5-tiny via llama.cpp OpenAI-compatible server.
+  # Place GGUF at models/ (DevQuasar Q4_K_M; symlink alias also works):
+  #   hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \
+  #     numind.NuExtract-tiny-v1.5.Q4_K_M.gguf --local-dir ./models
+  extract:
+    profiles: ["local-rft"]
+    # Multi-arch image; platform pin comes from compose.amd64.yml / compose.arm64.yml
+    image: ${CLIO_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    restart: unless-stopped
+    ports:
+      - "${CLIO_EXTRACT_PORT:-34313}:8080"
+    volumes:
+      - ./models:/models:ro
+    environment:
+      LLAMA_ARG_MODEL: /models/${CLIO_EXTRACT_GGUF:-numind.NuExtract-tiny-v1.5.Q4_K_M.gguf}
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: "8080"
+      # Default auto -np ≈ n_cpu (was 4 slots × 4096 KV). One agent → 1 slot.
+      LLAMA_ARG_CTX_SIZE: ${CLIO_EXTRACT_CTX:-2048}
+      LLAMA_ARG_N_PARALLEL: ${CLIO_EXTRACT_PARALLEL:-1}
+      LLAMA_ARG_N_THREADS: ${CLIO_EXTRACT_THREADS:-2}
+      LLAMA_ARG_TEMP: "0"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || curl -sf http://127.0.0.1:8080/v1/models || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${CLIO_EXTRACT_MEM_LIMIT:-768M}
+
+  # Ops profile: Postgres client tools for the physical (file-level) backup
+  # path. Opt-in only, so the default `up` starts exactly what it always did.
+  #
+  # Same pinned image as `postgres` on purpose: the server image already
+  # bundles pg_dump, pg_restore, pg_basebackup, and psql, so there is no
+  # second image to keep current and no client/server version skew.
+  #
+  # One-shot tool runs on the compose network use this service:
+  #   docker compose --profile ops run --rm pg-tools <command>
+  # The clone itself is taken inside the running `postgres` container, not
+  # here: the stock pg_hba.conf grants replication only to 127.0.0.1 and ::1,
+  # so a container on the compose bridge is refused with
+  # "no pg_hba.conf entry for replication connection". Nothing in a restore runs
+  # through this service; the restore copy-ins use plain `docker run` against
+  # the same pinned image, because they need named volumes and their own port,
+  # not a compose-network client.
+  pg-tools:
+    profiles: ["ops"]
+    image: pgvector/pgvector:0.8.6-pg16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${CLIO_POSTGRES_USER:-clio}
+      PGDATABASE: ${CLIO_POSTGRES_DB:-clio}
+    volumes:
+      # The operator's physical-clone destination. `create_host_path: false`
+      # keeps Compose from silently creating it as a root-owned directory;
+      # the operator creates it owner-only, and the runbook says so. The
+      # root-anchored /backups ignore rule matches the default.
+      - type: bind
+        source: ${CLIO_PG_BACKUP_DIR:-./backups}
+        target: /backups
+        bind:
+          create_host_path: false
+    # Keeps the container alive for interactive use. One-shot commands use
+    # `docker compose --profile ops run --rm pg-tools <command>`.
+    command: ["sleep", "infinity"]
+
+volumes:
+  pgdata:
+  tei_embed_cache:
+  tei_rerank_cache:

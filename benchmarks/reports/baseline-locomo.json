@@ -1,0 +1,359 @@
+{
+  "harness": {
+    "name": "clio-bench",
+    "version": "0.1.0",
+    "python": "3.14.4",
+    "tokenizer": "cl100k_base(clio-bench-fallback)",
+    "generated_at": "2026-09-24T16:31:42.505395+00:00"
+  },
+  "run": {
+    "suites": [
+      "locomo"
+    ],
+    "partition": "canary",
+    "seed": 100480,
+    "max_probes": 5,
+    "max_instances": 1,
+    "token_budget": 512,
+    "adapter": "clio",
+    "judge": {
+      "tier": "tier1",
+      "model": "qwen2.5-1.5b-instruct",
+      "base_url": "http://127.0.0.1:8899"
+    },
+    "generator": {
+      "model": "qwen2.5-1.5b-instruct",
+      "base_url": "http://127.0.0.1:8899"
+    }
+  },
+  "pins": {
+    "locomo": {
+      "name": "LoCoMo-style (Snap Research)",
+      "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+      "sha256": null,
+      "git_blob": "d95b872480b413d935821fdc3c84f8a8f5f29e73"
+    },
+    "longmemeval": {
+      "name": "LongMemEval-style (Wu et al.)",
+      "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+      "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+      "git_blob": null
+    }
+  },
+  "overall": {
+    "scored_probes": 5,
+    "failed_probes": 0,
+    "overall": {
+      "count": 5,
+      "accuracy": 0.2264911064067352,
+      "token_f1": 0.21268661850705195,
+      "tokens_retrieved_mean": 442.6,
+      "retrieval_latency_ms_p50": 1532.5646519922884,
+      "retrieval_latency_ms_p95": 1544.549383004778,
+      "generation_latency_ms_mean": 12627.941752001061
+    },
+    "per_category": {
+      "adversarial-abstention": {
+        "count": 1,
+        "accuracy": 0.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 444.0,
+        "retrieval_latency_ms_p50": 1532.5646519922884,
+        "retrieval_latency_ms_p95": 1532.5646519922884,
+        "generation_latency_ms_mean": 11217.059011003585
+      },
+      "multi-hop": {
+        "count": 1,
+        "accuracy": 0.6324555320336759,
+        "token_f1": 0.3137254901960785,
+        "tokens_retrieved_mean": 497.0,
+        "retrieval_latency_ms_p50": 1502.3361329949694,
+        "retrieval_latency_ms_p95": 1502.3361329949694,
+        "generation_latency_ms_mean": 16300.671099001192
+      },
+      "open-domain": {
+        "count": 1,
+        "accuracy": 0.0,
+        "token_f1": 0.10526315789473685,
+        "tokens_retrieved_mean": 462.0,
+        "retrieval_latency_ms_p50": 1447.9723560070852,
+        "retrieval_latency_ms_p95": 1447.9723560070852,
+        "generation_latency_ms_mean": 12314.22232100158
+      },
+      "single-hop": {
+        "count": 1,
+        "accuracy": 0.5,
+        "token_f1": 0.44444444444444436,
+        "tokens_retrieved_mean": 407.0,
+        "retrieval_latency_ms_p50": 1544.549383004778,
+        "retrieval_latency_ms_p95": 1544.549383004778,
+        "generation_latency_ms_mean": 12753.01101799414
+      },
+      "temporal-reasoning": {
+        "count": 1,
+        "accuracy": 0.0,
+        "token_f1": 0.2,
+        "tokens_retrieved_mean": 403.0,
+        "retrieval_latency_ms_p50": 1533.4709559974726,
+        "retrieval_latency_ms_p95": 1533.4709559974726,
+        "generation_latency_ms_mean": 10554.745311004808
+      }
+    }
+  },
+  "suites": {
+    "locomo": {
+      "aggregate": {
+        "scored_probes": 5,
+        "failed_probes": 0,
+        "overall": {
+          "count": 5,
+          "accuracy": 0.2264911064067352,
+          "token_f1": 0.21268661850705195,
+          "tokens_retrieved_mean": 442.6,
+          "retrieval_latency_ms_p50": 1532.5646519922884,
+          "retrieval_latency_ms_p95": 1544.549383004778,
+          "generation_latency_ms_mean": 12627.941752001061
+        },
+        "per_category": {
+          "adversarial-abstention": {
+            "count": 1,
+            "accuracy": 0.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 444.0,
+            "retrieval_latency_ms_p50": 1532.5646519922884,
+            "retrieval_latency_ms_p95": 1532.5646519922884,
+            "generation_latency_ms_mean": 11217.059011003585
+          },
+          "multi-hop": {
+            "count": 1,
+            "accuracy": 0.6324555320336759,
+            "token_f1": 0.3137254901960785,
+            "tokens_retrieved_mean": 497.0,
+            "retrieval_latency_ms_p50": 1502.3361329949694,
+            "retrieval_latency_ms_p95": 1502.3361329949694,
+            "generation_latency_ms_mean": 16300.671099001192
+          },
+          "open-domain": {
+            "count": 1,
+            "accuracy": 0.0,
+            "token_f1": 0.10526315789473685,
+            "tokens_retrieved_mean": 462.0,
+            "retrieval_latency_ms_p50": 1447.9723560070852,
+            "retrieval_latency_ms_p95": 1447.9723560070852,
+            "generation_latency_ms_mean": 12314.22232100158
+          },
+          "single-hop": {
+            "count": 1,
+            "accuracy": 0.5,
+            "token_f1": 0.44444444444444436,
+            "tokens_retrieved_mean": 407.0,
+            "retrieval_latency_ms_p50": 1544.549383004778,
+            "retrieval_latency_ms_p95": 1544.549383004778,
+            "generation_latency_ms_mean": 12753.01101799414
+          },
+          "temporal-reasoning": {
+            "count": 1,
+            "accuracy": 0.0,
+            "token_f1": 0.2,
+            "tokens_retrieved_mean": 403.0,
+            "retrieval_latency_ms_p50": 1533.4709559974726,
+            "retrieval_latency_ms_p95": 1533.4709559974726,
+            "generation_latency_ms_mean": 10554.745311004808
+          }
+        }
+      },
+      "ingestion": {
+        "instances": 1,
+        "turns_ingested": 509,
+        "turns_rejected": 0
+      },
+      "probes": [
+        {
+          "probe_id": "conv-49:q167",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "adversarial-abstention",
+          "question": "What class is Evan taking to learn how to make healthier meals?",
+          "gold_answer": "",
+          "candidate_answer": "Evan is taking a cooking class to learn how to make healthier meals.",
+          "retrieved_context": "[itm-cli-218595000-1999313] Hey Evan, sorry to hear about what happened. I can imagine how hard it must have been for you. Things haven't been easy for me either. Had a tough week and a doc's appointment, so it was kinda like a wake-up call to take better care of myself. On a bright side, I'm taking a cooking class to learn how to make healthier meals.\n[itm-cli-560521887-2000045] Cool, Evan! What have you been learning in those classes?\n[itm-cli-430690116-1999334] Hey Sam, sorry to hear you had a rough week. At least it's forcing us both to take better care of ourselves, right? I hear the class you're taking is packed with healthy recipes. How's it been going? Have you picked up any yummy new meals?\n[itm-cli-810842553-2000067] In painting classes, we've been learning about watercolors. The instructor stresses observing nature and painting what we see. It's a relaxing way to take a break from everyday stress.\n[itm-cli-995693776-2001096] Hey Sam! Loving it. Making healthier choices has definitely made a difference for me. It's amazing how small changes can have such a big impact. How about you? Is it making a difference for you too?\n[itm-cli-116253071-1999598] Wow, Sam, that's great news! Making changes to live healthier can be challenging, how has it been going?\n[itm-cli-569540629-1999338] The cooking class has been great, I've learned awesome recipes. Last night I made this yummy grilled dish, so good!\n[itm-cli-494401165-1997909] Awesome, Sam! Let me know how it goes. Making small changes can really help you live a healthier life. Don't forget - every step matters!\n[itm-cli-115054289-1999843] Wow, Sam, that's great to hear! Feeling more energized after meals is such a positive change. Keep up the good work! And speaking of healthy meals, do you have any favorite recipes you'd like to share?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A conveys the same information as the reference answer, but it is incorrect. The reference answer states that Evan is taking a cooking class to learn how to make healthier meals, while Response A suggests that Evan is taking a cooking class to learn how to make healthier meals. The reference answer is correct, but Response A is not. | Response B is not a direct answer to the question asked. It provides information about Evan's class, but does not answer the question about the class Evan is taking to learn how to make healthier meals.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response A conveys the same information as the reference answer, but it is incorrect. The reference answer states that Evan is taking a cooking class to learn how to make healthier meals, while Response A suggests that Evan is taking a cooking class to learn how to make healthier meals. The reference answer is correct, but Response A is not."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response B is not a direct answer to the question asked. It provides information about Evan's class, but does not answer the question about the class Evan is taking to learn how to make healthier meals."
+              }
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 1532.5646519922884,
+          "generation_latency_ms": 11217.059011003585,
+          "tokens_retrieved": 444,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q020",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "multi-hop",
+          "question": "In light of the health and dietary changes discussed, what would be an appropriate gift for both Evan and Sam to encourage their healthy lifestyles?",
+          "gold_answer": "a cookbook with healthy recipes or a subscription to a healthy meal delivery service.",
+          "candidate_answer": "An appropriate gift for both Evan and Sam to encourage their healthy lifestyles could be a fitness tracker or a subscription to a healthy meal delivery service. These items would help them monitor their progress and stay motivated in their health and dietary changes.",
+          "retrieved_context": "[itm-cli-65262384-1998128] I made some dietary changes, like cutting down on sugary snacks and eating more veggies and fruit, and it made a big impact on my health. Have you considered any changes?\n[itm-cli-810489978-2002808] Definitely, Sam! Hiking is an awesome way to bond with nature and push ourselves. It's gonna be a cool memory for us both. It's great to see progress, was just at the gym yesterday. Gaining strength!\n[itm-cli-710107483-2000216] Did you take advantage of the skiing opportunities in Banff? Sounds like it would have been a lot of fun!\n[itm-cli-7665971-1997422] That must have been a challenging experience, Sam. It's tough when we have to confront our own health challenges. Remember, it's never too late to make positive changes for a healthier lifestyle. Is there anything I can do to support you in this journey?\n[itm-cli-103496318-1998082] That's great, Sam! I struggled with my health a few years ago, but stuck with it. Here's a reminder of my commitment - my gym membership card. It's not just about exercise, diet and lifestyle changes also play a big role.\n[itm-cli-280124236-2008229] For sure, Sam. That's what makes family so special. They bring so much love and happiness. It's great having their support and knowing they're always there for us. I feel really fortunate to have their never-ending love and support.\n[itm-cli-627562200-2003394] Thanks, Sam. Letting go of unrealistic expectations was liberating, both physically and mentally.\n[itm-cli-678833860-1999359] Mmm, it looks delicious! What did you put in it? I want to eat healthy, so what kind of recipes do you suggest?\n[itm-cli-474024528-2008207] Agree, Evan! Family is everything - they bring so much love and happiness. They're always there for us no matter what. I'm grateful for their support and love.\n[itm-cli-756811951-1997431] Yeah, what worked for me was finding a fitness routine I really enjoy. It's my go-to, I love the feeling of being healthy and strong. Making it fun and finding little ways to make smarter choices in my diet really added up. Don't forget, you got this!",
+          "judge": {
+            "accuracy": 0.6324555320336759,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A correctly identifies a fitness tracker and a healthy meal delivery service as appropriate gifts for both Evan and Sam, which aligns with the reference answer. The temporal component is correctly addressed as the question has no temporal component. | Response B provides a more comprehensive and detailed gift suggestion that aligns with the reference answer's focus on health and dietary changes. It offers a fitness tracker, which is a more specific and relevant item for encouraging healthy lifestyles.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0.8,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "Response A correctly identifies a fitness tracker and a healthy meal delivery service as appropriate gifts for both Evan and Sam, which aligns with the reference answer. The temporal component is correctly addressed as the question has no temporal component."
+              },
+              "pass2": {
+                "accuracy_score": 0.5,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "Response B provides a more comprehensive and detailed gift suggestion that aligns with the reference answer's focus on health and dietary changes. It offers a fitness tracker, which is a more specific and relevant item for encouraging healthy lifestyles."
+              }
+            }
+          },
+          "token_f1": 0.3137254901960785,
+          "retrieval_latency_ms": 1502.3361329949694,
+          "generation_latency_ms": 16300.671099001192,
+          "tokens_retrieved": 497,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q089",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "open-domain",
+          "question": "What habit is Sam trying to change in terms of diet?",
+          "gold_answer": "consuming soda and candy",
+          "candidate_answer": "Sam is trying to change his diet by eating less processed food and sugary snacks.",
+          "retrieved_context": "[itm-cli-106913861-2006527] She looks so confident! What kind of painting is that in the background?\n[itm-cli-288509826-1997866] Yeah, breaking habits can be tough. Making small changes can have a big impact later on. Have you considered swapping soda for flavored seltzer water? It's still bubbly and tasty, but without the sugar. And instead of candy, you could try dark chocolate with high cocoa content - it's a healthier option. What do you think?\n[itm-cli-83210130-1997864] Nah, no changes for me. Still enjoying my soda and candy, although I know it's not the best habit to have.\n[itm-cli-457251402-2000495] Hey Evan! Exciting news: I started a new diet and exercise routine last Monday and it's made a huge difference. I feel great! What about you, what changes have you made recently?\n[itm-cli-592733498-2009566] Between a healthier diet and yoga, I\u2019m hoping for some positive changes.\n[itm-cli-999587343-2001758] Cool, Sam! Writing is a great way to express yourself. What kind of writing do you enjoy? And about the phone, I recommend trying to update it, it usually works for me!\n[itm-cli-896311323-2003306] I get it, Sam. I went through a similar phase a twoyears ago. Changed my diet, started walking regularly, things like that.\n[itm-cli-891713589-1997862] That salad looks yummy! I'm being extra careful with my health lately. I'm trying to eat less processed food and sugary snacks, even though I love ginger snaps. Have you made any changes to your diet recently?\n[itm-cli-939981408-2004466] Woah, Evan, that must've been scary! Phew, it was just a misunderstanding. A health scare can really make you re-evaluate what's important. As for me, I've been dealing with some discomfort and it's been limiting my movement. I've been trying to make changes diet-wise, but it can be hard.\n[itm-cli-816841974-1999820] Nice work, Sam! Proud of you sticking to it. Have you noticed any positive changes?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A accurately conveys the habit Sam is trying to change in terms of diet, while Response B is incorrect and does not match the reference answer. | Response A is incorrect as it does not match the reference answer. The reference answer mentions 'diet' and 'processed food and sugary snacks', while Response A only mentions 'soda and candy'.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0.8,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "Response A accurately conveys the habit Sam is trying to change in terms of diet, while Response B is incorrect and does not match the reference answer."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response A is incorrect as it does not match the reference answer. The reference answer mentions 'diet' and 'processed food and sugary snacks', while Response A only mentions 'soda and candy'."
+              }
+            }
+          },
+          "token_f1": 0.10526315789473685,
+          "retrieval_latency_ms": 1447.9723560070852,
+          "generation_latency_ms": 12314.22232100158,
+          "tokens_retrieved": 462,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q056",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What is Sam's persistent problem with his phone?",
+          "gold_answer": "His new phone malfunctioning, particularly with the navigation app.",
+          "candidate_answer": "Sam's persistent problem with his phone is its navigation app keeping malfunctioning, making getting around a bit of a challenge.",
+          "retrieved_context": "[itm-cli-999587343-2001758] Cool, Sam! Writing is a great way to express yourself. What kind of writing do you enjoy? And about the phone, I recommend trying to update it, it usually works for me!\n[itm-cli-776782590-2007838] That's very strange, I've never had a problem with it once!\n[itm-cli-309076704-1998529] Looks good to eat! Dealing with health problems can be challenging and take away from enjoyable experiences.\n[itm-cli-423576356-1999449] Thanks, Sam. His ankle is getting better, but still sore. It was rough at first, but thank goodness it was nothing serious.\n[itm-cli-685222918-1999471] Glad to hear his ankle is getting better. It's hard seeing someone we care about hurt. Look after yourself too, yeah? We gotta look after our health.\n[itm-cli-460325180-2001733] Drawing is cool. I'm still just learning how to draw, but I love expressing myself through writing. It's therapeutic and helps me sort out my feelings. Though, I've been a bit frustrated lately with my new phone. Its navigation app keeps malfunctioning, making getting around a bit of a challenge.\n[itm-cli-202426603-2003075] No problem, Sam. Whenever you need support, I'm here for you. Stay safe!\n[itm-cli-334193406-2006092] It's not easy for us right now, my son had an accident last Tuesday, he fell off his bike and it was rough. But he's doing better now. How are you dealing with all this?\n[itm-cli-977114916-2001974] No problem, Sam. Can't wait to hear about your progress. Keep up the hard work!\n[itm-cli-857876991-1998910] Glad to support you, Sam. Surrounding ourselves with people who care is key. What's on that note? A reminder or quote to stay motivated?",
+          "judge": {
+            "accuracy": 0.5,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.25,
+            "explanation": "The response A conveys the same information as the reference answer but is less detailed and specific. It also includes additional information not present in the reference. | Response B provides more specific details about the problem with the navigation app, which is consistent with the reference answer. However, it does not convey the same information as the reference answer, hence the accuracy score is 0.5.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0.5,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0.5,
+                "explanation": "The response A conveys the same information as the reference answer but is less detailed and specific. It also includes additional information not present in the reference."
+              },
+              "pass2": {
+                "accuracy_score": 0.5,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "Response B provides more specific details about the problem with the navigation app, which is consistent with the reference answer. However, it does not convey the same information as the reference answer, hence the accuracy score is 0.5."
+              }
+            }
+          },
+          "token_f1": 0.44444444444444436,
+          "retrieval_latency_ms": 1544.549383004778,
+          "generation_latency_ms": 12753.01101799414,
+          "tokens_retrieved": 407,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q073",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "temporal-reasoning",
+          "question": "When is Evan planning a big family reunion?",
+          "gold_answer": "Summer 2024",
+          "candidate_answer": "Evan is planning a big family reunion next summer.",
+          "retrieved_context": "[itm-cli-91425359-2005934] Thanks, Sam! Yeah, we're planning a big family reunion next summer. It's going to be a blast and a perfect opportunity to add to our collage.\n[itm-cli-759152636-2004344] No worries, Evan. And yes, we should make a plan to go. That photo is just mesmerizing!\n[itm-cli-396717600-2005910] That's wonderful to hear, Evan! It's clear how much you value your family. Are you thinking of any specific plans or events to add to that collage?\n[itm-cli-482795973-2005298] It's tough when your plans get derailed by something like this. But hey, sometimes these setbacks lead to new opportunities.\n[itm-cli-805609572-2008448] Oh this must be very hearty and delicious, well I'll have to stick to the diet plan, even with the family gathering!\n[itm-cli-806811113-2005937] Sounds fantastic! If you need any tips on organizing such a big event, just let me know. I'm always here to support and celebrate your family's milestones.\n[itm-cli-818963358-2001232] Yep, painting is awesome! Get some acrylic paints, brushes, a canvas/paper, and a palette to mix colors. I can give you some recommendations if you want. Just let me know when you're ready and we can plan a painting session!\n[itm-cli-642769638-2003718] Congrats Sam! That's awesome! I'm super proud of you. Becoming a Weight Watchers coach is a big deal. Keep going!\n[itm-cli-88182067-2005273] Hey Evan, that's rough. Dealing with a new car breaking down is such a hassle, especially when it's your main mode of transport.\n[itm-cli-441450852-2007996] Definitely, family support is so important. Knowing they're happy about our marriage is awesome and so comforting.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A conveys the same information as the reference answer but does not provide the specific year, which is not relevant to the question. The temporal component is correct. | The response is temporally correct and does not contain invented facts.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0.5,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "Response A conveys the same information as the reference answer but does not provide the specific year, which is not relevant to the question. The temporal component is correct."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "The response is temporally correct and does not contain invented facts."
+              }
+            }
+          },
+          "token_f1": 0.2,
+          "retrieval_latency_ms": 1533.4709559974726,
+          "generation_latency_ms": 10554.745311004808,
+          "tokens_retrieved": 403,
+          "error": null
+        }
+      ]
+    }
+  }
+}

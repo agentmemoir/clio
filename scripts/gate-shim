@@ -1,0 +1,122 @@
+#!/bin/sh
+# gate-shim: route heavy cargo and make commands in a Clio checkout through
+# scripts/gate.py, which runs each command at most once per working-tree
+# fingerprint and replays the stored verdict otherwise.
+#
+# Install as symlinks named `cargo` and `make` in an early PATH directory:
+#   scripts/gate-install.sh
+#
+# Outside a Clio checkout, or with GATE_RAW=1, this execs the real tool
+# unchanged, except that an installed ~/.config/clio/gate-hook may run it
+# and record the run. Inside a run started by the gate (GATE_ACTIVE=1) it
+# passes through too, so nested commands run for real.
+set -u
+
+self_dir=$(cd "$(dirname "$0")" && pwd -P) || exit 127
+self_name=$(basename "$0")
+
+find_real() {
+    old_ifs=$IFS
+    IFS=:
+    for dir in $PATH; do
+        [ -n "$dir" ] || dir=.
+        candidate="$dir/$self_name"
+        [ -x "$candidate" ] || continue
+        candidate_dir=$(cd "$dir" 2>/dev/null && pwd -P) || continue
+        [ "$candidate_dir" = "$self_dir" ] && continue
+        printf '%s\n' "$candidate"
+        IFS=$old_ifs
+        return 0
+    done
+    IFS=$old_ifs
+    return 1
+}
+
+real=$(find_real) || {
+    printf 'gate-shim: %s not found on PATH\n' "$self_name" >&2
+    exit 127
+}
+
+pass_through() {
+    exec "$real" "$@"
+}
+
+[ "${GATE_RAW:-}" = "1" ] && pass_through "$@"
+[ "${GATE_ACTIVE:-}" = "1" ] && pass_through "$@"
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || pass_through "$@"
+if [ ! -f "$root/scripts/gate.py" ]; then
+    # Outside clio, the hook runs the real tool and returns its exit code, or it is absent.
+    [ -x "${HOME:-}/.config/clio/gate-hook" ] && exec "${HOME:-}/.config/clio/gate-hook" "$root" "$real" "$@"
+    pass_through "$@"
+fi
+[ -f "$root/Cargo.toml" ] || pass_through "$@"
+
+heavy=0
+if [ "$self_name" = "cargo" ]; then
+    case "${1:-}" in
+        test | nextest | llvm-cov | clippy) heavy=1 ;;
+    esac
+elif [ "$self_name" = "make" ]; then
+    # A dry run prints its recipes instead of running them, so its exit code and
+    # its output describe no verdict at all. Caching one publishes a fake result
+    # under a real kind's name and, because the kinds are shared with real runs,
+    # overwrites the log of the run it stood in for. The loop below skips every
+    # argument starting with `-`, so the flag alone never stopped it: `make -n
+    # coverage` was classified heavy and its printed recipe list was published as
+    # the coverage verdict. Long forms are listed too, and a single-dash bundle
+    # counts if it carries `n`, because GNU make accepts `-ns` and `-jn`.
+    #
+    # MAKEFLAGS is checked as well, because GNU make reads the dry-run flag from
+    # there too and an export reaches this shim exactly as an argument does.
+    # Reading argv alone left `MAKEFLAGS=-n make coverage` publishing a recipe
+    # list as the coverage verdict.
+    #
+    # A short flag is matched as a bundle of letters after one dash, and a long
+    # flag only by its exact name. The `--*` arm has to come before the bundle
+    # arm, because a `case` pattern of `-[!-]*` also matches a long flag: the
+    # second character is a `-`, which is inside that class. Without that arm,
+    # `--output-sync=target` reads as a bundle carrying an `n` and passes through,
+    # which would mean every real coverage run went ungated on a machine whose
+    # build exports it. The dry-run names are listed rather than searched for
+    # because an `n` anywhere in a flag is far too weak a test: several ordinary
+    # make options carry that letter.
+    dry_run_flag() {
+        case "$1" in
+            -n | --dry-run | --just-print | --recon) return 0 ;;
+            --*) return 1 ;;
+            -?*) case "${1#-}" in *n*) return 0 ;; esac ;;
+        esac
+        return 1
+    }
+    for flag in ${MAKEFLAGS:-}; do
+        dry_run_flag "$flag" && pass_through "$@"
+    done
+    for arg in "$@"; do
+        dry_run_flag "$arg" && pass_through "$@"
+    done
+    for arg in "$@"; do
+        case "$arg" in
+            -*) continue ;;
+        esac
+        case "$arg" in
+            ritual | check | test | lint | coverage | cov | coverage-fast | coverage-clean | coverage-html | coverage-lcov | coverage-open | coverage-package)
+                heavy=1
+                break
+                ;;
+        esac
+    done
+fi
+[ "$heavy" = 1 ] || pass_through "$@"
+
+if [ -n "${CLIO_GATE_LOG_DIR:-}" ]; then
+    python3 "$root/scripts/gate.py" run --log-dir "$CLIO_GATE_LOG_DIR" -- "$real" "$@"
+else
+    python3 "$root/scripts/gate.py" run -- "$real" "$@"
+fi
+rc=$?
+if [ "$rc" = 70 ]; then
+    printf 'gate-shim: gate failed; running %s directly\n' "$self_name" >&2
+    exec "$real" "$@"
+fi
+exit "$rc"

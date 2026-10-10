@@ -1,0 +1,13 @@
+{
+  "verbosity": "selective",
+  "theta_offsets": {},
+  "duplicate_tolerance_write": "strict",
+  "duplicate_tolerance_read": "strict",
+  "recall_scope_default": "consolidated_only",
+  "retention_curve": true,
+  "retention_floor": 0.1,
+  "pack_fidelity_default": "flow",
+  "provenance_floor_default": "verified",
+  "maintenance_trigger": true,
+  "version": 3
+}

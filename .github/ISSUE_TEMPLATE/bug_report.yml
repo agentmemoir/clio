@@ -1,0 +1,67 @@
+name: Bug report
+description: Report something that is not working.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Search existing issues first to avoid duplicates.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw, including exact error output.
+      placeholder: Paste exact output, e.g. from `clio recall "..."`.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What should have happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal commands to reproduce, starting from setup.
+      placeholder: |
+        1. `clio setup ...`
+        2. `clio remember "..." --category ...`
+        3. `clio recall "..."`
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `clio version`, OS, backend, and install method.
+      value: |
+        - `clio version`:
+        - OS:
+        - Backend (sqlite/postgres):
+        - Install method (make install / cargo install / other):
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste related logs. No need for backticks; this renders as code.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Frequency, workarounds tried, related changes, links.

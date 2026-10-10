@@ -1,0 +1,73 @@
+# Nextest profiles for this workspace.
+#
+# The default `cargo test` runner prints nothing when the test process is
+# killed from the outside (for example by the kernel out-of-memory killer),
+# which turned two CI failures into mysteries with no named culprit. Nextest
+# reports per-test results, flags slow tests, terminates hung tests with the
+# test name attached, and writes a JUnit report, so the next resource-related
+# failure arrives with evidence instead of silence.
+#
+# Retries are deliberately zero: a flaky test must fail loudly so it gets
+# fixed, not pass quietly on a second attempt.
+
+# One listener per machine: the tests that bind the shared loopback range.
+#
+# Two production ranges overlap on this machine. `pick_managed_port` takes the
+# first free port in 34300-34310, and the MCP listener scan takes the first free
+# port in 34300-34309. A test that proves the refusal has to hold every one of
+# the eleven ports, so while it runs there is nowhere in the range for any other
+# test to bind. Nextest runs a test in its own process, so an in-process mutex
+# cannot order them, and a fixed port cannot be replaced with port 0 because the
+# range itself is the contract under test. One thread for this group is the
+# supported way to say so.
+#
+# The filter is an exact list, not a prefix, so `cargo nextest list -E
+# 'group(shared-listener-range)'` shows the membership. A new test that binds or
+# probes 34300-34310 has to be added to it, and this is where to say that.
+[test-groups]
+shared-listener-range = { max-threads = 1 }
+
+# The two pressure-measurement tests time backend latency against p95 ceilings
+# that were taken on an idle runner. Nextest runs tests in parallel by default,
+# so two concurrent measurement runs would time each backend against the
+# other's load. One thread for this group keeps the measurements serialized.
+pressure-measurement = { max-threads = 1 }
+
+# Declared on `default`, which `ci` inherits from, so it applies to both. A
+# group that only protected the local profile would leave the runner exposed.
+[[profile.default.overrides]]
+filter = 'test(/^(setup_managed::tests::(a_port_the_function_reports_can_be_bound|the_exhaustion_message_names_the_whole_range)|http_bind::tests::(auto_scan_binds_loopback_in_range|bare_bind_matches_auto_scan)|port_scan::tests::listener_on_contract_port_is_reported|auto_bind_announces_on_stderr_and_keeps_stdout_pure|two_instances_use_different_ports)$/)'
+test-group = 'shared-listener-range'
+
+# The maintenance-pressure latency measurements are intentionally slow: the
+# recorded clean runs needed 32.3 s (sqlite) and 75.5 s (postgres) under
+# instrumentation, so the ci profile's global 60s x 3 cap would terminate them
+# once instrumentation returns. These two tests get a 120 s slow period with
+# 3 periods before termination (360 s effective), about 1.6x the per-attempt
+# record and about 3.3x the 107.8 s serialized whole-run record. They are
+# also serialized into one single-thread group so each backend is timed
+# against an idle runner, not against the other's load; the ceilings were
+# taken from a serialized run.
+# Declared on `default` so `ci` inherits it.
+#
+# The measured figures must survive a green run: nextest discards the output
+# of a passing test unless asked. `success-output = "final"` prints the MEASURE
+# lines in the run's final summary, and `junit.store-success-output` keeps
+# them inside the ci profile's junit.xml (the only profile with a junit path).
+# Both are scoped to this filter so no other passing test's output changes.
+[[profile.default.overrides]]
+filter = 'test(pressure_measure)'
+test-group = 'pressure-measurement'
+slow-timeout = { period = "120s", terminate-after = 3 }
+success-output = "final"
+junit.store-success-output = true
+
+[profile.ci]
+# Run every test even after a failure; partial signal beats an early exit.
+fail-fast = false
+# A test slower than 60s is reported SLOW; a test slower than 3 minutes is
+# terminated and reported as a timeout failure with its name attached.
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+[profile.ci.junit]
+path = "junit.xml"

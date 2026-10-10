@@ -1,0 +1,141 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/clio-types",
+    "crates/clio-config",
+    "crates/clio-store",
+    "crates/clio-admission",
+    "crates/clio-write",
+    "crates/clio-belief",
+    "crates/clio-persona",
+    "crates/clio-index",
+    "crates/clio-ops",
+    "crates/clio-retrieve",
+    "crates/clio-history",
+    "crates/clio-compliance",
+    "crates/clio-hygiene",
+    "crates/clio-sync",
+    "crates/clio-backup",
+    "crates/clio-mcp",
+    "crates/clio",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+clio-types = { path = "crates/clio-types" }
+clio-config = { path = "crates/clio-config" }
+clio-store = { path = "crates/clio-store" }
+clio-admission = { path = "crates/clio-admission" }
+clio-write = { path = "crates/clio-write" }
+clio-belief = { path = "crates/clio-belief" }
+clio-persona = { path = "crates/clio-persona" }
+clio-index = { path = "crates/clio-index" }
+clio-ops = { path = "crates/clio-ops" }
+clio-retrieve = { path = "crates/clio-retrieve" }
+clio-history = { path = "crates/clio-history" }
+clio-compliance = { path = "crates/clio-compliance" }
+clio-hygiene = { path = "crates/clio-hygiene" }
+clio-sync = { path = "crates/clio-sync" }
+clio-backup = { path = "crates/clio-backup" }
+clio-mcp = { path = "crates/clio-mcp" }
+# deny (not forbid): sqlite-vec registration requires a one-site allow(unsafe_code).
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
+unicode-normalization = "0.1"
+chacha20poly1305 = "0.10"
+pgvector = { version = "0.4", features = ["postgres"] }
+postgres = "0.19"
+rand = "0.9"
+# The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
+# so a closed stdout ends the process quietly rather than panicking.
+libc = "0.2"
+# OS secret store for the Clio encryption key. The three features are the
+# native backend for each supported platform; keyring gates the backing crate
+# per target itself, so one unconditional entry resolves to Keychain on macOS,
+# Credential Manager on Windows, and the persistent Secret Service on Linux.
+# `vendored` builds libdbus from C source on Linux instead of linking the system
+# one, so the Linux build needs no pkg-config and no libdbus-1-dev. CI installs
+# no system packages, so without it the Linux build fails before it compiles.
+keyring = { version = "3", features = [
+    "apple-native",
+    "windows-native",
+    "linux-native-sync-persistent",
+    "vendored",
+] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.11"
+sqlite-vec = "0.1"
+zeroize = { version = "1", features = ["derive"] }
+zerocopy = "0.8"
+anstyle = "1.0"
+# Renders `clio setup`'s questions. It reads raw keystrokes from the terminal and
+# draws to stderr, so every prompt it owns needs a real TTY; the wizard's
+# in-memory reader and the plain-text renderer are what tests and any
+# terminal-less run use instead.
+cliclack = "0.5.6"
+# Masks a typed password so it does not land in the terminal scrollback, in a
+# screen recording, or in a pasted transcript. This is the only raw-terminal
+# code in the tree, and it sits behind the `setup_test_seam` masked-reader seam
+# so no test ever touches a TTY.
+rpassword = "7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+async-trait = "0.1"
+# Postgres TLS. The driver crate ships no TLS of its own in this version, so the
+# rustls integration is a separate small crate (underscore spelling; the
+# hyphenated name does not resolve). `rustls` and `webpki-roots` are already in
+# the lock through the HTTP transport, so this adds one package rather than a
+# second TLS stack. `ring` (not the `aws_lc_rs` default) is what the transport
+# already resolves to, and one crypto provider for the whole workspace is the
+# point of reusing the library.
+postgres_rustls = "0.1"
+tokio-postgres = "0.7"
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "logging",
+    "ring",
+    "tls12",
+] }
+rustls = { version = "0.23", default-features = false, features = [
+    "logging",
+    "ring",
+    "std",
+    "tls12",
+] }
+webpki-roots = "1"
+# Single approved TLS-capable JSON transport (rustls + gzip defaults, blocking).
+ureq = "3"
+# Gzip wrapper for the backup archive container; pinned to the version already
+# resolved as a transitive dependency of the HTTP transport (no new package).
+flate2 = "1.1.10"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -2 }
+redundant_clone = "deny"
+large_enum_variant = "deny"
+needless_collect = "deny"
+
+# Build-performance profiles (see the Cargo Book, "Optimizing Build Performance").
+# Workspace crates keep line tables only: enough for useful panic backtraces and
+# for llvm-cov source mapping, without the cost of full DWARF. Dependencies get
+# no debug info at all. `cargo build --profile debugging` opts back in when a
+# full-quality debugger session is needed.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true

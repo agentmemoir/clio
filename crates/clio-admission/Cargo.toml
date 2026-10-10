@@ -1,0 +1,17 @@
+[package]
+name = "clio-admission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Category gate and five-factor admission scoring for Agent Memoir"
+
+[dependencies]
+clio-types = { workspace = true }
+clio-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

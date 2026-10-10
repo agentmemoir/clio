@@ -1,0 +1,755 @@
+{
+  "harness": {
+    "name": "am-bench",
+    "version": "0.1.0",
+    "python": "3.14.4",
+    "tokenizer": "cl100k_base(am-bench-fallback)",
+    "generated_at": "2026-10-07T00:34:58.392055+00:00"
+  },
+  "run": {
+    "suites": [
+      "locomo"
+    ],
+    "partition": "canary",
+    "seed": 100480,
+    "max_probes": 20,
+    "max_instances": 2,
+    "token_budget": 4096,
+    "adapter": "clio",
+    "judge": {
+      "tier": "stub",
+      "model": "stub-exact-match",
+      "base_url": "",
+      "quotable": false
+    },
+    "generator": {
+      "model": "stub-context-echo",
+      "base_url": ""
+    }
+  },
+  "pins": {
+    "locomo": {
+      "name": "LoCoMo-style (Snap Research)",
+      "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+      "sha256": null,
+      "git_blob": "d95b872480b413d935821fdc3c84f8a8f5f29e73"
+    },
+    "longmemeval": {
+      "name": "LongMemEval-style (Wu et al.)",
+      "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+      "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+      "git_blob": null
+    }
+  },
+  "systems": {
+    "clio": {
+      "system": "clio",
+      "version": "0.1.2",
+      "settings": {
+        "retention_profile": {
+          "status": "read",
+          "value": {
+            "bank": "am-bench-fingerprint",
+            "source": "deployment",
+            "verbosity": "balanced",
+            "theta_offsets": {},
+            "duplicate_tolerance_write": "lenient",
+            "version": 3,
+            "accepted_but_inert": {
+              "duplicate_tolerance_read": "lenient",
+              "honored_by": "recall_scope_and_dedup",
+              "note": "read-side scope and dedup are active; these values apply to retrieve/compose unless the call overrides them",
+              "recall_scope_default": "full",
+              "status": "active"
+            }
+          },
+          "surface": "clio retention get --bank am-bench-fingerprint (store named by CLIO_RETENTION_PROFILES)"
+        },
+        "ranking_environment": {
+          "status": "read",
+          "value": {
+            "admission": {
+              "w1": 0.2,
+              "w2": 0.2,
+              "w3": 0.2,
+              "w4": 0.2,
+              "w5": 0.2
+            },
+            "coactivation": {
+              "eta": 0.15,
+              "half_life_days": 30.0,
+              "hub_degree_limit": 16,
+              "max_hops": 2,
+              "w_min": 0.05
+            },
+            "hygiene": {
+              "dup": 0.15,
+              "pattern": 0.25,
+              "secret": 0.35,
+              "staleness": 0.1,
+              "utility": 0.15
+            },
+            "hygiene_stale_half_life_days": 90.0,
+            "intent_gate": {
+              "skip_confidence": null
+            },
+            "maintenance_triggers": {
+              "cooldown_seconds": 300,
+              "dirty_ancestor_threshold": 1,
+              "eligible_hub_threshold": 1,
+              "hub_budget_per_wave": 16,
+              "max_waves_per_hour": 12,
+              "stale_unit_threshold": 1
+            },
+            "ok": true,
+            "recency_tau_days": 30.0,
+            "retention": {
+              "half_life_days": 30.0
+            },
+            "retrieval": {
+              "dense": 0.3333333333333333,
+              "importance": 0.3333333333333333,
+              "lexical": 0.3333333333333333
+            },
+            "theta_admit": 0.55,
+            "theta_overrides": {},
+            "trust": {
+              "agent_inferred": 0.85,
+              "third_party": 0.95,
+              "user_stated": 1.0
+            },
+            "type_prior_overrides": {}
+          },
+          "surface": "clio ranking get --output json"
+        },
+        "trigger_state": {
+          "status": "unreadable",
+          "tried": [
+            "clio maintenance status --output json (index pipeline fields only; no trigger state field exists yet)"
+          ]
+        },
+        "engine_profile": {
+          "status": "unreadable",
+          "tried": [
+            "clio config get engine_profile (unknown config path `engine_profile`)"
+          ]
+        }
+      }
+    }
+  },
+  "overall": {
+    "scored_probes": 20,
+    "failed_probes": 0,
+    "overall": {
+      "count": 20,
+      "accuracy": 0.0,
+      "token_f1": 0.024281821410066885,
+      "tokens_retrieved_mean": 401.7,
+      "retrieval_latency_ms_p50": 165.03351400024258,
+      "retrieval_latency_ms_p95": 177.19896599737694,
+      "generation_latency_ms_mean": 0.00955849936872255
+    },
+    "per_category": {
+      "adversarial-abstention": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 455.25,
+        "retrieval_latency_ms_p50": 162.85803700156976,
+        "retrieval_latency_ms_p95": 168.4627040012856,
+        "generation_latency_ms_mean": 0.008859249646775424
+      },
+      "multi-hop": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.06898506898506898,
+        "tokens_retrieved_mean": 440.75,
+        "retrieval_latency_ms_p50": 171.6975960007403,
+        "retrieval_latency_ms_p95": 180.48800899850903,
+        "generation_latency_ms_mean": 0.009121999028138816
+      },
+      "open-domain": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.0,
+        "tokens_retrieved_mean": 378.75,
+        "retrieval_latency_ms_p50": 172.33188500540564,
+        "retrieval_latency_ms_p95": 177.19896599737694,
+        "generation_latency_ms_mean": 0.010056750397779979
+      },
+      "single-hop": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.03629500580720092,
+        "tokens_retrieved_mean": 373.75,
+        "retrieval_latency_ms_p50": 165.03351400024258,
+        "retrieval_latency_ms_p95": 166.4706740048132,
+        "generation_latency_ms_mean": 0.009583000064594671
+      },
+      "temporal-reasoning": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.016129032258064516,
+        "tokens_retrieved_mean": 360.0,
+        "retrieval_latency_ms_p50": 165.08347999479156,
+        "retrieval_latency_ms_p95": 166.0055940010352,
+        "generation_latency_ms_mean": 0.010171497706323862
+      }
+    },
+    "tier": "stub",
+    "quotable": false
+  },
+  "suites": {
+    "locomo": {
+      "aggregate": {
+        "scored_probes": 20,
+        "failed_probes": 0,
+        "overall": {
+          "count": 20,
+          "accuracy": 0.0,
+          "token_f1": 0.024281821410066885,
+          "tokens_retrieved_mean": 401.7,
+          "retrieval_latency_ms_p50": 165.03351400024258,
+          "retrieval_latency_ms_p95": 177.19896599737694,
+          "generation_latency_ms_mean": 0.00955849936872255
+        },
+        "per_category": {
+          "adversarial-abstention": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 455.25,
+            "retrieval_latency_ms_p50": 162.85803700156976,
+            "retrieval_latency_ms_p95": 168.4627040012856,
+            "generation_latency_ms_mean": 0.008859249646775424
+          },
+          "multi-hop": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.06898506898506898,
+            "tokens_retrieved_mean": 440.75,
+            "retrieval_latency_ms_p50": 171.6975960007403,
+            "retrieval_latency_ms_p95": 180.48800899850903,
+            "generation_latency_ms_mean": 0.009121999028138816
+          },
+          "open-domain": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.0,
+            "tokens_retrieved_mean": 378.75,
+            "retrieval_latency_ms_p50": 172.33188500540564,
+            "retrieval_latency_ms_p95": 177.19896599737694,
+            "generation_latency_ms_mean": 0.010056750397779979
+          },
+          "single-hop": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.03629500580720092,
+            "tokens_retrieved_mean": 373.75,
+            "retrieval_latency_ms_p50": 165.03351400024258,
+            "retrieval_latency_ms_p95": 166.4706740048132,
+            "generation_latency_ms_mean": 0.009583000064594671
+          },
+          "temporal-reasoning": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.016129032258064516,
+            "tokens_retrieved_mean": 360.0,
+            "retrieval_latency_ms_p50": 165.08347999479156,
+            "retrieval_latency_ms_p95": 166.0055940010352,
+            "generation_latency_ms_mean": 0.010171497706323862
+          }
+        },
+        "tier": "stub",
+        "quotable": false
+      },
+      "ingestion": {
+        "instances": 2,
+        "turns_ingested": 928,
+        "turns_rejected": 0
+      },
+      "probes": [
+        {
+          "probe_id": "conv-26:q156",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "adversarial-abstention",
+          "question": "What is Melanie excited about in her adoption process?",
+          "gold_answer": "",
+          "candidate_answer": "[itm-cli-693285976-978151] Woohoo Melanie! I passed the adoption agency interviews last Friday! I'm so excited and thankful. This is a big move towards my goal of having a family.",
+          "retrieved_context": "[itm-cli-693285976-978151] Woohoo Melanie! I passed the adoption agency interviews last Friday! I'm so excited and thankful. This is a big move towards my goal of having a family.\n[itm-cli-848884459-977168] That's great, Caroline! Loving the inclusivity and support. Anything you're excited for in the adoption process?\n[itm-cli-102497788-978034] Thanks, Melanie! I'm stoked to start this new chapter. It's been a dream to adopt and provide a safe, loving home for kids who need it. Do you have any experience with adoption, or know anyone who's gone through the process?\n[itm-cli-658096931-977623] I'll never forget the day my youngest took her first steps. Seeing her wobble as she took those initial steps really put into perspective how fleeting life is and how lucky I am to be able to share these moments.\n[itm-cli-557763467-977137] Thanks, Caroline. It's still a work in progress, but I'm doing my best. My kids are so excited about summer break! We're thinking about going camping next month. Any fun plans for the summer?\n[itm-cli-73296249-977678] Thanks, Melanie. Here's one- 'Embracing Identity' is all about finding comfort and love in being yourself. The woman in the painting stands for the journey of acceptance. My aim was to show warmth, love and self-acceptance.\n[itm-cli-200638421-978036] Yeah, a buddy of mine adopted last year. It was a long process, but now they're super happy with their new kid. Makes me feel like maybe I should do it too!\n[itm-cli-498422391-978042] Yep! Do your research and find an adoption agency or lawyer. They'll help with the process and provide all the info. Gather documents like references, financial info and medical checks. Don't forget to prepare emotionally, since the wait can be hard. It's all worth it in the end though.\n[itm-cli-469788364-977284] Thanks Mel! I'm going to a transgender conference this month. I'm so excited to meet other people in the community and learn more about advocacy. It's gonna be great!\n[itm-cli-24239258-977300] Melanie, that's a great pic! That must have been awesome. What were they so stoked about?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 161.47986900614342,
+          "generation_latency_ms": 0.010158997611142695,
+          "tokens_retrieved": 504,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q042",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "multi-hop",
+          "question": "Would Melanie be more interested in going to a national park or a theme park?",
+          "gold_answer": "National park; she likes the outdoors",
+          "candidate_answer": "[itm-cli-715640554-978026] Phew! Glad it all worked out and you had a good time at the park!",
+          "retrieved_context": "[itm-cli-715640554-978026] Phew! Glad it all worked out and you had a good time at the park!\n[itm-cli-469788364-977284] Thanks Mel! I'm going to a transgender conference this month. I'm so excited to meet other people in the community and learn more about advocacy. It's gonna be great!\n[itm-cli-464417318-977880] Hey Caroline! Since we last spoke, I took my kids to a park yesterday. They had fun exploring and playing. It was nice seeing them have a good time outdoors. Time flies, huh? What's new with you?\n[itm-cli-262592896-977638] Thanks, Caroline! It was Matt Patterson, he is so talented! His voice and songs were amazing. What's up with you? Anything interesting going on?\n[itm-cli-566810778-977882] Wow, your kids had so much fun at the park! Being outdoors can be really enjoyable. A lot happened since our last chat. I've been chasing my ambitions and had the chance to volunteer at an LGBTQ+ youth center. It was so gratifying to talk to similar young people. It made me remember how essential it is to be kind and show support.\n[itm-cli-101468814-978112] Thanks! They were scared but we reassured them and explained their brother would be OK. They're tough kids.\n[itm-cli-410815127-977224] Hey Melanie! Long time no talk! A lot's been going on in my life! Take a look at this.\n[itm-cli-503600312-977838] I'm in awe of your courage as a trans person. Have you made any more art lately?\n[itm-cli-987186809-977109] I'm keen on counseling or working in mental health - I'd love to support those with similar issues.\n[itm-cli-874836371-977296] Since our last chat, I've been looking into counseling or mental health work more. I'm passionate about helping people and making a positive impact. It's tough, but really rewarding too. Anything new happening with you?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0909090909090909,
+          "retrieval_latency_ms": 167.00579800090054,
+          "generation_latency_ms": 0.012033000530209392,
+          "tokens_retrieved": 438,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q186",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "adversarial-abstention",
+          "question": "Who is Caroline a fan of in terms of modern music?",
+          "gold_answer": "",
+          "candidate_answer": "[itm-cli-924002307-977968] I'm a fan of both classical like Bach and Mozart, as well as modern music like Ed Sheeran's \"Perfect\".",
+          "retrieved_context": "[itm-cli-924002307-977968] I'm a fan of both classical like Bach and Mozart, as well as modern music like Ed Sheeran's \"Perfect\".\n[itm-cli-990635318-977270] I'm a big fan of pottery - the creativity and skill is awesome. Plus, making it is so calming. Look at this!\n[itm-cli-24906379-977912] Cool! What type of music do you play?\n[itm-cli-898495338-978175] Glad you agree, Caroline. Appreciate the support of those close to me. Their encouragement made me who I am.\n[itm-cli-657675142-977904] Yeah, that pic was from a show I went to. It was so much fun and reminded me of how music brings us together.\n[itm-cli-481736352-977900] That's so cool, Caroline! That's a great way to show off and be proud of everyone's skills. You know I love live music. Can't wait to hear about it!\n[itm-cli-488058537-977619] It was one of those moments where I felt tiny and in awe of the universe. Reminds me how awesome life is - so many little moments like that.\n[itm-cli-880102752-978155] Thanks so much, Melanie! It's beautiful! It really brings home how much love's in families - both blood and the ones we choose. I hope to build my own family and put a roof over kids who haven't had that before. For me, adoption is a way of giving back and showing love and acceptance.\n[itm-cli-237111027-977306] Sounds great! What kind of books you got in your library?\n[itm-cli-131117103-977274] Thanks, Caroline! Yeah, I made this bowl in my class. It took some work, but I'm pretty proud of it.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 162.85803700156976,
+          "generation_latency_ms": 0.009698000212665647,
+          "tokens_retrieved": 387,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q030",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "multi-hop",
+          "question": "Would Melanie be considered a member of the LGBTQ community?",
+          "gold_answer": "Likely no, she does not refer to herself as part of it",
+          "candidate_answer": "[itm-cli-721728760-977553] Hey Melanie! That sounds great! Last weekend I joined a mentorship program for LGBTQ youth - it's really rewarding to help the community.",
+          "retrieved_context": "[itm-cli-721728760-977553] Hey Melanie! That sounds great! Last weekend I joined a mentorship program for LGBTQ youth - it's really rewarding to help the community.\n[itm-cli-101468814-978112] Thanks! They were scared but we reassured them and explained their brother would be OK. They're tough kids.\n[itm-cli-738869563-977760] Thanks, Melanie. Art gives me a sense of freedom, but so does having supportive people around, promoting LGBTQ rights and being true to myself. I want to live authentically and help others to do the same.\n[itm-cli-433697128-977642] Wow, that's awesome! How did it feel being part of that community?\n[itm-cli-172250918-977874] Wow, Caroline, that's awesome! Can't wait to see your show - the LGBTQ community needs more platforms like this!\n[itm-cli-417032532-977593] Thanks, Melanie! It's awesome to have our own platform to be ourselves and support others' rights. Our group, 'Connected LGBTQ Activists', is made of all kinds of people investing in positive changes. We have regular meetings, plan events and campaigns, to get together and support each other.\n[itm-cli-301213091-978078] Yep, Melanie! Being ourselves is such a great feeling. It's an ongoing adventure of learning and growing.\n[itm-cli-702214867-977262] Wow, Caroline, sounds like the parade was an awesome experience! It's great to see the love and support for the LGBTQ+ community. Congrats! Has this experience influenced your goals at all?\n[itm-cli-69812568-977346] Wow, Caroline, that sounds awesome! So glad you felt accepted and supported. Events like these are great for reminding us of how strong community can be!\n[itm-cli-140999220-977180] Hey Caroline! Great to hear from you. Sounds like your event was amazing! I'm so proud of you for spreading awareness and getting others involved in the LGBTQ community. You've come a long way since your transition - keep on inspiring people with your strength and courage!",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.10810810810810811,
+          "retrieval_latency_ms": 171.6975960007403,
+          "generation_latency_ms": 0.007613998604938388,
+          "tokens_retrieved": 438,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q130",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "open-domain",
+          "question": "Which  classical musicians does Melanie enjoy listening to?",
+          "gold_answer": "Bach and Mozart",
+          "candidate_answer": "[itm-cli-551525192-977549] No worries, Mel! Your friendship means so much to me. Enjoy your day!",
+          "retrieved_context": "[itm-cli-551525192-977549] No worries, Mel! Your friendship means so much to me. Enjoy your day!\n[itm-cli-22811959-978072] That's awesome, Caroline! You drew it? What does it mean to you?\n[itm-cli-924002307-977968] I'm a fan of both classical like Bach and Mozart, as well as modern music like Ed Sheeran's \"Perfect\".\n[itm-cli-738869563-977760] Thanks, Melanie. Art gives me a sense of freedom, but so does having supportive people around, promoting LGBTQ rights and being true to myself. I want to live authentically and help others to do the same.\n[itm-cli-917299009-977105] Gonna continue my edu and check out career options, which is pretty exciting!\n[itm-cli-753132192-977405] I've been running farther to de-stress, which has been great for my headspace.\n[itm-cli-763416642-977381] Wow, Caroline! Books have such an awesome power! Which one has been your favorite guide?\n[itm-cli-306903156-977308] I've got lots of kids' books- classics, stories from different cultures, educational books, all of that. What's a favorite book you remember from your childhood?\n[itm-cli-603757809-977734] Caroline, congrats! So proud of you for taking this step. How does it feel? Also, do you have any pets?\n[itm-cli-137945170-977539] We enjoy hiking in the mountains and exploring forests. It's a cool way to connect with nature and each other.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 177.19896599737694,
+          "generation_latency_ms": 0.010059004125650972,
+          "tokens_retrieved": 333,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q080",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "temporal-reasoning",
+          "question": "When did Melanie buy the figurines?",
+          "gold_answer": "21 October 2023",
+          "candidate_answer": "[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?",
+          "retrieved_context": "[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?\n[itm-cli-789401707-978153] Congrats, Caroline! Adoption sounds awesome. I'm so happy for you. These figurines I bought yesterday remind me of family love. Tell me, what's your vision for the future?\n[itm-cli-795866757-977694] Sure thing, Melanie! Can't wait to see your pottery project.  I'm happy you found something that makes you happy. Show me when you can!\n[itm-cli-249868216-977613] Cool! What did it look like?\n[itm-cli-574192157-977902] Wow! Did you see that band?\n[itm-cli-764251765-977451] Wow, looks awesome! Did you join in?\n[itm-cli-424040362-977569] Seeing my mentee's face light up when they saw the support was the best! Such a special moment.\n[itm-cli-63445805-977850] Wow, that's gorgeous! Where did you find it?\n[itm-cli-603932063-977862] Wow, did you make that? It looks so real!\n[itm-cli-534735265-978022] Whoa, Mel, that sign looks serious. Did anything happen?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 154.26884400221752,
+          "generation_latency_ms": 0.00910699600353837,
+          "tokens_retrieved": 262,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q144",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "open-domain",
+          "question": "How did Melanie's son handle the accident?",
+          "gold_answer": "He was scared but reassured by his family",
+          "candidate_answer": "[itm-cli-603766637-978084] Oops, sorry 'bout the accident! Must have been traumatizing for you guys. Thank goodness your son's okay. Life sure can be a roller coaster.",
+          "retrieved_context": "[itm-cli-603766637-978084] Oops, sorry 'bout the accident! Must have been traumatizing for you guys. Thank goodness your son's okay. Life sure can be a roller coaster.\n[itm-cli-9903604-978092] The kids look so cute, Mel! I bet they bring lots of joy. How did they handle the accident?\n[itm-cli-798962207-978088] Glad your son is okay, Melanie. Life's unpredictable, but moments like these remind us how important our loved ones are. Family's everything.\n[itm-cli-697007427-978086] Yeah, our trip got off to a bad start. I was really scared when we got into the accident. Thankfully, my son's ok and that was a reminder that life is precious and to cherish our family.\n[itm-cli-496720882-978082] Hey Caroline, that roadtrip this past weekend was insane! We were all freaked when my son got into an accident. We were so lucky he was okay. It was a real scary experience. Thankfully it's over now. What's been up since we last talked?\n[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?\n[itm-cli-948030301-977455] Wow, what an experience! How did it make you feel?\n[itm-cli-433697128-977642] Wow, that's awesome! How did it feel being part of that community?\n[itm-cli-115593533-977459] Wow, Caroline! That's huge! How did it feel to be around so much love and acceptance?\n[itm-cli-340867336-978017] Thanks, Melanie. It's definitely changed them. Some close friends kept supporting me, but a few weren't able to handle it. It wasn't easy, but I'm much happier being around those who accept and love me. Now my relationships feel more genuine.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 153.5517379961675,
+          "generation_latency_ms": 0.008076000085566193,
+          "tokens_retrieved": 398,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q031",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "temporal-reasoning",
+          "question": "When did Melanie go camping in June?",
+          "gold_answer": "The week before 27 June 2023",
+          "candidate_answer": "[itm-cli-410815127-977224] Hey Melanie! Long time no talk! A lot's been going on in my life! Take a look at this.",
+          "retrieved_context": "[itm-cli-410815127-977224] Hey Melanie! Long time no talk! A lot's been going on in my life! Take a look at this.\n[itm-cli-557763467-977137] Thanks, Caroline. It's still a work in progress, but I'm doing my best. My kids are so excited about summer break! We're thinking about going camping next month. Any fun plans for the summer?\n[itm-cli-764251765-977451] Wow, looks awesome! Did you join in?\n[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?\n[itm-cli-919597395-977385] That sounds awesome! What did you take away from it to use in your life?\n[itm-cli-45719688-977744] That's so funny! I used to go horseback riding with my dad when I was a kid, we'd go through the fields, feeling the wind. It was so special. I've always had a love for horses!\n[itm-cli-972943226-977535] Yeah, Caroline, my family's been great - their love and support really helped me through tough times. It's awesome! We even went on another camping trip in the forest.\n[itm-cli-515207684-977710] Definitely, Mel! Finding those happy moments and clinging to them is key. It's what keeps us going, even when life's hard. I'm lucky to have people like you to remind me.\n[itm-cli-957374561-977742] Oliver's hilarious! He hid his bone in my slipper once! Cute, right? Almost as silly as when I got to feed a horse a carrot. \n[itm-cli-795866757-977694] Sure thing, Melanie! Can't wait to see your pottery project.  I'm happy you found something that makes you happy. Show me when you can!",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 159.249889999046,
+          "generation_latency_ms": 0.009887997293844819,
+          "tokens_retrieved": 397,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q176",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "adversarial-abstention",
+          "question": "How did Caroline feel while watching the meteor shower?",
+          "gold_answer": "",
+          "candidate_answer": "[itm-cli-156406037-977611] I'll always remember our camping trip last year when we saw the Perseid meteor shower. It was so amazing lying there and watching the sky light up with streaks of light. We all made wishes and felt so at one with the universe. That's a memory I'll never forget.",
+          "retrieved_context": "[itm-cli-156406037-977611] I'll always remember our camping trip last year when we saw the Perseid meteor shower. It was so amazing lying there and watching the sky light up with streaks of light. We all made wishes and felt so at one with the universe. That's a memory I'll never forget.\n[itm-cli-479374728-977754] Caroline, that's great! The blue's really powerful, huh? How'd you feel while painting it?\n[itm-cli-330324485-977615] The sky was so clear and filled with stars, and the meteor shower was amazing - it felt like we were part of something huge and awe-inspiring.\n[itm-cli-948030301-977455] Wow, what an experience! How did it make you feel?\n[itm-cli-115593533-977459] Wow, Caroline! That's huge! How did it feel to be around so much love and acceptance?\n[itm-cli-433697128-977642] Wow, that's awesome! How did it feel being part of that community?\n[itm-cli-671304332-977884] That sounds great, Caroline. Volunteering is a great way to meet people. Creating community and supporting each other, especially for kids, is really important. How did you feel about your time there? Anything that sticks out to you?\n[itm-cli-139888165-977437] Thanks Melanie - love the blue vase in the pic! Blue's my fave, it makes me feel relaxed. Sunflowers mean warmth and happiness, right? While roses stand for love and beauty? That's neat. What do flowers mean to you?\n[itm-cli-9903604-978092] The kids look so cute, Mel! I bet they bring lots of joy. How did they handle the accident?\n[itm-cli-26002917-978052] Yeah, Here's one I did last week. It's inspired by the sunsets. The colors make me feel calm. What have you been up to lately, artistically?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 168.4627040012856,
+          "generation_latency_ms": 0.007134003681130707,
+          "tokens_retrieved": 413,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q022",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "multi-hop",
+          "question": "Would Caroline likely have Dr. Seuss books on her bookshelf?",
+          "gold_answer": "Yes, since she collects classic children's books",
+          "candidate_answer": "[itm-cli-763416642-977381] Wow, Caroline! Books have such an awesome power! Which one has been your favorite guide?",
+          "retrieved_context": "[itm-cli-763416642-977381] Wow, Caroline! Books have such an awesome power! Which one has been your favorite guide?\n[itm-cli-306903156-977308] I've got lots of kids' books- classics, stories from different cultures, educational books, all of that. What's a favorite book you remember from your childhood?\n[itm-cli-101468814-978112] Thanks! They were scared but we reassured them and explained their brother would be OK. They're tough kids.\n[itm-cli-658096931-977623] I'll never forget the day my youngest took her first steps. Seeing her wobble as she took those initial steps really put into perspective how fleeting life is and how lucky I am to be able to share these moments.\n[itm-cli-946408655-977208] 5 years already! Time flies- feels like just yesterday I put this dress on! Thanks, Caroline!\n[itm-cli-586850504-977377] Caroline, so glad you got the support! Your experience really brought you to where you need to be. You're gonna make a huge difference! This book I read last year reminds me to always pursue my dreams, just like you are doing!\ud83c\udf1f\n[itm-cli-237111027-977306] Sounds great! What kind of books you got in your library?\n[itm-cli-838392390-978048] Thanks, Caroline. It was tough, but I'm doing ok. Been reading that book you recommended a while ago and painting to keep busy.\n[itm-cli-307859398-977750] Thanks, Caroline! Glad you like it. Yeah, I love to. It's peaceful and special. Horses have such grace! Do you like to paint too?\n[itm-cli-995523987-977583] Wow, Caroline! It really conveys unity and strength - such a gorgeous piece! My kids and I just finished another painting like our last one.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.07692307692307691,
+          "retrieval_latency_ms": 180.48800899850903,
+          "generation_latency_ms": 0.00983799691312015,
+          "tokens_retrieved": 390,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q095",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "open-domain",
+          "question": "What did Melanie and her family do while camping?",
+          "gold_answer": "explored nature, roasted marshmallows, and went on a hike",
+          "candidate_answer": "[itm-cli-254079372-978140] Wow, that's awesome! What do you love most about camping with your fam?",
+          "retrieved_context": "[itm-cli-254079372-978140] Wow, that's awesome! What do you love most about camping with your fam?\n[itm-cli-139888165-977437] Thanks Melanie - love the blue vase in the pic! Blue's my fave, it makes me feel relaxed. Sunflowers mean warmth and happiness, right? While roses stand for love and beauty? That's neat. What do flowers mean to you?\n[itm-cli-57343728-977537] Awesome, Mel! Family support's huge. What else do you guys like doing together?\n[itm-cli-838392390-978048] Thanks, Caroline. It was tough, but I'm doing ok. Been reading that book you recommended a while ago and painting to keep busy.\n[itm-cli-933206084-977630] Wow, Melanie, what a beautiful moment! Lucky you to have such an awesome family!\n[itm-cli-82702227-977609] Wow, Mel, that's awesome! What's your best camping memory?\n[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?\n[itm-cli-249868216-977613] Cool! What did it look like?\n[itm-cli-658096931-977623] I'll never forget the day my youngest took her first steps. Seeing her wobble as she took those initial steps really put into perspective how fleeting life is and how lucky I am to be able to share these moments.\n[itm-cli-948030301-977455] Wow, what an experience! How did it make you feel?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 150.08704100182513,
+          "generation_latency_ms": 0.007834998541511595,
+          "tokens_retrieved": 322,
+          "error": null
+        },
+        {
+          "probe_id": "conv-26:q073",
+          "suite": "locomo",
+          "instance_id": "conv-26",
+          "category": "temporal-reasoning",
+          "question": "When did Melanie get hurt?",
+          "gold_answer": "September 2023",
+          "candidate_answer": "[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?",
+          "retrieved_context": "[itm-cli-278186379-977772] Thanks, Melanie! That plate is awesome! Did you make it?\n[itm-cli-922435683-977268] Wow, Melanie! I'm getting creative too, just learning the piano. What made you try pottery?\n[itm-cli-539033145-977228] Thanks, Melanie! This necklace is super special to me - a gift from my grandma in my home country, Sweden. She gave it to me when I was young, and it stands for love, faith and strength. It's like a reminder of my roots and all the love and support I get from my family.\n[itm-cli-795866757-977694] Sure thing, Melanie! Can't wait to see your pottery project.  I'm happy you found something that makes you happy. Show me when you can!\n[itm-cli-434695293-978144] That's so peaceful and calming, Melanie! I can picture waking up to nature. It's great that you get to spend quality, tranquil time with your family.\n[itm-cli-607601371-978044] Thanks for the tip, Caroline. Doing research and readying myself emotionally makes sense. I'll do that. BTW, recently I had a setback. Last month I got hurt and had to take a break from pottery, which I use for self-expression and peace.\n[itm-cli-693289584-978171] Thanks, Melanie. Your support really means a lot. This journey has been amazing and I'm grateful I get to share it and help others with theirs. It's a real gift.\n[itm-cli-249868216-977613] Cool! What did it look like?\n[itm-cli-574192157-977902] Wow! Did you see that band?\n[itm-cli-764251765-977451] Wow, looks awesome! Did you join in?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 165.08347999479156,
+          "generation_latency_ms": 0.010789997759275138,
+          "tokens_retrieved": 378,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q089",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "open-domain",
+          "question": "What habit is Sam trying to change in terms of diet?",
+          "gold_answer": "consuming soda and candy",
+          "candidate_answer": "[itm-cli-703078978-979241] She looks so confident! What kind of painting is that in the background?",
+          "retrieved_context": "[itm-cli-703078978-979241] She looks so confident! What kind of painting is that in the background?\n[itm-cli-231138004-978321] Yeah, breaking habits can be tough. Making small changes can have a big impact later on. Have you considered swapping soda for flavored seltzer water? It's still bubbly and tasty, but without the sugar. And instead of candy, you could try dark chocolate with high cocoa content - it's a healthier option. What do you think?\n[itm-cli-174786830-978319] Nah, no changes for me. Still enjoying my soda and candy, although I know it's not the best habit to have.\n[itm-cli-390795504-978652] Hey Evan! Exciting news: I started a new diet and exercise routine last Monday and it's made a huge difference. I feel great! What about you, what changes have you made recently?\n[itm-cli-737537463-979498] Between a healthier diet and yoga, I\u2019m hoping for some positive changes.\n[itm-cli-624490191-978789] Cool, Sam! Writing is a great way to express yourself. What kind of writing do you enjoy? And about the phone, I recommend trying to update it, it usually works for me!\n[itm-cli-37972372-978968] I get it, Sam. I went through a similar phase a twoyears ago. Changed my diet, started walking regularly, things like that.\n[itm-cli-108231026-978317] That salad looks yummy! I'm being extra careful with my health lately. I'm trying to eat less processed food and sugary snacks, even though I love ginger snaps. Have you made any changes to your diet recently?\n[itm-cli-432636682-979043] Woah, Evan, that must've been scary! Phew, it was just a misunderstanding. A health scare can really make you re-evaluate what's important. As for me, I've been dealing with some discomfort and it's been limiting my movement. I've been trying to make changes diet-wise, but it can be hard.\n[itm-cli-900045150-978571] Nice work, Sam! Proud of you sticking to it. Have you noticed any positive changes?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 172.33188500540564,
+          "generation_latency_ms": 0.014256998838391155,
+          "tokens_retrieved": 462,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q056",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What is Sam's persistent problem with his phone?",
+          "gold_answer": "His new phone malfunctioning, particularly with the navigation app.",
+          "candidate_answer": "[itm-cli-624490191-978789] Cool, Sam! Writing is a great way to express yourself. What kind of writing do you enjoy? And about the phone, I recommend trying to update it, it usually works for me!",
+          "retrieved_context": "[itm-cli-624490191-978789] Cool, Sam! Writing is a great way to express yourself. What kind of writing do you enjoy? And about the phone, I recommend trying to update it, it usually works for me!\n[itm-cli-803828381-979370] That's very strange, I've never had a problem with it once!\n[itm-cli-36272764-978549] Thanks, Sam. His ankle is getting better, but still sore. It was rough at first, but thank goodness it was nothing serious.\n[itm-cli-480820604-978395] Looks good to eat! Dealing with health problems can be challenging and take away from enjoyable experiences.\n[itm-cli-174717897-978928] No problem, Sam. Whenever you need support, I'm here for you. Stay safe!\n[itm-cli-252079015-978503] Glad to support you, Sam. Surrounding ourselves with people who care is key. What's on that note? A reminder or quote to stay motivated?\n[itm-cli-573433747-978809] No problem, Sam. Can't wait to hear about your progress. Keep up the hard work!\n[itm-cli-113997774-978551] Glad to hear his ankle is getting better. It's hard seeing someone we care about hurt. Look after yourself too, yeah? We gotta look after our health.\n[itm-cli-404908293-978393] Woah. such a nice view! Thanks, Sam! She's definitely great. Every moment with her is really fun and energizing. It's a nice change, especially after dealing with health issues. But you never know what life's gonna throw at you. Btw look what life has thrown for me right now haha.\n[itm-cli-512607724-978787] Drawing is cool. I'm still just learning how to draw, but I love expressing myself through writing. It's therapeutic and helps me sort out my feelings. Though, I've been a bit frustrated lately with my new phone. Its navigation app keeps malfunctioning, making getting around a bit of a challenge.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.047619047619047616,
+          "retrieval_latency_ms": 166.4706740048132,
+          "generation_latency_ms": 0.007513997843489051,
+          "tokens_retrieved": 429,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q073",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "temporal-reasoning",
+          "question": "When is Evan planning a big family reunion?",
+          "gold_answer": "Summer 2024",
+          "candidate_answer": "[itm-cli-56773867-979167] Thanks, Sam! Yeah, we're planning a big family reunion next summer. It's going to be a blast and a perfect opportunity to add to our collage.",
+          "retrieved_context": "[itm-cli-56773867-979167] Thanks, Sam! Yeah, we're planning a big family reunion next summer. It's going to be a blast and a perfect opportunity to add to our collage.\n[itm-cli-856443265-979031] No worries, Evan. And yes, we should make a plan to go. That photo is just mesmerizing!\n[itm-cli-971602166-979165] That's wonderful to hear, Evan! It's clear how much you value your family. Are you thinking of any specific plans or events to add to that collage?\n[itm-cli-99373367-979123] It's tough when your plans get derailed by something like this. But hey, sometimes these setbacks lead to new opportunities.\n[itm-cli-459372976-979426] Oh this must be very hearty and delicious, well I'll have to stick to the diet plan, even with the family gathering!\n[itm-cli-146507220-979169] Sounds fantastic! If you need any tips on organizing such a big event, just let me know. I'm always here to support and celebrate your family's milestones.\n[itm-cli-866054955-978711] Yep, painting is awesome! Get some acrylic paints, brushes, a canvas/paper, and a palette to mix colors. I can give you some recommendations if you want. Just let me know when you're ready and we can plan a painting session!\n[itm-cli-128668939-978992] Congrats Sam! That's awesome! I'm super proud of you. Becoming a Weight Watchers coach is a big deal. Keep going!\n[itm-cli-917524282-979119] Hey Evan, that's rough. Dealing with a new car breaking down is such a hassle, especially when it's your main mode of transport.\n[itm-cli-361046681-979382] Definitely, family support is so important. Knowing they're happy about our marriage is awesome and so comforting.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.06451612903225806,
+          "retrieval_latency_ms": 166.0055940010352,
+          "generation_latency_ms": 0.01090099976863712,
+          "tokens_retrieved": 403,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q036",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What kind of foods or recipes has Sam recommended to Evan?",
+          "gold_answer": "grilled vegetables, grilled chicken and veggie stir-fry, poutine",
+          "candidate_answer": "[itm-cli-698640479-978541] Mmm, it looks delicious! What did you put in it? I want to eat healthy, so what kind of recipes do you suggest?",
+          "retrieved_context": "[itm-cli-698640479-978541] Mmm, it looks delicious! What did you put in it? I want to eat healthy, so what kind of recipes do you suggest?\n[itm-cli-624490191-978789] Cool, Sam! Writing is a great way to express yourself. What kind of writing do you enjoy? And about the phone, I recommend trying to update it, it usually works for me!\n[itm-cli-703078978-979241] She looks so confident! What kind of painting is that in the background?\n[itm-cli-2946628-978446] Thanks for the recommendation, what else motivates you?\n[itm-cli-571099183-979263] That's awesome, Evan! Finding that kind of connection must feel really liberating. Love can be so powerful, huh?\n[itm-cli-502571515-979177] Hey Sam, what's up? Long time no see, huh? Lots has happened.\n[itm-cli-621076494-978539] The cooking class has been great, I've learned awesome recipes. Last night I made this yummy grilled dish, so good!\n[itm-cli-436090787-978677] Sounds like fun! Which lake do you recommend? I'd love to explore some of the local trails.\n[itm-cli-8509904-979416] Hey, Evan. My family has been my rock through everything. Don't know what I'd do without them.\n[itm-cli-194670198-978741] Thanks, Sam! I usually paint what's on my mind or something I'm feeling. It can be good memories or places I wanna go to. It's more like expressing myself through art.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 165.03351400024258,
+          "generation_latency_ms": 0.008205002814065665,
+          "tokens_retrieved": 341,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q167",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "adversarial-abstention",
+          "question": "What class is Evan taking to learn how to make healthier meals?",
+          "gold_answer": "",
+          "candidate_answer": "[itm-cli-449504186-978535] Hey Evan, sorry to hear about what happened. I can imagine how hard it must have been for you. Things haven't been easy for me either. Had a tough week and a doc's appointment, so it was kinda like a wake-up call to take better care of myself. On a bright side, I'm taking a cooking class to learn how to make healthier meals.",
+          "retrieved_context": "[itm-cli-449504186-978535] Hey Evan, sorry to hear about what happened. I can imagine how hard it must have been for you. Things haven't been easy for me either. Had a tough week and a doc's appointment, so it was kinda like a wake-up call to take better care of myself. On a bright side, I'm taking a cooking class to learn how to make healthier meals.\n[itm-cli-950929941-978597] Cool, Evan! What have you been learning in those classes?\n[itm-cli-539085361-978537] Hey Sam, sorry to hear you had a rough week. At least it's forcing us both to take better care of ourselves, right? I hear the class you're taking is packed with healthy recipes. How's it been going? Have you picked up any yummy new meals?\n[itm-cli-37117815-978599] In painting classes, we've been learning about watercolors. The instructor stresses observing nature and painting what we see. It's a relaxing way to take a break from everyday stress.\n[itm-cli-185654565-978695] Hey Sam! Loving it. Making healthier choices has definitely made a difference for me. It's amazing how small changes can have such a big impact. How about you? Is it making a difference for you too?\n[itm-cli-751924019-978567] Wow, Sam, that's great news! Making changes to live healthier can be challenging, how has it been going?\n[itm-cli-621076494-978539] The cooking class has been great, I've learned awesome recipes. Last night I made this yummy grilled dish, so good!\n[itm-cli-339981951-978325] Awesome, Sam! Let me know how it goes. Making small changes can really help you live a healthier life. Don't forget - every step matters!\n[itm-cli-49587371-978575] Wow, Sam, that's great to hear! Feeling more energized after meals is such a positive change. Keep up the good work! And speaking of healthy meals, do you have any favorite recipes you'd like to share?\n[itm-cli-512607724-978787] Drawing is cool. I'm still just learning how to draw, but I love expressing myself through writing. It's therapeutic and helps me sort out my feelings. Though, I've been a bit frustrated lately with my new phone. Its navigation app keeps malfunctioning, making getting around a bit of a challenge.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 159.1859289983404,
+          "generation_latency_ms": 0.008445997082162648,
+          "tokens_retrieved": 517,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q020",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "multi-hop",
+          "question": "In light of the health and dietary changes discussed, what would be an appropriate gift for both Evan and Sam to encourage their healthy lifestyles?",
+          "gold_answer": "a cookbook with healthy recipes or a subscription to a healthy meal delivery service.",
+          "candidate_answer": "[itm-cli-312693444-978359] I made some dietary changes, like cutting down on sugary snacks and eating more veggies and fruit, and it made a big impact on my health. Have you considered any changes?",
+          "retrieved_context": "[itm-cli-312693444-978359] I made some dietary changes, like cutting down on sugary snacks and eating more veggies and fruit, and it made a big impact on my health. Have you considered any changes?\n[itm-cli-640540146-978916] Definitely, Sam! Hiking is an awesome way to bond with nature and push ourselves. It's gonna be a cool memory for us both. It's great to see progress, was just at the gym yesterday. Gaining strength!\n[itm-cli-450776698-978291] That must have been a challenging experience, Sam. It's tough when we have to confront our own health challenges. Remember, it's never too late to make positive changes for a healthier lifestyle. Is there anything I can do to support you in this journey?\n[itm-cli-795866493-978638] Did you take advantage of the skiing opportunities in Banff? Sounds like it would have been a lot of fun!\n[itm-cli-175998163-978355] That's great, Sam! I struggled with my health a few years ago, but stuck with it. Here's a reminder of my commitment - my gym membership card. It's not just about exercise, diet and lifestyle changes also play a big role.\n[itm-cli-732064031-979390] For sure, Sam. That's what makes family so special. They bring so much love and happiness. It's great having their support and knowing they're always there for us. I feel really fortunate to have their never-ending love and support.\n[itm-cli-404544340-978976] Thanks, Sam. Letting go of unrealistic expectations was liberating, both physically and mentally.\n[itm-cli-698640479-978541] Mmm, it looks delicious! What did you put in it? I want to eat healthy, so what kind of recipes do you suggest?\n[itm-cli-638320149-979388] Agree, Evan! Family is everything - they bring so much love and happiness. They're always there for us no matter what. I'm grateful for their support and love.\n[itm-cli-543787193-978295] Yeah, what worked for me was finding a fitness routine I really enjoy. It's my go-to, I love the feeling of being healthy and strong. Making it fun and finding little ways to make smarter choices in my diet really added up. Don't forget, you got this!",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 159.275127996807,
+          "generation_latency_ms": 0.007003000064287335,
+          "tokens_retrieved": 497,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q048",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What new diet and lifestyle change did Sam adopt over time?",
+          "gold_answer": "Healthy eating, exercise routine, running, hiking",
+          "candidate_answer": "[itm-cli-390795504-978652] Hey Evan! Exciting news: I started a new diet and exercise routine last Monday and it's made a huge difference. I feel great! What about you, what changes have you made recently?",
+          "retrieved_context": "[itm-cli-390795504-978652] Hey Evan! Exciting news: I started a new diet and exercise routine last Monday and it's made a huge difference. I feel great! What about you, what changes have you made recently?\n[itm-cli-554576744-978483] Little stuff matters - it builds our resilience over time.\n[itm-cli-175998163-978355] That's great, Sam! I struggled with my health a few years ago, but stuck with it. Here's a reminder of my commitment - my gym membership card. It's not just about exercise, diet and lifestyle changes also play a big role.\n[itm-cli-737537463-979498] Between a healthier diet and yoga, I\u2019m hoping for some positive changes.\n[itm-cli-127023875-978970] Wow, Evan, you look great! How did you manage the change?\n[itm-cli-203040015-978719] Hey Evan, long time no see! I've started eating healthier - what's new with you? Picked up any new hobbies?\n[itm-cli-37972372-978968] I get it, Sam. I went through a similar phase a twoyears ago. Changed my diet, started walking regularly, things like that.\n[itm-cli-751924019-978567] Wow, Sam, that's great news! Making changes to live healthier can be challenging, how has it been going?\n[itm-cli-266464653-979422] Thanks, Sam! We're having a family get-together tonight and enjoying some homemade lasagna. Super excited! By the way, I've started a new diet\u2014limiting myself to just two ginger snaps a day. What's on your menu tonight?\t\n[itm-cli-670497484-978565] Hey Evan, some big news: I'm on a diet and living healthier! Been tough, but I'm determined.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.09756097560975609,
+          "retrieval_latency_ms": 155.79601500212448,
+          "generation_latency_ms": 0.013805998605675995,
+          "tokens_retrieved": 386,
+          "error": null
+        },
+        {
+          "probe_id": "conv-49:q014",
+          "suite": "locomo",
+          "instance_id": "conv-49",
+          "category": "single-hop",
+          "question": "What is Evan's favorite food?",
+          "gold_answer": "Ginger snaps",
+          "candidate_answer": "[itm-cli-821538018-979500]  By the way there are plenty of other low-impact exercises that can be fun. Going on beach sunsets is one of my favorites - good for exercise and totally calming.",
+          "retrieved_context": "[itm-cli-821538018-979500]  By the way there are plenty of other low-impact exercises that can be fun. Going on beach sunsets is one of my favorites - good for exercise and totally calming.\n[itm-cli-49587371-978575] Wow, Sam, that's great to hear! Feeling more energized after meals is such a positive change. Keep up the good work! And speaking of healthy meals, do you have any favorite recipes you'd like to share?\n[itm-cli-37721072-979462] Hey Evan, what's up? What happened? Let me know.\n[itm-cli-108231026-978317] That salad looks yummy! I'm being extra careful with my health lately. I'm trying to eat less processed food and sugary snacks, even though I love ginger snaps. Have you made any changes to your diet recently?\n[itm-cli-609012580-978681] Wow, it looks great! Is it nearby? What a view!\n[itm-cli-703078978-979241] She looks so confident! What kind of painting is that in the background?\n[itm-cli-138843377-978450] What an amazing view! The key is to find something that keeps you motivated.\n[itm-cli-638320149-979388] Agree, Evan! Family is everything - they bring so much love and happiness. They're always there for us no matter what. I'm grateful for their support and love.\n[itm-cli-919880578-979011] Sorry to hear about your job, Evan. What happened?\n[itm-cli-950929941-978597] Cool, Evan! What have you been learning in those classes?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": true,
+            "hallucination_penalty": 0.0,
+            "explanation": "deterministic stub exact-match judge",
+            "raw": {
+              "kind": "stub"
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 164.2748180020135,
+          "generation_latency_ms": 0.008807000995147973,
+          "tokens_retrieved": 339,
+          "error": null
+        }
+      ]
+    }
+  }
+}

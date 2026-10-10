@@ -1,0 +1,20 @@
+# Arch flag: arm64 / aarch64 (Apple Silicon, Graviton, etc.)
+# Usage: docker compose -f compose.yml -f compose.arm64.yml [--profile local-retrieval|local-rft] up -d
+
+services:
+  postgres:
+    platform: linux/arm64
+
+  embed:
+    platform: linux/arm64
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9}
+
+  rerank:
+    platform: linux/arm64
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9}
+
+  extract:
+    platform: linux/arm64
+
+  pg-tools:
+    platform: linux/arm64

@@ -1,0 +1,34 @@
+[package]
+name = "clio-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Config loading, profiles, ranking env, and secret masking for Agent Memoir"
+
+[features]
+# Compiles the test-only key-injection seam into the library. Only a
+# dev-dependency turns it on, so nothing in a shipped binary can make a running
+# Clio seal a value under a key its operator did not create.
+test-key-injection = []
+
+[dependencies]
+clio-types = { workspace = true }
+# The secret envelope is one base64 string, so this is a runtime dependency now
+# rather than a test-only one. A hand-rolled encoder could itself be wrong, which
+# would make the leak assertions pass for the wrong reason.
+base64 = { workspace = true }
+# The one AEAD this project uses: content, the secret envelope, and the key store
+# are all sealed with it, so there is no second algorithm to argue about.
+chacha20poly1305 = { workspace = true }
+keyring = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+unicode-normalization = { workspace = true }
+sha2 = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true

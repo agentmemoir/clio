@@ -1,0 +1,25 @@
+[package]
+name = "clio-write"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Write-path extraction, span verification, and gated store orchestration"
+
+[dependencies]
+clio-types = { workspace = true }
+clio-config = { workspace = true }
+clio-admission = { workspace = true }
+clio-store = { workspace = true }
+clio-index = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+unicode-normalization = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+clio-store = { workspace = true }

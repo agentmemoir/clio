@@ -1,0 +1,313 @@
+// Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+// SPDX-License-Identifier: Apache-2.0
+//
+//! # Responsibility
+//!
+//! This module is responsible for how the top level of the CLI reads its own
+//! arguments and answers a request for help: which spellings mean help, what an
+//! unknown command says, what `clio help <topic>` resolves to, and the block every
+//! surface prints beneath its own flags.
+//!
+//! ## Owns
+//! - `parse_flags`, the reserved surfaces' name-to-value flag map
+//! - `wants_help`, `unknown_command` and `help_topic`, the top level's own refusals
+//! - `database_help_block`, the shared precedence-and-environment block
+//! - The two no-flag commands' help, and the catalog's own screen
+//!
+//! ## Does not own
+//! - Which commands exist and what flags they take (`cli_help` and `cli_help_usage`)
+//! - The verb dispatch that reaches this module (`main`)
+//! - Each surface's own flag list and help prose
+//!
+//! ## Boundary
+//!
+//! Changes to what the top level accepts or prints should normally require changes
+//! here. Adding a command or a flag should not.
+//!
+//! It is its own file because the crate root is at its own size limit and this is a
+//! separate concern from running the program.
+
+use std::process::ExitCode;
+
+use crate::cli_error::CliError;
+use crate::cli_help;
+use crate::cli_help_usage;
+use crate::cli_output;
+use crate::command_catalog;
+use crate::port_scan;
+
+/// Whether the arguments ask for help rather than for the command's work.
+pub(crate) fn wants_help(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
+}
+
+/// The unknown-command failure, with a suggestion when one is close.
+pub(crate) fn unknown_command(other: &str) -> CliError {
+    match cli_help::suggest_command(other) {
+        Some(closest) => CliError::usage(format!("unknown command `{other}`"))
+            .with_hint(format!("did you mean `clio {closest}`?")),
+        None => CliError::usage(format!("unknown command `{other}`")).with_hint("try `clio help`"),
+    }
+}
+
+/// Render a usage failure in whichever output mode the raw arguments select.
+pub(crate) fn report_usage_error(error: &CliError, raw: &[String]) -> ExitCode {
+    report_surface_usage_error(error, raw)
+}
+
+/// The topic `clio help <topic>` names, and the arguments to reach it with
+/// `--help` appended.
+///
+/// `Ok(None)` is a plain `clio help`. A topic the CLI does not know is an error,
+/// never a silent full catalog: the old behaviour made `clio help frobnicate`
+/// indistinguishable from `clio help remember`.
+///
+/// A two-word topic such as `ops diagnose` becomes the verb plus its own
+/// subcommand, so it reaches the same code `clio ops diagnose --help` reaches.
+pub(crate) fn help_topic(args: &[String]) -> Result<Option<(String, Vec<String>)>, CliError> {
+    let Some(position) = args.iter().position(|arg| !arg.starts_with('-')) else {
+        return Ok(None);
+    };
+    let verb = args[position].trim_start_matches("clio ").to_owned();
+    if !cli_help::is_known_command(&verb) {
+        let mut error = unknown_command(&verb);
+        let has_second_word = args[position + 1..].iter().any(|arg| !arg.starts_with('-'));
+        if has_second_word {
+            error = error.with_hint(format!(
+                "`clio help` takes one topic; try `clio help {verb}`"
+            ));
+        }
+        return Err(error);
+    }
+    let mut kept: Vec<String> = args[position + 1..].to_vec();
+    kept.push("--help".to_owned());
+    Ok(Some((verb, kept)))
+}
+
+/// `clio version --help`: the usage line plus what the command reports.
+pub(crate) fn print_version_help() -> ExitCode {
+    println!(
+        "{}\n\nPrints the package name and version. Takes no flags.",
+        cli_help_usage::usage_line("version").unwrap_or("clio version")
+    );
+    ExitCode::SUCCESS
+}
+
+/// `clio health --help`: the usage line plus what the command reports.
+pub(crate) fn print_health_help() -> ExitCode {
+    println!(
+        "{}\n\nPrints the machine-readable health JSON: name and version only.\n\
+         It opens no database and checks no service.",
+        cli_help_usage::usage_line("health").unwrap_or("clio health")
+    );
+    ExitCode::SUCCESS
+}
+
+/// Read the reserved surfaces' flags: a name-to-value map that fails closed on
+/// any flag the surface does not accept.
+///
+/// Each reserved surface declares the flags it takes (`known`), because these
+/// surfaces own their own `--help` and their flags are not described by a shared
+/// spec. A typo or an unsupported flag is a usage error (exit 2), the same class
+/// the shared parser gives, rather than a value stored and silently ignored.
+/// `--output`/`-o`, `--help` and `-h` are accepted everywhere.
+///
+/// The global flags are accepted on every surface too. `split_leading_globals`
+/// lifts them out from before the verb and `merge_leading_globals` hands them
+/// back with the surface's own arguments, so a surface that did not name them
+/// would refuse the invocation the top level just reconstructed.
+///
+/// The reserved surfaces take no positional operand, so a stray token is refused
+/// rather than dropped, the same way an unknown flag is. A bare `--` is the one
+/// exception: it is the top level's delimiter before positional text, so the
+/// token itself is accepted and what follows it is the refusal.
+///
+/// It is also strict about an empty value: `clio ops diagnose --db ''` used to
+/// fall back to the default database without a word, which is a different
+/// outcome from the refusal every other surface gives and left a caller with no
+/// way to predict it. The rule itself is `cli_error::reject_empty_value`, so
+/// both parsers share it.
+pub(crate) fn parse_flags(
+    args: impl IntoIterator<Item = String>,
+    known: &[&str],
+) -> Result<std::collections::HashMap<String, String>, CliError> {
+    let mut flags = std::collections::HashMap::new();
+    let mut pending: Option<String> = None;
+    let mut it = args.into_iter();
+    // `--flag=value` carries its own value. A bare `--flag` takes the next
+    // token as its value only when that token is not itself a `--flag`;
+    // otherwise `--flag` is value-less and the token is reprocessed. Without
+    // this, `--bind --db X` would bind the value `--db` and `--bind=ADDR`
+    // would be ignored, silently falling back to auto-bind.
+    while let Some(flag) = pending.take().or_else(|| it.next()) {
+        // A bare `--` is the top level's documented delimiter before positional
+        // text. The delimiter itself is accepted; anything after it is refused,
+        // because these surfaces have no operand slot to hand it to. This runs
+        // before the `--` prefix strip, which also matches the bare token.
+        if flag == "--" {
+            if let Some(token) = it.next() {
+                return Err(unexpected_argument(&token));
+            }
+            break;
+        }
+        // `-o` and `-o=…` are the short spelling of the global `--output` value
+        // flag; `-h` is the short spelling of `--help`. Every other single-dash
+        // token is an unknown flag and fails closed.
+        let name_value = if let Some(name_value) = flag.strip_prefix("--") {
+            name_value
+        } else if let Some(value) = flag.strip_prefix("-o=") {
+            crate::cli_error::reject_empty_value("-o", value)?;
+            flags.insert("output".to_owned(), value.to_owned());
+            continue;
+        } else if flag == "-o" {
+            "output"
+        } else if flag == "-h" {
+            flags.insert("help".to_owned(), "true".to_owned());
+            continue;
+        } else if flag.starts_with('-') {
+            return Err(unknown_surface_flag(&flag, known));
+        } else {
+            return Err(unexpected_argument(&flag));
+        };
+        if let Some((name, value)) = name_value.split_once('=') {
+            crate::cli_error::reject_empty_value(&format!("--{name}"), value)?;
+            insert_known(&mut flags, name, value.to_owned(), known)?;
+            continue;
+        }
+        let name = name_value;
+        // `--help` is value-less, so it never consumes the token after it.
+        if name == "help" {
+            flags.insert("help".to_owned(), "true".to_owned());
+            continue;
+        }
+        match it.next() {
+            Some(value) if !value.starts_with("--") => {
+                crate::cli_error::reject_empty_value(&format!("--{name}"), &value)?;
+                insert_known(&mut flags, name, value, known)?;
+            }
+            Some(value) => {
+                insert_known(&mut flags, name, "true".into(), known)?;
+                pending = Some(value);
+            }
+            None => {
+                insert_known(&mut flags, name, "true".into(), known)?;
+            }
+        }
+    }
+    Ok(flags)
+}
+
+/// Record a flag, or fail closed when the surface does not accept it.
+fn insert_known(
+    flags: &mut std::collections::HashMap<String, String>,
+    name: &str,
+    value: String,
+    known: &[&str],
+) -> Result<(), CliError> {
+    if accepted_by_surface(name, known) {
+        flags.insert(name.to_owned(), value);
+        Ok(())
+    } else {
+        Err(unknown_surface_flag(&format!("--{name}"), known))
+    }
+}
+
+/// Whether a surface accepts `name`: the flags it declares, the global flags
+/// every command takes before or after the verb, and `help`, which every surface
+/// answers. `output` is one of the globals, so the shared output mode is accepted
+/// everywhere by the same rule.
+fn accepted_by_surface(name: &str, known: &[&str]) -> bool {
+    name == "help"
+        || known.contains(&name)
+        || crate::cli_args::GLOBAL_VALUE_FLAGS.contains(&name)
+        || crate::cli_args::GLOBAL_BOOL_FLAGS.contains(&name)
+}
+
+/// The flags a suggestion may name: the surface's own, then the globals and
+/// `help`, which it also accepts.
+fn suggestion_candidates<'a>(known: &'a [&'a str]) -> Vec<&'a str> {
+    let mut candidates: Vec<&'a str> = known.to_vec();
+    candidates.extend_from_slice(crate::cli_args::GLOBAL_VALUE_FLAGS);
+    candidates.extend_from_slice(crate::cli_args::GLOBAL_BOOL_FLAGS);
+    candidates.push("help");
+    candidates
+}
+
+/// The reserved surfaces' unknown-flag failure, matching the shared parser:
+/// an exit-2 usage error, with a near-miss suggestion when one flag is close.
+fn unknown_surface_flag(flag: &str, known: &[&str]) -> CliError {
+    let rendered = if flag.starts_with('-') {
+        flag.to_owned()
+    } else {
+        format!("--{flag}")
+    };
+    match crate::cli_args::suggest(flag.trim_start_matches('-'), &suggestion_candidates(known)) {
+        Some(closest) => CliError::usage(format!("unknown flag `{rendered}`"))
+            .with_hint(format!("did you mean `--{closest}`?")),
+        None => CliError::usage(format!("unknown flag `{rendered}`")),
+    }
+}
+
+/// A token with no leading dash, which these surfaces have no operand slot for.
+/// It is refused so a mistyped flag cannot arrive as a silent no-op.
+fn unexpected_argument(token: &str) -> CliError {
+    CliError::usage(format!("unexpected argument `{token}`"))
+        .with_hint("these commands take flags only; run `clio help` for the list")
+}
+
+/// Report a usage failure from one of the reserved surfaces and return its exit
+/// code, honouring the caller's `--output` so the envelope is JSON when asked
+/// for and text otherwise.
+///
+/// Every surface needs this the moment its flag parsing can fail, and the mode
+/// rule is the same one `report_usage_error` applies to the verbs.
+pub(crate) fn report_surface_usage_error(error: &CliError, raw: &[String]) -> ExitCode {
+    let is_tty = cli_output::stdout_is_tty();
+    let mode = cli_output::mode_from_raw(raw, is_tty);
+    cli_output::report_error(error, mode, is_tty, cli_output::no_color_requested())
+}
+
+/// The database default and precedence chain, credentials masked. Shared by
+/// `clio help` and the subcommand `--help` surfaces; never opens the database.
+pub(crate) fn database_help_block<F>(get: &F) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
+    // Help must print even when the configured target cannot be opened, so the
+    // reason is shown in place of the target rather than swallowed.
+    let target = match crate::db_target::resolve_target(get, None, None) {
+        Ok(resolved) => format!(
+            "  default:    {}  (backend: {})",
+            clio_ops::redact_credentials(&resolved.url),
+            resolved.backend
+        ),
+        Err(reason) => format!("  default:    cannot be resolved: {reason}"),
+    };
+    format!(
+        "Database (no flags or config file needed):\n{target}\n  \
+         precedence: --db > the config file > CLIO_DATABASE_URL > CLIO_DATA_DIR > \
+         XDG_DATA_HOME > HOME > ./clio.db\n  \
+         env:        CLIO_DATA_DIR names the directory; the resolver appends clio.db\n  \
+         empty:      a value flag given an empty value (--db '') is refused; leave the flag off \
+         to take the default"
+    )
+}
+
+pub(crate) fn help_text() -> String {
+    let range = format!("{}-{}", port_scan::FIRST_PORT, port_scan::LAST_PORT);
+    format!(
+        "clio — {}\n\nUsage:\n{}",
+        clio::identity(),
+        command_catalog::catalog_text().replace("{range}", &range)
+    )
+}
+
+pub(crate) fn print_help() {
+    println!("{}", help_text());
+    println!("\n{}", database_help_block(&|key| std::env::var(key).ok()));
+}
+
+#[cfg(test)]
+#[path = "cli_top_level_tests.rs"]
+mod tests;

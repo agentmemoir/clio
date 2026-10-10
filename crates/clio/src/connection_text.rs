@@ -1,0 +1,55 @@
+// Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+// SPDX-License-Identifier: Apache-2.0
+//
+//! # Responsibility
+//!
+//! This module is responsible for the plain-text facts the CLI prints about a
+//! connection address: one sentence saying whether the address is encrypted and
+//! whether it stays on this machine.
+//!
+//! ## Owns
+//! - The shared encryption/locality sentence used by the applied summary and
+//!   `clio status`
+//!
+//! ## Does not own
+//! - Parsing, validating, or connecting with the address (see `clio-store`)
+//! - Redacting a password out of printed text (see `clio_ops::redact_credentials`)
+//!
+//! ## Boundary
+//!
+//! Changes to how an address is described in plain words should normally require
+//! changes here. Changes to how it is parsed should not.
+//!
+//! Keep this module focused on the sentence the CLI prints about a store.
+
+/// The one sentence that says how a stored address is protected: whether the
+/// connection is encrypted and whether it stays on this machine.
+///
+/// `clio setup`'s applied summary and `clio status` both print this, so the two
+/// can never describe the same store in two different ways. A Postgres address
+/// is read with the store's own parser, so the SSL mode and the locality are
+/// the ones the driver will use. An address that parser refuses is a SQLite
+/// file or `sqlite::memory:`, which is not encrypted and is on this machine.
+#[must_use]
+pub(crate) fn database_encryption_locality(address: &str) -> String {
+    match clio_store::parse_connection(address) {
+        Ok(parsed) => {
+            let encryption = if parsed.ssl == clio_store::SslChoice::Require {
+                "encrypted"
+            } else {
+                "encrypted: no"
+            };
+            let locality = if parsed.is_local() {
+                "this machine only"
+            } else {
+                "remote"
+            };
+            format!("{encryption}, {locality}")
+        }
+        Err(_) => "not encrypted, this machine only".to_owned(),
+    }
+}
+
+#[cfg(test)]
+#[path = "connection_text_tests.rs"]
+mod tests;

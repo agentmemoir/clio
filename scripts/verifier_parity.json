@@ -1,0 +1,166 @@
+{
+  "format": "clio-verifier-parity-v1",
+  "description": "Shared cross-language verifier conformance cases, evaluated by both the Rust verifier and the Python harness. Expected results follow the production Rust verifier: source date-time tokens use T, and numeric dates are ambiguous only when both calendar interpretations are valid and one could match. Both sides also reject non-empty unlisted snapshot leaves fail-closed, and report such a leaf by walk position rather than by its caller-supplied key or path.",
+  "cases": [
+    {
+      "id": "entity-nfc",
+      "source_text": "Cafe\u0301 opened today.",
+      "snapshot": {"entity": "Café"},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "entity-ungrounded",
+      "source_text": "Mara Quill opened today.",
+      "snapshot": {"entity": "The user"},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "number-grouped",
+      "source_text": "The batch contains 1,024 credits.",
+      "snapshot": {"amount": 1024},
+      "fields": [{"path": "amount", "kind": "number", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "number-eu-decimal",
+      "source_text": "The total is 1.234,56 euros.",
+      "snapshot": {"amount": 1234.56},
+      "fields": [{"path": "amount", "kind": "number", "required": true}],
+      "verify": {"comma_grouping": false},
+      "expected_ok": true
+    },
+    {
+      "id": "number-tolerance",
+      "source_text": "The measured value is 10.",
+      "snapshot": {"amount": 10.1},
+      "fields": [{"path": "amount", "kind": "number", "required": true}],
+      "verify": {"number_tolerance": 0.2},
+      "expected_ok": true
+    },
+    {
+      "id": "date-iso-t",
+      "source_text": "The event starts at 2026-04-03T10:00:00",
+      "snapshot": {"date": "2026-04-03T10:00:00"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "date-space-rejected-by-production",
+      "source_text": "The event starts at 2026-04-03 10:00:00",
+      "snapshot": {"date": "2026-04-03 10:00:00"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "date-unambiguous-day-first",
+      "source_text": "The event is on 25/04/2026",
+      "snapshot": {"date": "2026-04-25"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "date-unambiguous-month-first",
+      "source_text": "The event is on 04/25/2026",
+      "snapshot": {"date": "2026-04-25"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "date-ambiguous-fails-closed",
+      "source_text": "The event is on 03/04/2026",
+      "snapshot": {"date": "2026-04-03"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "date-ambiguous-policy",
+      "source_text": "The event is on 03/04/2026",
+      "snapshot": {"date": "2026-04-03"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {"day_first": true},
+      "expected_ok": true
+    },
+    {
+      "id": "date-unambiguous-dotted",
+      "source_text": "The event is on 25.04.2026",
+      "snapshot": {"date": "2026-04-25"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "date-time-mismatch",
+      "source_text": "The event starts at 2026-04-03T10:00:00",
+      "snapshot": {"date": "2026-04-03T10:01:00"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "date-time-z-rejected",
+      "source_text": "The event starts at 2026-04-03T10:00:00Z",
+      "snapshot": {"date": "2026-04-03T10:00:00Z"},
+      "fields": [{"path": "date", "kind": "date", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "unlisted-top-level-leaf-rejected",
+      "source_text": "Mara Quill opened the incident review.",
+      "snapshot": {"entity": "Mara Quill", "invented_note": "unverified paraphrase"},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "unlisted-nested-leaf-rejected",
+      "source_text": "Mara Quill opened the incident review.",
+      "snapshot": {"entity": "Mara Quill", "invented": {"deep": "unverified"}},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "unlisted-list-leaf-rejected",
+      "source_text": "Mara Quill opened the incident review.",
+      "snapshot": {"entity": "Mara Quill", "invented_list": ["a", "b"]},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "unlisted-leaf-under-declared-path-rejected",
+      "source_text": "Mara Quill opened the incident review.",
+      "snapshot": {"entity": {"name": "Mara Quill"}},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    },
+    {
+      "id": "empty-unlisted-leaves-ignored",
+      "source_text": "Mara Quill opened the incident review.",
+      "snapshot": {"entity": "Mara Quill", "note": "", "blank": "   ", "nul": null, "empty_obj": {}, "empty_list": []},
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": true
+    },
+    {
+      "id": "non-object-snapshot-rejected",
+      "source_text": "Mara Quill opened the incident review.",
+      "snapshot": "not an object",
+      "fields": [{"path": "entity", "kind": "entity", "required": true}],
+      "verify": {},
+      "expected_ok": false
+    }
+  ]
+}

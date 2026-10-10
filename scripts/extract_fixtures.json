@@ -1,0 +1,221 @@
+{
+  "format": "clio-extract-fixture-v1",
+  "set": "tuning",
+  "frozen": true,
+  "freeze_id": "synthetic-coding-agent-v1-2026-01-12",
+  "evidence": "fixture_contract_replay",
+  "provenance": {
+    "fixed": "Hand-authored synthetic response used to check the fixture and verifier contract; not a live or provider capture.",
+    "baseline": "Retained pre-fix fixture response for deterministic historical replay; not a live or provider capture."
+  },
+  "construction": "Hand-authored synthetic coding-agent cases with a fixed field grammar. The ten cases and their 21 gold fields are frozen fixture values; no provider response is used or asserted. Values are fictional and contain no user content. The rust_version baseline response is retained separately so the historical replay result can be measured without replacing the fixed response.",
+  "cases": [
+    {
+      "id": "borrow_e0382",
+      "class": "error_facts",
+      "source_text": "User said: the build failed with E0382 borrow of moved value.\nLesson: clone before move when both paths need ownership.",
+      "schema": {"error": "", "lesson": ""},
+      "fields": [
+        {"path": "error", "kind": "entity", "required": true}
+      ],
+      "gold": {"error": "E0382"},
+      "expected_snapshot": {"error": "E0382"},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"error": "E0382"},
+        "gist": "The build failed with E0382.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "rust_version",
+      "class": "rust_version",
+      "source_text": "CI uses Rust 1.75.0 on ubuntu-22.04 for the clio build.",
+      "schema": {"rust_version": "", "os": ""},
+      "fields": [
+        {"path": "rust_version", "kind": "entity", "required": true},
+        {"path": "os", "kind": "entity", "required": true}
+      ],
+      "gold": {"rust_version": "1.75.0", "os": "ubuntu-22.04"},
+      "expected_snapshot": {"rust_version": "1.75.0", "os": "ubuntu-22.04"},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "baseline_raw_response": {
+        "snapshot": {},
+        "gist": "The recorded extractor returned no structured fields.",
+        "source_ref": "recorded-pre-fix",
+        "diagnostic": {"extractor_status": "empty_snapshot", "prompt_profile": "legacy"}
+      },
+      "raw_response": {
+        "snapshot": {"rust_version": "1.75.0", "os": "ubuntu-22.04"},
+        "gist": "CI uses Rust 1.75.0 on ubuntu-22.04.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "ports",
+      "class": "service_ports",
+      "source_text": "Postgres listens on 34310; embed TEI on 34311; rerank on 34312.",
+      "schema": {"postgres_port": "", "embed_port": "", "rerank_port": ""},
+      "fields": [
+        {"path": "postgres_port", "kind": "number", "required": true},
+        {"path": "embed_port", "kind": "number", "required": true},
+        {"path": "rerank_port", "kind": "number", "required": true}
+      ],
+      "gold": {"postgres_port": "34310", "embed_port": "34311", "rerank_port": "34312"},
+      "expected_snapshot": {"postgres_port": 34310, "embed_port": 34311, "rerank_port": 34312},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"postgres_port": 34310, "embed_port": 34311, "rerank_port": 34312},
+        "gist": "The three local services use their documented ports.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "oom_137",
+      "class": "resource_facts",
+      "source_text": "Container clio-rerank-1 exited with code 137 after using 6GB during warmup.",
+      "schema": {"exit_code": "", "service": "", "memory": ""},
+      "fields": [
+        {"path": "exit_code", "kind": "number", "required": true},
+        {"path": "service", "kind": "entity", "required": true},
+        {"path": "memory", "kind": "entity", "required": true}
+      ],
+      "gold": {"exit_code": "137", "service": "clio-rerank-1", "memory": "6GB"},
+      "expected_snapshot": {"exit_code": 137, "service": "clio-rerank-1", "memory": "6GB"},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"exit_code": 137, "service": "clio-rerank-1", "memory": "6GB"},
+        "gist": "The rerank container exited with code 137 after using 6GB.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "person_timeout",
+      "class": "ownership_facts",
+      "source_text": "Owner Alice set HTTP timeout_seconds 30 on date 2026-09-16 for the extract probe.",
+      "schema": {"owner": "", "timeout_seconds": "", "date": ""},
+      "fields": [
+        {"path": "owner", "kind": "entity", "required": true},
+        {"path": "timeout_seconds", "kind": "number", "required": true},
+        {"path": "date", "kind": "date", "required": true}
+      ],
+      "gold": {"owner": "Alice", "timeout_seconds": "30", "date": "2026-09-16"},
+      "expected_snapshot": {"owner": "Alice", "timeout_seconds": 30, "date": "2026-09-16"},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"owner": "Alice", "timeout_seconds": 30, "date": "2026-09-16"},
+        "gist": "Alice set a 30 second timeout for 2026-09-16.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "model_ids",
+      "class": "model_facts",
+      "source_text": "Embedder is BAAI/bge-small-en-v1.5; reranker is onnx-community/gte-multilingual-reranker-base.",
+      "schema": {"embed_model": "", "rerank_model": ""},
+      "fields": [
+        {"path": "embed_model", "kind": "entity", "required": true},
+        {"path": "rerank_model", "kind": "entity", "required": true}
+      ],
+      "gold": {
+        "embed_model": "BAAI/bge-small-en-v1.5",
+        "rerank_model": "onnx-community/gte-multilingual-reranker-base"
+      },
+      "expected_snapshot": {
+        "embed_model": "BAAI/bge-small-en-v1.5",
+        "rerank_model": "onnx-community/gte-multilingual-reranker-base"
+      },
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {
+          "embed_model": "BAAI/bge-small-en-v1.5",
+          "rerank_model": "onnx-community/gte-multilingual-reranker-base"
+        },
+        "gist": "The local models are recorded in the deployment.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "file_line",
+      "class": "diagnostic_facts",
+      "source_text": "panic at file src/memory/admit.rs line 214 bank_id default admission score NaN",
+      "schema": {"file": "", "line": "", "bank_id": ""},
+      "fields": [
+        {"path": "file", "kind": "entity", "required": true},
+        {"path": "line", "kind": "number", "required": true},
+        {"path": "bank_id", "kind": "entity", "required": true}
+      ],
+      "gold": {"file": "src/memory/admit.rs", "line": "214", "bank_id": "default"},
+      "expected_snapshot": {"file": "src/memory/admit.rs", "line": 214, "bank_id": "default"},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"file": "src/memory/admit.rs", "line": 214, "bank_id": "default"},
+        "gist": "The panic identifies a file, line, and bank.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "absent_version",
+      "class": "absence_control",
+      "source_text": "The deploy finished successfully with no further notes.",
+      "schema": {"version": "", "status": ""},
+      "fields": [
+        {"path": "version", "kind": "entity", "required": false}
+      ],
+      "gold": {},
+      "expected_snapshot": {},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {},
+        "gist": "The deployment finished successfully.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "commit_sha",
+      "class": "revision_facts",
+      "source_text": "Merged commit ee277c2 into master after the load probe passed.",
+      "schema": {"commit": "", "branch": ""},
+      "fields": [
+        {"path": "commit", "kind": "entity", "required": true},
+        {"path": "branch", "kind": "entity", "required": true}
+      ],
+      "gold": {"commit": "ee277c2", "branch": "master"},
+      "expected_snapshot": {"commit": "ee277c2", "branch": "master"},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"commit": "ee277c2", "branch": "master"},
+        "gist": "The load probe passed after the commit was merged.",
+        "source_ref": "synthetic-fixed"
+      }
+    },
+    {
+      "id": "latency_numbers",
+      "class": "measurement_facts",
+      "source_text": "Rerank p95 was 1.8 seconds; extract p95 was 2.0 seconds under smoke load.",
+      "schema": {"rerank_p95_s": "", "extract_p95_s": ""},
+      "fields": [
+        {"path": "rerank_p95_s", "kind": "number", "required": true},
+        {"path": "extract_p95_s", "kind": "number", "required": true}
+      ],
+      "gold": {"rerank_p95_s": "1.8", "extract_p95_s": "2.0"},
+      "expected_snapshot": {"rerank_p95_s": 1.8, "extract_p95_s": 2.0},
+      "expected_admission": true,
+      "expected_grounding": true,
+      "raw_response": {
+        "snapshot": {"rerank_p95_s": 1.8, "extract_p95_s": 2.0},
+        "gist": "The smoke-load p95 values are recorded.",
+        "source_ref": "synthetic-fixed"
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "clio-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "MCP tool schemas and transport bindings for the write surface"
+
+[dependencies]
+clio-admission = { workspace = true }
+clio-belief = { workspace = true }
+clio-compliance = { workspace = true }
+clio-hygiene = { workspace = true }
+clio-config = { workspace = true }
+clio-history = { workspace = true }
+clio-index = { workspace = true }
+clio-ops = { workspace = true }
+clio-persona = { workspace = true }
+clio-retrieve = { workspace = true }
+clio-store = { workspace = true }
+clio-sync = { workspace = true }
+clio-types = { workspace = true }
+clio-write = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Sealing in these tests uses the process test key, so they never reach the
+# machine's real key store; without the feature a developer machine holding both
+# a keystore entry and a key file fails every seal with the two-store refusal.
+clio-config = { workspace = true, features = ["test-key-injection"] }
+
+[lints]
+workspace = true

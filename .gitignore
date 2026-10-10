@@ -1,0 +1,32 @@
+/models
+/target
+/coverage
+/backups
+__pycache__/
+*.pyc
+*.profraw
+.DS_Store
+# Hooks registered on this machine only. `scripts/precommit.py` runs what is in
+# here alongside the tracked hooks in `hooks.d/`, and nothing here is meant to be
+# staged, so a check kept outside this repository can join the run without this
+# repository disclosing that it exists. Anchored to the root so a crate's own
+# `.clio-hooks` directory stays trackable.
+/.clio-hooks/
+# The store's own artifacts. `*.lock` is the cross-process store lock; the
+# other three suffixes are the sidecars SQLite creates beside a database file.
+# A rollback journal holds original page images, so its bytes are store content
+# and must not be stageable. These follow the same three extensions the lock
+# patterns above cover, so a store pointed inside the checkout is covered
+# whichever of them it uses.
+*.db.lock
+*.sqlite.lock
+*.sqlite3.lock
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm

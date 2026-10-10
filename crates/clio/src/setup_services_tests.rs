@@ -1,0 +1,3 @@
+mod t {
+    use super::*;
+}

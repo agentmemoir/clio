@@ -1,0 +1,13 @@
+{
+  "workbench.sideBar.location": "right",
+  "git.autofetch": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/.jj": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/__pycache__": true
+  }
+}

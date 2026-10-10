@@ -1,0 +1,13 @@
+{
+  "verbosity": "balanced",
+  "theta_offsets": {},
+  "duplicate_tolerance_write": "lenient",
+  "duplicate_tolerance_read": "lenient",
+  "recall_scope_default": "full",
+  "retention_curve": true,
+  "retention_floor": 0.5,
+  "pack_fidelity_default": "flow",
+  "provenance_floor_default": null,
+  "maintenance_trigger": true,
+  "version": 3
+}

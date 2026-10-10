@@ -1,0 +1,13 @@
+# The exact compiler this repository is linted and tested with.
+#
+# An exact version, not `stable`. `stable` moves on its own schedule, so a lint
+# can start failing on the runner while the same tree passes on a developer
+# machine, with no commit in between to explain it. That happened when 1.99.0
+# reached the channel and deprecated a method the tree already used.
+#
+# Raising this number is a deliberate act: bump it, run the local gates, and fix
+# what the new version reports. The workflows install this same version, so the
+# pin is the single source of truth for both machines.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]

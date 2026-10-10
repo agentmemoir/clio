@@ -1,0 +1,242 @@
+# Contributing
+
+## Changelog
+
+Add a line to [CHANGELOG.md](CHANGELOG.md) in the same pull request that makes
+the change, under `[Unreleased]` and under one of the six types
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) defines: `Added`,
+`Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+
+Leave a type out when it has nothing in it. That specification asks for empty
+sections to be left out rather than shown as empty.
+
+The specification says nothing about linking, so this is our choice: end each
+entry with a link to its pull request, so a reader can see the change and the
+discussion.
+
+### Writing the entry
+
+Write for a person deciding whether to upgrade. Lead with what they will notice,
+not with what moved between files. A refactor, a test, or a rename is not an
+entry unless it changes what a user sees.
+
+An entry is as long as the change deserves. Most are one sentence. A change that
+breaks someone's setup gets more: what broke, what they must do, and whether
+there is a way to keep the old behaviour. A security fix gets a paragraph saying
+what an attacker could do.
+
+That specification is explicit that a changelog mentioning only some changes is
+as bad as no changelog, because a reader will treat it as the whole truth. So
+write down the change even when it is easy to describe wrongly.
+
+### Commit and pull request titles
+
+Prefix the title with `feat:`, `fix:`, `chore:`, or `docs:`, following
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Most
+titles on this repository already do. The prefixes keep the history readable.
+The changelog is written by hand and is not generated from them.
+
+### The gate
+
+CI is the gate. On every pull request it runs four checks: the format check,
+clippy, the scoped tests, and the scoped coverage judgement. Nothing about a
+change is verified until CI says so.
+
+What you run before you commit is the cheap half:
+
+```
+make ritual              # fmt check and clippy — no tests, no coverage
+```
+
+The name is the warning. A green `make ritual` says the code is formatted and
+compiles cleanly, including its test code. It says nothing about whether the
+tests pass or whether the files you changed reach their coverage floor.
+
+Those two are separate commands, scoped to what you touched:
+
+```
+make test-fast           # the tests of the crate you touched plus its dependents
+make coverage-fast       # measures that same set, judges the changed files
+```
+
+`make coverage-fast` is the whole of the coverage requirement: every Rust file
+your change created or modified must reach 80% of its lines. There is no second
+coverage check, no other metric, and no per-file number you can record to hold a
+file below 80%.
+
+`make coverage-fast` runs those same tests a second time under instrumentation,
+so running all three repeats the suite. Run `make ritual` every time. Run the
+other two when you want a local answer before you push, and let CI be the
+verdict when you do not.
+
+There is also a scoped lint, and it is cheaper than `make ritual`:
+
+```
+make lint                # clippy over the changed crates and their dependents only
+```
+
+A change to one file in `clio-ops` selects 3 of the 17 packages against 3 for
+`make ritual`'s workspace-wide pass. Use it while iterating. Use `make ritual`
+before you push, because CI's clippy is workspace-wide and a scoped local lint is
+a weaker approximation of it.
+
+The tests and the coverage step are both scoped to the files you changed.
+Format and clippy are not scoped, because a crate you did not touch can still
+fail to compile against a signature you changed.
+
+### Pre-commit checks
+
+Run them before you commit:
+
+```
+make precommit          # run every hook
+make precommit-list     # show which hooks would run
+```
+
+`precommit` is separate from the gate and CI does not run it. It reads the staged
+files rather than building anything, so it is quick; the gate is the expensive
+half.
+
+### The commit hook
+
+A hook can also run on every commit, so a check that reads your change cannot be
+skipped by forgetting to ask for it. Two files, because git does not use one
+hook for every commit:
+
+```
+ln -s ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
+ln -s ../../scripts/git-hooks/pre-merge-commit .git/hooks/pre-merge-commit
+```
+
+The second is not a duplicate. `git merge` does not consult `pre-commit` when a
+merge completes on its own: it invokes `pre-merge-commit` instead, and the only
+thing that would connect the two is a sample template git ships commented out.
+Without the second link, a merge commits with no check at all. A merge that
+needs conflict resolution is the other way round: git does not run
+`pre-merge-commit` there, and runs `pre-commit` when you commit the resolved
+result. Between the two, every merge is checked once.
+
+`make precommit` and the commit hooks run the same checks. The difference is
+scope. The commit hooks take only the checks that read the staged files, because
+a commit hook cannot afford to be slow: a check that runs a test suite is not
+bounded by the size of a commit, and a hook that costs twenty seconds is a hook
+that gets passed with `--no-verify`. The slower checks still run when you ask for
+them by name, and in CI.
+
+What the hooks cover, precisely: `git commit`, `git commit -a`,
+`git commit --amend`, `git commit --allow-empty`, an automatic `git merge`, and
+a merge you resolved and committed. What they do not: `git cherry-pick` and
+`git revert` create commits without consulting either hook. Run `make
+precommit` after either.
+
+The links are symlinks on purpose. `core.hooksPath` would be the alternative, and
+it is the wrong one here: it moves where git looks for hooks and stops it looking
+in `.git/hooks`, so every other hook you or a tool had put there stops running
+without a word. A link adds a gate and disables nothing.
+
+Three things these hooks will not tell you. A green run means the checks that ran
+found nothing, not that the tree is free of every kind of reference a reviewer
+might object to; the checks are a floor, not a proof. On a machine with no
+commit-scoped check registered they say so and let the commit through, because
+there is no gate there to enforce and refusing every commit would only teach
+people to pass `--no-verify`. And a hook that is registered but cannot run still
+fails the commit.
+
+### Adding a check
+
+Drop a file in `hooks.d/`. It does not need to be executable and it does not need
+a shebang: a `.py` or `.sh` file is run through the interpreter, and anything
+else has to carry the execute bit. Name it with a leading number so the order is
+stable (`30-my-check.py` runs after `20-...`). A hook exits 0 to pass and
+non-zero to fail. That is the whole contract.
+
+A hook is given the list of tracked text files as arguments, and two environment
+variables:
+
+| Variable | Value |
+|----------|-------|
+| `CLIO_PRECOMMIT_ROOT` | absolute path of the repository root |
+| `CLIO_PRECOMMIT_MODE` | `all`, or `staged` under `--staged` |
+
+A hook that does not care about files can ignore the arguments. One that needs
+the files should read them from the argument list rather than walking the tree,
+so it stays fast and so it cannot drift into reading a build artifact.
+
+A hook is commit-scoped unless it says otherwise. To keep one off the commit
+hook, put this line in the hook:
+
+```python
+# precommit-scope: manual
+```
+
+The default is the scope that cannot be lost: a check nobody has classified yet
+runs on every commit, so the worst case is a slow commit rather than a check
+that quietly stopped running. A value the runner does not recognise is an error
+rather than a guess, because a misspelling would otherwise pick the other scope
+without saying so. Say which scope a hook is in when it is not the default. The
+hooks in `hooks.d/` that run a Python suite and read nothing about the change are
+`manual`: run `make precommit-list` for the current set and its scopes rather
+than counting them here, because the set changes and this sentence would go stale
+without anyone noticing.
+
+Skip a slow one while iterating:
+
+```
+python3 scripts/precommit.py --skip 20-phase-timer-tests
+```
+
+### Checks kept outside this repository
+
+A check does not have to live here. `scripts/precommit.py` also runs every hook
+in `.clio-hooks/` at the repository root, which `.gitignore` excludes, so a hook
+registered there is never staged, never pushed, and never appears in a diff.
+Point `CLIO_PRECOMMIT_HOOKS` at a directory or a file to add more.
+
+Whatever a check matches is the whole of what it matches. A pattern list is
+written by someone thinking about the case in front of them, so a shape nobody
+thought of is not caught, and no amount of running the check changes that. Read
+what a check looks for before treating its silence as a clean bill: a check that
+greps for four identifier shapes says nothing about a reference written as a
+section number, and nothing about prose copied from a design record. If a check
+misses something, that is a bug in the check worth reporting rather than a
+judgement call you are expected to make at the commit.
+
+This is how a check that only some maintainers run joins the run without this
+repository containing it. It is a normal extension point, not a secret: the
+runner lists every hook it found, including ones from outside, so you can always
+see what is about to run.
+
+If a hook is registered but cannot run, the run **fails** rather than passing.
+A gate that has quietly stopped running looks exactly like a gate that is
+passing, so the runner refuses to report a verdict it cannot support.
+
+### Cutting a release
+
+1. Move the `[Unreleased]` entries under a new `## [X.Y.Z] - YYYY-MM-DD`
+   heading, dated today. Leave `[Unreleased]` in place, empty, above it.
+2. Add the link for the new version at the bottom of the file.
+3. Bump `version` in `[workspace.package]` in `Cargo.toml`. Every crate inherits
+   it, so that one line covers all of them.
+4. Commit, open a pull request, and merge.
+5. Tag the merge commit `vX.Y.Z` and push the tag.
+
+The release workflow builds the four platform binaries and publishes the
+matching changelog section as the release notes. It refuses to publish when the
+tag disagrees with the version in `Cargo.toml`, when a build fails, when any of
+the four binaries is missing, or when the changelog has nothing under that
+version. A partial release, or one with no notes, is never published.
+
+Release notes are the hand-written section rather than a generated list of commit
+titles, for the reason that specification gives: a generated changelog is mostly
+noise, and a commit log is not a changelog.
+
+### After a release fails to build
+
+A tag whose build failed stays where it is. Do not move it and do not delete it.
+Bump the version and release again.
+
+Record the abandoned version with a normal heading and a plain sentence saying
+it published nothing, so the next reader knows there is nothing to install from
+that tag. Keep a Changelog uses `[YANKED]` for a version that was published and
+then had to be pulled for a serious bug or a security problem. That is a
+different situation, so use that word only for it.

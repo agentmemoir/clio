@@ -1,0 +1,298 @@
+# Release: build the four shipped targets, checksum them, attach them to a
+# GitHub release, and publish the installer beside them.
+#
+# Deliberately not `cargo dist`. That tool would also generate a Homebrew
+# formula and an npm package, and the decision for this project is a single
+# install command. Four build lines and one release job are the whole thing.
+#
+# Every target builds on a runner of its own architecture, so nothing is
+# cross-compiled: a cross build of this dependency tree needs a C cross
+# toolchain for OpenSSL, D-Bus, and SQLite, and a native runner is both
+# simpler and a truer test of the artifact.
+#
+# Re-running a failed release is the Actions "re-run failed jobs" button, not
+# a manual trigger. A manual trigger would let a tag be published from whatever
+# the default branch happened to be, which is not a release anyone reviewed.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Least privilege: the build jobs only read the tree, so they keep the
+# read-only default and the write grant is given to the one job that talks to
+# the API.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # `-D warnings` matches CI, so a tree that would fail the test job cannot
+  # reach a release. `strip=symbols` is a shipping concern only and stays here
+  # rather than in a workspace profile that every local build would pay for.
+  RUSTFLAGS: -D warnings -C strip=symbols
+
+jobs:
+  # The tag is the release's name and the binary's own version, so a mismatch
+  # is a mislabelled download. This fails before any build spends minutes.
+  verify:
+    name: tag matches the workspace version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the workspace version
+        id: check
+        run: |
+          # Read the version with a TOML parser rather than a grep. A pattern
+          # for `version = "..."` matches the first one it sees, and this file
+          # has several: the workspace one is the only one that may be
+          # published, so a wrong match is a mislabelled release.
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ -z "$version" ]; then
+            echo "::error::could not read [workspace.package] version from Cargo.toml"
+            exit 1
+          fi
+          if [ "$version" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match workspace version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag $GITHUB_REF_NAME matches workspace version $version"
+
+  build:
+    name: ${{ matrix.asset }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      # One failure should not cancel the other three: a partial set of assets
+      # is still worth having on hand when diagnosing a platform-specific
+      # build break, and the release job refuses to publish an incomplete set.
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            asset: clio-aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            asset: clio-x86_64-apple-darwin
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            asset: clio-x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            asset: clio-aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same pin as CI. A release should be built by the compiler the tree was
+      # linted and tested with, not by whatever `stable` happens to be that day.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # musl-tools provides musl-gcc, which is the C compiler the build scripts
+      # reach for when the target is *-unknown-linux-musl. Without it the build
+      # fails in openssl-sys before it reaches any Rust code. Perl and make are
+      # what the vendored OpenSSL build needs; they are already on the macOS
+      # runners, so this step is Linux-only for that reason too.
+      - name: Install the musl C toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools perl make
+
+      # sqlite-vec's C source uses BSD integer names that musl only declares
+      # inside <sys/types.h>, so the musl build fails in cc-rs before any Rust
+      # is compiled. The wrapper force-includes that header for C sources and
+      # leaves assembly alone, because `cc` would otherwise hand the flag to the
+      # assembler and ring's hand-written .S would not build. Full explanation
+      # in scripts/musl-cc.sh.
+      - name: Route the musl C build through the header wrapper
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x scripts/musl-cc.sh
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-musl)
+              echo "CC_x86_64_unknown_linux_musl=$PWD/scripts/musl-cc.sh" >> "$GITHUB_ENV"
+              ;;
+            aarch64-unknown-linux-musl)
+              echo "CC_aarch64_unknown_linux_musl=$PWD/scripts/musl-cc.sh" >> "$GITHUB_ENV"
+              # GCC defaults to outline atomics on aarch64, which turns an
+              # atomic increment into a call to __aarch64_ldadd4_sync. glibc
+              # provides that helper and musl does not, so the vendored libdbus
+              # fails to link. This flag is aarch64-only; x86_64 rejects it.
+              echo "MUSL_EXTRA_CFLAGS=-mno-outline-atomics" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      - name: Build
+        run: cargo build --locked --release --bin clio --target ${{ matrix.target }}
+
+      # Every runner is native for its own target, so the artifact this job is
+      # about to publish is one it can actually execute. `version` is a pure
+      # string print with no database, no key store, and no network, so it is a
+      # real smoke test rather than a formality.
+      - name: Smoke test
+        run: |
+          bin="target/${{ matrix.target }}/release/clio"
+          "$bin" version
+          test "$("$bin" version)" = "clio ${{ needs.verify.outputs.version }}"
+
+      # A musl build that picked up the host's glibc would run fine on the runner
+      # and fail on a user's older distribution, which is the exact case musl
+      # was chosen for. The property to assert is "no shared library
+      # dependencies", so ask the dynamic loader rather than matching a
+      # particular wording: a musl binary here is static-PIE and ldd reports
+      # "statically linked", while a glibc one lists its libraries. A test that
+      # looked for one fixed phrase would pass a broken build.
+      - name: Assert the musl binaries need no shared libraries
+        if: runner.os == 'Linux'
+        run: |
+          bin="target/${{ matrix.target }}/release/clio"
+          file "$bin"
+          # `ldd` on a static binary prints a status line and no library list.
+          # Any line naming a .so file means the binary is dynamically linked.
+          if ldd "$bin" 2>&1 | grep -q '\.so'; then
+            echo "::error::$bin links against shared libraries; it will not run on an older distribution"
+            ldd "$bin" || true
+            exit 1
+          fi
+          echo "static: no shared library dependencies"
+
+      # Flat archive: the installer knows the binary is at the root, and no
+      # user has to care which target directory it came out of.
+      - name: Package
+        run: |
+          mkdir -p dist/clio-${{ matrix.target }}
+          cp "target/${{ matrix.target }}/release/clio" "dist/clio-${{ matrix.target }}/clio"
+          cp LICENSE README.md "dist/clio-${{ matrix.target }}/"
+          tar -C dist -czf "dist/${{ matrix.asset }}.tar.gz" "clio-${{ matrix.target }}"
+          rm -rf dist/clio-${{ matrix.target }}
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: publish the release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    # The build jobs hold the read-only default; this is the only job that
+    # needs to create the release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download every archive
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: clio-*
+          merge-multiple: true
+
+      # The installer fetches this file over HTTPS and refuses a download whose
+      # hash is absent from it. That catches a truncated transfer, a corrupted
+      # proxy response, and an asset swapped for another target. It does not
+      # protect against someone who can publish to this repository: the trust
+      # root is GitHub plus TLS, and the hash file is signed by nobody.
+      - name: Checksum the archives
+        run: |
+          cd dist
+          sha256sum clio-*.tar.gz > checksums.txt
+          cp ../scripts/install.sh install.sh
+          chmod +x install.sh
+          cat checksums.txt
+
+      # A set missing one target would leave the installer unable to serve a
+      # supported platform, and the failure would surface on a user's machine
+      # rather than here.
+      - name: Assert the asset set is complete
+        run: |
+          for asset in \
+            clio-aarch64-apple-darwin \
+            clio-x86_64-apple-darwin \
+            clio-x86_64-unknown-linux-musl \
+            clio-aarch64-unknown-linux-musl
+          do
+            test -s "dist/$asset.tar.gz" || { echo "::error::missing $asset.tar.gz"; exit 1; }
+            grep -q " $asset.tar.gz\$" dist/checksums.txt || { echo "::error::$asset.tar.gz is not in checksums.txt"; exit 1; }
+          done
+          ls -la dist
+
+      # The release page repeats the changelog section for this version instead
+      # of generating its own notes. Two accounts of one release drift apart, and
+      # the generated one is a list of pull request titles that nobody curates
+      # for a reader deciding whether to upgrade. GitHub still links the tag's
+      # commits and contributors on the release page.
+      - name: Build the release notes from the changelog
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Reads the section for this version and stops at the next version
+          # heading, so a neighbouring release cannot leak in. A heading may be
+          # written `## [1.2.3] - 2026-01-01` or `## 1.2.3 - 2026-01-01`; both
+          # are accepted, and the comparison is on the version alone.
+          # The link definitions that close the file also end the section, or
+          # they would be published as release notes.
+          notes="$(awk -v want="$version" '
+            /^## / {
+              # Take the version as the first token, dropping the brackets that
+              # may wrap it. The brackets close before the date, so they are
+              # removed from the token rather than from the end of the line.
+              h = $0
+              sub(/^##[[:space:]]+/, "", h)
+              split(h, f, /[[:space:]]+/)
+              v = f[1]
+              gsub(/[][]/, "", v)
+              if (grab) grab = 0
+              if (v == want) grab = 1
+              next
+            }
+            /^\[/ { grab = 0 }
+            grab { print }
+          ' CHANGELOG.md)"
+          # A section that is nothing but headings is not notes. Prose counts, so
+          # a release described in a paragraph alone still passes; a heading with
+          # nothing under it does not.
+          body="$(printf '%s\n' "$notes" | sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d')"
+          if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+            echo "::error::CHANGELOG.md has no changelog entries under [${version}]. Add them before tagging, or the release would ship with no notes."
+            exit 1
+          fi
+          {
+            printf '%s\n\n' "$notes"
+            echo "Full changelog: https://github.com/agentmemoir/clio/blob/v${version}/CHANGELOG.md"
+            echo
+            echo "Install:"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/agentmemoir/clio/releases/latest/download/install.sh | sh"
+            echo '```'
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            dist/*.tar.gz dist/checksums.txt dist/install.sh

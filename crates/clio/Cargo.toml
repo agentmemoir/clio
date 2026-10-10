@@ -1,0 +1,60 @@
+[package]
+name = "clio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Clio durable memory for long-horizon agents and companion chat (by Agent Memoir)"
+
+[[bin]]
+name = "clio"
+path = "src/main.rs"
+
+[dependencies]
+clio-types = { workspace = true }
+clio-config = { workspace = true }
+clio-backup = { workspace = true }
+clio-store = { workspace = true }
+clio-admission = { workspace = true }
+clio-write = { workspace = true }
+clio-belief = { workspace = true }
+clio-persona = { workspace = true }
+clio-index = { workspace = true }
+clio-ops = { workspace = true }
+clio-retrieve = { workspace = true }
+clio-history = { workspace = true }
+clio-hygiene = { workspace = true }
+clio-mcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anstyle = { workspace = true }
+cliclack = { workspace = true }
+# The one random source in the workspace, already used by the encryption-key
+# code. `clio setup` generates a database password with the same call rather
+# than adding a second generator.
+rand = { workspace = true }
+# Masks the typed database password and API keys. Hand-rolling terminal echo
+# control is not possible under the workspace's `unsafe_code = "deny"`, so this
+# is the whole of the raw-terminal surface, behind a seam.
+rpassword = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# The one signal the process sets itself: restoring the default `SIGPIPE`
+# disposition so a closed stdout ends the process quietly. Rust installs
+# `SIG_IGN` at startup, which turns a broken pipe into an `EPIPE` error that
+# `println!` panics on. Unix-only, so the dependency is target-scoped.
+libc = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# The deployment config seals its secrets, so a test that runs `clio setup` or
+# `config set` at deployment scope needs a Clio encryption key. The feature
+# compiles in the test-only injection seam; without it such a test would fall
+# through to the machine's real key store.
+clio-config = { workspace = true, features = ["test-key-injection"] }
+# Raw SQL reads of the seeded store file: the end-to-end lexical evidence
+# asserts the stored column through SQLite itself, not through the store API.
+rusqlite = { workspace = true }

@@ -1,0 +1,20 @@
+# Arch flag: x86_64 / amd64
+# Usage: docker compose -f compose.yml -f compose.amd64.yml [--profile local-retrieval|local-rft] up -d
+
+services:
+  postgres:
+    platform: linux/amd64
+
+  embed:
+    platform: linux/amd64
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+
+  rerank:
+    platform: linux/amd64
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+
+  extract:
+    platform: linux/amd64
+
+  pg-tools:
+    platform: linux/amd64

@@ -1,0 +1,360 @@
+{
+  "harness": {
+    "name": "clio-bench",
+    "version": "0.1.0",
+    "python": "3.14.4",
+    "tokenizer": "cl100k_base(clio-bench-fallback)",
+    "generated_at": "2026-09-24T16:36:40.895381+00:00"
+  },
+  "run": {
+    "suites": [
+      "longmemeval"
+    ],
+    "partition": "canary",
+    "seed": 100480,
+    "max_probes": 6,
+    "max_instances": 6,
+    "token_budget": 512,
+    "adapter": "clio",
+    "judge": {
+      "tier": "tier1",
+      "model": "qwen2.5-1.5b-instruct",
+      "base_url": "http://127.0.0.1:8899"
+    },
+    "generator": {
+      "model": "qwen2.5-1.5b-instruct",
+      "base_url": "http://127.0.0.1:8899"
+    }
+  },
+  "pins": {
+    "locomo": {
+      "name": "LoCoMo-style (Snap Research)",
+      "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+      "sha256": null,
+      "git_blob": "d95b872480b413d935821fdc3c84f8a8f5f29e73"
+    },
+    "longmemeval": {
+      "name": "LongMemEval-style (Wu et al.)",
+      "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+      "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+      "git_blob": null
+    }
+  },
+  "overall": {
+    "scored_probes": 6,
+    "failed_probes": 0,
+    "overall": {
+      "count": 6,
+      "accuracy": 0.0,
+      "token_f1": 0.15263157894736842,
+      "tokens_retrieved_mean": 192.5,
+      "retrieval_latency_ms_p50": 400.5237930105068,
+      "retrieval_latency_ms_p95": 965.5125509889331,
+      "generation_latency_ms_mean": 11369.838119171618
+    },
+    "per_category": {
+      "knowledge-update": {
+        "count": 1,
+        "accuracy": 0.0,
+        "token_f1": 0.2,
+        "tokens_retrieved_mean": 324.0,
+        "retrieval_latency_ms_p50": 659.8967899917625,
+        "retrieval_latency_ms_p95": 659.8967899917625,
+        "generation_latency_ms_mean": 13820.277286009514
+      },
+      "single-hop": {
+        "count": 4,
+        "accuracy": 0.0,
+        "token_f1": 0.07894736842105263,
+        "tokens_retrieved_mean": 178.0,
+        "retrieval_latency_ms_p50": 400.5237930105068,
+        "retrieval_latency_ms_p95": 472.8397639992181,
+        "generation_latency_ms_mean": 7355.638760003785
+      },
+      "temporal-reasoning": {
+        "count": 1,
+        "accuracy": 0.0,
+        "token_f1": 0.4,
+        "tokens_retrieved_mean": 119.0,
+        "retrieval_latency_ms_p50": 965.5125509889331,
+        "retrieval_latency_ms_p95": 965.5125509889331,
+        "generation_latency_ms_mean": 24976.196389005054
+      }
+    }
+  },
+  "suites": {
+    "longmemeval": {
+      "aggregate": {
+        "scored_probes": 6,
+        "failed_probes": 0,
+        "overall": {
+          "count": 6,
+          "accuracy": 0.0,
+          "token_f1": 0.15263157894736842,
+          "tokens_retrieved_mean": 192.5,
+          "retrieval_latency_ms_p50": 400.5237930105068,
+          "retrieval_latency_ms_p95": 965.5125509889331,
+          "generation_latency_ms_mean": 11369.838119171618
+        },
+        "per_category": {
+          "knowledge-update": {
+            "count": 1,
+            "accuracy": 0.0,
+            "token_f1": 0.2,
+            "tokens_retrieved_mean": 324.0,
+            "retrieval_latency_ms_p50": 659.8967899917625,
+            "retrieval_latency_ms_p95": 659.8967899917625,
+            "generation_latency_ms_mean": 13820.277286009514
+          },
+          "single-hop": {
+            "count": 4,
+            "accuracy": 0.0,
+            "token_f1": 0.07894736842105263,
+            "tokens_retrieved_mean": 178.0,
+            "retrieval_latency_ms_p50": 400.5237930105068,
+            "retrieval_latency_ms_p95": 472.8397639992181,
+            "generation_latency_ms_mean": 7355.638760003785
+          },
+          "temporal-reasoning": {
+            "count": 1,
+            "accuracy": 0.0,
+            "token_f1": 0.4,
+            "tokens_retrieved_mean": 119.0,
+            "retrieval_latency_ms_p50": 965.5125509889331,
+            "retrieval_latency_ms_p95": 965.5125509889331,
+            "generation_latency_ms_mean": 24976.196389005054
+          }
+        }
+      },
+      "ingestion": {
+        "instances": 6,
+        "turns_ingested": 96,
+        "turns_rejected": 1
+      },
+      "probes": [
+        {
+          "probe_id": "4100d0a0",
+          "suite": "longmemeval",
+          "instance_id": "4100d0a0",
+          "category": "single-hop",
+          "question": "What is my ethnicity?",
+          "gold_answer": "A mix of Irish and Italian",
+          "candidate_answer": "It is not known.",
+          "retrieved_context": "[itm-cli-431784713-2011641] That helps! I didn't know Italian citizenship would allow me to live and work in any EU country. That's really appealing. By the way, I've been thinking about my family tree and cultural heritage a lot lately, and it's interesting to consider how my mixed ethnicity - Irish and Italian - has shaped my upbringing.\n[itm-cli-962377160-2011671] That's a great idea! Irish cultural centers are a fantastic resource for learning about Irish heritage, and they usually cater to people of all skill levels, including beginners.\n\nMost Irish cultural centers offer classes or workshops specifically designed for beginners, so you don't need to have any prior experience. These classes are usually taught by experienced instructors who are passionate about sharing their knowledge of Irish music and dance.\n\nIn fact, many Irish cultural centers offer introductory classes or workshops that cover the basics of traditional Irish music and dance, such as:\n\n* Learning to play a traditional Irish instrument, like the tin whistle or bodhran\n* Mastering basic Irish dance steps, like the jig or reel\n* Exploring Irish music and dance history and culture\n\nThese classes are usually designed to be fun and engaging, and they're a great way to meet like-minded people who share your interest in Irish heritage.\n\nBefore signing up for a class, you can contact the Irish cultural center directly to ask about the following:\n\n* What's the skill level required for the class? Is it suitable for beginners?\n* What's the class format? Is it a group class or private lessons?\n* What's the cost? Are there any discounts for beginners or package deals?\n* What's the atmosphere like? Is it a relaxed, social environment or a more formal setting?\n\nBy asking these questions, you'll get a better sense of what to expect and can find a class that's a good fit for you.\n\nRemember, the most important thing is to have fun and enjoy the experience of learning about your Irish heritage!",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A does not provide any information about ethnicity, making it incorrect. It also does not agree with the temporal component of the question. | Response B does not provide any information about ethnicity, which is the question asked. It is unrelated to the reference answer.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response A does not provide any information about ethnicity, making it incorrect. It also does not agree with the temporal component of the question."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response B does not provide any information about ethnicity, which is the question asked. It is unrelated to the reference answer."
+              }
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 217.05377999751363,
+          "generation_latency_ms": 11274.901405005949,
+          "tokens_retrieved": 406,
+          "error": null
+        },
+        {
+          "probe_id": "8a137a7f",
+          "suite": "longmemeval",
+          "instance_id": "8a137a7f",
+          "category": "single-hop",
+          "question": "What type of bulb did I replace in my bedside lamp?",
+          "gold_answer": "Philips LED bulb",
+          "candidate_answer": "The user replaced a Philips LED bulb in their bedside lamp with a warm white bulb for their kitchen.",
+          "retrieved_context": "[itm-cli-569883175-2012476] I think I'll start with some warm white bulbs for my kitchen and see how that goes. I've been using a Philips LED bulb in my bedside lamp, and I really like the warm tone it provides.\n[itm-cli-74199618-2012286] I like those ideas, especially the layered lighting concept. I think I'll try placing a floor lamp behind the sofa. Can you suggest some good floor lamps with a warm tone that would work well with the Philips LED bulb I have in my bedside lamp?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.25,
+            "explanation": "Response A provides additional information about the bulb's use in the kitchen, which is not present in the reference answer. It also contains invented facts (warm white bulb for kitchen). | Response B contains invented facts (the user replaced a Philips LED bulb in their bedside lamp with a warm white bulb for their kitchen) that are not present in the reference answer.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response A provides additional information about the bulb's use in the kitchen, which is not present in the reference answer. It also contains invented facts (warm white bulb for kitchen)."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0.5,
+                "explanation": "Response B contains invented facts (the user replaced a Philips LED bulb in their bedside lamp with a warm white bulb for their kitchen) that are not present in the reference answer."
+              }
+            }
+          },
+          "token_f1": 0.3157894736842105,
+          "retrieval_latency_ms": 400.5237930105068,
+          "generation_latency_ms": 8108.737557995482,
+          "tokens_retrieved": 114,
+          "error": null
+        },
+        {
+          "probe_id": "gpt4_93f6379c",
+          "suite": "longmemeval",
+          "instance_id": "gpt4_93f6379c",
+          "category": "temporal-reasoning",
+          "question": "Which group did I join first, 'Page Turners' or 'Marketing Professionals'?",
+          "gold_answer": "Page Turners",
+          "candidate_answer": "You joined the 'Page Turners' book club group first.",
+          "retrieved_context": "[itm-cli-401086253-2012626] I'm looking for some book recommendations. I just joined a new book club group called \"Page Turners\" last week, where we discuss our favorite novels and share recommendations. Do you have any suggestions for our next read?\n[itm-cli-698423049-2012777] I'm looking for some marketing resources on personal branding. I've been engaging with a group called \"Marketing Professionals\" on LinkedIn since I joined it yesterday, where we discuss industry trends and share resources. Do you know of any good articles or online courses on the topic?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A conveys the same information as the reference answer but does not provide the temporal context, which is not relevant to the question. Response B is a direct answer to the question without any temporal context. | The response does not provide information about which group was joined first, 'Page Turners' or 'Marketing Professionals'. It only confirms that the person joined the 'Page Turners' group first.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0.5,
+                "temporal_correctness": true,
+                "hallucination_penalty": 0,
+                "explanation": "Response A conveys the same information as the reference answer but does not provide the temporal context, which is not relevant to the question. Response B is a direct answer to the question without any temporal context."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "The response does not provide information about which group was joined first, 'Page Turners' or 'Marketing Professionals'. It only confirms that the person joined the 'Page Turners' group first."
+              }
+            }
+          },
+          "token_f1": 0.4,
+          "retrieval_latency_ms": 965.5125509889331,
+          "generation_latency_ms": 24976.196389005054,
+          "tokens_retrieved": 119,
+          "error": null
+        },
+        {
+          "probe_id": "1903aded",
+          "suite": "longmemeval",
+          "instance_id": "1903aded",
+          "category": "single-hop",
+          "question": "I think we discussed work from home jobs for seniors earlier. Can you remind me what was the 7th job in the list you provided?",
+          "gold_answer": "Transcriptionist.",
+          "candidate_answer": "The 7th job in the list provided is a Virtual Tutor or Teacher.",
+          "retrieved_context": "[itm-cli-572544428-2013337] Brainstorm ideas for work from home jobs for seniors\n[itm-cli-822909682-2013339] 1. Virtual customer service representative\n2. Telehealth professional\n3. Remote bookkeeper\n4. Virtual tutor or teacher\n5. Freelance writer or editor\n6. Online survey taker\n7. Transcriptionist\n8. Social media manager\n9. Virtual travel agent\n10. E-commerce seller\n11. Remote IT support specialist\n12. Home-based customer service representative\n13. Online data entry specialist\n14. Telemarketing representative\n15. Virtual administrative assistant",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A does not match the reference answer, which is 'Virtual Tutor or Teacher'. The response is unrelated and incorrect. | Response B does not match the reference answer, which states the 7th job is a Transcriptionist. The temporal component of the question is not addressed, and there is no indication that the response is fabricated.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response A does not match the reference answer, which is 'Virtual Tutor or Teacher'. The response is unrelated and incorrect."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response B does not match the reference answer, which states the 7th job is a Transcriptionist. The temporal component of the question is not addressed, and there is no indication that the response is fabricated."
+              }
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 86.8235609959811,
+          "generation_latency_ms": 5195.543234003708,
+          "tokens_retrieved": 106,
+          "error": null
+        },
+        {
+          "probe_id": "cc5ded98",
+          "suite": "longmemeval",
+          "instance_id": "cc5ded98",
+          "category": "knowledge-update",
+          "question": "How much time do I dedicate to coding exercises each day?",
+          "gold_answer": "about two hours",
+          "candidate_answer": "Two hours a day is a significant amount of time to dedicate to coding exercises, according to the context provided.",
+          "retrieved_context": "[itm-cli-638424488-2013759] That's a great commitment! Two hours a day is a significant amount of time to dedicate to coding exercises, and with consistent effort, you'll definitely see progress in your skills.\n\nRemember, the key is to be consistent and persistent. It's better to practice coding regularly for a shorter period each day than to try to cram all your practice into one or two long sessions a week.\n\nAs you continue to practice, you'll start to notice improvements in your coding skills, such as:\n\n* Increased speed and efficiency in solving problems\n* Improved problem-solving strategies and approaches\n* Enhanced coding skills, including syntax, semantics, and programming concepts\n* Better understanding of data structures, algorithms, and software design patterns\n* Improved ability to debug and troubleshoot your code\n\nAdditionally, as you progress, you may start to notice improvements in your overall thinking and problem-solving skills, such as:\n\n* Improved analytical and critical thinking skills\n* Enhanced creativity and ability to approach problems from different angles\n* Better time management and organization skills\n* Increased confidence in your ability to tackle complex problems\n\nRemember to be patient and kind to yourself as you learn. Coding can be challenging, and it's normal to encounter frustrations and setbacks. But with persistence and dedication, you'll overcome these obstacles and continue to grow as a programmer.\n\nKeep track of your progress, celebrate your successes, and don't be afraid to reach out for help when you need it. You got this!\n\nHow do you plan to track your progress and stay motivated? Do you have any goals or milestones you're working towards?",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "The response does not provide a specific amount of time dedicated to coding exercises each day, which is the key information requested in the question. | The response does not provide any information about the time dedicated to coding exercises, making it unrelated to the reference answer.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "The response does not provide a specific amount of time dedicated to coding exercises each day, which is the key information requested in the question."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "The response does not provide any information about the time dedicated to coding exercises, making it unrelated to the reference answer."
+              }
+            }
+          },
+          "token_f1": 0.2,
+          "retrieval_latency_ms": 659.8967899917625,
+          "generation_latency_ms": 13820.277286009514,
+          "tokens_retrieved": 324,
+          "error": null
+        },
+        {
+          "probe_id": "726462e0",
+          "suite": "longmemeval",
+          "instance_id": "726462e0",
+          "category": "single-hop",
+          "question": "What was the discount I got on my first purchase from the new clothing brand?",
+          "gold_answer": "10%",
+          "candidate_answer": "It is not known.",
+          "retrieved_context": "[itm-cli-488324227-2013990] I'm also thinking of exploring other platforms like Instagram and Twitter to promote my writing services. Do you have any tips on how to get started with those platforms, especially since I don't have much experience with them? By the way, speaking of first purchases, I remember getting a 10% discount on my first purchase from that new clothing brand last month, which was nice.",
+          "judge": {
+            "accuracy": 0.0,
+            "temporal_correctness": false,
+            "hallucination_penalty": 0.0,
+            "explanation": "Response A does not provide any information about the discount on the first purchase, making it incorrect. Response B provides a specific discount percentage, which is the correct answer. | Response B does not provide any information about the discount on the first purchase from the new clothing brand. It is unrelated to the question and does not convey any information.",
+            "raw": {
+              "model": "qwen2.5-1.5b-instruct",
+              "tier": "tier1",
+              "pass1": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response A does not provide any information about the discount on the first purchase, making it incorrect. Response B provides a specific discount percentage, which is the correct answer."
+              },
+              "pass2": {
+                "accuracy_score": 0,
+                "temporal_correctness": false,
+                "hallucination_penalty": 0,
+                "explanation": "Response B does not provide any information about the discount on the first purchase from the new clothing brand. It is unrelated to the question and does not convey any information."
+              }
+            }
+          },
+          "token_f1": 0.0,
+          "retrieval_latency_ms": 472.8397639992181,
+          "generation_latency_ms": 4843.372843010002,
+          "tokens_retrieved": 86,
+          "error": null
+        }
+      ]
+    }
+  }
+}

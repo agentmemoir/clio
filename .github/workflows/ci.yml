@@ -1,0 +1,444 @@
+# CI: format, clippy, and the tests and coverage of what a change touches.
+#
+# The suite is scoped. `make test-fast` runs the tests of the packages a change
+# can affect, and `make coverage-fast` measures those same packages and judges
+# the changed files against a ≥80% line floor. Neither one measures
+# the workspace, so neither one can report on a file nobody touched.
+#
+# What that buys and what it costs are both real, so both are written down here
+# rather than left to be discovered:
+#
+#   buys: a change to one leaf crate is judged in minutes instead of the hour
+#         the full-workspace instrumented build needed, and the gate stops
+#         failing on coverage debt in files the change never went near.
+#   costs: a test that breaks in a crate the change does not reach will not be
+#          caught here. The closure is the crate plus every crate that depends on
+#          it, which is where a signature change shows up, but a defect that
+#          needs an unrelated crate's tests to surface is no longer CI's job.
+#
+# The gate itself is `scripts/scoped_runner.py`. Both targets share its package
+# selection, so a change cannot pass the tests job and fail the coverage job by
+# disagreeing about what it touched.
+#
+# The tests and the coverage judgement run as two jobs, not two steps of one:
+# on the five green runs from 2026-10-05 to 2026-10-07 the single job took
+# 674 s to 991 s, and the plain and instrumented runs were 533 s to 832 s of
+# that. Running them at the same time removes the shorter run from the
+# critical path; it pays a second runner and a second cache restore per run.
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'sql/**'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'hooks.d/**'
+      - 'rust-toolchain.toml'
+      - '.config/nextest.toml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'sql/**'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'hooks.d/**'
+      - 'rust-toolchain.toml'
+      - '.config/nextest.toml'
+      - '.github/workflows/ci.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  CLIO_DATABASE_URL: postgres://clio:clio@127.0.0.1:5432/clio
+  # Build parallelism, capped so the gate survives a small runner.
+  #
+  # A single rustc peaks around 386MB RSS on this workspace, so cargo's default of
+  # one compiler per core needs roughly 772MB on a 2-core runner and gets
+  # OOM-killed partway through the instrumented build. One compiler at a time
+  # fits. The wall-clock cost is bounded because the instrumented build is cached
+  # between runs, so only changed crates are recompiled.
+  CARGO_BUILD_JOBS: "1"
+
+jobs:
+  check:
+    name: fmt · clippy · scoped tests · script suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: clio
+          POSTGRES_PASSWORD: clio
+          POSTGRES_DB: clio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clio -d clio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      # Full history, not the default shallow clone. The scoped runner works out
+      # what a change touched by asking git for the merge base with the base
+      # branch, and a depth-1 clone has no base branch to find: the query fails,
+      # the runner treats the missing base as "measure everything", and the job
+      # silently turns back into the full-workspace gate this file exists to
+      # avoid. This is the one checkout setting the scoped gate depends on.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # What the two scoped steps measure against, and the exact spelling of it
+      # matters. A pull request is checked out in detached HEAD mode, so there is
+      # no local branch for the base at all -- only refs/remotes/origin/<base>.
+      # Passing the bare name `master` there is an unresolvable ref, and the
+      # runner treats an unresolvable base as an error rather than as an empty
+      # scope, so every pull request would fail on a typo-shaped mistake.
+      # `origin/<base>` is the form that resolves on a runner and on a laptop
+      # alike. A push to master has no base branch, and `origin/HEAD~1` is not a
+      # ref, so that case uses the previous commit directly: it keeps master
+      # honest about what it just merged rather than diffing master against
+      # itself and judging nothing.
+      - name: Resolve the diff base
+        run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            echo "SCOPED_BASE=origin/$GITHUB_BASE_REF" >> "$GITHUB_ENV"
+          else
+            echo "SCOPED_BASE=HEAD~1" >> "$GITHUB_ENV"
+          fi
+          echo "measuring against: ${GITHUB_BASE_REF:+$GITHUB_BASE_REF (remote form)}"
+
+      # The exact version, taken from the pin rather than from the `stable`
+      # channel. Naming it here as well is deliberate: the action's own
+      # documentation says an explicit input can override the toolchain file,
+      # and a second project found the opposite. Setting both removes the
+      # question. The step after this one fails the job if the two ever drift.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Fail if the runner and the pin disagree
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          if [ "$pinned" != "$actual" ]; then
+            echo "::error::runner has rustc $actual but rust-toolchain.toml pins $pinned"
+            exit 1
+          fi
+          echo "rustc $actual matches the pin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      # Clippy stays workspace-wide. It compiles but does not run the tests, so it
+      # is not the cost this workflow gave up, and scoping it would mean a crate
+      # is only linted on the pull request that changed it. A crate unchanged
+      # since master's last green run cannot produce a new finding, which is the
+      # argument for scoping it, but that argument depends on master staying green
+      # and it was not worth trading a lint regression for.
+      #
+      # --workspace is named here rather than left to the root manifest. This step
+      # once read as workspace-wide and was not: with `default-members` set to a
+      # single crate and no selector on the command, it linted that crate alone and
+      # returned success. A -D warnings error in any of the other sixteen crates,
+      # including in their test targets, could not fail this job.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      # The test gate. Runs the tests of the changed crate and every crate that
+      # depends on it, uninstrumented, and returns nextest's own exit code, so a
+      # failing test fails the step and is named by nextest. The instrumented
+      # re-run and its judgement live in the `scoped-coverage` job, which starts
+      # at the same time as this one.
+      - name: Scoped tests (changed files' packages and their dependents)
+        run: make test-fast BASE="$SCOPED_BASE"
+
+      # No doctest step. It cost 7 of the 11 minutes of a local full gate and ran
+      # 0 tests: the workspace has two doc examples, both marked `ignore`.
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+
+      # The self-tests and the suites that live under `scripts/`. These files
+      # decide what a gate reports and whether it reports at all: the wrapper
+      # answers a repeated heavy command with a stored verdict, and the scoped
+      # runner decides which packages this job measures. A wrong answer in
+      # either lands on an unrelated check rather than on the thing that is
+      # wrong.
+      #
+      # One step per suite, and `if: always()` on every one of them, because
+      # `make` stops at the first failing command: a single step would report one
+      # failure even when three suites are broken, and one broken suite would
+      # hide the four behind it. The check list then shows ten statuses where
+      # there are ten suites, and a reader can see which one went red. Count them
+      # with `grep -cE '^ +run: make scripts-check' .github/workflows/ci.yml`, or
+      # count the prerequisites of the aggregate `scripts-check` target in the
+      # Makefile; the two answers have to agree.
+      #
+      # The two steps that already existed keep the names they had. The others
+      # are new to this workflow: nothing on master ran them, and one
+      # grouped step for all of them told a reader one thing about many suites.
+      #
+      # `span_verify.py` is not machinery: it is the reference span-grounding
+      # check the extraction harness imports, and running it executes the
+      # self-check in its own `__main__`. It is on this list because nothing
+      # else ran it.
+
+      # The wrapper's own tests. It answers with a stored exit code and a stored
+      # log for a heavy command asked to run a second time on an unchanged tree,
+      # and every tool in a checkout goes through it.
+      - name: Gate self-test
+        if: always()
+        run: make scripts-check-gate
+
+      # Whether a clippy run can quietly lint less than the file says it does.
+      # The Clippy step above is the one this protects: it used to name no package
+      # selector, so with a narrowed default selection it compiled one crate and
+      # reported success. This step reads the Makefile, this workflow and the root
+      # manifest, so the scope that step depends on is checked rather than assumed.
+      - name: Lint scope check
+        if: always()
+        run: make scripts-check-lint-scope
+
+      # Whether a workflow installs the compiler the repository pins. The step
+      # above the toolchain install already fails on a mismatch, but it runs on
+      # the runner, so it answers after the push. This one answers before it.
+      - name: Toolchain pin check
+        if: always()
+        run: make scripts-check-toolchain-pin
+
+      # Whether a mechanical pass over assertions changed only what it was asked
+      # to. The commit above added a failure message to every emptiness assertion
+      # with a script, and three defects came in that the diff did not show: an
+      # assertion invented at a line no lint had flagged, an expression evaluated
+      # a second time inside a message argument, and sixty-two identifiers
+      # corrupted by a rewrite that stripped one character too many. Each was found
+      # by running something afterwards, so this is that step made permanent. It
+      # compares against the merge base, which is why the pull request's whole diff
+      # is judged rather than one commit.
+      - name: Assert faithfulness check
+        if: always()
+        run: make scripts-check-assert-faithfulness
+
+      - name: Span grounding self-check
+        if: always()
+        run: make scripts-check-span
+
+      - name: Phase timer tests
+        if: always()
+        run: make scripts-check-phase-timer
+
+      - name: Pre-commit runner tests
+        if: always()
+        run: make scripts-check-precommit
+
+      # Whether the coverage surface can still measure one run and report it
+      # once. The Scoped coverage step above is what this protects: its run is
+      # split into a test step and a report step so the gate owns a boundary in
+      # which to drop a profile buffer it cannot read and an instrumented binary
+      # the run did not build, and its report step names a merge failure mode so
+      # one malformed buffer costs its own coverage rather than the verdict every
+      # passing test had earned. None of that is visible from a green run, so
+      # removing any of it would leave this workflow reporting the same result.
+      - name: Coverage surface check
+        if: always()
+        run: make scripts-check-coverage-surface
+
+      # Whether every file the coverage gate skips for holding no executable code
+      # still holds none. The Scoped coverage step above is what this protects: that
+      # list is the one place a file leaves the coverage rule without a floor, and
+      # the gate names a skipped file and moves on, so a stale entry is a file
+      # silently outside the gate. Fourteen crate roots are on it today.
+      - name: No-code file check
+        if: always()
+        run: make scripts-check-codeless
+
+      # Whether the tree still holds exactly one coverage rule. The Scoped
+      # coverage step above is what this protects: the four rules that were not
+      # this one each arrived in a change about something else, and nothing in the
+      # tree would have refused any of them. A lint over a closed list of shapes,
+      # not a proof, and its own header says where it cannot see.
+      - name: One coverage rule check
+        if: always()
+        run: make scripts-check-coverage-policy
+
+      # Last, so it can report on whichever step failed: a test binary killed
+      # from outside prints nothing, which is the case this was added for.
+      - name: Out-of-memory check
+        if: failure()
+        run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
+
+  # The coverage judgement, beside the tests job so its instrumented pass and
+  # the plain pass overlap instead of adding up. The report lands in
+  # `target/coverage/coverage-scoped.json`, so the full-workspace report and a
+  # targeted one can no longer overwrite each other.
+  scoped-coverage:
+    name: scoped coverage (≥80% lines on each changed Rust file)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: clio
+          POSTGRES_PASSWORD: clio
+          POSTGRES_DB: clio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clio -d clio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Same base resolution as the tests job: a detached checkout has no local
+      # base branch for the bare name to resolve.
+      - name: Resolve the diff base
+        run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            echo "SCOPED_BASE=origin/$GITHUB_BASE_REF" >> "$GITHUB_ENV"
+          else
+            echo "SCOPED_BASE=HEAD~1" >> "$GITHUB_ENV"
+          fi
+          echo "measuring against: ${GITHUB_BASE_REF:+$GITHUB_BASE_REF (remote form)}"
+
+      # The same pin the other jobs use. Two jobs on different compilers would
+      # give two different answers about the same tree.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Fail if the runner and the pin disagree
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          if [ "$pinned" != "$actual" ]; then
+            echo "::error::runner has rustc $actual but rust-toolchain.toml pins $pinned"
+            exit 1
+          fi
+          echo "rustc $actual matches the pin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # The coverage gate: every Rust file this change created or modified must
+      # reach 80% of its lines. No other metric, no aggregate, and no per-file
+      # recorded floor is compared anywhere.
+      - name: Scoped coverage (≥80% lines on each changed Rust file)
+        run: make coverage-fast BASE="$SCOPED_BASE"
+
+      # Last, so it can report on whichever step failed: a test binary killed
+      # from outside prints nothing, which is the case this was added for.
+      - name: Out-of-memory check
+        if: failure()
+        run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
+
+  mcp-conformance-2025-11-25:
+    name: MCP conformance (2025-11-25 pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: clio
+          POSTGRES_PASSWORD: clio
+          POSTGRES_DB: clio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clio -d clio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      # Full history, for the same reason as the check job: the path test below
+      # asks git for the diff and a depth-1 clone cannot produce one.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The same pin the check job uses. Two jobs on different compilers would
+      # give two different answers about the same tree.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Same base resolution as the check job, and for the same reason: a
+      # detached checkout has no local base branch, so the bare name does not
+      # resolve.
+      - name: Resolve the diff base
+        run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            echo "SCOPED_BASE=origin/$GITHUB_BASE_REF" >> "$GITHUB_ENV"
+          else
+            echo "SCOPED_BASE=HEAD~1" >> "$GITHUB_ENV"
+          fi
+
+      # This job is one pinned conformance suite for one crate. It used to run on
+      # every push regardless of the diff, which is the full-suite cost this
+      # workflow removed: a change to `crates/clio-config` paid for `clio-mcp`'s
+      # entire test suite to prove nothing about `clio-config`. It now runs when
+      # the change touches `clio-mcp` or the workspace manifest, and says so when
+      # it does not, so the skipped state is visible in the log rather than
+      # looking like a pass.
+      - name: Decide whether the change touches clio-mcp
+        id: scope
+        run: |
+          if git diff --name-only "$SCOPED_BASE"..HEAD -- crates/clio-mcp Cargo.toml Cargo.lock \
+             | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "change touches clio-mcp; the pinned conformance suite runs"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "change does not touch clio-mcp; the pinned conformance suite is skipped"
+          fi
+
+      - name: Run MCP schema, unit, and conformance tests (pinned 2025-11-25)
+        if: steps.scope.outputs.run == 'true'
+        run: cargo test -p clio-mcp --locked
+
