@@ -5,9 +5,11 @@
 //!
 //! This module is responsible for handing the process's *current* ranking
 //! environment to the engines that read it, so a `ranking_env_set` in this
-//! process governs work started afterwards: the hub engine receives the derived
-//! co-activation policy, and the shared retriever receives the retrieval half
-//! (leg weights, retention half-life, and trust ratios).
+//! process governs work started afterwards: the hub engine, the shared
+//! retriever and its diagnostic twin, and the state's own association engine
+//! all receive the derived co-activation policy, and the retrievers also
+//! receive the retrieval half (leg weights, retention half-life, and trust
+//! ratios).
 //!
 //! ## Owns
 //! - `McpState::ranking_policy` (the derived `AssocPolicy` for a given env)
@@ -40,8 +42,9 @@ impl McpState {
         AssocPolicy::from_coactivation(&env.coactivation)
     }
 
-    /// Push the process's current ranking environment into the engines that hold
-    /// a co-activation policy and into the retriever's live ranking snapshot.
+    /// Push the process's current ranking environment into every engine that
+    /// holds a co-activation policy and into the retrievers' live ranking
+    /// snapshots.
     ///
     /// The ranking tools mutate the config runtime's in-memory `RankingEnv`
     /// (nothing persists it, and a fresh process starts from the effective
@@ -53,14 +56,19 @@ impl McpState {
             let rt = self.config.lock().expect("config runtime mutex poisoned");
             rt.ranking_env().clone()
         };
+        let policy = Self::ranking_policy(&env);
         if let Some(hub) = self.hub.as_ref() {
-            hub.set_policy(Self::ranking_policy(&env));
+            hub.set_policy(policy.clone());
         }
-        // The retriever takes one snapshot per request, so the retrieval
-        // weights, retention half-life, and trust ratios set here govern the
-        // next retrieval. Its own co-activation engine stays the value it was
-        // built with; the hub path above carries the live co-activation policy.
+        // Each retriever takes one snapshot per request, so the retrieval
+        // weights, retention half-life, trust ratios, and the co-activation
+        // policy its graph expansion and reinforcement read all govern the next
+        // retrieval. The diagnostic twin and the state's own association engine
+        // (the graph tools) carry the same policy, so one knob has one behavior
+        // on every path.
         self.retriever.set_ranking_env(&env);
+        self.diagnostic_retriever.set_ranking_env(&env);
+        self.assoc.set_policy(policy);
     }
 }
 

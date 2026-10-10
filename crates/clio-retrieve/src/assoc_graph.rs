@@ -48,13 +48,14 @@ impl AssociationEngine {
                 "associations requires an item id",
             ));
         }
-        let min = min_weight.unwrap_or(self.policy.w_min);
+        let policy = self.policy();
+        let min = min_weight.unwrap_or(policy.w_min);
         let mut out = Vec::new();
         for edge in self.store.list_assoc_edges(bank, Some(item_id))? {
             if edge.source_id == edge.target_id {
                 continue;
             }
-            let Some(eff) = self.observe(bank, &edge)? else {
+            let Some(eff) = self.observe(bank, &edge, &policy)? else {
                 continue;
             };
             if eff < min {
@@ -188,11 +189,12 @@ impl AssociationEngine {
                 "graph_query requires a seed id",
             ));
         }
-        let hops = max_hops.unwrap_or(self.policy.max_hops as usize);
+        let policy = self.policy();
+        let hops = max_hops.unwrap_or(policy.max_hops as usize);
         if hops == 0 {
             return Ok(Vec::new());
         }
-        let min = min_weight.unwrap_or(self.policy.w_min);
+        let min = min_weight.unwrap_or(policy.w_min);
         let mut visited: BTreeSet<String> = BTreeSet::from([seed_id.to_owned()]);
         let mut frontier = vec![seed_id.to_owned()];
         let mut out = Vec::new();
@@ -203,7 +205,7 @@ impl AssociationEngine {
                     if matches!(edge_type, Some(kind) if kind != edge.assoc_kind) {
                         continue;
                     }
-                    let Some(eff) = self.observe(bank, &edge)? else {
+                    let Some(eff) = self.observe(bank, &edge, &policy)? else {
                         continue;
                     };
                     if eff < min {
@@ -249,12 +251,13 @@ impl AssociationEngine {
                 "expand requires a bank",
             ));
         }
+        let policy = self.policy();
         let mut capped: Vec<String> = Vec::new();
         for seed in seeds {
             if !seed.is_empty() {
                 capped.push(seed.clone());
             }
-            if capped.len() >= self.policy.expand_seed_cap {
+            if capped.len() >= policy.expand_seed_cap {
                 break;
             }
         }
@@ -271,17 +274,17 @@ impl AssociationEngine {
                     // Expansion honors `w_min` for every kind: `observe` returns
                     // the effective weight (raw for sticky explicit edges) and
                     // prunes decayed coactivation edges below it.
-                    let Some(eff) = self.observe(bank, &edge)? else {
+                    let Some(eff) = self.observe(bank, &edge, &policy)? else {
                         continue;
                     };
-                    if eff < self.policy.w_min {
+                    if eff < policy.w_min {
                         continue;
                     }
                     let neighbor = other_endpoint(&edge, node);
                     if visited.insert(neighbor.clone()) {
                         out.push(neighbor.clone());
                         next.push(neighbor);
-                        if out.len() >= self.policy.expand_neighbor_cap {
+                        if out.len() >= policy.expand_neighbor_cap {
                             return Ok(out);
                         }
                     }

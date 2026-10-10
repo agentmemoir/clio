@@ -16,6 +16,7 @@
 //! - The stage at which each requested score floor runs (see `floors`)
 //!
 //! ## Does not own
+//! - Construction and the tuning setter surface (`hybrid_build`)
 //! - Backend search SQL (`clio_store::IndexStore`), embedding (`clio_index`),
 //!   the leg fetch/failure calls (`hybrid_legs`), or candidate fetching
 //!   (`hybrid_fetch`)
@@ -61,12 +62,12 @@
 //!
 //! Keep this module focused on retrieval orchestration.
 
-use crate::assoc::{AssociationEngine, StoreGraphExpander};
+use crate::assoc::AssociationEngine;
 use crate::dedup::{DedupConfig, DedupedCandidates, dedupe_candidates};
 use crate::entity_summary::resolve_entity_controls;
 use crate::finalize::{FinalizeArgs, finalize, select_page};
 use crate::floors::{apply_keyword_floor, apply_reranker_floor, apply_semantic_floor};
-use crate::fusion::{DEFAULT_RRF_K, StageHit};
+use crate::fusion::StageHit;
 use crate::hybrid_expand::expand_candidates;
 use crate::hybrid_fetch::fetch_items;
 use crate::hybrid_legs::{dense_candidates, lexical_candidates, temporal_leg};
@@ -74,13 +75,9 @@ use crate::hybrid_rank::{RetentionArgs, apply_rerank, fuse_candidates};
 use crate::hybrid_util::{dedupe_ordered, kept_stage, millis, rank_map};
 use crate::live_ranking::LiveRanking;
 use crate::rerank::Reranker;
-use crate::types::{
-    DEFAULT_LEG_FETCH, DEFAULT_SHORTLIST_M, GraphExpander, RetrieveMetrics, RetrieveOutcome,
-    RetrieveRequest,
-};
-use clio_config::ranking::{RankingEnv, RetrievalWeights};
+use crate::types::{GraphExpander, RetrieveMetrics, RetrieveOutcome, RetrieveRequest};
 use clio_index::Embedder;
-use clio_store::{AssocPolicy, IndexStore, Store};
+use clio_store::{IndexStore, Store};
 use clio_types::{AmError, ErrorCode, SearchDomain};
 use std::sync::Arc;
 use std::time::Instant;
@@ -115,102 +112,6 @@ impl std::fmt::Debug for HybridRetriever {
 }
 
 impl HybridRetriever {
-    /// Build a retriever with system-default weights and no embedder/reranker.
-    #[must_use]
-    pub fn new(store: Arc<dyn Store>, index: Arc<dyn IndexStore>) -> Self {
-        let assoc = Arc::new(AssociationEngine::new(
-            Arc::clone(&store),
-            AssocPolicy::default(),
-        ));
-        Self {
-            store,
-            index,
-            embedder: None,
-            reranker: None,
-            expander: Arc::new(StoreGraphExpander::new(Arc::clone(&assoc))),
-            assoc,
-            reinforce: true,
-            live: LiveRanking::new(),
-            fusion_k: DEFAULT_RRF_K,
-            leg_fetch: DEFAULT_LEG_FETCH,
-            shortlist_m: DEFAULT_SHORTLIST_M,
-        }
-    }
-
-    /// Build a retriever whose co-activation policy comes from a ranking
-    /// environment at construction, and whose leg weights, retention half-life,
-    /// and trust ratios are applied live.
-    #[must_use]
-    pub fn with_ranking_env(
-        store: Arc<dyn Store>,
-        index: Arc<dyn IndexStore>,
-        env: &RankingEnv,
-    ) -> Self {
-        let mut retriever = Self::new(store, index);
-        retriever.set_assoc_policy(AssocPolicy::from_coactivation(&env.coactivation));
-        retriever.set_ranking_env(env);
-        retriever
-    }
-
-    /// Apply the retrieval half of a ranking environment (live leg weights, retention half-life,
-    /// and trust ratios) to requests started after this call. The co-activation half is fixed at
-    /// construction and cannot be changed on a running retriever; a caller wanting a different
-    /// policy builds a new retriever (`with_ranking_env`) or calls `set_assoc_policy` before use.
-    pub fn set_ranking_env(&self, env: &RankingEnv) {
-        self.live.set_env(env);
-    }
-
-    /// Replace the co-activation policy (also retargets the default expander).
-    pub fn set_assoc_policy(&mut self, policy: AssocPolicy) {
-        self.assoc = Arc::new(AssociationEngine::new(Arc::clone(&self.store), policy));
-        self.expander = Arc::new(StoreGraphExpander::new(Arc::clone(&self.assoc)));
-    }
-
-    /// Enable/disable the co-activation reinforce hook (rollback switch).
-    pub fn set_reinforcement(&mut self, enabled: bool) {
-        self.reinforce = enabled;
-    }
-
-    /// Attach a dense embedder (enables the dense leg).
-    pub fn set_embedder(&mut self, embedder: Arc<dyn Embedder>) {
-        self.embedder = Some(embedder);
-    }
-
-    /// Attach a reranker (enables the optional second stage).
-    pub fn set_reranker(&mut self, reranker: Arc<dyn Reranker>) {
-        self.reranker = Some(reranker);
-    }
-
-    /// Disable rerank.
-    pub fn clear_reranker(&mut self) {
-        self.reranker = None;
-    }
-
-    /// Attach a graph expander.
-    pub fn set_expander(&mut self, expander: Arc<dyn GraphExpander>) {
-        self.expander = expander;
-    }
-
-    /// Set retrieval weights through the interior lock. Only the weights half
-    /// of the ranking environment; the retention half-life and trust ratios
-    /// are reachable through `set_ranking_env`.
-    pub fn set_weights(&self, weights: RetrievalWeights) {
-        self.live.set_weights(weights);
-    }
-
-    /// Override fusion/shortlist sizes.
-    pub fn set_fusion(&mut self, k: usize, leg_fetch: usize, shortlist_m: usize) {
-        self.fusion_k = k;
-        self.leg_fetch = leg_fetch;
-        self.shortlist_m = shortlist_m;
-    }
-
-    /// Current retrieval weights (a snapshot clone of the live value).
-    #[must_use]
-    pub fn weights(&self) -> RetrievalWeights {
-        self.live.weights()
-    }
-
     /// Run hybrid retrieval. Explicit callers are never gated.
     ///
     /// A linear orchestrator over the stages that live in their own modules
@@ -444,6 +345,9 @@ impl HybridRetriever {
         ))
     }
 }
+
+#[path = "hybrid_build.rs"]
+mod hybrid_build;
 
 #[cfg(test)]
 #[path = "hybrid_tests.rs"]
