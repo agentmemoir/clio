@@ -317,8 +317,9 @@ pub trait Store: crate::distilled_unit_store::DistilledUnitStore + Send + Sync {
     /// on the item row. Never a supersession and never compliance erasure. Writes the `discard`
     /// telemetry row inside the same transaction as the mutation.
     ///
-    /// Unknown / cross-bank `item_id` → `NotFound` (no existence leak). An already-discarded item
-    /// is rejected as `InvalidArgument`; content, DEKs, and supersession edges are untouched.
+    /// Unknown / cross-bank `item_id` → `ItemNotFound` (no existence leak). An
+    /// already-discarded item is rejected as `InvalidArgument`; content, DEKs,
+    /// and supersession edges are untouched.
     ///
     /// # Errors
     /// Missing item, already discarded, empty reason/actor, or storage failures.

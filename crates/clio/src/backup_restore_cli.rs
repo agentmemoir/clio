@@ -11,7 +11,7 @@
 //! - The `restore` flags (`--latest`, `--yes`, `--no-pre-backup`,
 //!   `--allow-missing-keys`, `--dry-run`) and the selector rule
 //! - The confirmation prompt and the exit codes: 0 for a restore or a plan,
-//!   3 for a partial restore or a post-commit count mismatch
+//!   3 for a partial, count-mismatched, or not-durable restore
 //!
 //! ## Does not own
 //! - The restore sequence and its refusals (see `backup_restore_flow`)
@@ -230,10 +230,8 @@ fn strip_newline(answer: &str) -> &str {
 }
 
 /// The process exit code one report maps to. A partial restore or a failed count
-/// check is not success; a rename that could not be fsynced keeps the code the
-/// restored result earns and is reported through the payload's `ok` field
-/// instead, because the store really was replaced and a new exit code would be
-/// a change to the documented contract.
+/// check is not success; a rename that could not be fsynced is a degraded
+/// restore and uses the command-specific exit code 3.
 fn exit_code(report: &Report) -> u8 {
     let condition = if report.result == RESULT_PARTIAL || report.result == RESULT_COUNT_MISMATCH {
         RestoreFailure::PartialOrCountMismatch

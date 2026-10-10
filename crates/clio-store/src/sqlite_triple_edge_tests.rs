@@ -293,9 +293,11 @@ fn query_end_invalidate_edge_cases() {
         .triple_end(&bank, "nobody", "lives_in", None, "t1", "t1")
         .unwrap();
     assert!(noop.already_ended);
-    assert!(
+    assert_eq!(
         s.invalidate_item(&bank, "no-item", "t1", "t1", None, "agent")
-            .is_err()
+            .unwrap_err()
+            .code,
+        ErrorCode::ItemNotFound
     );
     let mut item = carrier("gist1", &bank, "t0", "t0", "x");
     item.episodic_type = Some(EpisodicType::Gist);

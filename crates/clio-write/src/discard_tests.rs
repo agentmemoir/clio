@@ -234,20 +234,20 @@ fn validation_and_not_found() {
         discard(&args(&s, &ctx, "missing", "r", false, &sink))
             .unwrap_err()
             .code,
-        ErrorCode::NotFound
+        ErrorCode::ItemNotFound
     );
     assert_eq!(
         discard(&args(&s, &ctx, "missing", "r", true, &sink))
             .unwrap_err()
             .code,
-        ErrorCode::NotFound
+        ErrorCode::ItemNotFound
     );
     let other = OpContext::new(Bank::new("other-bank"), Actor::Agent);
     assert_eq!(
         discard(&args(&s, &other, "i1", "r", true, &sink))
             .unwrap_err()
             .code,
-        ErrorCode::NotFound
+        ErrorCode::ItemNotFound
     );
     assert!(sink.events().is_empty(), "failed calls emit no telemetry");
     // Bank A's item is untouched by the cross-bank attempt.
@@ -274,7 +274,7 @@ fn dry_run_rejects_already_discarded() {
         discard(&args(&s, &ctx, "i1", "ops", false, &sink))
             .unwrap_err()
             .code,
-        ErrorCode::NotFound
+        ErrorCode::ItemNotFound
     );
     assert_eq!(
         discard(&args(&s, &ctx, "i1", "ops", true, &sink))
