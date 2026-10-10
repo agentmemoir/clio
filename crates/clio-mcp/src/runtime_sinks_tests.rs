@@ -6,7 +6,7 @@
 //! This module is responsible for testing the store-backed gated-write signal source.
 //!
 //! ## Owns
-//! - Store-backed neighbor and recency signal tests
+//! - Store-backed neighbor signal tests and recency-neutral contract tests
 //! - Damaged-row resilience tests for admission lookups
 //!
 //! ## Does not own
@@ -25,6 +25,7 @@ use crate::runtime::{McpOpenOptions, McpState};
 use clio_admission::gated::candidate_text;
 use clio_belief::signals::BeliefSignalSource;
 use clio_store::{DekProvider, LocalDevKms, SqliteStore};
+use serde_json::json;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
@@ -93,10 +94,12 @@ fn duplicate_text_is_returned_as_neighbor() {
     );
     let neighbors = SignalSource::neighbor_texts(&signals, &probe).expect("neighbors");
     assert!(neighbors.contains(&candidate_text(&prior)), "{neighbors:?}");
-    let age = SignalSource::prior_age_days(&signals, &probe)
-        .expect("prior")
-        .expect("age");
-    assert!((age - 1.0).abs() < 0.001, "age: {age}");
+    assert!(
+        SignalSource::prior_age_days(&signals, &probe)
+            .expect("prior")
+            .is_none(),
+        "a store-backed write never reports a wall-clock age"
+    );
 }
 
 #[test]
@@ -178,7 +181,10 @@ fn unreadable_neighbor_is_skipped_while_readable_neighbor_remains() {
     let (neighbors, age) = signals.neighbor_signals(&probe).expect("signals");
 
     assert_eq!(neighbors, vec![candidate_text(&readable)]);
-    assert!(age.is_some(), "readable neighbor must supply recency");
+    assert!(
+        age.is_none(),
+        "recency stays neutral even when a readable neighbor remains"
+    );
 }
 
 #[test]
@@ -187,7 +193,9 @@ fn empty_bank_id_fails_closed() {
     let signals = signals_for(&s);
     let probe = item("", "probe", "text", "2026-01-02T00:00:00Z");
     assert!(SignalSource::neighbor_texts(&signals, &probe).is_err());
-    assert!(SignalSource::prior_age_days(&signals, &probe).is_err());
+    // The age accessor is neutral and never reads the store, so the fail-closed
+    // contract lives on the neighbor lookup that still does.
+    assert!(signals.neighbor_signals(&probe).is_err());
 }
 
 /// Work is bounded by the configured recent window: a probe with no lexical
@@ -304,4 +312,112 @@ fn belief_signal_source_reads_the_bank() {
         BeliefSignalSource::neighbor_texts(&signals, "bank-belief", "Deploys on Fridays are risky")
             .expect("belief neighbors");
     assert!(!neighbors.is_empty(), "belief create must see stored rows");
+}
+
+/// The stamped `admission_score` is a function of the candidate's content and
+/// provenance, not of when the write happened: two candidates with the same
+/// text but different `created_at` values score identically.
+///
+/// Before this contract the recency factor read the wall clock, so the same
+/// content written a moment apart stored different last digits.
+///
+/// Bit-exact comparison is the assertion, not an accident: the invariant is
+/// that identical content yields the identical stored bits, which an epsilon
+/// cannot check.
+#[allow(clippy::float_cmp)]
+#[test]
+fn admission_score_is_independent_of_the_write_time() {
+    let s = state();
+    let prior = item(
+        "bank-clock",
+        "itm-prior",
+        "deploys on fridays are risky",
+        "2026-01-01T00:00:00Z",
+    );
+    s.store.create_memory_item(&prior, "agent").expect("seed");
+    let signals = signals_for(&s);
+    let policy = crate::write_tools::admission_policy(&s, "bank-clock");
+
+    let early = item(
+        "bank-clock",
+        "itm-early",
+        "a genuinely new note about backups",
+        "2026-02-01T00:00:00Z",
+    );
+    let late = item(
+        "bank-clock",
+        "itm-late",
+        "a genuinely new note about backups",
+        "2026-02-02T00:00:00Z",
+    );
+
+    let early_inputs = clio_admission::signals_for(&early, &signals).expect("early signals");
+    let late_inputs = clio_admission::signals_for(&late, &signals).expect("late signals");
+    assert!(early_inputs.prior_age_days.is_none(), "no wall-clock age");
+    assert!(late_inputs.prior_age_days.is_none(), "no wall-clock age");
+
+    let early_score =
+        clio_admission::decide_ungated("task_spec", &early_inputs, &policy).expect("early score");
+    let late_score =
+        clio_admission::decide_ungated("task_spec", &late_inputs, &policy).expect("late score");
+    assert_eq!(
+        early_score.admission_score, late_score.admission_score,
+        "identical content must score identically regardless of write time"
+    );
+}
+
+/// The same invariant holds through the real gated write path: two banks that
+/// hold the same prior store an identical probe with an identical
+/// `admission_score` when the probes' timestamps are a day apart.
+#[test]
+fn stored_score_is_identical_for_writes_a_day_apart() {
+    let s = state();
+    let store = |bank: &str, id: &str, gist: &str, ts: &str| {
+        crate::store_write::store(
+            &s,
+            &json!({
+                "item": {"id": id, "subject_id": id, "gist": gist},
+                "category": "persona",
+                "epistemic_kind": "fact",
+                "bank": bank,
+                "actor": "agent",
+                "timestamp": ts,
+            }),
+        )
+        .expect("store")
+    };
+
+    // A dissimilar prior in each bank, so only the write time can differ.
+    for (bank, suffix) in [("bank-clock-a", "a"), ("bank-clock-b", "b")] {
+        let prior = store(
+            bank,
+            &format!("itm-prior-{suffix}"),
+            "deploys on fridays are risky",
+            "2026-01-01T00:00:00Z",
+        );
+        assert!(prior["pass"].as_bool().unwrap_or(false), "{prior}");
+    }
+
+    let early = store(
+        "bank-clock-a",
+        "itm-probe-a",
+        "a genuinely new note about backups",
+        "2026-02-01T00:00:00Z",
+    );
+    let late = store(
+        "bank-clock-b",
+        "itm-probe-b",
+        "a genuinely new note about backups",
+        "2026-02-02T00:00:00Z",
+    );
+    assert!(early["pass"].as_bool().unwrap_or(false), "{early}");
+    assert!(late["pass"].as_bool().unwrap_or(false), "{late}");
+    // Recency is the neutral `1.0` on both, which is what keeps the two scores
+    // equal; a clock-derived age would make the later probe score lower.
+    assert_eq!(early["factors"]["recency"], json!(1.0), "{early}");
+    assert_eq!(late["factors"]["recency"], json!(1.0), "{late}");
+    assert_eq!(
+        early["admission_score"], late["admission_score"],
+        "the stored score must not depend on the write time"
+    );
 }
