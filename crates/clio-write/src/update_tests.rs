@@ -265,7 +265,7 @@ fn t_discrete_routes_to_invalidate() {
         &cont,
         &triple,
     );
-    assert_eq!(update(&a).unwrap_err().code, ErrorCode::InvalidArgument);
+    assert_eq!(update(&a).unwrap_err().code, ErrorCode::ItemNotFound);
 }
 
 /// `fact`/`belief` are rejected as update_rule before any mutation.

@@ -85,7 +85,8 @@ pub trait HygieneStore: Send + Sync {
     /// Mark one item archived: excluded from default retrieve, readable by id.
     ///
     /// Reversible via [`HygieneStore::unarchive_item`]. Rejects discarded and
-    /// already-archived items as `InvalidArgument`, unknown items as `NotFound`.
+    /// already-archived items as `InvalidArgument`, unknown items as
+    /// `ItemNotFound`.
     ///
     /// # Errors
     /// Missing ids, not-found, already-archived, or storage failures.

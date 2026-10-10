@@ -5,7 +5,7 @@
 //!
 //! This module is responsible for the restore surface's golden outputs: the
 //! full text blast radius, the full text report, the full JSON payload, and a
-//! full text-mode refusal, pinned byte for byte against a hand-built archive
+//! full text-mode not-found error, pinned byte for byte against a hand-built archive
 //! whose id and stamps are fixed.
 //!
 //! ## Owns
@@ -186,12 +186,12 @@ fn a_one_item_store_prints_singular_counts() {
 }
 
 #[test]
-fn a_text_mode_refusal_is_pinned_byte_for_byte() {
+fn text_mode_missing_snapshot_is_pinned_byte_for_byte() {
     let (scratch, _) = golden_scratch("restore-golden-refusal");
 
     let (code, out, err) = run_in(&scratch, &["restore", "zzzz", "--output", "text"], false);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert_eq!(out, "", "a refusal prints nothing to stdout");
     assert_eq!(
         err,
@@ -199,6 +199,12 @@ fn a_text_mode_refusal_is_pinned_byte_for_byte() {
             "error: no snapshot `zzzz` in the backup directory\n",
             "hint: run `clio backup list` to see the snapshots\n",
         ),
-        "the refusal"
+        "the not-found error"
     );
+
+    let (code, _, err) = run_json_in(&scratch, &["restore", "zzzz"]);
+    assert_eq!(code, ExitCode::from(1), "{err}");
+    let error: serde_json::Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["ok"], serde_json::json!(false), "{error}");
+    assert_eq!(error["code"], serde_json::json!("not_found"), "{error}");
 }
