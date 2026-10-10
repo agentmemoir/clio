@@ -600,7 +600,7 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-coverage-policy
+	scripts-check-coverage-policy scripts-check-gate-install
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -650,6 +650,13 @@ scripts-check-coverage-surface:
 scripts-check-coverage-policy:
 	python3 scripts/coverage_policy_check.py --self-test
 	python3 scripts/coverage_policy_check.py
+
+# Whether the gate installer tells the truth about a shim it just linked. A
+# symlink that comes after the real tool on PATH never runs, and the installer
+# used to print a success line for it. This pins the NOT ACTIVE message and the
+# non-zero exit, with a controlled PATH so the answer is the same on any host.
+scripts-check-gate-install:
+	python3 scripts/test_gate_install.py
 
 coverage-html cov-html:
 	$(HERMETIC_OVERLAY_CLEAN)

@@ -200,7 +200,14 @@ fn origin_host_allowed_accepts_loopback_and_configured_hosts_only() {
     ] {
         assert!(origin_host_allowed(origin, &extra), "must allow {origin}");
     }
-    for origin in ["http://evil.example", "https://localhost.evil.example", ""] {
+    for origin in [
+        "http://evil.example",
+        "https://localhost.evil.example",
+        "http://[::1].evil",
+        "http://[::1]evil",
+        "http://[::1]:80@evil.example",
+        "",
+    ] {
         assert!(!origin_host_allowed(origin, &extra), "must refuse {origin}");
     }
 }
