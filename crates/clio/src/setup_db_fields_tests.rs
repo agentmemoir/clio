@@ -10,7 +10,7 @@
 //! ## Owns
 //! - The username rule at its boundary
 //! - One label per `Blame`
-//! - The three mode names and the query fragment
+//! - The mode names and the query fragment
 //!
 //! ## Does not own
 //! - The checks that use the username rule (see `setup_validate`)
@@ -111,18 +111,30 @@ fn every_blame_has_a_distinct_label() {
 }
 
 #[test]
-fn there_are_exactly_three_ssl_mode_names() {
-    assert_eq!(ssl_mode_names(), ["disable", "prefer", "require"]);
+fn there_are_exactly_four_ssl_mode_names() {
+    assert_eq!(
+        ssl_mode_names(),
+        ["disable", "prefer", "verify-full", "encrypt-no-verify"]
+    );
 }
 
 #[test]
 fn an_ssl_mode_is_spelled_as_a_query_parameter() {
-    assert_eq!(ssl_query(SslChoice::Require), "sslmode=require");
+    assert_eq!(ssl_query(SslChoice::VerifyFull), "sslmode=verify-full");
     assert_eq!(ssl_query(SslChoice::Prefer), "sslmode=prefer");
     assert_eq!(ssl_query(SslChoice::Disable), "sslmode=disable");
+    assert_eq!(
+        ssl_query(SslChoice::EncryptNoVerify),
+        "sslmode=encrypt-no-verify"
+    );
 }
 
 #[test]
 fn the_ssl_parameter_name_is_the_one_the_driver_reads() {
     assert_eq!(SSL_PARAM, "sslmode");
+}
+
+#[test]
+fn the_root_parameter_name_is_the_one_libpq_uses() {
+    assert_eq!(SSL_ROOT_PARAM, "sslrootcert");
 }

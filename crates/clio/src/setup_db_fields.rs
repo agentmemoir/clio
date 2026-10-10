@@ -11,7 +11,7 @@
 //! ## Owns
 //! - The username rule, kept apart from the message that reports it
 //! - The `Blame` label for each field a failed test can be sent back to
-//! - The three SSL mode names and the query fragment that carries one
+//! - The SSL mode names and the query fragment that carries one
 //!
 //! ## Does not own
 //! - The checks themselves (see `setup_validate`)
@@ -66,13 +66,21 @@ impl Blame {
 /// The query parameter that carries the SSL mode.
 pub(crate) const SSL_PARAM: &str = "sslmode";
 
-/// The three modes, in the order the question offers them.
+/// The query parameter that carries a caller-supplied root certificate.
+pub(crate) const SSL_ROOT_PARAM: &str = "sslrootcert";
+
+/// The modes, in the order the question offers them.
+///
+/// `verify-full` replaces the old `require`, and `encrypt-no-verify` is the one
+/// deliberate way to encrypt without checking the server. `require` is not
+/// offered: other Postgres clients use it for that no-check behaviour, and a
+/// name that sounds safe while skipping the check is what this list avoids.
 #[must_use]
-pub(crate) fn ssl_mode_names() -> [&'static str; 3] {
-    ["disable", "prefer", "require"]
+pub(crate) fn ssl_mode_names() -> [&'static str; 4] {
+    ["disable", "prefer", "verify-full", "encrypt-no-verify"]
 }
 
-/// The query fragment for one mode, e.g. `sslmode=require`.
+/// The query fragment for one mode, e.g. `sslmode=verify-full`.
 #[must_use]
 pub(crate) fn ssl_query(mode: SslChoice) -> String {
     format!("{SSL_PARAM}={}", mode.as_str())

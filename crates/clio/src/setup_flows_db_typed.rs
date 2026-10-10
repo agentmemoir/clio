@@ -59,6 +59,8 @@ struct Details {
     user: Option<String>,
     password: Option<String>,
     ssl: Option<SslChoice>,
+    /// The root certificate a verifying mode trusts, or empty for none.
+    ssl_root: Option<String>,
 }
 
 /// Which field a failed test sends the operator back to, in field order.
@@ -125,6 +127,7 @@ impl Field {
                 details.user = None;
                 details.password = None;
                 details.ssl = None;
+                details.ssl_root = None;
             }
             Self::Port => {
                 details.port = None;
@@ -132,20 +135,24 @@ impl Field {
                 details.user = None;
                 details.password = None;
                 details.ssl = None;
+                details.ssl_root = None;
             }
             Self::Name => {
                 details.name = None;
                 details.user = None;
                 details.password = None;
                 details.ssl = None;
+                details.ssl_root = None;
             }
             Self::Credentials => {
                 details.user = None;
                 details.password = None;
                 details.ssl = None;
+                details.ssl_root = None;
             }
             Self::Ssl => {
                 details.ssl = None;
+                details.ssl_root = None;
             }
         }
     }
@@ -165,6 +172,10 @@ pub(crate) fn ask_typed(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
     for attempt in 1..=DB_ATTEMPTS {
         ctx.section("Postgres details");
         ask_the_fields(ctx, &mut details, &mut extra)?;
+        let root = details
+            .ssl_root
+            .as_deref()
+            .filter(|path| !path.trim().is_empty());
         let address = crate::setup_plan_db::typed_address(
             field(&details.host),
             field(&details.port),
@@ -172,6 +183,7 @@ pub(crate) fn ask_typed(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
             field(&details.user),
             field(&details.password),
             details.ssl.unwrap_or(SslChoice::Prefer),
+            root,
             &extra,
         )
         .map_err(Signal::Refused)?;
@@ -304,6 +316,16 @@ fn ask_the_fields(
     }
     if details.ssl.is_none() {
         details.ssl = Some(ask_ssl(ctx, field(&details.host))?);
+    }
+    if details.ssl_root.is_none() {
+        // The root is a flag rather than a question, like the advanced settings:
+        // it is only meaningful with a verifying mode, and most operators have
+        // none to give. A pasted address can still carry `sslrootcert` itself.
+        details.ssl_root = Some(
+            ctx.flag("database-ssl-rootcert")
+                .unwrap_or_default()
+                .to_owned(),
+        );
     }
     // The advanced settings are never asked. `--database-option` still sets
     // them, and the paste route still takes a whole address, so nothing an

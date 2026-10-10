@@ -33,7 +33,7 @@ const HOSTED_BY_FLAG: [(&str, &str); 11] = [
     ("database-connect", "pasted"),
     (
         "database-url",
-        "postgres://clio:pw@db.example.com:5432/clio?sslmode=require",
+        "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full",
     ),
     ("embed", "online"),
     ("embed-url", "https://embed.example.test"),
@@ -51,7 +51,7 @@ const HOSTED_WITHOUT_KEY: [(&str, &str); 10] = [
     ("database-connect", "pasted"),
     (
         "database-url",
-        "postgres://clio:pw@db.example.com:5432/clio?sslmode=require",
+        "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full",
     ),
     ("embed", "online"),
     ("embed-url", "https://embed.example.test"),

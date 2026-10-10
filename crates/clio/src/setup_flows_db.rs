@@ -106,6 +106,12 @@ pub(crate) fn ask_database(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal>
                  `--database-connect typed`, which is the only route that asks for it",
             ));
         }
+        if choice != DatabaseChoice::Existing && ctx.has_flag("database-ssl-rootcert") {
+            return Err(Signal::usage(
+                "--database-ssl-rootcert applies to `--database existing`, the only route that \
+                 reaches a server whose certificate Clio did not issue",
+            ));
+        }
         // A sub-route has questions of its own, so a back from inside one lands
         // here rather than leaving the wizard. The hand-over question is the first
         // of those, so a back from it asks this question again instead of
@@ -301,7 +307,7 @@ fn ask_managed(ctx: &mut Ctx<'_>) -> Result<DatabasePlan, Signal> {
     ));
     ctx.warn(
         "Nothing to answer here. To change any of it, run `clio setup --database-port \
-         34309` (or any port from 34300 to 34310), or add `--database-ssl disable|require`.",
+         34309` (or any port from 34300 to 34310), or add `--database-ssl disable|prefer`.",
     );
     crate::setup_plan_db::managed(&host, &port, &name, &user, ssl, None).map_err(Signal::Refused)
 }

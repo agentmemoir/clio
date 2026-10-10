@@ -237,7 +237,7 @@ fn written_document(written: &WrittenConfig) -> serde_json::Value {
 #[test]
 fn status_agrees_with_the_applied_summary_about_a_remote_postgres() {
     let written = written("agree-remote");
-    let address = "postgres://clio:pw@db.example.com:5432/clio?sslmode=require";
+    let address = "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full";
     let run = apply(
         &written,
         &[
@@ -265,12 +265,12 @@ fn status_agrees_with_the_applied_summary_about_a_remote_postgres() {
     assert_eq!(written_document(&written)["backend"], json!("postgres"));
     assert_eq!(
         report.database.url,
-        "postgres://***@db.example.com:5432/clio?sslmode=require"
+        "postgres://***@db.example.com:5432/clio?sslmode=verify-full"
     );
 
     // The encryption sentence is the one fact both surfaces print about the same
     // address, so it must be the same sentence.
-    let encryption = "encrypted, remote";
+    let encryption = "encrypted and verified, remote";
     assert_eq!(report.database.encryption, encryption);
     assert!(
         summary_database_line(summary).ends_with(encryption),
@@ -336,8 +336,8 @@ fn status_agrees_with_the_applied_summary_about_a_sqlite_file() {
 fn key_view(location: Option<&str>, error: Option<&str>) -> DatabaseView {
     DatabaseView {
         backend: "postgres".to_owned(),
-        url: "postgres://***@db.example.com:5432/clio?sslmode=require".to_owned(),
-        encryption: "encrypted, remote".to_owned(),
+        url: "postgres://***@db.example.com:5432/clio?sslmode=verify-full".to_owned(),
+        encryption: "encrypted and verified, remote".to_owned(),
         key_location: location.map(str::to_owned),
         key_error: error.map(str::to_owned),
     }
@@ -351,7 +351,7 @@ fn a_key_read_that_fails_is_agreement_not_disagreement() {
     // the two values and failed here, having passed on a machine with a
     // Keychain. Pinned so the same comparison cannot come back.
     let summary = "  Applied. 6 settings written to /tmp/x/deployment.json\n        \
-                   Database: Postgres at db.example.com:5432, encrypted, remote\n        \
+                   Database: Postgres at db.example.com:5432, encrypted and verified, remote\n        \
                    Encryption key: unknown (cannot read from the Clio encryption key \
                    in Linux Secret Service: the platform store failed)\n";
     assert_key_agrees(
