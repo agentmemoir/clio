@@ -247,7 +247,16 @@ impl MemTreeMaint {
     /// join.
     #[cfg(test)]
     pub fn wait_for_quiescence(&self) {
-        while self.waves_in_flight.load(Ordering::Acquire) > 0 {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let in_flight = self.waves_in_flight.load(Ordering::Acquire);
+            if in_flight == 0 {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "refresh wave did not finish within 60s; waves_in_flight={in_flight}"
+            );
             thread::sleep(Duration::from_millis(1));
         }
     }

@@ -295,7 +295,9 @@ fn maintenance_status_keeps_failed_backlog_visible_after_wait() {
     }
     let sweeper = state.spawn_index_sweeper_with(Duration::from_millis(10));
     state.nudge_index();
-    std::thread::sleep(Duration::from_millis(2_100));
+    // Every seeded job failed inside the 30s retry backoff, so a sweeper drain
+    // skips them and cannot change the status below. The fixed 2.1s sleep this
+    // replaced was shorter than that backoff, so it could not make them due.
     let status = call(&state, "maintenance_status", json!({"bank": bank}));
     assert_eq!(status["ok"], json!(true), "{status}");
     let index = &status["index"];
