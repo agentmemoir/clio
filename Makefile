@@ -3,6 +3,7 @@
 # Rust (binary: clio):
 #   make build|compile | test | lint | fmt | check | run | install
 #   make ritual | test-fast | coverage-fast   (THE GATES)
+#   make quick BASE=origin/master             (the fast local check, mk/quick.mk)
 #   make scripts-check                        (the self-tests and suites in scripts/)
 #   make coverage | coverage-html | coverage-lcov   (diagnostics)
 #   make coverage-package PACKAGE=<crate>                          (one crate)
@@ -158,10 +159,13 @@ help:
 		'Checks:   make precommit | precommit-list  (run every registered pre-commit hook)' \
 		'Scripts:  make scripts-check  (the self-tests and suites in scripts/)' \
 		'Disk:     make sweep (report) | sweep-clean (reclaim) | clean (delete all build output) | clean-models' \
+		'Quick:    make quick BASE=origin/master (tests of the changed modules, stops at the first failure)' \
 		'Gates:    make ritual (format+clippy only, no tests) | test-fast (tests the changed files'"'"' packages) | coverage-fast (80%+ lines per changed file)' \
 		'Reports:  make coverage | coverage-clean | coverage-html | coverage-lcov | coverage-open | coverage-package PACKAGE=<crate>' \
 		'Compose:  make compose up|down mac|linux  [PROFILE=...]' \
 		'Install:  make install  (cargo install to ~/.cargo/bin)'
+
+include mk/quick.mk
 
 build compile:
 	$(CARGO) build --locked --bin $(BIN)
@@ -595,7 +599,7 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-coverage-policy scripts-check-gate-install
+	scripts-check-coverage-policy scripts-check-gate-install scripts-check-quick
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test

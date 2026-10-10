@@ -87,7 +87,7 @@ SKIP_DIRS = frozenset(
 )
 
 #: Suffixes worth reading. Prose and build files, not binaries and not fixtures.
-SCANNED_SUFFIXES = frozenset({".py", ".md", ".yml", ".yaml", ".toml", ".json", ".rs"})
+SCANNED_SUFFIXES = frozenset({".py", ".md", ".yml", ".yaml", ".toml", ".json", ".rs", ".mk"})
 SCANNED_NAMES = frozenset({"Makefile", "Dockerfile", "justfile"})
 
 #: Files too large to be about a rule, and generated ones.
