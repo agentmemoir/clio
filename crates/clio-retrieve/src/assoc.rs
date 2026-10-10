@@ -10,6 +10,8 @@
 //! ## Owns
 //! - `AssociationEngine`, `AssocEdgeView`, `GraphNodeView`
 //! - The effective-weight observation that prunes decayed coactivation edges
+//! - The engine's live co-activation policy cell and its snapshot accessor, so a
+//!   caller can retune one `Arc`-shared engine instead of rebuilding it
 //!
 //! ## Does not own
 //! - Tool traversal (`assoc_graph`), storage SQL (`clio-store`), or the weight
@@ -25,7 +27,7 @@ use clio_store::{AssocEdgeRecord, AssocKind, AssocPolicy, Store, effective_weigh
 use clio_types::{AmError, ErrorCode};
 use serde::Serialize;
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use crate::assoc_graph::StoreGraphExpander;
@@ -74,19 +76,28 @@ pub struct GraphNodeView {
 
 /// Association graph engine over one store.
 ///
-/// `Clone` shares the one store handle: a cloned engine reads and writes the
-/// same graph rather than a second view of it.
+/// `Clone` shares the one store handle and the one policy cell: a cloned engine
+/// reads and writes the same graph, under the same knobs, rather than a second
+/// view of it.
+///
+/// The co-activation policy sits behind a lock rather than in a plain field
+/// because the ranking tools tune it for the process's own config session, and
+/// every holder of the engine (the retriever's expansion and reinforcement
+/// engine, the retriever's default expander, and the state's graph tools) must
+/// see the new value without being rebuilt. The engine stays policy-driven: it
+/// never reads configuration itself, and a caller supplies the policy it wants
+/// later work to use through [`Self::set_policy`].
 #[derive(Clone)]
 pub struct AssociationEngine {
     pub(crate) store: Arc<dyn Store>,
-    pub(crate) policy: AssocPolicy,
+    pub(crate) policy: Arc<RwLock<AssocPolicy>>,
     pub(crate) now_millis: Option<i64>,
 }
 
 impl std::fmt::Debug for AssociationEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AssociationEngine")
-            .field("policy", &self.policy)
+            .field("policy", &self.policy())
             .finish_non_exhaustive()
     }
 }
@@ -97,7 +108,7 @@ impl AssociationEngine {
     pub fn new(store: Arc<dyn Store>, policy: AssocPolicy) -> Self {
         Self {
             store,
-            policy,
+            policy: Arc::new(RwLock::new(policy)),
             now_millis: None,
         }
     }
@@ -107,20 +118,33 @@ impl AssociationEngine {
     pub fn with_clock(store: Arc<dyn Store>, policy: AssocPolicy, now_millis: i64) -> Self {
         Self {
             store,
-            policy,
+            policy: Arc::new(RwLock::new(policy)),
             now_millis: Some(now_millis),
         }
     }
 
-    /// Current policy knobs.
+    /// The current policy knobs, cloned out in one read-lock scope.
+    ///
+    /// Cloned rather than borrowed so the guard is dropped before the caller
+    /// does any work: a concurrent `set_policy` never waits on a scan, and no
+    /// read guard is held across storage I/O. A caller that reads several knobs
+    /// takes one snapshot and passes it down, so one traversal never mixes two
+    /// knob sets.
     #[must_use]
-    pub fn policy(&self) -> &AssocPolicy {
-        &self.policy
+    pub fn policy(&self) -> AssocPolicy {
+        self.policy
+            .read()
+            .expect("assoc policy lock poisoned")
+            .clone()
     }
 
-    /// Replace policy knobs (affects subsequent reads/writes).
-    pub fn set_policy(&mut self, policy: AssocPolicy) {
-        self.policy = policy;
+    /// Replace the policy knobs used by reads and writes started after this
+    /// call.
+    ///
+    /// Interior mutability, so a live ranking-environment change reaches the
+    /// engine through a shared `Arc` instead of a rebuild.
+    pub fn set_policy(&self, policy: AssocPolicy) {
+        *self.policy.write().expect("assoc policy lock poisoned") = policy;
     }
 
     pub(crate) fn now_millis(&self) -> i64 {
@@ -134,10 +158,13 @@ impl AssociationEngine {
     /// Effective weight, pruning a decayed coactivation edge when observed.
     ///
     /// Returns `Ok(None)` when the edge was pruned (coactivation below `w_min`).
+    /// `policy` is the caller's one snapshot, so a traversal that observes many
+    /// edges reads one knob set rather than re-locking per edge.
     pub(crate) fn observe(
         &self,
         bank: &str,
         edge: &AssocEdgeRecord,
+        policy: &AssocPolicy,
     ) -> Result<Option<f64>, AmError> {
         match edge.assoc_kind {
             AssocKind::Explicit => Ok(Some(edge.weight)),
@@ -146,9 +173,9 @@ impl AssociationEngine {
                     edge.weight,
                     &edge.last_updated_at,
                     self.now_millis(),
-                    self.policy.half_life_days,
+                    policy.half_life_days,
                 );
-                if should_prune(eff, self.policy.w_min) {
+                if should_prune(eff, policy.w_min) {
                     self.store.delete_assoc_edge(bank, &edge.id)?;
                     self.store.record_assoc_audit(
                         bank,
@@ -158,7 +185,7 @@ impl AssociationEngine {
                         &serde_json::json!({
                             "edge_id": edge.id,
                             "effective_weight": eff,
-                            "w_min": self.policy.w_min,
+                            "w_min": policy.w_min,
                         }),
                     )?;
                     Ok(None)
@@ -194,11 +221,12 @@ impl AssociationEngine {
             return Ok(0);
         }
         let now = self.now_millis();
+        let policy = self.policy();
         let mut pairs = 0;
         for i in 0..ids.len() {
             for j in (i + 1)..ids.len() {
                 self.store
-                    .reinforce_assoc_edge(bank, &ids[i], &ids[j], now, self.policy.eta)?;
+                    .reinforce_assoc_edge(bank, &ids[i], &ids[j], now, policy.eta)?;
                 pairs += 1;
             }
         }
