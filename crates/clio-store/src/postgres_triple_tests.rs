@@ -255,13 +255,10 @@ fn pg_supersede_false_and_lookup_guards(store: &PostgresStore, bank2: &str) {
     assert_eq!(err.code, ErrorCode::InvalidArgument);
     assert!(store.get_triple(bank2, "missing").unwrap().is_none());
     assert!(store.triple_end("", "a", "b", None, "t", "t").is_err());
-    assert_eq!(
-        store
-            .invalidate_item(bank2, "nope", "t", "t", None, "agent")
-            .unwrap_err()
-            .code,
-        ErrorCode::ItemNotFound
-    );
+    let missing = store
+        .invalidate_item(bank2, "nope", "t", "t", None, "agent")
+        .unwrap_err();
+    assert_eq!(missing.code, ErrorCode::ItemNotFound);
 }
 
 fn pg_commit_guards_and_duplicate(store: &PostgresStore, bank2: &str) {
