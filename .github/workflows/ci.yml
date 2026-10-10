@@ -255,6 +255,13 @@ jobs:
         if: always()
         run: make scripts-check-coverage-surface
 
+      # The scoped runner's own tests, including the source matcher that decides a
+      # no-code file. It is the gate this job runs, so a break in its selection or
+      # its judgement would land on every other check.
+      - name: Scoped runner self-test
+        if: always()
+        run: make scripts-check-scoped-runner
+
       # Whether the tree still holds exactly one coverage rule. The Scoped
       # coverage step above is what this protects: the four rules that were not
       # this one each arrived in a change about something else, and nothing in the
