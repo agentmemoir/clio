@@ -8,13 +8,14 @@
 //! shared retriever, that a lowered co-activation threshold changes hub
 //! eligibility in the same process, that a live trust ratio and a live
 //! retrieval weight change the next retrieval, that a live co-activation
-//! threshold changes the next retrieval's graph expansion, and that a fresh
-//! process still starts from the effective defaults.
+//! threshold changes the next retrieval's graph expansion and the state's
+//! assoc engine behind the graph tools, and that a fresh process still starts
+//! from the effective defaults.
 //!
 //! ## Owns
 //! - `McpState::ranking_policy` and `apply_ranking_policy` assertions
-//! - The live trust-ratio, retrieval-weight, and co-activation-expansion tests
-//!   through the real `ranking_env_set` write path
+//! - The live trust-ratio, retrieval-weight, co-activation-expansion, and
+//!   graph-tool policy tests through the real `ranking_env_set` write path
 //!
 //! ## Does not own
 //! - The `consolidate` response shape (`mutator_tools_tests`)
@@ -397,8 +398,10 @@ fn a_dry_run_ranking_change_leaves_the_next_retrieval_alone() {
 }
 
 /// A live `ranking_env_set` `coactivation.w_min` patch governs the next
-/// retrieval's graph expansion: the retriever's own association engine reads
-/// the new threshold even though the retriever object was never rebuilt.
+/// retrieval's graph expansion and the state's own association engine (the
+/// graph tools): both read the new threshold even though neither was rebuilt.
+/// The retrieval check stays meaningful because nothing prunes the edge before
+/// it, so it fails if the retriever alone is left on its old policy.
 #[test]
 fn a_live_coactivation_patch_governs_the_next_retrieval_expansion() {
     let state = retrieval_state();
@@ -422,6 +425,10 @@ fn a_live_coactivation_patch_governs_the_next_retrieval_expansion() {
     // real `ranking_env_set` path, which calls `apply_ranking_policy`.
     let set = set_w_min(&state, 0.5);
     assert_eq!(set["ok"], json!(true), "{set}");
+    // The state's own association engine, which the graph tools read, takes the
+    // same knob through its shared policy cell.
+    let policy = state.assoc.policy();
+    assert_eq!(policy.w_min.to_bits(), 0.5f64.to_bits(), "{set}");
 
     let after = retrieve_expanding(&state, "alpha");
     assert_eq!(
