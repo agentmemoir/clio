@@ -273,6 +273,12 @@ jobs:
         if: always()
         run: make scripts-check-coverage-policy
 
+      # The test lookup against the runner's real list. It builds the test
+      # binaries itself, so it runs here directly, outside the suite targets.
+      - name: Owned lookup acceptance
+        if: always()
+        run: python3 scripts/owned_tests.py --accept
+
       # Last, so it can report on whichever step failed: a test binary killed
       # from outside prints nothing, which is the case this was added for.
       - name: Out-of-memory check
