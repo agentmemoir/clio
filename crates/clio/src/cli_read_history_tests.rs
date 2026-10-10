@@ -27,7 +27,7 @@ use crate::cli_read_test_support::{
     call, json_of, run_state, seed_failure, seed_item, seed_task, seed_triple, state,
 };
 use clio_mcp::runtime::McpState;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -56,9 +56,10 @@ fn task_get_success_missing_and_text() {
     assert!(out.contains("task_id: t1"), "{out}");
     assert!(out.contains("version: 3"), "{out}");
 
-    let (code, out, _) = run_state("task get", &["ghost", "--bank", "bank-a"], &s, false);
-    assert_eq!(code, ExitCode::from(0));
-    assert_eq!(json_of(&out)["record"], Value::Null);
+    // A task the bank does not hold is not found, not an empty record.
+    let (code, out, err) = run_state("task get", &["ghost", "--bank", "bank-a"], &s, false);
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(err.contains("\"code\":\"not_found\""), "{err}");
 
     assert_eq!(render_task_get(&json!({})), "no task");
     assert_eq!(
@@ -123,13 +124,15 @@ fn failure_list_exact_truncation_and_none() {
     assert_eq!(page["failures"].as_array().map(Vec::len), Some(1));
     assert_eq!(page["truncated"], json!(true));
 
-    let (_, out, _) = run_state(
+    // An argument that names no task and matches no failure is not found.
+    let (code, _, err) = run_state(
         "failure list",
         &["zzz-unknown", "--bank", "bank-a"],
         &s,
         false,
     );
-    assert_eq!(json_of(&out)["mode"], json!("none"));
+    assert_eq!(code, ExitCode::from(1), "{err}");
+    assert!(err.contains("\"code\":\"not_found\""), "{err}");
 
     let (_, out, _) = run_state("failure list", &["t1", "--bank", "bank-a"], &s, true);
     assert!(out.contains("mode: exact"), "{out}");

@@ -253,7 +253,7 @@ fn context_never_satisfies_snapshot_span_verification() {
         json!({"entity": "terse answers", "amount": 7, "date": "2024-01-01"});
     decoy["context"] = json!("The recorded amount is exactly 7.");
     let out = call(&s, "store", decoy);
-    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["ok"], json!(false), "{out}");
     assert!(
         !out["pass"].as_bool().unwrap_or(true),
         "decoy context must not verify the snapshot span: {out}"

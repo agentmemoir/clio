@@ -111,11 +111,20 @@ pub(crate) fn tool_result_value<T: Serialize>(result: ToolResult<T>) -> Result<V
     }
 }
 
-fn item_not_found(item_id: &str) -> AmError {
+pub(crate) fn item_not_found(item_id: &str) -> AmError {
     AmError::new(
         ErrorCode::ItemNotFound,
         format!("item `{item_id}` not found in bank"),
     )
+}
+
+/// Refuse an item id the bank does not hold. A mistyped id is then an error,
+/// not an empty answer that reads as "no data".
+pub(crate) fn require_item(state: &McpState, bank: &str, item_id: &str) -> Result<(), AmError> {
+    match state.store.get_memory_item(bank, item_id)? {
+        Some(_) => Ok(()),
+        None => Err(item_not_found(item_id)),
+    }
 }
 
 /// `get(item_id)`: full metadata + content references.
@@ -184,6 +193,9 @@ fn get_gist(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn maintenance_status(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    if let Some(item_id) = opt_str(args, "item_id") {
+        require_item(state, ctx.bank.as_str(), item_id)?;
+    }
     let result =
         clio_write::maintenance_status(&state.maint, ctx.bank.as_str(), opt_str(args, "item_id"));
     let status = match result.clone() {

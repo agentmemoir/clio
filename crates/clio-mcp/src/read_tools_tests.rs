@@ -414,3 +414,15 @@ fn memtree_query_and_get() {
     let too_deep = call(&s, "memtree_query", json!({"bank": "bank-a", "depth": 99}));
     assert_eq!(too_deep["code"], json!("out_of_range"));
 }
+
+#[test]
+fn maintenance_status_for_an_unknown_item_is_item_not_found() {
+    let s = state();
+    let out = call(
+        &s,
+        "maintenance_status",
+        json!({"item_id": "itm-nope", "bank": "bank-a"}),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("item_not_found"), "{out}");
+}

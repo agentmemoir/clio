@@ -296,3 +296,5 @@ fn t04c_successful_retrieve_emits_reinforce_telemetry() {
         "one PII-safe reinforce audit per wave"
     );
 }
+
+impl clio_store::TripleAssertion for FaultyStore {}

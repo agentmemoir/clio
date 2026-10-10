@@ -87,15 +87,15 @@ fn unknown_subcommand_suggests_a_neighbour() {
 
 #[test]
 fn run_open_dispatches_group_and_single_commands() {
-    // A group command against an empty in-memory store succeeds (record null).
+    // A group read of a task the empty in-memory store does not hold is not found.
     let (code, out, err) = run_open(
         "task",
         &["get", "t1", "--db", "sqlite::memory:", "--bank", "bank-a"],
         false,
     );
-    assert_eq!(code, ExitCode::from(0));
-    assert!(out.contains("\"ok\":true"), "{out}");
-    assert!(err.is_empty(), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("\"code\":\"not_found\""), "{err}");
 
     // A single read command still opens state and runs.
     let (code, out, _) = run_open("stats", &["--db", "sqlite::memory:"], false);
