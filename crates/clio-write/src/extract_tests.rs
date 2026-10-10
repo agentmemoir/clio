@@ -168,7 +168,7 @@ fn template_egress_is_scrubbed_like_chat_path() {
     let text = body["text"].as_str().unwrap();
     assert!(!text.contains("hunter2"), "{text}");
     let payload = body["tool_payload"].as_object().unwrap();
-    assert_ne!(payload["password"].as_str().unwrap(), "hunter2");
+    assert_ne!(payload["****word"].as_str().unwrap(), "hunter2");
     assert_eq!(payload["name"].as_str().unwrap(), "svc");
     let feedback = body["verify_feedback"].as_str().unwrap();
     assert!(!feedback.contains("hunter2"), "{feedback}");

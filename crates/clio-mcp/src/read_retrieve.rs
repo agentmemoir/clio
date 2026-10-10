@@ -133,24 +133,24 @@ fn retrieve_at(state: &McpState, args: &Value, now: Option<String>) -> Result<Va
         limit: opt_usize(args, "limit").unwrap_or(DEFAULT_LIMIT),
         as_of: opt_str(args, "as_of").map(str::to_owned),
         time_axis: time_axis(args)?,
-        expand_graph: opt_bool(args, "expand_graph", false),
+        expand_graph: opt_bool(args, "expand_graph", false)?,
         budget_tokens: opt_usize(args, "budget_tokens"),
         now,
         query_anchor: opt_str(args, "query_anchor").map(str::to_owned),
         recall_scope,
-        prefer_consolidated: opt_bool(args, "prefer_consolidated", false),
+        prefer_consolidated: opt_bool(args, "prefer_consolidated", false)?,
         duplicate_tolerance_read,
         retention_curve,
         retention_floor,
         min_scores: min_scores_from_value(args.get("min_scores"))?,
-        include_entities: opt_bool(args, "include_entities", true),
-        entity_summary: opt_bool(args, "entity_summary", false),
-        include_exact: opt_bool(args, "include_exact", false),
+        include_entities: opt_bool(args, "include_entities", true)?,
+        entity_summary: opt_bool(args, "entity_summary", false)?,
+        include_exact: opt_bool(args, "include_exact", false)?,
         provenance_floor,
     };
     let outcome = state.retriever.retrieve(&request)?;
     let mut value = serde_json::to_value(&outcome).expect("serialize retrieve outcome");
-    if opt_bool(args, "explain", false) {
+    if opt_bool(args, "explain", false)? {
         value["explanation"] = retrieve_explanation(&outcome, &request.domains);
     }
     Ok(value)
@@ -266,11 +266,11 @@ fn compose_context_at(
         persona_entries: persona_entries(state, &ctx, &timestamp)?,
         as_of: opt_str(args, "as_of").map(str::to_owned),
         time_axis: time_axis(args)?,
-        expand_graph: opt_bool(args, "expand_graph", false),
+        expand_graph: opt_bool(args, "expand_graph", false)?,
         now,
         query_anchor: opt_str(args, "query_anchor").map(str::to_owned),
         recall_scope,
-        prefer_consolidated: opt_bool(args, "prefer_consolidated", false),
+        prefer_consolidated: opt_bool(args, "prefer_consolidated", false)?,
         duplicate_tolerance_read,
         retention_curve,
         retention_floor,
@@ -280,7 +280,7 @@ fn compose_context_at(
     let composer = Composer::new(std::sync::Arc::clone(&state.retriever));
     let pack = composer.compose(&request, None)?;
     let mut value = serde_json::to_value(&pack).expect("serialize compose pack");
-    if opt_bool(args, "explain", false) {
+    if opt_bool(args, "explain", false)? {
         value["explanation"] = compose_explanation(&pack);
     }
     Ok(value)
