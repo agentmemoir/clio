@@ -27,11 +27,11 @@
 //! Keep this module focused on the MCP binding of the curve policy.
 
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
 use crate::write_tools::{dispatch, tool_result};
 use clio_retrieve::retrieve_from_json_with_policy;
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
-use std::sync::Arc;
 
 /// Fixed clock for every call in this module, injected through the handlers'
 /// `now` seam — the engine's fixed-clock input. The published `retrieve` and
@@ -39,15 +39,16 @@ use std::sync::Arc;
 /// could not fix the clock.
 const NOW: &str = "2030-01-01T00:00:00Z";
 
-fn state() -> Arc<McpState> {
-    McpState::open_with_effective(
+/// Hermetic state whose retention store is a file the fixture owns, so a profile
+/// written here never reaches the store the host environment names.
+fn state() -> RetentionStoreFixture {
+    RetentionStoreFixture::open_with_effective(
         &McpOpenOptions {
             default_bank: "bank-a".into(),
             ..McpOpenOptions::default()
         },
         &json!({}),
     )
-    .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]
