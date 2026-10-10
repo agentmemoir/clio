@@ -141,6 +141,7 @@ fn check_origin_allows_loopback_and_refuses_another_host() {
         "https://127.0.0.1",
         "http://localhost",
         "https://127.0.0.1:8443",
+        "http://[::1]:5173",
     ] {
         assert_eq!(
             check_origin(&cfg, &request_with("POST", &[("origin", origin)])),
@@ -181,22 +182,21 @@ fn check_origin_allows_a_configured_host_and_nothing_more() {
     );
 }
 
-/// The host policy on its own: the scheme is dropped, the port is dropped with
-/// the host it follows, a bare host with no scheme is compared as written, and
-/// everything not loopback or configured fails.
-///
-/// Only the two loopback spellings the split handles are listed. A bracketed
-/// IPv6 literal is not: the host is cut at its first colon, so `[::1]` arrives
-/// as `[` and is refused. That is the guard's behavior today, not a claim that
-/// IPv6 loopback should be refused, so it is not pinned here.
+/// The host policy on its own: the scheme is dropped, the port is cut from the
+/// host it follows — after the closing bracket for an IPv6 literal — a bare host
+/// with no scheme is compared as written, and everything not loopback or
+/// configured fails.
 #[test]
 fn origin_host_allowed_accepts_loopback_and_configured_hosts_only() {
-    let extra = vec!["custom-host".to_owned()];
+    let extra = vec!["custom-host".to_owned(), "[2001:db8::1]".to_owned()];
     for origin in [
         "http://localhost:8080",
         "https://127.0.0.1",
         "http://127.0.0.1:9000",
+        "http://[::1]:38417",
+        "http://[::1]",
         "custom-host",
+        "https://[2001:db8::1]:9000",
     ] {
         assert!(origin_host_allowed(origin, &extra), "must allow {origin}");
     }

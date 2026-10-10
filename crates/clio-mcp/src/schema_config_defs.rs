@@ -82,7 +82,7 @@ pub fn config_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "ranking_env_set",
-            description: "Patch the ranking/admission environment for this process's config session; the patch is readable back through `ranking_env_get` and `config_get`, is discarded at process exit, and governs the next retrieval: a successful set pushes the new retrieval weights, retention half-life, and trust ratios into the already-open retrieval snapshot, while the admission policy and the intent gate stay on the ranking environment fixed at process open. `dry_run=true` returns the normalized weights that would apply. Weights that must sum to 1.0 are renormalized or rejected with a clear error.",
+            description: "Patch the ranking/admission environment for this process's config session; the patch is readable back through `ranking_env_get` and `config_get`, is discarded at process exit, and governs the next retrieval: a successful set pushes the new retrieval weights, retention half-life, and trust ratios into the already-open retrieval snapshot, while the admission policy, the intent gate, and the hygiene weights stay on the ranking environment fixed at process open, and a `coactivation` patch reaches the association hub but not the retriever's own query expansion, which is fixed when the retriever is built. `dry_run=true` returns the normalized weights that would apply. Weights that must sum to 1.0 are renormalized or rejected with a clear error.",
             required: &["patch"],
             props: vec![
                 (
