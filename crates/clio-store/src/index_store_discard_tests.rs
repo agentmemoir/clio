@@ -132,7 +132,7 @@ fn suite_discard(store: &dyn DiscardBackend) {
             )
             .unwrap_err()
             .code,
-        ErrorCode::NotFound
+        ErrorCode::ItemNotFound
     );
     // Cross-bank id is not found and never leaks existence.
     assert_eq!(
@@ -140,7 +140,7 @@ fn suite_discard(store: &dyn DiscardBackend) {
             .discard_item(&bank_b, &id, "ops cleanup", "2024-06-01", "agent")
             .unwrap_err()
             .code,
-        ErrorCode::NotFound
+        ErrorCode::ItemNotFound
     );
     assert!(store.get_item_identity(&bank_b, &id).unwrap().is_none());
     assert_eq!(

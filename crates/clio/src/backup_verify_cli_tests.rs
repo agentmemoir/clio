@@ -143,18 +143,21 @@ fn latest_resolves_the_newest_snapshot() {
 }
 
 #[test]
-fn latest_in_an_empty_directory_is_a_usage_error() {
+fn latest_in_an_empty_directory_is_not_found() {
     let scratch = Scratch::new("verify-latest-empty");
     std::fs::create_dir_all(scratch.join("backups")).expect("create the directory");
 
     let (code, _, err) = run_json_in(&scratch, &["verify", "--latest"]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("no snapshot to verify"), "{err}");
+    let error: Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["ok"], json!(false), "{error}");
+    assert_eq!(error["code"], json!("not_found"), "{error}");
 }
 
 #[test]
-fn an_unknown_id_suggests_the_closest_one() {
+fn an_unknown_id_is_not_found_and_suggests_the_closest_one() {
     let scratch = Scratch::new("verify-unknown");
     let (id, _) = snapshot(&scratch);
     let mut wrong = id.clone();
@@ -162,8 +165,10 @@ fn an_unknown_id_suggests_the_closest_one() {
 
     let (code, _, err) = run_json_in(&scratch, &["verify", &wrong]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains(&format!("did you mean `{id}`")), "{err}");
+    let error: Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["code"], json!("not_found"), "{error}");
 }
 
 #[test]
@@ -384,12 +389,12 @@ fn verify_refuses_an_output_mode_it_does_not_know() {
 }
 
 #[test]
-fn latest_with_no_backup_directory_at_all_lists_nothing_and_refuses() {
+fn latest_with_no_backup_directory_at_all_is_not_found() {
     let scratch = Scratch::new("verify-no-dir");
 
     let (code, _, err) = run_json_in(&scratch, &["verify", "--latest"]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("no snapshot to verify"), "{err}");
 }
 
@@ -424,7 +429,7 @@ fn an_unknown_id_without_a_close_match_points_at_the_listing() {
 
     let (code, _, err) = run_json_in(&scratch, &["verify", "zzzz"]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("no snapshot `zzzz`"), "{err}");
     assert!(err.contains("clio backup list"), "{err}");
     assert!(!err.contains(&id), "no real id is echoed: {err}");

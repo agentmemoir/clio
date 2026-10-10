@@ -11,8 +11,8 @@ from unittest import mock
 from exec_tempdir import exec_tempdir
 from gate import *  # noqa: F403 - re-exports every engine name the tests reference
 
-def state(head: str, diff: str = "d", untracked=(), changed=()) -> TreeState:
-    return TreeState(head, diff, tuple(untracked), tuple(changed))
+def state(head: str, contents=(), changed=()) -> TreeState:
+    return TreeState(head, tuple(contents), tuple(changed))
 
 members = [
     Member("a", "/repo/crates/a", ("b",)),
@@ -27,10 +27,13 @@ class Tests(unittest.TestCase):
         baseline = fingerprint(state("h", changed=touched), env, "test", ["cargo", "test"])
         self.assertEqual(baseline, fingerprint(state("h", changed=touched), env, "test", ["cargo", "test"]))
         self.assertNotEqual(baseline, fingerprint(state("h2", changed=touched), env, "test", ["cargo", "test"]))
-        self.assertNotEqual(baseline, fingerprint(state("h", diff="d2", changed=touched), env, "test", ["cargo", "test"]))
         self.assertNotEqual(
             baseline,
-            fingerprint(state("h", changed=touched, untracked=(("new.rs", "z"),)), env, "test", ["cargo", "test"]),
+            fingerprint(state("h", contents=(("crates/a/src/lib.rs", "d2"),), changed=touched), env, "test", ["cargo", "test"]),
+        )
+        self.assertNotEqual(
+            baseline,
+            fingerprint(state("h", contents=(("new.rs", "z"),), changed=touched), env, "test", ["cargo", "test"]),
         )
         self.assertNotEqual(baseline, fingerprint(state("h", changed=touched), {"CLIO_DATABASE_URL": "y"}, "test", ["cargo", "test"]))
         self.assertNotEqual(baseline, fingerprint(state("h", changed=touched), env, "test", ["cargo", "test", "--workspace"]))
@@ -101,10 +104,10 @@ class Tests(unittest.TestCase):
             self.assertNotEqual(
                 baseline, fingerprint(state("h", changed=touched), env, kind, argv)
             )
-        self.assertEqual(b"clio-gate-v3\0", KEY_SCHEME)
-        # The version is the second, so an entry from the scheme before this
+        self.assertEqual(b"clio-gate-v4\0", KEY_SCHEME)
+        # The version is the fourth, so an entry from the scheme before this
         # one cannot be mistaken for one from this one.
-        self.assertTrue(KEY_SCHEME.endswith(b"v3\0"))
+        self.assertTrue(KEY_SCHEME.endswith(b"v4\0"))
 
     def test_a_test_lookup_is_not_a_test_verdict(self):
         self.assertEqual("test", command_kind(["cargo", "nextest", "run"]))

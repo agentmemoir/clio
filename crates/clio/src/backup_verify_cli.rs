@@ -175,8 +175,11 @@ fn verify(path: &Path) -> Result<VerifyReport, CliError> {
 fn resolve_id(parsed: &ParsedArgs, rows: &[SnapshotRow]) -> Result<String, CliError> {
     if parsed.has("latest") {
         return rows.first().map(|row| row.id.clone()).ok_or_else(|| {
-            CliError::usage("no snapshot to verify: the backup directory is empty")
-                .with_hint("take one with `clio backup create`")
+            CliError::operational(
+                "not_found",
+                "no snapshot to verify: the backup directory is empty",
+            )
+            .with_hint("take one with `clio backup create`")
         });
     }
     let id = parsed.positional(0).unwrap_or_default();
@@ -188,7 +191,11 @@ fn resolve_id(parsed: &ParsedArgs, rows: &[SnapshotRow]) -> Result<String, CliEr
         || "run `clio backup list` to see the snapshots".to_owned(),
         |best| format!("did you mean `{best}`?"),
     );
-    Err(CliError::usage(format!("no snapshot `{id}` in the backup directory")).with_hint(hint))
+    Err(CliError::operational(
+        "not_found",
+        format!("no snapshot `{id}` in the backup directory"),
+    )
+    .with_hint(hint))
 }
 
 /// The JSON verdict: per member, plus the archive's own facts.

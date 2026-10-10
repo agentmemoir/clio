@@ -365,7 +365,7 @@ pub fn run_index_suite(store: &dyn IndexBackend) {
             .put_lexical_doc(&bank_a, "missing-item", "x")
             .unwrap_err()
             .code,
-        clio_types::ErrorCode::NotFound
+        clio_types::ErrorCode::ItemNotFound
     );
     assert!(!store.delete_lexical_doc(&bank_a, "missing-item").unwrap());
 

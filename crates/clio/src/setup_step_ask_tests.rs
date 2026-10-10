@@ -190,7 +190,7 @@ fn a_hosted_service_with_no_key_and_no_terminal_is_refused() {
             ("database-connect", "pasted"),
             (
                 "database-url",
-                "postgres://clio:pw@db.example.com:5432/clio?sslmode=require",
+                "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full",
             ),
             ("embed", "online"),
             ("embed-url", "https://embed.example.test"),

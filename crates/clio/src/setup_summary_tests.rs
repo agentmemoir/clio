@@ -76,7 +76,10 @@ fn a_managed_loopback_run_names_the_parts_and_the_locality() {
         "{text}"
     );
     assert!(
-        text.contains("Database: Postgres at 127.0.0.1:34310, encrypted: no, this machine only"),
+        text.contains(
+            "Database: Postgres at 127.0.0.1:34310, encrypted and verified when offered, this \
+             machine only"
+        ),
         "{text}"
     );
     assert!(
@@ -98,8 +101,8 @@ fn a_managed_loopback_run_names_the_parts_and_the_locality() {
 #[test]
 fn a_remote_encrypted_run_names_remote_and_encrypted() {
     let plan = existing(
-        "postgres://clio:pw@db.example.com:5432/clio?sslmode=require".to_owned(),
-        SslChoice::Require,
+        "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full".to_owned(),
+        SslChoice::VerifyFull,
         Vec::new(),
         None,
     )
@@ -112,7 +115,7 @@ fn a_remote_encrypted_run_names_remote_and_encrypted() {
     let text = render(&answers, 6);
 
     assert!(
-        text.contains("Database: Postgres at db.example.com:5432, encrypted, remote"),
+        text.contains("Database: Postgres at db.example.com:5432, encrypted and verified, remote"),
         "{text}"
     );
     assert!(

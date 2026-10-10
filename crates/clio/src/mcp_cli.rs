@@ -242,6 +242,9 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
         Ok(flags) => flags,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
     };
+    if let Err(error) = refuse_sessions_value(&flags) {
+        return crate::cli_top_level::report_surface_usage_error(&error, &collected);
+    }
     let opts = match mcp_options(collected.iter().cloned()) {
         Ok(opts) => opts,
         Err(reason) => {
@@ -336,6 +339,22 @@ pub(crate) fn http_config(
     }
 }
 
+/// `--sessions` is a switch. Bare, it turns sessions on. With a value
+/// (`--sessions=false`, or a token taken as `--sessions extra`) the value is
+/// not what the caller meant, and sessions would still turn on, so it fails
+/// closed instead.
+fn refuse_sessions_value(
+    flags: &std::collections::HashMap<String, String>,
+) -> Result<(), crate::cli_error::CliError> {
+    match flags.get("sessions") {
+        Some(value) if value != "true" => Err(crate::cli_error::CliError::usage_hint(
+            "--sessions takes no value",
+            "pass --sessions alone to turn sessions on, or leave it out",
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Load the credential store `--token-file` names.
 ///
 /// `None` when the flag is absent, which keeps the loopback dev default. An
@@ -406,3 +425,7 @@ mod dispatch_tests;
 #[cfg(test)]
 #[path = "mcp_cli_credentials_tests.rs"]
 mod credentials_tests;
+
+#[cfg(test)]
+#[path = "mcp_cli_sessions_tests.rs"]
+mod sessions_tests;

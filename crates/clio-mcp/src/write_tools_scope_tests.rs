@@ -60,7 +60,8 @@ fn args_with_unlisted_leaf(id: &str) -> Value {
 fn store_rejects_unlisted_snapshot_leaf_and_writes_nothing() {
     let s = state();
     let out = call(&s, "store", args_with_unlisted_leaf("itm-unlisted"));
-    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("admission_refused"), "{out}");
     assert!(!out["pass"].as_bool().unwrap_or(true), "{out}");
     let reason = out["rejection_reason"].as_str().unwrap_or_default();
     assert!(reason.contains("span_verify"), "{out}");
@@ -170,7 +171,7 @@ fn tool_response_and_rejection_never_echo_the_caller_snapshot_key() {
     let mut args = args_with_unlisted_leaf("itm-unlisted-secret");
     args["item"]["snapshot"]["sk-live-LEAKEDKEY99"] = json!("x");
     let out = call(&s, "store", args);
-    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["ok"], json!(false), "{out}");
     assert!(!out["pass"].as_bool().unwrap_or(true), "{out}");
     let response = serde_json::to_string(&out).expect("response serializes");
     assert!(

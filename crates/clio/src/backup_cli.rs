@@ -302,19 +302,22 @@ fn resolve_store_target(
 }
 
 /// The snapshot to restore: the positional id, or the newest row of the
-/// listing. An unknown id is refused with the closest ids suggested.
+/// listing. A missing id is reported with the closest ids suggested.
 ///
 /// # Errors
 /// No id was given, `--latest` finds an empty backup directory, or the id is
-/// not in the listing.
+/// not in the listing. The first case is usage; the other two are not-found.
 pub(crate) fn resolve_restore_id(
     parsed: &ParsedArgs,
     rows: &[SnapshotRow],
 ) -> Result<String, CliError> {
     if parsed.has("latest") {
         return rows.first().map(|row| row.id.clone()).ok_or_else(|| {
-            CliError::usage("there is nothing to restore: the backup directory is empty")
-                .with_hint("take one with `clio backup create`")
+            CliError::operational(
+                "not_found",
+                "there is nothing to restore: the backup directory is empty",
+            )
+            .with_hint("take one with `clio backup create`")
         });
     }
     let id = parsed.positional(0).unwrap_or_default();
@@ -326,7 +329,11 @@ pub(crate) fn resolve_restore_id(
         || "run `clio backup list` to see the snapshots".to_owned(),
         |best| format!("did you mean `{best}`?"),
     );
-    Err(CliError::usage(format!("no snapshot `{id}` in the backup directory")).with_hint(hint))
+    Err(CliError::operational(
+        "not_found",
+        format!("no snapshot `{id}` in the backup directory"),
+    )
+    .with_hint(hint))
 }
 
 /// The refusal for a backend this build does not snapshot.

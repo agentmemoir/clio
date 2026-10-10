@@ -244,3 +244,53 @@ fn a_database_name_flag_with_a_path_separator_is_refused() {
     assert!(reason.contains("--database-name"), "{reason}");
     assert!(reason.contains("cannot hold"), "{reason}");
 }
+
+#[test]
+fn the_managed_route_refuses_the_no_verify_mode() {
+    // The deliberate no-check mode is for a server whose certificate Clio did
+    // not issue. A container Clio started has no certificate, so the mode is
+    // refused by name rather than accepted and failed at the connection test.
+    let reason = Harness::fresh()
+        .flag("database-ssl", "encrypt-no-verify")
+        .typing(crate::setup_preview_fixtures::MANAGED)
+        .typing(SERVICES)
+        .expect_refusal();
+    assert!(reason.contains("encrypt-no-verify"), "{reason}");
+    assert!(reason.contains("managed"), "{reason}");
+}
+
+#[test]
+fn the_managed_route_refuses_a_root_certificate_flag() {
+    // The root certificate belongs to a server Clio did not issue. The managed
+    // route reaches no such server, so the flag is refused by name rather than
+    // accepted and never used.
+    let reason = Harness::fresh()
+        .flag("database-ssl-rootcert", "/etc/ca.pem")
+        .typing(crate::setup_preview_fixtures::MANAGED)
+        .typing(SERVICES)
+        .expect_refusal();
+    assert!(reason.contains("--database-ssl-rootcert"), "{reason}");
+}
+
+#[test]
+fn the_sqlite_route_refuses_a_root_certificate_flag() {
+    let reason = Harness::fresh()
+        .flag("database-ssl-rootcert", "/etc/ca.pem")
+        .typing(crate::setup_preview_fixtures::SQLITE)
+        .typing(SERVICES)
+        .expect_refusal();
+    assert!(reason.contains("--database-ssl-rootcert"), "{reason}");
+}
+
+#[test]
+fn the_paste_route_refuses_a_root_certificate_flag() {
+    // A pasted address is kept as given and carries its own `sslrootcert`, so
+    // the flag cannot reach it. It is refused rather than silently dropped.
+    let reason = Harness::fresh()
+        .flag("database-ssl-rootcert", "/etc/ca.pem")
+        .with_secrets(&[ADDRESS])
+        .typing("3\n1\n")
+        .typing(SERVICES)
+        .expect_refusal();
+    assert!(reason.contains("--database-ssl-rootcert"), "{reason}");
+}

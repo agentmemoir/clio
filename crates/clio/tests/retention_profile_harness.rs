@@ -243,7 +243,9 @@ fn t25_07_fresh_runtime_resolves_builtin_default_and_still_gates() {
             "actor": "agent"
         }),
     );
-    assert_eq!(refused["ok"], json!(true), "{refused}");
+    // A refused write is `ok:false`, so it is never read as stored.
+    assert_eq!(refused["ok"], json!(false), "{refused}");
+    assert_eq!(refused["code"], json!("admission_refused"), "{refused}");
     assert_eq!(refused["pass"], json!(false));
     assert!(refused["rejection_reason"].is_string());
     assert_eq!(refused["profile_version"], json!(RETENTION_PROFILE_VERSION));

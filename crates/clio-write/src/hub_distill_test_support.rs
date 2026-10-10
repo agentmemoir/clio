@@ -352,3 +352,5 @@ impl clio_store::DistilledUnitStore for CrashSeam {
             .complete_distill_intent(bank_id, hub_id, revision_item_id)
     }
 }
+
+impl clio_store::TripleAssertion for CrashSeam {}

@@ -299,3 +299,42 @@ fn update_and_failure_record_missing_required_args() {
     assert_eq!(out["ok"], json!(false));
     assert_eq!(out["code"], json!("invalid_argument"));
 }
+
+#[test]
+fn invalidate_with_an_unknown_replacement_is_refused_and_leaves_the_item_open() {
+    use crate::runtime::{McpOpenOptions, McpState};
+    use crate::write_tools::dispatch;
+    use serde_json::json;
+    let s = McpState::open(&McpOpenOptions::default()).expect("state");
+    let stored = dispatch(
+        &s,
+        "store",
+        &json!({
+            "item": {
+                "id": "itm-inv-1", "subject_id": "itm-inv-1", "gist": "terse invalidate answers",
+                "snapshot": {"entity": "terse invalidate answers", "amount": 1, "date": "2024-01-01"}
+            },
+            "category": "persona", "epistemic_kind": "fact", "bank": "bank-a", "actor": "agent",
+            "source_text": "The user prefers terse invalidate answers (1 note since 2024-01-01)."
+        }),
+    );
+    assert_eq!(stored["ok"], json!(true), "{stored}");
+    let refused = dispatch(
+        &s,
+        "invalidate",
+        &json!({"item_id": "itm-inv-1", "replacement_id": "itm-nope", "bank": "bank-a", "actor": "agent"}),
+    );
+    assert_eq!(refused["ok"], json!(false), "{refused}");
+    assert_eq!(refused["code"], json!("item_not_found"), "{refused}");
+    let closed = dispatch(
+        &s,
+        "invalidate",
+        &json!({"item_id": "itm-inv-1", "bank": "bank-a", "actor": "agent"}),
+    );
+    assert_eq!(closed["ok"], json!(true), "{closed}");
+    assert_eq!(
+        closed["closed_ids"].as_array().map(Vec::len),
+        Some(1),
+        "{closed}"
+    );
+}

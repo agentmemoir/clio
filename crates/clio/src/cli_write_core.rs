@@ -30,10 +30,8 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{base_args, no_positionals, one_positional, parse_f64, validate_choice};
-use crate::cli_write_duplicate::{
-    allow_duplicate_arg, is_duplicate_noop, remember_refusal, render_duplicate,
-};
-use crate::cli_write_group::{Refusal, WriteCall, WriteGroup};
+use crate::cli_write_duplicate::{allow_duplicate_arg, remember_refusal};
+use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, batch_preview_refusal};
 use clio_types::{CONTEXT_MAX_BYTES, ErrorCode, SemanticCategory, validate_context};
 use serde_json::{Map, Value, json};
 
@@ -92,7 +90,6 @@ impl WriteGroup for CoreWriteGroup {
             "remember" if payload.get("dry_run") == Some(&Value::Bool(true)) => {
                 render_preview(payload)
             }
-            "remember" if is_duplicate_noop(payload) => render_duplicate(payload),
             "remember" => render_stored(payload),
             // `admit --file` batch preview: summary counts, not one decision.
             "admit" if is_batch_preview(payload) => render_batch_preview(payload),
@@ -107,12 +104,13 @@ impl WriteGroup for CoreWriteGroup {
 
     fn refusal(&self, verb: &str, payload: &Value) -> Option<Refusal> {
         // `admit` is the pre-flight check: a rejecting decision is the expected
-        // output (exit 0, nothing written). Only a real `remember` write maps
-        // `pass: false` to the exit-1 domain refusal.
-        if verb == "remember" {
-            remember_refusal(payload)
-        } else {
-            None
+        // output (exit 0, nothing written). A `remember` write maps `pass: false`
+        // and a duplicate to the exit-1 domain refusal. A batch preview in which
+        // every item is invalid is refused too, because nothing was previewed.
+        match verb {
+            "remember" => remember_refusal(payload),
+            "admit" if is_batch_preview(payload) => batch_preview_refusal(payload),
+            _ => None,
         }
     }
 }
@@ -144,39 +142,11 @@ fn remember_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
 /// `admit_preview_batch` (read-only batch preview over the file's `items`).
 fn admit_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     if let Some(path) = parsed.value("file") {
-        // The batch file carries `context` per item; a command-level value
-        // would be ambiguous, so the combination fails closed instead of being
-        // silently dropped.
-        if parsed.value("context").is_some() {
-            return Err(CliError::usage_hint(
-                "`admit --file` does not accept --context; set `context` on each item",
-                "each item object may carry its own bounded `context` string",
-            ));
-        }
-        return admit_batch_call(parsed, path);
+        return crate::cli_write_batch::admit_batch_call(parsed, path);
     }
     let args = candidate_args(parsed, "admit")?;
     Ok(WriteCall::Tool {
         tool: "admit_preview",
-        args: Value::Object(args),
-    })
-}
-
-fn admit_batch_call(parsed: &ParsedArgs, path: &str) -> Result<WriteCall, CliError> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|error| CliError::usage(format!("--file `{path}` is not readable: {error}")))?;
-    let value: Value = serde_json::from_str(&raw)
-        .map_err(|error| CliError::usage(format!("--file must contain a JSON object: {error}")))?;
-    let Some(items) = value.get("items").filter(|items| items.is_array()) else {
-        return Err(CliError::usage_hint(
-            "--file must contain a JSON object with a non-empty `items` array",
-            "try {\"items\": [{\"item\": {\"gist\": \"...\"}, \"category\": \"persona\", \"epistemic_kind\": \"fact\"}]}",
-        ));
-    };
-    let mut args = base_args(parsed);
-    args.insert("items".into(), items.clone());
-    Ok(WriteCall::Tool {
-        tool: "admit_preview_batch",
         args: Value::Object(args),
     })
 }

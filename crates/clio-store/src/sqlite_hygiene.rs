@@ -229,7 +229,7 @@ fn hygiene_item_tx(
             .am("hygiene lookup")?;
         let Some((category, epistemic_kind)) = row else {
             return Err(AmError::new(
-                ErrorCode::NotFound,
+                ErrorCode::ItemNotFound,
                 format!("item `{item_id}` not found in bank"),
             ));
         };

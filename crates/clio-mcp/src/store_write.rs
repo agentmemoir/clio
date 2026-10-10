@@ -23,16 +23,43 @@
 
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
 use crate::write_tools::{
-    admission_policy, attach_leaf, build_candidate, build_item, opt_bool, opt_str,
+    admission_policy, attach_leaf, build_candidate, build_item, opt_bool, opt_str, tool_result,
 };
 use clio_admission::is_exact_duplicate_reason;
 use clio_admission::policy::AdmissionPolicy;
-use clio_types::{AmError, MemoryItem};
+use clio_types::{AmError, ErrorCode, MemoryItem};
 use clio_write::store_path::VerifiedStoreRequest;
 use clio_write::verify::VerifyConfig;
 use clio_write::{default_event_fields, gated_store_verified};
 use serde_json::{Map, Value};
 use std::sync::Arc;
+
+/// The item's gist for a store-path write. An absent gist stays absent. An empty
+/// or whitespace-only gist is refused, so no write path stores blank text.
+pub(crate) fn gist_of(shell: &Value) -> Result<Option<String>, AmError> {
+    match shell.get("gist").and_then(Value::as_str) {
+        Some(text) if text.trim().is_empty() => Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "item.gist must not be empty or whitespace-only",
+        )),
+        Some(text) if !text.is_empty() => Ok(Some(text.to_owned())),
+        _ => Ok(None),
+    }
+}
+
+/// An item needs content: a non-blank gist, or a snapshot. An item with neither
+/// would store an empty memory, so every store-path entry refuses it.
+pub(crate) fn require_content(args: &Value) -> Result<(), AmError> {
+    let shell = args.get("item").unwrap_or(&Value::Null);
+    let has_snapshot = shell.get("snapshot").is_some_and(|v| !v.is_null());
+    if gist_of(shell)?.is_none() && !has_snapshot {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "item.gist is required unless item.snapshot is given",
+        ));
+    }
+    Ok(())
+}
 
 /// Store-path core shared by `admit_preview` (never writes), `store`, and the
 /// batch preview. `retention` overrides the resolved bank profile when present.
@@ -43,6 +70,7 @@ pub(crate) fn store_path(
     allow_write: bool,
     retention: Option<clio_config::retention::ResolvedRetention>,
 ) -> Result<Value, AmError> {
+    require_content(args)?;
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
     let candidate = build_candidate(args)?;
@@ -129,3 +157,50 @@ pub(crate) fn admit_preview(state: &McpState, args: &Value) -> Result<Value, AmE
 pub(crate) fn store(state: &McpState, args: &Value) -> Result<Value, AmError> {
     store_path(state, args, true, None)
 }
+
+/// The `store` tool envelope. A write the gates refused (an exact duplicate, or
+/// any other admission rejection) stored nothing, so it returns `ok:false` with
+/// the same code the CLI uses. A caller that checks `ok` never reads a refused
+/// write as stored. Previews and dry runs keep their verdict under `ok:true`.
+#[inline(never)]
+pub(crate) fn store_envelope(state: &McpState, args: &Value) -> Value {
+    match store(state, args) {
+        Ok(value) => match refusal_of(&value) {
+            Some((code, message)) => refused_envelope(value, code, &message),
+            None => tool_result(Ok(value)),
+        },
+        Err(err) => tool_result(Err(err)),
+    }
+}
+
+/// The refusal code and message for a write the gates turned away. `None` for a
+/// stored item, a preview, or a dry run.
+fn refusal_of(value: &Value) -> Option<(&'static str, String)> {
+    let refused = value.get("pass").and_then(Value::as_bool) == Some(false);
+    if !refused || value.get("id").is_some() || value.get("dry_run").is_some() {
+        return None;
+    }
+    let reason = value
+        .get("rejection_reason")
+        .and_then(Value::as_str)
+        .unwrap_or("write refused by the admission gates");
+    if value.get("duplicate") == Some(&Value::Bool(true)) {
+        return Some(("duplicate", format!("duplicate: nothing stored ({reason})")));
+    }
+    Some(("admission_refused", reason.to_owned()))
+}
+
+/// Re-shape a refused write as `ok:false`. The decision fields stay, so the
+/// reason and the score remain visible to the caller.
+fn refused_envelope(mut value: Value, code: &str, message: &str) -> Value {
+    if let Value::Object(fields) = &mut value {
+        fields.insert("ok".into(), Value::Bool(false));
+        fields.insert("code".into(), Value::from(code));
+        fields.insert("message".into(), Value::from(message));
+    }
+    value
+}
+
+#[cfg(test)]
+#[path = "store_write_tests.rs"]
+mod tests;

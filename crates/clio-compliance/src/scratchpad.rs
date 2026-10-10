@@ -170,10 +170,7 @@ impl Scratchpad {
         self.evict_expired(&mut sessions, now);
         let Some(pad) = sessions.get_mut(&(session.to_owned(), bank.to_owned())) else {
             return match key {
-                Some(k) => Err(AmError::new(
-                    ErrorCode::ItemNotFound,
-                    format!("scratchpad key `{k}` not found (session/bank scope)"),
-                )),
+                Some(k) => Err(key_not_found(k)),
                 None => Ok(serde_json::json!({
                     "bank": bank,
                     "session": session,
@@ -186,10 +183,7 @@ impl Scratchpad {
         match key {
             Some(k) => {
                 let Some((content, _)) = pad.entries.get(k) else {
-                    return Err(AmError::new(
-                        ErrorCode::ItemNotFound,
-                        format!("scratchpad key `{k}` not found (session/bank scope)"),
-                    ));
+                    return Err(key_not_found(k));
                 };
                 Ok(serde_json::json!({
                     "key": k,
@@ -212,8 +206,11 @@ impl Scratchpad {
         }
     }
 
-    /// Remove one key (or purge the whole session scratchpad when `key` is
-    /// `None`). Idempotent: removing a missing key is `Ok(())`.
+    /// Remove one key, or purge the whole session scratchpad when `key` is `None`.
+    ///
+    /// # Errors
+    /// `ItemNotFound` when `key` names a key this session and bank do not hold.
+    /// A clear that finds nothing to remove says so rather than reporting success.
     pub fn clear(
         &self,
         session: &str,
@@ -224,19 +221,28 @@ impl Scratchpad {
         let mut sessions = self.sessions.lock().expect("scratchpad poisoned");
         self.evict_expired(&mut sessions, now);
         let Some(pad) = sessions.get_mut(&(session.to_owned(), bank.to_owned())) else {
-            return Ok(());
+            return key.map_or(Ok(()), |k| Err(key_not_found(k)));
         };
         pad.touch(now);
         if let Some(k) = key {
-            if let Some((removed, _)) = pad.entries.remove(k) {
-                pad.total_bytes = pad.total_bytes.saturating_sub(removed.len());
-            }
+            let Some((removed, _)) = pad.entries.remove(k) else {
+                return Err(key_not_found(k));
+            };
+            pad.total_bytes = pad.total_bytes.saturating_sub(removed.len());
         } else {
             pad.entries.clear();
             pad.total_bytes = 0;
         }
         Ok(())
     }
+}
+
+/// The error for a key this session and bank do not hold.
+fn key_not_found(key: &str) -> AmError {
+    AmError::new(
+        ErrorCode::ItemNotFound,
+        format!("scratchpad key `{key}` not found (session/bank scope)"),
+    )
 }
 
 /// Parse JSON content when possible, else keep it as a plain string.

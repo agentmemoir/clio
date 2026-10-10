@@ -271,3 +271,33 @@ fn parse_operations_rejects_everything_else_with_usage_errors() {
         assert!(error.message().contains(fragment), "{}", error.message());
     }
 }
+
+#[test]
+fn admit_file_refuses_a_command_level_text_instead_of_dropping_it() {
+    let s = state();
+    let content = json!({"items": [{"item": {"gist": "one"}, "category": "persona", "epistemic_kind": "fact"}]});
+    let path = ops_file("admit-positional", &content.to_string());
+    let arg = path.display().to_string();
+    let (code, out, err) =
+        run_write_state("admit", &["POSITIONAL", "--file", arg.as_str()], &s, false);
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("does not accept TEXT"), "{err}");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn admit_file_refuses_a_command_level_context_instead_of_dropping_it() {
+    let s = state();
+    let content = json!({"items": [{"item": {"gist": "one"}, "category": "persona", "epistemic_kind": "fact"}]});
+    let path = ops_file("admit-context", &content.to_string());
+    let arg = path.display().to_string();
+    let (code, out, err) = run_write_state(
+        "admit",
+        &["--file", arg.as_str(), "--context", "conversation"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("does not accept --context"), "{err}");
+    let _ = std::fs::remove_file(&path);
+}

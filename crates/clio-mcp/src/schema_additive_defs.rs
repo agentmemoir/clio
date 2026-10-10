@@ -122,6 +122,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
                         "description": "Optional authoritative structured snapshot (verified against source_text). It may carry only the non-empty leaves entity, amount, and date; any other non-empty leaf is rejected."
                     }),
                 ),
+                ("source_text", s("Span haystack the snapshot is verified against; required when snapshot is present.")),
                 ("category", en("Semantic category of the slot value.", SEMANTIC_CATEGORIES)),
                 ("epistemic_kind", en("Fact or belief.", &EPISTEMIC_KINDS)),
                 ("source_type", en("Provenance source type.", &SOURCE_TYPES)),

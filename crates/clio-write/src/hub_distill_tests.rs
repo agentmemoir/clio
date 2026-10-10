@@ -275,7 +275,7 @@ fn explicit_edges_are_not_counted_and_missing_hub_errors() {
     let missing = engine
         .distill_hub("bank", "ghost", &ctx("bank"), ResolvedRetention::default())
         .expect_err("missing hub");
-    assert_eq!(missing.code, ErrorCode::NotFound);
+    assert_eq!(missing.code, ErrorCode::ItemNotFound);
 }
 
 #[test]

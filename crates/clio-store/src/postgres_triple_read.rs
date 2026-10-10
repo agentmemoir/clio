@@ -313,7 +313,7 @@ pub(crate) fn invalidate_item_tx(
         .am("invalidate item lookup")?;
     let Some(r) = row else {
         return Err(AmError::new(
-            ErrorCode::InvalidArgument,
+            ErrorCode::ItemNotFound,
             format!("item `{item_id}` not found in bank"),
         ));
     };

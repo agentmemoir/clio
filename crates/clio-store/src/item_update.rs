@@ -74,7 +74,7 @@ pub(crate) fn update_memory_item_sqlite_tx(
         )
         .optional()
         .am("subject lookup")?
-        .ok_or_else(|| AmError::new(ErrorCode::InvalidArgument, "item not found for update"))?;
+        .ok_or_else(|| AmError::new(ErrorCode::ItemNotFound, "item not found for update"))?;
     let Some(stored) = stored else {
         return Err(null_subject_err(&item.id));
     };
@@ -113,7 +113,7 @@ pub(crate) fn update_memory_item_sqlite_tx(
         .am("items update")?;
     if n == 0 {
         return Err(AmError::new(
-            ErrorCode::InvalidArgument,
+            ErrorCode::ItemNotFound,
             "item not found for update",
         ));
     }
@@ -162,7 +162,7 @@ pub(crate) fn update_memory_item_postgres_tx(
         .map(|row| row.get::<_, Option<String>>(0));
     let Some(stored) = stored else {
         return Err(AmError::new(
-            ErrorCode::InvalidArgument,
+            ErrorCode::ItemNotFound,
             "item not found for update",
         ));
     };
@@ -204,7 +204,7 @@ pub(crate) fn update_memory_item_postgres_tx(
         .am("items update")?;
     if n == 0 {
         return Err(AmError::new(
-            ErrorCode::InvalidArgument,
+            ErrorCode::ItemNotFound,
             "item not found for update",
         ));
     }

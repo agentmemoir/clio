@@ -116,14 +116,11 @@ impl Blame {
 /// The driver refuses the string, the string names no host, or it asks for an
 /// SSL mode this store cannot honour.
 pub(crate) fn check_connection(url: &str) -> Result<(), String> {
-    // The SSL mode is read first, and through `clio-store`'s own reader rather
-    // than the driver's, because that reader explains *why* `verify-full`
-    // cannot be honoured. The driver refuses the same value with "invalid
-    // value for option `sslmode`", which leaves an operator who typed it
-    // guessing what to type instead.
-    if let Some(mode) = ssl_mode_of(url) {
-        SslChoice::parse(mode)?;
-    }
+    // The SSL mode is read by the store's own reader, inside `parse_connection`,
+    // so a mode this store does not offer is refused with the message that names
+    // what to use instead. The driver would refuse the same value with a bare
+    // "invalid value for option `sslmode`", which leaves an operator who typed
+    // it guessing what to type instead.
     parse_connection(url)?;
     if clio_types::net::parse_scheme_host(url).is_err() {
         return Err(format!(
@@ -279,10 +276,10 @@ pub(crate) fn check_advanced(name: &str, value: &str) -> Result<(), String> {
     advanced(name)?.check(value)
 }
 
-/// The SSL mode to offer for a host: `require` for a remote host, `prefer` for
-/// this machine.
+/// The SSL mode to offer for a host: `verify-full` for a remote host, `prefer`
+/// for this machine.
 ///
-/// A remote host defaults to `require` because that is what providers expect
+/// A remote host defaults to `verify-full` because that is what providers expect
 /// and because certificate checking is then not optional. This machine defaults
 /// to `prefer` so an unencrypted local server keeps working.
 #[must_use]
@@ -290,18 +287,8 @@ pub(crate) fn default_ssl_for(host: &str) -> SslChoice {
     let host = host.split(',').map(str::trim).find(|part| !part.is_empty());
     match host {
         Some(host) if is_loopback(host) => SslChoice::Prefer,
-        _ => SslChoice::Require,
+        _ => SslChoice::VerifyFull,
     }
-}
-
-/// The `sslmode` an address asks for, if it asks for one.
-fn ssl_mode_of(url: &str) -> Option<&str> {
-    let (_, after) = url.split_once("://")?;
-    let query = after.split_once('?')?.1;
-    query.split('&').find_map(|pair| {
-        let (name, value) = pair.split_once('=')?;
-        (name.eq_ignore_ascii_case("sslmode")).then_some(value)
-    })
 }
 
 #[cfg(test)]

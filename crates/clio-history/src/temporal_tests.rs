@@ -401,7 +401,6 @@ fn limits_are_capped() {
     args.limit = Some(usize::MAX);
     let out = temporal_history(&args).unwrap();
     assert_eq!(out.len(), 2);
-    assert!(!out.is_empty());
 }
 
 #[path = "temporal_tests_belief_context_tests.rs"]

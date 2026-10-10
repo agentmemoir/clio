@@ -118,6 +118,40 @@ fn batch_call(
     })
 }
 
+/// `admit --file ops.json`: the file's `items` go to the read-only
+/// `admit_preview_batch` tool. A command-level TEXT or `--context` has no item
+/// to land on, so either one fails closed instead of being dropped.
+pub(crate) fn admit_batch_call(parsed: &ParsedArgs, path: &str) -> Result<WriteCall, CliError> {
+    if !parsed.positionals().is_empty() {
+        return Err(CliError::usage_hint(
+            "`admit --file` does not accept TEXT; put each text in its item object",
+            "set `item.gist` on each item in the file",
+        ));
+    }
+    if parsed.value("context").is_some() {
+        return Err(CliError::usage_hint(
+            "`admit --file` does not accept --context; set `context` on each item",
+            "each item object may carry its own bounded `context` string",
+        ));
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|error| CliError::usage(format!("--file `{path}` is not readable: {error}")))?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|error| CliError::usage(format!("--file must contain a JSON object: {error}")))?;
+    let Some(items) = value.get("items").filter(|items| items.is_array()) else {
+        return Err(CliError::usage_hint(
+            "--file must contain a JSON object with a non-empty `items` array",
+            "try {\"items\": [{\"item\": {\"gist\": \"...\"}, \"category\": \"persona\", \"epistemic_kind\": \"fact\"}]}",
+        ));
+    };
+    let mut args = base_args(parsed);
+    args.insert("items".into(), items.clone());
+    Ok(WriteCall::Tool {
+        tool: "admit_preview_batch",
+        args: Value::Object(args),
+    })
+}
+
 /// Decode the operations document: an object with an `operations` array, or a
 /// bare top-level array (both are the same thing to the tool). Anything else
 /// fails closed with a usage error before any dispatcher call; an empty array

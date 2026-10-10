@@ -135,7 +135,7 @@ fn default_deployment_path_is_loaded_and_can_be_disabled() {
 fn load_missing_is_empty() {
     let path = tmp("missing.json");
     let overlay = load_overlay_file(&path).expect("missing");
-    assert!(overlay.is_empty());
+    assert!(overlay.is_empty(), "a missing overlay file loads as empty");
 }
 
 #[test]

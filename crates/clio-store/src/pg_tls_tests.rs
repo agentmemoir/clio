@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - Parse cases: schemes accepted and refused, host and port lists, defaults
-//! - `sslmode` names, including the two that cannot be honoured
+//! - `sslmode` names, including the ones refused with a pointer to what works
 //! - The local-or-remote answer for a parsed connection
 //! - The connector each mode picks, read back off a parsed connection
 //!
@@ -27,13 +27,13 @@ use super::{SslChoice, is_loopback, parse_connection};
 
 #[test]
 fn parses_a_postgres_url_with_its_ssl_mode() {
-    let conn = parse_connection("postgres://u:p@db.example.com:5433/memories?sslmode=require")
-        .expect("require is a supported mode");
+    let conn = parse_connection("postgres://u:p@db.example.com:5433/memories?sslmode=verify-full")
+        .expect("verify-full is a supported mode");
     assert_eq!(conn.hosts, vec!["db.example.com".to_owned()]);
     assert_eq!(conn.ports, vec![5433]);
     assert_eq!(conn.database.as_deref(), Some("memories"));
     assert_eq!(conn.user.as_deref(), Some("u"));
-    assert_eq!(conn.ssl, SslChoice::Require);
+    assert_eq!(conn.ssl, SslChoice::VerifyFull);
     assert!(!conn.is_local());
 
     // The other spelling of the scheme is the same thing.
@@ -98,35 +98,78 @@ fn a_malformed_url_is_refused_with_the_driver_message() {
         "postgres://u:p@localhost:notaport/c",
         "postgres://u:p@localhost:99999/c",
         "postgres://u:p@[::1/c",
-        "postgres://u:p@localhost/c?sslmode=maybe",
     ] {
         let err = parse_connection(bad).expect_err("the driver refuses it");
         assert!(err.contains("database url is not usable"), "{bad}: {err}");
         // The parse refused it, so no connection was ever attempted.
         assert!(!err.contains("postgres connect"), "{bad}: {err}");
     }
+
+    // An unknown mode is refused by this store's own reader, before the driver
+    // sees the string, so the message names the modes rather than the driver's
+    // bare "invalid value".
+    let err =
+        parse_connection("postgres://u:p@localhost/c?sslmode=maybe").expect_err("unknown mode");
+    assert!(err.contains("sslmode must be"), "{err}");
 }
 
 #[test]
 fn ssl_mode_names_are_read_and_the_unsupported_ones_are_refused() {
     assert_eq!(SslChoice::parse("disable").unwrap(), SslChoice::Disable);
     assert_eq!(SslChoice::parse("PREFER").unwrap(), SslChoice::Prefer);
-    assert_eq!(SslChoice::parse(" require ").unwrap(), SslChoice::Require);
+    assert_eq!(
+        SslChoice::parse(" verify-full ").unwrap(),
+        SslChoice::VerifyFull
+    );
+    assert_eq!(
+        SslChoice::parse("encrypt-no-verify").unwrap(),
+        SslChoice::EncryptNoVerify
+    );
     assert_eq!(SslChoice::Disable.as_str(), "disable");
     assert_eq!(SslChoice::Prefer.as_str(), "prefer");
-    assert_eq!(SslChoice::Require.as_str(), "require");
+    assert_eq!(SslChoice::VerifyFull.as_str(), "verify-full");
+    assert_eq!(SslChoice::EncryptNoVerify.as_str(), "encrypt-no-verify");
 
-    // `verify-ca` and `verify-full` name modes the driver offers and this store
-    // cannot honour, so they need a message that says what to use instead.
-    for bad in ["verify-ca", "verify-full"] {
-        let err = SslChoice::parse(bad).expect_err("cannot be honoured");
-        assert!(err.contains("certificate"), "{bad} must explain why: {err}");
-        assert!(err.contains("require"), "{bad} must say what to use: {err}");
-    }
+    // `require` means "encrypt without checking" in other Postgres clients, so
+    // its refusal must name both the verifying mode and the deliberate no-check
+    // mode rather than leave the operator guessing.
+    let err = SslChoice::parse("require").expect_err("require is not offered");
+    assert!(err.contains("verify-full"), "{err}");
+    assert!(err.contains("encrypt-no-verify"), "{err}");
 
-    for bad in ["allow", "", "yes", "true", "required"] {
+    // `verify-ca` has no certificate-authority-only mode to select here, so its
+    // refusal names the mode and the option that would work instead.
+    let err = SslChoice::parse("verify-ca").expect_err("verify-ca is not offered");
+    assert!(err.contains("verify-full"), "{err}");
+    assert!(err.contains("sslrootcert"), "{err}");
+
+    // A partial name is refused rather than resolved to a mode, so a typo cannot
+    // silently select one, and `encrypt-no-verify` fails closed on a prefix.
+    for bad in [
+        "allow",
+        "",
+        "yes",
+        "true",
+        "required",
+        "verify",
+        "verify-f",
+        "encrypt",
+        "encrypt-no",
+    ] {
         assert!(SslChoice::parse(bad).is_err(), "{bad} must be refused");
     }
+}
+
+#[test]
+fn a_supplied_root_certificate_does_not_stop_the_parse() {
+    // The root is read by the store and taken out before the driver's own
+    // parser sees the string, so a URL that names one still parses.
+    let conn = parse_connection(
+        "postgres://u:p@db.example.com/c?sslmode=verify-full&sslrootcert=%2Fetc%2Fclio%2Fca.pem",
+    )
+    .expect("sslrootcert is read, not refused");
+    assert_eq!(conn.ssl, SslChoice::VerifyFull);
+    assert_eq!(conn.hosts, vec!["db.example.com".to_owned()]);
 }
 
 #[test]
@@ -136,7 +179,8 @@ fn each_url_ssl_mode_reaches_the_matching_choice() {
     for (mode, expected) in [
         ("disable", SslChoice::Disable),
         ("prefer", SslChoice::Prefer),
-        ("require", SslChoice::Require),
+        ("verify-full", SslChoice::VerifyFull),
+        ("encrypt-no-verify", SslChoice::EncryptNoVerify),
     ] {
         let conn =
             parse_connection(&format!("postgres://u:p@localhost/c?sslmode={mode}")).expect("parse");

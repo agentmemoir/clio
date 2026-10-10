@@ -341,3 +341,5 @@ pub fn derived_writer_names() -> Vec<String> {
     writers.sort_unstable();
     writers
 }
+
+impl clio_store::TripleAssertion for CountingStore {}
