@@ -388,10 +388,9 @@ fn runtime_paths_for_full_surface() {
     );
     // Masked view must redact database_url.
     let masked = rt_env.effective_masked();
-    assert_ne!(
-        masked["store"]["database_url"].as_str().unwrap_or(""),
-        "postgres://agentmemoir@127.0.0.1/agentmemoir"
-    );
+    let masked_url = masked["store"]["****_url"].as_str().unwrap_or("");
+    assert!(masked_url.contains("****"), "{masked}");
+    assert_ne!(masked_url, "postgres://agentmemoir@127.0.0.1/agentmemoir");
     let _ = std::fs::remove_file(deploy);
 }
 

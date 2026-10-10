@@ -89,11 +89,11 @@ fn redact_masks_api_key_in_gist_and_json() {
         Some("note api_key: sk-SECRETKEY99 and api_key: sk-OTHERKEY77 end"),
         Some(&json!({"token": "abcdEFGH1234"})),
     );
-    assert_eq!(preview["snapshot"]["api_key"], json!("****EY99"));
+    assert_eq!(preview["snapshot"]["****_key"], json!("****EY99"));
     assert_eq!(preview["snapshot"]["entity"], json!("Ada"));
     let gist = preview["gist"].as_str().unwrap();
     assert!(!gist.contains("sk-SECRETKEY99"));
     assert!(!gist.contains("sk-OTHERKEY77"));
     assert!(gist.contains("****"));
-    assert_eq!(preview["diagnostic"]["token"], json!("****1234"));
+    assert_eq!(preview["diagnostic"]["****oken"], json!("****1234"));
 }

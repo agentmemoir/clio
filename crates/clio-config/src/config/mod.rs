@@ -52,7 +52,7 @@ use crate::history_knobs::HistoryKnobs;
 use crate::log::{self, LogLevel};
 use crate::ranking::RankingEnv;
 use crate::retention_store::{RetentionStore, resolve_retention_path};
-use crate::secret::{masked_clone, path_is_secret};
+use crate::secret::{masked_at_path, masked_clone, path_is_secret};
 use clio_types::HistoryPolicy;
 use merge::{
     Overlay, apply_overlay, flatten_object, path_to_pointer, set_path, system_defaults,
@@ -362,14 +362,18 @@ impl Runtime {
     }
 
     fn config_get_inner(&self, path: Option<&str>) -> Result<ConfigGetData, AmError> {
-        let masked = self.effective_masked();
+        // Resolve the pointer on the unmasked tree: masking renames keys that
+        // themselves look secret, so a pointer such as `credentials.api_key`
+        // would otherwise stop at a name the masked view no longer has.
+        let raw = self.effective_raw();
         let value = match path {
-            None | Some("") => masked,
+            None | Some("") => masked_clone(&raw),
             Some(p) => {
                 let pointer = path_to_pointer(p);
-                masked.pointer(&pointer).cloned().ok_or_else(|| {
+                let found = raw.pointer(&pointer).ok_or_else(|| {
                     AmError::new(ErrorCode::UnknownPath, format!("unknown config path `{p}`"))
-                })?
+                })?;
+                masked_at_path(p, found)
             }
         };
         Ok(ConfigGetData {
