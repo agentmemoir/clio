@@ -23,19 +23,19 @@
 
 use super::*;
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
 use clio_config::retention::RetentionProfile;
 use clio_store::{DistilledUnitRecord, STALE_SOURCE_CHANGED};
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use clio_write::HUB_DISTILL_MARKER;
 use serde_json::json;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) const BANK: &str = "trigger-bank";
 const CREATED: &str = "2026-10-01T00:00:00Z";
 
-pub(super) fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state")
+pub(super) fn state() -> RetentionStoreFixture {
+    RetentionStoreFixture::open_with_effective(&McpOpenOptions::default(), &json!({}))
 }
 
 /// One real instant as the base; every other instant is derived from it, so
