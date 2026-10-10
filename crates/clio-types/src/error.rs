@@ -53,7 +53,7 @@ pub enum ErrorCode {
     MissingBank,
     /// A read target does not exist (or is not visible in the caller's scope).
     NotFound,
-    /// An item id read target does not exist in the caller's bank (reads).
+    /// An item id target does not exist or is not visible in the caller's bank.
     ItemNotFound,
     /// Co-activation reinforcement could not be durably handed off.
     CoactivationHandoffFailed,

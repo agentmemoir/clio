@@ -9,7 +9,7 @@
 //! ## Owns
 //! - The `auth token add|list|revoke` verbs, their flags, and their text views
 //! - The single one-time print of a generated secret on `add`
-//! - The mapping of store refusals to CLI usage/operational outcomes
+//! - Mapping store failures into the shared CLI error contract
 //!
 //! ## Does not own
 //! - The store itself: records, validation, digests, permissions
@@ -39,7 +39,6 @@ use crate::cli_read::{CliIo, emit, fail};
 use clio_config::auth_tokens::{
     AuthTokenRecord, add_token, load_auth_tokens, resolve_token_store_path_with, revoke_token,
 };
-use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 use std::process::ExitCode;
 
@@ -221,17 +220,6 @@ fn store_path(io: &CliIo) -> Result<std::path::PathBuf, CliError> {
     })
 }
 
-/// Map a store failure into the CLI contract. A refusal (bad input, a taken
-/// label, an unknown label, a refused file) is a usage outcome, exit 2; an
-/// I/O failure is operational, exit 1.
-fn refuse(error: &AmError) -> CliError {
-    if error.code == ErrorCode::Internal {
-        CliError::from_am_error(error)
-    } else {
-        CliError::refusal(error.code.as_str(), &error.message)
-    }
-}
-
 /// `auth token add --label L --actor A --bank B [--bank B…]`.
 ///
 /// The whole read-modify-write runs under the store's exclusive hold
@@ -254,9 +242,12 @@ fn run_add(
         return fail(io, mode, &required_flag("--actor", "add"));
     };
     let banks: Vec<String> = parsed.values_of("bank").to_vec();
+    if banks.is_empty() {
+        return fail(io, mode, &required_flag("--bank", "add"));
+    }
     let (record, secret) = match add_token(path, label, actor, &banks) {
         Ok(pair) => pair,
-        Err(error) => return fail(io, mode, &refuse(&error)),
+        Err(error) => return fail(io, mode, &CliError::from_am_error(&error)),
     };
     let payload = json!({
         "ok": true,
@@ -299,7 +290,7 @@ fn run_list(
     }
     let records = match load_auth_tokens(path) {
         Ok(records) => records,
-        Err(error) => return fail(io, mode, &refuse(&error)),
+        Err(error) => return fail(io, mode, &CliError::from_am_error(&error)),
     };
     let payload = json!({
         "ok": true,
@@ -356,7 +347,7 @@ fn run_revoke(
         return fail(io, mode, &required_flag("--label", "revoke"));
     };
     if let Err(error) = revoke_token(path, label) {
-        return fail(io, mode, &refuse(&error));
+        return fail(io, mode, &CliError::from_am_error(&error));
     }
     let payload = json!({
         "ok": true,

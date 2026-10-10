@@ -44,6 +44,18 @@ fn operational_error_exits_one_with_the_given_code() {
 }
 
 #[test]
+fn tool_domain_errors_keep_the_operational_exit_group() {
+    for code in ["invalid_argument", "invalid_type", "out_of_range"] {
+        let error = CliError::tool_failure(code, "bad flag value");
+        assert_eq!(error.code(), code);
+        assert_eq!(error.exit_code(), ExitCode::from(1));
+    }
+    let missing = CliError::tool_failure("item_not_found", "item not found");
+    assert_eq!(missing.code(), "item_not_found");
+    assert_eq!(missing.exit_code(), ExitCode::from(1));
+}
+
+#[test]
 fn from_am_error_keeps_code_and_masks_credentials() {
     let am = AmError::new(
         ErrorCode::Internal,

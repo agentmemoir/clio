@@ -375,7 +375,7 @@ fn tool_failure_adds_the_cross_process_dek_hint() {
             .unwrap_or_default()
             .contains("durable KMS provider")
     );
-    let plain = tool_failure("invalid_argument", "item not found");
+    let plain = tool_failure("item_not_found", "item not found");
     assert!(plain.hint().is_none());
 }
 
