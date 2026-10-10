@@ -61,14 +61,31 @@ for name in cargo make; do
 done
 
 if [ "$mode" = install ]; then
-    case ":$PATH:" in
-        *":$dest:"*) echo "gate-install: PATH already contains $dest" ;;
-        *) printf 'gate-install: add to your shell profile: export PATH="%s:$PATH"\n' "$dest" ;;
-    esac
-    resolved=$(command -v cargo 2>/dev/null || true)
-    case "$resolved" in
-        "$dest"/*) echo "gate-install: shim is active for this shell" ;;
-        "") ;;
-        *) echo "gate-install: warning: this shell resolves cargo as $resolved; it comes before $dest" ;;
-    esac
+    # A symlink in a directory that comes *after* the real tool on PATH never
+    # runs, and the old containment test ("PATH contains $dest") reported
+    # success anyway. Resolve each name and say where it landed, so a shim that
+    # is installed but shadowed reads as inactive rather than as a clean install.
+    # A dead shim is a failed install, so this exits non-zero: a caller that
+    # checks the exit code must not read the dead state as success.
+    inactive=0
+    for name in cargo make; do
+        resolved=$(command -v "$name" 2>/dev/null || true)
+        case "$resolved" in
+            "$dest"/*) echo "gate-install: $name shim is active for this shell" ;;
+            "")
+                printf 'gate-install: NOT ACTIVE: %s is not on PATH; add %s to your shell profile:\n' "$name" "$dest"
+                printf '  export PATH="%s:$PATH"\n' "$dest"
+                inactive=1
+                ;;
+            *)
+                printf 'gate-install: NOT ACTIVE: this shell resolves %s as %s; %s comes later on PATH\n' "$name" "$resolved" "$dest"
+                printf '  export PATH="%s:$PATH"\n' "$dest"
+                inactive=1
+                ;;
+        esac
+    done
+    if [ "$inactive" = 1 ]; then
+        echo "gate-install: the shim is linked but not active; fix PATH and run this again" >&2
+        exit 1
+    fi
 fi
