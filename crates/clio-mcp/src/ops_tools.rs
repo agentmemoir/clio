@@ -81,7 +81,7 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
                 store: &*state.ops_store,
                 index: &*state.index,
                 bank: opt_str(args, "bank"),
-                dry_run: opt_bool(args, "dry_run", true),
+                dry_run: opt_bool(args, "dry_run", true)?,
                 timestamp: &timestamp,
                 plans: &state.ops_plans,
             })?;
@@ -101,7 +101,7 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
                 plan_id: opt_str(args, "plan_id"),
                 actions: &actions,
                 bank: opt_str(args, "bank"),
-                confirm: opt_bool(args, "confirm", false),
+                confirm: opt_bool(args, "confirm", false)?,
                 timestamp: &timestamp,
             })?;
             Ok(to_value(&outcome))
@@ -131,8 +131,8 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
                 embedder: embedder(state),
                 bank,
                 target,
-                dry_run: opt_bool(args, "dry_run", true),
-                confirm: opt_bool(args, "confirm", false),
+                dry_run: opt_bool(args, "dry_run", true)?,
+                confirm: opt_bool(args, "confirm", false)?,
             })?;
             Ok(to_value(&report))
         }

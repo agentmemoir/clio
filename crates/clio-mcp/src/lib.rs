@@ -91,6 +91,7 @@ pub mod store_write;
 mod summarize_tools;
 pub mod sync_tools;
 pub mod write_tools;
+mod write_tools_handlers;
 
 /// Pinned MCP specification revision (item 3).
 ///

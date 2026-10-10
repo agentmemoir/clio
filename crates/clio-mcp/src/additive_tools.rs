@@ -165,7 +165,7 @@ fn canonical_put(state: &McpState, args: &Value) -> Result<Value, AmError> {
         updated_at: ts.clone(),
         context: opt_context(args, "context")?,
     };
-    let dry_run = opt_bool(args, "dry_run", false);
+    let dry_run = opt_bool(args, "dry_run", false)?;
     let fields = clio_write::default_event_fields();
     let mut req = clio_write::VerifiedStoreRequest {
         item,
@@ -174,7 +174,7 @@ fn canonical_put(state: &McpState, args: &Value) -> Result<Value, AmError> {
         evidence_ref: opt_str(args, "evidence_ref"),
         fields: &fields,
         verify: clio_write::VerifyConfig::default(),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
+        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
         admit_sink: &StderrSinks,
         verify_sink: &StderrSinks,
         timestamp: &ts,

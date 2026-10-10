@@ -50,8 +50,8 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         category: opt_str(args, "category").map(str::to_owned),
         time_start: opt_str(args, "time_start").map(str::to_owned),
         time_end: opt_str(args, "time_end").map(str::to_owned),
-        include_archived: opt_bool(args, "include_archived", true),
-        include_discarded: opt_bool(args, "include_discarded", true),
+        include_archived: opt_bool(args, "include_archived", true)?,
+        include_discarded: opt_bool(args, "include_discarded", true)?,
     };
     let content_mode = ExportContentMode::parse(opt_str(args, "content_mode"))?;
     let outcome = clio_compliance::export(&clio_compliance::ExportArgs {
@@ -91,10 +91,10 @@ fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         belief: &*state.belief,
         ctx: &ctx,
         source: req_str(args, "source")?,
-        dry_run: opt_bool(args, "dry_run", false),
-        force: opt_bool(args, "force", false),
+        dry_run: opt_bool(args, "dry_run", false)?,
+        force: opt_bool(args, "force", false)?,
         reason: opt_str(args, "reason"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
+        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
         signals: &signals,
         sink: &StderrSinks,
         belief_signals: &signals,

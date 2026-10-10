@@ -85,7 +85,7 @@ pub(crate) fn store_path(
         Some(resolved) => AdmissionPolicy::with_retention(&state.env, resolved),
         None => admission_policy(state, ctx.bank.as_str()),
     }
-    .with_force(opt_bool(args, "allow_duplicate", false));
+    .with_force(opt_bool(args, "allow_duplicate", false)?);
     let mut req = VerifiedStoreRequest {
         item,
         ctx: &ctx,
@@ -98,7 +98,7 @@ pub(crate) fn store_path(
         verify_sink: &StderrSinks,
         timestamp: &ts,
     };
-    let dry_run = opt_bool(args, "dry_run", false) || !allow_write;
+    let dry_run = opt_bool(args, "dry_run", false)? || !allow_write;
     let mut stored_id: Option<String> = None;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let decision = gated_store_verified(

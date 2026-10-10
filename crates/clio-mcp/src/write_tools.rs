@@ -25,7 +25,8 @@
 //!
 //! Keep this module focused on the MCP write dispatcher.
 
-use crate::runtime::{McpState, StderrSinks, StoreSignals};
+use crate::runtime::McpState;
+use crate::write_tools_handlers::{belief_observe, graph_link, triple_add, triple_end};
 use clio_admission::decision::Candidate;
 use clio_admission::policy::AdmissionPolicy;
 use clio_types::{
@@ -35,7 +36,6 @@ use clio_types::{
 use clio_write::MaintenanceSignal;
 use clio_write::memtree::AttachLeaf;
 use serde_json::{Map, Value};
-use std::sync::Arc;
 
 /// Tools whose in-process mutator implements a real no-write `dry_run` path.
 const DRY_RUN_TOOLS: [&str; 9] = [
@@ -159,9 +159,19 @@ pub(crate) fn opt_num(args: &Value, key: &str) -> Option<f64> {
     args.get(key).and_then(Value::as_f64)
 }
 
-/// Boolean argument with a default.
-pub(crate) fn opt_bool(args: &Value, key: &str, default: bool) -> bool {
-    args.get(key).and_then(Value::as_bool).unwrap_or(default)
+/// Optional boolean argument (absent/null -> `default`).
+///
+/// A present value of the wrong JSON type is an error, not a silent fallback to
+/// the default: a caller that asked for `false` must not receive `true`.
+pub(crate) fn opt_bool(args: &Value, key: &str, default: bool) -> Result<bool, AmError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(AmError::new(
+            ErrorCode::InvalidType,
+            format!("{key} must be a boolean"),
+        )),
+    }
 }
 
 /// Admission policy snapshot for one call, honoring the bank's retention profile.
@@ -179,8 +189,8 @@ pub(crate) fn gated_write_policy<'a>(
     state: &'a McpState,
     bank: &str,
     args: &Value,
-) -> AdmissionPolicy<'a> {
-    admission_policy(state, bank).with_force(opt_bool(args, "allow_duplicate", false))
+) -> Result<AdmissionPolicy<'a>, AmError> {
+    Ok(admission_policy(state, bank).with_force(opt_bool(args, "allow_duplicate", false)?))
 }
 
 /// Build the candidate item shell for `store` / `admit_preview`.
@@ -284,86 +294,6 @@ pub(crate) fn attach_leaf(
     Ok(MaintenanceSignal::leaf_attached(item.id.clone(), bank))
 }
 
-/// Gated `triple_add` (episodic admission + atomic supersede+insert).
-#[inline(never)]
-fn triple_add(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
-    let subject = req_str(args, "subject")?;
-    let update_rule = match opt_str(args, "update_rule") {
-        Some(raw) => Some(clio_types::UpdateRule::parse(raw)?),
-        None => None,
-    };
-    let sink = StderrSinks;
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
-    let context = opt_context(args, "context")?;
-    let t_args = clio_write::triple::TripleAddArgs {
-        ctx: &ctx,
-        subject,
-        predicate: req_str(args, "predicate")?,
-        object: req_str(args, "object")?,
-        epistemic_kind: clio_types::EpistemicKind::parse(req_str(args, "epistemic_kind")?)?,
-        context: context.as_deref(),
-        source_type: opt_str(args, "source_type")
-            .map(clio_types::SourceType::parse)
-            .transpose()?,
-        confidence: opt_num(args, "confidence"),
-        valid_from: opt_str(args, "valid_from"),
-        valid_until: opt_str(args, "valid_until"),
-        supersede: args
-            .get("supersede")
-            .and_then(Value::as_bool)
-            .unwrap_or(true),
-        snapshot_ref: opt_str(args, "snapshot_ref"),
-        gist_ref: opt_str(args, "gist_ref"),
-        update_rule,
-        subject_id: opt_str(args, "subject_id").unwrap_or(subject),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
-        admit_sink: &sink,
-        triple_sink: &sink,
-        timestamp: &ts,
-        dry_run: false,
-    };
-    let triple = clio_write::triple::triple_add(&*state.store, &signals, &t_args)?;
-    let (decision, outcome) = (triple.decision, triple.outcome);
-    let mut out = Map::new();
-    out.insert(
-        "decision".into(),
-        serde_json::to_value(&decision).expect("serialize tool payload"),
-    );
-    if let Some(o) = outcome {
-        out.insert("new_edge_id".into(), Value::from(o.new_edge_id));
-        out.insert(
-            "prior_edge_ids".into(),
-            serde_json::to_value(&o.prior_edge_ids).expect("serialize tool payload"),
-        );
-    }
-    Ok(Value::Object(out))
-}
-
-/// `triple_end`: expire open SPO edges without replacement.
-#[inline(never)]
-fn triple_end(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
-    let update_rule = match opt_str(args, "update_rule") {
-        Some(raw) => Some(clio_types::UpdateRule::parse(raw)?),
-        None => None,
-    };
-    let outcome = clio_write::triple::triple_end(
-        &*state.store,
-        &ctx,
-        req_str(args, "subject")?,
-        req_str(args, "predicate")?,
-        opt_str(args, "object"),
-        req_str(args, "valid_until")?,
-        &ts,
-        update_rule,
-        &StderrSinks,
-    )?;
-    Ok(end_outcome_json(&outcome))
-}
-
 /// Render a `TripleEndOutcome` as plain JSON.
 #[must_use]
 pub(crate) fn end_outcome_json(outcome: &clio_types::TripleEndOutcome) -> Value {
@@ -372,51 +302,6 @@ pub(crate) fn end_outcome_json(outcome: &clio_types::TripleEndOutcome) -> Value 
         "already_ended": outcome.already_ended,
         "replacement_id": outcome.replacement_id
     })
-}
-
-/// `belief_observe`: gated create / validated append.
-#[inline(never)]
-fn belief_observe(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
-    let proposition = req_str(args, "proposition")?;
-    let subject_default = format!("belief:{proposition}");
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
-    let context = opt_context(args, "context")?;
-    let b_args = clio_belief::BeliefObserveArgs {
-        ctx: &ctx,
-        subject_id: opt_str(args, "subject_id").unwrap_or(&subject_default),
-        proposition,
-        confidence: opt_num(args, "confidence")
-            .ok_or_else(|| AmError::new(ErrorCode::InvalidArgument, "confidence is required"))?,
-        context: context.as_deref(),
-        evidence_ref: req_str(args, "evidence_ref")?,
-        source_type: req_str(args, "source_type")?,
-        as_of: opt_str(args, "as_of"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
-        sink: &StderrSinks,
-        timestamp: &ts,
-    };
-    let outcome = clio_belief::belief_observe(&*state.belief, &signals, &b_args)?;
-    Ok(serde_json::to_value(&outcome).expect("serialize tool payload"))
-}
-
-/// Explicit association edge declaration (assoc engine).
-///
-/// Bank/actor resolve through [`McpState::resolve_ctx`], so a schema-conformant
-/// call that omits `bank` uses the connection default (args win over defaults).
-#[inline(never)]
-fn graph_link(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let ctx = state.resolve_ctx(args)?;
-    let view = state.assoc.graph_link(
-        ctx.bank.as_str(),
-        req_str(args, "source_id")?,
-        req_str(args, "target_id")?,
-        req_str(args, "relationship")?,
-        opt_num(args, "weight"),
-        ctx.actor.as_str(),
-    )?;
-    Ok(serde_json::to_value(&view).expect("serialize tool payload"))
 }
 
 #[cfg(test)]
@@ -442,3 +327,7 @@ mod write_tools_context_record_decode_tests;
 #[cfg(test)]
 #[path = "write_tools_context_write_tests.rs"]
 mod write_tools_context_write_tests;
+
+#[cfg(test)]
+#[path = "write_tools_bool_arg_tests.rs"]
+mod write_tools_bool_arg_tests;
