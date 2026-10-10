@@ -91,8 +91,8 @@ What this does NOT establish, stated plainly:
 - A branch that touches no Rust file is an honest all-clear, not a silent skip:
   it says so and exits 0. A `.md`-only change has nothing for either mode to run.
 - A file with no instrumented line cannot be measured at all, so no coverage
-  number applies to it. Those are listed in `scripts/coverage_codeless.json` and
-  the run names each one rather than inventing a denominator of zero.
+  number applies to it. The run reads each changed file and names every one it
+  skips for holding no executable code, rather than inventing a denominator of zero.
 
 That divergence was measured rather than assumed: `compose_docker.rs` sits at
 83.77% lines, close enough to the floor for a difference to show. Scoped to its
@@ -153,13 +153,21 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Collection, Iterable, NamedTuple, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
-CODELESS_PATH = Path(__file__).resolve().parent / "coverage_codeless.json"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     import owned_tests as owned
 except ImportError as error:  # pragma: no cover - only when the file is missing
     print(f"scoped-runner: cannot import scripts/owned_tests.py: {error}", file=sys.stderr)
+    raise
+
+try:
+    from executable_code import offenders
+except ImportError as error:  # pragma: no cover - only when the file is missing
+    print(
+        f"scoped-runner: cannot import scripts/executable_code.py: {error}",
+        file=sys.stderr,
+    )
     raise
 
 OwnedLookupError = owned.ResolutionError
@@ -209,27 +217,6 @@ EXIT_RUN_ERROR = 3
 # a file the tool also hides.
 EXCLUDED_DIRS = ("tests", "examples", "benches")
 EXCLUDED_SUFFIXES = ("_tests.rs", "-tests.rs", "tests.rs")
-
-# The key in the codeless file that records files holding no executable code.
-#
-# A file whose items are all declarations, `use`s, or `const` values compiles to
-# no instrumented region, so no llvm-cov report can ever contain it. That is true
-# of the line count as well as of the function count, so the gate, which judges
-# lines, cannot judge such a file either. Holding one to a coverage floor is not a
-# measurement: the run reports every measured file above its floor and still exits
-# non-zero, which is what stopped any commit that adds a `mod` to a crate root.
-#
-# Recorded rather than derived, because the property cannot be read off the
-# report. A file with no instrumented region is absent, and absence is also
-# exactly what a scope gap looks like, so the two cannot be told apart from the
-# report alone. Deciding by reading the source would mean modelling enough Rust
-# to know which items emit a counted region and which do not, and being wrong in
-# the permissive direction would turn an unmeasured file into a silent pass. A
-# recorded list is wrong in the other direction: a new such file fails until one
-# line is added, which is loud, visible, and self-correcting. A file holding a
-# function is judged normally, so a crate root that is mostly re-exports but
-# defines one is absent from this list on purpose.
-CODELESS_KEY = "_no_executable_code"
 
 RAW_PROFILE_HEADER_BYTES = 128
 """The size of the header every raw profile buffer starts with.
@@ -447,34 +434,24 @@ def is_measureable(rel: str) -> bool:
     return not set(PurePosixPath(rel).parts[:-1]) & set(EXCLUDED_DIRS)
 
 
-def load_codeless() -> dict[str, str]:
-    """The recorded files that hold no executable code, mapped to why.
+def has_no_executable_code(rel: str) -> bool:
+    """True when the source at `rel` compiles to no counted line.
 
-    A missing file is an empty list, not an error: a checkout without one simply
-    has nothing recorded, which is the same state as recording no such file, and
-    both mean every measured file is judged.
+    The decision is read from the file: a file holds no counted line exactly when
+    its source has no function body and no macro. A file that cannot be read is
+    not codeless, so the safe direction is to judge it; `is_present` handles a
+    deleted file separately.
     """
-    if not CODELESS_PATH.exists():
-        return {}
     try:
-        doc = json.loads(CODELESS_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise RunError(f"cannot read {CODELESS_PATH}: {error}") from error
-    recorded = doc.get(CODELESS_KEY, {})
-    if not isinstance(recorded, dict):
-        raise RunError(f"{CODELESS_PATH}: {CODELESS_KEY!r} must be an object")
-    out: dict[str, str] = {}
-    for rel, reason in recorded.items():
-        if not isinstance(rel, str) or not isinstance(reason, str):
-            raise RunError(
-                f"{CODELESS_PATH}: every {CODELESS_KEY!r} entry maps a path to a "
-                f"reason string, and {rel!r} does not"
-            )
-        # An underscore key is a note beside the list.
-        if rel.startswith("_"):
-            continue
-        out[rel] = reason
-    return out
+        source = (ROOT / rel).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    return not offenders(source)
+
+
+def parse_codeless(files: Iterable[str]) -> set[str]:
+    """The measured files whose own source holds no executable code."""
+    return {rel for rel in files if is_measureable(rel) and has_no_executable_code(rel)}
 
 
 def is_judgeable(rel: str, codeless: Collection[str] = ()) -> bool:
@@ -625,7 +602,8 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
     # same case: there is nothing left in it for a report to hold. Left in the
     # judged list, it was reported as a file the run failed to measure, so every
     # scope failed a change that only removed a file.
-    judgeable = [f for f in files if is_judgeable(f, load_codeless()) and is_present(f)]
+    codeless = parse_codeless(files)
+    judgeable = [f for f in files if is_judgeable(f, codeless) and is_present(f)]
     packages = workspace_packages()
     if everything:
         return [p["name"] for p in packages], judgeable, files
@@ -634,7 +612,7 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
         return [], judgeable, files
     # Every file a report could hold, codeless ones included. The check is about
     # belonging to a package at all, which has nothing to do with whether the file
-    # has code, so it must not lose the recorded files the judging set just dropped.
+    # has code, so it must not lose the codeless files the judging set just dropped.
     unowned = [f for f in files if is_measureable(f) and not package_owners(f, packages)]
     if unowned:
         # A changed Rust file no package owns can never appear in a report, so it
@@ -1651,16 +1629,16 @@ def main(argv: list[str]) -> int:
         return EXIT_RUN_ERROR
 
     label = "test" if args.tests_only else "judge"
-    codeless = load_codeless()
-    no_code = [rel for rel in changed if rel in codeless]
+    codeless = parse_codeless(changed)
+    no_code = [rel for rel in changed if rel in codeless and is_present(rel)]
     print(f"scoped-runner: scope={args.scope}")
     print(f"scoped-runner: {len(files)} changed file(s) to {label}")
     if no_code:
         # Printed rather than silently dropped: the gate's contract is that the
-        # reader can see every file the run did not judge. The line says why it
-        # was not judged, and the recorded reason says who decided that.
+        # reader can see every file the run did not judge. The source decided it
+        # holds no counted line, so the run names it and moves on.
         for rel in no_code:
-            print(f"scoped-runner: NO EXECUTABLE CODE {rel}: {codeless[rel]}")
+            print(f"scoped-runner: NO EXECUTABLE CODE {rel}")
     print(f"scoped-runner: {len(packages)} package(s) to run: {', '.join(packages) or '(none)'}")
 
     file_filter = ""
@@ -1695,8 +1673,8 @@ def main(argv: list[str]) -> int:
             print("scoped-runner: no changed file owns a test; nothing to run")
             if args.tests_only or not files:
                 # Nothing to run and nothing to judge. Every changed file is
-                # path-excluded, recorded as holding no executable code, or gone
-                # from the tree, so there is no verdict to give. Exiting non-zero
+                # path-excluded, holds no executable code, or is gone from the
+                # tree, so there is no verdict to give. Exiting non-zero
                 # here reported a failure over zero files, which is the empty-scope
                 # lie the run refuses to tell elsewhere.
                 return EXIT_OK
@@ -1769,8 +1747,8 @@ def main(argv: list[str]) -> int:
             print(
                 "scoped-runner: every judged file meets the floor from its own "
                 f"tests ({len(files)} judged, {len(changed) - len(files)} "
-                "excluded from coverage: path-excluded by the tool, or recorded "
-                "as holding no executable code)"
+                "excluded from coverage: path-excluded by the tool, or holding "
+                "no executable code)"
             )
             return EXIT_OK
 
@@ -1861,24 +1839,55 @@ def self_test() -> int:
     check("production files are measured", is_measureable("crates/clio/src/a.rs"), True)
     # A file holding no executable code is a third exclusion, and the two halves
     # it could be confused with are pinned here too. `is_measureable` alone cannot
-    # see it, which is why the recorded set is a separate argument: without one,
-    # every commit adding a `mod` to a crate root failed a gate that reported zero
-    # files below its floor.
+    # see it, so the source check is separate: without it, every commit adding a
+    # `mod` to a crate root failed a gate that reported zero files below its floor.
     check(
         "a file holding no executable code is not judged",
         is_judgeable("crates/clio-types/src/lib.rs", {"crates/clio-types/src/lib.rs"}),
         False,
     )
     check(
-        "the same file is judged when it is not recorded",
+        "the same file is judged when the codeless set is empty",
         is_judgeable("crates/clio-types/src/lib.rs"),
         True,
     )
     check(
-        "the recorded set is read from the codeless file",
-        "crates/clio-types/src/lib.rs" in load_codeless(),
+        "a crate root with no executable code is exempt by source",
+        has_no_executable_code("crates/clio-types/src/lib.rs"),
         True,
     )
+    # The matcher, on each shape that must and must not disqualify a file. The
+    # `fn` token is matched rather than a whole line, so a body is still seen
+    # when a visibility abuts `fn` or a newline separates `fn` from its name.
+    for case_name, source, must_flag in (
+        ("a plain function disqualifies", "pub fn thing() {}\n", True),
+        ("a private function disqualifies", "fn helper() {}\n", True),
+        ("a const fn disqualifies", "const fn make() -> u8 { 1 }\n", True),
+        ("an async fn disqualifies", "async fn go() {}\n", True),
+        ("an unsafe fn disqualifies", "unsafe fn raw() {}\n", True),
+        ("a visibility with no space before fn disqualifies", "pub(crate)fn thing() {}\n", True),
+        ("a newline between fn and its name disqualifies", "fn\nthing() {}\n", True),
+        ("a visibility then a newline then fn disqualifies", "pub(crate)\nfn thing() {}\n", True),
+        ("a bodyless declaration with no space does not", 'extern "C"{fn c_fn();}\n', False),
+        ("a type alias to a fn pointer does not", "type F = fn(u8) -> u8;\n", False),
+        ("a method in an impl disqualifies", "impl A {\n    pub fn call(&self) {}\n}\n", True),
+        ("a foreign fn declaration does not", 'extern "C" {\n    fn c_fn();\n}\n', False),
+        ("a trait method declaration does not", "trait Store: Send {\n    fn go(&self) -> u8;\n}\n", False),
+        ("a multi-line trait method declaration does not", "trait Store {\n    fn revise(\n        &self,\n        bank: &str,\n    ) -> Result<(), Error>;\n}\n", False),
+        ("a trait method with a default body disqualifies", "trait Store {\n    fn go(&self) -> u8 {\n        1\n    }\n}\n", True),
+        ("a declaration whose parameter holds an array does not", "trait Store {\n    fn go(&self, buf: [u8; 4]);\n}\n", False),
+        ("a body after a comment holding a semicolon disqualifies", "fn go() /* ; */ {\n    1\n}\n", True),
+        ("a macro_rules definition disqualifies", "macro_rules! go {\n    () => {};\n}\n", True),
+        ("module declarations only do not", "mod a;\npub mod b;\n", False),
+        ("use statements only do not", "use std::fmt;\npub use a::B;\n", False),
+        ("type aliases only do not", "pub type R = ();\n", False),
+        ("const and static values do not", "pub const N: usize = 2;\nstatic S: &str = \"\";\n", False),
+        ("a mention of fn in a comment does not", "// fn never_defined() {}\n", False),
+        ("a mention of fn in a doc comment does not", "/// calls fn thing() elsewhere\n", False),
+        ("fn inside a string does not", 'const S: &str = "fn thing() {}";\n', False),
+        ("an empty file does not", "", False),
+    ):
+        check(case_name, bool(offenders(source)), must_flag)
     check(
         "a crate root that does define functions stays judged",
         is_judgeable("crates/clio/src/lib.rs"),

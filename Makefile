@@ -143,11 +143,11 @@ CLEAN_FIND := find . \( -path ./.git -o -path ./private \) -prune -o
 
 .PHONY: help build compile test lint fmt check run install docs docs-open \
 	sweep sweep-clean clean clean-models precommit precommit-list \
-	ritual scripts-check scripts-check-gate \
+	ritual scripts-check scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-codeless scripts-check-coverage-policy \
+	scripts-check-coverage-policy \
 	coverage cov coverage-fast test-fast coverage-clean coverage-html cov-html coverage-lcov cov-lcov coverage-open coverage-package \
 	compose up down mac linux
 
@@ -596,14 +596,20 @@ coverage-package:
 #
 #   make scripts-check                   all of them, stopping at the first failure
 #   make scripts-check-precommit         one of them, named
-scripts-check: scripts-check-gate \
+scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-codeless scripts-check-coverage-policy
+	scripts-check-coverage-policy
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
+
+# The scoped runner's own tests, including the source matcher that decides a
+# no-code file. It is the gate CI runs, so a break in its selection or its
+# judgement would land on every other check.
+scripts-check-scoped-runner:
+	python3 scripts/scoped_runner.py --self-test
 
 scripts-check-lint-scope:
 	python3 scripts/lint_scope_check.py --self-test
@@ -632,16 +638,6 @@ scripts-check-precommit:
 scripts-check-coverage-surface:
 	python3 scripts/coverage_surface_check.py --self-test
 	python3 scripts/coverage_surface_check.py
-
-# Whether every file the coverage gate skips for holding no executable code still
-# holds none. That list is the one place a file leaves the coverage rule without
-# a floor, so an entry that has gone stale is a file silently outside the gate, and
-# the gate itself cannot notice: it names a skipped file and moves on. Fourteen
-# crate roots and one re-exporting module are on the list today. Runs no build and
-# no coverage command.
-scripts-check-codeless:
-	python3 scripts/coverage_codeless_check.py --self-test
-	python3 scripts/coverage_codeless_check.py
 
 # Whether the tree still holds exactly one coverage rule. The four rules that were
 # not this one all arrived in changes about something else, and nothing stopped
