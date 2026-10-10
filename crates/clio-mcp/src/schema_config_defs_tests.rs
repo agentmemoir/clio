@@ -181,13 +181,13 @@ fn ranking_env_set_description_states_the_patch_governs_the_next_retrieval() {
     );
 }
 
-/// The published `ranking_env_set` sentence names the two patch groups that do
-/// not reach the engine a caller would expect: `hygiene` stays on the
-/// process-open environment, and `coactivation` reaches the hub but not the
-/// retriever's own expansion. Both are accepted and read back, so the
+/// The published `ranking_env_set` sentence names both the live group and the
+/// group that stays fixed: `hygiene` stays on the process-open environment, and
+/// a `coactivation` patch now reaches the retriever's own query expansion as
+/// well as the hub and the graph tools. Both are accepted and read back, so the
 /// description has to say so.
 #[test]
-fn ranking_env_set_description_names_the_fixed_patch_groups() {
+fn ranking_env_set_description_names_the_live_and_fixed_groups() {
     let description = def("ranking_env_set").description;
     assert!(
         description
@@ -196,7 +196,7 @@ fn ranking_env_set_description_names_the_fixed_patch_groups() {
     );
     assert!(
         description.contains(
-            "`coactivation` patch reaches the association hub but not the retriever's own query expansion"
+            "`coactivation` patch reaches the association hub, the retriever's own query expansion"
         ),
         "{description}"
     );

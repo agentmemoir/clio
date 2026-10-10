@@ -7,13 +7,14 @@
 //! the process's *current* ranking environment reaches the hub engine and the
 //! shared retriever, that a lowered co-activation threshold changes hub
 //! eligibility in the same process, that a live trust ratio and a live
-//! retrieval weight change the next retrieval, and that a fresh process still
-//! starts from the effective defaults.
+//! retrieval weight change the next retrieval, that a live co-activation
+//! threshold changes the next retrieval's graph expansion, and that a fresh
+//! process still starts from the effective defaults.
 //!
 //! ## Owns
 //! - `McpState::ranking_policy` and `apply_ranking_policy` assertions
-//! - The live trust-ratio and retrieval-weight tests through the real
-//!   `ranking_env_set` write path
+//! - The live trust-ratio, retrieval-weight, and co-activation-expansion tests
+//!   through the real `ranking_env_set` write path
 //!
 //! ## Does not own
 //! - The `consolidate` response shape (`mutator_tools_tests`)
@@ -264,6 +265,49 @@ fn set_ranking(state: &McpState, patch: &Value, dry_run: bool) -> Value {
     )
 }
 
+/// Patch the live co-activation prune threshold through the real
+/// `ranking_env_set` JSON path.
+///
+/// The co-activation block is a whole struct, so the patch is built from the
+/// current constants with `w_min` changed, not from a partial literal, and sent
+/// as JSON the way an MCP client would.
+fn set_w_min(state: &McpState, w_min: f64) -> Value {
+    let mut coactivation = {
+        let rt = state.config.lock().expect("config runtime mutex poisoned");
+        rt.ranking_env().coactivation.clone()
+    };
+    coactivation.w_min = w_min;
+    set_ranking(
+        state,
+        &json!({
+            "coactivation": serde_json::to_value(&coactivation).expect("serialize coactivation")
+        }),
+        false,
+    )
+}
+
+/// One expanding retrieval through the engine's JSON surface with the clock
+/// pinned: the graph-expansion stage reads the retriever's own co-activation
+/// policy, so this is the seam a live `coactivation` patch must reach.
+fn retrieve_expanding(state: &McpState, query: &str) -> Value {
+    let outcome = serde_json::to_value(clio_retrieve::retrieve_from_json(
+        &state.retriever,
+        &json!({"bank": BANK, "query": query, "now": FIXED_NOW, "expand_graph": true}),
+    ))
+    .expect("serialize retrieve outcome");
+    assert_eq!(outcome["ok"], json!(true), "{outcome}");
+    outcome
+}
+
+/// Whether the payload returned a hit for `id`.
+fn has_hit(payload: &Value, id: &str) -> bool {
+    payload["hits"]
+        .as_array()
+        .expect("hits array")
+        .iter()
+        .any(|hit| hit["item_id"] == json!(id))
+}
+
 /// A live `ranking_env_set` changes the trust ratio the *next* retrieval
 /// applies to an agent-inferred belief, and the returned hit reports the
 /// applied value.
@@ -349,5 +393,44 @@ fn a_dry_run_ranking_change_leaves_the_next_retrieval_alone() {
         scores_f64(scores_for(&after, "belief"), "trust_factor").to_bits(),
         0.85f64.to_bits(),
         "a dry run must not reach the retriever: {after}"
+    );
+}
+
+/// A live `ranking_env_set` `coactivation.w_min` patch governs the next
+/// retrieval's graph expansion: the retriever's own association engine reads
+/// the new threshold even though the retriever object was never rebuilt.
+#[test]
+fn a_live_coactivation_patch_governs_the_next_retrieval_expansion() {
+    let state = retrieval_state();
+    // The seed matches the query; its neighbor does not, so the neighbor can
+    // only arrive through graph expansion.
+    seed(&state, &item("seed", BANK), "alpha expansion marker");
+    seed(&state, &item("nbr", BANK), "zzz unrelated text");
+    state
+        .store
+        .reinforce_assoc_edge(BANK, "seed", "nbr", now_millis(), 0.15)
+        .expect("co-activation edge");
+
+    let before = retrieve_expanding(&state, "alpha");
+    assert_eq!(before["graph_expanded"], json!(1), "{before}");
+    assert!(
+        has_hit(&before, "nbr"),
+        "the neighbor arrives by expansion first: {before}"
+    );
+
+    // Raise the prune threshold above the edge's effective weight through the
+    // real `ranking_env_set` path, which calls `apply_ranking_policy`.
+    let set = set_w_min(&state, 0.5);
+    assert_eq!(set["ok"], json!(true), "{set}");
+
+    let after = retrieve_expanding(&state, "alpha");
+    assert_eq!(
+        after["graph_expanded"],
+        json!(0),
+        "the live threshold retunes expansion: {after}"
+    );
+    assert!(
+        !has_hit(&after, "nbr"),
+        "the new threshold drops the neighbor: {after}"
     );
 }

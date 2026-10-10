@@ -173,7 +173,7 @@ pub fn with_double(state: &Arc<McpState>, double: &Arc<CountingStore>) -> Arc<Mc
     scoped.compliance = view_double(&scoped.compliance, &writes);
     scoped.hygiene = view_double(&scoped.hygiene, &writes);
     scoped.batch = view_double(&scoped.batch, &writes);
-    scoped.assoc = AssociationEngine::new(Arc::clone(&store), scoped.assoc.policy().clone());
+    scoped.assoc = AssociationEngine::new(Arc::clone(&store), scoped.assoc.policy());
     scoped.retriever = Arc::new(HybridRetriever::new(Arc::clone(&store), Arc::clone(&index)));
     let mut diagnostic_retriever = HybridRetriever::new(Arc::clone(&store), Arc::clone(&index));
     diagnostic_retriever.set_reinforcement(false);
