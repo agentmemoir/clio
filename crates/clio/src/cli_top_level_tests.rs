@@ -236,6 +236,31 @@ fn a_stray_positional_is_a_usage_error() {
     assert_eq!(error.message(), "unexpected argument `stray`");
 }
 
+/// A reserved surface refuses a value flag given twice and a whitespace-only value,
+/// the same way the verb grammar does, instead of keeping the last value silently.
+#[test]
+fn a_reserved_surface_refuses_a_repeated_or_blank_value_flag() {
+    let repeated = super::parse_flags(
+        ["--db".to_owned(), "a".to_owned(), "--db=b".to_owned()],
+        &[],
+    )
+    .expect_err("repeated --db");
+    assert!(
+        repeated.message().contains("--db was given more than once"),
+        "{}",
+        repeated.message()
+    );
+    let blank =
+        super::parse_flags(["--db".to_owned(), "  ".to_owned()], &[]).expect_err("blank --db");
+    assert!(
+        blank
+            .message()
+            .contains("--db must not be empty or whitespace-only"),
+        "{}",
+        blank.message()
+    );
+}
+
 /// A bare `--` is the top level's delimiter before positional text: the token
 /// itself is accepted and ends flag parsing, and a token after it is refused
 /// because these surfaces have no operand slot.

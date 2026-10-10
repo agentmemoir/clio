@@ -4,13 +4,13 @@
 //! # Responsibility
 //!
 //! This module is responsible for the duplicate-write CLI contract: the
-//! `remember --allow-duplicate` flag, and treating an exact-duplicate rejection as a
-//! no-op success instead of a failure.
+//! `remember --allow-duplicate` flag, and refusing an exact-duplicate write as a
+//! failure with the reason named.
 //!
 //! ## Owns
 //! - Decoding `--allow-duplicate` into the store tool's `allow_duplicate` argument
 //! - Recognising a `duplicate: true` store payload
-//! - The human text for a no-op duplicate write
+//! - The refusal for a duplicate write
 //!
 //! ## Does not own
 //! - The admission rejection itself (see `clio-admission`)
@@ -45,25 +45,22 @@ pub(crate) fn is_duplicate_noop(payload: &Value) -> bool {
 /// The refusal for a `remember` payload, or `None` when there is nothing to
 /// refuse.
 ///
-/// An exact duplicate was already rejected inside the store path, so the write
-/// stored nothing and the caller already holds the fact. Mapping that to the
-/// exit-1 domain refusal would abort agent loops and `set -e` scripts over a
-/// non-error, which is why it returns `None` here.
+/// An exact duplicate stores nothing, so it is refused like every other rejected
+/// write: exit 1, `ok` false, and the reason named. The envelope must not report
+/// `ok` true for a write that did not happen. A caller that wants the copy anyway
+/// passes `--allow-duplicate`.
 pub(crate) fn remember_refusal(payload: &Value) -> Option<crate::cli_write_group::Refusal> {
     if is_duplicate_noop(payload) {
-        return None;
+        let reason = payload
+            .get("rejection_reason")
+            .and_then(Value::as_str)
+            .unwrap_or("identical text is already stored");
+        return Some(crate::cli_write_group::Refusal {
+            code: "duplicate",
+            message: format!("duplicate: nothing stored ({reason})"),
+        });
     }
     crate::cli_write_group::decision_refusal(payload)
-}
-
-/// The `remember` view of a duplicate: nothing was written, and that is the
-/// expected outcome rather than an error.
-pub(crate) fn render_duplicate(payload: &Value) -> String {
-    let reason = payload
-        .get("rejection_reason")
-        .and_then(Value::as_str)
-        .unwrap_or("identical text is already stored");
-    format!("duplicate: nothing stored ({reason})")
 }
 
 #[cfg(test)]
