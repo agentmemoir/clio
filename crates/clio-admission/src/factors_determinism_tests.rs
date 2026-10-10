@@ -15,17 +15,17 @@
 //! ## Does not own
 //! - The factor formulas themselves (`factors_tests.rs`)
 //! - Gate and threshold policy (`policy_tests.rs`, `decision_tests.rs`)
+//! - The signal source that supplies the factors (`clio-mcp`)
 //!
 //! ## Boundary
 //!
-//! Regression cover for issue #29: identical `remember` input was reported to
-//! store an `admission_score` differing in the last digits about one run in
-//! ten, and the reported gap was one f32 ULP — the signature of a value being
-//! quantised or of a sum whose order varied. The report could not be
-//! reproduced locally over 100 store runs, so these tests pin the invariant
-//! rather than a fix: if a future change reintroduces order dependence or an
-//! f32 step, they fail here instead of showing up as items swapping ranks in
-//! recall.
+//! The arithmetic here is deterministic for fixed inputs, so it could not
+//! explain a reported `admission_score` that differed between identical writes.
+//! That cause was the signal source, which fed the recency factor an age
+//! measured against the write clock; the store-backed source now reports no
+//! age. These tests still pin the arithmetic invariant, so a future change that
+//! reintroduces order dependence or an f32 step fails here instead of showing
+//! up as items swapping ranks in recall.
 //!
 //! Keep this module focused on score determinism.
 

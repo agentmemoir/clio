@@ -228,7 +228,10 @@ pub struct RankingEnv {
     /// Per-key content-type prior overrides keyed by category or episodic type.
     pub type_prior_overrides: HashMap<String, f64>,
     /// Admission recency decay constant `τ` in days. Admission scoring reads
-    /// it as its age input; retrieval shaping does not.
+    /// it as its age input; retrieval shaping does not. Every shipped signal
+    /// source reports no prior age, so it changes no write score today: the
+    /// admission recency factor is a constant `1.0`. The knob stays live for
+    /// the arithmetic and for a host that supplies an explicit age.
     pub recency_tau_days: f64,
     /// Hygiene noise-score weights (appendix defaults).
     pub hygiene: HygieneWeights,

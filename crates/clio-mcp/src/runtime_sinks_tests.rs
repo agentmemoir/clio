@@ -25,6 +25,7 @@ use crate::runtime::{McpOpenOptions, McpState};
 use clio_admission::gated::candidate_text;
 use clio_belief::signals::BeliefSignalSource;
 use clio_store::{DekProvider, LocalDevKms, SqliteStore};
+use serde_json::json;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
@@ -362,5 +363,61 @@ fn admission_score_is_independent_of_the_write_time() {
     assert_eq!(
         early_score.admission_score, late_score.admission_score,
         "identical content must score identically regardless of write time"
+    );
+}
+
+/// The same invariant holds through the real gated write path: two banks that
+/// hold the same prior store an identical probe with an identical
+/// `admission_score` when the probes' timestamps are a day apart.
+#[test]
+fn stored_score_is_identical_for_writes_a_day_apart() {
+    let s = state();
+    let store = |bank: &str, id: &str, gist: &str, ts: &str| {
+        crate::store_write::store(
+            &s,
+            &json!({
+                "item": {"id": id, "subject_id": id, "gist": gist},
+                "category": "persona",
+                "epistemic_kind": "fact",
+                "bank": bank,
+                "actor": "agent",
+                "timestamp": ts,
+            }),
+        )
+        .expect("store")
+    };
+
+    // A dissimilar prior in each bank, so only the write time can differ.
+    for (bank, suffix) in [("bank-clock-a", "a"), ("bank-clock-b", "b")] {
+        let prior = store(
+            bank,
+            &format!("itm-prior-{suffix}"),
+            "deploys on fridays are risky",
+            "2026-01-01T00:00:00Z",
+        );
+        assert!(prior["pass"].as_bool().unwrap_or(false), "{prior}");
+    }
+
+    let early = store(
+        "bank-clock-a",
+        "itm-probe-a",
+        "a genuinely new note about backups",
+        "2026-02-01T00:00:00Z",
+    );
+    let late = store(
+        "bank-clock-b",
+        "itm-probe-b",
+        "a genuinely new note about backups",
+        "2026-02-02T00:00:00Z",
+    );
+    assert!(early["pass"].as_bool().unwrap_or(false), "{early}");
+    assert!(late["pass"].as_bool().unwrap_or(false), "{late}");
+    // Recency is the neutral `1.0` on both, which is what keeps the two scores
+    // equal; a clock-derived age would make the later probe score lower.
+    assert_eq!(early["factors"]["recency"], json!(1.0), "{early}");
+    assert_eq!(late["factors"]["recency"], json!(1.0), "{late}");
+    assert_eq!(
+        early["admission_score"], late["admission_score"],
+        "the stored score must not depend on the write time"
     );
 }
