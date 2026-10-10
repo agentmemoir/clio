@@ -20,7 +20,8 @@ fn mask_value_redacts_nested_api_key() {
         "credentials": { "api_key": "sk-SECRETKEY99" }
     });
     mask_value("", &mut v);
-    assert_eq!(v["credentials"]["api_key"], json!("****EY99"));
+    // The secret-shaped field name is masked along with its value.
+    assert_eq!(v["****ials"]["****_key"], json!("****EY99"));
     assert_eq!(v["backend"], json!("sqlite"));
 }
 
@@ -32,9 +33,40 @@ fn mask_arrays_and_non_string_secrets() {
         "token": null
     });
     mask_value("", &mut v);
-    assert_eq!(v["items"][0]["password"], json!("[REDACTED]"));
-    assert_eq!(v["token"], json!("[REDACTED]"));
+    assert_eq!(v["items"][0]["****word"], json!("[REDACTED]"));
+    assert_eq!(v["items"][1]["ok"], json!(true));
+    assert_eq!(v["****oken"], json!("[REDACTED]"));
     let _ = masked_clone(&json!({"secret": "ab"}));
+}
+
+#[test]
+fn mask_value_keeps_every_entry_when_masked_keys_collide() {
+    // `embed_api_key`, `extract_api_key`, and `rerank_api_key` all mask to the
+    // same last-4 form; every entry must still be present, not overwritten.
+    let mut v = json!({
+        "credentials": {
+            "embed_api_key": "a",
+            "extract_api_key": "b",
+            "rerank_api_key": "c"
+        }
+    });
+    mask_value("", &mut v);
+    let section = v["****ials"].as_object().expect("masked section");
+    assert_eq!(section.len(), 3, "{section:?}");
+    assert_eq!(section["****_key"], json!("[REDACTED]"));
+    assert_eq!(section["****_key#2"], json!("[REDACTED]"));
+    assert_eq!(section["****_key#3"], json!("[REDACTED]"));
+}
+
+#[test]
+fn masked_clone_masks_a_secret_shaped_key() {
+    // The value under a secret-looking key is masked today, but the key itself
+    // is echoed. A secret stored in the key name must not survive the clone.
+    let document = json!({"entity": "Ada", "sk-live-SECRETKEY99": "x"});
+    let rendered = serde_json::to_string(&masked_clone(&document)).unwrap();
+    assert!(!rendered.contains("sk-live-SECRETKEY99"), "{rendered}");
+    assert!(rendered.contains("****EY99"), "{rendered}");
+    assert!(rendered.contains("\"entity\":\"Ada\""), "{rendered}");
 }
 
 #[test]
