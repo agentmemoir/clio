@@ -275,6 +275,23 @@ fn ask_managed(ctx: &mut Ctx<'_>) -> Result<DatabasePlan, Signal> {
              `--database existing --database-connect typed`.",
         ));
     }
+    // The deliberate no-check mode is for a server whose certificate Clio did
+    // not issue. A container Clio just started has no certificate and is
+    // published on this machine only, so the mode can neither succeed nor be
+    // needed here. Refuse it by name rather than let the connection test fail.
+    let ssl = match ctx.flag("database-ssl") {
+        Some(raw) => {
+            let parsed = SslChoice::parse(raw).map_err(Signal::usage)?;
+            if parsed == SslChoice::EncryptNoVerify {
+                return Err(Signal::usage(
+                    "--database-ssl encrypt-no-verify does not apply to `--database managed`: \
+                     Clio's own Postgres has no certificate and is published on this machine only",
+                ));
+            }
+            parsed
+        }
+        None => SslChoice::Prefer,
+    };
     let host = match flagged_checked(ctx, "database-host", check_host)? {
         Some(flagged) => flagged,
         None => crate::setup_managed::MANAGED_HOST.to_owned(),
@@ -290,12 +307,6 @@ fn ask_managed(ctx: &mut Ctx<'_>) -> Result<DatabasePlan, Signal> {
     let name = match flagged_checked(ctx, "database-name", check_database_name)? {
         Some(flagged) => flagged,
         None => crate::setup_managed::MANAGED_DATABASE.to_owned(),
-    };
-    // A container Clio just started has no certificate, so `prefer` is the only
-    // mode that can succeed; asking would be asking a question with one answer.
-    let ssl = match ctx.flag("database-ssl") {
-        Some(raw) => SslChoice::parse(raw).map_err(Signal::usage)?,
-        None => SslChoice::Prefer,
     };
     // The line names a value Clio picked, so it also has to name the whole
     // command that changes it. `--database-ssl` on its own is not a command

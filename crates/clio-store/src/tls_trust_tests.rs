@@ -5,17 +5,19 @@
 //!
 //! This module is responsible for testing the trust a TLS connection rests on:
 //! that a supplied root is added to the bundled roots, that a bad file is
-//! refused with a message an operator can act on, and that a certificate signed
-//! by the supplied root verifies while the same certificate does not verify
-//! without it.
+//! refused with a message an operator can act on, that a certificate signed by
+//! the supplied root verifies while the same certificate does not verify without
+//! it, and that a real handshake built from the store's own config accepts the
+//! supplied root and rejects the same server without it.
 //!
 //! ## Owns
 //! - The bundled-roots-plus-supplied composition
 //! - The refusals for a missing or non-certificate file
 //! - Certificate verification against the composed roots
+//! - A real TLS handshake through [`verified_config`] and [`unverified_config`]
 //!
 //! ## Does not own
-//! - Reaching a real server (`pg_tls_db_tests` owns that)
+//! - The Postgres protocol handshake (`pg_tls_db_tests` owns that)
 //! - Reading `sslrootcert` out of a URL (`pg_url` owns that)
 //!
 //! ## Boundary
@@ -23,14 +25,18 @@
 //! Changes to how roots are composed or checked should normally require changes
 //! here. Changes to the mode names should not.
 //!
-//! The two certificates under `tests/fixtures` are a throwaway private CA and a
-//! leaf it signed, both for `localhost`. Only the certificates are kept; the
-//! keys were discarded after signing.
+//! The certificates under `tests/fixtures` are a throwaway private CA and a leaf
+//! it signed, both for `localhost`. `server.key.pem` is the leaf's test-only key:
+//! it authenticates nothing but the in-process server these tests start, and it
+//! is not a credential for any real service.
 
 use super::*;
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConnection, ServerConfig, ServerConnection, StreamOwned};
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -137,5 +143,107 @@ fn the_same_certificate_fails_without_the_supplied_root() {
     assert!(
         outcome.is_err(),
         "a private root is not one of the bundled public roots"
+    );
+}
+
+#[test]
+fn both_connectors_build_for_the_store() {
+    assert!(
+        verified_connector(None).is_ok(),
+        "the bundled-root connector builds"
+    );
+    assert!(
+        verified_connector(Some(&fixture("private_ca.pem"))).is_ok(),
+        "the private-root connector builds"
+    );
+    assert!(
+        unverified_connector().is_ok(),
+        "the no-verify connector builds"
+    );
+}
+
+/// A rustls server config from the fixture leaf and its test-only key.
+fn server_config() -> Arc<ServerConfig> {
+    let certs = read_pem(&fixture("server.pem")).expect("the fixture leaf reads");
+    let key = {
+        let file = std::fs::File::open(fixture("server.key.pem")).expect("the fixture key opens");
+        let mut reader = std::io::BufReader::new(file);
+        rustls_pemfile::private_key(&mut reader)
+            .expect("the fixture key reads")
+            .expect("the file holds one key")
+    };
+    Arc::new(
+        ServerConfig::builder_with_provider(Arc::new(default_provider()))
+            .with_safe_default_protocol_versions()
+            .expect("safe protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .expect("a server config builds from the fixture"),
+    )
+}
+
+/// Run one TLS handshake against an in-process server built from the fixture,
+/// and report the client's result. A certificate the client refuses fails its
+/// first write, which is the same failure the store would see.
+///
+/// The server reads one byte and echoes it, so the handshake completes on both
+/// sides. A five-second read timeout bounds either side, so a logic error fails
+/// a test instead of hanging the run.
+fn handshake(client: Arc<ClientConfig>) -> Result<(), String> {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
+    let addr = listener.local_addr().expect("the bound address");
+    let server = std::thread::spawn(move || -> Result<(), String> {
+        let (tcp, _) = listener.accept().map_err(|e| e.to_string())?;
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let conn = ServerConnection::new(server_config()).map_err(|e| e.to_string())?;
+        let mut tls = StreamOwned::new(conn, tcp);
+        let mut byte = [0u8; 1];
+        tls.read_exact(&mut byte).map_err(|e| e.to_string())?;
+        tls.write_all(&byte).map_err(|e| e.to_string())?;
+        tls.flush().map_err(|e| e.to_string())
+    });
+    let tcp = TcpStream::connect(addr).expect("connect to the in-process server");
+    tcp.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    let conn = ClientConnection::new(
+        client,
+        ServerName::try_from("localhost").expect("a dns name"),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut tls = StreamOwned::new(conn, tcp);
+    let outcome = (|| -> Result<(), String> {
+        tls.write_all(b"x").map_err(|e| e.to_string())?;
+        tls.flush().map_err(|e| e.to_string())?;
+        let mut byte = [0u8; 1];
+        tls.read_exact(&mut byte).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    let _ = server.join();
+    outcome
+}
+
+#[test]
+fn a_real_handshake_succeeds_with_the_supplied_root() {
+    let config = verified_config(Some(&fixture("private_ca.pem"))).expect("the config builds");
+    assert!(
+        handshake(config).is_ok(),
+        "the supplied root must authenticate the fixture server"
+    );
+}
+
+#[test]
+fn a_real_handshake_fails_without_the_supplied_root() {
+    let config = verified_config(None).expect("the config builds");
+    assert!(
+        handshake(config).is_err(),
+        "a private root is not one of the bundled public roots"
+    );
+}
+
+#[test]
+fn a_real_handshake_succeeds_without_verification() {
+    let config = unverified_config().expect("the config builds");
+    assert!(
+        handshake(config).is_ok(),
+        "encrypt-no-verify must accept the certificate it does not check"
     );
 }

@@ -236,6 +236,55 @@ fn a_managed_run_writes_an_address_with_no_password() {
 }
 
 #[test]
+fn a_root_certificate_with_a_verifying_mode_is_written() {
+    // The typed route's root certificate is a flag, and a verifying mode is the
+    // only one that uses it. The flag reaches the address, percent-encoded the
+    // way the rest of the value is.
+    let run = Harness::fresh()
+        .flags([
+            ("database", "existing"),
+            ("database-connect", "typed"),
+            ("database-host", "db.example.com"),
+            ("database-port", "5432"),
+            ("database-name", "clio"),
+            ("database-user", "clio"),
+            ("database-password", "pw"),
+            ("database-ssl", "verify-full"),
+            ("database-ssl-rootcert", "/etc/ca.pem"),
+        ])
+        .typing(SERVICES)
+        .run();
+    let plan = &run.answers().database.as_ref().expect("a plan").plan;
+    assert!(
+        plan.address.contains("sslrootcert=%2Fetc%2Fca.pem"),
+        "{}",
+        plan.address
+    );
+}
+
+#[test]
+fn a_root_certificate_with_a_non_verifying_mode_is_refused() {
+    // A mode that does not check the certificate cannot use a root, so the flag
+    // is refused by name rather than carried into an address that ignores it.
+    let reason = Harness::fresh()
+        .flags([
+            ("database", "existing"),
+            ("database-connect", "typed"),
+            ("database-host", "db.example.com"),
+            ("database-port", "5432"),
+            ("database-name", "clio"),
+            ("database-user", "clio"),
+            ("database-password", "pw"),
+            ("database-ssl", "disable"),
+            ("database-ssl-rootcert", "/etc/ca.pem"),
+        ])
+        .typing(SERVICES)
+        .expect_refusal();
+    assert!(reason.contains("--database-ssl-rootcert"), "{reason}");
+    assert!(reason.contains("checks the certificate"), "{reason}");
+}
+
+#[test]
 fn the_managed_route_refuses_a_password_flag() {
     let reason = Harness::fresh()
         .flag("database-password", "settings-password-0123456789")

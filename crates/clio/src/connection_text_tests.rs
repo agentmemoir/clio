@@ -61,3 +61,16 @@ fn a_cleartext_connection_says_so() {
         "not encrypted, remote"
     );
 }
+
+#[test]
+fn an_unreadable_postgres_address_does_not_claim_to_be_local_and_cleartext() {
+    // A mode this store no longer offers (`require`) makes the address
+    // unreadable. It is still a Postgres address, so it must not be described
+    // as a local, unencrypted SQLite file.
+    assert_eq!(
+        database_encryption_locality(
+            "postgres://clio:secret@db.example.com:5432/clio?sslmode=require"
+        ),
+        "encryption could not be read"
+    );
+}

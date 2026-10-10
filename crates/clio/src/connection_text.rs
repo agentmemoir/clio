@@ -49,8 +49,23 @@ pub(crate) fn database_encryption_locality(address: &str) -> String {
             };
             format!("{encryption}, {locality}")
         }
+        // A path is a SQLite file: not encrypted, and on this machine. A
+        // Postgres address that does not parse is neither, and describing it as
+        // unencrypted and local would say the opposite of the truth about a
+        // store that might be remote and encrypted. Say only what is known.
+        Err(_) if names_postgres_scheme(address) => "encryption could not be read".to_owned(),
         Err(_) => "not encrypted, this machine only".to_owned(),
     }
+}
+
+/// Whether an address names the Postgres scheme this store opens.
+///
+/// The parser refuses an address for two different reasons: it is not a
+/// Postgres address at all (a SQLite path), or it is a Postgres address this
+/// store cannot read. The two must not read the same way.
+fn names_postgres_scheme(address: &str) -> bool {
+    let address = address.trim_start();
+    address.starts_with("postgres://") || address.starts_with("postgresql://")
 }
 
 #[cfg(test)]

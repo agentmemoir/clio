@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - Building the root set from the bundled roots plus one supplied PEM file
+//! - The rustls client config a verified or unverified connection uses
 //! - The verified connector that checks the server certificate
 //! - The deliberately unverified connector for `encrypt-no-verify`
 //! - Reading a PEM file into DER certificates, with a message an operator can act on
@@ -68,15 +69,42 @@ pub(crate) fn trust_roots(supplied: Option<&str>) -> Result<RootCertStore, Failu
     Ok(roots)
 }
 
+/// The rustls client config a verified connection uses: the bundled roots plus
+/// any supplied root, and the protocol versions this build supports.
+///
+/// Kept separate from the connector so a test can drive a real handshake with
+/// the same config the store hands to `postgres_rustls`.
+///
+/// # Errors
+/// The supplied root cannot be read, or rustls cannot build the config.
+pub(crate) fn verified_config(supplied: Option<&str>) -> Result<Arc<ClientConfig>, Failure> {
+    Ok(Arc::new(
+        builder()?
+            .with_root_certificates(trust_roots(supplied)?)
+            .with_no_client_auth(),
+    ))
+}
+
+/// The rustls client config for `encrypt-no-verify`: TLS, with no check on the
+/// certificate.
+///
+/// # Errors
+/// rustls cannot build the config.
+pub(crate) fn unverified_config() -> Result<Arc<ClientConfig>, Failure> {
+    Ok(Arc::new(
+        builder()?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyCertificate))
+            .with_no_client_auth(),
+    ))
+}
+
 /// The connector that checks the server certificate against [`trust_roots`].
 ///
 /// # Errors
 /// The supplied root cannot be read, or rustls cannot build a client config.
 pub(crate) fn verified_connector(supplied: Option<&str>) -> Result<MakeTlsConnector, Failure> {
-    let config = builder()?
-        .with_root_certificates(trust_roots(supplied)?)
-        .with_no_client_auth();
-    Ok(connector(config))
+    Ok(connector(verified_config(supplied)?))
 }
 
 /// The connector for `encrypt-no-verify`: TLS, with no check on the certificate.
@@ -84,11 +112,7 @@ pub(crate) fn verified_connector(supplied: Option<&str>) -> Result<MakeTlsConnec
 /// # Errors
 /// rustls cannot build a client config.
 pub(crate) fn unverified_connector() -> Result<MakeTlsConnector, Failure> {
-    let config = builder()?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AcceptAnyCertificate))
-        .with_no_client_auth();
-    Ok(connector(config))
+    Ok(connector(unverified_config()?))
 }
 
 /// A rustls client builder with the protocol versions this build supports.
@@ -99,8 +123,8 @@ fn builder() -> Result<rustls::ConfigBuilder<ClientConfig, rustls::WantsVerifier
 }
 
 /// The store's TLS connector, from a finished client config.
-fn connector(config: ClientConfig) -> MakeTlsConnector {
-    MakeTlsConnector::new(TlsConnector::from(Arc::new(config)))
+fn connector(config: Arc<ClientConfig>) -> MakeTlsConnector {
+    MakeTlsConnector::new(TlsConnector::from(config))
 }
 
 /// Read every certificate in a PEM file into DER.
