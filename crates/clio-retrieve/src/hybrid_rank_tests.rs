@@ -33,9 +33,7 @@ use super::*;
 use crate::filter::recency_score;
 use crate::fixtures_tests as fx;
 use crate::fusion::DEFAULT_RRF_K;
-use clio_config::ranking::{
-    DEFAULT_RECENCY_TAU_DAYS, DEFAULT_RETENTION_HALF_LIFE_DAYS, RetrievalWeights, TrustRatios,
-};
+use clio_config::ranking::{DEFAULT_RETENTION_HALF_LIFE_DAYS, RetrievalWeights, TrustRatios};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -184,7 +182,7 @@ fn the_renormalised_default_matches_the_pre_removal_shaping_formula() {
             let admission = item.admission_score.expect("fixture admission score");
             // Every fixture item carries the reference stamp, so this recency
             // signal is 1.0, a real nonzero value; only the zero weight cancels it.
-            let recency = recency_score(item, FIXED_NOW, DEFAULT_RECENCY_TAU_DAYS);
+            let recency = recency_score(item, FIXED_NOW, 30.0);
             assert!(
                 (recency - 1.0).abs() < 1e-12,
                 "age 0 gives recency 1.0, got {recency}"

@@ -90,7 +90,7 @@ fn novelty_is_stable_across_repeated_calls() {
 
 #[test]
 fn weighted_score_is_bit_identical_across_repeats() {
-    let weights = [0.25, 0.2, 0.2, 0.2, 0.15];
+    let weights = [0.25, 0.25, 0.25, 0.25];
     // Values chosen to be unrepresentable in f32, so a narrowing step anywhere
     // in the sum would change the result.
     let factors = [
@@ -98,7 +98,6 @@ fn weighted_score_is_bit_identical_across_repeats() {
         0.1_f64 / 3.0,
         0.2_f64 / 7.0,
         0.3_f64 / 11.0,
-        0.4_f64 / 13.0,
     ];
     let first = weighted_score(weights, factors);
     for call in 0..64 {
@@ -111,7 +110,7 @@ fn weighted_score_is_bit_identical_across_repeats() {
     // And it must not have been rounded to f32 on the way out. The gap below is
     // about 7e-9, comfortably wider than the tolerance, so a narrowing step
     // would be caught rather than absorbed.
-    assert_eq!(first.to_string(), "0.21200970598029423");
+    assert_eq!(first.to_string(), "0.21185319582378406");
     assert!(
         (first - (first as f32) as f64).abs() > FULL_PRECISION_TOLERANCE,
         "score is representable as f32, so this fixture would not catch narrowing"
@@ -120,15 +119,14 @@ fn weighted_score_is_bit_identical_across_repeats() {
 
 #[test]
 fn weighted_score_matches_the_same_terms_summed_by_hand() {
-    // The score is a plain left-to-right sum of five products. Pinning the
+    // The score is a plain left-to-right sum of four products. Pinning the
     // arithmetic means a future change to the order, or to a fused multiply-add,
     // shows up as a value change rather than as a silent last-digit drift.
-    let weights = [0.25, 0.2, 0.2, 0.2, 0.15];
-    let factors = [0.9, 0.7, 0.55, 0.42, 0.31];
+    let weights = [0.25, 0.25, 0.25, 0.25];
+    let factors = [0.9, 0.7, 0.55, 0.42];
     let expected = weights[0] * factors[0]
         + weights[1] * factors[1]
         + weights[2] * factors[2]
-        + weights[3] * factors[3]
-        + weights[4] * factors[4];
+        + weights[3] * factors[3];
     assert_eq!(weighted_score(weights, factors), expected);
 }

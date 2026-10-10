@@ -3,10 +3,10 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for five-factor signals on the belief **create** path.
+//! This module is responsible for four-factor signals on the belief **create** path.
 //!
 //! ## Owns
-//! - `BeliefSignalSource` (neighbor / recency lookups for a proposition)
+//! - `BeliefSignalSource` (neighbor lookups for a proposition)
 //! - Belief `SignalInputs` construction and gate-free scoring
 //!
 //! ## Does not own
@@ -31,7 +31,7 @@ use clio_types::{AmError, ErrorCode, SourceType};
 /// to 0.5 and `θ_admit` falls back to the global threshold.
 pub const BELIEF_KEY: &str = "belief";
 
-/// Neighbor / recency lookups needed to score a new belief identity.
+/// Neighbor lookups needed to score a new belief identity.
 ///
 /// Hosts supply the adapter; `clio-belief` ships no default store adapter.
 pub trait BeliefSignalSource: std::fmt::Debug {
@@ -40,12 +40,6 @@ pub trait BeliefSignalSource: std::fmt::Debug {
     /// # Errors
     /// `factor_unavailable` when the store backend is down.
     fn neighbor_texts(&self, bank_id: &str, proposition: &str) -> Result<Vec<String>, AmError>;
-
-    /// Age of the nearest prior in days; `None` means no prior exists.
-    ///
-    /// # Errors
-    /// `factor_unavailable` when the store backend is down.
-    fn prior_age_days(&self, bank_id: &str, proposition: &str) -> Result<Option<f64>, AmError>;
 }
 
 /// Keep an existing `factor_unavailable`, else wrap the backend failure.
@@ -69,19 +63,14 @@ pub fn signals_for(
     let neighbors = source
         .neighbor_texts(bank_id, proposition)
         .map_err(as_factor_unavailable)?;
-    let prior_age_days = source
-        .prior_age_days(bank_id, proposition)
-        .map_err(as_factor_unavailable)?;
     Ok(SignalInputs {
         text: proposition.to_owned(),
         source_type: Some(source_type),
         neighbors: Some(neighbors),
-        prior_age_days,
-        recency_unavailable: false,
     })
 }
 
-/// Score a new belief identity with five factors and **no category gate**.
+/// Score a new belief identity with four factors and **no category gate**.
 ///
 /// # Errors
 /// `factor_unavailable` when a required signal backend is down.

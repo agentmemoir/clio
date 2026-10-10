@@ -75,11 +75,11 @@ impl<'a> AdmissionPolicy<'a> {
         self.force
     }
 
-    /// Five-factor weights `w1…w5` in score order.
+    /// Four-factor weights `w1…w4` in score order.
     #[must_use]
-    pub fn weights(&self) -> [f64; 5] {
+    pub fn weights(&self) -> [f64; 4] {
         let a = &self.env.admission;
-        [a.w1, a.w2, a.w3, a.w4, a.w5]
+        [a.w1, a.w2, a.w3, a.w4]
     }
 
     /// Effective `θ_admit` for a category or episodic-type key.
@@ -95,12 +95,6 @@ impl<'a> AdmissionPolicy<'a> {
     #[must_use]
     pub fn prior_for(&self, key: &str) -> f64 {
         prior_for(&self.env.type_prior_overrides, key)
-    }
-
-    /// Recency decay constant `τ` in days.
-    #[must_use]
-    pub const fn recency_tau_days(&self) -> f64 {
-        self.env.recency_tau_days
     }
 
     /// Effective duplicate-gate novelty floor for this profile.

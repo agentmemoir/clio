@@ -23,7 +23,7 @@
 
 use crate::factors::{
     clamp01, confidence_score, factor_unavailable, is_exact_duplicate, novelty_jaccard,
-    recency_decay, utility_score, weighted_score,
+    utility_score, weighted_score,
 };
 use crate::policy::AdmissionPolicy;
 use clio_types::{AmError, EpisodicType, ErrorCode, ItemKind, SemanticCategory};
@@ -103,14 +103,9 @@ pub struct SignalInputs {
     pub source_type: Option<clio_types::SourceType>,
     /// Neighbor texts for novelty; `None` means the store backend is down.
     pub neighbors: Option<Vec<String>>,
-    /// Age of the nearest prior in days; `None` when there is no prior or the
-    /// source reports no age (see `SignalSource::prior_age_days`).
-    pub prior_age_days: Option<f64>,
-    /// Set when the recency backend itself is down (distinct from no prior).
-    pub recency_unavailable: bool,
 }
 
-/// Five scored factors in `w1…w5` order.
+/// Four scored factors in `w1…w4` order.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FactorBreakdown {
     /// Future utility.
@@ -119,21 +114,13 @@ pub struct FactorBreakdown {
     pub confidence: f64,
     /// Semantic novelty.
     pub novelty: f64,
-    /// Temporal recency.
-    pub recency: f64,
     /// Content-type prior.
     pub type_prior: f64,
 }
 
 impl FactorBreakdown {
-    fn as_array(self) -> [f64; 5] {
-        [
-            self.utility,
-            self.confidence,
-            self.novelty,
-            self.recency,
-            self.type_prior,
-        ]
+    fn as_array(self) -> [f64; 4] {
+        [self.utility, self.confidence, self.novelty, self.type_prior]
     }
 
     fn zero() -> Self {
@@ -141,7 +128,6 @@ impl FactorBreakdown {
             utility: 0.0,
             confidence: 0.0,
             novelty: 0.0,
-            recency: 0.0,
             type_prior: 0.0,
         }
     }
@@ -169,7 +155,7 @@ pub struct Decision {
     pub mission_rule_labels: Vec<String>,
 }
 
-/// Score one candidate: gate, then five factors, then threshold.
+/// Score one candidate: gate, then four factors, then the threshold.
 ///
 /// # Errors
 /// `factor_unavailable` when a required signal backend is down.
@@ -181,7 +167,7 @@ pub fn decide(
     decide_ungated(candidate.key(), signals, policy)
 }
 
-/// Five-factor score for a key with **no category gate**.
+/// Four-factor score for a key with **no category gate**.
 ///
 /// Used by the belief-writes create path, where the category gate is
 /// N/A but five-factor admission still MUST run on a new belief identity.
@@ -203,11 +189,8 @@ pub fn decide_ungated(
         .neighbors
         .as_ref()
         .ok_or_else(|| factor_unavailable("novelty neighbor store"))?;
-    if signals.recency_unavailable {
-        return Err(factor_unavailable("recency store"));
-    }
     // Mission influence is arithmetic only: the utility term moves; confidence,
-    // novelty, recency, and the type prior never do. A keep hit cannot rescue a
+    // novelty, and the type prior never do. A keep hit cannot rescue a
     // category-gate or span-verification failure because those reject before
     // scoring ever runs.
     let mission = policy.mission_evaluate(&signals.text);
@@ -216,7 +199,6 @@ pub fn decide_ungated(
         utility,
         confidence: clamp01(confidence_score(signals.source_type, &signals.text)),
         novelty: novelty_jaccard(&signals.text, neighbors),
-        recency: recency_decay(signals.prior_age_days, policy.recency_tau_days()),
         type_prior: clamp01(policy.prior_for(key)),
     };
     let score = weighted_score(policy.weights(), factors.as_array());

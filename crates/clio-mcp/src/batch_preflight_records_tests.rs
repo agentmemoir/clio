@@ -29,7 +29,6 @@ fn rejection_helper_maps_decision_reason() {
             utility: 0.1,
             confidence: 0.1,
             novelty: 0.1,
-            recency: 0.1,
             type_prior: 0.1,
         },
         rejection_reason: Some("below theta".into()),

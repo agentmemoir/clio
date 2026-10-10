@@ -154,7 +154,6 @@ fn ranking_set_renormalizes_admission() {
             w2: 1.0,
             w3: 1.0,
             w4: 1.0,
-            w5: 1.0,
         }),
         ..RankingEnvPatch::default()
     };
@@ -162,7 +161,7 @@ fn ranking_set_renormalizes_admission() {
         panic!("apply");
     };
     assert!(data.applied);
-    assert!((data.ranking.admission.w1 - 0.2).abs() < 1e-9);
+    assert!((data.ranking.admission.w1 - 0.25).abs() < 1e-9);
 }
 
 #[test]
@@ -278,7 +277,6 @@ fn deployment_error_and_context_actor_paths() {
                 w2: 0.0,
                 w3: 0.0,
                 w4: 0.0,
-                w5: 0.0,
             }),
             ..RankingEnvPatch::default()
         },

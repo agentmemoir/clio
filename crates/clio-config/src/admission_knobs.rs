@@ -28,17 +28,14 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 
 /// Default `θ_admit` per key when no override is set.
-pub const DEFAULT_THETA_ADMIT: f64 = 0.55;
-
-/// Default recency decay constant `τ` in days.
-pub const DEFAULT_RECENCY_TAU_DAYS: f64 = 30.0;
-
-/// Default recency decay constant `τ` in days, as a named function for the
-/// test surface. The env is no longer deserialized as a whole.
-#[must_use]
-pub const fn default_recency_tau() -> f64 {
-    DEFAULT_RECENCY_TAU_DAYS
-}
+///
+/// The four-factor score has no constant recency contribution. The old
+/// five-factor score was `0.2 * (utility + confidence + novelty + type_prior) +
+/// 0.2`, because recency was always the neutral `1.0`, so the threshold that
+/// admits the same items under the four-factor score is `1.25 * 0.55 - 0.25`.
+/// A deployment that tuned `θ_admit` against the five-factor score must retune
+/// it the same way.
+pub const DEFAULT_THETA_ADMIT: f64 = 0.4375;
 
 /// Every key that may carry a threshold or prior override.
 ///
@@ -216,20 +213,6 @@ pub fn validate_type_prior_overrides<S: BuildHasher>(
     map: &HashMap<String, f64, S>,
 ) -> Result<(), AmError> {
     validate_override_map(map, "type_prior")
-}
-
-/// Validate the recency decay constant `τ` in days.
-///
-/// # Errors
-/// Non-finite or non-positive `τ`.
-pub fn validate_recency_tau(tau_days: f64) -> Result<(), AmError> {
-    if !(tau_days.is_finite() && tau_days > 0.0) {
-        return Err(AmError::new(
-            ErrorCode::OutOfRange,
-            "recency_tau_days must be finite and > 0",
-        ));
-    }
-    Ok(())
 }
 
 /// Resolve the effective threshold: per-key override wins, else the global.
