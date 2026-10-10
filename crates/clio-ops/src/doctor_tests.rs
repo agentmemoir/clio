@@ -119,7 +119,7 @@ fn live_plan_is_registered_and_retrievable() {
     let (registry, plan) = plan_for(&store, Some("b"), false);
     assert!(!plan.dry_run);
     assert_eq!(plan.bank.as_deref(), Some("b"));
-    assert!(!registry.is_empty());
+    assert!(!registry.is_empty(), "planning registers a plan");
     assert_eq!(registry.len(), 1);
     assert_eq!(registry.get(&plan.plan_id), Some(plan));
 }

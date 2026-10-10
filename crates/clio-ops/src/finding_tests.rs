@@ -36,7 +36,7 @@ fn severity_orders_info_warning_error() {
 #[test]
 fn findings_aggregate_ok_only_fails_on_error() {
     let clean = Findings::new();
-    assert!(clean.is_empty());
+    assert!(clean.is_empty(), "new findings hold nothing");
     let empty_len = clean.len();
     assert_eq!(empty_len, 0);
     assert!(clean.ok());
@@ -44,7 +44,7 @@ fn findings_aggregate_ok_only_fails_on_error() {
 
     let mut warnings = Findings::new();
     warnings.push(finding(codes::EMBEDDING_UNREACHABLE, Severity::Warning));
-    assert!(!warnings.is_empty());
+    assert!(!warnings.is_empty(), "a pushed warning is held");
     assert!(warnings.ok());
     assert_eq!(warnings.max_severity(), Some(Severity::Warning));
 

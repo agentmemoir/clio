@@ -148,7 +148,10 @@ fn set_rejects_empty_bank_and_invalid_profile() {
         store.set_deployment(bad).expect_err("bad deploy").code,
         ErrorCode::UnknownPath
     );
-    assert!(store.banks.is_empty());
+    assert!(
+        store.banks.is_empty(),
+        "a rejected deployment leaves no banks"
+    );
     assert!(store.deployment.is_none());
 }
 
