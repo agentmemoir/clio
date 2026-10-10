@@ -169,6 +169,11 @@ fn every_value_flag_is_read_by_the_wizard() {
             "flag(\"database-ssl\")",
         ),
         (
+            "database-ssl-rootcert",
+            "setup_flows_db_typed.rs",
+            "flag(\"database-ssl-rootcert\")",
+        ),
+        (
             "database-option",
             "setup_flows_db_typed.rs",
             "flag_values(\"database-option\")",

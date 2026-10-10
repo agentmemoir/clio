@@ -27,7 +27,7 @@ use crate::setup_preview_fixtures::{Harness, SERVICES, TYPED};
 use serde_json::json;
 
 #[test]
-fn a_remote_host_defaults_to_require_and_this_machine_to_prefer() {
+fn a_remote_host_defaults_to_verify_full_and_this_machine_to_prefer() {
     let remote = Harness::fresh()
         .with_secrets(&["pw"])
         .typing(TYPED)
@@ -48,8 +48,27 @@ fn a_remote_host_defaults_to_require_and_this_machine_to_prefer() {
             .as_str()
             .to_owned()
     };
-    assert_eq!(ssl_of(&remote), "require", "{}", remote.out);
+    assert_eq!(ssl_of(&remote), "verify-full", "{}", remote.out);
     assert_eq!(ssl_of(&local), "prefer", "{}", local.out);
+}
+
+#[test]
+fn choosing_encrypt_no_verify_warns_at_the_choice_and_is_recorded() {
+    // Option 4 at the SSL question is the deliberate no-check mode. The run must
+    // say, at the point of choice, what it does and does not protect against, and
+    // the plan must carry the mode so status can report it afterwards.
+    let run = Harness::fresh()
+        .with_secrets(&["pw"])
+        .typing("3\n2\ndb.example.com\n5432\nclio\n\n4\n")
+        .typing(SERVICES)
+        .run();
+    assert!(
+        run.out.contains("does not check the server certificate"),
+        "the warning is printed at the choice: {}",
+        run.out
+    );
+    let plan = &run.answers().database.as_ref().expect("a plan").plan;
+    assert_eq!(plan.ssl.as_str(), "encrypt-no-verify");
 }
 
 #[test]

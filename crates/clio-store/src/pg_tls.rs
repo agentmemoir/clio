@@ -8,9 +8,9 @@
 //! mode, and every caller in the store goes through [`connect`].
 //!
 //! ## Owns
-//! - The connector choice for `disable` / `prefer` / `require`, including the
-//!   fail-closed arm for a driver SSL mode this build has never seen
-//! - Connection-string parsing through the driver's own parser
+//! - The connector choice for every SSL mode this store offers
+//! - Connection-string parsing, including the SSL options `pg_url` reads
+//!   before the driver's own parser sees the string
 //! - The local-or-remote answer for a connection string ([`Connection::is_local`])
 //! - Whether a connection failure is worth repeating (`pg_probe` owns the
 //!   window and reads that answer)
@@ -37,13 +37,9 @@
 
 use clio_types::{AmError, ErrorCode, is_loopback_host, url_scheme};
 use postgres::{Client, NoTls};
-use postgres_rustls::MakeTlsConnector;
-use rustls::{ClientConfig, RootCertStore};
 use std::str::FromStr;
-use std::sync::Arc;
 use tokio_postgres::Config;
-use tokio_postgres::config::{Host, SslMode};
-use tokio_rustls::TlsConnector;
+use tokio_postgres::config::Host;
 
 /// Port the driver falls back to when a connection string names none.
 const DEFAULT_PORT: u16 = 5432;
@@ -79,16 +75,31 @@ const PLACEHOLDER_REASONS: &[&str] = &[
     TLS_HANDSHAKE_FAILED,
 ];
 
-/// The SSL modes this store supports, named as `sslmode` names them.
+/// The SSL modes this store supports, named as `libpq` names them.
+///
+/// `require` is deliberately not offered. In `libpq` it means "encrypt and do
+/// not check the server", and a name that sounds safe while skipping
+/// verification is the footgun this list exists to remove. The two modes that
+/// verify say so in their names, and the deliberate no-check mode says what it
+/// is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SslChoice {
     /// Connect in the clear whatever the server offers.
     Disable,
     /// Ask for TLS and carry on in the clear on the same socket if refused.
+    ///
+    /// When the server does accept TLS the certificate is verified. This is
+    /// stricter than `libpq`'s `prefer`, on purpose.
     #[default]
     Prefer,
-    /// Require TLS, verified against the bundled public roots.
-    Require,
+    /// Require TLS, verified against the bundled roots plus any supplied root.
+    VerifyFull,
+    /// Require TLS without checking the server certificate.
+    ///
+    /// This protects against eavesdropping only. Anything that can intercept
+    /// the connection can pretend to be the server, because nothing
+    /// authenticates it. It is never a default.
+    EncryptNoVerify,
 }
 
 impl SslChoice {
@@ -98,48 +109,44 @@ impl SslChoice {
         match self {
             Self::Disable => "disable",
             Self::Prefer => "prefer",
-            Self::Require => "require",
+            Self::VerifyFull => "verify-full",
+            Self::EncryptNoVerify => "encrypt-no-verify",
         }
     }
 
     /// Read a mode name as `sslmode` spells it.
     ///
+    /// Only the exact names are accepted: no name is a prefix of another, and a
+    /// partial one is refused rather than resolved, so a typo cannot silently
+    /// select a mode. `require`, `verify-ca`, and `allow` get their own message
+    /// naming what to use instead, because an operator arriving from another
+    /// Postgres client is likely to try them.
+    ///
     /// # Errors
-    /// Any name outside the three. `verify-ca` and `verify-full` get their own
-    /// message: the driver has no way to encrypt without checking the server, so
-    /// there is nothing for those two to select, and "unsupported" on its own
-    /// would leave the operator guessing what to type instead.
+    /// Any name outside the four.
     pub fn parse(raw: &str) -> Result<Self, String> {
         let name = raw.trim().to_ascii_lowercase();
         match name.as_str() {
             "disable" => Ok(Self::Disable),
             "prefer" => Ok(Self::Prefer),
-            "require" => Ok(Self::Require),
-            "verify-ca" | "verify-full" => Err(format!(
-                "sslmode `{raw}` cannot be honoured: this store always checks the server \
-                 certificate against the bundled public roots, and the driver offers no way to \
-                 encrypt without checking it. Use `require`, or `prefer` to fall back to plain \
-                 text when the server refuses TLS"
+            "verify-full" => Ok(Self::VerifyFull),
+            // Hard to type by mistake, and the only mode that skips the check.
+            "encrypt-no-verify" => Ok(Self::EncryptNoVerify),
+            "require" => Err(format!(
+                "sslmode `{raw}` is not offered: other Postgres clients use `require` for \
+                 encrypting without checking the server certificate. Use `verify-full` to check \
+                 it, `encrypt-no-verify` to encrypt without checking it, or `prefer` to allow \
+                 plain text when the server refuses TLS"
+            )),
+            "verify-ca" => Err(format!(
+                "sslmode `{raw}` is not offered: this store checks the certificate chain and the \
+                 server name together, so there is no certificate-authority-only mode. Use \
+                 `verify-full`, and add `sslrootcert=<path>` to trust a private certificate \
+                 authority"
             )),
             other => Err(format!(
-                "sslmode must be disable|prefer|require, got `{other}`"
+                "sslmode must be disable|prefer|verify-full|encrypt-no-verify, got `{other}`"
             )),
-        }
-    }
-
-    /// Map a driver mode onto a choice, failing closed.
-    ///
-    /// `SslMode` is `#[non_exhaustive]`, so a mode added by a later driver
-    /// release arrives here with no arm of its own. The `_` arm maps it to
-    /// `Require`: a mode this build has never read must not be assumed to be the
-    /// one that connects without encryption.
-    #[must_use]
-    pub fn of(mode: SslMode) -> Self {
-        match mode {
-            SslMode::Disable => Self::Disable,
-            SslMode::Prefer => Self::Prefer,
-            SslMode::Require => Self::Require,
-            _ => Self::Require,
         }
     }
 }
@@ -235,26 +242,29 @@ pub fn parse_connection(url: &str) -> Result<Connection, String> {
              not database targets)"
         ));
     }
-    let config = Config::from_str(url)
+    let spec = crate::pg_url::spec(url)?;
+    let config = Config::from_str(&spec.driver_url)
         .map_err(|e| format!("database url is not usable: {}", describe(&e)))?;
     Ok(Connection {
         hosts: config.get_hosts().iter().map(host_name).collect(),
         ports: config.get_ports().to_vec(),
         database: config.get_dbname().map(ToOwned::to_owned),
         user: config.get_user().map(ToOwned::to_owned),
-        ssl: SslChoice::of(config.get_ssl_mode()),
+        ssl: spec.ssl,
     })
 }
 
 /// Open one connection, choosing the connector from the string's SSL mode.
 ///
 /// - `disable` uses the plain connector.
-/// - `require` uses the rustls connector with certificate checking on and the
-///   bundled public roots, so `require` means a *verified* connection.
-/// - `prefer` uses that same rustls connector. The driver sends `SSLRequest`,
+/// - `verify-full` requires TLS and checks the certificate chain and the server
+///   name against the bundled public roots plus any `sslrootcert`.
+/// - `prefer` uses that same verified connector. The driver sends `SSLRequest`,
 ///   reads the answer, and continues in the clear on the same socket when the
 ///   answer is no. There is no second attempt, so a wrong password produces one
 ///   failure rather than two.
+/// - `encrypt-no-verify` requires TLS and checks nothing, which is the one
+///   deliberate way to reach a server whose certificate cannot be verified.
 ///
 /// The driver refuses `prefer` together with `sslnegotiation=direct` and says so
 /// itself; that message is passed through rather than pre-empted, because the
@@ -267,28 +277,9 @@ pub fn connect(url: &str) -> Result<Client, AmError> {
     open(url).map_err(Failure::am_error)
 }
 
-/// The verified TLS connector: rustls, the bundled public roots, no client
-/// certificate.
-///
-/// # Errors
-/// rustls cannot build a client configuration from those roots. That set is a
-/// build-time constant, so it does not happen in a working binary; it is still
-/// reported rather than unwrapped, because a connector that quietly degraded to
-/// no checking is the exact failure this stage exists to prevent.
-fn rustls_connector() -> Result<MakeTlsConnector, Failure> {
-    let config =
-        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .map_err(|e| Failure::settled(format!("tls setup: {e}")))?
-            .with_root_certificates(RootCertStore {
-                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-            })
-            .with_no_client_auth();
-    Ok(MakeTlsConnector::new(TlsConnector::from(Arc::new(config))))
-}
-
 /// A connection or query that failed, with the reason split so that only a
 /// refused socket is worth repeating.
+#[derive(Debug)]
 pub(crate) struct Failure {
     pub(crate) message: String,
     /// True when a later attempt could plausibly succeed.
@@ -312,15 +303,26 @@ impl Failure {
 /// Open a connection, keeping the driver's own error so a caller can tell a
 /// refused socket from a refusal.
 pub(crate) fn open(url: &str) -> Result<Client, Failure> {
-    // Parse with the driver first: it owns what a connection string may say, and
-    // its refusal is a better message than anything written here. The original
-    // string is what the connection uses, so nothing read here can change the
-    // address that is dialled.
-    let config = Config::from_str(url)
-        .map_err(|e| Failure::settled(format!("postgres url is not usable: {}", describe(&e))))?;
-    let attempt = match SslChoice::of(config.get_ssl_mode()) {
-        SslChoice::Disable => Client::connect(url, NoTls),
-        SslChoice::Prefer | SslChoice::Require => Client::connect(url, rustls_connector()?),
+    // Read the SSL options this store acts on first, then let the driver parse
+    // the rewritten URL. The URL the connection uses is the one the driver can
+    // accept, with `sslrootcert` taken out and `sslmode` mapped to a value it
+    // knows; the connector alone decides whether the certificate is checked.
+    let spec = crate::pg_url::spec(url).map_err(Failure::settled)?;
+    if let Err(e) = Config::from_str(&spec.driver_url) {
+        return Err(Failure::settled(format!(
+            "postgres url is not usable: {}",
+            describe(&e)
+        )));
+    }
+    let attempt = match spec.ssl {
+        SslChoice::Disable => Client::connect(&spec.driver_url, NoTls),
+        SslChoice::Prefer | SslChoice::VerifyFull => Client::connect(
+            &spec.driver_url,
+            crate::tls_trust::verified_connector(spec.root.as_deref())?,
+        ),
+        SslChoice::EncryptNoVerify => {
+            Client::connect(&spec.driver_url, crate::tls_trust::unverified_connector()?)
+        }
     };
     attempt.map_err(|e| Failure {
         message: format!("postgres connect: {}", describe(&e)),

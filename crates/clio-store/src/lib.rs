@@ -288,6 +288,8 @@ mod pg_scoped_schema;
 #[cfg(test)]
 mod pg_skip;
 mod pg_tls;
+mod pg_url;
+mod tls_trust;
 
 #[cfg(test)]
 mod test_unique;

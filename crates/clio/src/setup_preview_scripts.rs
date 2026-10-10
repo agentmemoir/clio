@@ -82,7 +82,7 @@ pub(crate) const PASTED: &str = "3\n1\n";
 
 /// The address [`PASTED`] is completed by.
 pub(crate) const PASTED_ADDRESS: &str =
-    "postgres://clio:pw@db.example.com:5432/clio?sslmode=require";
+    "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full";
 
 /// The secrets a pasted route consumes, with whatever else the run needs after it.
 ///

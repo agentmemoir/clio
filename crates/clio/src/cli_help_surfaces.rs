@@ -215,7 +215,8 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
         "clio setup [--database managed|sqlite|existing] [--config PATH] [--db-path PATH] \
          [--database-url ADDRESS] [--database-connect pasted|typed] [--database-host H] \
          [--database-port P] [--database-name N] [--database-user U] \
-         [--database-password P] [--database-ssl MODE] [--database-option NAME=VALUE]... \
+         [--database-password P] [--database-ssl MODE] [--database-ssl-rootcert PATH] \
+         [--database-option NAME=VALUE]... \
          [--embed local|online] [--embed-url U] [--embed-model M] [--embed-key K] \
          [--embed-provider tei|openai] [--embed-dims N] [--rerank local|online|skip] \
          [--rerank-url U] [--rerank-model M] [--rerank-key K] [--rerank-provider tei|cohere] \
