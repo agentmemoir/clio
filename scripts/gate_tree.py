@@ -45,13 +45,15 @@ def repo_root(cwd: str) -> str | None:
 
 
 def read_tree_state(root: str) -> TreeState:
-    """HEAD plus the content of every path that differs from it.
+    """HEAD plus the content and git-visible mode of every path that differs.
 
     The key describes the working tree, not the index, so staging a change does
     not move it. A path's bytes reach the key the same way whether it is tracked
     or untracked: hashing `git diff HEAD` and the untracked list separately put a
     new file in the key once as a hashed untracked entry and then, after `git
-    add`, inside the diff text, so the same bytes keyed two entries.
+    add`, inside the diff text, so the same bytes keyed two entries. The mode is
+    hashed beside the bytes because `git diff HEAD` used to carry a mode change
+    in its text, and a content-only key would silently lose that sensitivity.
     """
     head = _git(root, "rev-parse", "HEAD")
     names = _git(root, "diff", "HEAD", "--name-only", "-z")
@@ -61,16 +63,24 @@ def read_tree_state(root: str) -> TreeState:
     paths = sorted(set(_splitz(names)) | set(_splitz(untracked)))
     entries: list[tuple[str, str]] = []
     for rel in paths:
+        path = Path(root) / rel
         try:
-            body = (Path(root) / rel).read_bytes()
+            info = path.stat()
         except FileNotFoundError:
             # A deleted path has no bytes; the name and this marker still
             # separate a deletion from the same path restored.
             entries.append((rel, "deleted"))
             continue
         except OSError as e:
+            raise GateError(f"cannot stat changed file {rel}: {e}") from e
+        try:
+            body = path.read_bytes()
+        except OSError as e:
             raise GateError(f"cannot read changed file {rel}: {e}") from e
-        entries.append((rel, hashlib.sha256(body).hexdigest()))
+        # Git tracks only the executable bit, so a mode-only change on a file
+        # whose content is already in the key must still move the key.
+        mode = "x" if info.st_mode & 0o111 else "-"
+        entries.append((rel, f"{mode}:{hashlib.sha256(body).hexdigest()}"))
     return TreeState(
         head=head.decode().strip(),
         contents=tuple(entries),

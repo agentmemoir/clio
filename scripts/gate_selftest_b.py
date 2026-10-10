@@ -23,6 +23,33 @@ members = [
     Member("c", "/repo/crates/c", ()),
 ]
 
+def git(root: Path, *args: str) -> None:
+    """Run git in `root` under a fixed identity, failing on error."""
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env=dict(
+            os.environ,
+            GIT_AUTHOR_NAME="t",
+            GIT_AUTHOR_EMAIL="t@t",
+            GIT_COMMITTER_NAME="t",
+            GIT_COMMITTER_EMAIL="t@t",
+        ),
+    )
+
+def git_repo(root: Path) -> None:
+    """Init `root` as a repo with one committed file, so `HEAD` exists."""
+    git(root, "init", "-q", "-b", "master")
+    (root / "tracked.txt").write_text("one\n")
+    git(root, "add", "tracked.txt")
+    git(root, "commit", "-qm", "init")
+
+def key(root: Path) -> str:
+    """The gate fingerprint of the real git tree at `root`."""
+    return fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
+
 class Tests(unittest.TestCase):
     def test_a_clean_never_replays(self):
         # `clean` removes build output, so a replayed verdict would report
@@ -62,32 +89,31 @@ class Tests(unittest.TestCase):
         # entries and a verdict measured before staging did not replay.
         with exec_tempdir(purpose="a staged added file") as tmp:
             root = Path(tmp)
-            identity = {
-                "GIT_AUTHOR_NAME": "t",
-                "GIT_AUTHOR_EMAIL": "t@t",
-                "GIT_COMMITTER_NAME": "t",
-                "GIT_COMMITTER_EMAIL": "t@t",
-            }
-
-            def git(*args: str) -> None:
-                subprocess.run(
-                    ["git", *args],
-                    cwd=root,
-                    check=True,
-                    capture_output=True,
-                    env=dict(os.environ, **identity),
-                )
-
-            git("init", "-q", "-b", "master")
-            (root / "tracked.txt").write_text("one\n")
-            git("add", "tracked.txt")
-            git("commit", "-qm", "init")
+            git_repo(root)
             (root / "tracked.txt").write_text("one\ntwo\n")
             (root / "added.rs").write_text("// new\n")
-            before = fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
-            git("add", "added.rs", "tracked.txt")
-            after = fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
-            self.assertEqual(before, after, "staging does not change the working-tree key")
+            before = key(root)
+            git(root, "add", "added.rs", "tracked.txt")
+            self.assertEqual(before, key(root), "staging does not change the working-tree key")
+
+    def test_a_mode_change_on_a_modified_file_moves_the_key(self):
+        # The old diff-text key carried the `old mode`/`new mode` lines; a
+        # content-only key would not, so the executable bit is hashed too.
+        with exec_tempdir(purpose="a mode change") as tmp:
+            root = Path(tmp)
+            git_repo(root)
+            (root / "tracked.txt").write_text("one\ntwo\n")
+            before = key(root)
+            (root / "tracked.txt").chmod(0o755)
+            self.assertNotEqual(before, key(root), "a mode change moves the key")
+
+    def test_deleting_a_tracked_file_moves_the_key(self):
+        with exec_tempdir(purpose="a deleted file") as tmp:
+            root = Path(tmp)
+            git_repo(root)
+            before = key(root)
+            (root / "tracked.txt").unlink()
+            self.assertNotEqual(before, key(root), "a deletion moves the key")
 
     def test_the_two_lists_of_nextest_subcommands_are_one_list(self):
         # Narrowing a command and classifying it are two decisions about the
