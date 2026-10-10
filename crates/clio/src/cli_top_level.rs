@@ -126,7 +126,7 @@ pub(crate) fn print_health_help() -> ExitCode {
 /// It is also strict about an empty value: `clio ops diagnose --db ''` used to
 /// fall back to the default database without a word, which is a different
 /// outcome from the refusal every other surface gives and left a caller with no
-/// way to predict it. The rule itself is `cli_error::reject_empty_value`, so
+/// way to predict it. The rule itself is `cli_error::reject_blank_value`, so
 /// both parsers share it.
 pub(crate) fn parse_flags(
     args: impl IntoIterator<Item = String>,
@@ -157,7 +157,8 @@ pub(crate) fn parse_flags(
         let name_value = if let Some(name_value) = flag.strip_prefix("--") {
             name_value
         } else if let Some(value) = flag.strip_prefix("-o=") {
-            crate::cli_error::reject_empty_value("-o", value)?;
+            crate::cli_error::reject_blank_value("-o", value)?;
+            crate::cli_error::reject_repeated_flag("--output", flags.contains_key("output"))?;
             flags.insert("output".to_owned(), value.to_owned());
             continue;
         } else if flag == "-o" {
@@ -171,7 +172,8 @@ pub(crate) fn parse_flags(
             return Err(unexpected_argument(&flag));
         };
         if let Some((name, value)) = name_value.split_once('=') {
-            crate::cli_error::reject_empty_value(&format!("--{name}"), value)?;
+            crate::cli_error::reject_blank_value(&format!("--{name}"), value)?;
+            crate::cli_error::reject_repeated_flag(&format!("--{name}"), flags.contains_key(name))?;
             insert_known(&mut flags, name, value.to_owned(), known)?;
             continue;
         }
@@ -183,7 +185,11 @@ pub(crate) fn parse_flags(
         }
         match it.next() {
             Some(value) if !value.starts_with("--") => {
-                crate::cli_error::reject_empty_value(&format!("--{name}"), &value)?;
+                crate::cli_error::reject_blank_value(&format!("--{name}"), &value)?;
+                crate::cli_error::reject_repeated_flag(
+                    &format!("--{name}"),
+                    flags.contains_key(name),
+                )?;
                 insert_known(&mut flags, name, value, known)?;
             }
             Some(value) => {

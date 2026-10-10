@@ -175,6 +175,12 @@ impl Fixture {
     /// The `clio` binary, with a cleared environment, the shared key seed, and
     /// this store selected.
     pub fn command(&self) -> Command {
+        self.command_for(&[])
+    }
+
+    /// The launcher for a run with `args`. A scenario that names its own bank
+    /// replaces the pin rather than repeating it, because a repeated flag is refused.
+    pub fn command_for(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_clio"));
         cmd.env_clear();
         // Forward the coverage profile pattern so instrumented children write
@@ -183,18 +189,22 @@ impl Fixture {
             cmd.env("LLVM_PROFILE_FILE", pattern);
         }
         super::common::seed_key(&mut cmd);
-        cmd.args(["--db"])
-            .arg(&self.db)
-            // Pin the bank so the seeded items and the wave are in the same one,
-            // whatever the host environment happens to name.
-            .args(["--bank", BANK])
-            // A path that does not exist, so a run never reads an operator's
-            // deployment overlay. An empty value is not used: that disables
-            // deployment loading entirely rather than pointing it at nothing.
-            .env(
-                "CLIO_DEPLOYMENT_CONFIG",
-                self.dir.0.join("absent-overlay.json"),
-            );
+        cmd.args(["--db"]).arg(&self.db);
+        // Pin the bank so the seeded items and the wave are in the same one,
+        // whatever the host environment happens to name.
+        if !args
+            .iter()
+            .any(|arg| *arg == "--bank" || arg.starts_with("--bank="))
+        {
+            cmd.args(["--bank", BANK]);
+        }
+        // A path that does not exist, so a run never reads an operator's
+        // deployment overlay. An empty value is not used: that disables
+        // deployment loading entirely rather than pointing it at nothing.
+        cmd.env(
+            "CLIO_DEPLOYMENT_CONFIG",
+            self.dir.0.join("absent-overlay.json"),
+        );
         cmd
     }
 
@@ -217,7 +227,7 @@ impl Fixture {
 
     /// Run one `clio` verb and return the raw result.
     pub fn output(&self, args: &[&str]) -> Output {
-        self.command()
+        self.command_for(args)
             .args(args)
             .stdin(Stdio::null())
             .output()

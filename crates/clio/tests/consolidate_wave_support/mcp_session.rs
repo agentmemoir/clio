@@ -50,7 +50,7 @@ impl McpSession {
     /// its wave, a one-shot CLI process does not.
     pub fn open(f: &Fixture) -> Self {
         let mut child = f
-            .command()
+            .command_for(&["mcp", "stdio", "--bank", BANK])
             .args(["mcp", "stdio", "--bank", BANK])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

@@ -35,6 +35,15 @@ use std::collections::{HashMap, HashSet};
 pub(crate) const GLOBAL_VALUE_FLAGS: &[&str] = &["db", "backend", "bank", "actor", "output"];
 /// Boolean global flags (never consume a following token).
 pub(crate) const GLOBAL_BOOL_FLAGS: &[&str] = &["no-input", "yes"];
+/// Value flags whose value is a timestamp, on every verb. Checked here, so a
+/// value the store cannot read is refused before any verb stores or filters by it.
+const TIMESTAMP_VALUE_FLAGS: &[&str] = &[
+    "as-of",
+    "valid-from",
+    "valid-until",
+    "time-start",
+    "time-end",
+];
 
 /// The flags a command accepts: its own plus the globals.
 pub(crate) struct FlagSpec {
@@ -153,14 +162,18 @@ impl ParsedArgs {
 ///
 /// # Errors
 /// A usage error (exit 2) for an unknown flag, a missing flag value, a value
-/// supplied to a boolean flag, or an empty value supplied to a value flag.
+/// supplied to a boolean flag, or a blank value supplied to a value flag.
 /// Unknown flags fail closed with a suggestion.
 ///
-/// Every value flag follows one rule for an empty value: it is refused, and the
-/// message names the flag. The alternative — dropping an empty value and running
-/// the command as if the flag were absent — is what made `--as-of ''` quietly
-/// search every memory instead of the one the caller asked for. A caller that
-/// wants the unfiltered behaviour omits the flag.
+/// Every value flag follows one rule for a blank value (empty or whitespace-only):
+/// it is refused, and the message names the flag. The alternative — dropping a
+/// blank value and running the command as if the flag were absent — is what made
+/// `--as-of ''` quietly search every memory instead of the one the caller asked
+/// for. A caller that wants the unfiltered behaviour omits the flag.
+///
+/// A blank positional is refused for the same reason: a write verb would store
+/// it. A value flag given twice is refused rather than last-wins, unless the flag
+/// is declared repeatable. A timestamp flag whose value is not a timestamp is refused.
 ///
 /// # Panics
 /// Never. The grammar is total over `String` tokens.
@@ -213,8 +226,7 @@ pub(crate) fn parse(
                     }
                 },
             };
-            crate::cli_error::reject_empty_value("-o", &value)?;
-            parsed.values.insert("output".to_owned(), value);
+            record_value(&mut parsed, spec, "output", "-o", value)?;
             last_bool = None;
             continue;
         }
@@ -255,18 +267,39 @@ pub(crate) fn parse(
                     }
                 }
             };
-            crate::cli_error::reject_empty_value(&format!("--{name}"), &value)?;
-            if spec.repeats(name) {
-                parsed.multi.entry(name.to_owned()).or_default().push(value);
-            } else {
-                parsed.values.insert(name.to_owned(), value);
-            }
+            record_value(&mut parsed, spec, name, &format!("--{name}"), value)?;
             last_bool = None;
             continue;
         }
         return Err(unknown_flag(&token, spec));
     }
+    for positional in &parsed.positionals {
+        crate::cli_error::reject_blank_positional(positional)?;
+    }
     Ok(parsed)
+}
+
+/// Check one value flag's value, then record it: the blank and timestamp rules,
+/// and the repeat rule for a flag that does not repeat. `label` is the flag as
+/// the caller typed it, so the message names it.
+fn record_value(
+    parsed: &mut ParsedArgs,
+    spec: &FlagSpec,
+    name: &str,
+    label: &str,
+    value: String,
+) -> Result<(), CliError> {
+    crate::cli_error::reject_blank_value(label, &value)?;
+    if TIMESTAMP_VALUE_FLAGS.contains(&name) {
+        crate::cli_error::reject_bad_timestamp(label, &value)?;
+    }
+    if spec.repeats(name) {
+        parsed.multi.entry(name.to_owned()).or_default().push(value);
+    } else {
+        crate::cli_error::reject_repeated_flag(label, parsed.values.contains_key(name))?;
+        parsed.values.insert(name.to_owned(), value);
+    }
+    Ok(())
 }
 
 /// Split leading global flags from the verb so they may appear before it.
@@ -367,6 +400,10 @@ fn unknown_flag(token: &str, spec: &FlagSpec) -> CliError {
 #[cfg(test)]
 #[path = "cli_args_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_args_value_tests.rs"]
+mod value_tests;
 
 /// The matcher lives in its own module and its own file; re-exported here so the
 /// grammar and its callers keep one import path for it.
