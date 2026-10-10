@@ -22,7 +22,7 @@
 //! Keep this module focused on SQLite window behavior and shared fixtures.
 
 use crate::sqlite::SqliteStore;
-use crate::store::MAX_WINDOW_ITEMS;
+use crate::window_query::MAX_WINDOW_ITEMS;
 use crate::window_query::compile_window;
 use crate::{DekProvider, HygieneStore, LocalDevKms, Store};
 use clio_types::{EpistemicKind, ErrorCode, ItemKind, MemoryItem, SemanticCategory, TimeAxis};

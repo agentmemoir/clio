@@ -21,8 +21,13 @@
 //!
 //! Keep this module focused on the shared item-window query compiler.
 
-use crate::store::MAX_WINDOW_ITEMS;
 use clio_types::{AmError, ErrorCode, TimeAxis};
+
+/// Upper bound on [`crate::Store::item_ids_in_window`] results.
+///
+/// A retrieval arm never needs more than its candidate fetch, and the bound
+/// keeps a caller-supplied limit from turning one query into an unbounded scan.
+pub const MAX_WINDOW_ITEMS: usize = 1000;
 
 /// A compiled window statement plus the string parameters it references.
 pub(crate) struct CompiledWindow {

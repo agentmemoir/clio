@@ -144,9 +144,10 @@ fn supersession_report_is_deterministic_same_query_twice() {
     assert_eq!(first, second, "{first}\n{second}");
 }
 
-// Dense re-measurement: the closed row's vector survives raw KNN but filtered dense search hides it.
+// Dense re-measurement: both the raw KNN primitive and the filtered dense
+// search hide the closed row, and the live revision stays reachable.
 #[test]
-fn dense_leg_hides_the_closed_row_that_raw_knn_still_returns() {
+fn dense_surfaces_hide_the_closed_row_after_correction() {
     let s = state();
     corrected_pair(&s, "bank-a");
     s.store
@@ -158,8 +159,12 @@ fn dense_leg_hides_the_closed_row_that_raw_knn_still_returns() {
     let probe = slot("bank-a", "ss-old", 0).embedding;
     let raw = s.store.knn("bank-a", &probe, 5).expect("knn");
     assert!(
-        raw.iter().any(|h| h.item_id == "ss-old"),
-        "stale vector residue: {raw:?}"
+        !raw.iter().any(|h| h.item_id == "ss-old"),
+        "closed row filtered from raw KNN: {raw:?}"
+    );
+    assert!(
+        raw.iter().any(|h| h.item_id == "ss-new"),
+        "live row visible to raw KNN: {raw:?}"
     );
     let dense = s
         .index

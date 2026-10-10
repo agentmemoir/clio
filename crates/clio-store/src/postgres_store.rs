@@ -21,6 +21,7 @@ use crate::embedding_space::EmbeddingSpace;
 use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{AssocEdgeRecord, ItemInspectFilter, ItemInspectRow, KnnHit, VectorSlot};
 use crate::postgres::{PostgresStore, distance_expr};
+use crate::postgres_index::VISIBLE;
 use crate::store::Store;
 use clio_types::{AmError, MemoryItem};
 use pgvector::Vector;
@@ -185,11 +186,13 @@ impl Store for PostgresStore {
         let limit = k as i64;
         // The halfvec form repeats the identical cast in ORDER BY so the
         // expression index is used instead of falling back to a sequential scan.
-        let distance = distance_expr(self.space(), "");
+        let distance = distance_expr(self.space(), "e");
         let sql = format!(
-            "SELECT item_id, ({distance}) AS distance
-             FROM item_embeddings
-             WHERE bank_id = $2
+            "SELECT e.item_id, ({distance}) AS distance
+             FROM item_embeddings e
+             JOIN items ON items.id = e.item_id AND items.bank_id = e.bank_id
+             WHERE e.bank_id = $2
+               AND {VISIBLE}
              ORDER BY {distance}
              LIMIT $3"
         );
