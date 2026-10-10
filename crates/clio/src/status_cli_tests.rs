@@ -254,10 +254,13 @@ fn ports_and_db_userinfo_are_reported_redacted() {
     assert_eq!(report.database.backend, "postgres");
     assert_eq!(report.database.url, "postgres://***@db:5432/clio");
     assert!(!report.database.url.contains("topsecret"));
-    assert_eq!(report.database.encryption, "encrypted: no, remote");
+    assert_eq!(
+        report.database.encryption,
+        "encrypted and verified when offered, remote"
+    );
     let text = render_text(&report);
     assert!(
-        text.contains("postgres://***@db:5432/clio (encrypted: no, remote)"),
+        text.contains("postgres://***@db:5432/clio (encrypted and verified when offered, remote)"),
         "{text}"
     );
     assert!(!text.contains("topsecret"), "{text}");
@@ -268,7 +271,7 @@ fn database_encryption_and_key_location_are_reported() {
     let deps = FakeDeps {
         env: HashMap::from([(
             "CLIO_DATABASE_URL".to_owned(),
-            "postgres://user:topsecret@db.example.com:5432/clio?sslmode=require".to_owned(),
+            "postgres://user:topsecret@db.example.com:5432/clio?sslmode=verify-full".to_owned(),
         )]),
         key: KeyMode::Location("macOS Keychain".to_owned()),
         ..FakeDeps::default()
@@ -277,10 +280,10 @@ fn database_encryption_and_key_location_are_reported() {
     assert_eq!(report.database.backend, "postgres");
     assert_eq!(
         report.database.url,
-        "postgres://***@db.example.com:5432/clio?sslmode=require"
+        "postgres://***@db.example.com:5432/clio?sslmode=verify-full"
     );
     assert!(!report.database.url.contains("topsecret"));
-    assert_eq!(report.database.encryption, "encrypted, remote");
+    assert_eq!(report.database.encryption, "encrypted and verified, remote");
     assert_eq!(
         report.database.key_location.as_deref(),
         Some("macOS Keychain")
@@ -289,14 +292,14 @@ fn database_encryption_and_key_location_are_reported() {
     let text = render_text(&report);
     assert!(
         text.contains(
-            "postgres://***@db.example.com:5432/clio?sslmode=require (encrypted, remote)"
+            "postgres://***@db.example.com:5432/clio?sslmode=verify-full (encrypted and verified, remote)"
         ),
         "{text}"
     );
     assert!(text.contains("encryption key: macOS Keychain"), "{text}");
     let json = to_json(&report);
     assert!(
-        json.contains("\"encryption\":\"encrypted, remote\""),
+        json.contains("\"encryption\":\"encrypted and verified, remote\""),
         "{json}"
     );
     assert!(

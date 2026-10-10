@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - `disable` and `prefer` reaching a server that offers no TLS
-//! - `require` being refused by such a server, and not retried
+//! - `verify-full` and `encrypt-no-verify` being refused by such a server, and
+//!   not retried
 //! - The probe's version and `vector` report, including a database without the
 //!   extension
 //! - The failures that must not be retried, and the error text one produces
@@ -72,11 +73,11 @@ fn disable_and_prefer_both_reach_a_plain_server() {
 }
 
 #[test]
-fn require_against_a_plain_server_is_the_drivers_tls_refusal() {
+fn verify_full_against_a_plain_server_is_the_drivers_tls_refusal() {
     let _guard = lock_pg_test();
-    let url = url_with_query("sslmode=require");
+    let url = url_with_query("sslmode=verify-full");
     let text = match connect(&url) {
-        Ok(_) => panic!("a plain server cannot satisfy require"),
+        Ok(_) => panic!("a plain server cannot satisfy verify-full"),
         Err(err) => err.to_string(),
     };
     // The server's own answer, not a timeout and not a failure to open the
@@ -88,8 +89,24 @@ fn require_against_a_plain_server_is_the_drivers_tls_refusal() {
     // A handshake failure is on the list of things not worth repeating, and the
     // attempt count is what proves the list still matches this driver's wording.
     let (_, report) = retry_until_ready(3, || probe_once(&url), || {})
-        .expect_err("a plain server cannot satisfy require");
+        .expect_err("a plain server cannot satisfy verify-full");
     assert_eq!(report.made, 1, "a TLS refusal must not be retried");
+}
+
+#[test]
+fn encrypt_no_verify_still_needs_a_server_that_offers_tls() {
+    let _guard = lock_pg_test();
+    // The mode skips the certificate check, not the encryption: a server that
+    // refuses TLS cannot satisfy it either.
+    let url = url_with_query("sslmode=encrypt-no-verify");
+    let text = match connect(&url) {
+        Ok(_) => panic!("a plain server cannot satisfy encrypt-no-verify"),
+        Err(err) => err.to_string(),
+    };
+    assert!(
+        text.contains("does not support TLS"),
+        "expected the server's TLS refusal, got: {text}"
+    );
 }
 
 #[test]

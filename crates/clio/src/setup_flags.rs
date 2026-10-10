@@ -49,6 +49,7 @@ pub(crate) const VALUE_FLAGS: &[&str] = &[
     "database-user",
     "database-password",
     "database-ssl",
+    "database-ssl-rootcert",
     "database-option",
     "embed",
     "embed-url",
@@ -171,9 +172,11 @@ pub(crate) fn print_help(out: &mut impl std::io::Write) {
          authentication, so it is unreachable off this machine and needs no password. Every\n\
          process on this machine can still reach it, which is the ordinary exposure of a local\n\
          development database. --database-password applies to the existing route only.\n\
-         SSL modes: disable, prefer, require. verify-ca and verify-full are not offered,\n\
-         because this store has no way to encrypt without checking the server certificate.\n\
-         A remote host defaults to require; this machine defaults to prefer.\n\n\
+         SSL modes: disable, prefer, verify-full, encrypt-no-verify. verify-full checks the\n\
+         certificate and the server name. encrypt-no-verify encrypts without checking the server,\n\
+         protects against eavesdropping only, and is never a default. verify-ca is not offered.\n\
+         Add sslrootcert=PATH (or --database-ssl-rootcert PATH) to trust a private certificate\n\
+         authority. A remote host defaults to verify-full; this machine defaults to prefer.\n\n\
          Advanced connection settings (--database-option, repeatable): options,\n\
          application_name, connect_timeout, target_session_attrs, channel_binding,\n\
          sslnegotiation, keepalives, keepalives_idle, keepalives_interval,\n\
