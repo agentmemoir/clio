@@ -370,7 +370,7 @@ fn run_reindex<S: OpsRepos>(
     let target = match flags.get("target") {
         Some(raw) => match clio_index::RebuildTargets::parse(raw) {
             Ok(target) => target,
-            Err(e) => return emit_error(&e, 1),
+            Err(e) => return emit_usage_error(e.message),
         },
         None => clio_index::RebuildTargets::All,
     };

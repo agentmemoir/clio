@@ -6,6 +6,12 @@ All notable changes to Clio. The format follows
 [CONTRIBUTING.md](CONTRIBUTING.md) for how to add an entry, and for the choices
 we made where that specification is silent.
 
+## [Unreleased]
+
+### Fixed
+
+- Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

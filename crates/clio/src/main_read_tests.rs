@@ -111,7 +111,7 @@ fn help_documents_the_output_mode_rule_and_short_alias() {
         "an explicit `--output`/`-o` always wins;",
         "text on a terminal (TTY) and JSON when piped.",
         "`-o json`, `-o=json`.",
-        "the shell shows that as 141, and it is not one of these exit codes",
+        "Unix shells show these as 141, 130, or 143, outside the command exit codes",
     ] {
         assert!(text.contains(phrase), "help must say {phrase:?}:\n{text}");
     }

@@ -160,10 +160,10 @@ fn reindex_dense_confirmed_without_embedder_exits_3() {
 }
 
 #[test]
-fn reindex_bad_target_exits_1() {
+fn reindex_bad_target_exits_2() {
     let mut args = memory("reindex");
     args.extend(["--target", "bogus"].map(str::to_owned));
-    assert_eq!(run_ops_args(args), ExitCode::from(1));
+    assert_eq!(run_ops_args(args), ExitCode::from(2));
 }
 
 /// A regression test for the reindex key store: the command must read the
