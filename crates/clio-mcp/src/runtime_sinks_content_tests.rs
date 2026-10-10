@@ -120,7 +120,7 @@ fn faulty_store() -> Arc<SqliteStore> {
 }
 
 /// A row whose content cannot be opened costs only its own novelty contribution:
-/// the readable neighbor is still scored and still supplies recency.
+/// the readable neighbor is still scored, while recency stays neutral.
 #[test]
 fn corrupt_neighbor_is_skipped_while_a_readable_neighbor_remains() {
     let store = faulty_store();
@@ -161,7 +161,10 @@ fn corrupt_neighbor_is_skipped_while_a_readable_neighbor_remains() {
     let (neighbors, age) = signals.neighbor_signals(&probe).expect("signals");
 
     assert_eq!(neighbors, vec![candidate_text(&readable)]);
-    assert!(age.is_some(), "readable neighbor must supply recency");
+    assert!(
+        age.is_none(),
+        "recency stays neutral even with a readable neighbor"
+    );
 }
 
 /// A corrupt row in the bank must not fail the write that triggered the scan.
