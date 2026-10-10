@@ -23,14 +23,17 @@ use crate::runtime::{McpOpenOptions, McpState};
 use std::sync::Arc;
 
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        backend: "sqlite".into(),
-        database_url: "sqlite::memory:".into(),
-        default_bank: "bank-mcp".into(),
-        default_actor: clio_types::Actor::Agent,
-        shared_bank_enabled: false,
-        kms_path: None,
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "sqlite".into(),
+            database_url: "sqlite::memory:".into(),
+            default_bank: "bank-mcp".into(),
+            default_actor: clio_types::Actor::Agent,
+            shared_bank_enabled: false,
+            kms_path: None,
+        },
+        &serde_json::json!({}),
+    )
     .expect("mcp state")
 }
 

@@ -120,10 +120,13 @@ pub fn build(base: &McpState) -> Fixture {
 
 /// Open the SQLite in-memory state the fixture runs on.
 pub fn open_sqlite() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        default_bank: MAIN_BANK.into(),
-        ..McpOpenOptions::default()
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            default_bank: MAIN_BANK.into(),
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("open sqlite state")
 }
 

@@ -28,7 +28,11 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Default sqlite-backed test state (matches the additive fixture builder).
 pub(crate) fn state() -> std::sync::Arc<crate::runtime::McpState> {
-    crate::runtime::McpState::open(&crate::runtime::McpOpenOptions::default()).expect("state")
+    crate::runtime::McpState::open_with_effective(
+        &crate::runtime::McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]

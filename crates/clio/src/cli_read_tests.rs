@@ -57,7 +57,8 @@ fn seed(state: &McpState, bank: &str, id: &str, gist: &str) {
 }
 
 fn state_with_items() -> Arc<McpState> {
-    let state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     seed(&state, "bank-a", "itm-1", "terse answers");
     seed(&state, "bank-a", "itm-2", "verbose replies");
     state

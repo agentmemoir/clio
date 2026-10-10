@@ -39,13 +39,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 /// Fresh state whose durable retention store file is `path`, mirroring the
 /// env-configured open path (`load_lossy` + configured persist target).
 fn state_with_store(path: &Path) -> Arc<McpState> {
-    let mut s = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut s = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     Arc::get_mut(&mut s)
         .expect("unique state")
         .set_retention_path(path);

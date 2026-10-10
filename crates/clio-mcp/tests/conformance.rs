@@ -19,10 +19,13 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        default_bank: "conf-bank".into(),
-        ..McpOpenOptions::default()
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            default_bank: "conf-bank".into(),
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("state")
 }
 

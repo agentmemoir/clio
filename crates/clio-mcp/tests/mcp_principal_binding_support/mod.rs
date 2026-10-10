@@ -129,7 +129,7 @@ fn tighten(path: &Path) {
 /// permission switched on — the shared bank surface is the only one today — can
 /// ask for it instead of asserting only its absence.
 pub fn spawn_server_with(cfg: HttpConfig, options: &McpOpenOptions) -> u16 {
-    let state = McpState::open(options).expect("state");
+    let state = McpState::open_with_effective(options, &serde_json::json!({})).expect("state");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {

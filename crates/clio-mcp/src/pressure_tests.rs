@@ -64,7 +64,8 @@ const FIXTURE_WEIGHTS: HygieneWeights = HygieneWeights {
 };
 
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 fn item(id: &str, gist: &str, admission: f64, created_at: &str) -> MemoryItem {

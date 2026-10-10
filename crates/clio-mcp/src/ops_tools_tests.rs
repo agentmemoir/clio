@@ -30,14 +30,17 @@ use std::sync::Arc;
 const TS: &str = "2026-01-01T00:00:00Z";
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        backend: "sqlite".into(),
-        database_url: "sqlite::memory:".into(),
-        default_bank: "bank-ops".into(),
-        default_actor: clio_types::Actor::Agent,
-        shared_bank_enabled: false,
-        kms_path: None,
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "sqlite".into(),
+            database_url: "sqlite::memory:".into(),
+            default_bank: "bank-ops".into(),
+            default_actor: clio_types::Actor::Agent,
+            shared_bank_enabled: false,
+            kms_path: None,
+        },
+        &serde_json::json!({}),
+    )
     .expect("mcp state")
 }
 
@@ -273,14 +276,17 @@ fn reindex_without_bank_while_shared_disabled_is_forbidden() {
 
 #[test]
 fn reindex_without_bank_with_shared_enabled_sweeps_whole_store() {
-    let st = McpState::open(&McpOpenOptions {
-        backend: "sqlite".into(),
-        database_url: "sqlite::memory:".into(),
-        default_bank: "bank-ops".into(),
-        default_actor: clio_types::Actor::Agent,
-        shared_bank_enabled: true,
-        kms_path: None,
-    })
+    let st = McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "sqlite".into(),
+            database_url: "sqlite::memory:".into(),
+            default_bank: "bank-ops".into(),
+            default_actor: clio_types::Actor::Agent,
+            shared_bank_enabled: true,
+            kms_path: None,
+        },
+        &serde_json::json!({}),
+    )
     .expect("mcp state");
     let result = dispatch(&st, "reindex", &json!({ "timestamp": TS }));
     assert_eq!(result["ok"], Value::Bool(true), "{result}");

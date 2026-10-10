@@ -16,14 +16,17 @@ const BANK: &str = "erase-e2e-bank";
 const SUBJECT: &str = "erase-e2e-subject";
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        shared_bank_enabled: false,
-        backend: "sqlite".into(),
-        database_url: "sqlite::memory:".into(),
-        default_bank: BANK.into(),
-        default_actor: Actor::Harness,
-        kms_path: None,
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            shared_bank_enabled: false,
+            backend: "sqlite".into(),
+            database_url: "sqlite::memory:".into(),
+            default_bank: BANK.into(),
+            default_actor: Actor::Harness,
+            kms_path: None,
+        },
+        &serde_json::json!({}),
+    )
     .expect("state")
 }
 

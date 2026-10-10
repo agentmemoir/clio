@@ -30,7 +30,8 @@ use std::sync::Arc;
 
 /// One in-memory state; each test builds its own, so no test depends on another.
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 /// A state scoped to one credential that may reach `bank-a` as `harness`.
@@ -111,10 +112,13 @@ fn the_shared_bank_needs_the_deployment_to_enable_it() {
         .expect_err("shared bank disabled");
     assert_eq!(err.code, ErrorCode::Forbidden);
 
-    let enabled = McpState::open(&McpOpenOptions {
-        shared_bank_enabled: true,
-        ..McpOpenOptions::default()
-    })
+    let enabled = McpState::open_with_effective(
+        &McpOpenOptions {
+            shared_bank_enabled: true,
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("state");
     assert_eq!(
         enabled
