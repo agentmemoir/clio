@@ -589,11 +589,6 @@ coverage-package:
 # once: a per-package run nothing keeps inside its selection, one command doing
 # both jobs at once, and a report step whose merge one malformed buffer can end.
 #
-# One script under `scripts/` still has no CI step, and the absence is
-# deliberate. `owned_tests.py --accept` runs `cargo nextest list`, which builds
-# the workspace's test binaries, so it does not fit a target of pure Python and
-# wants a step of its own; it is wired into a manual pre-commit hook only.
-#
 #   make scripts-check                   all of them, stopping at the first failure
 #   make scripts-check-precommit         one of them, named
 scripts-check: scripts-check-gate scripts-check-scoped-runner \
