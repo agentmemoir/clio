@@ -95,7 +95,11 @@ fn t09_missing_auth_rejected_when_a_store_record_is_configured() {
 
 #[test]
 fn non_loopback_without_a_usable_store_fails_closed() {
-    let state = crate::runtime::McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
     let err = serve_with_listener(state, HttpConfig::default(), listener);
     let message = err
@@ -126,7 +130,11 @@ fn non_loopback_without_a_usable_store_fails_closed() {
 /// exactly as it would with no store at all.
 #[test]
 fn non_loopback_with_an_empty_store_fails_closed() {
-    let state = crate::runtime::McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
     let cfg = HttpConfig {
         credentials: Some(Arc::new(CredentialStore::default())),
@@ -308,8 +316,11 @@ fn route_helpers_cover_security_and_status_paths() {
 
 #[test]
 fn serve_with_listener_accepts_real_connections() {
-    let state =
-        crate::runtime::McpState::open(&crate::runtime::McpOpenOptions::default()).expect("state");
+    let state = crate::runtime::McpState::open_with_effective(
+        &crate::runtime::McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     let cfg = HttpConfig::default();
@@ -362,7 +373,9 @@ fn retention_tools_parity_stdio_vs_http() {
     .to_string();
 
     // stdio transport over the shared handler.
-    let stdio_state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let stdio_state =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("state");
     let stdio_handler = McpHandler::new(stdio_state);
     let frames = format!("{batch}\n{profile}\n");
     let mut out: Vec<u8> = Vec::new();

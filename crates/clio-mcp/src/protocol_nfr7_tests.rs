@@ -42,7 +42,8 @@ const PROVIDER_EXCEPTIONS: &[(&str, &str)] = &[(
 )];
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 /// Derive a minimal valid argument instance for one property schema node.

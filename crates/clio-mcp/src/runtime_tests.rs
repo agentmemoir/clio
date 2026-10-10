@@ -10,8 +10,8 @@
 //! and ops embedder tests in `ops_embedder_tests`.
 //!
 //! ## Owns
-//! - `McpState::open` behaviour over both backends, including bank/actor
-//!   argument precedence and next-item-id allocation
+//! - Hermetic `McpState::open_with_effective` behaviour over both backends,
+//!   including bank/actor argument precedence and next-item-id allocation
 //! - Empty signal sources, extractor fail-closed configuration, and
 //!   file-backed KMS persistence across opens
 //!
@@ -36,7 +36,44 @@ use serde_json::json;
 use std::sync::Arc;
 
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
+}
+
+/// The hermetic constructor must ignore the operator's deployment file, while
+/// the deployment path layers it. This guards every test that asserts "no
+/// sidecar configured": on a host with a configured deployment that assertion
+/// was about the machine, not the code.
+#[test]
+fn hermetic_open_ignores_the_deployment_file() {
+    let dir = std::env::temp_dir().join(format!("clio-runtime-overlay-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("deployment.json");
+    std::fs::write(
+        &path,
+        r#"{"rerank":{"provider":"tei","url":"http://127.0.0.1:1","model":"m"}}"#,
+    )
+    .expect("write overlay");
+
+    let layered = McpState::open_with_runtime(
+        &McpOpenOptions::default(),
+        clio_config::Runtime::with_env_and_deployment_file(&|_| None, path),
+    )
+    .expect("layered open");
+    assert!(
+        layered.pipeline.rerank_active,
+        "the deployment overlay must attach the reranker"
+    );
+
+    let hermetic =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("hermetic open");
+    assert!(
+        !hermetic.pipeline.rerank_active,
+        "the hermetic open must ignore the deployment file"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -49,21 +86,27 @@ fn opens_sqlite_in_memory() {
 
 #[test]
 fn unknown_backend_fails_with_out_of_range() {
-    let err = McpState::open(&McpOpenOptions {
-        backend: "mysql".into(),
-        ..McpOpenOptions::default()
-    })
+    let err = McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "mysql".into(),
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect_err("unknown backend");
     assert_eq!(err.code, clio_types::ErrorCode::OutOfRange);
 }
 
 #[test]
 fn bank_and_actor_args_win_over_defaults() {
-    let s = McpState::open(&McpOpenOptions {
-        default_bank: "default".into(),
-        default_actor: clio_types::Actor::System,
-        ..McpOpenOptions::default()
-    })
+    let s = McpState::open_with_effective(
+        &McpOpenOptions {
+            default_bank: "default".into(),
+            default_actor: clio_types::Actor::System,
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("state");
     let ctx = s
         .resolve_ctx(&json!({"bank": "bank-x", "actor": "user"}))
@@ -149,11 +192,14 @@ fn opens_postgres_when_database_url_configured() {
     // Serialize against clio-store's shared-Postgres tests:
     // this open migrates the same shared database they delete rows from.
     let _guard = clio_store::lock_pg_test();
-    let opened = McpState::open(&McpOpenOptions {
-        backend: "postgres".into(),
-        database_url: url,
-        ..McpOpenOptions::default()
-    });
+    let opened = McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "postgres".into(),
+            database_url: url,
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    );
     assert!(opened.is_ok(), "postgres open failed: {:?}", opened.err());
 }
 
@@ -205,9 +251,9 @@ fn file_backed_kms_persists_across_state_opens() {
     clio_config::secret_seal::test_key::install_process_key(
         [0x6b; clio_config::secret_key::KEY_LEN],
     );
-    // Regression for #2 at the runtime seam: two `McpState::open` calls over the
-    // same database and key-store path share DEKs, so content written by the
-    // first is readable by the second.
+    // Regression for #2 at the runtime seam: two hermetic opens over the same
+    // database and key-store path share DEKs, so content written by the first is
+    // readable by the second.
     let dir = std::env::temp_dir().join(format!("clio-runtime-kms-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let opts = McpOpenOptions {
@@ -216,13 +262,13 @@ fn file_backed_kms_persists_across_state_opens() {
         kms_path: Some(dir.join("clio.kms.json")),
         ..McpOpenOptions::default()
     };
-    let first = McpState::open(&opts).expect("first open");
+    let first = McpState::open_with_effective(&opts, &serde_json::json!({})).expect("first open");
     let envelope = first
         .kms
         .encrypt("sub-runtime", b"persist")
         .expect("encrypt");
     drop(first);
-    let second = McpState::open(&opts).expect("second open");
+    let second = McpState::open_with_effective(&opts, &serde_json::json!({})).expect("second open");
     assert_eq!(second.kms.decrypt(&envelope).expect("decrypt"), b"persist");
     let _ = std::fs::remove_dir_all(&dir);
 }

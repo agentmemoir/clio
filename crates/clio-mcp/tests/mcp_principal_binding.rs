@@ -234,10 +234,13 @@ fn the_unbound_loopback_default_still_honors_a_declared_actor_and_bank() {
 fn stdio_and_the_in_process_dispatcher_keep_the_unbound_contract() {
     // The bound rule is reached only from the HTTP edge; the other two callers of
     // the handler are unchanged.
-    let state = McpState::open(&McpOpenOptions {
-        default_bank: "demo".into(),
-        ..McpOpenOptions::default()
-    })
+    let state = McpState::open_with_effective(
+        &McpOpenOptions {
+            default_bank: "demo".into(),
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("state");
     let handler = McpHandler::new(Arc::clone(&state));
     let frame = store_item_declaring("anywhere-at-all", "stdio-1", "harness");

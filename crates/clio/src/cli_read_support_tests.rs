@@ -86,7 +86,8 @@ pub(crate) fn json_of(text: &str) -> Value {
 
 /// Open in-memory state with no deployment overlay.
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 /// Dispatch an in-process tool call (the same seam the CLI uses).

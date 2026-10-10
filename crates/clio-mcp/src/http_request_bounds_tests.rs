@@ -43,7 +43,8 @@ const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"p
 /// thread runs until the per-test process exits, which matches the production
 /// loop shape.
 fn spawn_server(cfg: HttpConfig) -> u16 {
-    let state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {

@@ -129,7 +129,11 @@ fn frames() -> String {
 
 #[test]
 fn t04_stdio_session_flows_end_to_end() {
-    let state = crate::runtime::McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let handler = McpHandler::new(state);
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
@@ -161,7 +165,11 @@ fn t04_stdio_session_flows_end_to_end() {
 
 #[test]
 fn t13_stdout_purity_no_log_lines() {
-    let state = crate::runtime::McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let handler = McpHandler::new(state);
     let input = Cursor::new(frames().into_bytes());
     let mut out: Vec<u8> = Vec::new();
@@ -176,7 +184,11 @@ fn t13_stdout_purity_no_log_lines() {
 
 #[test]
 fn eof_terminates_cleanly() {
-    let state = crate::runtime::McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
     let handler = McpHandler::new(state);
     let input = Cursor::new(Vec::<u8>::new());
     let mut out: Vec<u8> = Vec::new();

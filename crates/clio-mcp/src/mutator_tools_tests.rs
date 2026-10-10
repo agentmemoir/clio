@@ -10,7 +10,8 @@ use serde_json::json;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -210,7 +211,15 @@ fn a_long_lived_binding_keeps_the_async_consolidate_response() {
 
 #[test]
 fn a_one_shot_binding_completes_the_consolidate_wave() {
-    let s = McpState::open_one_shot(&McpOpenOptions::default()).expect("one-shot state");
+    // Hermetic one-shot: an env-free runtime and an empty provider document, so
+    // the wave joins on the calling thread.
+    let s = McpState::open_with_runtime_effective_and_wave(
+        &McpOpenOptions::default(),
+        clio_config::Runtime::with_env(&|_| None),
+        &serde_json::json!({}),
+        true,
+    )
+    .expect("one-shot state");
     let out = call(&s, "consolidate", json!({"bank": "bank-a"}));
     assert_eq!(out["ok"], json!(true), "{out}");
     assert_eq!(out["status"], json!("completed"), "{out}");
@@ -305,7 +314,8 @@ fn invalidate_with_an_unknown_replacement_is_refused_and_leaves_the_item_open() 
     use crate::runtime::{McpOpenOptions, McpState};
     use crate::write_tools::dispatch;
     use serde_json::json;
-    let s = McpState::open(&McpOpenOptions::default()).expect("state");
+    let s = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     let stored = dispatch(
         &s,
         "store",

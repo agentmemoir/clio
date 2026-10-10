@@ -112,7 +112,8 @@ fn stale_unit(state: &McpState, id: &str) {
 }
 
 fn handler() -> Arc<McpHandler> {
-    let state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     let mut scoped = (*state).clone();
     scoped.env.hygiene = FIXTURE_WEIGHTS;
     stale_unit(&scoped, "stats-unit");
