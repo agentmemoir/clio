@@ -328,6 +328,30 @@ fn an_empty_root_certificate_adds_nothing() {
 }
 
 #[test]
+fn a_root_certificate_is_not_added_for_a_mode_that_does_not_check_it() {
+    // A root in an address whose mode never checks the certificate would be a
+    // value that reaches the store and is never used. It is left out.
+    for mode in [SslChoice::Disable, SslChoice::EncryptNoVerify] {
+        let address = typed_address(
+            "h",
+            "5432",
+            "clio",
+            "clio",
+            "pw",
+            mode,
+            Some("/etc/ca.pem"),
+            &[],
+        )
+        .expect("assembles");
+        assert!(
+            !address.contains("sslrootcert"),
+            "{}: {address}",
+            mode.as_str()
+        );
+    }
+}
+
+#[test]
 fn the_managed_flag_spellings_are_accepted() {
     assert_eq!(
         DatabaseChoice::parse("managed"),

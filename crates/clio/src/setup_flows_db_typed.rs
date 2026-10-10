@@ -321,11 +321,22 @@ fn ask_the_fields(
         // The root is a flag rather than a question, like the advanced settings:
         // it is only meaningful with a verifying mode, and most operators have
         // none to give. A pasted address can still carry `sslrootcert` itself.
-        details.ssl_root = Some(
-            ctx.flag("database-ssl-rootcert")
-                .unwrap_or_default()
-                .to_owned(),
-        );
+        let root = ctx
+            .flag("database-ssl-rootcert")
+            .unwrap_or_default()
+            .to_owned();
+        // A root with a mode that does not check the certificate would be a
+        // silent no-op, so it is refused by name rather than carried into an
+        // address that ignores it.
+        if !root.trim().is_empty()
+            && !matches!(details.ssl, Some(SslChoice::Prefer | SslChoice::VerifyFull))
+        {
+            return Err(Signal::usage(
+                "--database-ssl-rootcert needs a mode that checks the certificate (prefer or \
+                 verify-full); the chosen mode does not check it",
+            ));
+        }
+        details.ssl_root = Some(root);
     }
     // The advanced settings are never asked. `--database-option` still sets
     // them, and the paste route still takes a whole address, so nothing an

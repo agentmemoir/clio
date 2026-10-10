@@ -264,8 +264,12 @@ pub(crate) fn typed_address(
         ssl_query(ssl)
     );
     // The supplied root rides in the address, spelled the way libpq spells it,
-    // so the store reads it back with everything else the connection needs.
-    if let Some(root) = root.filter(|path| !path.trim().is_empty()) {
+    // so the store reads it back with everything else the connection needs. It
+    // is only meaningful for a mode that checks the certificate, so a mode that
+    // does not check one never carries it.
+    if matches!(ssl, SslChoice::Prefer | SslChoice::VerifyFull)
+        && let Some(root) = root.filter(|path| !path.trim().is_empty())
+    {
         address.push('&');
         address.push_str(crate::setup_db_fields::SSL_ROOT_PARAM);
         address.push('=');
