@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Kept-run (<kind>.prev) and replay stand-ins for the published log (<kind>.log)."""
+
 import contextlib
 import io
 import json
@@ -282,7 +284,7 @@ class StandInTests(unittest.TestCase):
         for _name, _ok in checks:
             self.assertTrue(_ok, _name)
 
-    def test_every_surface_names_the_kept_run_tooevery_surface_names_the_kept_run_too(self) -> None:
+    def test_every_surface_names_the_kept_run_too(self) -> None:
         checks: list[tuple[str, bool]] = []
         # Tracked files only. A checkout carries surfaces this repository does not
         # own -- a link to another checkout's instructions, a machine-local hook --
