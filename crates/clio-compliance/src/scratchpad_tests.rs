@@ -56,10 +56,9 @@ fn missing_key_and_missing_session() {
     assert_eq!(err.code, ErrorCode::ItemNotFound);
     let view = pad.read("ghost", "b", None, now()).unwrap();
     assert_eq!(view["entries"].as_array().unwrap().len(), 0);
-    assert_eq!(
-        pad.clear("ghost", "b", Some("x"), now()).map_err(|_| ()),
-        Ok(())
-    );
+    // A clear of a key this session never held says so, rather than succeeding.
+    let cleared = pad.clear("ghost", "b", Some("x"), now()).unwrap_err();
+    assert_eq!(cleared.code, ErrorCode::ItemNotFound);
 }
 
 #[test]
@@ -120,8 +119,9 @@ fn clear_removes_key_or_whole_session() {
     pad.clear("s", "b", None, now()).unwrap();
     let view = pad.read("s", "b", None, now()).unwrap();
     assert_eq!(view["total_bytes"].as_u64(), Some(0));
-    // Removing an already-missing key is idempotent.
-    pad.clear("s", "b", Some("a"), now()).unwrap();
+    // A key that is already gone is not found, so the second clear says so.
+    let gone = pad.clear("s", "b", Some("a"), now()).unwrap_err();
+    assert_eq!(gone.code, ErrorCode::ItemNotFound);
 }
 
 #[test]

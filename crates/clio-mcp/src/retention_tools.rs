@@ -206,6 +206,23 @@ pub(crate) fn preview_batch(state: &McpState, args: &Value) -> Result<Value, AmE
             }
         }
     }
+    // A preview where every item failed validation previewed nothing, so it is a
+    // refusal, not a success. The CLI's `admit --file` gives the same refusal.
+    if let Some(first) = results.first()
+        && results.iter().all(|item| item.get("error").is_some())
+    {
+        let reason = first
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid item");
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!(
+                "no item previewed: all {} items failed validation; item 0: {reason}",
+                results.len()
+            ),
+        ));
+    }
     let count = results.len();
     Ok(json!({
         "bank": bank,
@@ -227,3 +244,7 @@ pub(crate) fn preview_batch(state: &McpState, args: &Value) -> Result<Value, AmE
 #[cfg(test)]
 #[path = "retention_tools_tests.rs"]
 mod retention_tools_tests;
+
+#[cfg(test)]
+#[path = "retention_tools_preview_tests.rs"]
+mod preview_tests;

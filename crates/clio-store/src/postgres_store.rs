@@ -405,3 +405,15 @@ impl Store for PostgresStore {
         self.get_distilled_unit_impl(bank_id, item_id)
     }
 }
+
+impl crate::triple_assertion::TripleAssertion for PostgresStore {
+    fn triple_asserted_ever(
+        &self,
+        bank_id: &str,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+    ) -> Result<bool, AmError> {
+        self.triple_asserted_ever_impl(bank_id, subject, predicate, object)
+    }
+}

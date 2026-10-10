@@ -81,7 +81,7 @@ pub fn dispatch(state: &McpState, name: &str, args: &Value) -> Value {
     }
     let result = match name {
         "admit_preview" => crate::store_write::admit_preview(state, args),
-        "store" => crate::store_write::store(state, args),
+        "store" => return nudge_if_ok(state, crate::store_write::store_envelope(state, args)),
         "triple_add" => triple_add(state, args),
         "triple_end" => triple_end(state, args),
         "belief_observe" => belief_observe(state, args),

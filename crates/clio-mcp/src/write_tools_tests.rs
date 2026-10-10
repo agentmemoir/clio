@@ -110,7 +110,9 @@ fn span_verify_failure_is_structured_rejection() {
         json!({"entity": "Ada Lovelace", "amount": 42, "date": "1852-01-01"});
     args["source_text"] = json!("Completely unrelated text with no matching span.");
     let out = call(&s, "store", args);
-    assert_eq!(out["ok"], json!(true), "{out}");
+    // A refused write is `ok:false`, so a caller that checks `ok` never reads it as stored.
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("admission_refused"), "{out}");
     assert!(!out["pass"].as_bool().unwrap_or(true));
     assert!(
         out["rejection_reason"]
@@ -137,10 +139,12 @@ fn triple_add_gated_and_triple_end_expires() {
         &s,
         "triple_end",
         json!({
-            "subject": "rust", "predicate": "creates", "valid_until": "t1", "bank": "bank-a"
+            "subject": "rust", "predicate": "used_by", "object": "agent",
+            "valid_until": "t1", "bank": "bank-a"
         }),
     );
     assert_eq!(end["ok"], json!(true), "{end}");
+    assert_eq!(end["already_ended"], json!(false), "{end}");
 }
 
 #[test]
@@ -345,16 +349,20 @@ fn triple_add_belief_requires_source_type() {
 }
 
 #[test]
-fn store_defaults_when_item_shell_and_ids_are_absent() {
+fn store_defaults_ids_when_the_item_has_no_id() {
+    // An item needs content. The snapshot sits under `item`, where the builder reads it.
     let s = state();
     let out = call(
         &s,
         "store",
         json!({
+            "item": {
+                "gist": "prefers terse answers",
+                "snapshot": {"entity": "terse answers", "amount": 1, "date": "2024-01-01"}
+            },
             "category": "persona",
             "epistemic_kind": "fact",
-            "source_text": "The user prefers terse answers.",
-            "snapshot": {"entity": "terse answers", "amount": 1, "date": "2024-01-01"},
+            "source_text": "The user prefers terse answers (1 note since 2024-01-01).",
             "bank": "bank-a"
         }),
     );
