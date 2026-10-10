@@ -83,6 +83,19 @@ pub(crate) fn open_optional_object(
     open_object(kms, cipher.unwrap_or_default())
 }
 
+/// Whether one sealed row's object is the wanted object. With no object wanted,
+/// every row matches. Both backends compare through this, so the rule is one.
+pub(crate) fn object_matches(
+    kms: &dyn DekProvider,
+    cipher: Option<&str>,
+    wanted: Option<&str>,
+) -> Result<bool, AmError> {
+    match wanted {
+        None => Ok(true),
+        Some(wanted) => Ok(open_optional_object(kms, cipher)? == wanted),
+    }
+}
+
 /// The named error for a triple row whose sealed value body is absent.
 ///
 /// A fresh row always has one. A NULL or empty body is a legacy-format row

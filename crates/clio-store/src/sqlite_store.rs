@@ -390,3 +390,15 @@ impl Store for SqliteStore {
         self.audit_trail_impl(bank_id, item_id)
     }
 }
+
+impl crate::triple_assertion::TripleAssertion for SqliteStore {
+    fn triple_asserted_ever(
+        &self,
+        bank_id: &str,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+    ) -> Result<bool, AmError> {
+        self.triple_asserted_ever_impl(bank_id, subject, predicate, object)
+    }
+}

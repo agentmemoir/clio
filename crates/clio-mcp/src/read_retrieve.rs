@@ -335,11 +335,11 @@ fn compose_explanation(pack: &ComposePack) -> Value {
 #[inline(never)]
 fn associations(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let rows = state.assoc.associations(
-        ctx.bank.as_str(),
-        req_str(args, "item_id")?,
-        opt_num(args, "min_weight"),
-    )?;
+    let item_id = req_str(args, "item_id")?;
+    crate::read_tools::require_item(state, ctx.bank.as_str(), item_id)?;
+    let rows = state
+        .assoc
+        .associations(ctx.bank.as_str(), item_id, opt_num(args, "min_weight"))?;
     Ok(json!({ "associations": rows }))
 }
 
@@ -360,9 +360,11 @@ fn graph_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
         None => None,
         Some(raw) => Some(AssocKind::parse(raw)?),
     };
+    let seed_id = req_str(args, "seed_id")?;
+    crate::read_tools::require_item(state, ctx.bank.as_str(), seed_id)?;
     let rows = state.assoc.graph_query(
         ctx.bank.as_str(),
-        req_str(args, "seed_id")?,
+        seed_id,
         hops,
         edge_type,
         opt_num(args, "min_weight"),
@@ -417,3 +419,7 @@ mod read_retrieve_scores_tests;
 #[cfg(test)]
 #[path = "read_retrieve_temporal_tests.rs"]
 mod read_retrieve_temporal_tests;
+
+#[cfg(test)]
+#[path = "read_retrieve_not_found_tests.rs"]
+mod not_found_tests;

@@ -295,8 +295,11 @@ pub fn triple_query(store: &dyn Store, query: &TripleQuery) -> Result<Vec<Triple
 
 /// Expire open SPO edges without replacement.
 ///
+/// A triple the bank never asserted is an error, so a mistyped subject or
+/// predicate cannot read as success. An already-ended triple stays a no-op.
+///
 /// # Errors
-/// Wrong update rule or store failures.
+/// Wrong update rule, a triple the bank never asserted, or store failures.
 #[allow(clippy::too_many_arguments)]
 pub fn triple_end(
     store: &dyn Store,
@@ -310,14 +313,15 @@ pub fn triple_end(
     sink: &dyn TripleSink,
 ) -> Result<TripleEndOutcome, AmError> {
     ensure_discrete_update_rule(update_rule)?;
-    let out = store.triple_end(
-        ctx.bank.as_str(),
-        subject,
-        predicate,
-        object,
-        valid_until,
-        timestamp,
-    )?;
+    let bank = ctx.bank.as_str();
+    let out = store.triple_end(bank, subject, predicate, object, valid_until, timestamp)?;
+    // Nothing was open. The store wrote nothing, so refusing here leaves no partial write.
+    if out.closed_ids.is_empty()
+        && out.already_ended
+        && !store.triple_asserted_ever(bank, subject, predicate, object)?
+    {
+        return Err(triple_not_found(subject, predicate, object));
+    }
     sink.emit(TripleEvent {
         operation: "triple_end".into(),
         bank: ctx.bank.as_str().into(),
@@ -328,6 +332,16 @@ pub fn triple_end(
         replacement_id: None,
     });
     Ok(out)
+}
+
+/// The error for a triple end over a subject, predicate, and object the bank never
+/// asserted.
+fn triple_not_found(subject: &str, predicate: &str, object: Option<&str>) -> AmError {
+    let object = object.map_or(String::new(), |object| format!(" {object}"));
+    AmError::new(
+        ErrorCode::NotFound,
+        format!("triple `{subject} {predicate}{object}` not found in bank"),
+    )
 }
 
 /// Invalidate an item-shaped discrete record (not an SPO edge id).
@@ -373,3 +387,7 @@ pub fn default_time_axis() -> TimeAxis {
 #[cfg(test)]
 #[path = "triple_tests.rs"]
 mod triple_tests;
+
+#[cfg(test)]
+#[path = "triple_end_tests.rs"]
+mod triple_end_tests;

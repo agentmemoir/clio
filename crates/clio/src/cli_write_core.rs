@@ -142,39 +142,11 @@ fn remember_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
 /// `admit_preview_batch` (read-only batch preview over the file's `items`).
 fn admit_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     if let Some(path) = parsed.value("file") {
-        // The batch file carries `context` per item; a command-level value
-        // would be ambiguous, so the combination fails closed instead of being
-        // silently dropped.
-        if parsed.value("context").is_some() {
-            return Err(CliError::usage_hint(
-                "`admit --file` does not accept --context; set `context` on each item",
-                "each item object may carry its own bounded `context` string",
-            ));
-        }
-        return admit_batch_call(parsed, path);
+        return crate::cli_write_batch::admit_batch_call(parsed, path);
     }
     let args = candidate_args(parsed, "admit")?;
     Ok(WriteCall::Tool {
         tool: "admit_preview",
-        args: Value::Object(args),
-    })
-}
-
-fn admit_batch_call(parsed: &ParsedArgs, path: &str) -> Result<WriteCall, CliError> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|error| CliError::usage(format!("--file `{path}` is not readable: {error}")))?;
-    let value: Value = serde_json::from_str(&raw)
-        .map_err(|error| CliError::usage(format!("--file must contain a JSON object: {error}")))?;
-    let Some(items) = value.get("items").filter(|items| items.is_array()) else {
-        return Err(CliError::usage_hint(
-            "--file must contain a JSON object with a non-empty `items` array",
-            "try {\"items\": [{\"item\": {\"gist\": \"...\"}, \"category\": \"persona\", \"epistemic_kind\": \"fact\"}]}",
-        ));
-    };
-    let mut args = base_args(parsed);
-    args.insert("items".into(), items.clone());
-    Ok(WriteCall::Tool {
-        tool: "admit_preview_batch",
         args: Value::Object(args),
     })
 }
