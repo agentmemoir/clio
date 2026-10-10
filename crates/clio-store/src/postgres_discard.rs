@@ -86,7 +86,7 @@ impl PostgresStore {
                 .am("discard lookup")?;
             let Some(r) = row else {
                 return Err(AmError::new(
-                    ErrorCode::NotFound,
+                    ErrorCode::ItemNotFound,
                     format!("item `{item_id}` not found in bank"),
                 ));
             };

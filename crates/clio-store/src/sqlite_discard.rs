@@ -90,7 +90,7 @@ impl SqliteStore {
                 .am("discard lookup")?;
             let Some((category, epistemic_kind, discarded)) = row else {
                 return Err(AmError::new(
-                    ErrorCode::NotFound,
+                    ErrorCode::ItemNotFound,
                     format!("item `{item_id}` not found in bank"),
                 ));
             };

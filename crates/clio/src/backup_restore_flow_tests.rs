@@ -210,8 +210,10 @@ fn an_unknown_id_suggests_the_closest_one_and_changes_nothing() {
 
     let (code, _, err) = run_json_in(&scratch, &["restore", &format!("{id}x"), "--yes"]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains(&format!("did you mean `{id}`")), "{err}");
+    let error: serde_json::Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["code"], serde_json::json!("not_found"), "{error}");
     assert_eq!(
         sqlite_content_digest(&store_path(&scratch)).expect("digest the target"),
         before
@@ -220,13 +222,15 @@ fn an_unknown_id_suggests_the_closest_one_and_changes_nothing() {
 }
 
 #[test]
-fn latest_in_an_empty_directory_says_there_is_nothing_to_restore() {
+fn latest_in_an_empty_directory_is_not_found() {
     let scratch = Scratch::new("restore-latest-empty");
 
     let (code, _, err) = run_json_in(&scratch, &["restore", "--latest", "--yes"]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("nothing to restore"), "{err}");
+    let error: serde_json::Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["code"], serde_json::json!("not_found"), "{error}");
 }
 
 #[test]
@@ -359,7 +363,7 @@ fn an_unknown_id_without_a_close_match_points_at_the_listing() {
 
     let (code, _, err) = run_json_in(&scratch, &["restore", "zzzz", "--yes"]);
 
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("clio backup list"), "{err}");
     assert_eq!(
         sqlite_content_digest(&store_path(&scratch)).expect("digest the target"),

@@ -131,13 +131,13 @@ fn add_prints_the_secret_once_and_stores_only_the_digest() {
     assert_eq!(digest.len(), 64);
     assert!(!fs::read_to_string(&store).expect("bytes").contains(&secret));
 
-    // A second add with the same label is refused and the file is unchanged.
+    // A second add with the same label is a domain error and the file is unchanged.
     let bytes_before = fs::read_to_string(&store).expect("bytes");
     let (code, _, err) = run_auth(&store, &add_args("ci", &["demo"]));
     assert_eq!(
         code,
-        ExitCode::from(2),
-        "duplicate label is a usage error: {err}"
+        ExitCode::from(1),
+        "duplicate label is an operational error: {err}"
     );
     assert!(err.contains("already exists"), "{err}");
     assert_eq!(fs::read_to_string(&store).expect("bytes"), bytes_before);
@@ -145,22 +145,22 @@ fn add_prints_the_secret_once_and_stores_only_the_digest() {
 }
 
 #[test]
-fn bad_add_input_is_refused_without_touching_the_store() {
+fn bad_add_input_uses_domain_or_usage_exit_without_touching_the_store() {
     let store = scratch("bad-add");
-    let cases: Vec<Vec<&str>> = vec![
-        // Invalid label charset.
-        add_args("has space", &["demo"]),
-        add_args("", &["demo"]),
-        // Invalid actor, carrying the shared parser's message.
-        vec![
-            "token", "add", "--label", "ok", "--actor", "robot", "--bank", "demo",
-        ],
-        // No bank at all.
-        vec!["token", "add", "--label", "ok", "--actor", "agent"],
+    let cases: Vec<(Vec<&str>, u8)> = vec![
+        (add_args("has space", &["demo"]), 1),
+        (add_args("", &["demo"]), 2),
+        (
+            vec![
+                "token", "add", "--label", "ok", "--actor", "robot", "--bank", "demo",
+            ],
+            1,
+        ),
+        (vec!["token", "add", "--label", "ok", "--actor", "agent"], 2),
     ];
-    for args in cases {
+    for (args, exit) in cases {
         let (code, _, err) = run_auth(&store, &args);
-        assert_eq!(code, ExitCode::from(2), "{args:?}: {err}");
+        assert_eq!(code, ExitCode::from(exit), "{args:?}: {err}");
         assert!(
             fs::read_to_string(&store).is_err(),
             "no store file is created"
@@ -169,14 +169,16 @@ fn bad_add_input_is_refused_without_touching_the_store() {
     }
     let (_, _, err) = run_auth(
         &store,
-        &["token", "add", "--label", "ok", "--actor", "robot"],
+        &[
+            "token", "add", "--label", "ok", "--actor", "robot", "--bank", "demo",
+        ],
     );
     assert!(err.contains("agent|harness|user|system"), "{err}");
     let (_, _, err) = run_auth(
         &store,
         &["token", "add", "--label", "ok", "--actor", "agent"],
     );
-    assert!(err.contains("at least one bank"), "{err}");
+    assert!(err.contains("requires --bank"), "{err}");
 }
 
 #[test]
@@ -241,18 +243,28 @@ fn revoke_removes_a_record_and_states_the_restart_timing() {
     assert_eq!(code, ExitCode::SUCCESS);
     assert!(out.contains("\"records\":[]"), "{out}");
 
-    // Unknown label: non-zero exit, file unchanged.
+    // Unknown label: operational not-found, file unchanged.
     let bytes_before = fs::read_to_string(&store).expect("bytes");
     let (code, _, err) = run_auth(&store, &["token", "revoke", "--label", "ghost"]);
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("no token labelled"), "{err}");
     assert_eq!(fs::read_to_string(&store).expect("bytes"), bytes_before);
     assert_eq!(records_on_disk(&store).len(), before.len() - 1);
+
+    let (code, _, err) = run_auth(
+        &store,
+        &["token", "revoke", "--label", "ghost", "--output", "json"],
+    );
+    assert_eq!(code, ExitCode::from(1), "{err}");
+    let error: Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["ok"], serde_json::json!(false), "{error}");
+    assert_eq!(error["code"], serde_json::json!("not_found"), "{error}");
+    assert_eq!(fs::read_to_string(&store).expect("bytes"), bytes_before);
     let _ = fs::remove_file(&store);
 }
 
 #[test]
-fn a_refused_store_file_blocks_every_verb() {
+fn a_broken_store_file_fails_every_verb_as_operational() {
     let store = scratch("refused");
     fs::write(&store, "not json").expect("write malformed");
     for args in [
@@ -262,7 +274,7 @@ fn a_refused_store_file_blocks_every_verb() {
         ][..],
     ] {
         let (code, _, err) = run_auth(&store, args);
-        assert_eq!(code, ExitCode::from(2), "{args:?}: {err}");
+        assert_eq!(code, ExitCode::from(1), "{args:?}: {err}");
         assert!(
             err.contains("malformed") || err.contains("token store"),
             "{err}"
@@ -271,7 +283,7 @@ fn a_refused_store_file_blocks_every_verb() {
     // An empty file is also refused, not parsed as an empty store.
     fs::write(&store, "").expect("write empty");
     let (code, _, err) = run_auth(&store, &["token", "list"]);
-    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert_eq!(code, ExitCode::from(1), "{err}");
     // A world-readable file is refused before it is parsed.
     #[cfg(unix)]
     {
@@ -279,7 +291,7 @@ fn a_refused_store_file_blocks_every_verb() {
         fs::write(&store, "[]").expect("write array");
         fs::set_permissions(&store, fs::Permissions::from_mode(0o644)).expect("loosen");
         let (code, _, err) = run_auth(&store, &["token", "list"]);
-        assert_eq!(code, ExitCode::from(2), "{err}");
+        assert_eq!(code, ExitCode::from(1), "{err}");
         assert!(err.contains("owner-only"), "{err}");
     }
     let _ = fs::remove_file(&store);

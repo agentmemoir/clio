@@ -255,10 +255,12 @@ fn pg_supersede_false_and_lookup_guards(store: &PostgresStore, bank2: &str) {
     assert_eq!(err.code, ErrorCode::InvalidArgument);
     assert!(store.get_triple(bank2, "missing").unwrap().is_none());
     assert!(store.triple_end("", "a", "b", None, "t", "t").is_err());
-    assert!(
+    assert_eq!(
         store
             .invalidate_item(bank2, "nope", "t", "t", None, "agent")
-            .is_err()
+            .unwrap_err()
+            .code,
+        ErrorCode::ItemNotFound
     );
 }
 

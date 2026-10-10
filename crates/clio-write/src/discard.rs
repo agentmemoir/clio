@@ -119,7 +119,7 @@ pub enum DiscardOutcome {
 ///
 /// Repeat-discard is rejected as `InvalidArgument` on the confirmed path
 /// (documented policy); a dry-run preview of an already-discarded item is
-/// rejected as `NotFound` because only active items resolve an identity.
+/// rejected as `ItemNotFound` because only active items resolve an identity.
 ///
 /// # Errors
 /// Missing bank, empty `item_id`/`reason`, or not-found / already-discarded
@@ -165,7 +165,7 @@ pub fn discard(args: &DiscardArgs<'_>) -> Result<DiscardOutcome, AmError> {
         let identity = args
             .store
             .get_item_identity(bank, args.item_id)?
-            .ok_or_else(|| AmError::new(ErrorCode::NotFound, not_found(args.item_id)))?;
+            .ok_or_else(|| AmError::new(ErrorCode::ItemNotFound, not_found(args.item_id)))?;
         DiscardOutcome::DryRun(identity)
     };
     Ok(outcome)
