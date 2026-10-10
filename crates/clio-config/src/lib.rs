@@ -88,8 +88,7 @@ pub use clio_types::context;
 pub use clio_types::error;
 
 pub use admission_knobs::{
-    DEFAULT_RECENCY_TAU_DAYS, DEFAULT_THETA_ADMIT, KNOWN_ADMISSION_KEYS, default_type_prior,
-    prior_for, threshold_for,
+    DEFAULT_THETA_ADMIT, KNOWN_ADMISSION_KEYS, default_type_prior, prior_for, threshold_for,
 };
 pub use backup_path::{
     BACKUP_DIR_ENV, BackupDirTier, ResolvedBackupDir, default_backup_dir, resolve_backup_dir,

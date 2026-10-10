@@ -200,10 +200,6 @@ impl SignalSource for HubSignalSource {
     fn neighbor_texts(&self, _item: &MemoryItem) -> Result<Vec<String>, AmError> {
         Ok(self.texts.clone())
     }
-
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 /// Count endpoints that will receive a cross-reference (hub + distinct neighbors).

@@ -89,7 +89,7 @@ pub fn config_defs() -> Vec<ToolDef> {
                     "patch",
                     json!({
                         "type": "object",
-                        "description": "Ranking/admission fields to change (retrieval, admission, coactivation, intent_gate, theta_admit, theta_overrides, type_prior_overrides, recency_tau_days, hygiene, retention, trust, maintenance_triggers). `maintenance_triggers` patches `dirty_ancestor_threshold`, `eligible_hub_threshold`, and `stale_unit_threshold` (each default 1, firing a wave when the count is greater than or equal to the threshold; `0` disables just that one condition), plus `cooldown_seconds` (default 300; `0` means no cooldown), `max_waves_per_hour` (default 12; rejects `0`), and `hub_budget_per_wave` (default 16; rejects `0`, because a zero budget would spend a wave and distil nothing).",
+                        "description": "Ranking/admission fields to change (retrieval, admission, coactivation, intent_gate, theta_admit, theta_overrides, type_prior_overrides, hygiene, retention, trust, maintenance_triggers). `maintenance_triggers` patches `dirty_ancestor_threshold`, `eligible_hub_threshold`, and `stale_unit_threshold` (each default 1, firing a wave when the count is greater than or equal to the threshold; `0` disables just that one condition), plus `cooldown_seconds` (default 300; `0` means no cooldown), `max_waves_per_hour` (default 12; rejects `0`), and `hub_budget_per_wave` (default 16; rejects `0`, because a zero budget would spend a wave and distil nothing).",
                         "additionalProperties": true
                     }),
                 ),

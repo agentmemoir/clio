@@ -75,7 +75,7 @@ def main():
             }
         )
     elif command == "ranking":
-        emit({"ok": True, "retrieval": {"dense": 0.25}, "recency_tau_days": 30.0})
+        emit({"ok": True, "retrieval": {"dense": 0.25}})
     elif command == "maintenance":
         emit({"ok": True, "index": {"pending_jobs": 0}})
     elif command == "retention":

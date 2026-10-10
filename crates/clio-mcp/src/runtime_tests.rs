@@ -101,18 +101,8 @@ fn no_signals_are_empty() {
     let item = test_item();
     let neighbors = SignalSource::neighbor_texts(&s, &item).expect("neighbors");
     assert!(neighbors.is_empty(), "{neighbors:?}");
-    assert!(
-        SignalSource::prior_age_days(&s, &item)
-            .expect("age")
-            .is_none()
-    );
     let belief_neighbors = BeliefSignalSource::neighbor_texts(&s, "b", "p").expect("neighbors");
     assert!(belief_neighbors.is_empty(), "{belief_neighbors:?}");
-    assert!(
-        BeliefSignalSource::prior_age_days(&s, "b", "p")
-            .expect("age")
-            .is_none()
-    );
 }
 
 fn test_item() -> clio_types::MemoryItem {

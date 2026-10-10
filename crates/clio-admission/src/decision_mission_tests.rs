@@ -31,15 +31,13 @@ use clio_config::retention::RetentionProfile;
 use clio_config::retention_mission::{MissionEntry, MissionMatchKind, RetentionMission};
 use clio_types::SourceType;
 
-/// Neutral scoring inputs: no neighbors (novelty 1.0), no prior (recency 1.0),
-/// user-stated provenance (confidence 0.9).
+/// Neutral scoring inputs: no neighbors (novelty 1.0), user-stated provenance
+/// (confidence 0.9).
 fn signals(text: &str) -> SignalInputs {
     SignalInputs {
         text: text.to_owned(),
         source_type: Some(SourceType::UserStated),
         neighbors: Some(Vec::new()),
-        prior_age_days: None,
-        recency_unavailable: false,
     }
 }
 
@@ -92,13 +90,12 @@ fn chatter_fixture_calibrates_under_coding_default() {
         let with_mission = decide_with(&coding, line);
         let without_mission = decide_with(&empty, line);
         println!(
-            "fixture[{index:02}] pass(default)={:>5} score={:.3} utility={:.2} confidence={:.2} novelty={:.2} recency={:.2} prior={:.2} reason={:?} | pass(empty)={}",
+            "fixture[{index:02}] pass(default)={:>5} score={:.3} utility={:.2} confidence={:.2} novelty={:.2} prior={:.2} reason={:?} | pass(empty)={}",
             with_mission.pass,
             with_mission.admission_score,
             with_mission.factors.utility,
             with_mission.factors.confidence,
             with_mission.factors.novelty,
-            with_mission.factors.recency,
             with_mission.factors.type_prior,
             with_mission.rejection_reason,
             without_mission.pass,
@@ -185,7 +182,7 @@ fn drop_wins_over_keep() {
     profile.mission = Some(mission_with(&["ping"], &[(false, "status ping")]));
     let baseline = decide_with(&coding_default_without_mission(), "status ping noted");
     let decision = decide_with(&profile, "status ping noted");
-    let expected = baseline.admission_score - 0.30 * 0.2;
+    let expected = baseline.admission_score - 0.30 * 0.25;
     assert!((decision.admission_score - expected).abs() < 1e-9);
 }
 
@@ -199,7 +196,7 @@ fn keep_hit_adds_exact_bonus() {
     assert!(decision.pass);
     let expected = (baseline.factors.utility + 0.15).clamp(0.0, 1.0);
     assert!((decision.factors.utility - expected).abs() < 1e-9);
-    assert!((decision.admission_score - (baseline.admission_score + 0.15 * 0.2)).abs() < 1e-9);
+    assert!((decision.admission_score - (baseline.admission_score + 0.15 * 0.25)).abs() < 1e-9);
 }
 
 /// a keep hit can never rescue a category-gate failure.

@@ -91,7 +91,6 @@ fn t05_ranking_env_set_renormalizes() {
             w2: 1.0,
             w3: 0.0,
             w4: 0.0,
-            w5: 0.0,
         }),
         ..RankingEnvPatch::default()
     };

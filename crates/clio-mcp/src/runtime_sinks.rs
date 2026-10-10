@@ -47,7 +47,7 @@ const SIGNALS_LEXICAL_LIMIT: usize = 64;
 /// Candidate-text characters used for the lexical query (FTS OR-term bound).
 const SIGNALS_QUERY_CHARS: usize = 512;
 
-/// Neutral neighbor/recency signals: no neighbors, no prior.
+/// Neutral signals: no neighbors.
 ///
 /// This is **not** the gated write source. Every gated write path that scores
 /// against stored memory uses [`StoreSignals`]. `NoSignals` remains for tests
@@ -60,21 +60,15 @@ impl SignalSource for NoSignals {
     fn neighbor_texts(&self, _item: &MemoryItem) -> Result<Vec<String>, AmError> {
         Ok(vec![])
     }
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 impl BeliefSignalSource for NoSignals {
     fn neighbor_texts(&self, _bank_id: &str, _proposition: &str) -> Result<Vec<String>, AmError> {
         Ok(vec![])
     }
-    fn prior_age_days(&self, _bank_id: &str, _proposition: &str) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
-/// Store-backed neighbor/recency signals for the gated write path.
+/// Store-backed neighbor signals for the gated write path.
 ///
 /// Used by every gated write surface whose rows live in `items`: `store`
 /// (`remember`/`admit`/`admit --file`), `canonical_put`, `triple_add`,
@@ -90,15 +84,6 @@ impl BeliefSignalSource for NoSignals {
 /// bank cannot make a write quadratic. The recent window catches just-written
 /// items the async indexer has not published yet; the lexical leg catches older
 /// indexed matches the window misses.
-///
-/// # Recency
-///
-/// `prior_age_days` is always `None` here, so a store-backed write scores
-/// recency `1.0`. A stored neighbor's age is a wall-clock quantity: reading it
-/// would make the stamped `admission_score` depend on how far apart two writes
-/// happened rather than on their content, so byte-identical banks would score
-/// differently and near-tied hits could swap in recall. Read-time age is the
-/// retention curve's job, applied once per hit against the query clock.
 ///
 /// # Novelty
 ///
@@ -263,12 +248,6 @@ impl SignalSource for StoreSignals {
             .map(candidate_text)
             .collect())
     }
-
-    /// Neutral: the store-backed write path never reports an age, so the
-    /// stamped score cannot depend on the write clock. See the type docs.
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 impl BeliefSignalSource for StoreSignals {
@@ -278,16 +257,6 @@ impl BeliefSignalSource for StoreSignals {
             .iter()
             .map(candidate_text)
             .collect())
-    }
-
-    /// Belief recency stays neutral (`None`).
-    ///
-    /// The belief signal interface carries no candidate timestamp, so an age
-    /// computed against the wall clock would make admission nondeterministic
-    /// and break byte-parity conformance. Novelty is scored against stored rows;
-    /// recency keeps its previous `1.0` value for belief creates.
-    fn prior_age_days(&self, _bank_id: &str, _proposition: &str) -> Result<Option<f64>, AmError> {
-        Ok(None)
     }
 }
 

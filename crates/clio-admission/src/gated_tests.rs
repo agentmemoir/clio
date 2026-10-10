@@ -239,26 +239,19 @@ fn backend_failures_error_without_event_or_write() {
     let ctx = ctx();
     let item = semantic_item("down-1");
 
-    for source in [
-        StubSource {
-            neighbors_down: true,
-            ..StubSource::default()
-        },
-        StubSource {
-            prior_down: true,
-            ..StubSource::default()
-        },
-    ] {
-        let req = gate_req(&item, &ctx, policy.clone(), &sink, "2026-09-17T00:00:00Z");
-        let err = gated_create(
-            &req,
-            Candidate::Semantic(SemanticCategory::Persona),
-            &source,
-            &mut |_| panic!("backend down must never write"),
-        )
-        .expect_err("backend down");
-        assert_eq!(err.code, ErrorCode::FactorUnavailable);
-    }
+    let source = StubSource {
+        neighbors_down: true,
+        ..StubSource::default()
+    };
+    let req = gate_req(&item, &ctx, policy.clone(), &sink, "2026-09-17T00:00:00Z");
+    let err = gated_create(
+        &req,
+        Candidate::Semantic(SemanticCategory::Persona),
+        &source,
+        &mut |_| panic!("backend down must never write"),
+    )
+    .expect_err("backend down");
+    assert_eq!(err.code, ErrorCode::FactorUnavailable);
     let events = sink.events();
     assert!(events.is_empty(), "{events:?}");
 }

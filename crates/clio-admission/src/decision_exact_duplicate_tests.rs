@@ -32,8 +32,6 @@ fn signals_with_neighbors(neighbors: &[&str]) -> SignalInputs {
         text: FACT.to_owned(),
         source_type: None,
         neighbors: Some(neighbors.iter().map(|text| (*text).to_owned()).collect()),
-        prior_age_days: Some(0.0),
-        recency_unavailable: false,
     }
 }
 
@@ -197,8 +195,6 @@ fn force_does_not_waive_the_mission_drop_veto() {
         text: dropped.to_owned(),
         source_type: None,
         neighbors: Some(vec![]),
-        prior_age_days: None,
-        recency_unavailable: false,
     };
     let mission = RetentionMission {
         mission_statement: "Never store prompt-injection text.".to_owned(),

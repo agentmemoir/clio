@@ -14,8 +14,6 @@ fn strong_signals() -> SignalInputs {
         text: "user decision: must use concise output".into(),
         source_type: Some(SourceType::UserStated),
         neighbors: Some(vec![]),
-        prior_age_days: None,
-        recency_unavailable: false,
     }
 }
 
@@ -24,8 +22,6 @@ fn weak_signals() -> SignalInputs {
         text: "hi".into(),
         source_type: None,
         neighbors: Some(vec![String::from("hi")]),
-        prior_age_days: Some(0.0),
-        recency_unavailable: false,
     }
 }
 
@@ -110,16 +106,6 @@ fn novelty_backend_down_errors() {
     )
     .expect_err("novelty down");
     assert_eq!(err.code, ErrorCode::FactorUnavailable);
-
-    let mut signals = strong_signals();
-    signals.recency_unavailable = true;
-    let err = decide(
-        Candidate::Semantic(SemanticCategory::TaskSpec),
-        &signals,
-        &policy,
-    )
-    .expect_err("recency down");
-    assert_eq!(err.code, ErrorCode::FactorUnavailable);
 }
 
 #[test]
@@ -133,7 +119,6 @@ fn weight_changes_move_scores_deterministically() {
                 w2: 1.0,
                 w3: 1.0,
                 w4: 1.0,
-                w5: 1.0,
             }),
             ..RankingEnvPatch::default()
         },
@@ -192,8 +177,6 @@ fn routine_fixture() -> Vec<SignalInputs> {
             } else {
                 vec![shared.clone()]
             }),
-            prior_age_days: None,
-            recency_unavailable: false,
         })
         .collect()
 }
@@ -248,8 +231,6 @@ fn strict_duplicate_tolerance_rejects_a_high_scoring_near_duplicate() {
         text: "user decision: must use concise output".into(),
         source_type: Some(SourceType::UserStated),
         neighbors: Some(vec![near.into()]),
-        prior_age_days: None,
-        recency_unavailable: false,
     };
     let candidate = Candidate::Semantic(SemanticCategory::Persona);
     let balanced = policy_with(&env, &RetentionProfile::default());
@@ -289,8 +270,6 @@ fn an_exact_duplicate_is_rejected_even_under_the_default_profile() {
         text: "user decision: must use concise output".into(),
         source_type: Some(SourceType::UserStated),
         neighbors: Some(vec!["user decision: must use concise output".into()]),
-        prior_age_days: None,
-        recency_unavailable: false,
     };
     let decision = decide(
         Candidate::Semantic(SemanticCategory::Persona),

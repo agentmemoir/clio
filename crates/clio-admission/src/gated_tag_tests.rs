@@ -78,10 +78,6 @@ impl SignalSource for UnusedSource {
     fn neighbor_texts(&self, _item: &MemoryItem) -> Result<Vec<String>, clio_types::AmError> {
         panic!("tag mismatch must fail before signal lookup")
     }
-
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, clio_types::AmError> {
-        panic!("tag mismatch must fail before signal lookup")
-    }
 }
 
 #[test]
