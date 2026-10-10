@@ -109,7 +109,10 @@ fn a_keep_count_larger_than_the_directory_keeps_everything() {
     assert_eq!(plan.listed_bytes, 600, "the listing total is unchanged");
     // An empty directory is the same rule with nothing to apply it to.
     let empty = select(&[], &LinkedPaths::default(), 3).expect("an empty listing is not an error");
-    assert!(empty.kept.is_empty() && empty.candidates.is_empty());
+    assert!(
+        empty.kept.is_empty() && empty.candidates.is_empty(),
+        "an empty listing keeps nothing and offers no candidates"
+    );
     assert_eq!(empty.listed_bytes, 0);
 }
 

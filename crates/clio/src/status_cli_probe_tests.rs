@@ -173,7 +173,10 @@ fn build_setup_absent_config_is_none() {
         "absent config reports none"
     );
     assert!(view.embed.is_none() && view.rerank.is_none());
-    assert!(view.secrets.is_empty());
+    assert!(
+        view.secrets.is_empty(),
+        "absent key stores report no secrets"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

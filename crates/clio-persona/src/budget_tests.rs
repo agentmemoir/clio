@@ -116,7 +116,10 @@ fn preferences_rank_against_stables() {
 #[test]
 fn empty_and_zero_budget() {
     let t = truncate_document(&PersonaDocument::default(), 400);
-    assert!(t.document.stable.is_empty() && t.document.preferences.is_empty());
+    assert!(
+        t.document.stable.is_empty() && t.document.preferences.is_empty(),
+        "an empty document truncates to empty sections"
+    );
     let doc = PersonaDocument {
         stable: vec![stable("a", 0.9)],
         preferences: vec![],

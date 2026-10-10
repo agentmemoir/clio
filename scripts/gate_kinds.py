@@ -186,5 +186,9 @@ COVERAGE_ARTIFACT = "target/coverage/coverage.json"
 #: v3 moved a `cargo llvm-cov` probe out of the `coverage` kind. An entry stored
 #: before that was keyed on a kind the tool no longer publishes under, and it
 #: would otherwise be readable as a coverage verdict.
-KEY_SCHEME = b"clio-gate-v3\0"
+#:
+#: v4 keys the tree on the content of each changed path instead of the diff
+#: text plus a separate untracked list, so a verdict measured before `git add`
+#: replays after it.
+KEY_SCHEME = b"clio-gate-v4\0"
 USAGE = "usage: gate.py run [--force] [--log-dir DIR] -- CMD ARGS... | gate.py --self-test"
