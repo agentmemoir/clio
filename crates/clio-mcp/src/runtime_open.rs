@@ -219,11 +219,10 @@ impl McpState {
         // Each engine derives its co-activation policy from the same ranking
         // environment through the one conversion, instead of hardcoding
         // `AssocPolicy::default()`. At open the environment is the system
-        // default, so these values are unchanged. The two differ afterwards:
-        // the hub engine's policy is replaceable, so a later `ranking_env_set`
-        // governs the next hub wave (see `McpState::apply_ranking_policy`),
-        // while this association engine and the retriever keep the value they
-        // were built with.
+        // default, so these values are unchanged. A later `ranking_env_set`
+        // governs the next hub wave and the next retrieval alike: every one of
+        // these engines holds a replaceable policy cell, pushed by
+        // `McpState::apply_ranking_policy`.
         let assoc = AssociationEngine::new(
             Arc::clone(&store_any),
             AssocPolicy::from_coactivation(&env.coactivation),

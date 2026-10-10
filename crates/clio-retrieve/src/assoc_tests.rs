@@ -151,7 +151,6 @@ fn t04b_reinforcement_switch_and_policy_replacement() {
     let eng = fx::assoc_engine_at(&store, 0);
     assert!(format!("{eng:?}").contains("AssociationEngine"));
     assert_eq!(eng.policy().hub_degree_limit, 16);
-    let mut eng = eng;
     eng.set_policy(AssocPolicy {
         eta: 0.2,
         ..AssocPolicy::default()
@@ -172,7 +171,7 @@ fn t05_reinforce_failure_fails_retrieve_closed() {
             "alpha",
         );
     }
-    let mut retriever = fx::retriever(&store);
+    let retriever = fx::retriever(&store);
     retriever.set_assoc_policy(AssocPolicy {
         eta: 2.0,
         ..AssocPolicy::default()
