@@ -14,6 +14,11 @@ fn mask_secret_keeps_last_four() {
 }
 
 #[test]
+fn mask_secret_keeps_the_redacted_literal() {
+    assert_eq!(mask_secret("[REDACTED]"), "[REDACTED]");
+}
+
+#[test]
 fn mask_value_redacts_nested_api_key() {
     let mut v = json!({
         "backend": "sqlite",
@@ -92,6 +97,27 @@ fn mask_string_secrets_masks_strings_and_keeps_non_strings() {
 }
 
 #[test]
+fn masking_an_already_masked_document_changes_nothing() {
+    // `my_auth` masks to `****auth`, which still looks like a secret key, so a
+    // second pass reaches its value, which the first pass left as `[REDACTED]`.
+    let once = masked_clone(&json!({
+        "my_auth": "ab",
+        "credentials": {"api_key": "xy", "database_url": "postgres://u:p@h/db"},
+        "items": [{"secret": "abcd"}]
+    }));
+    assert_eq!(masked_clone(&once), once, "{once}");
+}
+
+#[test]
+fn mask_string_secrets_is_idempotent() {
+    let mut v = json!({"api_key": "ab", "nested": {"token": "x"}});
+    mask_string_secrets("", &mut v);
+    let once = v.clone();
+    mask_string_secrets("", &mut v);
+    assert_eq!(v, once, "{v}");
+}
+
+#[test]
 fn scrub_masks_every_api_key_occurrence() {
     let raw = "api_key: sk-FIRSTKEY99 then api_key: sk-SECONDKEY88";
     let scrubbed = scrub_inline_secrets(raw);
@@ -104,7 +130,7 @@ fn scrub_masks_every_api_key_occurrence() {
 fn scrub_is_idempotent_over_an_already_masked_value() {
     // An export scrubs a short value to the literal `[REDACTED]`. Feeding that
     // masked bundle back through the scrubber (the import path) must not
-    // mangle it: `mask_secret("[REDACTED]")` is `****TED]`.
+    // mangle it: the masker returns `[REDACTED]` unchanged.
     let once = scrub_inline_secrets("token: ab");
     assert_eq!(once, "token: [REDACTED]");
     let twice = scrub_inline_secrets(&once);

@@ -57,8 +57,14 @@ pub fn path_is_secret(path: &str) -> bool {
 
 /// Mask a secret string: empty or ≤4 chars → `[REDACTED]` (last-4 would reveal
 /// the whole secret); otherwise `****` + last up to 4 chars.
+///
+/// [`REDACTED`] passes through unchanged: it is what the masker emits for a
+/// short value, and masking an already-masked document must not rewrite it.
 #[must_use]
 pub fn mask_secret(raw: &str) -> String {
+    if raw == REDACTED {
+        return REDACTED.to_owned();
+    }
     let chars: Vec<char> = raw.chars().collect();
     if chars.len() <= 4 {
         return "[REDACTED]".to_owned();
@@ -196,11 +202,11 @@ pub fn mask_string_secrets(path: &str, value: &mut Value) {
 
 /// The literal [`mask_secret`] emits for a value of four characters or fewer.
 ///
-/// A scrubbed value must be a fixed point of [`mask_secret`], otherwise
-/// re-scrubbing an already-masked string corrupts it: `mask_secret` on the
-/// ten-character `[REDACTED]` returns `****TED]`. Longer values already are
-/// fixed points, because `****` plus the last four characters reproduces
-/// itself. Only this one literal needs an explicit guard.
+/// Masking is a fixed point on this literal: [`mask_secret`] returns it
+/// unchanged, and [`scrub_inline_secrets`] short-circuits it. Without that, a
+/// second masking pass over an already-masked document would rewrite the
+/// ten-character `[REDACTED]` to `****TED]`. Longer masks already reproduce
+/// themselves, because `****` plus the last four characters is itself.
 const REDACTED: &str = "[REDACTED]";
 
 /// Scrub every `key: secret` / `key=secret` pair in prose (all marker occurrences).
