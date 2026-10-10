@@ -634,11 +634,10 @@ scripts-check-coverage-surface:
 	python3 scripts/coverage_surface_check.py
 
 # Whether every file the coverage gate skips for holding no executable code still
-# holds none. That list is the one place a file leaves the coverage rule without
-# a floor, so an entry that has gone stale is a file silently outside the gate, and
-# the gate itself cannot notice: it names a skipped file and moves on. Fourteen
-# crate roots and one re-exporting module are on the list today. Runs no build and
-# no coverage command.
+# holds none. The runner now decides that property from each file's own source, and
+# this check keeps the recorded list honest while the last entries are removed, so a
+# stale entry is caught rather than skipped silently. Runs no build and no coverage
+# command.
 scripts-check-codeless:
 	python3 scripts/coverage_codeless_check.py --self-test
 	python3 scripts/coverage_codeless_check.py

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Every file the coverage gate skips for holding no executable code must hold none.
 
-`scripts/coverage_codeless.json` is the one list that takes files out of the
-coverage rule without a floor, so an entry that is wrong is a file silently
-outside the gate. Nothing else in the tree would notice: the gate names a skipped
-file and moves on, which is the right behaviour for a file that genuinely has no
-line to measure and the wrong behaviour for one that has.
+`scripts/coverage_codeless.json` records the files the coverage gate skips for
+holding no executable code. The runner now decides that property from each file's
+own source and keeps the record as a cross-check, so an entry that is wrong is
+caught rather than a file silently leaving the gate.
 
 So this checks the list against the tree. A file qualifies when every item in it
 compiles to no instrumented line: module declarations, `use` statements, type
@@ -42,13 +41,13 @@ ROOT = Path(__file__).resolve().parent.parent
 CODELESS_PATH = Path(__file__).resolve().parent / "coverage_codeless.json"
 CODELESS_KEY = "_no_executable_code"
 
-#: A function definition, at any indentation, with any combination of the
-#: visibility, defaultness and linkage prefixes Rust allows in front of `fn`.
-FUNCTION = re.compile(
-    r"^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:default[ \t]+)?(?:const[ \t]+)?"
-    r"(?:async[ \t]+)?(?:unsafe[ \t]+)?(?:extern[ \t]+\"[^\"]*\"[ \t]+)?fn[ \t]+\w+",
-    re.MULTILINE,
-)
+#: The `fn` keyword as its own token, followed by a name. The prefixes Rust
+#: allows in front of `fn` — visibility, `default`, `const`, `async`, `unsafe`,
+#: `extern "C"` — need no separate pattern here: the scan only needs the `fn`
+#: token to reach `_has_body`, which tells a signature from a body. Matching the
+#: token rather than an indented, space-separated line also catches the forms a
+#: prefix pattern missed, such as `pub(crate)fn thing(){}` and `fn\nthing(){}`.
+FUNCTION = re.compile(r"(?<![\w])fn\s+\w+", re.MULTILINE)
 
 #: A macro that can expand to functions. A `macro_rules!` body is ordinary Rust
 #: tokens, so this check cannot see what it produces, and an entry naming one has
@@ -265,6 +264,11 @@ def self_test() -> int:
         ("a const fn", "const fn make() -> u8 { 1 }\n", True),
         ("an async fn", "async fn go() {}\n", True),
         ("an unsafe fn", "unsafe fn raw() {}\n", True),
+        ("a visibility with no space before fn", "pub(crate)fn thing() {}\n", True),
+        ("a newline between fn and its name", "fn\nthing() {}\n", True),
+        ("a visibility then a newline then fn", "pub(crate)\nfn thing() {}\n", True),
+        ("a bodyless declaration with no space", 'extern "C"{fn c_fn();}\n', False),
+        ("a type alias to a fn pointer", "type F = fn(u8) -> u8;\n", False),
         ("a method in an impl", "impl A {\n    pub fn call(&self) {}\n}\n", True),
         ("a foreign fn declaration", 'extern "C" {\n    fn c_fn();\n}\n', False),
         ("a trait method declaration", "trait Store: Send {\n    fn go(&self) -> u8;\n}\n", False),

@@ -1,22 +1,11 @@
 {
   "_why": "Files whose items are only module declarations, `use`s, type aliases, `const` values, and bodyless declarations such as a trait method signature or an `extern` import. They compile to no instrumented line, so llvm-cov cannot put them in any report and a coverage floor could never apply to them. This is a statement about lines, not about functions: the gate judges lines, and a file with no counted line has nothing for that judgement to read. Without an entry they are judged as files the run failed to measure, which is a false failure: the run reports every measured file above its floor and still exits non-zero. Adding one here is a reviewed decision that the file has no code. Removing an entry for a file that has since grown a function puts it back under the gate, which is the safe direction. A file holding a function body is judged normally, so a crate root that is mostly re-exports but defines one is deliberately absent from this list.",
   "_no_executable_code": {
-    "crates/clio-admission/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
     "crates/clio-backup/src/lib.rs": "Crate root holding only module declarations plus two `pub const` items; a constant is a value in the binary's data, so it carries no counted line.",
-    "crates/clio-belief/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-compliance/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-config/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-hygiene/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-index/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-ops/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-retrieve/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
     "crates/clio-retrieve/src/token.rs": "One `pub use` re-exporting the estimator from `clio-types`; the estimator itself lives there and is measured there.",
     "crates/clio-store/src/distilled_unit_store.rs": "Holds only the `DistilledUnitStore` trait declaration; its methods have no default bodies, so a declaration compiles to no counted line.",
-    "crates/clio-store/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
     "crates/clio-store/src/store.rs": "Holds the `Store` trait declaration with bodyless method signatures; a declaration compiles to no counted line.",
     "crates/clio-store/src/sync_store.rs": "Holds re-exports plus only the `SyncStore` trait declaration; its methods have no default bodies, so a declaration compiles to no counted line.",
-    "crates/clio-sync/src/lib.rs": "Crate root holding only module declarations plus two `pub const` items; a constant is a value in the binary's data, so it carries no counted line.",
-    "crates/clio-types/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line.",
-    "crates/clio-write/src/lib.rs": "Crate root holding only module declarations and re-exports; it has no counted line."
+    "crates/clio-sync/src/lib.rs": "Crate root holding only module declarations plus two `pub const` items; a constant is a value in the binary's data, so it carries no counted line."
   }
 }
