@@ -231,7 +231,7 @@ fn sync_serve_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
              `clio auth token add` and pass its store file as `token_file`",
         ));
     }
-    let dev = opt_bool(args, "dev", false);
+    let dev = opt_bool(args, "dev", false)?;
     let token_file = opt_str(args, "token_file").map(std::path::PathBuf::from);
     if token_file.is_none() && !dev {
         return Err(AmError::new(
@@ -269,7 +269,7 @@ fn sync_serve_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn sync_ack_skip_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let id = req_str(args, "sync_mutation_id")?.to_owned();
-    let confirm = opt_bool(args, "confirm", false);
+    let confirm = opt_bool(args, "confirm", false)?;
     if !confirm {
         return Ok(json!({ "acked": false, "would_ack": id }));
     }

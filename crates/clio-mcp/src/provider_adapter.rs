@@ -62,7 +62,7 @@ enum ItemOutcome {
 pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
-    let dry_run = opt_bool(args, "dry_run", false);
+    let dry_run = opt_bool(args, "dry_run", false)?;
     let options = args.get("options").unwrap_or(&Value::Null);
 
     let base_url = opt_str(options, "api_base_url")
@@ -90,7 +90,7 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
         }
     });
 
-    let policy = gated_write_policy(state, ctx.bank.as_str(), args);
+    let policy = gated_write_policy(state, ctx.bank.as_str(), args)?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
 
     let mut would_create = 0usize;

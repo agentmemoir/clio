@@ -107,7 +107,7 @@ pub(crate) fn profile_set(state: &McpState, args: &Value) -> Result<Value, AmErr
             format!("scope must be bank|deployment, got `{scope}`"),
         ));
     }
-    if !opt_bool(args, "confirm", false) {
+    if !opt_bool(args, "confirm", false)? {
         return Ok(json!({
             "confirm": false,
             "stored": false,

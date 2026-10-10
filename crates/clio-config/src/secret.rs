@@ -57,8 +57,14 @@ pub fn path_is_secret(path: &str) -> bool {
 
 /// Mask a secret string: empty or ≤4 chars → `[REDACTED]` (last-4 would reveal
 /// the whole secret); otherwise `****` + last up to 4 chars.
+///
+/// [`REDACTED`] passes through unchanged: it is what the masker emits for a
+/// short value, and masking an already-masked document must not rewrite it.
 #[must_use]
 pub fn mask_secret(raw: &str) -> String {
+    if raw == REDACTED {
+        return REDACTED.to_owned();
+    }
     let chars: Vec<char> = raw.chars().collect();
     if chars.len() <= 4 {
         return "[REDACTED]".to_owned();
@@ -68,21 +74,33 @@ pub fn mask_secret(raw: &str) -> String {
 }
 
 /// Recursively mask secret-looking keys in a JSON value (in place).
+///
+/// A key that itself looks secret is replaced by its masked form, so secret
+/// material stored in a key name cannot survive the walk. Values keep the
+/// rules they had: leaves under a secret path become masked strings, and
+/// containers are walked.
 pub fn mask_value(path: &str, value: &mut Value) {
     match value {
         Value::Object(map) => {
-            for (key, child) in map.iter_mut() {
+            let entries = std::mem::take(map);
+            for (key, mut child) in entries {
                 let child_path = if path.is_empty() {
                     key.clone()
                 } else {
                     format!("{path}.{key}")
                 };
-                let secret = path_is_secret(&child_path) || path_is_secret(key);
-                match child {
-                    Value::Object(_) | Value::Array(_) => mask_value(&child_path, child),
-                    _ if secret => *child = Value::String(mask_leaf(child)),
-                    _ => {}
+                let secret = path_is_secret(&child_path) || path_is_secret(&key);
+                if child.is_object() || child.is_array() {
+                    mask_value(&child_path, &mut child);
+                } else if secret {
+                    child = Value::String(mask_leaf(&child));
                 }
+                let out_key = if path_is_secret(&key) {
+                    unique_key(mask_secret(&key), map)
+                } else {
+                    unique_key(key, map)
+                };
+                map.insert(out_key, child);
             }
         }
         Value::Array(items) => {
@@ -91,6 +109,25 @@ pub fn mask_value(path: &str, value: &mut Value) {
             }
         }
         _ => {}
+    }
+}
+
+/// A key no earlier entry owns; suffixed when a masked form collides.
+///
+/// Two secret-looking siblings can mask to the same last-4 form (`embed_api_key`
+/// and `rerank_api_key` both become `****_key`). Dropping the later one would
+/// silently delete an entry, so it gets a numbered suffix instead.
+fn unique_key(candidate: String, taken: &serde_json::Map<String, Value>) -> String {
+    if !taken.contains_key(&candidate) {
+        return candidate;
+    }
+    let mut n = 2;
+    loop {
+        let attempt = format!("{candidate}#{n}");
+        if !taken.contains_key(&attempt) {
+            return attempt;
+        }
+        n += 1;
     }
 }
 
@@ -107,6 +144,22 @@ fn mask_leaf(value: &Value) -> String {
 pub fn masked_clone(value: &Value) -> Value {
     let mut out = value.clone();
     mask_value("", &mut out);
+    out
+}
+
+/// Mask a value that was selected out of a larger document at `path`.
+///
+/// A path lookup can land on a scalar (for example `credentials.api_key`),
+/// which [`masked_clone`]'s object walk cannot reach; the path decides here
+/// whether that scalar is masked before it leaves as a read view.
+#[must_use]
+pub(crate) fn masked_at_path(path: &str, value: &Value) -> Value {
+    let mut out = value.clone();
+    if out.is_object() || out.is_array() {
+        mask_value(path, &mut out);
+    } else if path_is_secret(path) {
+        out = Value::String(mask_leaf(value));
+    }
     out
 }
 
@@ -149,11 +202,11 @@ pub fn mask_string_secrets(path: &str, value: &mut Value) {
 
 /// The literal [`mask_secret`] emits for a value of four characters or fewer.
 ///
-/// A scrubbed value must be a fixed point of [`mask_secret`], otherwise
-/// re-scrubbing an already-masked string corrupts it: `mask_secret` on the
-/// ten-character `[REDACTED]` returns `****TED]`. Longer values already are
-/// fixed points, because `****` plus the last four characters reproduces
-/// itself. Only this one literal needs an explicit guard.
+/// Masking is a fixed point on this literal: [`mask_secret`] returns it
+/// unchanged, and [`scrub_inline_secrets`] short-circuits it. Without that, a
+/// second masking pass over an already-masked document would rewrite the
+/// ten-character `[REDACTED]` to `****TED]`. Longer masks already reproduce
+/// themselves, because `****` plus the last four characters is itself.
 const REDACTED: &str = "[REDACTED]";
 
 /// Scrub every `key: secret` / `key=secret` pair in prose (all marker occurrences).

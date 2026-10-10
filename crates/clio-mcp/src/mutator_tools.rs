@@ -111,7 +111,7 @@ fn invalidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn discard(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
-    let confirm = opt_bool(args, "confirm", false);
+    let confirm = opt_bool(args, "confirm", false)?;
     let d_args = clio_write::DiscardArgs {
         store: &*state.store,
         ctx: &ctx,
@@ -162,7 +162,7 @@ fn has_nonempty_new_value(args: &Value) -> bool {
 fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
-    let confirm = opt_bool(args, "confirm", false);
+    let confirm = opt_bool(args, "confirm", false)?;
     let item_id = req_str(args, "item_id")?.to_owned();
     let reason = req_str(args, "reason")?.to_owned();
     // The blank-reason rejection must hold on the zero-write preview as well as
@@ -290,7 +290,7 @@ fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
         legal_basis: req_str(args, "legal_basis")?,
         request_id: req_str(args, "request_id")?,
         reason_code: opt_str(args, "reason_code"),
-        confirm: opt_bool(args, "confirm", false),
+        confirm: opt_bool(args, "confirm", false)?,
         salt: &salt,
         timestamp: &ts,
         sink: &StderrSinks,
@@ -316,7 +316,7 @@ fn consolidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
     // `resolve_ctx` already applied args-over-default for `bank`, so the
     // resolved context bank is the wave's target bank.
     let bank = ctx.bank.as_str().to_owned();
-    let force = opt_bool(args, "force", false);
+    let force = opt_bool(args, "force", false)?;
     // Take the process's current ranking environment as the wave's policy, so a
     // `ranking_env_set` earlier in this process governs the wave this call
     // starts. Both bindings call this one function, so neither can drift.

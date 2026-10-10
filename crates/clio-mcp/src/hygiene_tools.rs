@@ -79,7 +79,7 @@ fn hygiene_clean_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     let action_raw = opt_str(args, "action").unwrap_or("keep");
     let action = CleanAction::parse(action_raw)?;
     let targets = clean_targets(args)?;
-    let confirm = opt_bool(args, "confirm", false);
+    let confirm = opt_bool(args, "confirm", false)?;
     let batch_id = state.next_clean_batch_id();
     let outcome = clio_hygiene::clean(&CleanArgs {
         store: &*state.store,

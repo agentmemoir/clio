@@ -85,10 +85,11 @@ fn embed_config_keys_defaults_allowlist_and_masking() {
             .contains("****")
     );
     let masked = rt_set.effective_masked();
-    let key_view = masked["credentials"]["embed_api_key"]
-        .as_str()
-        .unwrap_or("");
-    assert!(key_view.contains("****") && !key_view.contains("sk-sidecar-token"));
+    let key_view = masked["****ials"]["****_key"].as_str().unwrap_or("");
+    assert!(
+        key_view.contains("****") && !key_view.contains("sk-sidecar-token"),
+        "{masked}"
+    );
 }
 
 #[test]

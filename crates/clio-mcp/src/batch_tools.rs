@@ -70,7 +70,7 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
             format!("batch exceeds the {MAX_BATCH_OPS}-operation cap"),
         ));
     }
-    let dry_run = opt_bool(args, "dry_run", false);
+    let dry_run = opt_bool(args, "dry_run", false)?;
     let mut writes: Vec<BatchWrite> = Vec::new();
     let mut resolved: Vec<Option<String>> = Vec::new();
     let mut reports: Vec<Value> = Vec::new();

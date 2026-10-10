@@ -101,7 +101,7 @@ pub(crate) fn summarize_with_extractor(
 ) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let scope = req_str(args, "scope")?;
-    let dry_run = opt_bool(args, "dry_run", false);
+    let dry_run = opt_bool(args, "dry_run", false)?;
     if scope == "bank" {
         summarize_bank(state, &ctx, dry_run, extractor)
     } else {

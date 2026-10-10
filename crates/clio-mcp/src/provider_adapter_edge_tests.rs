@@ -58,7 +58,7 @@ fn t05_planted_credential_masked_in_all_output() {
         "secret was not masked: {out_text}"
     );
 
-    let masked = out["credentials_masked"]["api_key"].as_str().unwrap();
+    let masked = out["credentials_masked"]["****_key"].as_str().unwrap();
     assert!(masked.starts_with("****"), "expected **** prefix: {masked}");
     assert!(masked.ends_with("4321"), "expected last 4: {masked}");
 }
