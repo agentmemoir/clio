@@ -2,8 +2,8 @@
 """Content-addressed gate for heavy cargo and make commands in this repo.
 
 Every workflow stage used to re-run the same suites on the same tree. This
-wrapper fingerprints the working tree (HEAD, tracked diff, untracked files,
-relevant environment, command kind, effective command), runs the command at most
+wrapper fingerprints the working tree (HEAD and the content of each changed
+path, relevant environment, command kind, effective command), runs the command at most
 once per fingerprint, serialises concurrent runs with a lock, and stores the
 verdict (exit code and full log) for both pass and fail. A repeated command on an
 unchanged tree returns the stored verdict instead of running again. A stored

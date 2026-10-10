@@ -50,7 +50,8 @@ fn default_profile_rejects_an_exact_duplicate_and_the_waiver_admits_it() {
     assert_eq!(first["pass"], serde_json::json!(true), "{first}");
 
     let second = write("bank-default-dedup", "itm-d2", false);
-    assert_eq!(second["ok"], serde_json::json!(true), "{second}");
+    assert_eq!(second["ok"], serde_json::json!(false), "{second}");
+    assert_eq!(second["code"], serde_json::json!("duplicate"), "{second}");
     assert_eq!(
         second["factors"]["novelty"],
         serde_json::json!(0.0),
@@ -110,7 +111,8 @@ fn strict_bank_rejects_exact_duplicate_at_write_time() {
     // even consulted, so the reason is the unconditional one. A near-duplicate
     // is what the strict floor is for, and it is covered in `clio-admission`.
     let second = write("itm-dup-2");
-    assert_eq!(second["ok"], serde_json::json!(true), "{second}");
+    assert_eq!(second["ok"], serde_json::json!(false), "{second}");
+    assert_eq!(second["code"], serde_json::json!("duplicate"), "{second}");
     assert_eq!(second["pass"], serde_json::json!(false), "{second}");
     assert_eq!(
         second["factors"]["novelty"],

@@ -16,8 +16,7 @@ class GateError(Exception):
 @dataclass(frozen=True)
 class TreeState:
     head: str
-    diff_digest: str
-    untracked: tuple[tuple[str, str], ...]
+    contents: tuple[tuple[str, str], ...]
     changed: tuple[str, ...]
 
 
@@ -46,26 +45,46 @@ def repo_root(cwd: str) -> str | None:
 
 
 def read_tree_state(root: str) -> TreeState:
+    """HEAD plus the content and git-visible mode of every path that differs.
+
+    The key describes the working tree, not the index, so staging a change does
+    not move it. A path's bytes reach the key the same way whether it is tracked
+    or untracked: hashing `git diff HEAD` and the untracked list separately put a
+    new file in the key once as a hashed untracked entry and then, after `git
+    add`, inside the diff text, so the same bytes keyed two entries. The mode is
+    hashed beside the bytes because `git diff HEAD` used to carry a mode change
+    in its text, and a content-only key would silently lose that sensitivity.
+    """
     head = _git(root, "rev-parse", "HEAD")
-    diff = _git(root, "diff", "HEAD")
     names = _git(root, "diff", "HEAD", "--name-only", "-z")
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
-    if head is None or diff is None or names is None or untracked is None:
+    if head is None or names is None or untracked is None:
         raise GateError("git state unavailable")
-    changed = _splitz(names)
+    paths = sorted(set(_splitz(names)) | set(_splitz(untracked)))
     entries: list[tuple[str, str]] = []
-    for rel in _splitz(untracked):
-        changed.append(rel)
+    for rel in paths:
+        path = Path(root) / rel
         try:
-            body = (Path(root) / rel).read_bytes()
+            info = path.stat()
+        except FileNotFoundError:
+            # A deleted path has no bytes; the name and this marker still
+            # separate a deletion from the same path restored.
+            entries.append((rel, "deleted"))
+            continue
         except OSError as e:
-            raise GateError(f"cannot read untracked file {rel}: {e}") from e
-        entries.append((rel, hashlib.sha256(body).hexdigest()))
+            raise GateError(f"cannot stat changed file {rel}: {e}") from e
+        try:
+            body = path.read_bytes()
+        except OSError as e:
+            raise GateError(f"cannot read changed file {rel}: {e}") from e
+        # Git tracks only the executable bit, so a mode-only change on a file
+        # whose content is already in the key must still move the key.
+        mode = "x" if info.st_mode & 0o111 else "-"
+        entries.append((rel, f"{mode}:{hashlib.sha256(body).hexdigest()}"))
     return TreeState(
         head=head.decode().strip(),
-        diff_digest=hashlib.sha256(diff).hexdigest(),
-        untracked=tuple(sorted(entries)),
-        changed=tuple(sorted(changed)),
+        contents=tuple(entries),
+        changed=tuple(paths),
     )
 
 
@@ -97,9 +116,8 @@ def fingerprint(state: TreeState, env: dict[str, str], kind: str, argv: list[str
     h = hashlib.sha256()
     h.update(_scheme)
     h.update(state.head.encode() + b"\0")
-    h.update(state.diff_digest.encode() + b"\0")
-    for rel, digest in state.untracked:
-        h.update(f"U\0{rel}\0{digest}\0".encode())
+    for rel, digest in state.contents:
+        h.update(f"F\0{rel}\0{digest}\0".encode())
     for key in ENV_KEYS:
         h.update(f"E\0{key}\0{_effective_env(env, key)}\0".encode())
     h.update(f"K\0{kind}\0".encode())

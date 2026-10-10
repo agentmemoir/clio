@@ -36,9 +36,8 @@ pub(crate) const EXIT_OK: u8 = 0;
 pub(crate) const EXIT_OPERATIONAL: u8 = 1;
 /// Process exit code for a usage error (bad flag, missing argument, unknown command).
 pub(crate) const EXIT_USAGE: u8 = 2;
-/// Process exit code for a restore that replaced the database but not the key
-/// store. Distinct from both success and a refusal: the operator must be able
-/// to tell a partial restore from either.
+/// Process exit code for a command-specific degraded outcome. Distinct from
+/// success and a refusal so scripts can identify partial or incomplete work.
 pub(crate) const EXIT_PARTIAL: u8 = 3;
 
 /// One CLI failure: a machine code, a human message, an optional hint, an
@@ -233,7 +232,8 @@ pub(crate) fn name_cli_inputs(message: &str) -> String {
     crate::cli_error_names::to_cli_spelling(&clio_ops::redact_credentials(message))
 }
 
-/// Refuse an empty value for a flag the caller supplied explicitly.
+/// Refuse a blank value for a flag the caller supplied explicitly. Blank means
+/// empty or whitespace-only.
 ///
 /// One rule for every value flag, on every surface, so a caller can predict it.
 /// The flag is named in both the message and the hint, and the hint says what to
@@ -244,13 +244,58 @@ pub(crate) fn name_cli_inputs(message: &str) -> String {
 /// value map the reserved surfaces read. When the rule sat only in the first, a
 /// command like `clio ops diagnose --db ''` silently used the default database
 /// and no message anywhere said that was different from a refusal.
-pub(crate) fn reject_empty_value(flag: &str, value: &str) -> Result<(), CliError> {
-    if !value.is_empty() {
+pub(crate) fn reject_blank_value(flag: &str, value: &str) -> Result<(), CliError> {
+    if !value.trim().is_empty() {
         return Ok(());
     }
     Err(CliError::usage_hint(
-        format!("{flag} must not be empty when supplied (omit the flag instead)"),
-        format!("pass a non-empty value or omit {flag}"),
+        format!(
+            "{flag} must not be empty or whitespace-only when supplied (omit the flag instead)"
+        ),
+        format!("pass a non-blank value or omit {flag}"),
+    ))
+}
+
+/// Refuse a blank positional argument. A write verb would store its text as
+/// given, so blank text is refused before it reaches the store.
+pub(crate) fn reject_blank_positional(value: &str) -> Result<(), CliError> {
+    if !value.trim().is_empty() {
+        return Ok(());
+    }
+    Err(CliError::usage_hint(
+        "a positional argument must not be empty or whitespace-only",
+        "pass the text, or leave the argument out",
+    ))
+}
+
+/// Refuse a second occurrence of a value flag that does not repeat. The last
+/// value used to win without a word, so the first value vanished from the
+/// command and the caller never learned it.
+///
+/// `seen` is whether the flag already holds a value.
+pub(crate) fn reject_repeated_flag(flag: &str, seen: bool) -> Result<(), CliError> {
+    if !seen {
+        return Ok(());
+    }
+    Err(CliError::usage_hint(
+        format!("{flag} was given more than once"),
+        format!("pass {flag} once"),
+    ))
+}
+
+/// Refuse a timestamp flag whose value is not a timestamp. The three accepted
+/// forms are RFC 3339, a calendar date, and a date-time without a zone. Any
+/// other text would be stored or filtered as a literal string.
+pub(crate) fn reject_bad_timestamp(flag: &str, value: &str) -> Result<(), CliError> {
+    let readable = chrono::DateTime::parse_from_rfc3339(value).is_ok()
+        || chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+        || chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S").is_ok();
+    if readable {
+        return Ok(());
+    }
+    Err(CliError::usage_hint(
+        format!("{flag} must be a timestamp such as 2026-01-01T00:00:00Z"),
+        format!("pass a timestamp for {flag}, or omit it"),
     ))
 }
 

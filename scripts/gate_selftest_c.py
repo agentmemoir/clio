@@ -17,8 +17,8 @@ from unittest import mock
 from exec_tempdir import exec_tempdir
 from gate import *  # noqa: F403 - re-exports every engine name the tests reference
 
-def state(head: str, diff: str = "d", untracked=(), changed=()) -> TreeState:
-    return TreeState(head, diff, tuple(untracked), tuple(changed))
+def state(head: str, contents=(), changed=()) -> TreeState:
+    return TreeState(head, tuple(contents), tuple(changed))
 
 def published(name: str, log_dir: Path) -> str:
     """What the wrapper published under a kind, or "" when it published nothing.
@@ -56,10 +56,10 @@ class DirectTests(unittest.TestCase):
                 checks.append(("--force re-executes", run_gate(cmd, force=True) == 0 and counter.read_text().count("run") == 3))
             with env_patch, root_patch, mock.patch(
                 "gate.read_tree_state",
-                side_effect=[state("h1", diff="one", changed=("crates/a/src/lib.rs",)), state("h1", diff="two", changed=("crates/a/src/lib.rs",))],
+                side_effect=[state("h1", contents=(("crates/a/src/lib.rs", "one"),), changed=("crates/a/src/lib.rs",)), state("h1", contents=(("crates/a/src/lib.rs", "two"),), changed=("crates/a/src/lib.rs",))],
             ), quiet[0], quiet[1]:
                 run_gate(cmd)
-            with env_patch, root_patch, mock.patch("gate.read_tree_state", return_value=state("h1", diff="one", changed=("crates/a/src/lib.rs",))), quiet[0], quiet[1]:
+            with env_patch, root_patch, mock.patch("gate.read_tree_state", return_value=state("h1", contents=(("crates/a/src/lib.rs", "one"),), changed=("crates/a/src/lib.rs",))), quiet[0], quiet[1]:
                 run_gate(cmd)
                 checks.append(("a mid-run change is not cached", counter.read_text().count("run") == 5))
 
@@ -76,7 +76,7 @@ class DirectTests(unittest.TestCase):
             root_patch = mock.patch("gate.repo_root", return_value="/repo")
             tree_patch = mock.patch(
                 "gate.read_tree_state",
-                return_value=state("h1", diff="path", changed=("crates/a/src/lib.rs",)),
+                return_value=state("h1", contents=(("crates/a/src/lib.rs", "path"),), changed=("crates/a/src/lib.rs",)),
             )
             quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
             with env_patch, root_patch, tree_patch, mock.patch.dict(os.environ, {"PATH": "/one"}), quiet[0], quiet[1]:
@@ -114,7 +114,7 @@ class StandInTests(unittest.TestCase):
             root_patch = mock.patch("gate.repo_root", return_value="/repo")
             tree_patch = mock.patch(
                 "gate.read_tree_state",
-                return_value=state("h1", diff="cmd", changed=("crates/a/src/lib.rs",)),
+                return_value=state("h1", contents=(("crates/a/src/lib.rs", "cmd"),), changed=("crates/a/src/lib.rs",)),
             )
             quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
             with env_patch, root_patch, tree_patch, quiet[0], quiet[1]:
@@ -173,7 +173,7 @@ class StandInTests(unittest.TestCase):
             root_patch = mock.patch("gate.repo_root", return_value="/repo")
             tree_patch = mock.patch(
                 "gate.read_tree_state",
-                return_value=state("h1", diff="pkg", changed=("crates/a/src/lib.rs",)),
+                return_value=state("h1", contents=(("crates/a/src/lib.rs", "pkg"),), changed=("crates/a/src/lib.rs",)),
             )
             quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
             with env_patch, root_patch, tree_patch, quiet[0], quiet[1]:

@@ -25,7 +25,7 @@ use super::*;
 use serde_json::json;
 
 const STORED: &str =
-    "postgres://clio:s3cret@db.example.com:5555/clio?sslmode=require&application_name=me";
+    "postgres://clio:s3cret@db.example.com:5555/clio?sslmode=verify-full&application_name=me";
 
 #[test]
 fn a_fresh_install_has_no_defaults_at_all() {
@@ -59,7 +59,7 @@ fn a_stored_address_fills_every_field_of_the_typed_route() {
     assert_eq!(defaults.port.as_deref(), Some("5555"));
     assert_eq!(defaults.name.as_deref(), Some("clio"));
     assert_eq!(defaults.user.as_deref(), Some("clio"));
-    assert_eq!(defaults.ssl.as_deref(), Some("require"));
+    assert_eq!(defaults.ssl.as_deref(), Some("verify-full"));
     assert!(
         defaults.has_password,
         "a stored password is a fact, not a value"

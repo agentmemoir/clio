@@ -99,18 +99,16 @@ fn a_non_durable_rename_carries_its_own_field() {
     );
 }
 
-/// The exit code does not move: the store really was replaced, and a new code
-/// would change the documented contract this phase does not change. The
-/// payload's `ok` field is what says the run was degraded.
+/// A non-durable rename is a degraded restore, so it uses exit 3 with `ok:false`.
 #[test]
-fn a_non_durable_rename_keeps_the_restored_exit_code() {
+fn a_non_durable_rename_uses_the_degraded_exit_code() {
     let code = exit_code(&not_durable_report());
 
     assert_eq!(
         code,
         backup_restore_exit::exit_code_for(RestoreFailure::RestoredNotDurable)
     );
-    assert_eq!(code, 0, "the code stays 0 and `ok` carries the warning");
+    assert_eq!(code, 3, "a degraded result must not exit 0");
 }
 
 /// A clean restore has no durability warning to report, so the field is absent

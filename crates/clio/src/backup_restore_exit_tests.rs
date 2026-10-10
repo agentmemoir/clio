@@ -52,8 +52,7 @@ fn each_condition(mut visit: impl FnMut(RestoreFailure)) {
             RestoredOrPlanned => walk(RestoredNotDurable, visit),
             RestoredNotDurable => walk(PartialOrCountMismatch, visit),
             PartialOrCountMismatch => walk(BadArguments, visit),
-            BadArguments => walk(UnknownSnapshot, visit),
-            UnknownSnapshot => walk(ArchiveDamaged, visit),
+            BadArguments => walk(ArchiveDamaged, visit),
             ArchiveDamaged => walk(BackendMismatch, visit),
             BackendMismatch => walk(SchemaTooNew, visit),
             SchemaTooNew => walk(ArchiveWithoutKeys, visit),
@@ -110,10 +109,9 @@ fn exit(code: u8) -> std::process::ExitCode {
 fn every_condition_maps_to_the_documented_code() {
     let expected = [
         (RestoreFailure::RestoredOrPlanned, EXIT_OK),
-        (RestoreFailure::RestoredNotDurable, EXIT_OK),
+        (RestoreFailure::RestoredNotDurable, EXIT_PARTIAL),
         (RestoreFailure::PartialOrCountMismatch, EXIT_PARTIAL),
         (RestoreFailure::BadArguments, EXIT_USAGE),
-        (RestoreFailure::UnknownSnapshot, EXIT_USAGE),
         (RestoreFailure::ArchiveDamaged, EXIT_USAGE),
         (RestoreFailure::BackendMismatch, EXIT_USAGE),
         (RestoreFailure::SchemaTooNew, EXIT_USAGE),

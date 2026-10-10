@@ -178,7 +178,8 @@ fn purge_memtree(
 }
 
 /// Derived hub-distilled items that reference an erased item via the
-/// `HUB_DISTILL_EDGE_RELATIONSHIP` edge and lack affirmative anonymization.
+/// `HUB_DISTILL_EDGE_RELATIONSHIP` edge. Every referrer is purged: Clio keeps no
+/// retention path for an affirmatively anonymized derivative.
 fn distilled_referrers(
     tx: &mut postgres::Transaction<'_>,
     bank_id: &str,

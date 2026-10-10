@@ -33,6 +33,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod additive_tools;
+mod arg_contract;
 pub mod batch_preflight;
 pub mod batch_preflight_records;
 pub mod batch_tools;

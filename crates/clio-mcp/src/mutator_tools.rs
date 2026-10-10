@@ -88,6 +88,11 @@ fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn invalidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    // Checked before the item is closed: a replacement id that names nothing must
+    // not leave the item ended with no successor.
+    if let Some(replacement) = opt_str(args, "replacement_id") {
+        crate::read_tools::require_item(state, ctx.bank.as_str(), replacement)?;
+    }
     let ts = state.resolve_timestamp(args);
     let outcome = clio_write::triple::invalidate(
         &*state.store,

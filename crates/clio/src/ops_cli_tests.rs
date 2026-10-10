@@ -106,10 +106,10 @@ fn repair_unknown_action_exits_2() {
 }
 
 #[test]
-fn repair_missing_plan_exits_2() {
+fn repair_missing_plan_exits_1() {
     let mut args = memory("repair");
     args.extend(["--plan", "plan-1", "--confirm"].map(str::to_owned));
-    assert_eq!(run_ops_args(args), ExitCode::from(2));
+    assert_eq!(run_ops_args(args), ExitCode::from(1));
 }
 
 #[test]
@@ -160,10 +160,10 @@ fn reindex_dense_confirmed_without_embedder_exits_3() {
 }
 
 #[test]
-fn reindex_bad_target_exits_3() {
+fn reindex_bad_target_exits_2() {
     let mut args = memory("reindex");
     args.extend(["--target", "bogus"].map(str::to_owned));
-    assert_eq!(run_ops_args(args), ExitCode::from(3));
+    assert_eq!(run_ops_args(args), ExitCode::from(2));
 }
 
 /// A regression test for the reindex key store: the command must read the
@@ -282,10 +282,10 @@ fn diagnose_on_a_store_whose_key_store_is_gone_answers_without_creating_it() {
 }
 
 #[test]
-fn unknown_backend_exits_1() {
+fn unknown_backend_exits_2() {
     assert_eq!(
         run_ops(&["diagnose", "--backend", "mysql"]),
-        ExitCode::from(1)
+        ExitCode::from(2)
     );
 }
 

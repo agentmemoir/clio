@@ -299,16 +299,16 @@ fn the_real_binary_refuses_bad_input_and_bad_files() {
             "auth", "token", "add", "--label", "ci", "--actor", "agent", "--bank", "demo",
         ],
     );
-    assert_eq!(dup.status.code(), Some(2));
+    assert_eq!(dup.status.code(), Some(1));
     let ghost = run(&store, &["auth", "token", "revoke", "--label", "ghost"]);
-    assert_eq!(ghost.status.code(), Some(2));
+    assert_eq!(ghost.status.code(), Some(1));
     let robot = run(
         &store,
         &[
             "auth", "token", "add", "--label", "x", "--actor", "robot", "--bank", "demo",
         ],
     );
-    assert_eq!(robot.status.code(), Some(2));
+    assert_eq!(robot.status.code(), Some(1));
     let no_bank = run(
         &store,
         &["auth", "token", "add", "--label", "x", "--actor", "agent"],
@@ -325,7 +325,7 @@ fn the_real_binary_refuses_bad_input_and_bad_files() {
         fs::set_permissions(&corrupt, fs::Permissions::from_mode(0o600)).expect("tighten");
     }
     let refused = run(&corrupt, &["auth", "token", "list"]);
-    assert_eq!(refused.status.code(), Some(2));
+    assert_eq!(refused.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(stderr.contains("malformed"), "{stderr}");
     // A file group or other can read is refused before it is parsed.
@@ -335,7 +335,7 @@ fn the_real_binary_refuses_bad_input_and_bad_files() {
         fs::set_permissions(&corrupt, fs::Permissions::from_mode(0o644)).expect("loosen");
         fs::write(&corrupt, "[]").expect("write array");
         let refused = run(&corrupt, &["auth", "token", "list"]);
-        assert_eq!(refused.status.code(), Some(2));
+        assert_eq!(refused.status.code(), Some(1));
         assert!(
             String::from_utf8_lossy(&refused.stderr).contains("owner-only"),
             "{}",

@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,14 +14,41 @@ from exec_tempdir import exec_tempdir
 from gate import *  # noqa: F403 - re-exports every engine name the tests reference
 from gate import _artifact_rel_paths, _purge_coverage_cache, _restore_artifacts, _save_artifacts
 
-def state(head: str, diff: str = "d", untracked=(), changed=()) -> TreeState:
-    return TreeState(head, diff, tuple(untracked), tuple(changed))
+def state(head: str, contents=(), changed=()) -> TreeState:
+    return TreeState(head, tuple(contents), tuple(changed))
 
 members = [
     Member("a", "/repo/crates/a", ("b",)),
     Member("b", "/repo/crates/b", ()),
     Member("c", "/repo/crates/c", ()),
 ]
+
+def git(root: Path, *args: str) -> None:
+    """Run git in `root` under a fixed identity, failing on error."""
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env=dict(
+            os.environ,
+            GIT_AUTHOR_NAME="t",
+            GIT_AUTHOR_EMAIL="t@t",
+            GIT_COMMITTER_NAME="t",
+            GIT_COMMITTER_EMAIL="t@t",
+        ),
+    )
+
+def git_repo(root: Path) -> None:
+    """Init `root` as a repo with one committed file, so `HEAD` exists."""
+    git(root, "init", "-q", "-b", "master")
+    (root / "tracked.txt").write_text("one\n")
+    git(root, "add", "tracked.txt")
+    git(root, "commit", "-qm", "init")
+
+def key(root: Path) -> str:
+    """The gate fingerprint of the real git tree at `root`."""
+    return fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
 
 class Tests(unittest.TestCase):
     def test_a_clean_never_replays(self):
@@ -46,13 +74,46 @@ class Tests(unittest.TestCase):
             root_patch = mock.patch("gate.repo_root", return_value="/repo")
             tree_patch = mock.patch(
                 "gate.read_tree_state",
-                return_value=state("h1", diff="clean", changed=("crates/a/src/lib.rs",)),
+                return_value=state("h1", contents=(("crates/a/src/lib.rs", "clean"),), changed=("crates/a/src/lib.rs",)),
             )
             quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
             with env_patch, root_patch, tree_patch, quiet[0], quiet[1]:
                 run_gate(clean)
                 run_gate(clean)
                 self.assertEqual(2, counter.read_text().count("run"))
+
+    def test_staging_an_added_file_keeps_the_fingerprint(self):
+        # The key describes the working tree, not the index. Before this, an
+        # added file reached the key as a hashed untracked entry and then,
+        # after `git add`, inside the diff text, so the same bytes keyed two
+        # entries and a verdict measured before staging did not replay.
+        with exec_tempdir(purpose="a staged added file") as tmp:
+            root = Path(tmp)
+            git_repo(root)
+            (root / "tracked.txt").write_text("one\ntwo\n")
+            (root / "added.rs").write_text("// new\n")
+            before = key(root)
+            git(root, "add", "added.rs", "tracked.txt")
+            self.assertEqual(before, key(root), "staging does not change the working-tree key")
+
+    def test_a_mode_change_on_a_modified_file_moves_the_key(self):
+        # The old diff-text key carried the `old mode`/`new mode` lines; a
+        # content-only key would not, so the executable bit is hashed too.
+        with exec_tempdir(purpose="a mode change") as tmp:
+            root = Path(tmp)
+            git_repo(root)
+            (root / "tracked.txt").write_text("one\ntwo\n")
+            before = key(root)
+            (root / "tracked.txt").chmod(0o755)
+            self.assertNotEqual(before, key(root), "a mode change moves the key")
+
+    def test_deleting_a_tracked_file_moves_the_key(self):
+        with exec_tempdir(purpose="a deleted file") as tmp:
+            root = Path(tmp)
+            git_repo(root)
+            before = key(root)
+            (root / "tracked.txt").unlink()
+            self.assertNotEqual(before, key(root), "a deletion moves the key")
 
     def test_the_two_lists_of_nextest_subcommands_are_one_list(self):
         # Narrowing a command and classifying it are two decisions about the

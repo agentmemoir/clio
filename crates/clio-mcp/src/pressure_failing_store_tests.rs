@@ -259,3 +259,6 @@ fn failing_sources_render_the_exact_unavailable_reason() {
         "{marker}"
     );
 }
+
+impl clio_store::TripleAssertion for FailingStore {}
+impl clio_store::TripleAssertion for SecondScanFails {}

@@ -268,17 +268,31 @@ fn each_subcommands_help_carries_its_own_usage_and_prose() {
 
 /// The refusal carries the message and the hint on separate lines and exits 2.
 ///
-/// An error that exits 0 is the defect this replaced: `clio retention --help` was
-/// an unrecognised subcommand and it reported success.
+/// An error that exits 0 is the defect this replaced: an unrecognised
+/// subcommand used to report success.
 #[test]
 fn a_refusal_names_the_hint_and_exits_two() {
     assert_eq!(
         super::eprintln_error(
-            "unknown retention command `--help`",
+            "unknown retention command `bogus`",
             "try `clio retention get`"
         ),
         ExitCode::from(2)
     );
+}
+
+/// A help spelling where a subcommand belongs prints the subcommand list and
+/// exits 0, so `clio retention --help` and `clio help retention` answer the
+/// question instead of refusing `--help` as an unknown command.
+#[test]
+fn a_top_level_help_spelling_prints_the_subcommand_list() {
+    for spelling in ["--help", "help", "-h"] {
+        assert_eq!(
+            retention(vec![spelling.to_owned()]),
+            ExitCode::SUCCESS,
+            "clio retention {spelling} must print help"
+        );
+    }
 }
 
 /// A profile is also read from the file `--profile-file` names, and an inline

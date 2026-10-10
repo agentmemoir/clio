@@ -173,7 +173,12 @@ impl McpHandler {
         }
         let empty = json!({});
         let args = params.get("arguments").unwrap_or(&empty);
-        let result = crate::write_tools::dispatch(state, name, args);
+        // An argument the schema does not declare, or a blank required value, is
+        // refused here. Before this check it was dropped, and the write went on.
+        let result = match crate::arg_contract::check(name, args) {
+            Ok(()) => crate::write_tools::dispatch(state, name, args),
+            Err(err) => crate::write_tools::tool_result(Err(err)),
+        };
         if let Some(err) = coactivation_rpc_error(&result) {
             // A failed durable handoff fails the call closed with a
             // retryable, server-defined JSON-RPC error.

@@ -243,6 +243,10 @@ pub(crate) fn managed_address(
 ///
 /// # Errors
 /// A field is empty, or the driver refuses the assembled address.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "an address is assembled from its fields; grouping them would only move the same values"
+)]
 pub(crate) fn typed_address(
     host: &str,
     port: &str,
@@ -250,6 +254,7 @@ pub(crate) fn typed_address(
     user: &str,
     password: &str,
     ssl: SslChoice,
+    root: Option<&str>,
     extra: &[Extra],
 ) -> Result<String, String> {
     let mut address = format!(
@@ -258,6 +263,18 @@ pub(crate) fn typed_address(
         encode(password),
         ssl_query(ssl)
     );
+    // The supplied root rides in the address, spelled the way libpq spells it,
+    // so the store reads it back with everything else the connection needs. It
+    // is only meaningful for a mode that checks the certificate, so a mode that
+    // does not check one never carries it.
+    if matches!(ssl, SslChoice::Prefer | SslChoice::VerifyFull)
+        && let Some(root) = root.filter(|path| !path.trim().is_empty())
+    {
+        address.push('&');
+        address.push_str(crate::setup_db_fields::SSL_ROOT_PARAM);
+        address.push('=');
+        address.push_str(&encode(root));
+    }
     for setting in extra {
         if setting.value.trim().is_empty() {
             continue;

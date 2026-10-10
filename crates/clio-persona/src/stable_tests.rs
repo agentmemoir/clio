@@ -250,7 +250,10 @@ fn t09_cross_bank_access_isolated() {
     })
     .unwrap()
     .document;
-    assert!(doc.stable.is_empty() && doc.preferences.is_empty());
+    assert!(
+        doc.stable.is_empty() && doc.preferences.is_empty(),
+        "another bank sees an empty document"
+    );
     let mut args = put_args(&s, "style", "other-bank-value");
     args.ctx = &other;
     assert!(persona_put_stable(&args).is_ok());

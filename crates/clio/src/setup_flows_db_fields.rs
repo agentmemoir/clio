@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - `flagged_or_asked`, the flag-or-question field reader
-//! - `ask_ssl`, the three SSL modes and the host-derived default
+//! - `ask_ssl`, the SSL modes and the host-derived default
 //!
 //! ## Does not own
 //! - The routes themselves (see `setup_flows_db` and `setup_flows_db_typed`)
@@ -67,9 +67,13 @@ where
 
 /// The SSL question, whose default follows the host.
 ///
-/// A remote host defaults to `require` because that is what providers expect and
-/// because certificate checking is then not optional. This machine defaults to
-/// `prefer`, so an unencrypted local server keeps working.
+/// A remote host defaults to `verify-full` because that is what providers expect
+/// and because certificate checking is then not optional. This machine defaults
+/// to `prefer`, so an unencrypted local server keeps working.
+///
+/// Choosing `encrypt-no-verify` prints, at the point of choice, what the mode
+/// does and does not protect against. It is never a default and the operator has
+/// to name it.
 ///
 /// # Errors
 /// The stream failed, the operator went back, or the answer named no
@@ -77,38 +81,60 @@ where
 pub(crate) fn ask_ssl(ctx: &mut Ctx<'_>, host: &str) -> Result<SslChoice, Signal> {
     use crate::setup_prompt::Choice;
     let names = crate::setup_db_fields::ssl_mode_names();
-    let options: [Choice; 3] = [
-        Choice::new(names[0], "disable", "No encryption. Local servers only."),
+    let options: [Choice; 4] = [
+        Choice::new(
+            names[0],
+            "disable",
+            "No encryption at all. Local servers only.",
+        ),
         Choice::new(
             names[1],
             "prefer",
-            "Encrypted when the server offers it, plain text when it does not.",
+            "Encrypt and check the certificate when the server offers TLS, plain text when it \
+             does not.",
         ),
         Choice::new(
             names[2],
-            "require",
-            "Refuse to connect without encryption. Cloud providers expect this.",
+            "verify-full",
+            "Refuse to connect without encryption, and check the certificate and the server name. \
+             Add sslrootcert=PATH for a private certificate authority.",
+        ),
+        Choice::new(
+            names[3],
+            "encrypt-no-verify",
+            "Encrypt, but do not check the server certificate. Stops eavesdropping only.",
         ),
     ];
-    // A flag is the operator speaking last, so it beats a stored default and the
-    // host-derived one.
-    if let Some(raw) = ctx.flag("database-ssl") {
-        return SslChoice::parse(raw).map_err(Signal::usage);
-    }
-    let default = match ctx.defaults().ssl.as_deref() {
-        Some(stored) if names.contains(&stored) => stored.to_owned(),
-        _ => crate::setup_validate::default_ssl_for(host)
-            .as_str()
-            .to_owned(),
-    };
-    if !ctx.interactive() {
-        return SslChoice::parse(&default).map_err(Signal::usage);
-    }
-    match ctx.ask_choice("SSL mode", &options, &default)? {
-        Reply::Back => Err(Signal::Back),
-        Reply::Value(value) if value.trim().is_empty() => {
-            SslChoice::parse(&default).map_err(Signal::usage)
+    let mode = if let Some(raw) = ctx.flag("database-ssl") {
+        // A flag is the operator speaking last, so it beats a stored default and
+        // the host-derived one.
+        SslChoice::parse(raw).map_err(Signal::usage)?
+    } else {
+        let default = match ctx.defaults().ssl.as_deref() {
+            Some(stored) if names.contains(&stored) => stored.to_owned(),
+            _ => crate::setup_validate::default_ssl_for(host)
+                .as_str()
+                .to_owned(),
+        };
+        if ctx.interactive() {
+            match ctx.ask_choice("SSL mode", &options, &default)? {
+                Reply::Back => return Err(Signal::Back),
+                Reply::Value(value) if value.trim().is_empty() => {
+                    SslChoice::parse(&default).map_err(Signal::usage)?
+                }
+                Reply::Value(value) => SslChoice::parse(&value).map_err(Signal::usage)?,
+            }
+        } else {
+            SslChoice::parse(&default).map_err(Signal::usage)?
         }
-        Reply::Value(value) => SslChoice::parse(&value).map_err(Signal::usage),
+    };
+    if mode == SslChoice::EncryptNoVerify {
+        ctx.warn(
+            "encrypt-no-verify encrypts the connection but does not check the server certificate. \
+             It stops someone reading the traffic, but not someone who can intercept the \
+             connection and pretend to be the server. Use verify-full with sslrootcert when you \
+             hold the server's root certificate.",
+        );
     }
+    Ok(mode)
 }

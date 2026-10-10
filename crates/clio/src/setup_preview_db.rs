@@ -178,13 +178,14 @@ fn has_password(address: &str) -> bool {
 /// The encryption and locality of the address, as the driver sees them.
 ///
 /// A loopback address never leaves the machine, so it is labelled by where it
-/// goes rather than by whether it is encrypted; anything else has to be
-/// `require`, because the endpoint and address rules both refuse a remote plain
-/// connection, so it is labelled `encrypted, remote`.
+/// goes rather than by whether it is encrypted; anything else is verified
+/// (`verify-full`) or deliberately unverified (`encrypt-no-verify`), and is
+/// labelled by whether the server certificate is checked.
 fn locality_of(parsed: &clio_store::Connection, ssl: &str) -> String {
     let encryption = match ssl {
         "disable" => "not encrypted",
         "prefer" => "prefer",
+        "encrypt-no-verify" => "encrypted, not verified",
         _ => "encrypted",
     };
     let place = if parsed.is_local() {

@@ -46,11 +46,13 @@ fn a_repeating_flag_collects_every_occurrence_in_order() {
     // An inline form is collected too.
     let parsed = parse(&repeated, tokens(&["--domains=x"])).expect("parse");
     assert_eq!(parsed.values_of("domains"), &["x".to_owned()]);
-    // A non-repeating flag still keeps only its last value.
-    let parsed = parse(&spec(), tokens(&["--limit", "1", "--limit", "2"])).expect("parse");
-    assert_eq!(parsed.value("limit"), Some("2"));
-    let limit_values = parsed.values_of("limit");
-    assert!(limit_values.is_empty(), "{limit_values:?}");
+    // A non-repeating flag given twice is refused, not last-wins.
+    let error = parse(&spec(), tokens(&["--limit", "1", "--limit", "2"])).expect_err("repeat");
+    assert!(
+        error.message().contains("--limit was given more than once"),
+        "{}",
+        error.message()
+    );
 }
 
 #[test]
