@@ -3,10 +3,10 @@
 //! Retention profile tools and batch admission preview tests.
 use super::*;
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
 use serde_json::{Value, json};
-use std::sync::Arc;
-fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+fn state() -> RetentionStoreFixture {
+    RetentionStoreFixture::open(&McpOpenOptions::default())
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -218,7 +218,7 @@ fn profile_set_requires_confirmation_and_is_bank_scoped() {
     );
     assert_eq!(stored["ok"], json!(true), "{stored}");
     assert_eq!(stored["stored"], json!(true));
-    assert_eq!(stored["persisted"], json!(false));
+    assert_eq!(stored["persisted"], json!(true), "fixture store");
 
     let a = call(&s, "retention_profile_get", json!({"bank": "bank-a"}));
     assert_eq!(a["source"], json!("bank"));
