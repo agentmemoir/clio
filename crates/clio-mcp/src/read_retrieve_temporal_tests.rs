@@ -341,8 +341,8 @@ fn the_explain_trace_carries_the_arm_counter_and_rank() {
     );
 }
 
-/// Drop the wall-clock fields (latency counters and the recency-boosted fused
-/// score) so two live calls can be compared; every other key and value,
+/// Drop the wall-clock fields (latency counters and the clock-derived score
+/// factors) so two live calls can be compared; every other key and value,
 /// including the temporal counter and ranks, must still match exactly.
 fn strip_volatile(mut value: Value) -> Value {
     value
@@ -354,6 +354,7 @@ fn strip_volatile(mut value: Value) -> Value {
         object.remove("score");
         if let Some(scores) = object.get_mut("scores").and_then(Value::as_object_mut) {
             scores.remove("final");
+            scores.remove("age_factor");
         }
     }
     value

@@ -80,6 +80,7 @@ SKIP_DIRS = frozenset(
         "__pycache__",
         "coverage",
         "html",
+        ".cache",
     }
 )
 
@@ -533,6 +534,21 @@ def self_test() -> int:
     expect("the gate states the number the rule states", EXPECTED_FLOOR in gate_text, True)
     expect("the gate holds the one comparison once",
            len(re.findall(re.escape(EXPECTED_COMPARISON), gate_text)), 1)
+
+    # A git-ignored cache directory holds no rule, so an unreadable file inside
+    # one must not be scanned and must not fail the check.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        (tree / "benchmarks" / ".cache").mkdir(parents=True)
+        (tree / "benchmarks" / ".cache" / "blob.json").write_bytes(b"\x8a\x00")
+        (tree / "Makefile").write_text("all:\n")
+        expect(
+            "a git-ignored cache file is not scanned",
+            [path.relative_to(tree).as_posix() for path in candidate_paths(tree)],
+            ["Makefile"],
+        )
 
     # The real tree, which is the assertion that matters.
     found, unread = scan()

@@ -380,7 +380,10 @@ fn an_owned_sequence_refusal_names_the_table_and_the_sequence() {
     let error = snapshot_postgres_into(scoped.url(), &mut stage).expect_err("a sequence refusal");
     assert!(error.message.contains("seq_t"), "error: {}", error.message);
     assert!(error.message.contains("seq_t_id_seq"));
-    assert!(handed.borrow().is_empty());
+    assert!(
+        handed.borrow().is_empty(),
+        "a refused dump hands back no tables"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
