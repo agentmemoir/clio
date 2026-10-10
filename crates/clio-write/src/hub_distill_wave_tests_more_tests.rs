@@ -391,3 +391,5 @@ fn the_hub_wave_count_is_per_bank_and_nonzero_while_running() {
     assert_eq!(engine.hub_distill_in_flight("bank"), 0, "after the wave");
     assert_eq!(engine.hub_distill_in_flight("other"), 0, "after the wave");
 }
+
+impl clio_store::TripleAssertion for WaveStore {}

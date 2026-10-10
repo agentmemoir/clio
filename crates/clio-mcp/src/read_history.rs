@@ -46,16 +46,37 @@ pub(crate) fn dispatch(
     })
 }
 
+/// A task id the bank does not hold. A mistyped id is an error, so it cannot read
+/// as a task with no history.
+fn task_not_found(task_id: &str) -> AmError {
+    AmError::new(
+        ErrorCode::NotFound,
+        format!("task `{task_id}` not found in bank"),
+    )
+}
+
+/// Refuse a task id the bank does not hold.
+fn require_task(state: &McpState, bank: &str, task_id: &str) -> Result<(), AmError> {
+    match state.history.get_task(bank, task_id)? {
+        Some(_) => Ok(()),
+        None => Err(task_not_found(task_id)),
+    }
+}
+
 /// `task_get(task_id)`: latest task version + optional ancestor gist.
 #[inline(never)]
 fn task_get(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    let task_id = req_str(args, "task_id")?;
     let outcome = clio_history::task_get(&clio_history::TaskGetArgs {
         history: &*state.history,
         store: &*state.store,
         bank_id: ctx.bank.as_str(),
-        task_id: req_str(args, "task_id")?,
+        task_id,
     })?;
+    if outcome.record.is_none() {
+        return Err(task_not_found(task_id));
+    }
     Ok(json!({
         "record": outcome.record,
         "ancestor_gist": outcome.ancestor_gist
@@ -66,13 +87,17 @@ fn task_get(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn task_history(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    let task_id = req_str(args, "task_id")?;
     let outcome = clio_history::task_history(&clio_history::TaskHistoryArgs {
         history: &*state.history,
         bank_id: ctx.bank.as_str(),
-        task_id: req_str(args, "task_id")?,
+        task_id,
         limit: opt_usize(args, "limit"),
         policy: &state.history_policy,
     })?;
+    if outcome.records.is_empty() {
+        require_task(state, ctx.bank.as_str(), task_id)?;
+    }
     Ok(json!({
         "records": outcome.records,
         "limit": outcome.limit
@@ -83,14 +108,20 @@ fn task_history(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn failures_for_task(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    let query = req_str(args, "task_id_or_query")?;
     let outcome = clio_history::failures_for_task(&clio_history::FailuresForTaskArgs {
         history: &*state.history,
         bank_id: ctx.bank.as_str(),
-        task_id_or_query: req_str(args, "task_id_or_query")?,
+        task_id_or_query: query,
         limit: opt_usize(args, "limit"),
         policy: &state.history_policy,
         sink: &StderrSinks,
     })?;
+    // Nothing matched the argument as a task or as failure text: it names no task
+    // the bank holds, so it is not found rather than an empty list.
+    if outcome.mode == "none" {
+        require_task(state, ctx.bank.as_str(), query)?;
+    }
     Ok(json!({
         "failures": outcome.failures,
         "matched_task_ids": outcome.matched_task_ids,
@@ -253,3 +284,7 @@ fn belief_history(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[cfg(test)]
 #[path = "read_history_temporal_context_tests.rs"]
 mod read_history_temporal_context_tests;
+
+#[cfg(test)]
+#[path = "read_history_not_found_tests.rs"]
+mod not_found_tests;

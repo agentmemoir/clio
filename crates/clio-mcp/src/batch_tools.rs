@@ -87,6 +87,17 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
         let raw_params = op.get("params").unwrap_or(&empty);
         let in_batch_ids: Vec<String> = resolved.iter().flatten().cloned().collect();
         let params = substitute_refs(raw_params, &resolved)?;
+        // The same argument contract as a direct call. An undeclared or blank
+        // argument aborts the batch, instead of being dropped and written without it.
+        crate::arg_contract::check(tool, &params).map_err(|e| {
+            AmError::new(
+                e.code,
+                format!(
+                    "batch aborted at operation {index} (`{tool}`): {}",
+                    e.message
+                ),
+            )
+        })?;
         let staged = preflight(state, tool, &params, &in_batch_ids).map_err(|e| {
             AmError::new(
                 e.code,
@@ -216,3 +227,7 @@ mod batch_tools_tests;
 #[cfg(test)]
 #[path = "batch_tools_context_batch_canonical_tests.rs"]
 mod batch_tools_context_batch_canonical_tests;
+
+#[cfg(test)]
+#[path = "batch_tools_contract_tests.rs"]
+mod batch_tools_contract_tests;

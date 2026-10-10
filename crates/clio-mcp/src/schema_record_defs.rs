@@ -53,6 +53,7 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ("evidence_ref", s("Evidence reference.")),
                 context_prop(),
                 ("allow_duplicate", b("Store even when identical to an item already in this bank; waives the exact-duplicate rejection only.")),
+                ("dry_run", b("Validate and score without a durable write.")),
             ]
             .into_iter()
             .chain(bank_actor())
@@ -92,6 +93,7 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ("evidence_ref", s("Optional evidence reference.")),
                 context_prop(),
                 ("allow_duplicate", b("Store even when identical to an item already in this bank; waives the exact-duplicate rejection only.")),
+                ("dry_run", b("Validate and score without a durable write.")),
             ]
             .into_iter()
             .chain(bank_actor())
@@ -112,6 +114,7 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
                 ("evidence_ref", s("Optional evidence reference.")),
                 context_prop(),
                 ("allow_duplicate", b("Store even when identical to an item already in this bank; waives the exact-duplicate rejection only.")),
+                ("dry_run", b("Validate and score without a durable write.")),
             ]
             .into_iter()
             .chain(bank_actor())

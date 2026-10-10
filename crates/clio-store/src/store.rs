@@ -8,6 +8,7 @@ use crate::embedding_space::EmbeddingSpace;
 use crate::model::{
     AssocEdgeRecord, ItemIdentity, ItemInspectFilter, ItemInspectRow, KnnHit, VectorSlot,
 };
+use crate::triple_assertion::TripleAssertion;
 use clio_types::{
     AmError, MemoryItem, TimeAxis, TripleAddOutcome, TripleEndOutcome, TripleQuery, TripleRecord,
 };
@@ -24,7 +25,9 @@ pub const MAX_WINDOW_ITEMS: usize = 1000;
 /// Memory-item create/update methods are **ungated repository primitives**; public
 /// long-term write tools must wrap them with admission gates before commit. This
 /// file is at the 450-line cap: the next addition needs a module split, not another reflow.
-pub trait Store: crate::distilled_unit_store::DistilledUnitStore + Send + Sync {
+pub trait Store:
+    crate::distilled_unit_store::DistilledUnitStore + TripleAssertion + Send + Sync
+{
     /// Delete one item row and its derived rows (vector, lexical, index job,
     /// distilled-unit record, distill intents), scoped by bank, in one
     /// transaction.

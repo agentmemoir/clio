@@ -127,6 +127,7 @@ mod postgres_sync;
 mod postgres_sync_records;
 mod postgres_sync_rows;
 mod postgres_triple;
+mod postgres_triple_asserted;
 mod postgres_triple_read;
 mod postgres_window;
 mod restore_key_swap;
@@ -174,6 +175,7 @@ mod sqlite_store;
 mod sqlite_sync;
 mod sqlite_sync_rows;
 mod sqlite_triple;
+mod sqlite_triple_asserted;
 mod sqlite_triple_read;
 mod sqlite_window;
 mod store;
@@ -183,6 +185,7 @@ mod sync_records;
 mod sync_store;
 #[path = "sync_store_rows.rs"]
 mod sync_store_rows;
+mod triple_assertion;
 mod triple_cipher;
 mod triple_invariant;
 mod triple_map;
@@ -269,6 +272,7 @@ pub use sync_store::{
     DeadLetterStatus, JournalAppendOutcome, SyncConflictRow, SyncDeadLetterRow, SyncFeedRow,
     SyncJournalRow, SyncStore,
 };
+pub use triple_assertion::TripleAssertion;
 pub use vector_ddl::{
     HALFVEC_MIN_VERSION, pgvector_supports_halfvec, postgres_vector_ddl, sqlite_vector_ddl,
 };
