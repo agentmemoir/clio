@@ -289,7 +289,6 @@ mod pg_scoped_schema;
 mod pg_skip;
 mod pg_tls;
 
-
 #[cfg(test)]
 mod test_unique;
 

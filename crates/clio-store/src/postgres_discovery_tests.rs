@@ -26,9 +26,9 @@
 //! Keep this module focused on discovery tests.
 
 use super::*;
+use crate::embedding_space::embedding_space_pg_space_tests::base_url;
 use crate::pg_lock::lock_pg_test;
 use crate::pg_scoped_schema::ScopedSchema;
-use crate::embedding_space::embedding_space_pg_space_tests::base_url;
 
 /// The application-table names the store's core DDL creates, sorted.
 ///

@@ -312,14 +312,14 @@ class ChangelogTests(unittest.TestCase):
         self,
     ) -> None:
         text = CHANGELOG.read_text(encoding="utf-8")
-        unreleased = _section(text, "## [Unreleased]")
-        added = _section(unreleased, "### Added")
+        # One entry per top-level bullet, with its wrapped lines joined, so the
+        # check does not depend on where the prose wraps or on a heading name.
         entries = [
-            line
-            for line in added.splitlines()
-            if "long-lived-companion.json" in line and "coding-agent.json" in line
+            entry
+            for entry in re.split(r"\n(?=- )", text)
+            if "long-lived-companion.json" in entry and "coding-agent.json" in entry
         ]
-        self.assertTrue(entries, "no Added entry names both profiles")
+        self.assertTrue(entries, "no changelog entry names both profiles")
         entry = entries[0]
         self.assertIn("no constant", entry.lower())
         self.assertNotIn("accuracy", entry)

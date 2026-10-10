@@ -58,10 +58,10 @@ pub(crate) mod fixtures;
 
 /// Archive restore-readiness: the members an archive carries come back out
 /// byte-exact and a damaged key member is caught.
-
+///
 /// Hostile archives and hostile manifest fields, as `list` and `verify` meet
 /// them: member order abuse, repeated member names, and an over-cap manifest.
-
+///
 /// The hand-built Postgres archive fixtures the archive suites share.
 #[cfg(test)]
 #[path = "postgres_archive_fixtures.rs"]
@@ -69,10 +69,9 @@ mod postgres_archive_fixtures;
 
 /// Postgres archives: a hand-built dump is assembled, extracted, and verified
 /// member by member.
-
+///
 /// The duplicate-member-name hostile cases: the reader's once-only rule from
 /// the outside, and the writer's own rule.
-
 pub use archive_name::{archive_file_name, snapshot_id, snapshot_id_of};
 pub use atomic_publish::AtomicFile;
 pub use container::{

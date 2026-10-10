@@ -33,8 +33,8 @@
 //!
 //! Keep this module focused on the backup help wording.
 
-use crate::*;
 use crate::backup_cli_fixtures::{Scratch, run_backup};
+use crate::*;
 
 /// The claim both surfaces must carry, word for word, however each of them
 /// wraps its lines: a SQLite snapshot is a compacted copy, never a

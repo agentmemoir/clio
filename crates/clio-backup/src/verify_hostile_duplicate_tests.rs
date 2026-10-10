@@ -31,13 +31,13 @@ use crate::MANIFEST_MEMBER;
 use crate::container::ArchiveWriter;
 use crate::extract::extract_members;
 use crate::fixtures::{Scratch, dir_entries};
+use crate::inventory::{list_snapshot_rows, read_manifest};
+use crate::tar_header::HEADER_SIZE;
+use crate::verify::verify_archive;
 use crate::verify::verify_hostile_manifest_tests::{
     KEYS, PAYLOAD, hostile_archive, integrity_ok, manifest_bytes, raw_member, refuse,
     verify_refuses,
 };
-use crate::inventory::{list_snapshot_rows, read_manifest};
-use crate::tar_header::HEADER_SIZE;
-use crate::verify::verify_archive;
 use clio_types::ErrorCode::{ArchiveCorrupt, InvalidArgument};
 use serde_json::Value;
 use std::path::{Path, PathBuf};

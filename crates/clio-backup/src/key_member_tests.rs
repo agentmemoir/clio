@@ -29,9 +29,11 @@ use crate::KEY_MEMBER;
 use crate::MANIFEST_MEMBER;
 use crate::extract::extract_members;
 use crate::fixtures::{Scratch, dir_entries};
-use crate::verify::verify_hostile_manifest_tests::{KEYS, PAYLOAD, hostile_archive, manifest_bytes, raw_member};
 use crate::inventory::read_manifest;
 use crate::tar_header::{HEADER_SIZE, build_header};
+use crate::verify::verify_hostile_manifest_tests::{
+    KEYS, PAYLOAD, hostile_archive, manifest_bytes, raw_member,
+};
 use clio_types::ErrorCode::ArchiveCorrupt;
 use serde_json::Value;
 

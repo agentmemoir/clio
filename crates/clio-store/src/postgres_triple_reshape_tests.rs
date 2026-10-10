@@ -23,13 +23,13 @@
 //!
 //! Keep this module focused on the legacy-shape open guard.
 
-use crate::postgres_triple::postgres_triple_seal_erase_tests::{
-    SECRET, carrier, edge, open_pg, unique_ids, unique_subject, url,
-};
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::pg_lock::lock_pg_test;
 use crate::pg_scoped_schema::ScopedSchema;
 use crate::postgres::PostgresStore;
+use crate::postgres_triple::postgres_triple_seal_erase_tests::{
+    SECRET, carrier, edge, open_pg, unique_ids, unique_subject, url,
+};
 use crate::store::Store;
 use crate::test_unique::unique;
 use clio_types::ErrorCode;

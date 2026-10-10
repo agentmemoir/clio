@@ -117,4 +117,3 @@ pub fn bound_read_tools() -> &'static [&'static str] {
 pub fn bound_tools() -> Vec<&'static str> {
     clio_types::mcp_tools::bound_tools()
 }
-

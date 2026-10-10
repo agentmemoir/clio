@@ -25,8 +25,8 @@
 //! limit. Every case uses a private schema that is dropped on exit.
 
 use crate::embedding_space::EmbeddingSpace;
-use crate::pg_scoped_schema::ScopedSchema;
 use crate::embedding_space::embedding_space_pg_space_tests::{base_url, item, pseudo_vector, slot};
+use crate::pg_scoped_schema::ScopedSchema;
 use crate::postgres::{PostgresStore, distance_expr};
 use crate::store::Store;
 use postgres::Client;

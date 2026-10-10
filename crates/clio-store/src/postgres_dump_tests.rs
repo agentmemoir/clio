@@ -24,9 +24,9 @@
 //! Keep this module focused on the dump tests.
 
 use super::*;
+use crate::embedding_space::embedding_space_pg_space_tests::{base_url, item};
 use crate::pg_lock::lock_pg_test;
 use crate::pg_scoped_schema::ScopedSchema;
-use crate::embedding_space::embedding_space_pg_space_tests::{base_url, item};
 use crate::store::Store;
 use std::cell::RefCell;
 use std::path::PathBuf;

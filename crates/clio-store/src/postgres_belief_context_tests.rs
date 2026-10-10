@@ -22,8 +22,8 @@
 //!
 //! Keep this module focused on shared-Postgres belief context coverage.
 
-use crate::belief_store::{BELIEF_CONTEXT_HASH_DOMAIN, BeliefStore};
 use crate::belief_store::belief_store_belief_tests::mk_belief;
+use crate::belief_store::{BELIEF_CONTEXT_HASH_DOMAIN, BeliefStore};
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::migrate::IntoAmError;
 use crate::postgres::PostgresStore;

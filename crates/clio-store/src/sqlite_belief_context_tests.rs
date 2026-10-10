@@ -22,12 +22,12 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use crate::belief_store::belief_store_belief_tests::mk_belief;
 use crate::belief_store::{
     BeliefStore, belief_audit_detail, belief_context_correction_detail, belief_context_stats,
     map_belief_insert, open_belief_context, require_nonempty, seal_belief_context, unique_entry_id,
     validate_context_arg,
 };
-use crate::belief_store::belief_store_belief_tests::mk_belief;
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::migrate::IntoAmError;
 use crate::sqlite::SqliteStore;

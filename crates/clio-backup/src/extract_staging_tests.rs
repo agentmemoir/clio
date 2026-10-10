@@ -29,8 +29,10 @@ use crate::KEY_MEMBER;
 use crate::MANIFEST_MEMBER;
 use crate::extract::{extract_members, staging_failure};
 use crate::fixtures::{Scratch, dir_entries};
-use crate::verify::verify_hostile_manifest_tests::{KEYS, PAYLOAD, hostile_archive, manifest_bytes, raw_member};
 use crate::tar_header::HEADER_SIZE;
+use crate::verify::verify_hostile_manifest_tests::{
+    KEYS, PAYLOAD, hostile_archive, manifest_bytes, raw_member,
+};
 use clio_types::{AmError, ErrorCode};
 use serde_json::Value;
 use std::path::Path;

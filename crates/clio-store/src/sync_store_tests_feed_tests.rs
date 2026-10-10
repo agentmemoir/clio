@@ -284,7 +284,11 @@ fn belief_context_correction_is_visible_to_the_change_feed() {
     use crate::BeliefStore as _;
     let s = store();
     let bank = "b-correct";
-    let mut seeded = crate::belief_store::belief_store_belief_tests::mk_belief("bel-correct", bank, "subj-correct");
+    let mut seeded = crate::belief_store::belief_store_belief_tests::mk_belief(
+        "bel-correct",
+        bank,
+        "subj-correct",
+    );
     seeded.context = Some("original".into());
     s.create_belief(&seeded, "agent").expect("create");
     // After the seed's own stamp: nothing else is pending yet.

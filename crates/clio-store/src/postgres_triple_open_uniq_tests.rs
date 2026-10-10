@@ -24,11 +24,11 @@
 
 use crate::migrate::{SQL_CORE, SQL_VECTORS_POSTGRES};
 use crate::postgres::PostgresStore;
-use crate::store::Store;
-use crate::test_unique::unique;
 use crate::sqlite_triple::sqlite_triple_open_uniq_tests::{
     LEGACY_OPEN_INX, OPEN_UNIQ_INDEX, carrier, edge, kms, raw_open_triple_sql,
 };
+use crate::store::Store;
+use crate::test_unique::unique;
 use clio_types::ErrorCode;
 
 fn open_pg() -> Option<PostgresStore> {

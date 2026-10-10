@@ -183,7 +183,8 @@ mod tests {
         // Stand in for a test body: take the guard through the helper, then hold
         // it while the probe looks for the key.
         let caller = std::thread::spawn(move || {
-            let (_guard, _store, _kms) = crate::postgres_belief::postgres_belief_context_tests::open_pg();
+            let (_guard, _store, _kms) =
+                crate::postgres_belief::postgres_belief_context_tests::open_pg();
             tx.send(()).expect("signal probe start");
             std::thread::sleep(Duration::from_millis(750));
         });

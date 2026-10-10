@@ -80,7 +80,7 @@ fn the_schema_gate_refuses_newer_and_allows_equal_older_and_unknown() {
     let error = compare_schema(Some("99"), "1").expect_err("newer is refused");
     assert_eq!(error.exit_code(), ExitCode::from(2));
     assert!(error.message().contains("99"), "{}", error.message());
-    assert!(error.message().contains("1"), "{}", error.message());
+    assert!(error.message().contains('1'), "{}", error.message());
 }
 /// The prompt names the snapshot and the target.
 #[test]
@@ -288,7 +288,7 @@ fn the_schema_gate_refuses_newer_and_allows_older() {
     );
     assert_eq!(code, ExitCode::from(2), "{err}");
     assert!(err.contains("99"), "{err}");
-    assert!(err.contains("1"), "{err}");
+    assert!(err.contains('1'), "{err}");
     assert_eq!(
         sqlite_content_digest(&store_path(&scratch)).expect("digest the target"),
         before

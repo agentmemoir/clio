@@ -46,7 +46,6 @@ pub mod document;
 pub mod observe;
 pub mod stable;
 
-
 pub use budget::{PersonaPackEntry, truncate_document};
 pub use document::{PersonaGetArgs, PersonaGetOutcome, persona_get};
 pub use observe::{
