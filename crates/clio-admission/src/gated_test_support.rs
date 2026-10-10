@@ -23,7 +23,7 @@ use super::{GateRequest, SignalSource, VecSink, candidate_text};
 use crate::factors::factor_unavailable;
 use crate::policy::AdmissionPolicy;
 use clio_types::{
-    Actor, AmError, Bank, EpisodicType, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext,
+    Actor, AmError, Bank, EpisodicType, EpistemicKind, ItemKind, MemoryItem, OpContext,
     SemanticCategory,
 };
 use serde_json::json;
@@ -48,14 +48,12 @@ pub(super) fn gate_req<'a>(
     }
 }
 
-/// Store stub: neighbors and priors are scripted; `*_down` fails the lookup.
+/// Store stub: neighbors are scripted; `neighbors_down` fails the lookup.
 #[derive(Debug, Default)]
 pub(super) struct StubSource {
     pub(super) neighbors: Vec<String>,
     pub(super) mirror_item: bool,
     pub(super) neighbors_down: bool,
-    pub(super) prior: Option<f64>,
-    pub(super) prior_down: bool,
 }
 
 impl SignalSource for StubSource {
@@ -68,13 +66,6 @@ impl SignalSource for StubSource {
         }
         Ok(self.neighbors.clone())
     }
-
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        if self.prior_down {
-            return Err(AmError::new(ErrorCode::Internal, "recency store down"));
-        }
-        Ok(self.prior)
-    }
 }
 
 pub(super) fn strong_source() -> StubSource {
@@ -84,7 +75,6 @@ pub(super) fn strong_source() -> StubSource {
 pub(super) fn weak_source() -> StubSource {
     StubSource {
         mirror_item: true,
-        prior: Some(0.0),
         ..StubSource::default()
     }
 }

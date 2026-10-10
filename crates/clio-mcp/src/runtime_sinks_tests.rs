@@ -6,7 +6,7 @@
 //! This module is responsible for testing the store-backed gated-write signal source.
 //!
 //! ## Owns
-//! - Store-backed neighbor signal tests and recency-neutral contract tests
+//! - Store-backed neighbor signal tests and write-time-independence tests
 //! - Damaged-row resilience tests for admission lookups
 //!
 //! ## Does not own
@@ -62,17 +62,12 @@ fn item(bank: &str, id: &str, gist: &str, created_at: &str) -> MemoryItem {
 }
 
 #[test]
-fn empty_bank_has_no_neighbors_and_no_prior() {
+fn empty_bank_has_no_neighbors() {
     let s = state();
     let signals = signals_for(&s);
     let probe = item("bank-empty", "probe", "hello world", "2026-01-02T00:00:00Z");
     let neighbors = SignalSource::neighbor_texts(&signals, &probe).expect("neighbors");
     assert!(neighbors.is_empty(), "{neighbors:?}");
-    assert!(
-        SignalSource::prior_age_days(&signals, &probe)
-            .expect("prior")
-            .is_none()
-    );
 }
 
 #[test]
@@ -94,12 +89,6 @@ fn duplicate_text_is_returned_as_neighbor() {
     );
     let neighbors = SignalSource::neighbor_texts(&signals, &probe).expect("neighbors");
     assert!(neighbors.contains(&candidate_text(&prior)), "{neighbors:?}");
-    assert!(
-        SignalSource::prior_age_days(&signals, &probe)
-            .expect("prior")
-            .is_none(),
-        "a store-backed write never reports a wall-clock age"
-    );
 }
 
 #[test]
@@ -115,15 +104,10 @@ fn self_id_is_excluded() {
     let signals = signals_for(&s);
     let neighbors = SignalSource::neighbor_texts(&signals, &only).expect("neighbors");
     assert!(neighbors.is_empty(), "{neighbors:?}");
-    assert!(
-        SignalSource::prior_age_days(&signals, &only)
-            .expect("prior")
-            .is_none()
-    );
 }
 
 #[test]
-fn unparseable_timestamps_yield_no_prior() {
+fn unparseable_timestamps_do_not_break_the_neighbor_scan() {
     let s = state();
     let prior = item("bank-bad-ts", "itm-prior", "some text", "not-a-timestamp");
     s.store.create_memory_item(&prior, "agent").expect("seed");
@@ -134,11 +118,6 @@ fn unparseable_timestamps_yield_no_prior() {
             .expect("neighbors")
             .len(),
         1
-    );
-    assert!(
-        SignalSource::prior_age_days(&signals, &probe)
-            .expect("prior")
-            .is_none()
     );
 }
 
@@ -178,13 +157,8 @@ fn unreadable_neighbor_is_skipped_while_readable_neighbor_remains() {
         "new candidate",
         "2026-01-03T00:00:00Z",
     );
-    let (neighbors, age) = signals.neighbor_signals(&probe).expect("signals");
-
+    let neighbors = SignalSource::neighbor_texts(&signals, &probe).expect("signals");
     assert_eq!(neighbors, vec![candidate_text(&readable)]);
-    assert!(
-        age.is_none(),
-        "recency stays neutral even when a readable neighbor remains"
-    );
 }
 
 #[test]
@@ -193,9 +167,6 @@ fn empty_bank_id_fails_closed() {
     let signals = signals_for(&s);
     let probe = item("", "probe", "text", "2026-01-02T00:00:00Z");
     assert!(SignalSource::neighbor_texts(&signals, &probe).is_err());
-    // The age accessor is neutral and never reads the store, so the fail-closed
-    // contract lives on the neighbor lookup that still does.
-    assert!(signals.neighbor_signals(&probe).is_err());
 }
 
 /// Work is bounded by the configured recent window: a probe with no lexical
@@ -267,35 +238,6 @@ fn lexical_index_supplies_older_neighbors() {
     );
 }
 
-/// `signals_for` derives both factors from one source call.
-#[test]
-fn combined_signal_call_matches_individual_accessors() {
-    let s = state();
-    let prior = item(
-        "bank-combined",
-        "itm-prior",
-        "shared text",
-        "2026-01-01T00:00:00Z",
-    );
-    s.store.create_memory_item(&prior, "agent").expect("seed");
-    let signals = signals_for(&s);
-    let probe = item(
-        "bank-combined",
-        "probe",
-        "shared text",
-        "2026-01-02T00:00:00Z",
-    );
-    let (neighbors, age) = signals.neighbor_signals(&probe).expect("combined");
-    assert_eq!(
-        neighbors,
-        SignalSource::neighbor_texts(&signals, &probe).expect("neighbors")
-    );
-    assert_eq!(
-        age,
-        SignalSource::prior_age_days(&signals, &probe).expect("prior")
-    );
-}
-
 /// Belief creates score against stored memory through the same bounded source.
 #[test]
 fn belief_signal_source_reads_the_bank() {
@@ -353,8 +295,6 @@ fn admission_score_is_independent_of_the_write_time() {
 
     let early_inputs = clio_admission::signals_for(&early, &signals).expect("early signals");
     let late_inputs = clio_admission::signals_for(&late, &signals).expect("late signals");
-    assert!(early_inputs.prior_age_days.is_none(), "no wall-clock age");
-    assert!(late_inputs.prior_age_days.is_none(), "no wall-clock age");
 
     let early_score =
         clio_admission::decide_ungated("task_spec", &early_inputs, &policy).expect("early score");
@@ -412,10 +352,6 @@ fn stored_score_is_identical_for_writes_a_day_apart() {
     );
     assert!(early["pass"].as_bool().unwrap_or(false), "{early}");
     assert!(late["pass"].as_bool().unwrap_or(false), "{late}");
-    // Recency is the neutral `1.0` on both, which is what keeps the two scores
-    // equal; a clock-derived age would make the later probe score lower.
-    assert_eq!(early["factors"]["recency"], json!(1.0), "{early}");
-    assert_eq!(late["factors"]["recency"], json!(1.0), "{late}");
     assert_eq!(
         early["admission_score"], late["admission_score"],
         "the stored score must not depend on the write time"

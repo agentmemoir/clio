@@ -162,7 +162,6 @@ fn refuse_decision(report: &VerifyReport, profile_version: u32) -> Decision {
             utility: 0.0,
             confidence: 0.0,
             novelty: 0.0,
-            recency: 0.0,
             type_prior: 0.0,
         },
         rejection_reason: Some(format!("span_verify_refuse: {}", feedback(report))),

@@ -135,31 +135,6 @@ pub trait SignalSource: std::fmt::Debug {
     /// # Errors
     /// `factor_unavailable` when the store backend is down.
     fn neighbor_texts(&self, item: &MemoryItem) -> Result<Vec<String>, AmError>;
-
-    /// Age of the nearest prior in days; `None` means no prior exists.
-    ///
-    /// A source MAY report no age without reading any backend. The store-backed
-    /// source does: an age measured against the write clock would make the
-    /// stamped `admission_score` depend on write timing, so recency is a
-    /// constant `1.0` on the store-backed write path.
-    ///
-    /// # Errors
-    /// `factor_unavailable` when a backend this source does read is down.
-    fn prior_age_days(&self, item: &MemoryItem) -> Result<Option<f64>, AmError>;
-
-    /// Neighbor texts and prior age from one lookup.
-    ///
-    /// Hosts whose lookup is expensive (a store scan) SHOULD override this so a
-    /// single scan serves every factor that needs one. A source whose age
-    /// accessor reads no backend needs no override, because the default already
-    /// scans once. The default calls the two accessors above, so existing
-    /// sources keep their behavior.
-    ///
-    /// # Errors
-    /// `factor_unavailable` when the store backend is down.
-    fn neighbor_signals(&self, item: &MemoryItem) -> Result<(Vec<String>, Option<f64>), AmError> {
-        Ok((self.neighbor_texts(item)?, self.prior_age_days(item)?))
-    }
 }
 
 /// Candidate text under test: gist plus snapshot, in that order.
@@ -180,15 +155,11 @@ pub fn candidate_text(item: &MemoryItem) -> String {
 /// # Errors
 /// `factor_unavailable` when a store lookup fails.
 pub fn signals_for(item: &MemoryItem, source: &dyn SignalSource) -> Result<SignalInputs, AmError> {
-    let (neighbors, prior_age_days) = source
-        .neighbor_signals(item)
-        .map_err(as_factor_unavailable)?;
+    let neighbors = source.neighbor_texts(item).map_err(as_factor_unavailable)?;
     Ok(SignalInputs {
         text: candidate_text(item),
         source_type: item.source_type,
         neighbors: Some(neighbors),
-        prior_age_days,
-        recency_unavailable: false,
     })
 }
 

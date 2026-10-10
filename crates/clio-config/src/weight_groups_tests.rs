@@ -93,15 +93,15 @@ fn retrieval_weights_names_the_unknown_key_before_a_missing_one() {
     assert!(!msg.contains("missing field"), "got: {msg}");
 }
 
-/// A five-factor admission group has five weights and its default sums to 1.0.
+/// A four-factor admission group has four weights and its default sums to 1.0.
 #[test]
-fn admission_weights_default_is_five_weights_summing_to_one() {
+fn admission_weights_default_is_four_weights_summing_to_one() {
     let w = AdmissionWeights::default();
     let slice = w.as_slice();
-    assert_eq!(slice.len(), 5, "five factors: {slice:?}");
-    // 0.2 is the literal in the group's default, so five of them are 0.2 * 5.0 = 1.0.
+    assert_eq!(slice.len(), 4, "four factors: {slice:?}");
+    // 0.25 is the literal in the group's default, so four of them are 0.25 * 4.0 = 1.0.
     for (i, v) in slice.iter().enumerate() {
-        assert!((*v - 0.2).abs() < 1e-12, "factor {i} was {v}");
+        assert!((*v - 0.25).abs() < 1e-12, "factor {i} was {v}");
     }
     let sum: f64 = slice.iter().sum();
     assert!((sum - 1.0).abs() < 1e-9, "default sum was {sum}");
@@ -110,7 +110,7 @@ fn admission_weights_default_is_five_weights_summing_to_one() {
 /// The slice helpers keep each factor in its own field, in declaration order.
 #[test]
 fn admission_weights_slice_round_trip_keeps_field_order() {
-    let values = [0.05, 0.1, 0.2, 0.25, 0.4];
+    let values = [0.1, 0.2, 0.3, 0.4];
     let w = AdmissionWeights::from_slice(values);
     for (got, want) in w.as_slice().into_iter().zip(values) {
         assert!(
@@ -123,23 +123,22 @@ fn admission_weights_slice_round_trip_keeps_field_order() {
 /// Position `n` of the slice is factor `w(n+1)`, so a reordering is visible.
 #[test]
 fn admission_weights_from_slice_maps_each_position_to_its_own_factor() {
-    let w = AdmissionWeights::from_slice([0.1, 0.2, 0.3, 0.4, 0.5]);
+    let w = AdmissionWeights::from_slice([0.1, 0.2, 0.3, 0.4]);
     assert!((w.w1 - 0.1).abs() < 1e-12, "w1 was {}", w.w1);
     assert!((w.w2 - 0.2).abs() < 1e-12, "w2 was {}", w.w2);
     assert!((w.w3 - 0.3).abs() < 1e-12, "w3 was {}", w.w3);
     assert!((w.w4 - 0.4).abs() < 1e-12, "w4 was {}", w.w4);
-    assert!((w.w5 - 0.5).abs() < 1e-12, "w5 was {}", w.w5);
 }
 
-/// The five declared factors parse as a patch, in the order they are written.
+/// The four declared factors parse as a patch, in the order they are written.
 #[test]
-fn admission_weights_accepts_a_five_field_payload() {
+fn admission_weights_accepts_a_four_field_payload() {
     let patch: RankingEnvPatch = serde_json::from_value(serde_json::json!({
-        "admission": {"w1": 0.1, "w2": 0.2, "w3": 0.3, "w4": 0.1, "w5": 0.3}
+        "admission": {"w1": 0.1, "w2": 0.2, "w3": 0.3, "w4": 0.4}
     }))
-    .expect("five factors parse");
+    .expect("four factors parse");
     let w = patch.admission.expect("admission present");
-    for (got, want) in w.as_slice().into_iter().zip([0.1, 0.2, 0.3, 0.1, 0.3]) {
+    for (got, want) in w.as_slice().into_iter().zip([0.1, 0.2, 0.3, 0.4]) {
         assert!((got - want).abs() < 1e-12, "parsed {got}, want {want}");
     }
 }
@@ -148,11 +147,22 @@ fn admission_weights_accepts_a_five_field_payload() {
 #[test]
 fn admission_weights_rejects_a_patch_missing_a_factor() {
     let err = serde_json::from_value::<RankingEnvPatch>(serde_json::json!({
-        "admission": {"w1": 0.2, "w2": 0.2, "w3": 0.2, "w4": 0.4}
+        "admission": {"w1": 0.2, "w2": 0.2, "w3": 0.6}
     }))
-    .expect_err("w5 is missing");
+    .expect_err("w4 is missing");
     let msg = err.to_string();
-    assert!(msg.contains("missing field `w5`"), "got: {msg}");
+    assert!(msg.contains("missing field `w4`"), "got: {msg}");
+}
+
+/// A patch that carries the retired recency weight is rejected, not ignored.
+#[test]
+fn admission_weights_rejects_a_retired_weight() {
+    let err = serde_json::from_value::<RankingEnvPatch>(serde_json::json!({
+        "admission": {"w1": 0.2, "w2": 0.2, "w3": 0.3, "w4": 0.2, "w5": 0.1}
+    }))
+    .expect_err("w5 is a retired weight");
+    let msg = err.to_string();
+    assert!(msg.contains("unknown field `w5`"), "got: {msg}");
 }
 
 /// The gate ships with no confidence set, so nothing skips retrieval by default.

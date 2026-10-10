@@ -63,40 +63,42 @@ impl RetrievalWeights {
     }
 }
 
-/// Five-factor admission weights `w1…w5` MUST sum to 1.0 when applied.
+/// Four-factor admission weights `w1…w4` MUST sum to 1.0 when applied.
+///
+/// A key this group does not declare is rejected rather than ignored, so a
+/// weight retired from the blend cannot ride along inside a patch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdmissionWeights {
     pub w1: f64,
     pub w2: f64,
     pub w3: f64,
     pub w4: f64,
-    pub w5: f64,
 }
 
 impl Default for AdmissionWeights {
     fn default() -> Self {
+        // Four factors, one quarter each, so the group sums to 1.0 exactly.
         Self {
-            w1: 0.2,
-            w2: 0.2,
-            w3: 0.2,
-            w4: 0.2,
-            w5: 0.2,
+            w1: 0.25,
+            w2: 0.25,
+            w3: 0.25,
+            w4: 0.25,
         }
     }
 }
 
 impl AdmissionWeights {
-    pub(crate) fn as_slice(&self) -> [f64; 5] {
-        [self.w1, self.w2, self.w3, self.w4, self.w5]
+    pub(crate) fn as_slice(&self) -> [f64; 4] {
+        [self.w1, self.w2, self.w3, self.w4]
     }
 
-    pub(crate) fn from_slice(v: [f64; 5]) -> Self {
+    pub(crate) fn from_slice(v: [f64; 4]) -> Self {
         Self {
             w1: v[0],
             w2: v[1],
             w3: v[2],
             w4: v[3],
-            w5: v[4],
         }
     }
 }

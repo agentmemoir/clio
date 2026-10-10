@@ -24,20 +24,18 @@
 //! Keep this module focused on the admission knob tests.
 
 use super::*;
-use crate::admission_knobs::{CoactivationConstants, default_recency_tau, validate_coactivation};
+use crate::admission_knobs::{CoactivationConstants, validate_coactivation};
 use crate::ranking::{RankingEnv, RankingEnvPatch, preview_patch};
 use clio_types::SemanticCategory;
 use std::collections::HashMap;
 
 #[test]
 fn knob_defaults_follow_appendix() {
-    assert!((DEFAULT_THETA_ADMIT - 0.55).abs() < 1e-9);
-    assert!((DEFAULT_RECENCY_TAU_DAYS - 30.0).abs() < 1e-9);
+    assert!((DEFAULT_THETA_ADMIT - 0.4375).abs() < 1e-9);
     assert!((default_type_prior("persona").unwrap() - 0.90).abs() < 1e-9);
     assert!((default_type_prior("gist").unwrap() - 0.40).abs() < 1e-9);
     assert!(default_type_prior("nope").is_none());
     assert!((prior_for(&HashMap::new(), "unknown-key") - 0.5).abs() < 1e-9);
-    assert!((default_recency_tau() - 30.0).abs() < 1e-9);
     assert_eq!(KNOWN_ADMISSION_KEYS.len(), 11);
 }
 
@@ -79,13 +77,14 @@ fn per_key_overrides_apply() {
         &RankingEnvPatch {
             theta_overrides: Some(HashMap::from([("persona".into(), 0.9)])),
             type_prior_overrides: Some(HashMap::from([("gist".into(), 0.6)])),
-            recency_tau_days: Some(7.0),
             ..RankingEnvPatch::default()
         },
     )
     .expect("overrides");
     assert!((threshold_for(&next.theta_overrides, next.theta_admit, "persona") - 0.9).abs() < 1e-9);
-    assert!((threshold_for(&next.theta_overrides, next.theta_admit, "schema") - 0.55).abs() < 1e-9);
+    assert!(
+        (threshold_for(&next.theta_overrides, next.theta_admit, "schema") - 0.4375).abs() < 1e-9
+    );
     assert!((prior_for(&next.type_prior_overrides, "gist") - 0.6).abs() < 1e-9);
 }
 
@@ -103,10 +102,6 @@ fn rejects_bad_override_keys_values_and_bypass() {
         },
         RankingEnvPatch {
             type_prior_overrides: Some(HashMap::from([("admission_bypass".into(), 0.0)])),
-            ..RankingEnvPatch::default()
-        },
-        RankingEnvPatch {
-            recency_tau_days: Some(0.0),
             ..RankingEnvPatch::default()
         },
     ] {
@@ -141,7 +136,6 @@ fn patch_without_new_knobs_fills_their_defaults() {
     }))
     .expect("coactivation group with omitted bounds is accepted");
     let env = preview_patch(&RankingEnv::system_defaults(), &patch).expect("patch applies");
-    assert!((env.recency_tau_days - 30.0).abs() < 1e-9);
     assert!(env.theta_overrides.is_empty());
     assert!(env.type_prior_overrides.is_empty());
     // New association bounds fall back to their documented defaults.
