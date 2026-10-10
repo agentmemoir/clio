@@ -116,7 +116,6 @@ fn run_failure_scenario() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
-    std::thread::sleep(Duration::from_millis(50));
     drop(state);
     sweeper.join().expect("join failure sweeper");
     embedder.join().expect("join failing embedder");
