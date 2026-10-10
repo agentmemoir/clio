@@ -341,9 +341,8 @@ fn the_explain_trace_carries_the_arm_counter_and_rank() {
     );
 }
 
-/// Drop the wall-clock fields (latency counters and the clock-derived score
-/// factors) so two live calls can be compared; every other key and value,
-/// including the temporal counter and ranks, must still match exactly.
+/// Drop the wall-clock fields; the clock-derived `scores.age_factor` is snapped
+/// to a 1e-12 grid so a one-ULP difference vanishes but a real disagreement survives.
 fn strip_volatile(mut value: Value) -> Value {
     value
         .as_object_mut()
@@ -354,15 +353,16 @@ fn strip_volatile(mut value: Value) -> Value {
         object.remove("score");
         if let Some(scores) = object.get_mut("scores").and_then(Value::as_object_mut) {
             scores.remove("final");
-            scores.remove("age_factor");
+            if let Some(f) = scores.get("age_factor").and_then(Value::as_f64) {
+                scores.insert("age_factor".into(), ((f * 1e12).round() / 1e12).into());
+            }
         }
     }
     value
 }
 
 /// The MCP payload and the in-process surface produce the same full response
-/// for the same store and the same anchored arguments, apart from the two
-/// wall-clock fields.
+/// for the same store and the same anchored arguments, apart from the wall-clock fields.
 #[test]
 fn mcp_and_in_process_surfaces_agree_when_the_arm_runs() {
     let state = seeded_state();

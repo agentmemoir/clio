@@ -64,6 +64,8 @@ import sys
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
+from coverage_policy_prose import allowed, context_of
+
 ROOT = Path(__file__).resolve().parent.parent
 
 #: Where the rule lives. The gate script, and nothing else.
@@ -90,6 +92,15 @@ SCANNED_NAMES = frozenset({"Makefile", "Dockerfile", "justfile"})
 
 #: Files too large to be about a rule, and generated ones.
 SKIP_NAMES = frozenset({"Cargo.lock", "coverage_report_fixture.json"})
+
+#: Files that name every shape this check looks for, so it would find all of
+#: them in them. They are the definition of the rules, not an instance of them.
+SELF_FILES = frozenset(
+    {
+        "scripts/coverage_policy_check.py",
+        "scripts/coverage_policy_selftest.py",
+    }
+)
 
 
 class Finding(NamedTuple):
@@ -167,47 +178,6 @@ LIVE_PHRASES = (
     (r"--fail-under-(?:lines|functions|regions|file-lines)", "a threshold flag"),
 )
 
-#: A line carrying one of these is describing a rule as history, and a rule
-#: described as history is not a rule. This is the heuristic the module
-#: documentation names, and it is deliberately generous: it would rather let a
-#: withdrawal through than refuse a document that explains why a rule went.
-HISTORICAL_MARKERS = (
-    "used to",
-    "no longer",
-    "not used",
-    "removed",
-    "withdrawn",
-    "withdrew",
-    "retired",
-    "deleted",
-    "gone",
-    "was a",
-    "were a",
-    "do not reintroduce",
-    "must not",
-    "never",
-    "deliberately unused",
-    "history",
-    "2026-10-03",
-    "2026-10-04",
-    "it could have been",
-    "exists in",
-    "would be a finding",
-    "the rule this",
-    "second rule",
-    "one rule",
-    "no aggregate",
-    "not planned",
-    "nothing compares",
-    "compared against nothing",
-    "judged by nothing",
-    "is not a rule",
-    "rejected",
-    "reinstates",
-    "removes",
-    "exactly the thing this rule",
-)
-
 
 def candidate_paths(root: Path = ROOT) -> list[Path]:
     """Every file this check reads, in a stable order.
@@ -227,86 +197,6 @@ def candidate_paths(root: Path = ROOT) -> list[Path]:
         if path.name in SCANNED_NAMES or path.suffix in SCANNED_SUFFIXES:
             out.append(path)
     return sorted(out)
-
-
-def paragraphs(text: str) -> list[list[str]]:
-    """The text as paragraphs: runs of consecutive non-blank lines.
-
-    Prose wraps, and a docstring wraps, so the word that makes a sentence a
-    statement about the past is very often not on the line that carries the
-    phrase. Judging line by line would either flag every historical sentence in
-    this repository or force all of them to be reworded to fit a linter, and the
-    second is worse: it edits correct writing to satisfy a heuristic.
-    """
-    out: list[list[str]] = []
-    current: list[str] = []
-    for line in text.splitlines():
-        if line.strip():
-            current.append(line)
-        elif current:
-            out.append(current)
-            current = []
-    if current:
-        out.append(current)
-    return out
-
-
-def context_of(text: str) -> list[str]:
-    """For each line of `text`, the whole paragraph it belongs to, lowercased.
-
-    One entry per line, including the blank ones, so a caller can index this by
-    line number without doing arithmetic. A blank line's own context is itself,
-    which is right: a blank line is the boundary of a paragraph, so nothing about
-    it can excuse a phrase.
-    """
-    lines = text.splitlines()
-    out: list[str] = [""] * len(lines)
-    start: int | None = None
-    for number, line in enumerate(lines):
-        if line.strip():
-            if start is None:
-                start = number
-        elif start is not None:
-            blob = " ".join(item.lower() for item in lines[start:number])
-            for index in range(start, number):
-                out[index] = blob
-            start = None
-    if start is not None:
-        blob = " ".join(item.lower() for item in lines[start:])
-        for index in range(start, len(lines)):
-            out[index] = blob
-    return out
-
-
-#: Denial. A sentence saying a rule is not used, is not to be used, or is not
-#: there is evidence against a live rule whatever else its paragraph says. Matched
-#: as bare substrings because the wording varies too much for a pattern, and a
-#: denial is the common case here: almost every mention of a retired rule in this
-#: repository is somebody writing down that it went.
-DENIAL_MARKERS = ("not ", "nothing ", "never ", "without ", "no ")
-
-
-def allowed(context: str) -> bool:
-    """Whether a line's paragraph says the thing is history or denies it.
-
-    Generous on purpose, and that is a measured trade rather than a hope. Every
-    one of this repository's historical sentences is allowed by one of these, and
-    a check that flagged them would push a reader toward deleting the record of
-    what was removed. The cost is a live rule described in a paragraph that also
-    contains a withdrawal, which this cannot see. It still catches the decisive
-    shapes: a flag handed to the tool, a retired path, a second threshold, a
-    second comparison.
-
-    A second, coarser allowance sits on top of this list. `DENIAL_MARKERS` matches
-    a bare "not", "no", "nothing", "never" or "without" anywhere in the paragraph,
-    because the common case in this repository is a document spending a paragraph
-    on what no longer applies. Without it this check would flag almost every
-    coverage paragraph in `ci.md` and the playbook, and a linter that punishes
-    writing down a removal gets the removal deleted instead.
-    """
-    if any(marker in context for marker in HISTORICAL_MARKERS):
-        return True
-    return any(marker in context for marker in DENIAL_MARKERS)
 
 
 def scan_text(rule: str, rel: str, text: str, patterns: Iterable[tuple[str, str]]) -> list[Finding]:
@@ -370,9 +260,10 @@ def scan(root: Path = ROOT) -> tuple[list[Finding], list[str]]:
 
     for path in candidate_paths(root):
         rel = str(path.relative_to(root))
-        # This file names every shape it looks for, so it would find all of them
-        # in itself. It is the definition of the rules, not an instance of them.
-        if rel == "scripts/coverage_policy_check.py":
+        # These files name every shape the check looks for, so it would find
+        # all of them in them. They are the definition of the rules, not an
+        # instance of them.
+        if rel in SELF_FILES:
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -435,130 +326,6 @@ def scan(root: Path = ROOT) -> tuple[list[Finding], list[str]]:
     return findings, unreadable
 
 
-def self_test() -> int:
-    """The rules, on inputs that cannot drift."""
-    failures = 0
-
-    def expect(name: str, got: object, want: object) -> None:
-        nonlocal failures
-        if got != want:
-            failures += 1
-            print(f"self-test FAIL: {name}: got {got!r}, want {want!r}")
-        else:
-            print(f"self-test ok: {name}")
-
-    def with_files(files: dict[str, str]):
-        """A tree of `files`, as text, checked without touching the real one."""
-        class Fake:
-            def exists(self) -> bool:
-                return False
-
-            def read_text(self, encoding: str = "utf-8") -> str:
-                return ""
-
-        findings: list[Finding] = []
-        for retired in RETIRED_PATHS:
-            if retired in files:
-                findings.append(Finding("a retired mechanism is back", retired, 0, "exists again"))
-        for rel, text in files.items():
-            if rel == "scripts/coverage_policy_check.py":
-                continue
-            findings += scan_text("flag", rel, text, ((THRESHOLD_FLAG.pattern, "flag"),))
-            findings += prose_findings(rel, text)
-            if rel != GATE and not rel.endswith(".rs"):
-                findings += scan_text("floor", rel, text, ((FLOOR_ASSIGNMENT.pattern, "floor"),))
-                findings += scan_text("cmp", rel, text, ((COMPARISON.pattern, "cmp"),))
-        return findings
-
-    # A clean tree is clean. The gate as it stands, with its own comparison.
-    clean = with_files({GATE: f"{EXPECTED_FLOOR}\nif row.lines_pct < floor:\n    pass\n"})
-    expect("a tree holding only the rule is clean", [f.rule for f in clean], [])
-
-    # A threshold flag anywhere is a finding, every family of it.
-    for flag in ("--fail-under-lines", "--fail-under-functions", "--fail-under-file-lines", "--fail-uncovered-regions"):
-        expect(f"{flag} is a finding", bool(with_files({"Makefile": f"cov {flag} 80\n"})), True)
-    expect("a flag inside prose about history is not a finding",
-           bool(with_files({"ci.md": f"It used to carry {chr(96)}--fail-under-lines{chr(96)} 80.\n"})), False)
-
-    # A retired mechanism, by path and by name.
-    expect("a retired path is a finding", bool(with_files({"scripts/coverage_guard.py": ""})), True)
-    expect("a retired floors file is a finding", bool(with_files({"scripts/coverage_floors.json": "{}"})), True)
-
-    # A second threshold, and a second comparison, in a file that is not the gate.
-    expect("a second floor constant is a finding", bool(with_files({"scripts/other.py": "MIN_COVERAGE = 90\n"})), True)
-    expect("a second comparison site is a finding",
-           bool(with_files({"scripts/other.py": "if row.lines_pct >= 80:\n"})), True)
-    expect("the gate's own comparison is not a finding", bool(with_files({GATE: "if row.lines_pct < floor:\n"})), False)
-    expect("a threshold in a makefile is a finding",
-           bool(with_files({"Makefile": "MIN_COVERAGE = 90\n"})), True)
-    expect("a threshold withdrawn in a comment is not a finding",
-           bool(with_files({"Makefile": "# it used to carry --fail-under-lines 80\n"})), False)
-    expect("Rust domain vocabulary is not a coverage threshold",
-           bool(with_files({"crates/clio-retrieve/src/floors.rs": "const FLOOR: f64 = 0.5;\n"})), False)
-    expect("a coverage rule described in a Rust comment is still found",
-           bool(with_files({"crates/a/src/x.rs": "// every file must reach 80% of its functions\n"})), True)
-
-    # Prose. A live phrase is a finding; the same phrase as history is not.
-    live = [
-        ("a changed file must reach 80% of its functions", "functions must reach"),
-        ("the aggregate floor is 80%", "aggregate floor"),
-        ("every file must clear the added-line floor", "added-line floor"),
-        ("see the recorded floors for this file", "recorded floors"),
-        ("run coverage-guard to check", "coverage-guard live"),
-    ]
-    for text, name in live:
-        expect(f"prose reading as a live rule: {name}", bool(with_files({"docs/x.md": text + "\n"})), True)
-    history = [
-        "It used to carry a function floor, which was withdrawn on 2026-10-03.",
-        "The aggregate floor was removed; nothing compares the total now.",
-        "Do not reintroduce --fail-under-regions without a human decision.",
-        "The recorded floors are gone; the file was deleted.",
-        "`coverage-guard` is deleted and must not be reintroduced.",
-        "There is no aggregate requirement and no requirement on untouched files.",
-    ]
-    for text in history:
-        expect(f"prose describing history is not a finding: {text[:44]!r}", bool(with_files({"docs/x.md": text + "\n"})), False)
-
-    # The check exempts itself, because it has to name every shape it looks for.
-    expect("this file is exempt from the prose rule",
-           bool(with_files({"scripts/coverage_policy_check.py": "a function floor appears here\n"})), False)
-
-    # The gate's own two invariants, checked against the real file.
-    try:
-        gate_text = (ROOT / GATE).read_text(encoding="utf-8")
-    except OSError as error:
-        expect("the gate is readable", str(error), "readable")
-        gate_text = ""
-    expect("the gate defines the one threshold exactly once",
-           len(re.findall(r"^LINE_FLOOR\s*=", gate_text, re.MULTILINE)), 1)
-    expect("the gate states the number the rule states", EXPECTED_FLOOR in gate_text, True)
-    expect("the gate holds the one comparison once",
-           len(re.findall(re.escape(EXPECTED_COMPARISON), gate_text)), 1)
-
-    # A git-ignored cache directory holds no rule, so an unreadable file inside
-    # one must not be scanned and must not fail the check.
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = Path(tmp)
-        (tree / "benchmarks" / ".cache").mkdir(parents=True)
-        (tree / "benchmarks" / ".cache" / "blob.json").write_bytes(b"\x8a\x00")
-        (tree / "Makefile").write_text("all:\n")
-        expect(
-            "a git-ignored cache file is not scanned",
-            [path.relative_to(tree).as_posix() for path in candidate_paths(tree)],
-            ["Makefile"],
-        )
-
-    # The real tree, which is the assertion that matters.
-    found, unread = scan()
-    expect("no file this check needs is unreadable", unread, [])
-    expect("the real tree holds one rule", [(f.rule, f.path, f.line) for f in found], [])
-
-    print(f"self-test: {'all passed' if failures == 0 else f'{failures} failed'}")
-    return EXIT_OK if failures == 0 else 1
-
-
 EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_USAGE = 2
@@ -573,6 +340,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--list-scanned", action="store_true", help="print every path this check reads")
     args = parser.parse_args(argv)
     if args.self_test:
+        from coverage_policy_selftest import self_test
+
         return self_test()
     if args.list_scanned:
         for path in candidate_paths():
