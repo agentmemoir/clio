@@ -162,6 +162,15 @@ except ImportError as error:  # pragma: no cover - only when the file is missing
     print(f"scoped-runner: cannot import scripts/owned_tests.py: {error}", file=sys.stderr)
     raise
 
+try:
+    from coverage_codeless_check import offenders
+except ImportError as error:  # pragma: no cover - only when the file is missing
+    print(
+        f"scoped-runner: cannot import scripts/coverage_codeless_check.py: {error}",
+        file=sys.stderr,
+    )
+    raise
+
 OwnedLookupError = owned.ResolutionError
 
 LINE_FLOOR = 80.0
@@ -219,16 +228,12 @@ EXCLUDED_SUFFIXES = ("_tests.rs", "-tests.rs", "tests.rs")
 # measurement: the run reports every measured file above its floor and still exits
 # non-zero, which is what stopped any commit that adds a `mod` to a crate root.
 #
-# Recorded rather than derived, because the property cannot be read off the
-# report. A file with no instrumented region is absent, and absence is also
-# exactly what a scope gap looks like, so the two cannot be told apart from the
-# report alone. Deciding by reading the source would mean modelling enough Rust
-# to know which items emit a counted region and which do not, and being wrong in
-# the permissive direction would turn an unmeasured file into a silent pass. A
-# recorded list is wrong in the other direction: a new such file fails until one
-# line is added, which is loud, visible, and self-correcting. A file holding a
-# function is judged normally, so a crate root that is mostly re-exports but
-# defines one is absent from this list on purpose.
+# The runner decides this from the file's own source, with the same `offenders`
+# parse the checker uses: no function body and no macro means no counted line.
+# Absence from a report cannot decide it on its own, because a scope gap looks
+# the same as a file with no instrumented line; the source can, because it holds
+# the whole file. The recorded list is kept for one release as a cross-check, and
+# a listed file the source now shows as code fails the run.
 CODELESS_KEY = "_no_executable_code"
 
 RAW_PROFILE_HEADER_BYTES = 128
@@ -477,6 +482,38 @@ def load_codeless() -> dict[str, str]:
     return out
 
 
+def has_no_executable_code(rel: str) -> bool:
+    """True when the source at `rel` compiles to no counted line.
+
+    The decision is read from the file, not from a recorded list: a file holds no
+    counted line exactly when its source has no function body and no macro. A
+    file that cannot be read is not codeless, so the safe direction is to judge
+    it; `is_present` handles a deleted file separately.
+    """
+    try:
+        source = (ROOT / rel).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    return not offenders(source)
+
+
+def parse_codeless(files: Iterable[str]) -> set[str]:
+    """The measured files whose own source holds no executable code."""
+    return {rel for rel in files if is_measureable(rel) and has_no_executable_code(rel)}
+
+
+def stale_codeless_entries(
+    files: Iterable[str], codeless: Collection[str], recorded: Collection[str]
+) -> list[str]:
+    """Recorded no-code files whose source now holds code, in file order.
+
+    The record is kept for one release as the rule moves into this runner. A
+    recorded file the source now shows as code is stale: the gate judges it
+    either way, but the entry must go.
+    """
+    return sorted(rel for rel in files if rel in recorded and rel not in codeless)
+
+
 def is_judgeable(rel: str, codeless: Collection[str] = ()) -> bool:
     """True when this file is one a report could hold and must be judged against.
 
@@ -625,7 +662,15 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
     # same case: there is nothing left in it for a report to hold. Left in the
     # judged list, it was reported as a file the run failed to measure, so every
     # scope failed a change that only removed a file.
-    judgeable = [f for f in files if is_judgeable(f, load_codeless()) and is_present(f)]
+    codeless = parse_codeless(files)
+    stale = stale_codeless_entries(files, codeless, load_codeless())
+    if stale:
+        raise RunError(
+            "recorded as holding no executable code, but the source holds code: "
+            f"{', '.join(stale)}; remove the entry from {CODELESS_PATH.name} so "
+            "the gate judges the file"
+        )
+    judgeable = [f for f in files if is_judgeable(f, codeless) and is_present(f)]
     packages = workspace_packages()
     if everything:
         return [p["name"] for p in packages], judgeable, files
@@ -1651,16 +1696,16 @@ def main(argv: list[str]) -> int:
         return EXIT_RUN_ERROR
 
     label = "test" if args.tests_only else "judge"
-    codeless = load_codeless()
-    no_code = [rel for rel in changed if rel in codeless]
+    codeless = parse_codeless(changed)
+    no_code = [rel for rel in changed if rel in codeless and is_present(rel)]
     print(f"scoped-runner: scope={args.scope}")
     print(f"scoped-runner: {len(files)} changed file(s) to {label}")
     if no_code:
         # Printed rather than silently dropped: the gate's contract is that the
-        # reader can see every file the run did not judge. The line says why it
-        # was not judged, and the recorded reason says who decided that.
+        # reader can see every file the run did not judge. The source decided it
+        # holds no counted line, so the run names it and moves on.
         for rel in no_code:
-            print(f"scoped-runner: NO EXECUTABLE CODE {rel}: {codeless[rel]}")
+            print(f"scoped-runner: NO EXECUTABLE CODE {rel}")
     print(f"scoped-runner: {len(packages)} package(s) to run: {', '.join(packages) or '(none)'}")
 
     file_filter = ""
@@ -1875,9 +1920,25 @@ def self_test() -> int:
         True,
     )
     check(
-        "the recorded set is read from the codeless file",
-        "crates/clio-types/src/lib.rs" in load_codeless(),
+        "a crate root with no executable code is exempt by source",
+        has_no_executable_code("crates/clio-types/src/lib.rs"),
         True,
+    )
+    check(
+        "a recorded file that still holds no code is not stale",
+        stale_codeless_entries(
+            ["crates/clio-types/src/lib.rs"],
+            {"crates/clio-types/src/lib.rs"},
+            {"crates/clio-types/src/lib.rs"},
+        ),
+        [],
+    )
+    check(
+        "a recorded file that now holds code is stale",
+        stale_codeless_entries(
+            ["crates/clio/src/lib.rs"], set(), {"crates/clio/src/lib.rs"}
+        ),
+        ["crates/clio/src/lib.rs"],
     )
     check(
         "a crate root that does define functions stays judged",

@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 # precommit-scope: manual
 #
-# It runs the no-code file check and nothing else. That list is the one place a
-# file leaves the coverage rule without a floor, and nothing else in the tree
-# would notice a stale entry, so the check runs here rather than waiting for
-# someone to be told by a gate that had already skipped the file.
+# It runs the no-code file check and nothing else. The runner now decides the
+# property from each file's own source and keeps the recorded list as a
+# cross-check, so this check runs here until the last entries are removed.
 """Hook: every file the coverage gate skips for holding no code still holds none.
 
 `scripts/coverage_codeless.json` records the files whose items are only module
 declarations, `use` statements, type aliases and `const` or `static` values, so
 they compile to no instrumented line and no coverage number can apply to them.
-Fourteen crate roots and one re-exporting module are on the list today.
+The runner decides that property from each file's own source and keeps the record
+as a cross-check while the last entries are removed.
 
-The list is also the only mechanism by which a file escapes the coverage rule
-without a floor, which makes a wrong entry the one defect the gate cannot report
-about itself: it names a skipped file and moves on. A file that has grown a
-function since it was recorded would be measured by nobody and judged by nobody,
-and the run would still be green. `scripts/coverage_codeless_check.py` reads
-every recorded path and fails when one holds a function or a macro that can
-expand to one, and when a recorded path no longer exists.
+A recorded file that has grown a function would leave the record stale, so
+`scripts/coverage_codeless_check.py` reads every recorded path and fails when one
+holds a function or a macro that can expand to one, and when a recorded path no
+longer exists.
 
 The hook takes no files. It runs the check and exits with its status, printing
 one line when the list is sound and the check's own output when it is not. The
