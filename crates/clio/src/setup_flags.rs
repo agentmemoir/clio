@@ -116,9 +116,9 @@ pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>
             if value.starts_with("--") {
                 return Err(format!("--{name} requires a value"));
             }
-            if value.is_empty() {
+            if value.trim().is_empty() {
                 return Err(
-                    crate::cli_error::reject_empty_value(&format!("--{name}"), value)
+                    crate::cli_error::reject_blank_value(&format!("--{name}"), value)
                         .expect_err("an empty value is always refused")
                         .message()
                         .to_owned(),
@@ -134,6 +134,8 @@ pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>
                     .or_insert_with(|| value.clone());
                 continue;
             }
+            crate::cli_error::reject_repeated_flag(&format!("--{name}"), flags.contains_key(name))
+                .map_err(|error| error.message().to_owned())?;
             flags.insert(name.to_owned(), value.clone());
             continue;
         }

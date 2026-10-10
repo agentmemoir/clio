@@ -26,6 +26,7 @@ clio-retrieve = { workspace = true }
 clio-history = { workspace = true }
 clio-hygiene = { workspace = true }
 clio-mcp = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anstyle = { workspace = true }
