@@ -175,7 +175,28 @@ fn ranking_env_set_description_states_the_patch_governs_the_next_retrieval() {
     assert!(description.contains("trust"), "{description}");
     assert!(
         description.contains(
-            "the admission policy and the intent gate stay on the ranking environment fixed at process open"
+            "the admission policy, the intent gate, and the hygiene weights stay on the ranking environment fixed at process open"
+        ),
+        "{description}"
+    );
+}
+
+/// The published `ranking_env_set` sentence names the two patch groups that do
+/// not reach the engine a caller would expect: `hygiene` stays on the
+/// process-open environment, and `coactivation` reaches the hub but not the
+/// retriever's own expansion. Both are accepted and read back, so the
+/// description has to say so.
+#[test]
+fn ranking_env_set_description_names_the_fixed_patch_groups() {
+    let description = def("ranking_env_set").description;
+    assert!(
+        description
+            .contains("the hygiene weights stay on the ranking environment fixed at process open"),
+        "{description}"
+    );
+    assert!(
+        description.contains(
+            "`coactivation` patch reaches the association hub but not the retriever's own query expansion"
         ),
         "{description}"
     );
