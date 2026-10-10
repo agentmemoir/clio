@@ -309,6 +309,9 @@ PLATFORM_SKIPPED: list[str] = []
 Filled as a side effect of the recursive walk and read once by the acceptance
 check. A list threaded through every recursion would obscure the walk for a
 value only the top of it consumes.
+
+Reviewed 2026-10-10 per fix-inline-exceptions: keep. Empty is correct here;
+without it a module compiled only elsewhere would report as unclaimed.
 """
 
 
@@ -318,6 +321,7 @@ def is_support_file(name: str) -> bool:
     A closed list of exactly three suffixes, because the rule is what makes the
     owner rule safe to have an exemption: a shared helper has several users and so
     cannot have one owner, which is harmless only while it holds no test.
+    Enforced by `accept_against_runner` in owned_accept.py; reviewed 2026-10-10.
     """
     return name.endswith(SUPPORT_SUFFIXES)
 

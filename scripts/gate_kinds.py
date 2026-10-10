@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import re
+
+EXIT_USAGE = 2
+EXIT_INTERNAL = 70
+LOG_TAIL_LINES = 12
+#: Terminal formatting, stripped before anything is read out of a tool's help
+#: text. Whether a tool colours its output is the caller's setting, so a value
+#: read from it has to be the same on a CI runner and on a terminal.
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+CARGO_KINDS = {
+    "test": "test",
+    "nextest": "test",
+    "llvm-cov": "coverage",
+    "clippy": "clippy",
+}
+#: The `cargo nextest` subcommands that execute tests. Everything else under
+#: `nextest` is a lookup or a utility -- `list`, `show-config`, `archive`,
+#: `self` -- and nextest takes its subcommand before any flag, so the token after
+#: `nextest` is the whole answer. `r` is nextest's own alias for `run`.
+NEXTEST_EXECUTING_SUBCOMMANDS = frozenset({"run", "r"})
+#: Every `cargo nextest` subcommand the tool advertises, aliases included, read
+#: off its own `cargo nextest --help` at 0.9.146. This is not a list of options
+#: that take a value, which is what an earlier version of this file carried and
+#: which drifts every time the tool grows an option: the walk below needs to
+#: recognise a subcommand, not to know which option swallowed the token in front
+#: of it. A token that is not one of these is either an option's value or an
+#: argument, and both are skipped, so an option this file has never heard of
+#: cannot hide the subcommand behind it. A self-test compares this against the
+#: installed tool, so a subcommand added upstream fails a check.
+NEXTEST_KNOWN_SUBCOMMANDS = frozenset(
+    {"list", "run", "r", "bench", "b", "archive", "show-config", "self", "help"}
+)
+#: The kind a non-executing `cargo nextest` subcommand is stored and published
+#: under. It used to be `test`, because `CARGO_KINDS` maps the tool rather than
+#: what the tool was asked to do, and that is what let the pre-commit hook which
+#: compares the test lookup against the runner's own list of tests overwrite the
+#: real test verdict and stand in for it. A reader could not tell a listing from
+#: a run, the exit code of a lookup was served as the test result, and the log
+#: tail printed on a failure came from the wrong command entirely. A verdict is
+#: only readable if it names the command that produced it.
+NEXTEST_LOOKUP_KIND = "nextest-lookup"
+#: The `cargo llvm-cov` subcommands that produce a coverage report, read off its
+#: own `cargo llvm-cov --help` at 0.9.0. `test`, `run` and `nextest` run something
+#: and measure it; `report` measures the data an earlier run left behind.
+LLVM_COV_REPORTING_SUBCOMMANDS = frozenset({"test", "run", "report", "nextest"})
+#: Every `cargo llvm-cov` subcommand the tool advertises. The set has the same job
+#: here that `NEXTEST_KNOWN_SUBCOMMANDS` has there: the walk below needs to
+#: recognise a subcommand, not to know which option swallowed the token in front
+#: of it, so an option added upstream cannot hide the subcommand behind it.
+LLVM_COV_KNOWN_SUBCOMMANDS = frozenset(
+    {"test", "run", "report", "show-env", "clean", "nextest"}
+)
+#: The kind a `cargo llvm-cov` invocation that measures nothing is stored and
+#: published under. `CARGO_KINDS` maps the tool rather than what it was asked to
+#: do, and that is what let a version or environment probe publish under the
+#: `coverage` kind and overwrite a real coverage log: the reader was handed the
+#: exit code of a probe as the coverage result. A verdict is only readable if it
+#: names the command that produced it.
+LLVM_COV_LOOKUP_KIND = "llvm-cov-lookup"
+#: The flags that ask the tool to describe itself rather than measure anything.
+#: They stand in for a subcommand, because `cargo llvm-cov --version` carries
+#: none, and a bare `cargo llvm-cov` is `cargo llvm-cov test` in every way the
+#: gate cares about.
+LLVM_COV_PROBE_FLAGS = frozenset({"--version", "-V", "--help", "-h"})
+MAKE_KINDS = {
+    # `ritual` is the cheap local gate: the format check and the workspace-wide
+    # clippy. It runs no test and judges no coverage, so a stored verdict for it
+    # is safe to replay in a way a stored test verdict is not. It is listed here
+    # so its verdict publishes under a stable kind rather than the generic
+    # `make`, which is what the procedure files read out of logs/.
+    # `verify` was the previous name for a gate that ran all four checks. It was
+    # never in this table, so it was never cached and never published, which made
+    # every stage file's claim that the wrapper covered it false. Both names were
+    # checked when the target was renamed; this comment exists so the next
+    # rename does not repeat it.
+    "ritual": "ritual",
+    "check": "check",
+    "test": "test",
+    "lint": "lint",
+    "coverage": "coverage",
+    "cov": "coverage",
+    # A distinct kind from `coverage`, so a replayed verdict is never reported
+    # as the full-workspace gate. `coverage-fast` judges only the changed files,
+    # and its scope depends on the diff, which is part of the fingerprint.
+    "coverage-fast": "coverage-fast",
+    # Each of these is a distinct kind too, and for the same reason as
+    # `coverage-fast` plus one more: they all used to publish under the plain
+    # `coverage` name, so the log a reader is sent to after one of them ran held
+    # that one's output instead of the coverage run's, and a report derived from
+    # a report was indistinguishable from the report. A verdict is only readable
+    # if it names the command that produced it. `cov` is left as an alias of
+    # `coverage` because it asks for the same thing under a shorter name.
+    "coverage-clean": "coverage-clean",
+    "coverage-html": "coverage-html",
+    "coverage-lcov": "coverage-lcov",
+    "coverage-open": "coverage-open",
+    # Measures one package into an instrumented directory of its own, and
+    # judges nothing. A distinct kind for the same reason as `coverage-fast`: a
+    # replayed verdict published under `coverage` would read as the
+    # whole-workspace gate, and this is the opposite of that. The name contains
+    # `coverage` on purpose, because that is what makes the self-test's coverage
+    # registration assertion apply to it: that a target with `coverage` in its
+    # name publishes a registered coverage kind. The other assertion reads every
+    # key here, so this one is dispatched by the shim whatever it is called. A
+    # diagnostic missing either would be neither cached, locked nor published
+    # while looking like a target that had them.
+    "coverage-package": "coverage-package",
+}
+#: Every kind that produces or consumes a coverage report, which is what a clean
+#: has to discard: a report measures a build, and a clean removes the build, so a
+#: stored verdict for one of these describes a tree that no longer exists. A kind
+#: missing from here survives that clean, and its replay then serves a verdict
+#: measured against a build that is gone.
+#:
+#: Registered does not mean this file owns that kind's report, and for most of
+#: this set it does not. What a coverage kind saves is the single path
+#: `COVERAGE_ARTIFACT` names, because a make target's argument vector never
+#: carries `--output-path` -- the recipe that would hold it is inside the
+#: Makefile, not in the command the wrapper is handed. Only `make coverage` writes
+#: that path. The scoped gate writes a report of its own, a package run writes one
+#: named after the package, and the lcov and html targets write neither, so for
+#: those kinds this set buys the clean, the lock and the published log rather than
+#: an artifact of their own.
+COVERAGE_KINDS = frozenset(
+    {
+        "coverage",
+        "coverage-fast",
+        "coverage-clean",
+        "coverage-html",
+        "coverage-lcov",
+        "coverage-open",
+        "coverage-package",
+    }
+)
+SCOPED_KINDS = {"test", "clippy"}
+#: The two values the scoping switch has. It is a switch rather than a dial, so
+#: only these are named: an unrecognised value behaves as the default does, and
+#: the cache key records the side of the switch a command ran on rather than the
+#: spelling used to say it.
+GATE_SCOPE_DEFAULT = "quick"
+GATE_SCOPE_OFF = "off"
+#: The environment values that change what a command does, and so belong in the
+#: cache key. This is an allowlist on purpose: hashing the whole environment
+#: would put a timestamp or a shell session id in the key and every run would
+#: miss. Each entry has to earn its place, because an entry that is missing
+#: gives two different commands one stored verdict. A value read here to decide
+#: what runs, and missing from this tuple, is the defect this file once had; a
+#: self-test checks the two lists against each other.
+ENV_KEYS = (
+    "CARGO_BUILD_JOBS",
+    "CARGO_INCREMENTAL",
+    "CLIO_DEPLOYMENT_CONFIG",
+    "CLIO_DATABASE_URL",
+    "NEXTEST_PROFILE",
+    "PROFILE",
+    "RUSTC_WRAPPER",
+    "RUSTFLAGS",
+    # The two the scoping code below reads. Both change what runs while leaving
+    # the argument vector untouched, which is exactly the shape of a key that is
+    # too coarse: `PACKAGES` set in the environment makes `_scope_make` hand the
+    # command back unrewritten, so `make test` with one package list and `make
+    # test` with another were the same command line and shared one entry. The
+    # second run was told the first run's exit code.
+    "GATE_SCOPE",
+    "PACKAGES",
+)
+#: Environment values this file reads that are deliberately not in the key, each
+#: with the reason it cannot change what a command does. Anything read to decide
+#: what runs belongs in `ENV_KEYS`; a self-test parses this file's own source
+#: and fails on a name that is in neither list.
+#: Reviewed 2026-10-10 per fix-inline-exceptions, keep: read-but-unhashed env values guarded by the env-read self-test.
+ENV_KEY_EXEMPT = {
+    "XDG_CACHE_HOME": "chooses where the cache is kept, not what runs",
+    "PATH": "a stored failure from another PATH is re-run rather than replayed",
+    "GATE_FORCE": "decides only whether to consult the cache, and setting it skips it",
+}
+COVERAGE_ARTIFACT = "target/coverage/coverage.json"
+#: The version salt mixed into every cache key. Bump it whenever the key stops
+#: meaning what it meant, so an entry written under the old scheme cannot be read
+#: back as if it had been written under the new one. Bazel calls this the action
+#: cache salt and ccache the namespace; both use it the same way.
+#:
+#: v3 moved a `cargo llvm-cov` probe out of the `coverage` kind. An entry stored
+#: before that was keyed on a kind the tool no longer publishes under, and it
+#: would otherwise be readable as a coverage verdict.
+KEY_SCHEME = b"clio-gate-v3\0"
+USAGE = "usage: gate.py run [--force] [--log-dir DIR] -- CMD ARGS... | gate.py --self-test"
