@@ -37,6 +37,14 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut it = args.into_iter();
     let sub = it.next().unwrap_or_default();
     let collected: Vec<String> = it.collect();
+    // A help spelling where a subcommand belongs asks for the list of
+    // subcommands, the way `clio mcp --help` and `clio ops --help` answer. This
+    // runs before the parser, because `--help` is otherwise read as the
+    // subcommand name and refused as an unknown retention command.
+    if matches!(sub.as_str(), "help" | "--help" | "-h") {
+        print_retention_help();
+        return ExitCode::SUCCESS;
+    }
     // `--help` was never read here: `retention get --help` ran the command and
     // reported the retention store missing, and `retention schema --help` printed
     // the whole JSON schema. Both answered a different question than the one asked.
@@ -76,6 +84,20 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
 
 /// The retention subcommands, in the order `clio retention --help` lists them.
 const RETENTION_SUBCOMMANDS: &[&str] = &["get", "set", "schema"];
+
+/// The `clio retention` subcommands, one usage line each.
+///
+/// This is the screen `clio retention --help` and `clio help retention` print;
+/// a subcommand's own flags stay behind `clio retention <subcommand> --help`.
+fn print_retention_help() {
+    for command in ["retention get", "retention set", "retention schema"] {
+        println!(
+            "{}",
+            crate::cli_help_surfaces::wrapped_usage(command, 78, 0).join("\n")
+        );
+    }
+    println!("Ask a subcommand for its flags with `clio retention <subcommand> --help`.");
+}
 
 /// The flags each `clio retention` subcommand accepts. Any other flag is a usage
 /// error, so a typo cannot silently fall back to the default bank or store.
