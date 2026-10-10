@@ -348,6 +348,12 @@ clean-models:
 # minutes; this is the fast loop you run while working, and it deliberately
 # stays out of the branch gate so a failing hook cannot block an unrelated fix.
 #
+# `make precommit` runs the commit-scoped hooks over every tracked file. The hooks
+# marked `precommit-scope: manual` are left out of it, because each of them runs
+# in CI as a step of its own. `python3 scripts/precommit.py` runs every hook,
+# manual ones included, and `make precommit-list` shows which hooks `make
+# precommit` runs and which it leaves out.
+#
 # The hook set is data, not code in this file. scripts/precommit.py finds every
 # hook in hooks.d/ (tracked), in .clio-hooks/ (git-ignored, machine-local), and
 # in whatever CLIO_PRECOMMIT_HOOKS names, then runs them. Adding a check to this
@@ -357,10 +363,10 @@ clean-models:
 # stored verdict for an unchanged tree, and a hook that goes green from a cache
 # tells you nothing about the tree in front of you.
 precommit:
-	python3 scripts/precommit.py
+	python3 scripts/precommit.py --commit --all-files
 
 precommit-list:
-	python3 scripts/precommit.py --list
+	python3 scripts/precommit.py --commit --list
 
 # --- coverage (requires: cargo install cargo-llvm-cov nextest; rustup component add llvm-tools-preview) ---
 
@@ -586,7 +592,7 @@ coverage-package:
 # out which file to open. `span_verify.py` is not
 # machinery: it is the reference span-grounding check that `extract_quality.py`
 # imports, and running it directly executes the self-check in its `__main__`.
-# `test_phase_timer.py` and `test_precommit.py` are suites for the phase timer
+# `test_phase_timer.py` and the `test_precommit*.py` files are suites for the phase timer
 # and the pre-commit runner. `coverage_surface_check.py` reads the coverage
 # commands in this Makefile, the workflows and the gate's own two command
 # builders, and refuses a shape that could no longer measure one run and report it
@@ -626,6 +632,9 @@ scripts-check-phase-timer:
 
 scripts-check-precommit:
 	python3 scripts/test_precommit.py
+	python3 scripts/test_precommit_scopes.py
+	python3 scripts/test_precommit_shim.py
+	python3 scripts/test_precommit_all_files.py
 
 # Whether the coverage surface can still measure one run and report it once. The
 # run is split into a test step and a report step so the gate owns a boundary in
