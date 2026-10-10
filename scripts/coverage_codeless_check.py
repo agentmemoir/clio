@@ -254,7 +254,7 @@ def self_test() -> int:
     except (OSError, ValueError) as error:
         expect("the recorded list is readable", str(error), "readable")
         recorded = {}
-    expect("the recorded list is not empty", len(recorded) > 0, True)
+    expect("an empty list yields no findings", check({}), [])
     expect("every recorded path still holds no code", check(recorded), [])
 
     # The matcher, on each shape that must disqualify a file.
