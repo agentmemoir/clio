@@ -17,10 +17,13 @@ const BANK: &str = "mock-bank";
 const TS: &str = "2024-01-01T00:00:00Z";
 
 fn seed_state() -> Arc<McpState> {
-    let state = McpState::open(&McpOpenOptions {
-        default_bank: BANK.into(),
-        ..McpOpenOptions::default()
-    })
+    let state = McpState::open_with_effective(
+        &McpOpenOptions {
+            default_bank: BANK.into(),
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("state");
     // Distinct gists per id: a shared one is an exact duplicate, and the
     // unconditional write-side rule refuses the second store.

@@ -24,20 +24,26 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 pub(crate) fn shared_state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        shared_bank_enabled: true,
-        ..McpOpenOptions::default()
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            shared_bank_enabled: true,
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("shared state")
 }
 
 /// State whose admission threshold rejects every candidate (θ > 1.0).
 pub(crate) fn rejecting_state() -> Arc<McpState> {
-    let mut state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut state =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("state");
     Arc::get_mut(&mut state).expect("single owner").env = clio_config::ranking::RankingEnv {
         theta_admit: 1.1,
         ..clio_config::ranking::RankingEnv::system_defaults()

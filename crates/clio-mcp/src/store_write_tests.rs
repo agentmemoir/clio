@@ -66,7 +66,8 @@ fn an_item_needs_a_gist_or_a_snapshot() {
 #[test]
 fn a_repeated_store_is_refused_as_not_ok_and_a_dry_run_keeps_its_verdict() {
     use crate::runtime::McpOpenOptions;
-    let s = McpState::open(&McpOpenOptions::default()).expect("state");
+    let s = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     let args = json!({
         "item": {
             "id": "itm-dup-1", "subject_id": "subj-dup", "gist": "terse dup answers",

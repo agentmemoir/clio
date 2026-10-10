@@ -43,9 +43,9 @@ pub(crate) struct RetentionStoreFixture {
 }
 
 impl RetentionStoreFixture {
-    /// Adopt a state opened with [`McpState::open`].
+    /// Adopt a state opened hermetic, with no ambient configuration.
     pub(crate) fn open(options: &McpOpenOptions) -> Self {
-        Self::adopt(McpState::open(options).expect("state"))
+        Self::adopt(McpState::open_with_effective(options, &serde_json::json!({})).expect("state"))
     }
 
     /// Adopt a state opened with [`McpState::open_with_effective`].

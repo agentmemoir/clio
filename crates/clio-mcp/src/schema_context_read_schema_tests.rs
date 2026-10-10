@@ -26,7 +26,8 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -202,7 +203,7 @@ fn inspect_survives_undecryptable_ciphertext_rows() {
         kms_path: Some(dir.join("first.kms.json")),
         ..McpOpenOptions::default()
     };
-    let first = McpState::open(&opts).expect("first state");
+    let first = McpState::open_with_effective(&opts, &serde_json::json!({})).expect("first state");
     store_item(&first, "itm-no-dek", "subj-no-dek", Some("lost one"));
     store_item(&first, "itm-tampered", "subj-tampered", Some("lost two"));
     store_item(
@@ -220,7 +221,8 @@ fn inspect_survives_undecryptable_ciphertext_rows() {
         kms_path: Some(dir.join("second.kms.json")),
         ..opts
     };
-    let second = McpState::open(&second_opts).expect("second state");
+    let second =
+        McpState::open_with_effective(&second_opts, &serde_json::json!({})).expect("second state");
     second
         .kms
         .encrypt("subj-tampered", b"mint a new DEK")

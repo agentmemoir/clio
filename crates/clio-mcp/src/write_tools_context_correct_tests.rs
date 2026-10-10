@@ -27,7 +27,8 @@ use std::sync::Arc;
 const SECRET_CONTEXT: &str = "raw-context-must-never-be-echoed";
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]

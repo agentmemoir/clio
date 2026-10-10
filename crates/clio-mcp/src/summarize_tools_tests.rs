@@ -30,7 +30,8 @@ use clio_write::{ExtractCandidate, ExtractRequest, Transport};
 use serde_json::{Value, json};
 
 fn state() -> std::sync::Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 /// Store one admitted item with a snapshot through the real MCP write path.

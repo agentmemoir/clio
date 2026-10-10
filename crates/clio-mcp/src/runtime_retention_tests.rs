@@ -109,7 +109,9 @@ fn set_retention_path_persists_and_reloads() {
         .as_nanos();
     let path = std::env::temp_dir().join(format!("am-mcp-retention-{nanos}.json"));
 
-    let mut writer = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut writer =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("state");
     Arc::get_mut(&mut writer)
         .expect("unique state")
         .set_retention_path(path.clone());
@@ -124,7 +126,9 @@ fn set_retention_path_persists_and_reloads() {
         .expect("set");
     assert!(persisted);
 
-    let mut reader = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut reader =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("state");
     Arc::get_mut(&mut reader)
         .expect("unique state")
         .set_retention_path(path.clone());
@@ -169,7 +173,8 @@ fn failed_persist_rolls_back_the_in_memory_store() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).expect("dir");
-    let mut s = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut s = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     Arc::get_mut(&mut s)
         .expect("unique state")
         .set_retention_path(dir.clone());
@@ -206,7 +211,8 @@ fn successful_persist_keeps_the_stored_change() {
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("am-mcp-retention-ok-{nanos}"));
     std::fs::create_dir_all(&dir).expect("dir");
-    let mut s = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut s = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     Arc::get_mut(&mut s)
         .expect("unique state")
         .set_retention_path(dir.join("profiles.json"));
