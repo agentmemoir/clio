@@ -46,13 +46,13 @@ pub(crate) fn persona_put_stable(state: &McpState, args: &Value) -> Result<Value
         confidence: opt_num(args, "confidence"),
         source: opt_str(args, "source"),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
+        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
         signal_source: &signals,
         admission_sink: &StderrSinks,
         persona_sink: &StderrSinks,
         budget_tokens: state.budget_tokens,
         timestamp: &ts,
-        dry_run: opt_bool(args, "dry_run", false),
+        dry_run: opt_bool(args, "dry_run", false)?,
     };
     match clio_persona::persona_put_stable(&p_args)? {
         clio_persona::PersonaPutStableOutcome::Admitted {
@@ -97,7 +97,7 @@ pub(crate) fn persona_observe(state: &McpState, args: &Value) -> Result<Value, A
         confidence: opt_num(args, "confidence"),
         source: opt_str(args, "source"),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
+        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
         signal_source: &signals,
         admission_sink: &StderrSinks,
         continuous_sink: &StderrSinks,
@@ -153,12 +153,12 @@ pub(crate) fn task_upsert(state: &McpState, args: &Value) -> Result<Value, AmErr
         status: req_str(args, "status")?,
         context: context.as_deref(),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
+        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
         signal_source: &signals,
         admission_sink: &StderrSinks,
         sink: &StderrSinks,
         timestamp: &ts,
-        dry_run: opt_bool(args, "dry_run", false),
+        dry_run: opt_bool(args, "dry_run", false)?,
     };
     match clio_history::task_upsert(&t_args)? {
         clio_history::TaskUpsertOutcome::Stored { record, decision } => Ok(json!({
@@ -205,13 +205,13 @@ pub(crate) fn failure_record(state: &McpState, args: &Value) -> Result<Value, Am
         lesson: req_str(args, "lesson")?,
         context: context.as_deref(),
         evidence_ref: opt_str(args, "evidence_ref"),
-        policy: gated_write_policy(state, ctx.bank.as_str(), args),
+        policy: gated_write_policy(state, ctx.bank.as_str(), args)?,
         history_policy: &state.history_policy,
         signal_source: &signals,
         admission_sink: &StderrSinks,
         sink: &StderrSinks,
         timestamp: &ts,
-        dry_run: opt_bool(args, "dry_run", false),
+        dry_run: opt_bool(args, "dry_run", false)?,
     };
     match clio_history::failure_record(&f_args)? {
         clio_history::FailureRecordOutcome::Stored { record, decision } => Ok(json!({
