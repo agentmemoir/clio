@@ -11,7 +11,8 @@ use serde_json::json;
 use std::sync::Arc;
 
 fn handler() -> (McpHandler, Arc<McpState>) {
-    let state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     let handler = McpHandler::new(Arc::clone(&state));
     (handler, state)
 }

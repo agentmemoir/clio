@@ -29,7 +29,8 @@ use std::sync::Arc;
 /// Serve through the real `serve_with_listener` in a background thread; the
 /// tests drive the production accept loop, not a test-local re-implementation.
 pub(crate) fn spawn_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
-    let state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     let handler = Arc::new(McpHandler::new(Arc::clone(&state)));
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();

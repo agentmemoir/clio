@@ -154,9 +154,12 @@ pub(crate) fn run_write_open(cmd: &str, args: &[&str], is_tty: bool) -> (ExitCod
 /// State with the shared-bank surface enabled (the CLI's `--shared-bank`
 /// opt-in) so the shared verbs pass the deployment gate in tests.
 pub(crate) fn shared_state() -> Arc<clio_mcp::runtime::McpState> {
-    clio_mcp::runtime::McpState::open(&clio_mcp::runtime::McpOpenOptions {
-        shared_bank_enabled: true,
-        ..clio_mcp::runtime::McpOpenOptions::default()
-    })
+    clio_mcp::runtime::McpState::open_with_effective(
+        &clio_mcp::runtime::McpOpenOptions {
+            shared_bank_enabled: true,
+            ..clio_mcp::runtime::McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("shared state")
 }

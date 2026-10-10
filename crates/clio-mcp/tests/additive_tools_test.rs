@@ -27,14 +27,17 @@ use std::sync::Arc;
 fn handler(shared: bool) -> Arc<McpHandler> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let state = McpState::open(&McpOpenOptions {
-        backend: "sqlite".into(),
-        database_url: format!("/tmp/am-additive-{}-{n}-{shared}.db", std::process::id()),
-        default_bank: "bank-a".into(),
-        default_actor: clio_types::Actor::Agent,
-        shared_bank_enabled: shared,
-        kms_path: None,
-    })
+    let state = McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "sqlite".into(),
+            database_url: format!("/tmp/am-additive-{}-{n}-{shared}.db", std::process::id()),
+            default_bank: "bank-a".into(),
+            default_actor: clio_types::Actor::Agent,
+            shared_bank_enabled: shared,
+            kms_path: None,
+        },
+        &serde_json::json!({}),
+    )
     .expect("state");
     Arc::new(McpHandler::new(state))
 }

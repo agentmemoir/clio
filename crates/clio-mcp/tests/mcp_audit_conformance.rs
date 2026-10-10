@@ -28,10 +28,13 @@ const BANK: &str = "audit-conf";
 const TS: &str = "2024-01-01T00:00:00Z";
 
 fn fresh_state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions {
-        default_bank: BANK.into(),
-        ..McpOpenOptions::default()
-    })
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            default_bank: BANK.into(),
+            ..McpOpenOptions::default()
+        },
+        &serde_json::json!({}),
+    )
     .expect("state")
 }
 

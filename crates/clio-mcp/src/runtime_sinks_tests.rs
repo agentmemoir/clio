@@ -29,7 +29,8 @@ use serde_json::json;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 fn signals_for(s: &McpState) -> StoreSignals {

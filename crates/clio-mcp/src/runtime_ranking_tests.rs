@@ -35,7 +35,8 @@ use std::sync::Arc;
 
 /// A state over an isolated in-memory store, the way the runtime opens one.
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 fn item(id: &str, bank: &str) -> MemoryItem {

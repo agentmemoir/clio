@@ -56,7 +56,8 @@ fn seed_subject(state: &McpState, bank: &str, id: &str, gist: &str, subject: &st
 
 /// In-memory state with one readable and one crypto-shredded candidate.
 fn state_with_shredded_candidate() -> Arc<McpState> {
-    let state = McpState::open(&McpOpenOptions::default()).expect("state");
+    let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state");
     seed_subject(&state, "bank-a", "itm-ok", "alpha readable", "subj-ok");
     seed_subject(
         &state,

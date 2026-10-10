@@ -132,8 +132,9 @@ fn mcp_stdio_serves_then_eof() {
     // inherited process stdin (`run` would lock the real stdin). The
     // explicit DB keeps the test independent of the host environment.
     let handler = clio_mcp::protocol::McpHandler::new(
-        clio_mcp::runtime::McpState::open(
+        clio_mcp::runtime::McpState::open_with_effective(
             &mcp_options(["--db", "sqlite::memory:"].map(str::to_owned)).expect("options"),
+            &serde_json::json!({}),
         )
         .expect("state"),
     );

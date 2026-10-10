@@ -14,7 +14,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
-    McpState::open(&McpOpenOptions::default()).expect("state")
+    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+        .expect("state")
 }
 
 fn clio_bin() -> Command {
@@ -335,7 +336,9 @@ fn retention_profile_strictness_applies_across_a_restart() {
     drop(writer);
 
     // A fresh MCP runtime loads the persisted file: the bank is strict again.
-    let mut strict = McpState::open(&McpOpenOptions::default()).expect("state");
+    let mut strict =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("state");
     Arc::get_mut(&mut strict)
         .expect("unique state")
         .set_retention_path(file);
