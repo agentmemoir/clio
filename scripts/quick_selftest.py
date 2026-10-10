@@ -289,6 +289,29 @@ class RunTests(unittest.TestCase):
             quick.parse([])
 
 
+class SchemaCheckTests(unittest.TestCase):
+    def test_it_runs_first_only_when_the_change_touches_clio_mcp(self) -> None:
+        with mock.patch.object(quick.subprocess, "run") as run:
+            self.assertEqual(quick.schema_check(["crates/clio-store/src/a.rs"]), 0)
+            run.assert_not_called()
+            run.return_value.returncode = 1
+            self.assertEqual(quick.schema_check(["crates/clio-store/src/a.rs", "crates/clio-mcp/src/b.rs"]), 1)
+            self.assertEqual(run.call_args.args[0][-1], str(quick.SCHEMA_CHECK))
+
+    def test_a_failed_schema_check_stops_the_run_before_any_test(self) -> None:
+        args = quick.parse(["--base", "b"])
+        with mock.patch.object(quick.runner, "resolve_ref", return_value="x"), mock.patch.object(
+            quick.runner, "changed_files", return_value=["crates/clio-mcp/src/b.rs"]
+        ), mock.patch.object(quick.runner, "is_present", return_value=True), mock.patch.object(
+            quick.runner, "workspace_packages", return_value=[]
+        ), mock.patch.object(quick, "select", return_value=quick.Selection([Term("p")], [])), mock.patch.object(
+            quick, "schema_check", return_value=1
+        ), mock.patch.object(quick, "run_selection") as run_tests, mock.patch.object(quick, "newest_history", return_value=[]):
+            with mock.patch("builtins.print"):
+                self.assertEqual(quick.run(args), 1)
+        run_tests.assert_not_called()
+
+
 class ProfileTests(unittest.TestCase):
     def test_the_quick_profile_stops_early_never_retries_and_keeps_the_thread_cap(self) -> None:
         config = tomllib.loads((runner.ROOT / ".config" / "nextest.toml").read_text())

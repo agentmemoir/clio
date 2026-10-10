@@ -57,6 +57,7 @@ HISTORY = [
     QUICK_JUNIT,
 ]
 NO_CHANGE = "quick: no changed Rust file"
+SCHEMA_CHECK = runner.ROOT / "scripts" / "schema_args_check.py"
 
 Lookup = Callable[[str], "owned.OwnedSelection"]
 
@@ -166,6 +167,13 @@ def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
     return lines
 
 
+def schema_check(files: Sequence[str]) -> int:
+    """Run the static schema check first when the change touches `clio-mcp`; its exit code."""
+    if not any(rel.startswith("crates/clio-mcp/") for rel in files):
+        return 0
+    return subprocess.run([sys.executable, str(SCHEMA_CHECK)], cwd=runner.ROOT).returncode
+
+
 def nextest(packages: Sequence[str], expression: str, extra: Sequence[str] = ()) -> int:
     """Run `expression` over `packages`. Without `-p`, cargo builds and runs only the
     workspace's default member, so the packages must be named."""
@@ -229,7 +237,9 @@ def run(args: argparse.Namespace) -> int:
         print(plan_json(selection, files))
         return runner.EXIT_OK
     print("\n".join(plan_lines(selection, history)), flush=True)
-    return runner.EXIT_OK if args.plan else run_selection(selection, args.retry_failed)
+    if args.plan:
+        return runner.EXIT_OK
+    return schema_check(files) or run_selection(selection, args.retry_failed)
 
 
 def main(argv: Sequence[str]) -> int:
