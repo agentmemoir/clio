@@ -30,7 +30,7 @@ use clio_store::SslChoice;
 /// Addresses the wizard must accept unchanged.
 const ACCEPTED: &[&str] = &[
     "postgres://u:p@h:5432/db",
-    "postgresql://u:p@h:5432/db?sslmode=require",
+    "postgresql://u:p@h:5432/db?sslmode=verify-full",
     "postgres://u:p@h1:5432,h2:5432/db",
     "postgres://u:a%20b%26c@h:5432/db",
     "postgres://u:p@db.example.com/memoir",
@@ -43,7 +43,7 @@ fn a_plain_address_is_accepted() {
 
 #[test]
 fn the_postgresql_spelling_is_accepted() {
-    assert!(check_connection("postgresql://u:p@h:5432/db?sslmode=require").is_ok());
+    assert!(check_connection("postgresql://u:p@h:5432/db?sslmode=verify-full").is_ok());
 }
 
 #[test]
@@ -81,14 +81,16 @@ fn an_address_with_no_host_is_refused() {
 }
 
 #[test]
-fn verify_full_in_an_address_is_refused_with_a_reason() {
-    let error = check_connection("postgres://u:p@h:5432/db?sslmode=verify-full")
-        .expect_err("this store cannot honour verify-full");
+fn verify_full_in_an_address_is_accepted() {
+    assert!(check_connection("postgres://u:p@h:5432/db?sslmode=verify-full").is_ok());
+}
+
+#[test]
+fn require_in_an_address_is_refused_with_the_modes_to_use_instead() {
+    let error = check_connection("postgres://u:p@h:5432/db?sslmode=require")
+        .expect_err("require is not offered");
     assert!(error.contains("verify-full"), "{error}");
-    assert!(
-        error.contains("require") || error.contains("prefer"),
-        "says what to use instead: {error}"
-    );
+    assert!(error.contains("encrypt-no-verify"), "{error}");
 }
 
 #[test]
@@ -96,6 +98,10 @@ fn verify_ca_in_an_address_is_refused() {
     let error = check_connection("postgres://u:p@h:5432/db?sslmode=verify-ca")
         .expect_err("this store cannot honour verify-ca");
     assert!(error.contains("verify-ca"), "{error}");
+    assert!(
+        error.contains("sslrootcert"),
+        "names the option that would work: {error}"
+    );
 }
 
 #[test]
@@ -259,7 +265,7 @@ fn an_endpoint_with_no_host_is_refused() {
 
 #[test]
 fn a_remote_host_defaults_to_require() {
-    assert_eq!(default_ssl_for("db.example.com"), SslChoice::Require);
+    assert_eq!(default_ssl_for("db.example.com"), SslChoice::VerifyFull);
 }
 
 #[test]
@@ -270,7 +276,7 @@ fn a_loopback_host_defaults_to_prefer() {
 
 #[test]
 fn an_empty_host_is_treated_as_remote() {
-    assert_eq!(default_ssl_for(""), SslChoice::Require);
+    assert_eq!(default_ssl_for(""), SslChoice::VerifyFull);
 }
 
 #[test]

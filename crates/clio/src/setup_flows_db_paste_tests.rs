@@ -29,7 +29,8 @@ use crate::setup_preview_fixtures::{Harness, SERVICES};
 
 #[test]
 fn the_paste_route_keeps_the_address_exactly_as_given() {
-    let address = "postgres://clio:pw@db.example.com:5432/clio?sslmode=require&application_name=me";
+    let address =
+        "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full&application_name=me";
     let run = Harness::fresh()
         .with_secrets(&[address])
         .typing("3\n1\n")
@@ -37,7 +38,7 @@ fn the_paste_route_keeps_the_address_exactly_as_given() {
         .run();
     let plan = &run.answers().database.as_ref().expect("a plan").plan;
     assert_eq!(plan.address, address, "a paste is never rebuilt");
-    assert_eq!(plan.ssl.as_str(), "require", "the pasted mode is kept");
+    assert_eq!(plan.ssl.as_str(), "verify-full", "the pasted mode is kept");
 }
 
 #[test]

@@ -340,8 +340,10 @@ fn the_applied_summary_names_the_parts_the_key_and_no_secret() {
         run.out
     );
     assert!(
-        run.out
-            .contains("Database: Postgres at 127.0.0.1:34310, encrypted: no, this machine only"),
+        run.out.contains(
+            "Database: Postgres at 127.0.0.1:34310, encrypted and verified when offered, \
+                 this machine only"
+        ),
         "{}",
         run.out
     );

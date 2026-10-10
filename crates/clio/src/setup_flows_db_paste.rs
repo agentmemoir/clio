@@ -100,9 +100,19 @@ pub(crate) fn ask_handover(ctx: &mut Ctx<'_>) -> Result<HandOver, Signal> {
 ///
 /// A paste cannot be masked, and pretending otherwise would be the one lie in
 /// this wizard, so it is shown as it is entered. The address keeps its query
-/// string because most cloud providers put `?sslmode=require` in there and
+/// string because most cloud providers put `?sslmode=verify-full` in there and
 /// rebuilding it would break the connection.
 pub(crate) fn ask_pasted(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
+    // A pasted address is kept exactly as given, so it carries its own
+    // `sslrootcert` when it needs one. Accepting the flag here would be a
+    // silent no-op: the run would report success and the root would never reach
+    // the address, which is worse than refusing it.
+    if ctx.has_flag("database-ssl-rootcert") {
+        return Err(Signal::usage(
+            "--database-ssl-rootcert applies to the typed route; a pasted address carries its \
+             own sslrootcert",
+        ));
+    }
     ctx.section("Postgres address");
     let flag_value = ctx.flag("database-url").map(str::to_owned);
     let default = ctx.defaults().address.clone();
@@ -158,7 +168,7 @@ pub(crate) fn ask_pasted(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
 ///
 /// The address is kept exactly as given, so its mode is read rather than
 /// overwritten. One read, through the store's own parser, so a pasted
-/// `?sslmode=require` keeps `require`.
+/// `?sslmode=verify-full` keeps `verify-full`.
 pub(crate) fn pasted_ssl(address: &str) -> SslChoice {
     clio_store::parse_connection(address).map_or(SslChoice::Prefer, |parsed| parsed.ssl)
 }

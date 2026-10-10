@@ -42,7 +42,7 @@ fn managed_plan() -> DatabasePlan {
 fn existing_plan() -> DatabasePlan {
     existing(
         "postgres://u:p@db.example.com:5432/clio".to_owned(),
-        SslChoice::Require,
+        SslChoice::VerifyFull,
         Vec::new(),
         None,
     )
@@ -188,7 +188,7 @@ fn a_description_of_a_passwordless_address_is_not_redacted() {
 fn a_description_redacts_a_typed_password() {
     let plan = existing(
         "postgres://u:s3cret@h:5432/clio".to_owned(),
-        SslChoice::Require,
+        SslChoice::VerifyFull,
         vec![],
         None,
     )
@@ -204,11 +204,11 @@ fn a_file_description_names_the_file() {
 
 #[test]
 fn a_managed_address_names_the_host_port_and_database() {
-    let address = managed_address("127.0.0.1", "34310", "clio", "clio", SslChoice::Require)
+    let address = managed_address("127.0.0.1", "34310", "clio", "clio", SslChoice::VerifyFull)
         .expect("assembles");
     assert_eq!(
         address,
-        "postgres://clio@127.0.0.1:34310/clio?sslmode=require"
+        "postgres://clio@127.0.0.1:34310/clio?sslmode=verify-full"
     );
 }
 
@@ -228,6 +228,7 @@ fn a_typed_password_is_percent_encoded() {
         "clio",
         "a b&c=d",
         SslChoice::Prefer,
+        None,
         &[],
     )
     .expect("assembles");
@@ -246,6 +247,7 @@ fn a_typed_advanced_value_is_percent_encoded() {
         "clio",
         "pw",
         SslChoice::Prefer,
+        None,
         &[Extra {
             name: "options",
             value: "a b&c=d".to_owned(),
@@ -264,6 +266,7 @@ fn an_empty_advanced_value_adds_nothing() {
         "clio",
         "pw",
         SslChoice::Prefer,
+        None,
         &[Extra {
             name: "options",
             value: "  ".to_owned(),
@@ -275,9 +278,77 @@ fn an_empty_advanced_value_adds_nothing() {
 
 #[test]
 fn the_ssl_mode_is_the_first_query_parameter() {
-    let address = typed_address("h", "5432", "clio", "clio", "pw", SslChoice::Disable, &[])
-        .expect("assembles");
+    let address = typed_address(
+        "h",
+        "5432",
+        "clio",
+        "clio",
+        "pw",
+        SslChoice::Disable,
+        None,
+        &[],
+    )
+    .expect("assembles");
     assert!(address.contains("?sslmode=disable"), "{address}");
+}
+
+#[test]
+fn a_typed_root_certificate_is_percent_encoded_into_the_address() {
+    let address = typed_address(
+        "h",
+        "5432",
+        "clio",
+        "clio",
+        "pw",
+        SslChoice::VerifyFull,
+        Some("/etc/my ca.pem"),
+        &[],
+    )
+    .expect("assembles");
+    assert!(
+        address.contains("&sslrootcert=%2Fetc%2Fmy%20ca.pem"),
+        "{address}"
+    );
+}
+
+#[test]
+fn an_empty_root_certificate_adds_nothing() {
+    let address = typed_address(
+        "h",
+        "5432",
+        "clio",
+        "clio",
+        "pw",
+        SslChoice::VerifyFull,
+        Some("  "),
+        &[],
+    )
+    .expect("assembles");
+    assert!(!address.contains("sslrootcert"), "{address}");
+}
+
+#[test]
+fn a_root_certificate_is_not_added_for_a_mode_that_does_not_check_it() {
+    // A root in an address whose mode never checks the certificate would be a
+    // value that reaches the store and is never used. It is left out.
+    for mode in [SslChoice::Disable, SslChoice::EncryptNoVerify] {
+        let address = typed_address(
+            "h",
+            "5432",
+            "clio",
+            "clio",
+            "pw",
+            mode,
+            Some("/etc/ca.pem"),
+            &[],
+        )
+        .expect("assembles");
+        assert!(
+            !address.contains("sslrootcert"),
+            "{}: {address}",
+            mode.as_str()
+        );
+    }
 }
 
 #[test]
