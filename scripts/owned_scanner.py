@@ -321,7 +321,7 @@ def is_support_file(name: str) -> bool:
     A closed list of exactly three suffixes, because the rule is what makes the
     owner rule safe to have an exemption: a shared helper has several users and so
     cannot have one owner, which is harmless only while it holds no test.
-    Enforced by `accept_against_runner` in owned_tests.py; reviewed 2026-10-10.
+    Enforced by `accept_against_runner` in owned_accept.py; reviewed 2026-10-10.
     """
     return name.endswith(SUPPORT_SUFFIXES)
 
