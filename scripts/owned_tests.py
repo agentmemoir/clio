@@ -279,14 +279,14 @@ def runner_test_modules() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
 def accept_against_runner() -> int:
     """Check the prediction against the runner's real test modules.
 
-    Three things are reported, because each is a different failure: a real module
-    no file claims is a test that would be silently skipped; a predicted module
-    holding no test is harmless in a wide filter and fatal alone; a module
-    compiled only elsewhere cannot be selected here at all.
+    Four things are reported: a real module no file claims; a predicted module
+    holding no test; a module compiled only elsewhere; a shared-helpers file
+    holding tests, which breaks the exemption the owner rule depends on.
     """
     unit_real, integration_real = runner_test_modules()
     predicted: dict[str, set[str]] = {}
-    for package, crate_dir in workspace_crates().items():
+    crates = workspace_crates()
+    for package, crate_dir in crates.items():
         try:
             owners = crate_test_modules(crate_dir)
         except (ResolutionError, SourceError) as error:
@@ -299,6 +299,17 @@ def accept_against_runner() -> int:
             predicted[package] = claimed
 
     platform_excluded = set(PLATFORM_SKIPPED)
+    # Reviewed 2026-10-10 per fix-inline-exceptions: PLATFORM_SKIPPED stays;
+    # gate.py ENV_KEY_EXEMPT stays too (read-but-unhashed env, guarded by self-test).
+    support_violations: list[str] = []
+    for package, crate_dir in crates.items():
+        try:
+            for path in walk_crate(crate_dir):
+                if is_support_file(path.name) and holds_tests(path):
+                    support_violations.append(str(path.relative_to(ROOT)))
+        except (ResolutionError, SourceError) as error:
+            print(f"  {package}: could not resolve: {error}")
+            continue
     missing_total = 0
     extra_total = 0
     for package in sorted(set(unit_real) | set(predicted)):
@@ -322,7 +333,7 @@ def accept_against_runner() -> int:
     # Integration targets are checked separately and keyed by target name. They
     # were absent from this check entirely at first, which is how a gap survived a
     # check that read "0 unclaimed".
-    declared = declared_targets(workspace_crates())
+    declared = declared_targets(crates)
     known_targets = {binary.split("::", 1)[1] for binary in integration_real}
     integration_missing = 0
     for binary in sorted(integration_real):
@@ -354,14 +365,22 @@ def accept_against_runner() -> int:
         for module in skipped:
             print(f"      OTHER PLATFORM  {module}")
     total_missing = missing_total + integration_missing
+    if support_violations:
+        print(f"  {len(support_violations)} shared-helpers file(s) hold tests:")
+        for rel in sorted(support_violations):
+            print(
+                f"      SUPPORT    {rel}: is a shared-helpers file but holds tests; "
+                "give it an owner and rename it to *_tests.rs, or move the tests out"
+            )
     print(
         f"acceptance: {total_missing} test module(s) no file claims "
         f"({missing_total} unit, {integration_missing} in integration targets), "
         f"{extra_total} claimed module(s) hold no test, "
         f"{len(skipped)} compiled only elsewhere, "
+        f"{len(support_violations)} shared-helpers file(s) hold tests, "
         f"{len(integration_real)} integration target(s) checked"
     )
-    return 1 if total_missing else 0
+    return 1 if total_missing or support_violations else 0
 
 
 def filter_expression(modules: Iterable[str], binary: str | None = None) -> str:
