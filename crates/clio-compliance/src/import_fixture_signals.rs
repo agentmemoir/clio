@@ -32,9 +32,6 @@ impl SignalSource for EmptySignals {
     fn neighbor_texts(&self, _item: &MemoryItem) -> Result<Vec<String>, clio_types::AmError> {
         Ok(vec![])
     }
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, clio_types::AmError> {
-        Ok(None)
-    }
 }
 
 impl BeliefSignalSource for EmptySignals {
@@ -44,13 +41,6 @@ impl BeliefSignalSource for EmptySignals {
         _proposition: &str,
     ) -> Result<Vec<String>, clio_types::AmError> {
         Ok(vec![])
-    }
-    fn prior_age_days(
-        &self,
-        _bank_id: &str,
-        _proposition: &str,
-    ) -> Result<Option<f64>, clio_types::AmError> {
-        Ok(None)
     }
 }
 

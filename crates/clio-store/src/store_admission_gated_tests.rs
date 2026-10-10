@@ -71,11 +71,10 @@ fn gate_req<'a>(
     }
 }
 
-/// Test signal source: scripted neighbors and prior age.
+/// Test signal source: scripted neighbors.
 #[derive(Debug, Default)]
 struct StubSource {
     mirror_item: bool,
-    prior: Option<f64>,
 }
 
 impl SignalSource for StubSource {
@@ -84,10 +83,6 @@ impl SignalSource for StubSource {
             return Ok(vec![candidate_text(item)]);
         }
         Ok(vec![])
-    }
-
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, clio_types::AmError> {
-        Ok(self.prior)
     }
 }
 
@@ -148,10 +143,7 @@ fn gated_reject_persists_nothing() {
     let bank = unique("gate-r");
     let id = unique("reject");
     let item = gist_item(&id, &bank, "hi");
-    let source = StubSource {
-        mirror_item: true,
-        prior: Some(0.0),
-    };
+    let source = StubSource { mirror_item: true };
 
     let decision = gated_create(
         &gate_req(&item, &ctx(&bank), policy.clone(), &sink),
@@ -243,10 +235,7 @@ fn postgres_gated_write_parity() {
     let admit_id = unique("pg-admit");
     let reject_id = unique("pg-reject");
     let admit_source = StubSource::default();
-    let reject_source = StubSource {
-        mirror_item: true,
-        prior: Some(0.0),
-    };
+    let reject_source = StubSource { mirror_item: true };
 
     let decision = gated_create(
         &gate_req(

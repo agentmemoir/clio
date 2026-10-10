@@ -1,6 +1,6 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
-//! Category gate and five-factor admission scoring.
+//! Category gate and four-factor admission scoring.
 //!
 //! Pure logic over [`RankingEnv`]; no I/O. Later write tools call
 //! [`gated_create`] so no public long-term write bypasses these gates.

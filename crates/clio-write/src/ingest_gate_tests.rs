@@ -43,9 +43,6 @@ impl SignalSource for MirrorNeighbors {
     fn neighbor_texts(&self, item: &MemoryItem) -> Result<Vec<String>, AmError> {
         Ok(vec![candidate_text(item)])
     }
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 fn base_item(bank: &str) -> MemoryItem {

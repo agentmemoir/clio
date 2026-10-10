@@ -4,16 +4,13 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for deterministic five-factor admission signals.
+//! This module is responsible for deterministic four-factor admission signals.
 //!
 //! ## Owns
-//! - Utility, confidence, novelty, and type-prior signal math, plus the
-//!   recency factor's missing-prior rule
+//! - Utility, confidence, novelty, and type-prior signal math
 //! - The `factor_unavailable` error when a signal backend is down
 //!
 //! ## Does not own
-//! - The recency curve arithmetic: `recency_decay` delegates to
-//!   `clio_types::decay::half_life_factor`
 //! - Threshold policy or admit/reject decisions
 //! - Durable writes or telemetry sinks
 //!
@@ -24,7 +21,7 @@
 //!
 //! Keep this module focused on deterministic factor signals.
 
-use clio_types::{AmError, ErrorCode, SourceType, half_life_factor};
+use clio_types::{AmError, ErrorCode, SourceType};
 use std::collections::BTreeSet;
 
 /// Clamp a signal into `[0, 1]`; non-finite values become `0.0`.
@@ -186,30 +183,14 @@ pub fn is_exact_duplicate(text: &str, neighbors: &[String]) -> bool {
         .any(|neighbor| normalize_exact(neighbor) == normalized)
 }
 
-/// Temporal recency: `exp(-ln2 * age_days / tau_days)`, so `tau_days` acts as
-/// the half-life and the factor halves once per tau; no prior scores `1.0`.
-///
-/// The curve is deliberately a half-life decay, not the plain exponential
-/// `exp(-age / tau)` this factor once used: at one tau the score is now `0.5`
-/// rather than `0.368`. A non-positive or non-finite tau, and a NaN age, still
-/// fail soft at `0.0` via [`half_life_factor`].
+/// Weighted admission score from the four factors in `w1…w4` order.
 #[must_use]
-pub fn recency_decay(prior_age_days: Option<f64>, tau_days: f64) -> f64 {
-    let Some(age) = prior_age_days else {
-        return 1.0;
-    };
-    half_life_factor(age, tau_days)
-}
-
-/// Weighted admission score from the five factors in `w1…w5` order.
-#[must_use]
-pub fn weighted_score(weights: [f64; 5], factors: [f64; 5]) -> f64 {
+pub fn weighted_score(weights: [f64; 4], factors: [f64; 4]) -> f64 {
     clamp01(
         weights[0] * factors[0]
             + weights[1] * factors[1]
             + weights[2] * factors[2]
-            + weights[3] * factors[3]
-            + weights[4] * factors[4],
+            + weights[3] * factors[3],
     )
 }
 

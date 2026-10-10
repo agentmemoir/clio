@@ -48,9 +48,6 @@ impl SignalSource for EmptySignals {
     fn neighbor_texts(&self, _item: &clio_types::MemoryItem) -> Result<Vec<String>, AmError> {
         Ok(Vec::new())
     }
-    fn prior_age_days(&self, _item: &clio_types::MemoryItem) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 pub(crate) struct Setup {

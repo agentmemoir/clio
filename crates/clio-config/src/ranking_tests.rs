@@ -205,7 +205,6 @@ fn preview_patch_intent_and_admission_errors() {
                     w2: 0.0,
                     w3: 0.0,
                     w4: 0.0,
-                    w5: 0.0,
                 }),
                 ..RankingEnvPatch::default()
             },

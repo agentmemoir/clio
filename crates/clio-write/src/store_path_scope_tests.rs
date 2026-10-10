@@ -39,9 +39,6 @@ impl SignalSource for EmptyNeighbors {
     fn neighbor_texts(&self, _item: &MemoryItem) -> Result<Vec<String>, AmError> {
         Ok(vec![])
     }
-    fn prior_age_days(&self, _item: &MemoryItem) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 fn item_with_snapshot(id: &str, snap: serde_json::Value) -> MemoryItem {

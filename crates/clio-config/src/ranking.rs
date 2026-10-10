@@ -22,8 +22,7 @@
 //! Keep this module focused on ranking-environment knobs and patch validation.
 
 use crate::admission_knobs::{
-    validate_coactivation, validate_recency_tau, validate_theta_overrides,
-    validate_type_prior_overrides,
+    validate_coactivation, validate_theta_overrides, validate_type_prior_overrides,
 };
 use crate::error::{AmError, ErrorCode};
 use crate::weight_groups::normalize_weights;
@@ -31,8 +30,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub use crate::admission_knobs::{
-    CoactivationConstants, DEFAULT_RECENCY_TAU_DAYS, DEFAULT_THETA_ADMIT, KNOWN_ADMISSION_KEYS,
-    default_type_prior, prior_for, threshold_for,
+    CoactivationConstants, DEFAULT_THETA_ADMIT, KNOWN_ADMISSION_KEYS, default_type_prior,
+    prior_for, threshold_for,
 };
 pub use crate::hygiene_knobs::{
     DEFAULT_HYGIENE_STALE_HALF_LIFE_DAYS, HygieneWeights, default_hygiene_stale_half_life,
@@ -227,12 +226,6 @@ pub struct RankingEnv {
     pub theta_overrides: HashMap<String, f64>,
     /// Per-key content-type prior overrides keyed by category or episodic type.
     pub type_prior_overrides: HashMap<String, f64>,
-    /// Admission recency decay constant `τ` in days. Admission scoring reads
-    /// it as its age input; retrieval shaping does not. Every shipped signal
-    /// source reports no prior age, so it changes no write score today: the
-    /// admission recency factor is a constant `1.0`. The knob stays live for
-    /// the arithmetic and for a host that supplies an explicit age.
-    pub recency_tau_days: f64,
     /// Hygiene noise-score weights (appendix defaults).
     pub hygiene: HygieneWeights,
     /// Staleness half-life for hygiene scoring, in days.
@@ -256,7 +249,6 @@ impl RankingEnv {
             theta_admit: DEFAULT_THETA_ADMIT,
             theta_overrides: HashMap::new(),
             type_prior_overrides: HashMap::new(),
-            recency_tau_days: DEFAULT_RECENCY_TAU_DAYS,
             hygiene: HygieneWeights::default(),
             hygiene_stale_half_life_days: DEFAULT_HYGIENE_STALE_HALF_LIFE_DAYS,
             retention: RetentionKnobs::default(),
@@ -279,7 +271,6 @@ pub struct RankingEnvPatch {
     pub theta_admit: Option<f64>,
     pub theta_overrides: Option<HashMap<String, f64>>,
     pub type_prior_overrides: Option<HashMap<String, f64>>,
-    pub recency_tau_days: Option<f64>,
     pub hygiene: Option<HygieneWeights>,
     pub hygiene_stale_half_life_days: Option<f64>,
     pub retention: Option<RetentionKnobs>,
@@ -294,7 +285,7 @@ fn apply_retrieval(w: &RetrievalWeights) -> Result<RetrievalWeights, AmError> {
 
 fn apply_admission(w: &AdmissionWeights) -> Result<AdmissionWeights, AmError> {
     let n = normalize_weights(&w.as_slice())?;
-    Ok(AdmissionWeights::from_slice([n[0], n[1], n[2], n[3], n[4]]))
+    Ok(AdmissionWeights::from_slice([n[0], n[1], n[2], n[3]]))
 }
 
 fn apply_hygiene(w: &HygieneWeights) -> Result<HygieneWeights, AmError> {
@@ -368,10 +359,6 @@ pub fn preview_patch(base: &RankingEnv, patch: &RankingEnvPatch) -> Result<Ranki
     if let Some(map) = patch.type_prior_overrides.clone() {
         validate_type_prior_overrides(&map)?;
         next.type_prior_overrides = map;
-    }
-    if let Some(tau) = patch.recency_tau_days {
-        validate_recency_tau(tau)?;
-        next.recency_tau_days = tau;
     }
     if let Some(h) = &patch.hygiene {
         next.hygiene = apply_hygiene(h)?;

@@ -127,53 +127,6 @@ fn novelty_proxy_edges() {
 }
 
 #[test]
-fn recency_decay_math() {
-    // Pinned from the half-life curve exp(-ln2 * age / tau) at tau = 30,
-    // computed from the formula, not from the implementation: 7 -> 0.850667,
-    // 30 -> 0.500000, 90 -> 0.125000, 365 -> 0.000218.
-    assert!((recency_decay(None, 30.0) - 1.0).abs() < 1e-9);
-    assert!((recency_decay(Some(0.0), 30.0) - 1.0).abs() < 1e-9);
-    assert!((recency_decay(Some(-5.0), 30.0) - 1.0).abs() < 1e-9);
-    let week = recency_decay(Some(7.0), 30.0);
-    assert!((week - 0.850_667).abs() < 1e-6);
-    let month = recency_decay(Some(30.0), 30.0);
-    assert!((month - 0.5).abs() < 1e-9);
-    let quarter = recency_decay(Some(90.0), 30.0);
-    assert!((quarter - 0.125).abs() < 1e-9);
-    let year = recency_decay(Some(365.0), 30.0);
-    assert!((year - 0.000_217_5).abs() < 1e-6);
-    assert!((recency_decay(Some(5.0), 0.0) - 0.0).abs() < 1e-9);
-}
-
-#[test]
-fn recency_regression_pins_the_documented_before_and_after_row() {
-    // The published admission row at tau = 30, before and after the decay
-    // switch: the old plain exponential `exp(-age / 30)` against the half-life
-    // curve. The "before" column is executed from the old formula and the
-    // "after" column through the real call path, so a later re-drift of either
-    // shows up here rather than only in the curve's own unit test.
-    let old_formula = |age: f64| (-age / 30.0_f64).exp();
-    let published = [
-        (7.0, 0.791_890, 0.850_667),
-        (30.0, 0.367_879, 0.500_000),
-        (90.0, 0.049_787, 0.125_000),
-        (365.0, 0.000_005, 0.000_218),
-    ];
-    for (age, before, after) in published {
-        let old = old_formula(age);
-        assert!(
-            (old - before).abs() < 1e-6,
-            "old formula at {age} days: expected {before}, got {old}"
-        );
-        let now = recency_decay(Some(age), 30.0);
-        assert!(
-            (now - after).abs() < 1e-6,
-            "moved curve at {age} days: expected {after}, got {now}"
-        );
-    }
-}
-
-#[test]
 fn clamp01_guards_both_ends_and_both_kinds_of_non_finite() {
     // Above one, below zero, and in range: `f64::clamp` handles all three, so
     // the value passes through unchanged when it is already inside the range.
@@ -263,16 +216,16 @@ fn weighted_score_clamps_a_negative_sum_up_to_zero() {
     // weight. `0.0` is the fail-soft choice: a negative score is not a ranking,
     // and letting it through would make every downstream comparison against a
     // threshold meaningless.
-    let s = weighted_score([-0.2; 5], [1.0; 5]);
+    let s = weighted_score([-0.2; 4], [1.0; 4]);
     assert!((s - 0.0).abs() < 1e-9, "negative weighted sum: got {s}");
     // And a zero sum stays zero, so the clamp does not disturb an even split.
-    let even = weighted_score([0.2; 5], [0.5; 5]);
+    let even = weighted_score([0.25; 4], [0.5; 4]);
     assert!((even - 0.5).abs() < 1e-9);
 }
 
 #[test]
 fn weighted_score_clamps() {
-    let s = weighted_score([0.2; 5], [1.0, 1.0, 1.0, 1.0, 1.0]);
+    let s = weighted_score([0.25; 4], [1.0, 1.0, 1.0, 1.0]);
     assert!((s - 1.0).abs() < 1e-9);
     assert!((clamp01(f64::NAN) - 0.0).abs() < 1e-9);
     assert!((clamp01(2.0) - 1.0).abs() < 1e-9);

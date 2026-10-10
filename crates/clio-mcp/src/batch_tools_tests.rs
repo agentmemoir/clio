@@ -195,7 +195,6 @@ fn admission_rejection_helper_shapes_structured_error() {
         utility: 0.1,
         confidence: 0.1,
         novelty: 0.1,
-        recency: 0.1,
         type_prior: 0.1,
     };
     let decision = clio_admission::decision::Decision {

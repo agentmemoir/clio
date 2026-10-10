@@ -35,9 +35,6 @@ impl BeliefSignalSource for EmptySignals {
     fn neighbor_texts(&self, _bank_id: &str, _proposition: &str) -> Result<Vec<String>, AmError> {
         Ok(vec![])
     }
-    fn prior_age_days(&self, _bank_id: &str, _proposition: &str) -> Result<Option<f64>, AmError> {
-        Ok(None)
-    }
 }
 
 fn store() -> SqliteStore {
@@ -337,9 +334,6 @@ struct FailingSignals {
 
 impl BeliefSignalSource for FailingSignals {
     fn neighbor_texts(&self, _bank_id: &str, _proposition: &str) -> Result<Vec<String>, AmError> {
-        Err(AmError::new(self.code, "signal store down"))
-    }
-    fn prior_age_days(&self, _bank_id: &str, _proposition: &str) -> Result<Option<f64>, AmError> {
         Err(AmError::new(self.code, "signal store down"))
     }
 }
