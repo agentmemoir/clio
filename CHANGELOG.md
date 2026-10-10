@@ -10,7 +10,7 @@ we made where that specification is silent.
 
 ### Fixed
 
-- Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
+- Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; document signal-based shell statuses; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
 
 ## [0.1.0] - 2026-10-10
 
