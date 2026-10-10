@@ -240,6 +240,6 @@ fn bank_a_claim_is_invisible_to_bank_b_wave() {
             .distill_hub("b", "hub", &ctx("b"), ResolvedRetention::default())
             .expect_err("no hub item in bank B")
             .code,
-        clio_types::ErrorCode::NotFound
+        clio_types::ErrorCode::ItemNotFound
     );
 }

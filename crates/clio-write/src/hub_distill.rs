@@ -217,7 +217,7 @@ impl HubDistillEngine {
             Ok(Some(hub)) => hub,
             Ok(None) => {
                 return Err(AmError::new(
-                    ErrorCode::NotFound,
+                    ErrorCode::ItemNotFound,
                     format!("hub `{hub_id}` not found in bank"),
                 ));
             }

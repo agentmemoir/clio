@@ -89,7 +89,7 @@ impl IndexStore for SqliteStore {
                 .am("lexical item lookup")?;
             if exists == 0 {
                 return Err(AmError::new(
-                    ErrorCode::NotFound,
+                    ErrorCode::ItemNotFound,
                     format!("item `{item_id}` not found in bank `{bank_id}`"),
                 ));
             }
