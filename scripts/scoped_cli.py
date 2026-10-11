@@ -25,7 +25,15 @@ from scoped_judge import (
 )
 from scoped_package import coverage_package_mode
 from scoped_run import run_coverage, run_tests
-from scoped_select import is_measureable, is_present, parse_codeless, select
+from scoped_select import (
+    build_inputs,
+    changed_paths,
+    is_measureable,
+    is_present,
+    parse_codeless,
+    select,
+    workspace_packages,
+)
 
 
 # --- entry point ---------------------------------------------------------------
@@ -92,9 +100,16 @@ def main(argv: list[str]) -> int:
         for rel in no_code:
             print(f"scoped-runner: NO EXECUTABLE CODE {rel}")
     print(f"scoped-runner: {len(packages)} package(s) to run: {', '.join(packages) or '(none)'}")
+    # Files that are not Rust but decide what a crate compiles or reads (issue #69). They
+    # select packages in `select`; here they only get named, and they turn off the file filter
+    # below, because a changed lock file or fixture can break any test of the packages it reaches.
+    build_files = [] if args.all else build_inputs(changed_paths(args.base), workspace_packages())[1]
+    for rel in build_files:
+        print(f"scoped-runner: BUILD INPUT {rel}")
 
     file_filter = ""
-    if args.scope == "file":
+    unplanned: list[str] = []
+    if args.scope == "file" and not build_files:
         # A deleted file owns no tests because nothing is left of it, and the
         # ownership lookup cannot reach a path that no crate root holds any more.
         # It is skipped and named rather than raised on, so a change that retires
@@ -149,6 +164,12 @@ def main(argv: list[str]) -> int:
     # selection that silently failed.
     if not packages:
         print("scoped-runner: no changed Rust file; nothing to run")
+        return EXIT_OK
+
+    if build_files and not files and not args.tests_only:
+        # Only build inputs changed, so no Rust file is owed a number. The test step runs the
+        # packages' tests; an instrumented run of all of them would judge nothing.
+        print("scoped-runner: only build inputs changed; no Rust file to judge")
         return EXIT_OK
 
     if args.tests_only:
