@@ -7,7 +7,8 @@
 //! an id names, and reporting the per-member verdict.
 //!
 //! ## Owns
-//! - The `verify` flags (`--latest`) and its text and JSON views
+//! - The `verify` views over its record's flags (`--latest`; the accepted set
+//!   is the `backup verify` registry record's)
 //! - Both views stating the archive's backend, snapshot method, consistency,
 //!   and store schema alongside the per-member verdict
 //! - Id resolution, including the closest-id hint for an unknown id
@@ -37,13 +38,6 @@ use clio_backup::verify::VerifyReport;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-
-/// The value flags `verify` adds to the globals (none beyond the globals).
-const VALUE_FLAGS: &[&str] = &[];
-
-/// The boolean flags `verify` adds to the globals: the newest-snapshot
-/// selector.
-const BOOL_FLAGS: &[&str] = &["latest"];
 
 /// Run `clio backup verify` against injected streams, env, and cwd.
 pub(crate) fn run(
@@ -101,9 +95,13 @@ pub(crate) fn run(
     }
 }
 
-/// The flags `backup verify` accepts.
+/// The flags `backup verify` accepts: the `backup verify` record's own flags,
+/// decoded through the registry, plus the globals every parser spec merges.
 fn spec() -> FlagSpec {
-    FlagSpec::new(VALUE_FLAGS, BOOL_FLAGS)
+    match crate::cli_command_registry::find("backup verify") {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
+    }
 }
 
 /// Exactly one selector: a snapshot id, or `--latest`.

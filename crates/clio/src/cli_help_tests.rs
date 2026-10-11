@@ -54,11 +54,33 @@ fn catalog_commands_bind_read_verbs_to_tools() {
     }
 }
 
+/// `known_commands` is the set of top-level verbs the registry records spell:
+/// every single-token record names itself, every multi-token record extends
+/// its prefix, and nothing else is listed.
+///
+/// The two directions are the independent inputs: a verb listed with no record
+/// would suggest a command the dispatcher refuses, and a record whose verb is
+/// missing would hide a command the CLI runs from the suggestion lookup.
 #[test]
-fn known_commands_cover_reserved_and_read_verbs() {
-    let known = known_commands();
-    for verb in RESERVED_VERBS.iter().chain(READ_VERBS.iter()) {
-        assert!(known.contains(verb), "missing verb {verb}");
+fn known_commands_are_the_registrys_top_level_verbs() {
+    let verbs = known_commands();
+    for verb in &verbs {
+        let prefixed = format!("{verb} ");
+        assert!(
+            crate::cli_command_registry::find(verb).is_some()
+                || crate::cli_command_registry::all().any(|spec| spec.name.starts_with(&prefixed)),
+            "`{verb}` is a known command with no record"
+        );
+    }
+    for spec in crate::cli_command_registry::all() {
+        let verb = match spec.name.split_once(' ') {
+            Some((prefix, _)) => prefix,
+            None => spec.name,
+        };
+        assert!(
+            verbs.contains(&verb),
+            "`{verb}` has records but is not a known command"
+        );
     }
 }
 
@@ -133,6 +155,46 @@ fn suggest_command_finds_typos_and_exact_matches() {
     assert_eq!(suggest_command("recal"), Some("recall"));
     assert_eq!(suggest_command("mcp"), Some("mcp"));
     assert_eq!(suggest_command("zzzzzz"), None);
+}
+
+/// `suggest` keeps the earlier candidate on a tie, so the hint a reader sees
+/// is a function of the authored `KNOWN_VERB_ORDER` and not of the registry's
+/// contents alone. This pins the ties that order decides, so a mechanical
+/// re-derivation cannot move them silently.
+#[test]
+fn suggest_command_ties_resolve_by_the_authored_order() {
+    // `s` scores `sync` and `show` equally; `sync` is the earlier entry.
+    assert_eq!(suggest_command("s"), Some("sync"));
+    // `st` scores `setup` and `stats` equally; `setup` is the earlier entry.
+    assert_eq!(suggest_command("st"), Some("setup"));
+    // `i` scores `intent` and `import` equally; `intent` is the earlier entry.
+    assert_eq!(suggest_command("i"), Some("intent"));
+    // The other member of the `s` tie is reached by its own input, so the
+    // tie is decided by the order and not by reachability.
+    assert_eq!(suggest_command("sh"), Some("show"));
+
+    // The differential, executable: the registry's first-occurrence verb
+    // order resolves the same `s` tie to `show` instead.
+    let mut registry_order: Vec<&'static str> = Vec::new();
+    for spec in crate::cli_command_registry::all() {
+        let verb = match spec.name.split_once(' ') {
+            Some((prefix, _)) => prefix,
+            None => spec.name,
+        };
+        if !registry_order.contains(&verb) {
+            registry_order.push(verb);
+        }
+    }
+    assert_eq!(suggest("s", &registry_order), Some("show"));
+}
+
+/// `is_known_command` names the three depths `clio help <topic>` may take, and
+/// a fourth token is not one of them: the first three words here name a real
+/// command, so the refusal is about the depth rather than the words.
+#[test]
+fn is_known_command_refuses_more_than_three_tokens() {
+    assert!(is_known_command("auth token add"));
+    assert!(!is_known_command("auth token add extra"));
 }
 
 #[test]

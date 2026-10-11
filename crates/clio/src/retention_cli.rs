@@ -12,12 +12,16 @@
 //!
 //! ## Does not own
 //! - The profile object, mapping numbers, or storage format (see `clio-config`)
+//! - The subcommands' static records (see
+//!   `cli_command_registry_ranking_retention`)
 //! - Profile resolution semantics or admission scoring
 //!
 //! ## Boundary
 //!
-//! Changes to the retention CLI command surface should normally require changes here.
-//! Changes to profile semantics should not require changes here.
+//! Changes to a retention verb's flags, usage text, or summary should normally
+//! require changes in `cli_command_registry_ranking_retention`; changes to its
+//! dispatch, decoding, or views should normally require changes here. Changes
+//! to profile semantics should not require changes here.
 //!
 //! Keep this module focused on the retention CLI surface.
 
@@ -51,7 +55,7 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     // The scan runs before the parser so a help request is not turned into a
     // usage error by a stray token or an unknown flag; `status` and the `mcp`
     // subcommands answer help the same way.
-    if matches!(sub.as_str(), "get" | "set" | "schema")
+    if retention_subcommands().contains(&sub.as_str())
         && collected
             .iter()
             .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
@@ -59,12 +63,14 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
         println!("{}", retention_help(&sub));
         return ExitCode::SUCCESS;
     }
-    let flags = match parse_flags(collected.iter().cloned(), retention_flags(&sub)) {
+    let known = retention_known_flags(&sub);
+    let flags = match parse_flags(collected.iter().cloned(), &known) {
         Ok(flags) => flags,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
     };
-    if !matches!(sub.as_str(), "get" | "set" | "schema") {
-        let hint = match crate::cli_args::suggest(&sub, RETENTION_SUBCOMMANDS) {
+    if !retention_subcommands().contains(&sub.as_str()) {
+        let subs = retention_subcommands();
+        let hint = match crate::cli_args::suggest(&sub, &subs) {
             Some(closest) => format!("did you mean `clio retention {closest}`?"),
             None => "try `clio retention get|set|schema`".to_owned(),
         };
@@ -82,31 +88,46 @@ pub fn retention(args: impl IntoIterator<Item = String>) -> ExitCode {
     }
 }
 
-/// The retention subcommands, in the order `clio retention --help` lists them.
-const RETENTION_SUBCOMMANDS: &[&str] = &["get", "set", "schema"];
+/// The `retention` subcommands: the registered `retention` records' first
+/// token past the prefix, in registry order. `pub(crate)` so the registry tests
+/// assert this derivation's output instead of rebuilding it.
+///
+/// The split is optional: a one-token suffix is the whole subcommand, and a
+/// longer name contributes only its first token, so the derived list can
+/// neither skip a record nor carry a mangled name.
+pub(crate) fn retention_subcommands() -> Vec<&'static str> {
+    crate::cli_command_registry::names()
+        .filter_map(|name| name.strip_prefix("retention "))
+        .map(|rest| rest.split_once(' ').map_or(rest, |(sub, _)| sub))
+        .collect()
+}
+
+/// The flags a `clio retention` subcommand accepts: the subcommand's record's
+/// own flags. The declared globals are accepted by the shared surface parser's
+/// own rule, so a flag neither the record nor a global names is a usage error,
+/// and a typo cannot silently fall back to the default bank or store.
+///
+/// `pub(crate)` so the registry tests assert this derivation's return value
+/// instead of rebuilding the list.
+pub(crate) fn retention_known_flags(sub: &str) -> Vec<&'static str> {
+    match crate::cli_command_registry::find(&format!("retention {sub}")) {
+        Some(spec) => spec.documented.iter().map(|flag| flag.long).collect(),
+        None => Vec::new(),
+    }
+}
 
 /// The `clio retention` subcommands, one usage line each.
 ///
 /// This is the screen `clio retention --help` and `clio help retention` print;
 /// a subcommand's own flags stay behind `clio retention <subcommand> --help`.
 fn print_retention_help() {
-    for command in ["retention get", "retention set", "retention schema"] {
+    for sub in retention_subcommands() {
         println!(
             "{}",
-            crate::cli_help_surfaces::wrapped_usage(command, 78, 0).join("\n")
+            crate::cli_help_surfaces::wrapped_usage(&format!("retention {sub}"), 78, 0).join("\n")
         );
     }
     println!("Ask a subcommand for its flags with `clio retention <subcommand> --help`.");
-}
-
-/// The flags each `clio retention` subcommand accepts. Any other flag is a usage
-/// error, so a typo cannot silently fall back to the default bank or store.
-fn retention_flags(sub: &str) -> &'static [&'static str] {
-    match sub {
-        "get" => &["profiles", "bank"],
-        "set" => &["profiles", "bank", "profile", "profile-file", "scope"],
-        _ => &[],
-    }
 }
 
 /// One retention subcommand's help, read from the shared usage registry.

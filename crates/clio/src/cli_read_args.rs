@@ -137,6 +137,14 @@ pub(crate) fn required_flags(verb: &str) -> Vec<&'static str> {
 /// The brackets are followed, not the text: `[--a X|--b Y]` is one optional group
 /// whose members are alternatives, and `[--flag]...` is one optional repeatable. A
 /// flag is required only when no bracket is open around it.
+///
+/// A top-level `|` separates whole command forms (`clio backup restore ID |
+/// clio backup restore --latest`): the scan reads every form rather than
+/// stopping at the alternation, so a flag that only one form writes bare still
+/// reads as bare. Such a flag is not required, because the verb also runs in
+/// the other form; the bare-flag parity test excuses it by name, with a row for
+/// `backup restore` and `backup verify`, so a new alternation fails that test
+/// until the flag has a row instead of being excused silently.
 #[cfg(test)]
 pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
     let mut depth = 0usize;
@@ -144,7 +152,6 @@ pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
     for token in usage.split(' ') {
         for part in token.chars() {
             match part {
-                '[' | '|' if depth == 0 && part == '[' => depth += 1,
                 '[' => depth += 1,
                 ']' => depth = depth.saturating_sub(1),
                 _ => {}

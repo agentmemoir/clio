@@ -40,11 +40,12 @@ use crate::field_documentation_test_support::{
 };
 use clio_store::{SyncJournalRow, SyncStore};
 
-/// The operator-facing help this crate's sealed wire is documented in. Read at
-/// compile time, following the cross-crate source-read pattern this crate's own
+/// The operator-facing help this crate's sealed wire is documented in: the sync
+/// registry records, which now carry every command's usage text. Read at compile
+/// time, following the cross-crate source-read pattern this crate's own
 /// auth-path and store-boundary tests already use; a moved file fails this
 /// module's compilation loudly rather than silently passing.
-const HELP_USAGE: &str = include_str!("../../clio/src/cli_help_usage.rs");
+const HELP_USAGE: &str = include_str!("../../clio/src/cli_command_registry_sync.rs");
 
 /// The store's shared journal column projection, read the same way. This is the
 /// list a later phase changes when it adds or removes a wire field, so the
@@ -82,15 +83,37 @@ const UNDOCUMENTED_COLUMNS: [(&str, &str); 4] = [
     ),
 ];
 
-/// The slice of one help entry, from its usage line to the next entry's.
-fn help_entry(verb: &str) -> &str {
-    let marker = format!("usage: clio {verb}");
+/// The prose one sync command's help prints, from the record that now holds it.
+///
+/// The migration moved every command's usage text out of the help file and into
+/// the registry records, where a command's prose is the note constant its record
+/// carries, so an entry is located by that constant rather than by a
+/// `usage: clio ...` line. The record is required to name the note as well: a
+/// note that survives as an unreferenced constant, or one dropped from its
+/// record's `notes` list, fails here instead of passing on text nothing renders.
+fn help_entry(verb: &str, note: &str) -> &'static str {
+    let marker = format!("const {note}: &str = \"");
     let start = HELP_USAGE.find(&marker).unwrap_or_else(|| {
-        panic!("help usage must document `{verb}`");
+        panic!("help usage must document `{verb}`: no `{note}` in the sync registry");
     });
-    let rest = &HELP_USAGE[start + marker.len()..];
-    let end = rest.find("usage: clio ").unwrap_or(rest.len());
-    &HELP_USAGE[start..start + marker.len() + end]
+    let text = &HELP_USAGE[start + marker.len()..];
+    let end = text
+        .find("\";")
+        .unwrap_or_else(|| panic!("`{note}` must be a closed string literal"));
+
+    let record = format!("name: \"{verb}\",");
+    let record_start = HELP_USAGE.find(&record).unwrap_or_else(|| {
+        panic!("the sync registry must record `{verb}`");
+    });
+    let record_end = HELP_USAGE[record_start..]
+        .find("};")
+        .map_or(HELP_USAGE.len(), |offset| record_start + offset);
+    assert!(
+        HELP_USAGE[record_start..record_end].contains(note),
+        "the `{verb}` record must name the `{note}` prose its help prints"
+    );
+
+    &text[..end]
 }
 
 /// The journal's own column list, parsed out of the store's projection.
@@ -187,7 +210,7 @@ fn every_journal_column_is_documented_or_explained() {
 /// control.
 #[test]
 fn the_serve_help_names_each_documented_field_on_the_side_it_sits_on() {
-    let entry = help_entry("sync serve");
+    let entry = help_entry("sync serve", "SERVE_CLEARTEXT_NOTE");
     assert_each_field_is_named_on_its_side(entry);
     for residual in ["record-kind mix", "device-id stability"] {
         assert!(
@@ -212,7 +235,7 @@ fn the_serve_help_names_each_documented_field_on_the_side_it_sits_on() {
 /// the prose and forgotten in the table.
 #[test]
 fn the_serve_help_enumerates_the_documented_cleartext_set() {
-    let entry = help_entry("sync serve");
+    let entry = help_entry("sync serve", "SERVE_CLEARTEXT_NOTE");
     let expected = documented_cleartext_names();
     let mut present: Vec<&str> = expected
         .iter()
@@ -243,7 +266,7 @@ fn the_serve_help_enumerates_the_documented_cleartext_set() {
 /// pull cursor freezes, while content under a held key stays readable.
 #[test]
 fn the_key_verbs_help_carry_the_lifecycle_and_the_rotation_procedure() {
-    let keygen = help_entry("sync keygen");
+    let keygen = help_entry("sync keygen", "KEYGEN_NOTE");
     assert!(keygen.contains("never leaves the node"), "{keygen}");
     assert!(keygen.contains("seals with the newest key"), "{keygen}");
     assert!(keygen.contains("opens with any key it holds"), "{keygen}");
@@ -258,18 +281,18 @@ fn the_key_verbs_help_carry_the_lifecycle_and_the_rotation_procedure() {
         "failure mode 2: {keygen}"
     );
 
-    let export = help_entry("sync key export");
+    let export = help_entry("sync key export", "KEY_EXPORT_NOTE");
     assert!(export.contains("on purpose"), "{export}");
     assert!(export.contains("rotation"), "{export}");
 
-    let status = help_entry("sync key status");
+    let status = help_entry("sync key status", "KEY_STATUS_NOTE");
     assert!(status.contains("fingerprint"), "{status}");
     assert!(
         status.contains("never the key or a prefix of it"),
         "{status}"
     );
 
-    let status_report = help_entry("sync status");
+    let status_report = help_entry("sync status", "STATUS_ROTATION_NOTE");
     assert!(
         status_report.contains("dead-letters"),
         "the rotation section points at the visible report: {status_report}"

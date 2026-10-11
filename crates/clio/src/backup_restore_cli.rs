@@ -8,8 +8,9 @@
 //! and the exit codes it maps results to.
 //!
 //! ## Owns
-//! - The `restore` flags (`--latest`, `--yes`, `--no-pre-backup`,
-//!   `--allow-missing-keys`, `--dry-run`) and the selector rule
+//! - The `restore` views over its record's flags (`--latest`, `--yes`,
+//!   `--no-pre-backup`, `--allow-missing-keys`, `--dry-run`; the accepted set
+//!   is the `backup restore` registry record's) and the selector rule
 //! - The confirmation prompt and the exit codes: 0 for a restore or a plan,
 //!   3 for a partial, count-mismatched, or not-durable restore
 //!
@@ -41,18 +42,6 @@ use crate::cli_read::{CliIo, emit, fail};
 use clio_store::SpaceCheck;
 use std::path::PathBuf;
 use std::process::ExitCode;
-
-/// The value flags `restore` adds to the globals (none beyond the globals).
-const VALUE_FLAGS: &[&str] = &[];
-
-/// The boolean flags `restore` adds to the globals.
-const BOOL_FLAGS: &[&str] = &[
-    "latest",
-    "yes",
-    "no-pre-backup",
-    "allow-missing-keys",
-    "dry-run",
-];
 
 /// Run `clio backup restore` against injected streams, env, and cwd.
 pub(crate) fn run(
@@ -120,9 +109,14 @@ pub(crate) fn run_with_probe(
     }
 }
 
-/// The flags `backup restore` accepts.
+/// The flags `backup restore` accepts: the `backup restore` record's own
+/// flags, decoded through the registry, plus the globals every parser spec
+/// merges.
 fn spec() -> FlagSpec {
-    FlagSpec::new(VALUE_FLAGS, BOOL_FLAGS)
+    match crate::cli_command_registry::find("backup restore") {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
+    }
 }
 
 /// Exactly one selector: a snapshot id, or `--latest`.

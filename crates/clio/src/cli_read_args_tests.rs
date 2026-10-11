@@ -39,6 +39,29 @@ fn every_checked_verb() -> Vec<&'static str> {
     verbs
 }
 
+/// The verb-and-flag pairs where a bare reading of the usage line is not the
+/// required set, each with the reason: the exception is named rather than
+/// assumed, so a new one has to be added here.
+///
+/// `--confirm` is written bare in every verb that has it because it is the gate
+/// on the live run and the reader must see it, but a verb that omits it still
+/// does its work: `clio discard --reason X` is a dry run, not a refusal.
+///
+/// `compose-context` prints `--budget-tokens N` bare so the reader sees a value
+/// the run must have, but the record marks it optional: the workspace group's
+/// build refuses a run without a value, not the record's required set.
+///
+/// `backup restore` and `backup verify` write `--latest` bare in one whole-command
+/// form (`ID | --latest`); the `ID` form runs the verb without it, so it is not
+/// required. The test below fails if any of these flags stops being written bare.
+const EXCUSED: &[(&str, &str)] = &[
+    ("discard", "confirm"),
+    ("erase", "confirm"),
+    ("compose-context", "budget-tokens"),
+    ("backup restore", "latest"),
+    ("backup verify", "latest"),
+];
+
 /// The flags a verb's usage line writes bare, with the bracket that opens an
 /// optional group removed from consideration.
 ///
@@ -60,6 +83,12 @@ fn a_bare_flag_is_one_the_verb_cannot_run_without() {
     // A required flag inside a bracket is optional, which is what makes the check
     // decidable: the bracket is the only signal the reader has.
     assert_eq!(bare_flags("clio x [--out FILE]"), Vec::<String>::new());
+    // A top-level `|` separates whole command forms, and every form is read: the
+    // alternate form's flag is bare, so the parity check must excuse it by name.
+    assert_eq!(
+        bare_flags("clio backup verify ID | clio backup verify --latest [--output json|text]"),
+        vec!["--latest".to_owned()]
+    );
 }
 
 /// The resolved required set of every verb is the one its own usage line states,
@@ -75,27 +104,6 @@ fn a_bare_flag_is_one_the_verb_cannot_run_without() {
 /// required is the drift this test exists for.
 #[test]
 fn every_required_flag_list_is_the_one_its_usage_line_states() {
-    // The verb-and-flag pairs where a bare reading of the usage line is not the
-    // required set, each with the reason. A new one has to be added here, which is
-    // the point: the exception is named rather than assumed.
-    //
-    // `--confirm` is written bare in every verb that has it because it is the gate
-    // on the live run and the reader must see it, but a verb that omits it still
-    // does its work: `clio discard --reason X` is a dry run, not a refusal. The
-    // confirm gate owns that decision, so this table does not.
-    //
-    // `compose-context` prints `--budget-tokens N` bare so the reader sees a value
-    // the run must have, but the record marks it optional: the workspace group's
-    // build refuses a run without a value, not the record's required set.
-    //
-    // Measured, not guessed: `clio discard` and `clio erase` write confirm bare,
-    // while `clio update` and `clio correct` bracket theirs. The row below fails
-    // if either of those two usage lines is reworded.
-    let excused: &[(&str, &str)] = &[
-        ("discard", "confirm"),
-        ("erase", "confirm"),
-        ("compose-context", "budget-tokens"),
-    ];
     let mut differences: Vec<String> = Vec::new();
     for verb in every_checked_verb() {
         let usage = cli_help_usage::usage_line(verb)
@@ -104,7 +112,7 @@ fn every_required_flag_list_is_the_one_its_usage_line_states() {
             .iter()
             .map(|name| name.trim_start_matches("--").to_owned())
             .filter(|name| {
-                !excused
+                !EXCUSED
                     .iter()
                     .any(|(excused_verb, flag)| *excused_verb == verb && flag == name)
             })
@@ -129,22 +137,18 @@ fn every_required_flag_list_is_the_one_its_usage_line_states() {
     );
 }
 
-/// An excused flag is written bare, so the exception above is a fact about the help
-/// text rather than a claim about it.
+/// An excused flag is written bare, so the exception table is a fact about the
+/// help text rather than a claim about it.
 #[test]
 fn an_excused_flag_is_written_bare_in_the_usage_line() {
-    for (verb, excused) in [
-        ("discard", "confirm"),
-        ("erase", "confirm"),
-        ("compose-context", "budget-tokens"),
-    ] {
+    for &(verb, excused) in EXCUSED {
         let usage = cli_help_usage::usage_line(verb).expect("registered");
         assert!(
             bare_flags(&usage)
                 .iter()
                 .any(|flag| flag == &format!("--{excused}")),
-            "`clio {verb}` now brackets --{excused}, so the exception above is stale and \
-             the row can be deleted"
+            "`clio {verb}` now brackets --{excused}, so the exception table row is \
+             stale and the row can be deleted"
         );
     }
 }
