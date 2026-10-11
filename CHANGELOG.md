@@ -10,6 +10,7 @@ we made where that specification is silent.
 
 ### Fixed
 
+- Scoped coverage runs remove old executable objects for selected packages and targets before rebuilding, so stale source maps cannot inflate a changed file's line count. [Issue #47](https://github.com/agentmemoir/clio/issues/47) [PR #141](https://github.com/agentmemoir/clio/pull/141)
 - `clio recall` names the binding score floor when the floors empty the page and echoes the effective limit; an unknown `--bank` is refused on reads and on a summarize dry-run; and a bad `--domains` refusal names the flag. [Issue #16](https://github.com/agentmemoir/clio/issues/16) [PR #138](https://github.com/agentmemoir/clio/pull/138)
 - Reject out-of-range persona observations, unverifiable source text, invalid inspect/export filters, missing retention profile files, and reads from unknown banks; reject unknown summarize preview scopes and source-text CLI flags without snapshot support. Warn when semantic or keyword floors remove all retrieval candidates, include the named day in date-only inspect end bounds, and explain process-local scratchpad lifetime and hygiene `keep` behavior. [Issue #14](https://github.com/agentmemoir/clio/issues/14) [PR #114](https://github.com/agentmemoir/clio/pull/114)
 - Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; document signal-based shell statuses; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
