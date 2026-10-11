@@ -105,3 +105,34 @@ fn discard_rejects_a_string_confirm_flag() {
     assert_eq!(out["code"], json!("invalid_type"), "{out}");
     assert_eq!(out["message"], json!("confirm must be a boolean"), "{out}");
 }
+
+#[test]
+fn the_observe_writes_read_the_duplicate_waiver_as_a_strict_boolean() {
+    // Both handlers build their admission policy from `allow_duplicate`, so `true`
+    // is accepted and a value that is not a boolean is an error.
+    let state = state();
+    let cases = [
+        (
+            "persona_observe_preference",
+            json!({"key": "verbosity", "observed_value": 0.5}),
+        ),
+        (
+            "belief_observe",
+            json!({
+                "proposition": "p", "confidence": 0.5, "evidence_ref": "e",
+                "source_type": "user_stated"
+            }),
+        ),
+    ];
+    for (tool, base) in cases {
+        let mut waived = base.clone();
+        waived["allow_duplicate"] = json!(true);
+        let accepted = dispatch(&state, tool, &waived);
+        assert_eq!(accepted["ok"], json!(true), "{tool}: {accepted}");
+        let mut wrong = base;
+        wrong["allow_duplicate"] = json!("yes");
+        let refused = dispatch(&state, tool, &wrong);
+        assert_eq!(refused["ok"], json!(false), "{tool}: {refused}");
+        assert_eq!(refused["code"], json!("invalid_type"), "{tool}: {refused}");
+    }
+}

@@ -21,7 +21,7 @@
 //!
 //! Keep this module focused on portability schema definitions.
 
-use crate::schema_defs::{ToolDef, b, s};
+use crate::schema_defs::{ToolDef, allow_duplicate_prop, b, s};
 
 /// All portability tool definitions.
 #[must_use]
@@ -76,6 +76,7 @@ pub fn portability_defs() -> Vec<ToolDef> {
                     b("Overwrite differing existing rows (requires reason)."),
                 ),
                 ("reason", s("Audit reason required when force=true.")),
+                allow_duplicate_prop(),
             ],
         },
         ToolDef {
@@ -107,6 +108,7 @@ pub fn portability_defs() -> Vec<ToolDef> {
                     "dry_run",
                     b("Plan and produce dry-run report with zero writes."),
                 ),
+                allow_duplicate_prop(),
             ],
         },
     ]
