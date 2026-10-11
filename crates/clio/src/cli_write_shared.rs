@@ -25,9 +25,10 @@
 
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
-use crate::cli_read::{base_args, one_positional, parse_f64, validate_choice};
+use crate::cli_read::{base_args, one_positional, parse_unit_f64, validate_choice};
 use crate::cli_write_core::caller_item_id;
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, decision_refusal};
+use crate::cli_write_source_type::source_type_arg;
 use serde_json::{Value, json};
 
 /// The shared-surface and reviewer commands.
@@ -109,6 +110,7 @@ fn shared_store_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
         )
     })?;
     let kind = validate_choice("epistemic-kind", kind, &["fact", "belief"])?;
+    let source_type = source_type_arg(kind, parsed)?;
     let mut args = base_args(parsed);
     args.insert("item".into(), json!({"id": caller_item_id(), "gist": text}));
     args.insert("epistemic_kind".into(), Value::from(kind));
@@ -118,13 +120,13 @@ fn shared_store_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     if let Some(episodic) = parsed.value("episodic-type") {
         args.insert("episodic_type".into(), Value::from(episodic));
     }
-    if let Some(source) = parsed.value("source-type") {
+    if let Some(source) = source_type {
         args.insert("source_type".into(), Value::from(source));
     }
     if let Some(raw) = parsed.value("confidence") {
         args.insert(
             "confidence".into(),
-            Value::from(parse_f64("confidence", raw)?),
+            Value::from(parse_unit_f64("confidence", raw)?),
         );
     }
     if let Some(evidence) = parsed.value("evidence-ref") {

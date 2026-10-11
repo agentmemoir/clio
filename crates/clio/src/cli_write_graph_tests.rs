@@ -79,7 +79,7 @@ fn triple_add_requires_three_positionals() {
 
 #[test]
 fn triple_add_belief_without_source_type_is_refused() {
-    // Source_type is required iff belief.
+    // Source_type is required iff belief, refused at the flag boundary.
     let s = state();
     let (code, out, err) = run_write_state(
         "triple add",
@@ -87,8 +87,9 @@ fn triple_add_belief_without_source_type_is_refused() {
         &s,
         false,
     );
-    assert_eq!(code, ExitCode::from(1), "{out}{err}");
-    assert!(err.contains("source_type"), "{err}");
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("--source-type"), "{err}");
+    assert!(err.contains("belief"), "{err}");
 }
 
 #[test]
