@@ -108,12 +108,12 @@ fn remember_matches_the_registered_usage_and_parser() {
     let spec = record("remember");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--source-text TEXT] [--allow-duplicate] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated",
+        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--allow-duplicate] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
         "remember full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--source-text TEXT] [--allow-duplicate] [--dry-run] [--output json|text]",
+        "clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--allow-duplicate] [--dry-run] [--output json|text]",
         "remember usage line"
     );
     assert_eq!(
@@ -130,7 +130,6 @@ fn remember_matches_the_registered_usage_and_parser() {
             "source-type",
             "evidence-ref",
             "context",
-            "source-text"
         ]
     );
     assert_eq!(
@@ -151,7 +150,7 @@ fn admit_renders_the_file_alternate_and_hides_the_file_flag() {
     let spec = record("admit");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio admit TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--output json|text]\n       or: clio admit --file ops.json [--bank BANK] [--actor ACTOR]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated",
+        "usage: clio admit TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--output json|text]\n       or: clio admit --file ops.json [--bank BANK] [--actor ACTOR]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
         "admit full usage"
     );
     assert_eq!(
@@ -344,24 +343,24 @@ fn discard_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.positionals, [positional("ID", true)].as_slice());
 }
 
-/// `correct` pins its printed line and carries the hidden `--confirm` flag
-/// the invocation itself stands in for.
+/// `correct` pins its printed line and prints the `--confirm` flag that gates
+/// the live run.
 #[test]
-fn correct_pins_the_line_and_hides_the_confirm_flag() {
+fn correct_pins_the_line_and_prints_the_confirm_flag() {
     let spec = record("correct");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio correct ID VALUE --reason R [--context TEXT] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio correct ID VALUE --reason R [--context TEXT] [--confirm] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "correct full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio correct ID VALUE --reason R [--context TEXT] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "clio correct ID VALUE --reason R [--context TEXT] [--confirm] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "correct usage line"
     );
     assert!(
-        !spec.usage_line().contains("--confirm"),
-        "the hidden --confirm flag must not print in the line: {}",
+        spec.usage_line().contains("[--confirm]"),
+        "the gating --confirm flag must print in the line: {}",
         spec.usage_line()
     );
     assert_eq!(

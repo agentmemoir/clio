@@ -3,12 +3,18 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the usage lines of the commands that bind no MCP
-//! tool and own their own `--help`: `mcp`, `ops`, `compose`, `retention`, `status`,
-//! `setup`, `install`, `uninstall`, and the two report-only commands.
+//! This module is responsible for the reserved surfaces' usage lines and the
+//! wrapping every help surface shares. A moved command's line lives on its
+//! registry record; the table holds the same bytes as the record rows' byte
+//! reference, and the three retention rows are the lines of the commands that
+//! have not moved yet.
 //!
 //! ## Owns
-//! - `SURFACE_USAGE`, the flag list each of those commands accepts
+//! - `SURFACE_USAGE`, the reserved surfaces' lines: the record rows' byte
+//!   reference the reserved-surface record tests read, plus the retention
+//!   lines of the commands without a record and the `ops` lines the ops
+//!   surface renders as its group help
+//! - `surface_usage_line`, the table half of the shared usage lookup
 //! - The wrapping every help surface and the catalog share, so one command's line
 //!   breaks the same way in both places
 //! - `ops_usage_lines`, because `ops` is one verb with five subcommands and each
@@ -16,14 +22,15 @@
 //!
 //! ## Does not own
 //! - The usage lines of the commands that bind an MCP tool (`cli_help_usage`)
+//! - A registered command's usage line (see `cli_command_registry`)
 //! - Each surface's own extra prose, which the surface keeps
 //! - The catalog's layout (see `command_catalog`)
 //!
 //! ## Boundary
 //!
 //! Changes to what one of these commands accepts should normally require changes
-//! here and in the surface that parses it. A change to how help is laid out should
-//! not.
+//! to its registry record, and to the row beside it here while the row stays a
+//! record's byte reference. A change to how help is laid out should not.
 //!
 //! Keep this module focused on these commands' flag lists and the shared wrapping.
 
@@ -159,6 +166,15 @@ pub(crate) fn ops_usage_lines(sub: &str) -> Option<Vec<&'static str>> {
 /// Each of these is printed by the surface named beside it, and by the catalog.
 /// The surface keeps its own extra prose; only the flag list is shared, because
 /// the flag list is the part that drifts.
+///
+/// The fifteen reserved-surface rows stay: the reserved-surface record tests
+/// read them through `surface_usage_line` as the byte reference their records
+/// are pinned against. The five `ops` rows also render: the ops surface reads
+/// them through `ops_usage_lines` for its group and per-subcommand help. The
+/// other ten never render through the shared lookup, because `cli_help_usage`
+/// answers a registered command from its record first. The two `compose` rows
+/// are gone: their records' bytes are pinned directly by the compose record
+/// tests.
 const SURFACE_USAGE: &[(&str, &str)] = &[
     ("version", "clio version"),
     ("health", "clio health"),
@@ -201,14 +217,6 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     (
         "status",
         "clio status [--db PATH] [--backend sqlite|postgres] [--dir DIR] [--output json|text]",
-    ),
-    (
-        "compose up",
-        "clio compose up [--dir DIR] [--services LIST]",
-    ),
-    (
-        "compose down",
-        "clio compose down [--dir DIR] [--services LIST]",
     ),
     (
         "setup",

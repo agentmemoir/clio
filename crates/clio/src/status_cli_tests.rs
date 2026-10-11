@@ -411,3 +411,22 @@ fn status_does_not_write_config_or_store() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A configured address naming a server this build cannot open is a usage
+/// error: the resolver refuses it before any store is opened, so `status`
+/// exits 2 instead of degrading.
+#[test]
+fn a_configured_address_this_build_cannot_open_is_a_usage_error() {
+    let deps = FakeDeps {
+        env: HashMap::from([("CLIO_DATABASE_URL".to_owned(), "mysql://h/db".to_owned())]),
+        ..FakeDeps::default()
+    };
+    let error = build(&args(&[]), &deps).expect_err("mysql:// is not a store this build opens");
+    assert_eq!(error.code(), "usage");
+    assert!(
+        error.message().contains("mysql://h/db"),
+        "{}",
+        error.message()
+    );
+    assert_eq!(status_with(&args(&[]), &deps), ExitCode::from(2));
+}

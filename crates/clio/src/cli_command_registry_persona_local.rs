@@ -90,6 +90,10 @@ const EPISTEMIC_KIND_REQUIRED: Flag = Flag {
     ..Flag::value("epistemic-kind", "K")
 };
 
+/// The `--epistemic-kind`/`--source-type` pairing `canonical put` prints under
+/// its usage line.
+const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
+
 /// `persona observe` accepts `--context` without printing it, so its printed
 /// line is pinned here while `documented` keeps the parser's accepted set.
 const PERSONA_OBSERVE_USAGE: &str = "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]";
@@ -234,7 +238,7 @@ pub(crate) const CANONICAL_PUT: CommandSpec = CommandSpec {
     name: "canonical put",
     aliases: &[],
     summary: "gated single-slot upsert with bi-temporal supersession",
-    notes: &[],
+    notes: &[SOURCE_TYPE_PAIRING_NOTE],
     positionals: &[KEY, VALUE],
     documented: &[
         CATEGORY_REQUIRED,

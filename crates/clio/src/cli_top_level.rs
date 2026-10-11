@@ -10,9 +10,13 @@
 //!
 //! ## Owns
 //! - `parse_flags`, the reserved surfaces' name-to-value flag map
+//! - `record_flag_names`, the flag names a surface's registry record documents
 //! - `wants_help`, `unknown_command` and `help_topic`, the top level's own refusals
+//! - `print_record_help` and the two no-flag commands' help, rendered from
+//!   their registry records
+//! - `wants_json_catalog`, the help record's JSON-catalog request
 //! - `database_help_block`, the shared precedence-and-environment block
-//! - The two no-flag commands' help, and the catalog's own screen
+//! - The catalog's own screen
 //!
 //! ## Does not own
 //! - Which commands exist and what flags they take (`cli_help` and `cli_help_usage`)
@@ -31,7 +35,6 @@ use std::process::ExitCode;
 
 use crate::cli_error::CliError;
 use crate::cli_help;
-use crate::cli_help_usage;
 use crate::cli_output;
 use crate::command_catalog;
 use crate::port_scan;
@@ -40,6 +43,26 @@ use crate::port_scan;
 pub(crate) fn wants_help(args: &[String]) -> bool {
     args.iter()
         .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
+}
+
+/// The flag names a surface's registry record documents, in print order: the
+/// names `parse_flags` gates the surface's own flags on.
+pub(crate) fn record_flag_names(name: &str) -> Vec<&'static str> {
+    let spec =
+        crate::cli_command_registry::find(name).unwrap_or_else(|| panic!("`{name}` is registered"));
+    spec.documented.iter().map(|flag| flag.long).collect()
+}
+
+/// Whether the raw arguments select the help record's JSON catalog: `--json`
+/// is the one boolean flag the help record documents, so the dispatch reads
+/// the spelling from the record rather than a second hand-written list.
+pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
+    let spec =
+        crate::cli_command_registry::find("help").unwrap_or_else(|| panic!("`help` is registered"));
+    spec.documented
+        .iter()
+        .filter(|flag| flag.value.is_none())
+        .any(|flag| args.iter().any(|arg| arg == &format!("--{}", flag.long)))
 }
 
 /// The unknown-command failure, with a suggestion when one is close.
@@ -85,23 +108,23 @@ pub(crate) fn help_topic(args: &[String]) -> Result<Option<(String, Vec<String>)
     Ok(Some((verb, kept)))
 }
 
-/// `clio version --help`: the usage line plus what the command reports.
-pub(crate) fn print_version_help() -> ExitCode {
-    println!(
-        "{}\n\nPrints the package name and version. Takes no flags.",
-        cli_help_usage::usage_line("version").unwrap_or_else(|| "clio version".to_owned())
-    );
+/// One registry record's `--help` screen: its usage line, a blank line, then
+/// its notes, so the surface's prose lives on the record beside its flags.
+pub(crate) fn print_record_help(name: &str) -> ExitCode {
+    let spec =
+        crate::cli_command_registry::find(name).unwrap_or_else(|| panic!("`{name}` is registered"));
+    println!("{}\n\n{}", spec.usage_line(), spec.notes.join("\n\n"));
     ExitCode::SUCCESS
 }
 
-/// `clio health --help`: the usage line plus what the command reports.
+/// `clio version --help`: the version record's own usage line and notes.
+pub(crate) fn print_version_help() -> ExitCode {
+    print_record_help("version")
+}
+
+/// `clio health --help`: the health record's own usage line and notes.
 pub(crate) fn print_health_help() -> ExitCode {
-    println!(
-        "{}\n\nPrints the machine-readable health JSON: name and version only.\n\
-         It opens no database and checks no service.",
-        cli_help_usage::usage_line("health").unwrap_or_else(|| "clio health".to_owned())
-    );
-    ExitCode::SUCCESS
+    print_record_help("health")
 }
 
 /// Read the reserved surfaces' flags: a name-to-value map that fails closed on

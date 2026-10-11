@@ -342,3 +342,78 @@ fn install_github_copilot_writes_the_vs_code_profile_file() {
     assert_eq!(clio["type"], serde_json::json!("stdio"));
     assert_eq!(clio["command"], serde_json::json!(fake_exe()));
 }
+
+#[test]
+fn an_empty_home_fails_the_cursor_install_before_any_write() {
+    // An empty home resolves no `.cursor` directory, so the record has no
+    // config file and the verb must fail as a precondition, not a usage error.
+    let code = run_with(
+        Verb::Install,
+        &args(&["--harness", "cursor"]),
+        &|| Ok(fake_exe()),
+        &|| DirectWriteEnv::with(OsLayout::Linux, PathBuf::new(), None, None, None),
+        &never_install,
+        &never_uninstall,
+    );
+    assert_eq!(
+        code,
+        ExitCode::from(1),
+        "an unresolvable config is a precondition failure, not a usage error"
+    );
+}
+
+#[test]
+fn a_failing_exe_lookup_fails_the_direct_write_install() {
+    let scratch = Scratch::new("install-no-exe");
+    let code = run_with(
+        Verb::Install,
+        &args(&["--harness", "cursor"]),
+        &|| Err(std::io::Error::new(std::io::ErrorKind::NotFound, "gone")),
+        &|| temp_env(&scratch.root, None),
+        &never_install,
+        &never_uninstall,
+    );
+    assert_eq!(
+        code,
+        ExitCode::from(1),
+        "an exe-lookup failure is a precondition failure, not a usage error"
+    );
+}
+
+#[test]
+fn an_unparseable_config_refuses_the_uninstall_with_exit_1() {
+    let scratch = Scratch::new("refuse-uninstall");
+    seed_cursor_file(&scratch, "{\"mcpServers\": {\"other\": not json}}");
+    let code = run_with(
+        Verb::Uninstall,
+        &args(&["--harness", "cursor"]),
+        &|| Ok(fake_exe()),
+        &|| temp_env(&scratch.root, None),
+        &never_install,
+        &never_uninstall,
+    );
+    assert_eq!(
+        code,
+        ExitCode::from(1),
+        "an unparseable config is a precondition failure, not a usage error"
+    );
+}
+
+#[test]
+fn a_config_that_is_not_a_json_object_refuses_the_install_with_an_io_detail() {
+    let scratch = Scratch::new("not-an-object");
+    seed_cursor_file(&scratch, "[]");
+    let config = cursor_config(&scratch);
+    let message = direct_write_outcome_text(
+        Verb::Install,
+        agent_harness::resolve("cursor").expect("cursor is supported"),
+        &config,
+        &agent_harness::server_argv(&fake_exe()),
+    )
+    .expect_err("a parsed non-object config must refuse the install");
+    assert!(message.contains("does not hold a JSON object"), "{message}");
+    assert!(
+        !message.contains("add this entry by hand"),
+        "an Io refusal is not a parse refusal and must not carry the snippet: {message}"
+    );
+}

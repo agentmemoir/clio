@@ -30,6 +30,7 @@ use crate::cli_command_registry_core_writes as core_writes;
 use crate::cli_command_registry_graph_records as graph_records;
 use crate::cli_command_registry_persona_local as persona_local;
 use crate::cli_command_registry_shared_workspace as shared_workspace;
+use crate::cli_command_registry_surface as surface;
 use crate::cli_command_registry_task_history as task_history;
 use crate::cli_command_registry_write_operations as write_operations;
 use crate::cli_command_spec::{CommandSpec, Flag};
@@ -64,6 +65,11 @@ pub(crate) static GLOBAL_VALUE_FLAGS: &[Flag] = &[
 /// Boolean global flags, in the order every parser spec merges them.
 pub(crate) static GLOBAL_BOOL_FLAGS: &[Flag] = &[GLOBAL_NO_INPUT, GLOBAL_YES];
 
+/// The two `compose` records, registered as the reserved surfaces' tranche's
+/// tail so the surface group covers all 17 reserved leaves.
+static COMPOSE_LEAVES: &[CommandSpec] =
+    &[surface::compose::COMPOSE_UP, surface::compose::COMPOSE_DOWN];
+
 /// The command tranches, in registration order.
 ///
 /// `all` walks them in this order; both rendered help surfaces read their verb
@@ -76,6 +82,8 @@ static TRANCHES: &[&[CommandSpec]] = &[
     shared_workspace::SHARED_WORKSPACE,
     core_writes::CORE_WRITES,
     write_operations::WRITE_OPERATIONS,
+    surface::SURFACE,
+    COMPOSE_LEAVES,
 ];
 
 /// Every global flag name that takes a value, in merge order.

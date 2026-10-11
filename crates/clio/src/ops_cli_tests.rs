@@ -10,6 +10,7 @@
 //! ## Owns
 //! - Exit-code tests for `diagnose`, `verify`, `doctor`, `repair`, `reindex`
 //! - Unknown-subcommand and unknown-backend tests
+//! - The unknown-embed-provider refusal at dispatch
 //! - The key-store split regressions: reindex and repair resolve the sibling
 //!   KMS, read-only commands answer without creating one
 //!
@@ -318,17 +319,27 @@ fn a_flag_from_another_ops_subcommand_is_a_usage_error() {
 /// The subcommand that owns each flag still accepts it.
 #[test]
 fn each_ops_subcommand_accepts_its_own_flags() {
-    let flags = crate::cli_top_level::parse_flags(
-        ["--plan".to_owned(), "p1".to_owned()],
-        super::ops_flags("repair"),
-    )
-    .expect("repair takes --plan");
+    let repair = super::ops_flag_names("repair");
+    let flags = crate::cli_top_level::parse_flags(["--plan".to_owned(), "p1".to_owned()], &repair)
+        .expect("repair takes --plan");
     assert_eq!(flags.get("plan").map(String::as_str), Some("p1"));
 
     let error = crate::cli_top_level::parse_flags(
         ["--plan".to_owned(), "p1".to_owned()],
-        super::ops_flags("diagnose"),
+        &super::ops_flag_names("diagnose"),
     )
     .expect_err("diagnose does not take --plan");
     assert_eq!(error.code(), "usage");
+}
+
+/// An unknown embed provider fails the dispatcher closed with exit 1 before
+/// any command runs, instead of quietly disabling dense work.
+#[test]
+fn an_unknown_embed_provider_fails_the_open_exits_1() {
+    let env = |key: &str| match key {
+        "CLIO_EMBED_URL" => Some("http://127.0.0.1:34311/embed".to_owned()),
+        "CLIO_EMBED_PROVIDER" => Some("nosuch".to_owned()),
+        _ => None,
+    };
+    assert_eq!(super::ops_with(memory("diagnose"), &env), ExitCode::from(1));
 }

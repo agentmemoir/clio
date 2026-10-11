@@ -100,7 +100,7 @@ fn shared_store_matches_the_registered_usage_and_parser() {
     let spec = record("shared store");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] [--source-text TEXT] --actor A --shared-bank [--output json|text]"
+        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor A --shared-bank [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -116,7 +116,6 @@ fn shared_store_matches_the_registered_usage_and_parser() {
             "source-type",
             "confidence",
             "evidence-ref",
-            "source-text"
         ]
     );
     assert_eq!(
@@ -215,7 +214,7 @@ fn hygiene_clean_renders_the_or_alternate_and_the_trailing_note() {
     let text = spec.full_usage();
     assert_eq!(
         text,
-        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only"
+        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only\n       --action keep applies each candidate's suggested action, including archive or discard"
     );
     assert_eq!(
         spec.usage_line(),
@@ -227,7 +226,10 @@ fn hygiene_clean_renders_the_or_alternate_and_the_trailing_note() {
     );
     assert_eq!(
         spec.notes,
-        ["without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only"]
+        [
+            "without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only",
+            "--action keep applies each candidate's suggested action, including archive or discard"
+        ]
     );
     let or_at = text.find("\n       or: ").expect("the alternate prints");
     let note_at = text.find("\n       without").expect("the note prints");
