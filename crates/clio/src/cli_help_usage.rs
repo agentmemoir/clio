@@ -201,7 +201,7 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
     (
         "correct",
-        "usage: clio correct ID VALUE --reason R [--context TEXT] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio correct ID VALUE --reason R [--context TEXT] [--confirm] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
     ),
     (
         "triple add",
