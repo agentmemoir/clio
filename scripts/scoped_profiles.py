@@ -255,6 +255,32 @@ def _object_pattern(names: Collection[str]) -> re.Pattern[str]:
     return re.compile(rf"^(lib)?({alternates})(-[0-9a-f]+)?$")
 
 
+def drop_selected_objects(directory: Path, selected: Sequence[str]) -> int:
+    """Delete old executables of packages this run will rebuild."""
+    packages = workspace_packages()
+    selected_names = set(selected)
+    names = _object_names([p for p in packages if p["name"] in selected_names])
+    selected_pattern = _object_pattern(names)
+    dropped = 0
+    checked = 0
+    for path in _instrumented_files(directory):
+        if not selected_pattern.match(path.stem):
+            continue
+        checked += 1
+        if not _inside(path, directory):
+            raise RunError(
+                f"refusing to delete {path}: it does not resolve inside the "
+                f"instrumented build directory {directory}"
+            )
+        path.unlink()
+        dropped += 1
+    print(
+        f"scoped-runner: selected package objects checked {checked}, deleted "
+        f"{dropped} (before the instrumented test run)"
+    )
+    return dropped
+
+
 def prune_foreign_objects(directory: Path, selected: Sequence[str]) -> int:
     """Delete instrumented executables no selected package owns. Returns the count.
 

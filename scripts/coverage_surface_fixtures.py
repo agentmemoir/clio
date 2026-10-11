@@ -14,7 +14,7 @@ from coverage_surface_text import MAKEFILE
 # under one temporary directory that is removed when the suite returns. Nothing
 # here is executed, so no fixture has to run.
 
-#: The gate's two command builders and its two hygiene markers, in the shape the
+#: The gate's two command builders and its hygiene markers, in the shape the
 #: real file has. Written out rather than produced by editing a copy of it,
 #: because substring surgery on a fixture is how a case ends up testing a shape it
 #: never built.
@@ -54,10 +54,14 @@ def drop_invalid_profraws(directory):
 def prune_foreign_objects(directory, selected):
     return 0
 
+def drop_selected_objects(directory, selected):
+    return 0
+
 
 def run_coverage(packages, report_path, env):
-    run_coverage_tests(packages, env)
     directory = env["dir"]
+    drop_selected_objects(directory, packages)
+    run_coverage_tests(packages, env)
     drop_invalid_profraws(directory)
     prune_foreign_objects(directory, packages)
     write_coverage_report(report_path, env)
@@ -72,6 +76,19 @@ TARGET_DIR_KEY = "CARGO_LLVM_COV_TARGET_DIR"
 #: see.
 NO_OBJECT_DELETE_RUNNER = CLEAN_RUNNER.replace(
     "    prune_foreign_objects(directory, packages)\n", ""
+)
+
+#: The selected binaries have to go before the build, not only before the report.
+NO_SELECTED_OBJECT_DROP_RUNNER = CLEAN_RUNNER.replace(
+    "    drop_selected_objects(directory, packages)\n", ""
+)
+
+LATE_SELECTED_OBJECT_DROP_RUNNER = CLEAN_RUNNER.replace(
+    "    drop_selected_objects(directory, packages)\n", ""
+).replace(
+    "    run_coverage_tests(packages, env)\n",
+    "    run_coverage_tests(packages, env)\n"
+    "    drop_selected_objects(directory, packages)\n",
 )
 
 #: The same run with the buffer scan removed.
@@ -151,8 +168,9 @@ CLEAN_PACKAGE_RUNNER = '''"""A fixture one-package mode."""
 
 
 def run_package_coverage(name, env):
-    run_coverage_tests([name], env)
     directory = env["dir"]
+    drop_selected_objects(directory, [name])
+    run_coverage_tests([name], env)
     drop_invalid_profraws(directory)
     prune_foreign_objects(directory, [name])
     write_coverage_report(env["report"], env)

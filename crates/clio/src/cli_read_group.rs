@@ -44,5 +44,15 @@ pub(crate) trait ReadGroup: Sync {
     fn render(&self, verb: &str, payload: &Value, _palette: crate::cli_style::Palette) -> String;
 
     /// Optional post-processing over a success payload before emission.
-    fn decorate(&self, _verb: &str, _parsed: &ParsedArgs, _payload: &mut Value) {}
+    ///
+    /// `arguments` is the tool request [`build`](Self::build) produced, so a group
+    /// can echo a value it sent without parsing the flag a second time.
+    fn decorate(
+        &self,
+        _verb: &str,
+        _parsed: &ParsedArgs,
+        _arguments: &Value,
+        _payload: &mut Value,
+    ) {
+    }
 }

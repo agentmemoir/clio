@@ -12,8 +12,10 @@ from scoped_core import COV_DIR, REPORT, ROOT, RunError
 from scoped_profiles import (
     clear_profile_buffers,
     drop_invalid_profraws,
+    drop_selected_objects,
     instrumented_dir,
     prune_foreign_objects,
+    resolved_instrumented_dir,
 )
 
 
@@ -162,11 +164,7 @@ def run_coverage(
 ) -> None:
     """One instrumented pass, writing the scoped report path.
 
-    Old profile data is cleared first. Without that, the report merges this run
-    with the last one and reports coverage for code that did not run, which is
-    the most likely way a targeted number silently becomes a full-workspace one.
-    This is not theoretical: a stale-profile leak was checked for directly while
-    building the file scope, and the clean step does drop every `.profraw`.
+    Old profiles and selected executables are cleared first; otherwise the report can merge prior profiles or old line mappings with current binaries.
 
     The pass is two commands with the gate owning the gap between them, because
     the two things that have to happen in that gap cannot happen inside a single
@@ -180,6 +178,7 @@ def run_coverage(
     """
     env = hermetic_env()
     clear_profile_buffers(env)
+    drop_selected_objects(resolved_instrumented_dir(env), packages)
     run_coverage_tests(packages, filter_expression, env)
 
     # The boundary the gate owns. Everything below acts on the instrumented build
