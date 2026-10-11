@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from ..adapter import MemoryBenchmarkAdapter
 from ..fingerprint import Fingerprint, unreadable_setting
+from ..packing import pack_context
 from ..scoring import _normalize
 from ..tokenizer import ReferenceTokenizer
 from ..types import DialogueTurn, IngestResult, RetrievalResult
@@ -49,19 +50,16 @@ class MemoryAdapter(MemoryBenchmarkAdapter):
                 scored.append((overlap, turn))
         scored.sort(key=lambda pair: (-pair[0], pair[1].turn_id))
         chosen = [turn for _, turn in scored[: self._top_k]]
-        pieces: list[str] = []
-        used = 0
-        for turn in chosen:
-            cost = self._tokenizer.count(turn.text)
-            if used + cost > token_budget:
-                break
-            pieces.append(f"[{turn.turn_id}] {turn.speaker}: {turn.text}")
-            used += cost
+        hits = [
+            (turn.turn_id, f"[{turn.turn_id}] {turn.speaker}: {turn.text}")
+            for turn in chosen
+        ]
+        context, used, item_ids = pack_context(hits, token_budget, self._tokenizer)
         return RetrievalResult(
-            context="\n".join(pieces),
+            context=context,
             latency_ms=0.0,
             tokens_retrieved=used,
-            item_ids=tuple(turn.turn_id for turn in chosen[: len(pieces)]),
+            item_ids=item_ids,
         )
 
     def healthcheck(self) -> bool:
