@@ -105,9 +105,13 @@ const FILE_REQUIRED: Flag = Flag {
     ..Flag::value("file", "candidates.json")
 };
 
+/// The `--epistemic-kind`/`--source-type` pairing `shared store` prints under
+/// its usage line.
+const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
+
 /// The `shared store` printed line: the parser's accepted set keeps the
 /// `category`-first order the dispatcher already merges, so the line is pinned.
-const SHARED_STORE_USAGE: &str = "clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] [--source-text TEXT] --actor A --shared-bank [--output json|text]";
+const SHARED_STORE_USAGE: &str = "clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor A --shared-bank [--output json|text]";
 
 /// `compose-context` accepts `--query` without printing it and prints
 /// `--budget-tokens` as a mandated flag, so its line is pinned too.
@@ -121,12 +125,16 @@ const HYGIENE_CLEAN_ALTERNATE: &str =
 const HYGIENE_CLEAN_NOTE: &str =
     "without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only";
 
+/// The `hygiene clean` note: what `--action keep` does with each candidate.
+const HYGIENE_KEEP_NOTE: &str =
+    "--action keep applies each candidate's suggested action, including archive or discard";
+
 /// `clio shared store`: write one item into the shared bank.
 pub(crate) const SHARED_STORE: CommandSpec = CommandSpec {
     name: "shared store",
     aliases: &[],
     summary: "write into a shared bank",
-    notes: &[],
+    notes: &[SOURCE_TYPE_PAIRING_NOTE],
     positionals: &[TEXT],
     documented: &[
         Flag::value("category", "C"),
@@ -135,7 +143,6 @@ pub(crate) const SHARED_STORE: CommandSpec = CommandSpec {
         Flag::value("source-type", "T"),
         Flag::value("confidence", "N"),
         Flag::value("evidence-ref", "E"),
-        Flag::value("source-text", "TEXT"),
         SHARED_ACTOR_REQUIRED,
         SHARED_BANK_REQUIRED,
         GLOBAL_OUTPUT,
@@ -218,7 +225,7 @@ pub(crate) const HYGIENE_CLEAN: CommandSpec = CommandSpec {
     name: "hygiene clean",
     aliases: &[],
     summary: "(or --file - for stdin; without --confirm, or with --dry-run: zero-write dry-run only)",
-    notes: &[HYGIENE_CLEAN_NOTE],
+    notes: &[HYGIENE_CLEAN_NOTE, HYGIENE_KEEP_NOTE],
     positionals: &[],
     documented: &[
         FILE_REQUIRED,

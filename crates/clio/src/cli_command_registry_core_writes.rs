@@ -101,9 +101,14 @@ const ADMIT_USAGE: &str = "clio admit TEXT --category C [--bank BANK] [--actor A
 /// The `admit` alternate: the file spelling of the admission preview.
 const ADMIT_FILE_ALTERNATE: &str = "clio admit --file ops.json [--bank BANK] [--actor ACTOR]";
 
-/// The `correct` printed line: the invocation itself is the confirmation, so
-/// the accepted `--confirm` never prints, and the line is pinned.
-const CORRECT_USAGE: &str = "clio correct ID VALUE --reason R [--context TEXT] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]";
+/// The `--epistemic-kind`/`--source-type` pairing `remember`, `admit`,
+/// `triple add`, `canonical put`, and `shared store` print under their usage
+/// lines.
+const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
+
+/// The `correct` printed line: `--confirm` gates the live run and prints, and
+/// the line is pinned.
+const CORRECT_USAGE: &str = "clio correct ID VALUE --reason R [--context TEXT] [--confirm] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]";
 
 /// The `discard` printed line: `--confirm` gates the live run and prints bare,
 /// but the confirm gate owns the refusal (a run without it is a dry run), so
@@ -115,7 +120,7 @@ pub(crate) const REMEMBER: CommandSpec = CommandSpec {
     name: "remember",
     aliases: &[],
     summary: "",
-    notes: &[CONTEXT_NOTE],
+    notes: &[CONTEXT_NOTE, SOURCE_TYPE_PAIRING_NOTE],
     positionals: &[TEXT],
     documented: &[
         CATEGORY_REQUIRED,
@@ -126,7 +131,6 @@ pub(crate) const REMEMBER: CommandSpec = CommandSpec {
         Flag::value("source-type", "T"),
         Flag::value("evidence-ref", "E"),
         Flag::value("context", "TEXT"),
-        Flag::value("source-text", "TEXT"),
         Flag::boolean("allow-duplicate"),
         Flag::boolean("dry-run"),
         GLOBAL_OUTPUT,
@@ -146,7 +150,7 @@ pub(crate) const ADMIT: CommandSpec = CommandSpec {
     name: "admit",
     aliases: &[],
     summary: "score one write without storing it; `--file ops.json` previews a whole batch instead",
-    notes: &[CONTEXT_NOTE],
+    notes: &[CONTEXT_NOTE, SOURCE_TYPE_PAIRING_NOTE],
     positionals: &[TEXT],
     documented: &[
         CATEGORY_REQUIRED,
@@ -278,8 +282,7 @@ pub(crate) const DISCARD: CommandSpec = CommandSpec {
     section: Section::Write,
 };
 
-/// `clio correct`: an attributable value replacement that keeps history; the
-/// invocation is its own confirmation, so `--confirm` rides hidden.
+/// `clio correct`: an attributable value replacement that keeps history; `--confirm` gates the live run.
 pub(crate) const CORRECT: CommandSpec = CommandSpec {
     name: "correct",
     aliases: &[],

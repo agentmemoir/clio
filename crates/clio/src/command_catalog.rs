@@ -7,7 +7,9 @@
 //! command, carrying the command's flags and a short description.
 //!
 //! ## Owns
-//! - The catalog's authored rows for the commands without a registry record
+//! - The catalog's authored rows: the rows of the commands without a registry
+//!   record, plus the eight `mcp` and `ops` rows the record tests read as
+//!   their byte reference
 //! - The renderer that lays an entry out: wrapped usage line, tool arrow, note
 //!
 //! ## Does not own
@@ -37,11 +39,15 @@
 /// lists of the same flags is how 159 flags came to exist in a command's help and
 /// nowhere in the catalog, including `--source-type`, which a belief write needs.
 ///
+/// A command that has moved into a registry record has no row here: its row is
+/// rendered from its record. The eight `mcp` and `ops` subcommand rows are the
+/// one exception — they are the byte reference the reserved-surface record
+/// tests pin their records against, and they never render, because a
+/// registered key resolves to its record first.
+///
 /// Read by the order accessor as the fallback row for a command that has not
 /// moved into a registry record yet.
 pub(crate) const ENTRIES_BEFORE: &[(&str, &str)] = &[
-    ("version", "Print package identity"),
-    ("health", "Machine-readable health/version JSON"),
     (
         "mcp schema-export",
         "Print/write the tool_schema pack (alias: --path)",
@@ -66,22 +72,6 @@ pub(crate) const ENTRIES_BEFORE: &[(&str, &str)] = &[
         "Rebuild derived indexes (live run requires --confirm); a lexical rebuild replaces legacy plaintext index rows with keyed term digests. Ops exit codes: 0 healthy or completed, 1 domain/runtime failure or findings, 2 usage or repair refusal, 3 reindex failed",
     ),
     (
-        "status",
-        "Read-only unified stack health (setup, database, listeners, Compose, diagnose). Exit codes: 0 healthy, 1 degraded, 2 usage",
-    ),
-    (
-        "compose up",
-        "Materialize the compose stack and start the local Docker services (postgres, embed, rerank, extract)",
-    ),
-    (
-        "compose down",
-        "Stop and remove the services `clio compose up` started; re-runnable",
-    ),
-    (
-        "setup",
-        "Configure the stack and write the deployment config the binary reads (see `clio setup --help` for the full flag set)",
-    ),
-    (
         "retention schema",
         "Print the retention profile JSON Schema",
     ),
@@ -93,6 +83,22 @@ pub(crate) const ENTRIES_BEFORE: &[(&str, &str)] = &[
         "retention set",
         "Store a validated retention profile (persists to --profiles/env)",
     ),
+];
+
+/// The authored rows the reserved-surface record tests read as their byte
+/// reference: the summary text the catalog printed before each record landed,
+/// pinned equal to the record's summary. A registered key resolves to its
+/// record first, so a reference row never renders.
+#[cfg(test)]
+pub(crate) const AUTHORED_ROW_REFERENCES: &[&str] = &[
+    "mcp schema-export",
+    "mcp stdio",
+    "mcp http",
+    "ops diagnose",
+    "ops verify",
+    "ops doctor",
+    "ops repair",
+    "ops reindex",
 ];
 
 /// The catalog rows after the registry's first record, in whole-catalog order.
@@ -168,18 +174,6 @@ pub(crate) const ENTRIES_AFTER: &[(&str, &str)] = &[
     (
         "auth token revoke",
         "Remove the record; takes effect at the next server start",
-    ),
-    (
-        "install",
-        "Register the clio MCP server with a supported agent harness (see `clio install --help` for the supported harnesses)",
-    ),
-    (
-        "uninstall",
-        "Remove the clio MCP server registration from a supported agent harness (see `clio uninstall --help` for the supported harnesses)",
-    ),
-    (
-        "help",
-        "Global flags: --db --backend --bank --actor --output (-o). Output mode: an explicit `--output`/`-o` always wins; otherwise text on a terminal (TTY) and JSON when piped. Forms: `--output json`, `--output=json`, `-o json`, `-o=json`. Empty values: a value flag given an empty value (`--bank ''`) is refused on every command; leave the flag off to take the default. Use -- after the command before positional text that starts with -; keep flags before it. Exit codes: 0 ok, 1 domain or runtime failure, 2 usage error or documented command refusal (ops repair or backup restore), 3 is a command-specific degraded outcome (clio ops reindex, backup prune or backup create --keep, or backup restore). Process stops caused by SIGPIPE, SIGINT, or SIGTERM cannot report a CLI error; shells that use the 128+signal convention show these as 141, 130, or 143, outside the command exit codes",
     ),
 ];
 
@@ -275,3 +269,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 #[path = "command_catalog_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "command_catalog_seam_tests.rs"]
+mod seam_tests;

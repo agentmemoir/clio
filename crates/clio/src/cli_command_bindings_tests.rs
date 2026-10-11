@@ -6,7 +6,7 @@
 //! This module tests the global order accessor: each spine is the order its
 //! surface prints, every spine key resolves exactly one row from exactly one
 //! source, and no authored fallback row is left for a command the registry
-//! holds.
+//! holds beyond the eight byte-reference rows the record tests pin.
 //!
 //! ## Owns
 //! - The one-row-per-key invariant: a registered key prints its record, an
@@ -106,8 +106,12 @@ fn every_catalog_key_resolves_record_first_or_once_from_the_table() {
                 (spec.name, spec.summary),
                 "`{key}` must print its record"
             );
+            // The eight reference rows are the byte reference the reserved-
+            // surface record tests pin against; they never render, because a
+            // registered key resolves to its record first.
             assert!(
-                authored.is_empty(),
+                authored.is_empty()
+                    || crate::command_catalog::AUTHORED_ROW_REFERENCES.contains(key),
                 "`{key}` has a record and the authored row {authored:?}, so its row has two sources"
             );
             from_records += 1;
@@ -201,6 +205,11 @@ fn every_binding_key_is_a_catalog_key() {
 /// Every authored row still in a table belongs to a command the registry does
 /// not hold, so no command's row has both a record and a stale authored copy.
 ///
+/// The eight subcommand reference rows are the one exception: they are the byte
+/// reference the reserved-surface record tests pin equal to their records'
+/// summaries, and they never render, because a registered key resolves to its
+/// record first.
+///
 /// This is the tripwire that keeps the deletion honest in both directions: a
 /// record dropped from the registry would leave a row with no record and no
 /// authored row (caught above), and a row left behind after a move fails here.
@@ -212,7 +221,8 @@ fn every_authored_fallback_row_belongs_to_an_unregistered_command() {
         .chain(authored_catalog_rows())
     {
         assert!(
-            registry::find(command).is_none(),
+            registry::find(command).is_none()
+                || crate::command_catalog::AUTHORED_ROW_REFERENCES.contains(&command),
             "`{command}` is authored in a fallback table and also registered"
         );
     }

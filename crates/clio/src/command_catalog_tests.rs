@@ -11,8 +11,10 @@
 //! - Every catalog command has a registered usage line
 //! - Every registered usage line's flags appear in the catalog
 //! - Every catalog command resolves through `cli help <topic>`
-//! - The registry seam: each record's row appears once, at its spine position
-//!   among the remaining authored rows, with no second authored row beside it
+//!
+//! The registry seam — each record's row once, at its spine position, with no
+//! stale authored copy beside it, and each rendered registered block showing
+//! only accepted flags — lives in `command_catalog_seam_tests.rs`.
 //!
 //! ## Does not own
 //! - The wording of any one usage line (`cli_help_usage_tests`)
@@ -23,9 +25,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{
-    ARROW, ENTRIES_AFTER, ENTRIES_BEFORE, NOTE_INDENT, NOTE_WIDTH, USAGE_WIDTH, catalog_rows,
-};
+use super::{ARROW, NOTE_INDENT, NOTE_WIDTH, USAGE_WIDTH, catalog_rows};
 use crate::cli_help_usage;
 use crate::help_flags_test_support::{entry_block, flags_in};
 
@@ -278,147 +278,6 @@ fn no_rendered_catalog_line_exceeds_its_width() {
     );
 }
 
-/// Every command in the registry is listed by `catalog_commands` exactly once,
-/// so no record's row can be duplicated or dropped.
-#[test]
-fn every_registry_command_is_listed_exactly_once() {
-    let listed: Vec<&str> = super::catalog_commands().collect();
-    for spec in crate::cli_command_registry::all() {
-        let count = listed.iter().filter(|name| **name == spec.name).count();
-        assert_eq!(
-            count, 1,
-            "`{}` must be listed once, found {count} rows",
-            spec.name
-        );
-    }
-}
-
-/// The registry's records render at their spine positions: every record prints
-/// inside one span, no authored row sits inside it, and the authored rows that
-/// remain only follow the last record.
-///
-/// The write-head move completed the record span, so it now runs unbroken from
-/// `recall` to `graph link`. A catalog that compacted the records elsewhere,
-/// dropped one, or let an authored row slip inside the span fails here.
-#[test]
-fn the_registry_records_render_at_their_spine_positions() {
-    let listed: Vec<&str> = super::catalog_commands().collect();
-    let is_record = |name: &str| crate::cli_command_registry::find(name).is_some();
-    let first_record = listed
-        .iter()
-        .position(|name| is_record(name))
-        .expect("the catalog lists a record");
-    let last_record = listed
-        .iter()
-        .rposition(|name| is_record(name))
-        .expect("the catalog lists a record");
-    for name in &listed[..first_record] {
-        assert!(
-            !is_record(name),
-            "`{name}` is a record before the record span"
-        );
-    }
-    for name in &listed[first_record..=last_record] {
-        assert!(
-            is_record(name),
-            "`{name}` is an authored row inside the record span"
-        );
-    }
-    for name in &listed[last_record + 1..] {
-        assert!(
-            !is_record(name),
-            "`{name}` is a record printed after the last record's spine position"
-        );
-    }
-    assert_eq!(
-        last_record - first_record + 1,
-        crate::cli_command_registry::all().count(),
-        "every record prints exactly once inside the span"
-    );
-}
-
-/// No authored row names a registered command, so a record's row has exactly
-/// one source and the table holds no stale copy of it.
-#[test]
-fn no_authored_row_names_a_registered_command() {
-    for (command, _) in ENTRIES_BEFORE.iter().chain(ENTRIES_AFTER.iter()) {
-        assert!(
-            crate::cli_command_registry::find(command).is_none(),
-            "`{command}` is authored in the catalog table and also registered"
-        );
-    }
-}
-
-/// Every registered command resolves a usage line and a summary through the
-/// catalog, so its row renders rather than falling back to a marker.
-#[test]
-fn every_registry_command_resolves_a_usage_line_and_summary() {
-    for spec in crate::cli_command_registry::all() {
-        assert!(
-            cli_help_usage::usage_line(spec.name).is_some(),
-            "`{}` has no usage line",
-            spec.name
-        );
-        let row = catalog_rows()
-            .find(|(name, _)| *name == spec.name)
-            .expect("a registered name is a catalog row");
-        assert_eq!(row.1, spec.summary, "`{}` summary", spec.name);
-        // `remember` renders no description: its authored catalog row was
-        // empty, and the frozen golden capture pins those bytes, so the record
-        // carries an empty summary too. Every other summary must stay filled.
-        if spec.name != "remember" {
-            assert!(!row.1.is_empty(), "`{}` summary is empty", spec.name);
-        }
-    }
-}
-
-/// The rendered `clio help` block for a registered command shows only flags its
-/// parser accepts.
-///
-/// The usage-line parity check compares the registry text; this one reads the
-/// rendered block a reader actually sees, so a renderer, wrapping, or note
-/// change that puts a flag into the catalog that the command's parser would
-/// refuse fails here even though the usage line itself never changed.
-///
-/// For the records without a `usage_override`, the block and the accepted set
-/// both derive from the same record, so this loop guards the renderer and the
-/// flag scan rather than the record data; the override records are the real
-/// cross-source checks, pinned literally in the test below.
-#[test]
-fn every_registered_catalog_block_shows_only_flags_its_parser_accepts() {
-    for spec in crate::cli_command_registry::all() {
-        let parser = crate::cli_read::spec_for(spec.name)
-            .or_else(|| crate::cli_write::spec_for(spec.name))
-            .unwrap_or_else(|| panic!("`{}` has no parser spec", spec.name));
-        let accepted: Vec<String> = parser
-            .value_flags()
-            .iter()
-            .chain(parser.bool_flags().iter())
-            .map(|name| format!("--{name}"))
-            .collect();
-        let block = catalog_block(spec.name);
-        let wrong: Vec<String> = flags_in(&block)
-            .into_iter()
-            .filter(|flag| !accepted.contains(flag))
-            .collect();
-        assert!(
-            wrong.is_empty(),
-            "`clio {}` shows {wrong:?} in its `clio help` block, which its parser \
-             refuses:\n{block}",
-            spec.name
-        );
-    }
-}
-
-/// The override record's rendered block hides the flag its parser accepts: the
-/// printed line comes from the record's `usage_override`, not from its
-/// documented flag set, so a renderer that ignored the override would print
-/// `--context` here.
-#[test]
-fn the_persona_observe_block_hides_the_context_flag_its_parser_accepts() {
-    let block = catalog_block("persona observe");
-    assert!(
-        !block.contains("--context"),
-        "the override must keep --context out of the catalog: {block}"
-    );
-}
+// The registry-seam tests — one row per record, the record spans' spine
+// bounds, the authored reference rows, and the rendered registered blocks' —
+// live beside this module in `command_catalog_seam_tests.rs`.

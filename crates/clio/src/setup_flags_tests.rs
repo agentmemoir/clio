@@ -22,6 +22,14 @@
 
 use super::*;
 
+/// The setup record's accepted flags: the table the parser reads, so a test
+/// asks the record rather than a second list.
+fn accepted() -> &'static [crate::cli_command_spec::Flag] {
+    crate::cli_command_registry::find("setup")
+        .expect("`setup` is registered")
+        .documented
+}
+
 #[test]
 fn a_boolean_flag_may_precede_a_valued_one() {
     let flags = parse_setup_args(&[
@@ -86,21 +94,23 @@ fn the_retired_type_flag_names_its_replacement() {
 
 #[test]
 fn every_value_flag_the_parser_accepts_is_accepted_by_name() {
-    // The parser and the help text are written from the same list, so a flag can
+    // The parser and the record are written from the same table, so a flag can
     // only get into one of them by hand. This asks the parser directly for each
     // name, which is the failure the wizard would otherwise show as "unexpected
-    // argument" on a flag the help screen prints.
-    for flag in VALUE_FLAGS {
-        let raw = vec![format!("--{flag}"), "value".to_owned()];
+    // argument" on a flag the record accepts.
+    for flag in accepted().iter().filter(|flag| flag.value.is_some()) {
+        let raw = vec![format!("--{}", flag.long), "value".to_owned()];
         let parsed = parse_setup_args(&raw);
         assert!(
             parsed.is_ok(),
-            "--{flag} is in the value-flag list but the parser refuses it: {parsed:?}"
+            "--{} is in the accepted table but the parser refuses it: {parsed:?}",
+            flag.long
         );
         assert_eq!(
-            parsed.expect("a value").get(*flag).map(String::as_str),
+            parsed.expect("a value").get(flag.long).map(String::as_str),
             Some("value"),
-            "--{flag} did not keep its value"
+            "--{} did not keep its value",
+            flag.long
         );
     }
 }
@@ -110,10 +120,43 @@ fn help_documents_every_value_flag_it_accepts() {
     let mut out: Vec<u8> = Vec::new();
     print_help(&mut out);
     let text = String::from_utf8(out).expect("utf8");
-    for flag in BOOLEAN_FLAGS.iter().chain(VALUE_FLAGS) {
-        assert!(text.contains(flag), "--help does not document {flag}");
+    for flag in accepted() {
+        assert!(
+            text.contains(flag.long),
+            "--help does not document {}",
+            flag.long
+        );
     }
     assert!(text.contains("--allow-untested"), "{text}");
+    assert!(text.contains("--help"), "{text}");
+}
+
+#[test]
+fn the_retired_rotate_flag_names_why_it_is_gone() {
+    let error =
+        parse_setup_args(&["--rotate-database-password".to_owned()]).expect_err("a retired flag");
+    assert_eq!(error, ROTATE_REMOVED);
+    assert!(error.contains("no password"), "{error}");
+}
+
+#[test]
+fn help_is_accepted_by_the_parser_itself() {
+    // `--help` is answered before the parser runs on the real surface, but the
+    // parser still accepts it by name so a valued flag may follow it; a test
+    // pins that here rather than trusting the surface ordering.
+    let flags = parse_setup_args(&["--help".to_owned()]).expect("parse");
+    assert_eq!(flags.get("help").map(String::as_str), Some("true"));
+}
+
+#[test]
+fn a_blank_value_is_refused_by_name() {
+    for value in [String::new(), "  ".to_owned()] {
+        let error = parse_setup_args(&["--config".to_owned(), value]).expect_err("a blank value");
+        assert!(
+            error.contains("--config must not be empty or whitespace-only"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -194,20 +237,24 @@ fn every_value_flag_is_read_by_the_wizard() {
         ("extract", "setup_step_extract.rs", "flag(\"extract\")"),
     ];
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for flag in VALUE_FLAGS {
+    for flag in accepted().iter().filter(|flag| flag.value.is_some()) {
         let (_, file, needle) = READERS
             .iter()
-            .find(|(name, _, _)| name == flag)
-            .unwrap_or_else(|| panic!("no reader recorded for --{flag}"));
+            .find(|(name, _, _)| *name == flag.long)
+            .unwrap_or_else(|| panic!("no reader recorded for --{}", flag.long));
         let text = std::fs::read_to_string(dir.join(file)).expect("a source file");
         assert!(
             text.contains(needle),
-            "--{flag} is recorded as read in {file} but `{needle}` is gone"
+            "--{} is recorded as read in {file} but `{needle}` is gone",
+            flag.long
         );
     }
     assert_eq!(
         READERS.len(),
-        VALUE_FLAGS.len(),
+        accepted()
+            .iter()
+            .filter(|flag| flag.value.is_some())
+            .count(),
         "a recorded reader names a flag that no longer exists"
     );
 }

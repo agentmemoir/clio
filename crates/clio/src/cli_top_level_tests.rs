@@ -285,3 +285,36 @@ fn a_double_dash_ends_flag_parsing() {
     .expect_err("a token after the delimiter has no operand slot");
     assert_eq!(error.message(), "unexpected argument `stray`");
 }
+
+/// A value flag repeated in separate-token form is refused, the same way the
+/// `--flag=value` spelling is, instead of the last value silently winning.
+#[test]
+fn a_value_flag_repeated_in_separate_tokens_is_a_usage_error() {
+    let error = super::parse_flags(
+        [
+            "--db".to_owned(),
+            "a".to_owned(),
+            "--db".to_owned(),
+            "b".to_owned(),
+        ],
+        &[],
+    )
+    .expect_err("a repeated --db is a usage error in either spelling");
+    assert!(
+        error.message().contains("--db was given more than once"),
+        "{}",
+        error.message()
+    );
+}
+
+/// A flag name that reaches the unknown-flag reporter without its dash is
+/// rendered with the `--` prefix, so the refusal names the flag the way the
+/// reader types it. No production caller hands a bare name over today; the
+/// branch is defensive, and this test calls the reporter with one directly.
+#[test]
+fn a_flag_name_without_a_dash_is_rendered_with_the_double_dash() {
+    let error = super::unknown_surface_flag("confidance", &["confidence"]);
+    assert_eq!(error.code(), "usage");
+    assert_eq!(error.message(), "unknown flag `--confidance`");
+    assert_eq!(error.hint(), Some("did you mean `--confidence`?"));
+}

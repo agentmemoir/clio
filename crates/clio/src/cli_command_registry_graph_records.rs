@@ -157,6 +157,10 @@ const REQUIRED_RELATIONSHIP: Flag = Flag {
 /// but `--output`, which each usage line documents.
 const UNPRINTED_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
 
+/// The `--epistemic-kind`/`--source-type` pairing `triple add` prints under
+/// its usage line.
+const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
+
 /// `triple query`'s usage line: its three positionals are nested optionals, a
 /// shape the assembled form cannot print.
 const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--output json|text]";
@@ -193,7 +197,7 @@ pub(crate) const TRIPLE_ADD: CommandSpec = CommandSpec {
     name: "triple add",
     aliases: &[],
     summary: "write one subject/predicate/object fact",
-    notes: &[],
+    notes: &[SOURCE_TYPE_PAIRING_NOTE],
     positionals: &[TRIPLE_S, TRIPLE_P, TRIPLE_O],
     documented: &[
         Flag::value("epistemic-kind", "fact|belief"),

@@ -51,14 +51,12 @@ use crate::agent_harness_write_install::{
     InstallOutcome, install_server_from_file, remove_server_from_direct_write,
 };
 use crate::cli_error::CliError;
-use crate::cli_top_level::{parse_flags, report_surface_usage_error, wants_help};
+use crate::cli_top_level::{
+    parse_flags, record_flag_names, report_surface_usage_error, wants_help,
+};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-
-/// The flags both verbs accept. Any other flag is a usage error rather than a
-/// silently ignored token.
-const HARNESS_FLAGS: &[&str] = &["harness"];
 
 /// The two verbs, so the parse-decide-report flow runs once for both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,7 +285,11 @@ fn decide(args: &[String]) -> Result<Decision, CliError> {
     if wants_help(args) {
         return Ok(Decision::Help);
     }
-    let flags = parse_flags(args.iter().cloned(), HARNESS_FLAGS)?;
+    // The flags the verb accepts are the ones its registry record documents;
+    // any other flag is a usage error rather than a silently ignored token.
+    // Both verbs' records document the same single flag, and the tranche tests
+    // pin them equal, so one record's names gate both parsers.
+    let flags = parse_flags(args.iter().cloned(), &record_flag_names("install"))?;
     if flags.contains_key("help") {
         return Ok(Decision::Help);
     }
