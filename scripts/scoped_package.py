@@ -13,8 +13,10 @@ from scoped_profiles import (
     CARGO_LLVM_COV_TARGET_KEY,
     clear_profile_buffers,
     drop_invalid_profraws,
+    drop_selected_objects,
     instrumented_dir,
     prune_foreign_objects,
+    resolved_instrumented_dir,
 )
 from scoped_run import hermetic_env, run_coverage_tests, write_coverage_report
 from scoped_select import workspace_packages
@@ -88,12 +90,7 @@ def package_env(name: str) -> dict[str, str]:
 def run_package_coverage(name: str) -> PackageMeasurement:
     """Measure one package into its own instrumented directory and report.
 
-    The same two steps as the gate, in the same order, with the same buffer and
-    object hygiene between them, and under a directory this package alone builds
-    into. That last part is the difference from running the coverage tool's own
-    per-package command: that one builds into the shared instrumented directory
-    and merges whatever the object walk finds there, so an earlier run's binaries
-    for other packages change this package's per-file rows.
+    The gate's same test and report steps run here, with stale selected executables removed before tests and this package's own instrumented directory for isolation.
 
     A red suite does not cost the report, which is the output this mode exists
     for. The test step writes no report of its own, so the buffers of every test
@@ -105,6 +102,7 @@ def run_package_coverage(name: str) -> PackageMeasurement:
     env = package_env(name)
     report_path = package_report_path(name)
     clear_profile_buffers(env)
+    drop_selected_objects(resolved_instrumented_dir(env), [name])
     test_status = EXIT_OK
     try:
         run_coverage_tests([name], None, env)

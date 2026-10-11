@@ -15,7 +15,6 @@ from scoped_profiles import (
     CARGO_LLVM_COV_TARGET_KEY,
     RAW_PROFILE_HEADER_BYTES,
     _inside,
-    resolved_instrumented_dir,
 )
 
 from scoped_selftest_support import shared as globals
@@ -24,15 +23,16 @@ from scoped_selftest_support import shared as globals
 def run(check, name, prune_packages) -> None:
     # --- the one-package mode, wired end to end without a build --------------
     #
-    # Every step is recorded rather than run, because what is under test is the
-    # order, the directory, the package, and the report path: four things that a
-    # real run would only prove by producing the wrong rows and taking an hour.
+    # Record the cleanup, test, and report order without running the package suite.
     calls: list[tuple] = []
+    expected_directory = (ROOT / package_target_override("clio-store")).resolve()
     original_mode_globals = {
         name: globals()[name]
         for name in (
             "workspace_packages",
             "clear_profile_buffers",
+            "resolved_instrumented_dir",
+            "drop_selected_objects",
             "run_coverage_tests",
             "instrumented_dir",
             "drop_invalid_profraws",
@@ -72,6 +72,12 @@ def run(check, name, prune_packages) -> None:
     try:
         globals()["workspace_packages"] = lambda: prune_packages
         globals()["clear_profile_buffers"] = lambda env: calls.append(("clear", env))
+        globals()["resolved_instrumented_dir"] = lambda env=None: (
+            calls.append(("resolve", expected_directory, env)) or expected_directory
+        )
+        globals()["drop_selected_objects"] = lambda directory, selected: calls.append(
+            ("selected", Path(directory), tuple(selected))
+        )
         globals()["run_coverage_tests"] = lambda pkgs, filt=None, env=None: calls.append(
             ("test", tuple(pkgs), dict(env or {}))
         )
@@ -80,7 +86,7 @@ def run(check, name, prune_packages) -> None:
         # resolution: what is under test is WHICH directory the mode picked, and
         # that it picked it from its own run's environment.
         globals()["instrumented_dir"] = lambda env=None: (
-            calls.append(("dir", resolved_instrumented_dir(env))) or calls[-1][1]
+            calls.append(("dir", expected_directory)) or expected_directory
         )
         globals()["drop_invalid_profraws"] = lambda directory: calls.append(("buffers", Path(directory)))
         globals()["prune_foreign_objects"] = lambda directory, selected: calls.append(
@@ -102,33 +108,37 @@ def run(check, name, prune_packages) -> None:
         check(
             "it runs the same steps in the same order",
             [call[0] for call in calls],
-            ["clear", "test", "dir", "buffers", "prune", "report"],
+            ["clear", "resolve", "selected", "test", "dir", "buffers", "prune", "report"],
         )
-        check("its test step names exactly this package", calls[1][1], ("clio-store",))
-        expected_directory = (ROOT / package_target_override("clio-store")).resolve()
+        check("its test step names exactly this package", calls[3][1], ("clio-store",))
         check(
-            "it resolves the package's own instrumented directory",
-            calls[2][1],
-            expected_directory,
+            "it resolves the package's own instrumented directory before the test run",
+            (calls[1][1], calls[1][2]),
+            (expected_directory, calls[3][2]),
+        )
+        check(
+            "it removes old objects for exactly this package before the test run",
+            (calls[2][1], calls[2][2]),
+            (expected_directory, ("clio-store",)),
         )
         check(
             "its hygiene steps run against that directory, not the shared one",
-            (calls[3][1], calls[4][1]),
+            (calls[5][1], calls[6][1]),
             (expected_directory, expected_directory),
         )
         check(
             "its report path is the package's own, not the gate's",
-            calls[5][1],
+            calls[7][1],
             package_report_path("clio-store"),
         )
         check(
             "its tools build into that directory, not the shared one",
-            calls[1][2].get(CARGO_LLVM_COV_TARGET_KEY),
+            calls[3][2].get(CARGO_LLVM_COV_TARGET_KEY),
             package_target_override("clio-store"),
         )
         check(
             "it prunes the object list rather than trusting the directory",
-            calls[4][2],
+            calls[6][2],
             ("clio-store",),
         )
         check(
@@ -161,6 +171,8 @@ def run(check, name, prune_packages) -> None:
         for name in (
             "workspace_packages",
             "clear_profile_buffers",
+            "resolved_instrumented_dir",
+            "drop_selected_objects",
             "run_coverage_tests",
             "instrumented_dir",
             "drop_invalid_profraws",
@@ -177,9 +189,15 @@ def run(check, name, prune_packages) -> None:
     try:
         globals()["workspace_packages"] = lambda: prune_packages
         globals()["clear_profile_buffers"] = lambda env: red_calls.append(("clear", env))
+        globals()["resolved_instrumented_dir"] = lambda env=None: (
+            red_calls.append(("resolve", expected_directory, env)) or expected_directory
+        )
+        globals()["drop_selected_objects"] = lambda directory, selected: red_calls.append(
+            ("selected", Path(directory), tuple(selected))
+        )
         globals()["run_coverage_tests"] = _failing_test_step
         globals()["instrumented_dir"] = lambda env=None: (
-            red_calls.append(("dir", resolved_instrumented_dir(env))) or red_calls[-1][1]
+            red_calls.append(("dir", expected_directory)) or expected_directory
         )
         globals()["drop_invalid_profraws"] = lambda directory: red_calls.append(
             ("buffers", Path(directory))
@@ -204,7 +222,7 @@ def run(check, name, prune_packages) -> None:
         check(
             "a red suite runs the same steps in the same order",
             [call[0] for call in red_calls],
-            ["clear", "test", "dir", "buffers", "prune", "report"],
+            ["clear", "resolve", "selected", "test", "dir", "buffers", "prune", "report"],
         )
         check(
             "a red suite still writes the package's own report",
