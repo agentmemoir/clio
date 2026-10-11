@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The nine `CommandSpec` records and `PERSONA_LOCAL`, the tranche that
 //!   lists them in the registry's declared order
+//! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -30,65 +31,163 @@
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
 use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use clio_types::{SemanticCategory, SourceType};
 
-/// The global flags these records accept without printing.
-const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
-
-/// The scratchpad records print `--bank`/`--actor`, so only these ride along.
-const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
-
-/// A required `KEY`.
+/// The required `KEY` positional of the persona and scratchpad writes.
 const KEY: Positional = Positional {
     label: "KEY",
     required: true,
     description: "",
 };
 
-/// The optional `KEY` of `scratchpad read` and `scratchpad clear`.
-const OPTIONAL_KEY: Positional = Positional {
-    label: "KEY",
-    required: false,
-    description: "",
-};
-
-/// A required `VALUE`.
+/// The required `VALUE` positional of `persona stable` and `canonical put`.
 const VALUE: Positional = Positional {
     label: "VALUE",
     required: true,
     description: "",
 };
 
-/// The `scratchpad write` body.
-const CONTENT: Positional = Positional {
-    label: "CONTENT",
-    required: true,
-    description: "",
-};
-
-/// The `persona observe` observation.
+/// The required `NUMBER` positional of `persona observe`.
 const NUMBER: Positional = Positional {
     label: "NUMBER",
     required: true,
     description: "",
 };
 
+/// The required `CONTENT` positional of `scratchpad write`.
+const CONTENT: Positional = Positional {
+    label: "CONTENT",
+    required: true,
+    description: "",
+};
+
+/// The optional `KEY` positional of the scratchpad reads.
+const OPTIONAL_KEY: Positional = Positional {
+    label: "KEY",
+    required: false,
+    description: "",
+};
+
+/// The `--explain` trace flag this tranche's read commands document.
+const EXPLAIN: Flag = Flag::toggle("explain", "Asks `read_args` for the trace detail.");
+
+/// The `--dry-run` preview flag this tranche's write commands document.
+const DRY_RUN: Flag = Flag::toggle("dry-run", "Previews with no durable change.");
+
+/// The `--source explicit|inferred` of `persona stable`, which the tool
+/// defaults to `explicit`.
+const SOURCE_STABLE: Flag = Flag {
+    default: Some("explicit"),
+    ..Flag::choice(
+        "source",
+        "explicit|inferred",
+        "`optional_flags` validates `explicit` or `inferred`.",
+        &["explicit", "inferred"],
+    )
+};
+
+/// The `--source explicit|inferred` of `persona observe`, which the tool
+/// defaults to `inferred`.
+const SOURCE_OBSERVE: Flag = Flag {
+    default: Some("inferred"),
+    ..Flag::choice(
+        "source",
+        "explicit|inferred",
+        "`optional_flags` validates `explicit` or `inferred`.",
+        &["explicit", "inferred"],
+    )
+};
+
+/// The `--confidence N` of `persona stable`, `persona observe`, and `canonical put`.
+const CONFIDENCE: Flag = Flag::float(
+    "confidence",
+    "N",
+    "`parse_unit_f64` bounds it to `0.0..=1.0`.",
+);
+
+/// The `--evidence-ref E` of the persona and canonical writes.
+const EVIDENCE_REF: Flag = Flag::text("evidence-ref", "E", "Sets the entry's `evidence_ref`.");
+
+/// The `--context TEXT` of `persona stable` and `persona observe`.
+const PERSONA_CONTEXT: Flag = Flag::text("context", "TEXT", "Sets the entry's `context`.");
+
+/// The `--session S` of the scratchpad commands.
+const SESSION: Flag = Flag::text("session", "S", "`insert_session` sets the session id.");
+
 /// The scratchpad lines print `--bank B`; the global's own placeholder is longer.
-const SCRATCHPAD_BANK: Flag = Flag::value("bank", "B");
+const SCRATCHPAD_BANK: Flag = Flag::text("bank", "B", "`base_args` scopes the call to one bank.");
 
 /// The scratchpad and persona write lines print `--actor A`.
-const SCRATCHPAD_ACTOR: Flag = Flag::value("actor", "A");
+const SCRATCHPAD_ACTOR: Flag = Flag::text("actor", "A", "`base_args` names the acting identity.");
+
+/// The `--budget-tokens N` of `persona get`, which `clio_persona` defaults to
+/// `DEFAULT_PERSONA_TOKEN_BUDGET`.
+const BUDGET_TOKENS: Flag = Flag {
+    default: Some("400"),
+    ..Flag::uint(
+        "budget-tokens",
+        "N",
+        "`persona_get_call` sets the token budget.",
+    )
+};
 
 /// `canonical put` cannot run without its selector flags.
 const CATEGORY_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("category", "C")
+    ..Flag::choice(
+        "category",
+        "C",
+        "`canonical_put_call` requires the slot category from `task_spec|schema|tool_config|output_constraint|persona`.",
+        SemanticCategory::WIRE,
+    )
 };
 
 /// The second `canonical put` selector.
 const EPISTEMIC_KIND_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("epistemic-kind", "K")
+    ..Flag::choice(
+        "epistemic-kind",
+        "K",
+        "`canonical_put_call` requires and validates `fact` or `belief`.",
+        &["fact", "belief"],
+    )
 };
+
+/// The `--source-type T` of `canonical put`.
+const SOURCE_TYPE: Flag = Flag::choice(
+    "source-type",
+    "T",
+    "`source_type_arg` requires it with `belief`: `user_stated|agent_inferred|third_party`.",
+    SourceType::WIRE,
+);
+
+/// The `--source-text TEXT` of `canonical put`.
+const SOURCE_TEXT: Flag = Flag::text(
+    "source-text",
+    "TEXT",
+    "`canonical_put_call` sets the `source_text`.",
+);
+
+/// The `--context C` of `canonical put`.
+const CANONICAL_CONTEXT: Flag = Flag::text(
+    "context",
+    "C",
+    "`context_arg` bounds the context to 4096 bytes.",
+);
+
+/// The `--as-of TS` of `canonical get`.
+const AS_OF: Flag = Flag::text(
+    "as-of",
+    "TS",
+    "`canonical_get_call` sets the point-in-time `as_of`.",
+);
+
+/// The `--item-id ID` of `maintenance status`.
+const ITEM_ID: Flag = Flag::text(
+    "item-id",
+    "ID",
+    "`maintenance_status_call` sets the `item_id` filter.",
+);
 
 /// The `--epistemic-kind`/`--source-type` pairing `canonical put` prints under
 /// its usage line.
@@ -98,6 +197,12 @@ const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a
 /// line is pinned here while `documented` keeps the parser's accepted set.
 const PERSONA_OBSERVE_USAGE: &str = "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]";
 
+/// The global flags these records accept without printing.
+const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+
+/// The scratchpad records print `--bank`/`--actor`, so only these ride along.
+const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
+
 /// `clio persona get`: the persona document, within a token budget.
 pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
     name: "persona get",
@@ -105,11 +210,7 @@ pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
     summary: "the persona model, within a token budget",
     notes: &[],
     positionals: &[],
-    documented: &[
-        Flag::value("budget-tokens", "N"),
-        Flag::boolean("explain"),
-        GLOBAL_OUTPUT,
-    ],
+    documented: &[BUDGET_TOKENS, EXPLAIN, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -127,11 +228,11 @@ pub(crate) const PERSONA_STABLE: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[KEY, VALUE],
     documented: &[
-        Flag::value("confidence", "N"),
-        Flag::value("source", "explicit|inferred"),
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "TEXT"),
-        Flag::boolean("dry-run"),
+        CONFIDENCE,
+        SOURCE_STABLE,
+        EVIDENCE_REF,
+        PERSONA_CONTEXT,
+        DRY_RUN,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -152,10 +253,10 @@ pub(crate) const PERSONA_OBSERVE: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[KEY, NUMBER],
     documented: &[
-        Flag::value("confidence", "N"),
-        Flag::value("source", "explicit|inferred"),
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "TEXT"),
+        CONFIDENCE,
+        SOURCE_OBSERVE,
+        EVIDENCE_REF,
+        PERSONA_CONTEXT,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -174,12 +275,7 @@ pub(crate) const SCRATCHPAD_WRITE: CommandSpec = CommandSpec {
     summary: "store an ephemeral key for this session",
     notes: &[],
     positionals: &[KEY, CONTENT],
-    documented: &[
-        Flag::value("session", "S"),
-        SCRATCHPAD_BANK,
-        SCRATCHPAD_ACTOR,
-        GLOBAL_OUTPUT,
-    ],
+    documented: &[SESSION, SCRATCHPAD_BANK, SCRATCHPAD_ACTOR, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
     flag_aliases: &[],
     usage_override: None,
@@ -196,12 +292,7 @@ pub(crate) const SCRATCHPAD_READ: CommandSpec = CommandSpec {
     summary: "read one key, or the whole pad",
     notes: &[],
     positionals: &[OPTIONAL_KEY],
-    documented: &[
-        Flag::value("session", "S"),
-        SCRATCHPAD_BANK,
-        SCRATCHPAD_ACTOR,
-        GLOBAL_OUTPUT,
-    ],
+    documented: &[SESSION, SCRATCHPAD_BANK, SCRATCHPAD_ACTOR, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
     flag_aliases: &[],
     usage_override: None,
@@ -218,12 +309,7 @@ pub(crate) const SCRATCHPAD_CLEAR: CommandSpec = CommandSpec {
     summary: "drop one key, or the whole pad",
     notes: &[],
     positionals: &[OPTIONAL_KEY],
-    documented: &[
-        Flag::value("session", "S"),
-        SCRATCHPAD_BANK,
-        SCRATCHPAD_ACTOR,
-        GLOBAL_OUTPUT,
-    ],
+    documented: &[SESSION, SCRATCHPAD_BANK, SCRATCHPAD_ACTOR, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
     flag_aliases: &[],
     usage_override: None,
@@ -243,12 +329,12 @@ pub(crate) const CANONICAL_PUT: CommandSpec = CommandSpec {
     documented: &[
         CATEGORY_REQUIRED,
         EPISTEMIC_KIND_REQUIRED,
-        Flag::value("source-type", "T"),
-        Flag::value("confidence", "N"),
-        Flag::value("source-text", "TEXT"),
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "C"),
-        Flag::boolean("dry-run"),
+        SOURCE_TYPE,
+        CONFIDENCE,
+        SOURCE_TEXT,
+        EVIDENCE_REF,
+        CANONICAL_CONTEXT,
+        DRY_RUN,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -267,7 +353,7 @@ pub(crate) const CANONICAL_GET: CommandSpec = CommandSpec {
     summary: "read one canonical key",
     notes: &[],
     positionals: &[KEY],
-    documented: &[Flag::value("as-of", "TS"), GLOBAL_OUTPUT],
+    documented: &[AS_OF, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -284,11 +370,7 @@ pub(crate) const MAINTENANCE_STATUS: CommandSpec = CommandSpec {
     summary: "queue depth, failures, and drain progress",
     notes: &[],
     positionals: &[],
-    documented: &[
-        Flag::value("item-id", "ID"),
-        Flag::boolean("explain"),
-        GLOBAL_OUTPUT,
-    ],
+    documented: &[ITEM_ID, EXPLAIN, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,

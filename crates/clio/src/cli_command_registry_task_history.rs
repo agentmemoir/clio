@@ -15,6 +15,7 @@
 //! ## Owns
 //! - The eight `CommandSpec` records and `TASK_HISTORY`, the tranche that
 //!   lists them in head-group order
+//! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -62,39 +63,65 @@ const TARGET: Positional = Positional {
 };
 
 /// The `--explain` trace flag the read commands here document.
-const EXPLAIN: Flag = Flag::boolean("explain");
+const EXPLAIN: Flag = Flag::toggle(
+    "explain",
+    "Requests the trace; `cli_read_args::read_args` sends `explain` as true to the read tool.",
+);
 
 /// The `--dry-run` preview flag the write commands here document.
-const DRY_RUN: Flag = Flag::boolean("dry-run");
+const DRY_RUN: Flag = Flag::toggle(
+    "dry-run",
+    "Previews the write without storing it; `cli_write_persona` sends `dry_run` as true to the write tool.",
+);
 
 /// The required `--definition D` flag of `task upsert`.
 const DEFINITION: Flag = Flag {
     required: true,
-    ..Flag::value("definition", "D")
+    ..Flag::text(
+        "definition",
+        "D",
+        "Sets the task definition text; `cli_write_persona::task_upsert_call` sends it as `definition` to `task_upsert`.",
+    )
 };
 
 /// The required `--status S` flag of `task upsert`.
 const STATUS: Flag = Flag {
     required: true,
-    ..Flag::value("status", "S")
+    ..Flag::text(
+        "status",
+        "S",
+        "Sets the task status; `cli_write_persona::task_upsert_call` sends it as `status` to `task_upsert`.",
+    )
 };
 
 /// The required `--attempt-n N` flag of `failure record`.
 const ATTEMPT_N: Flag = Flag {
     required: true,
-    ..Flag::value("attempt-n", "N")
+    ..Flag::uint(
+        "attempt-n",
+        "N",
+        "Numbers the attempt; `cli_write_persona::failure_record_call` parses it with `parse_u64` into `attempt_n`.",
+    )
 };
 
 /// The required `--what-failed W` flag of `failure record`.
 const WHAT_FAILED: Flag = Flag {
     required: true,
-    ..Flag::value("what-failed", "W")
+    ..Flag::text(
+        "what-failed",
+        "W",
+        "Describes what failed; `cli_write_persona::failure_record_call` sends it as `what_failed`.",
+    )
 };
 
 /// The required `--lesson L` flag of `failure record`.
 const LESSON: Flag = Flag {
     required: true,
-    ..Flag::value("lesson", "L")
+    ..Flag::text(
+        "lesson",
+        "L",
+        "Records the lesson; `cli_write_persona::failure_record_call` sends it as `lesson`.",
+    )
 };
 
 /// The declared globals these commands accept without printing: every global
@@ -126,7 +153,15 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
     summary: "a task's recorded transitions",
     notes: &[],
     positionals: &[TASK_ID],
-    documented: &[Flag::value("limit", "N"), EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[
+        Flag::uint(
+            "limit",
+            "N",
+            "Caps the recorded transitions; `cli_read_history::task_history_call` parses it with `parse_u64` for `task_history`.",
+        ),
+        EXPLAIN,
+        GLOBAL_OUTPUT,
+    ],
     accepted_extra: UNPRINTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -146,9 +181,21 @@ pub(crate) const TASK_UPSERT: CommandSpec = CommandSpec {
     documented: &[
         DEFINITION,
         STATUS,
-        Flag::value("steps", "a,b"),
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "TEXT"),
+        Flag::text(
+            "steps",
+            "a,b",
+            "Lists task steps as comma-separated text; `cli_write_persona::task_upsert_call` splits it into the `steps` array.",
+        ),
+        Flag::text(
+            "evidence-ref",
+            "E",
+            "Names supporting evidence; `cli_write_persona::task_upsert_call` sends it as `evidence_ref`.",
+        ),
+        Flag::text(
+            "context",
+            "TEXT",
+            "Adds freeform context; `cli_write_persona::task_upsert_call` sends it as `context`.",
+        ),
         DRY_RUN,
         GLOBAL_OUTPUT,
     ],
@@ -169,7 +216,15 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     summary: "failures recorded against one task",
     notes: &[],
     positionals: &[TASK_ID_OR_QUERY],
-    documented: &[Flag::value("limit", "N"), EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[
+        Flag::uint(
+            "limit",
+            "N",
+            "Caps the failures returned; `cli_read_history::failure_list_call` parses it with `parse_u64` for `failures_for_task`.",
+        ),
+        EXPLAIN,
+        GLOBAL_OUTPUT,
+    ],
     accepted_extra: UNPRINTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -191,8 +246,16 @@ pub(crate) const FAILURE_RECORD: CommandSpec = CommandSpec {
         ATTEMPT_N,
         WHAT_FAILED,
         LESSON,
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "TEXT"),
+        Flag::text(
+            "evidence-ref",
+            "E",
+            "Names supporting evidence; `cli_write_persona::failure_record_call` sends it as `evidence_ref`.",
+        ),
+        Flag::text(
+            "context",
+            "TEXT",
+            "Adds freeform context; `cli_write_persona::failure_record_call` sends it as `context`.",
+        ),
         DRY_RUN,
         GLOBAL_OUTPUT,
     ],
@@ -214,11 +277,31 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[],
     documented: &[
-        Flag::value("time-start", "TS"),
-        Flag::value("time-end", "TS"),
-        Flag::value("task-id", "ID"),
-        Flag::value("depth", "N"),
-        Flag::value("limit", "N"),
+        Flag::text(
+            "time-start",
+            "TS",
+            "Sets the lower time bound; `cli_read_history::memtree_query_call` sends it as `time_range.start`.",
+        ),
+        Flag::text(
+            "time-end",
+            "TS",
+            "Sets the upper time bound; `cli_read_history::memtree_query_call` sends it as `time_range.end`.",
+        ),
+        Flag::text(
+            "task-id",
+            "ID",
+            "Restricts the walk to one task; `cli_read_history::memtree_query_call` sends it as `task_id`.",
+        ),
+        Flag::uint(
+            "depth",
+            "N",
+            "Bounds the tree walk depth; `cli_read_history::memtree_query_call` parses it with `parse_u64`.",
+        ),
+        Flag::uint(
+            "limit",
+            "N",
+            "Caps the nodes returned; `cli_read_history::memtree_query_call` parses it with `parse_u64` for `memtree_query`.",
+        ),
         EXPLAIN,
         GLOBAL_OUTPUT,
     ],
@@ -258,8 +341,17 @@ pub(crate) const HISTORY_TEMPORAL: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[TARGET],
     documented: &[
-        Flag::value("as-of", "TS"),
-        Flag::value("time-axis", "valid|transaction"),
+        Flag::text(
+            "as-of",
+            "TS",
+            "Sets the as-of instant; `cli_read_history::temporal_call` passes it to `temporal_history` as `as_of`.",
+        ),
+        Flag::choice(
+            "time-axis",
+            "valid|transaction",
+            "Selects the bi-temporal axis; `cli_read_args::validate_time_axis` accepts `valid` or `transaction` for `temporal_history`.",
+            &["valid", "transaction"],
+        ),
         EXPLAIN,
         GLOBAL_OUTPUT,
     ],
@@ -288,3 +380,7 @@ pub(crate) static TASK_HISTORY: &[CommandSpec] = &[
 #[cfg(test)]
 #[path = "cli_command_registry_task_history_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_command_registry_task_history_metadata_tests.rs"]
+mod metadata_tests;

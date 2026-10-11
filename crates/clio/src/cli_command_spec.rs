@@ -98,7 +98,6 @@ pub(crate) enum ValueKind {
     Uint,
     #[cfg_attr(not(test), allow(dead_code))]
     Float,
-    #[cfg_attr(not(test), allow(dead_code))]
     Enum(&'static [&'static str]),
 }
 
@@ -155,6 +154,77 @@ impl Flag {
             placeholder_override: None,
             value_optional: false,
             exclusive_group: None,
+        }
+    }
+
+    /// A required-text value flag with its placeholder and one-line description.
+    pub(crate) const fn text(
+        long: &'static str,
+        placeholder: &'static str,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            description,
+            ..Self::value(long, placeholder)
+        }
+    }
+
+    /// A whole-number value flag with its placeholder and description.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) const fn uint(
+        long: &'static str,
+        placeholder: &'static str,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            description,
+            value: Some(ValueSpec {
+                placeholder,
+                kind: ValueKind::Uint,
+            }),
+            ..Self::value(long, placeholder)
+        }
+    }
+
+    /// A decimal value flag with its placeholder and description.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) const fn float(
+        long: &'static str,
+        placeholder: &'static str,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            description,
+            value: Some(ValueSpec {
+                placeholder,
+                kind: ValueKind::Float,
+            }),
+            ..Self::value(long, placeholder)
+        }
+    }
+
+    /// A value flag restricted to `allowed`, with its placeholder and description.
+    pub(crate) const fn choice(
+        long: &'static str,
+        placeholder: &'static str,
+        description: &'static str,
+        allowed: &'static [&'static str],
+    ) -> Self {
+        Self {
+            description,
+            value: Some(ValueSpec {
+                placeholder,
+                kind: ValueKind::Enum(allowed),
+            }),
+            ..Self::value(long, placeholder)
+        }
+    }
+
+    /// A boolean flag with its one-line description and no value.
+    pub(crate) const fn toggle(long: &'static str, description: &'static str) -> Self {
+        Self {
+            description,
+            ..Self::boolean(long)
         }
     }
 }

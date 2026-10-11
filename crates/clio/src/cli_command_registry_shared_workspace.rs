@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The nine `CommandSpec` records and `SHARED_WORKSPACE`, the tranche that
 //!   lists them in the registry's declared order
+//! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -30,6 +31,7 @@
 
 use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use clio_types::SourceType;
 
 /// The global flags these records accept without printing.
 const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
@@ -75,34 +77,65 @@ const OPTIONAL_QUERY: Positional = Positional {
     description: "",
 };
 
+/// The closed `--action` set `cli_write_hygiene` validates against.
+const HYGIENE_ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "keep"];
+
+/// The `--explain` trace flag the read commands here document.
+const EXPLAIN: Flag = Flag::toggle("explain", "`read_args` requests the trace.");
+
+/// The `--limit N` page cap the hygiene read commands document.
+const HYGIENE_LIMIT: Flag = Flag {
+    default: Some("50"),
+    ..Flag::uint(
+        "limit",
+        "N",
+        "Caps the page; `cli_read_hygiene` parses it, and the tool defaults it to 50 when omitted.",
+    )
+};
+
+/// The `--offset N` page skip the hygiene read commands document.
+const HYGIENE_OFFSET: Flag = Flag {
+    default: Some("0"),
+    ..Flag::uint(
+        "offset",
+        "N",
+        "Skips leading results; `cli_read_hygiene` parses it, and the tool defaults it to 0 when omitted.",
+    )
+};
+
 /// The shared-bank lines print `--actor A` bare and cannot run without it.
 const SHARED_ACTOR_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("actor", "A")
+    ..Flag::text("actor", "A", "`base_args` forwards the identity.")
 };
 
 /// The `--shared-bank` opt-in is written bare on every shared record.
 const SHARED_BANK_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::boolean("shared-bank")
+    ..Flag::toggle("shared-bank", "`cli_write` enables the shared bank.")
 };
 
 /// `shared discard` cannot run without its reason.
 const REASON_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("reason", "R")
+    ..Flag::text("reason", "R", "`shared_discard` forwards the reason.")
 };
 
 /// `shared store` cannot run without an epistemic kind.
 const EPISTEMIC_KIND_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("epistemic-kind", "K")
+    ..Flag::choice(
+        "epistemic-kind",
+        "K",
+        "Marks `fact` or `belief`; belief requires `--source-type`.",
+        &["fact", "belief"],
+    )
 };
 
 /// `hygiene clean` cannot run without a candidates file.
 const FILE_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("file", "candidates.json")
+    ..Flag::text("file", "candidates.json", "`cli_write_hygiene` reads it.")
 };
 
 /// The `--epistemic-kind`/`--source-type` pairing `shared store` prints under
@@ -137,12 +170,17 @@ pub(crate) const SHARED_STORE: CommandSpec = CommandSpec {
     notes: &[SOURCE_TYPE_PAIRING_NOTE],
     positionals: &[TEXT],
     documented: &[
-        Flag::value("category", "C"),
-        Flag::value("episodic-type", "T"),
+        Flag::text("category", "C", "`shared_store` forwards the category."),
+        Flag::text("episodic-type", "T", "`shared_store` forwards the kind."),
         EPISTEMIC_KIND_REQUIRED,
-        Flag::value("source-type", "T"),
-        Flag::value("confidence", "N"),
-        Flag::value("evidence-ref", "E"),
+        Flag::choice(
+            "source-type",
+            "T",
+            "Names belief provenance (`user_stated`, `agent_inferred`, `third_party`); required with belief.",
+            SourceType::WIRE,
+        ),
+        Flag::float("confidence", "N", "`parse_unit_f64` bounds the value."),
+        Flag::text("evidence-ref", "E", "`shared_store` forwards evidence."),
         SHARED_ACTOR_REQUIRED,
         SHARED_BANK_REQUIRED,
         GLOBAL_OUTPUT,
@@ -182,7 +220,7 @@ pub(crate) const SHARED_DISCARD: CommandSpec = CommandSpec {
     positionals: &[ITEM_ID],
     documented: &[
         REASON_REQUIRED,
-        Flag::boolean("confirm"),
+        Flag::toggle("confirm", "`shared_discard` previews without it."),
         SHARED_ACTOR_REQUIRED,
         SHARED_BANK_REQUIRED,
         GLOBAL_OUTPUT,
@@ -204,9 +242,16 @@ pub(crate) const HYGIENE_AUDIT: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[],
     documented: &[
-        Flag::value("min-score", "N"),
-        Flag::value("limit", "N"),
-        Flag::value("offset", "N"),
+        Flag {
+            default: Some("0.40"),
+            ..Flag::float(
+                "min-score",
+                "N",
+                "Sets the score floor; `cli_read_hygiene` parses it, and `clio_hygiene` defaults it to `DEFAULT_MIN_SCORE`.",
+            )
+        },
+        HYGIENE_LIMIT,
+        HYGIENE_OFFSET,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -229,11 +274,19 @@ pub(crate) const HYGIENE_CLEAN: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         FILE_REQUIRED,
-        Flag::value("action", "flag|archive|discard|keep"),
-        Flag::boolean("confirm"),
-        Flag::boolean("dry-run"),
-        Flag::value("reason", "R"),
-        Flag::value("note", "N"),
+        Flag {
+            default: Some("keep"),
+            ..Flag::choice(
+                "action",
+                "flag|archive|discard|keep",
+                "Sets the action per candidate (`flag`, `archive`, `discard`, `delete`, `keep`); defaults to `keep`.",
+                HYGIENE_ACTIONS,
+            )
+        },
+        Flag::toggle("confirm", "`hygiene_clean` applies the batch."),
+        Flag::toggle("dry-run", "`hygiene_clean` previews instead."),
+        Flag::text("reason", "R", "`hygiene_clean` forwards it."),
+        Flag::text("note", "N", "`hygiene_clean` forwards it."),
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -253,12 +306,7 @@ pub(crate) const HYGIENE_LOG: CommandSpec = CommandSpec {
     summary: "what hygiene has already done",
     notes: &[],
     positionals: &[],
-    documented: &[
-        Flag::value("limit", "N"),
-        Flag::value("offset", "N"),
-        GLOBAL_BANK,
-        GLOBAL_OUTPUT,
-    ],
+    documented: &[HYGIENE_LIMIT, HYGIENE_OFFSET, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
@@ -275,7 +323,7 @@ pub(crate) const INTENT_GATE: CommandSpec = CommandSpec {
     summary: "decide whether a turn should reach memory",
     notes: &[],
     positionals: &[TURN_TEXT],
-    documented: &[Flag::boolean("explain"), GLOBAL_OUTPUT],
+    documented: &[EXPLAIN, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -293,16 +341,26 @@ pub(crate) const COMPOSE_CONTEXT: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[OPTIONAL_QUERY],
     documented: &[
-        Flag::value("query", "Q"),
-        Flag::value("domains", "a,b"),
-        Flag::value("budget-tokens", "N"),
-        Flag::value("as-of", "TS"),
-        Flag::value("query-anchor", "TS"),
-        Flag::value("time-axis", "valid|transaction"),
-        Flag::value("recall-scope", "full|consolidated_only"),
-        Flag::boolean("expand-graph"),
-        Flag::boolean("prefer-consolidated"),
-        Flag::boolean("explain"),
+        Flag::text("query", "Q", "`compose_context` accepts either."),
+        Flag::text("domains", "a,b", "`split_domains` splits the value."),
+        Flag::uint("budget-tokens", "N", "`parse_u64` sets the budget."),
+        Flag::text("as-of", "TS", "`compose_context` forwards it."),
+        Flag::text("query-anchor", "TS", "`compose_context` forwards it."),
+        Flag::choice(
+            "time-axis",
+            "valid|transaction",
+            "Selects the bi-temporal axis (`valid` or `transaction`).",
+            &["valid", "transaction"],
+        ),
+        Flag::choice(
+            "recall-scope",
+            "full|consolidated_only",
+            "Selects the recall scope (`full` or `consolidated_only`).",
+            &["full", "consolidated_only"],
+        ),
+        Flag::toggle("expand-graph", "`compose_context` expands the graph."),
+        Flag::toggle("prefer-consolidated", "`compose_context` prefers units."),
+        EXPLAIN,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -321,7 +379,7 @@ pub(crate) const AUDIT_TRAIL: CommandSpec = CommandSpec {
     summary: "masked lifecycle reconstruction for one item",
     notes: &[],
     positionals: &[ITEM_ID],
-    documented: &[Flag::boolean("explain"), GLOBAL_OUTPUT],
+    documented: &[EXPLAIN, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,

@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The five `CommandSpec` records and the `WRITE_OPERATIONS` tranche that
 //!   lists them in whole-catalog order
+//! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -46,47 +47,81 @@ const ITEM_ID: Positional = Positional {
 /// `validate` cannot run without its action choice.
 const ACTION_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("action", "attest|update|invalidate|delete")
+    ..Flag::choice(
+        "action",
+        "attest|update|invalidate|delete",
+        "Selects the review action that `cli_write_shared::validate_call` validates against `attest`, `update`, `invalidate`, or `delete` before calling the `validate` tool.",
+        &["attest", "update", "invalidate", "delete"],
+    )
 };
 
 /// `batch` cannot run without its operations file.
 const FILE_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("file", "ops.json")
+    ..Flag::text(
+        "file",
+        "ops.json",
+        "Names the operations JSON file that `cli_write_batch::batch_call` decodes and hands to the `batch` tool; `-` reads the document from stdin.",
+    )
 };
 
 /// `export` cannot run without its output file.
 const OUT_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("out", "FILE")
+    ..Flag::text(
+        "out",
+        "FILE",
+        "Names the bundle file that `cli_write_portability::export_call` passes to the `export` tool as `destination`.",
+    )
 };
 
 /// `import` cannot run without its source bundle.
 const SOURCE_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("source", "FILE")
+    ..Flag::text(
+        "source",
+        "FILE",
+        "Names the bundle file that `cli_write_portability::import_call` passes to the `import` tool as `source`.",
+    )
 };
 
 /// `erase` cannot run without its subject.
 const SUBJECT_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("subject", "S")
+    ..Flag::text(
+        "subject",
+        "S",
+        "Names the data subject whose key is destroyed; `cli_write_portability::erase_call` passes it to the `erase_request` tool as `subject_id`.",
+    )
 };
 
 /// `erase` cannot run without its basis.
 const BASIS_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("basis", "B")
+    ..Flag::text(
+        "basis",
+        "B",
+        "Records the legal basis for erasure; `cli_write_portability::erase_call` passes it to the `erase_request` tool as `legal_basis`.",
+    )
 };
 
 /// `erase` cannot run without its request identifier.
 const REQUEST_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("request", "R")
+    ..Flag::text(
+        "request",
+        "R",
+        "Identifies the erasure request; `cli_write_portability::erase_call` passes it to the `erase_request` tool as `request_id`.",
+    )
 };
 
 /// `erase` prints its actor choice, not the global spelling.
-const ERASE_ACTOR: Flag = Flag::value("actor", "harness|system");
+const ERASE_ACTOR: Flag = Flag::choice(
+    "actor",
+    "harness|system",
+    "Selects the erasure actor that the `erase_request` tool accepts as `harness` or `system`; `cli_write_portability::erase_call` passes it through `cli_read_args::base_args`.",
+    &["harness", "system"],
+);
 
 /// The `batch` alternate: the stdin spelling of `--file`.
 const BATCH_STDIN_ALTERNATE: &str = "clio batch --file - (reads operations JSON from stdin)";
@@ -107,10 +142,26 @@ pub(crate) const VALIDATE: CommandSpec = CommandSpec {
     positionals: &[ITEM_ID],
     documented: &[
         ACTION_REQUIRED,
-        Flag::value("note", "N"),
-        Flag::value("new-content", "C"),
-        Flag::value("bank", "B"),
-        Flag::value("actor", "A"),
+        Flag::text(
+            "note",
+            "N",
+            "Carries the reviewer note that `cli_write_shared::validate_call` passes to the `validate` tool as `note`.",
+        ),
+        Flag::text(
+            "new-content",
+            "C",
+            "Carries the replacement text that `cli_write_shared::validate_call` passes to the `validate` tool as `new_content`.",
+        ),
+        Flag::text(
+            "bank",
+            "B",
+            "Scopes the review to one bank; `cli_read_args::base_args` passes it to the `validate` tool.",
+        ),
+        Flag::text(
+            "actor",
+            "A",
+            "Names the acting identity; `cli_read_args::base_args` passes it to the `validate` tool.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
@@ -132,9 +183,20 @@ pub(crate) const BATCH: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         FILE_REQUIRED,
-        Flag::boolean("dry-run"),
-        Flag::value("bank", "B"),
-        Flag::value("actor", "A"),
+        Flag::toggle(
+            "dry-run",
+            "Reports the batch plan without writing; `cli_write_batch::batch_call` sets the `batch` tool's `dry_run` argument.",
+        ),
+        Flag::text(
+            "bank",
+            "B",
+            "Scopes the batch to one bank; `cli_read_args::base_args` passes it to the `batch` tool, not to individual operations.",
+        ),
+        Flag::text(
+            "actor",
+            "A",
+            "Names the acting identity; `cli_read_args::base_args` passes it to the `batch` tool.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
@@ -155,12 +217,49 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         OUT_REQUIRED,
-        Flag::value("content-mode", "dsar_plaintext|ciphertext_backup"),
-        Flag::value("category", "C"),
-        Flag::value("time-start", "TS"),
-        Flag::value("time-end", "TS"),
-        Flag::value("include-archived", "true|false"),
-        Flag::value("include-discarded", "true|false"),
+        Flag {
+            default: Some("dsar_plaintext"),
+            ..Flag::choice(
+                "content-mode",
+                "dsar_plaintext|ciphertext_backup",
+                "Selects the bundle content mode that `cli_write_portability::export_call` validates against `dsar_plaintext` or `ciphertext_backup`, and the tool defaults it to `dsar_plaintext` when omitted.",
+                &["dsar_plaintext", "ciphertext_backup"],
+            )
+        },
+        Flag::choice(
+            "category",
+            "C",
+            "Filters the bundle to one semantic category; `cli_write_portability::export_call` validates it against `clio_types::SemanticCategory::WIRE` (`task_spec`, `schema`, `tool_config`, `output_constraint`, `persona`).",
+            clio_types::SemanticCategory::WIRE,
+        ),
+        Flag::text(
+            "time-start",
+            "TS",
+            "Bounds the bundle to items created at or after this timestamp; `cli_write_portability::export_call` passes it as `time_start`.",
+        ),
+        Flag::text(
+            "time-end",
+            "TS",
+            "Bounds the bundle to items created at or before this timestamp; `cli_write_portability::export_call` passes it as `time_end`.",
+        ),
+        Flag {
+            default: Some("true"),
+            ..Flag::choice(
+                "include-archived",
+                "true|false",
+                "Chooses whether archived items join the bundle; `cli_write_portability::include_flag` validates `true` or `false` and maps it to the tool's boolean, which defaults to true.",
+                &["true", "false"],
+            )
+        },
+        Flag {
+            default: Some("true"),
+            ..Flag::choice(
+                "include-discarded",
+                "true|false",
+                "Chooses whether discarded items join the bundle; `cli_write_portability::include_flag` validates `true` or `false` and maps it to the tool's boolean, which defaults to true.",
+                &["true", "false"],
+            )
+        },
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,
@@ -183,9 +282,19 @@ pub(crate) const IMPORT: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         SOURCE_REQUIRED,
-        Flag::boolean("dry-run"),
-        Flag::boolean("force"),
-        Flag::value("reason", "R"),
+        Flag::toggle(
+            "dry-run",
+            "Previews the restore without writing; `cli_write_portability::import_call` sets the `import` tool's `dry_run` argument.",
+        ),
+        Flag::toggle(
+            "force",
+            "Allows overwriting existing items; `cli_write_portability::import_call` sets the `import` tool's `force` argument, which the tool requires with `--reason`.",
+        ),
+        Flag::text(
+            "reason",
+            "R",
+            "Records why the restore overwrites; `cli_write_portability::import_call` passes it to the `import` tool as `reason`.",
+        ),
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -210,9 +319,22 @@ pub(crate) const ERASE: CommandSpec = CommandSpec {
         SUBJECT_REQUIRED,
         BASIS_REQUIRED,
         REQUEST_REQUIRED,
-        Flag::value("reason-code", "C"),
-        Flag::boolean("confirm"),
-        Flag::boolean("dry-run"),
+        Flag {
+            default: Some("COMPLIANCE_CRYPTO_SHRED"),
+            ..Flag::text(
+                "reason-code",
+                "C",
+                "Records the reason code for erasure; `cli_write_portability::erase_call` passes it to the `erase_request` tool as `reason_code`, and `clio_compliance` defaults it to `DEFAULT_REASON_CODE`.",
+            )
+        },
+        Flag::toggle(
+            "confirm",
+            "Passes the confirmation gate that `cli_confirm::require_confirm` enforces before `cli_write_portability::erase_call` runs the erasure.",
+        ),
+        Flag::toggle(
+            "dry-run",
+            "Previews the irreversible erasure with zero writes; `cli_write_portability::erase_call` returns a `WriteCall::Preview`.",
+        ),
         ERASE_ACTOR,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,

@@ -14,6 +14,7 @@
 //! - The help prose records carry and the accepted sets `version` and
 //!   `health` declare
 //! - The tranche's `validate` contract against the catalog inventory
+//! - The tranche's flag metadata: the enum list the reindex consumer accepts
 //!
 //! ## Does not own
 //! - The parser and helper cases and the dispatch's trailing-argument and
@@ -29,11 +30,40 @@
 //! Keep this module focused on the reserved-surface records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::CommandSpec;
+use crate::cli_command_spec::{CommandSpec, ValueKind};
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
     super::SURFACE.iter().collect()
+}
+
+/// Every documented flag in the surface tranche carries complete metadata: a
+/// description, and for a value flag a placeholder and a non-empty kind. The
+/// setup record's table is part of the tranche, so this covers `ACCEPTED` too.
+#[test]
+fn the_surface_tranche_flags_carry_complete_metadata() {
+    let specs = tranche();
+    assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
+}
+
+/// `ops reindex --target` accepts exactly the three legs
+/// `clio_index::RebuildTargets::parse` parses; the setup record's own enum
+/// lists are pinned where that grammar lives (`setup_flags_tests`).
+#[test]
+fn the_reindex_target_enum_names_the_values_the_consumer_parses() {
+    let target = record("ops reindex")
+        .documented
+        .iter()
+        .find(|flag| flag.long == "target")
+        .expect("ops reindex documents --target")
+        .value
+        .expect("--target takes a value")
+        .kind;
+    assert_eq!(
+        target,
+        ValueKind::Enum(&["dense", "lexical", "all"]),
+        "`RebuildTargets::parse` accepts these three legs"
+    );
 }
 
 /// The tranche's records pass `validate` against the catalog inventory.

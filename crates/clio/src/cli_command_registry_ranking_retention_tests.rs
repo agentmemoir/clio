@@ -30,7 +30,7 @@
 //! Keep this module focused on the five ranking and retention records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::Section;
+use crate::cli_command_spec::{CommandSpec, Section};
 
 /// `ranking get` renders today's usage text and builds today's parser sets.
 #[test]
@@ -293,4 +293,29 @@ fn validate_accepts_the_ranking_and_retention_records_against_the_catalog_invent
         crate::cli_command_registry::validate(&specs, &inventory),
         Ok(())
     );
+}
+
+/// Every documented flag in the tranche carries complete metadata: a
+/// description, and for a value flag a placeholder and a non-empty value kind.
+#[test]
+fn the_ranking_and_retention_tranche_has_complete_flag_metadata() {
+    let specs: Vec<&CommandSpec> = super::RANKING_RETENTION_LEAVES.iter().collect();
+    assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
+}
+
+/// The retention metadata defaults are the literals `retention_cli` falls back
+/// to: `bank_of` uses `default`, and `run` uses `bank`.
+#[test]
+fn the_retention_defaults_match_the_retention_cli_fallbacks() {
+    let default_of = |name: &str, long: &str| {
+        record(name)
+            .documented
+            .iter()
+            .find(|flag| flag.long == long)
+            .unwrap_or_else(|| panic!("`{name}` documents --{long}"))
+            .default
+    };
+    assert_eq!(default_of("retention get", "bank"), Some("default"));
+    assert_eq!(default_of("retention set", "bank"), Some("default"));
+    assert_eq!(default_of("retention set", "scope"), Some("bank"));
 }

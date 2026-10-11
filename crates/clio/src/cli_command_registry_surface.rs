@@ -61,11 +61,11 @@ const STATUS_UNDOCUMENTED_GLOBALS: &[&str] = &["bank", "actor", "no-input", "yes
 /// The required `--harness` flag of `install` and `uninstall`.
 const HARNESS_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("harness", "<name>")
+    ..Flag::text("harness", "<name>", "Harness `install_cli` resolves.")
 };
 
 /// The `--json` flag of `help`, the one boolean flag the help dispatch reads.
-const HELP_JSON: Flag = Flag::boolean("json");
+const HELP_JSON: Flag = Flag::toggle("json", "Selects the JSON catalog `cli_top_level` prints.");
 
 /// The `help` line: the flag comes before the topic it narrows, which the
 /// assembled order cannot write, so the line is pinned.
@@ -94,24 +94,29 @@ const DB_BACKEND_BANK: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK];
 /// present with no value and the transport scans for a free port.
 const BIND: Flag = Flag {
     value_optional: true,
-    ..Flag::value("bind", "ADDR")
+    ..Flag::text("bind", "ADDR", "Bind address `mcp_cli` scans or uses.")
 };
 
 /// The flags `mcp http` documents past the database trio.
-const TOKEN_FILE: Flag = Flag::value("token-file", "PATH");
-const SESSIONS: Flag = Flag::boolean("sessions");
+const TOKEN_FILE: Flag = Flag::text("token-file", "PATH", "Credential store `mcp_cli` loads.");
+const SESSIONS: Flag = Flag::toggle("sessions", "Enables `mcp_cli` http sessions.");
 
 /// The flags `mcp schema-export` documents; `--path` is the accepted alias
 /// its handler resolves in place of `--out`.
-const SCHEMA_EXPORT_OUT: Flag = Flag::value("out", "FILE");
-const SCHEMA_EXPORT_PATH: Flag = Flag::value("path", "FILE");
+const SCHEMA_EXPORT_OUT: Flag = Flag::text("out", "FILE", "Pack file `mcp_cli` writes.");
+const SCHEMA_EXPORT_PATH: Flag = Flag::text("path", "FILE", "Alias of `--out` for the pack.");
 
 /// The flags the mutating `ops` subcommands document past the database trio.
-const DRY_RUN_FALSE: Flag = Flag::value("dry-run", "false");
-const CONFIRM: Flag = Flag::boolean("confirm");
-const REPAIR_PLAN: Flag = Flag::value("plan", "PLAN_ID");
-const REPAIR_ACTIONS: Flag = Flag::value("actions", "a,b");
-const REINDEX_TARGET: Flag = Flag::value("target", "dense|lexical|all");
+const DRY_RUN_FALSE: Flag = Flag::text("dry-run", "false", "Pass `false` to record or apply.");
+const CONFIRM: Flag = Flag::toggle("confirm", "Confirms a live run in `ops_cli`.");
+const REPAIR_PLAN: Flag = Flag::text("plan", "PLAN_ID", "Plan id `ops_cli`'s repair resolves.");
+const REPAIR_ACTIONS: Flag = Flag::text("actions", "a,b", "Comma list `ops_cli`'s repair applies.");
+const REINDEX_TARGET: Flag = Flag::choice(
+    "target",
+    "dense|lexical|all",
+    "Index legs `ops_cli`'s reindex rebuilds.",
+    &["dense", "lexical", "all"],
+);
 
 /// `clio version`: the package identity line, over no flags and no tool.
 pub(crate) const VERSION: CommandSpec = CommandSpec {
@@ -177,7 +182,7 @@ pub(crate) const STATUS: CommandSpec = CommandSpec {
     documented: &[
         GLOBAL_DB,
         GLOBAL_BACKEND,
-        Flag::value("dir", "DIR"),
+        Flag::text("dir", "DIR", "Compose root `status_cli` probes."),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: STATUS_UNDOCUMENTED_GLOBALS,
