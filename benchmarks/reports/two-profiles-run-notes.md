@@ -146,3 +146,4 @@ After both runs (`2026-10-07T00:36:51Z`): `nproc` 4, load average 1.38, 1.00, 0.
 - Both scorecards come from `--judge stub --generator stub`. Their accuracy and token F1 values are smoke signals, not results.
 - Half-life is not part of either profile in this build. Both runs used the system default half-life of 30 days, as the profiles README states.
 - `turns_rejected` differed (0 for the companion, 1 for the coding agent). That is a smoke observation from the stub paths; it is not evidence about profile quality.
+- `turns_rejected` means admission refusals only, and an exact duplicate is counted apart from it. Both runs above were made before the harness classified a write by its refusal code, so a rejection counted in either scorecard could be a duplicate rather than a gate refusal, and neither scorecard can be re-derived from what is committed.
