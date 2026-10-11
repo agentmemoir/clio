@@ -27,7 +27,7 @@
 //! Keep this module focused on MCP hygiene dispatch.
 
 use crate::runtime::{McpState, now_utc};
-use crate::write_tools::{opt_bool, opt_num, opt_str, req_str};
+use crate::write_tools::{opt_bool, opt_num, opt_str};
 use clio_hygiene::{CleanAction, CleanArgs, CleanTarget};
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
@@ -166,16 +166,6 @@ fn clean_targets(args: &Value) -> Result<Vec<CleanTarget>, AmError> {
                 .to_owned();
             targets.push(CleanTarget {
                 item_id,
-                noise_score: None,
-                suggested_action: None,
-            });
-        }
-    }
-    if targets.is_empty() {
-        // A single `item_id` string is accepted for one-item cleans.
-        if let Ok(single) = req_str(args, "item_id") {
-            targets.push(CleanTarget {
-                item_id: single.to_owned(),
                 noise_score: None,
                 suggested_action: None,
             });

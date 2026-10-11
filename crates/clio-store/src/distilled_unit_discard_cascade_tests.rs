@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 /// The store surface the cascade suite reads through: the discard hook plus a
 /// raw audit-operation listing for the cascade's telemetry rows.
-trait CascadeBackend: Store {
+pub(super) trait CascadeBackend: Store {
     /// Operations recorded for one item, oldest first.
     fn audit_ops(&self, item_id: &str) -> Vec<String>;
     /// The subject key row for one subject: `(dek_ref, status)`.
@@ -47,7 +47,7 @@ trait CascadeBackend: Store {
 }
 
 /// Seed one distilled unit claiming `hub` and `sources`, all under `subject`.
-fn seed_unit(
+pub(super) fn seed_unit(
     store: &dyn CascadeBackend,
     bank: &str,
     subject: &str,

@@ -322,16 +322,29 @@ fn hygiene_clean_accepts_prior_audit_candidates() {
 }
 
 #[test]
-fn hygiene_clean_accepts_a_single_item_id_string() {
+fn hygiene_clean_takes_one_item_as_a_one_entry_list() {
     let st = state();
     seed_item(&st, "mcp-single-1");
     let result = dispatch(
         &st,
         "hygiene_clean",
-        &json!({ "item_id": "mcp-single-1", "action": "flag", "confirm": false }),
+        &json!({ "item_ids": ["mcp-single-1"], "action": "flag", "confirm": false }),
     );
     let payload = ok_payload(&result);
     assert_eq!(payload["would_flag"], 1);
+}
+
+#[test]
+fn hygiene_clean_does_not_read_a_bare_item_id() {
+    // The schema declares `item_ids` and `candidates`; a bare `item_id` names no target.
+    let st = state();
+    seed_item(&st, "mcp-single-2");
+    let result = dispatch(
+        &st,
+        "hygiene_clean",
+        &json!({ "item_id": "mcp-single-2", "action": "flag", "confirm": false }),
+    );
+    assert_eq!(result["ok"], Value::Bool(false), "{result}");
 }
 
 #[test]
@@ -374,8 +387,8 @@ fn hygiene_target_normalization_fails_closed() {
     );
     assert_eq!(result["ok"], Value::Bool(false), "{result}");
     assert!(result["message"].as_str().unwrap().contains("item_ids"));
-    // No targets at all (and no item_id string) falls through to the empty
-    // targets rejection of the in-process clean.
+    // No targets at all falls through to the empty targets rejection of the
+    // in-process clean.
     let result = dispatch(
         &st,
         "hygiene_clean",

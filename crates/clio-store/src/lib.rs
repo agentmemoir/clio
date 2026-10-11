@@ -66,6 +66,7 @@ mod distilled_evidence;
 mod distilled_freshness;
 mod distilled_revision;
 mod distilled_unit;
+mod distilled_unit_codec;
 mod distilled_unit_store;
 mod embedding_space;
 mod erase_hash;

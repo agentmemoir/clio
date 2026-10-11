@@ -52,26 +52,14 @@ BATCH_PREFIX = "batch"
 
 ROUTED = "routed by name"
 
-BUG = "agentmemoir/clio#75: a surface gap, the argument is refused before the handler runs"
 GUARD = "refused on purpose: the handler reads it only to reject it with a message"
-SHARED = "read through a shared helper; not yet judged"
 
 #: Reads of an undeclared argument that exist on `master` today. Remove an entry when the
 #: schema declares the argument or the read goes; a stale entry fails the run.
 KNOWN: dict[tuple[str, str], str] = {
-    **{pair: BUG for pair in [
-        ("persona_observe_preference", "allow_duplicate"), ("belief_observe", "allow_duplicate"),
-        ("import", "allow_duplicate"), ("import_provider", "allow_duplicate"),
-        ("belief_history", "as_of"), ("temporal_history", "limit"), ("canonical_put", "evidence_ref"),
-        ("task_upsert", "subject_id"), ("failure_record", "subject_id"), ("hygiene_clean", "item_id"),
-    ]},
     **{pair: GUARD for pair in [
         ("consolidate", "scope"), ("sync_push", "sync_key"), ("sync_pull", "sync_key"),
         ("sync_serve", "token"),
-    ]},
-    **{pair: SHARED for pair in [
-        ("sync_ack_skip", "remote"), ("sync_ack_skip", "sync_key"), ("sync_ack_skip", "token"),
-        ("sync_status", "remote"), ("sync_status", "token"),
     ]},
 }
 
