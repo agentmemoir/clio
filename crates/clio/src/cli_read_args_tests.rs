@@ -9,6 +9,8 @@
 //!
 //! ## Owns
 //! - That `REQUIRED_FLAGS` agrees with the usage registry, exceptions included
+//! - That a registered verb answers from its record while a table verb answers
+//!   from its row
 //! - Coverage of `require_flags`, `flag`, `unexpected_extra`, `one_positional`,
 //!   `no_positionals` and `validate_choice`
 //!
@@ -20,7 +22,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{REQUIRED_FLAGS, bare_flags, flag, require_flags};
+use super::{REQUIRED_FLAGS, bare_flags, flag, require_flags, required_flags};
 use crate::cli_help_usage;
 
 /// The flags a verb's usage line writes bare, with the bracket that opens an
@@ -71,7 +73,7 @@ fn every_required_flag_list_is_the_one_its_usage_line_states() {
     for (verb, flags) in REQUIRED_FLAGS {
         let usage = cli_help_usage::usage_line(verb)
             .unwrap_or_else(|| panic!("`clio {verb}` must have a registered usage line"));
-        let mut stated: Vec<String> = bare_flags(usage)
+        let mut stated: Vec<String> = bare_flags(&usage)
             .iter()
             .map(|name| name.trim_start_matches("--").to_owned())
             .filter(|name| !excused.iter().any(|(_, flag)| flag == name))
@@ -100,7 +102,7 @@ fn an_excused_flag_is_written_bare_in_the_usage_line() {
     for (verb, excused) in [("discard", "confirm"), ("erase", "confirm")] {
         let usage = cli_help_usage::usage_line(verb).expect("registered");
         assert!(
-            bare_flags(usage)
+            bare_flags(&usage)
                 .iter()
                 .any(|flag| flag == &format!("--{excused}")),
             "`clio {verb}` now brackets --{excused}, so the exception above is stale and \
@@ -133,8 +135,8 @@ fn every_missing_required_flag_is_named_at_once() {
         ["--rule".to_owned(), "r".to_owned()],
     )
     .expect("parse");
-    assert!(require_flags(&parsed, "update", &["rule"]).is_ok());
-    let error = require_flags(&parsed, "canonical put", &["category", "epistemic-kind"])
+    assert!(require_flags(&parsed, "update", ["rule"]).is_ok());
+    let error = require_flags(&parsed, "canonical put", ["category", "epistemic-kind"])
         .expect_err("both are missing");
     assert_eq!(error.code(), "usage");
     let message = error.message().to_owned();
@@ -154,7 +156,7 @@ fn a_verb_with_no_required_flags_never_refuses() {
         Vec::<String>::new(),
     )
     .expect("parse");
-    assert!(require_flags(&parsed, "version", &[]).is_ok());
+    assert!(require_flags(&parsed, "version", []).is_ok());
 }
 
 /// The hint is a command line the reader can paste, so it carries a placeholder for
@@ -169,7 +171,7 @@ fn a_refusal_hint_is_a_command_line_with_a_placeholder_per_flag() {
     let error = require_flags(
         &parsed,
         "failure record",
-        &["attempt-n", "what-failed", "lesson"],
+        ["attempt-n", "what-failed", "lesson"],
     )
     .expect_err("all three are missing");
     assert_eq!(
@@ -195,4 +197,52 @@ fn a_proved_flag_reads_back_as_its_value() {
     .expect("parse");
     assert_eq!(flag(&parsed, "rule"), "keep");
     assert_eq!(flag(&parsed, "absent"), "");
+}
+
+/// The five core read verbs carry no required flag in their records yet, so
+/// `required_flags` reports an empty set for each.
+#[test]
+fn core_read_verbs_have_no_required_flags() {
+    for verb in ["recall", "get", "show", "inspect", "stats"] {
+        assert!(
+            required_flags(verb).is_empty(),
+            "`{verb}` must have no required flags"
+        );
+    }
+}
+
+/// A verb without a record still reports its table row unchanged.
+#[test]
+fn a_table_verb_keeps_its_required_flag_set() {
+    assert_eq!(
+        required_flags("failure record"),
+        ["attempt-n", "what-failed", "lesson"]
+    );
+    assert_eq!(
+        required_flags("canonical put"),
+        ["category", "epistemic-kind"]
+    );
+    assert!(required_flags("version").is_empty(), "no record, no row");
+}
+
+/// The missing-flag refusal for a table verb is unchanged, message and hint
+/// included.
+#[test]
+fn a_table_verbs_missing_flag_refusal_is_unchanged() {
+    let parsed = crate::cli_args::parse(
+        &crate::cli_args::FlagSpec::new(&["attempt-n", "what-failed", "lesson"], &[]),
+        Vec::<String>::new(),
+    )
+    .expect("parse");
+    let error = require_flags(&parsed, "failure record", required_flags("failure record"))
+        .expect_err("all three are missing");
+    assert_eq!(error.code(), "usage");
+    assert_eq!(
+        error.message(),
+        "`failure record` requires --attempt-n, --what-failed, --lesson (3 missing)"
+    );
+    assert_eq!(
+        error.hint(),
+        Some("try `clio failure record ... --attempt-n VALUE --what-failed VALUE --lesson VALUE`")
+    );
 }

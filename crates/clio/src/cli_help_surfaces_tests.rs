@@ -47,7 +47,7 @@ fn the_shared_lookup_reads_the_mcp_bound_half_too() {
     let first = full.lines().next().expect("a usage line has a first line");
     assert_eq!(
         crate::cli_help_usage::usage_line("recall"),
-        Some(first.trim_start_matches("usage: ")),
+        Some(first.trim_start_matches("usage: ").to_owned()),
         "the shared lookup must reach the MCP-bound lines as well as these"
     );
     // It returns the flag list, not the whole entry with the prose that follows it.

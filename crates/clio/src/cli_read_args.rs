@@ -132,12 +132,20 @@ pub(crate) const REQUIRED_FLAGS: &[(&str, &[&str])] = &[
     ("canonical put", &["category", "epistemic-kind"]),
 ];
 
-/// A verb's required flags, from the one table.
-pub(crate) fn required_flags(verb: &str) -> &'static [&'static str] {
+/// A verb's required flags: the registry record's when the verb is registered,
+/// else the table row.
+///
+/// A registered record owns its command's flags, so its required set cannot
+/// drift from the usage line that command prints. The table stays the answer for
+/// every verb without a record.
+pub(crate) fn required_flags(verb: &str) -> Vec<&'static str> {
+    if let Some(spec) = crate::cli_command_registry::find(verb) {
+        return spec.required_flags();
+    }
     REQUIRED_FLAGS
         .iter()
         .find(|(name, _)| *name == verb)
-        .map_or(&[], |(_, flags)| *flags)
+        .map_or_else(Vec::new, |(_, flags)| flags.to_vec())
 }
 
 /// A flag in a usage line that is written bare rather than inside brackets, and so
@@ -174,8 +182,9 @@ pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
 pub(crate) fn require_flags(
     parsed: &ParsedArgs,
     verb: &str,
-    flags: &[&'static str],
+    flags: impl AsRef<[&'static str]>,
 ) -> Result<(), CliError> {
+    let flags = flags.as_ref();
     let missing: Vec<String> = flags
         .iter()
         .copied()

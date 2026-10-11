@@ -11,16 +11,21 @@
 //! - Every catalog command has a registered usage line
 //! - Every registered usage line's flags appear in the catalog
 //! - Every catalog command resolves through `cli help <topic>`
+//! - The registry seam: each record's row appears once, in place, with no
+//!   second authored row beside it
 //!
 //! ## Does not own
 //! - The wording of any one usage line (`cli_help_usage_tests`)
 //! - The layout of the catalog text (`command_catalog`)
+//! - Each record's own summary and flags (`cli_command_registry_core_reads_tests`)
 //!
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{ARROW, ENTRIES, NOTE_INDENT, NOTE_WIDTH, USAGE_WIDTH};
+use super::{
+    ARROW, ENTRIES_AFTER, ENTRIES_BEFORE, NOTE_INDENT, NOTE_WIDTH, USAGE_WIDTH, catalog_rows,
+};
 use crate::cli_help_usage;
 use crate::help_flags_test_support::{entry_block, flags_in};
 
@@ -44,9 +49,8 @@ fn catalog_block(command: &str) -> String {
 /// requires and which the catalog never mentioned.
 #[test]
 fn every_catalog_command_has_a_registered_usage_line() {
-    let missing: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let missing: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| cli_help_usage::usage_line(command).is_none())
         .collect();
     assert!(
@@ -63,9 +67,8 @@ fn every_registered_usage_line_is_reachable_from_a_command() {
     // `usage_for` is the MCP-bound half of the registry; the rest is the surface
     // table. Both are covered by the loop below over the catalog, which is the
     // only consumer of the surface half.
-    let unreachable: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let unreachable: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| {
             cli_help_usage::usage_line(command).is_none()
                 && crate::cli_help::verb_help(command).is_some()
@@ -86,7 +89,7 @@ fn every_registered_usage_line_is_reachable_from_a_command() {
 /// from the catalog while every flag check stayed green.
 #[test]
 fn every_command_the_dispatcher_runs_is_in_the_catalog() {
-    let listed: Vec<&str> = ENTRIES.iter().map(|(command, _)| *command).collect();
+    let listed: Vec<&str> = catalog_rows().map(|(command, _)| command).collect();
     let missing: Vec<&str> = crate::cli_help::all_known_commands()
         .into_iter()
         .filter(|command| !listed.contains(command))
@@ -103,9 +106,8 @@ fn every_command_the_dispatcher_runs_is_in_the_catalog() {
 #[test]
 fn every_catalog_command_is_one_the_dispatcher_runs() {
     let known = crate::cli_help::all_known_commands();
-    let unknown: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let unknown: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| !known.contains(command))
         .collect();
     assert!(
@@ -120,12 +122,12 @@ fn every_catalog_command_is_one_the_dispatcher_runs() {
 /// if the renderer ever stops printing the registry's flags.
 #[test]
 fn every_flag_in_a_usage_line_appears_in_that_commands_catalog_line() {
-    for (command, _) in ENTRIES {
+    for (command, _) in catalog_rows() {
         let Some(usage) = cli_help_usage::usage_line(command) else {
             continue;
         };
         let block = catalog_block(command);
-        let missing: Vec<String> = flags_in(usage)
+        let missing: Vec<String> = flags_in(&usage)
             .into_iter()
             .filter(|flag| !block.contains(flag.as_str()))
             .collect();
@@ -145,13 +147,11 @@ fn every_flag_in_a_usage_line_appears_in_that_commands_catalog_line() {
 /// description promising something the reader cannot type.
 #[test]
 fn a_description_names_no_flag_the_cli_does_not_accept() {
-    let accepted: Vec<String> = ENTRIES
-        .iter()
+    let accepted: Vec<String> = catalog_rows()
         .filter_map(|(command, _)| cli_help_usage::usage_line(command))
-        .flat_map(flags_in)
+        .flat_map(|usage| flags_in(&usage))
         .collect();
-    let unknown: Vec<(String, String)> = ENTRIES
-        .iter()
+    let unknown: Vec<(String, String)> = catalog_rows()
         .flat_map(|(command, note)| {
             flags_in(note)
                 .into_iter()
@@ -171,9 +171,8 @@ fn a_description_names_no_flag_the_cli_does_not_accept() {
 /// topic lookup and the catalog cannot drift apart either.
 #[test]
 fn every_catalog_command_is_a_known_command() {
-    let unknown: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let unknown: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| !crate::cli_help::is_known_command(command))
         .collect();
     assert!(
@@ -192,8 +191,7 @@ fn every_catalog_command_is_a_known_command() {
 #[test]
 fn install_and_uninstall_catalog_notes_name_no_harness_subset() {
     let supported = crate::agent_harness::supported_names();
-    let offenders: Vec<(String, Vec<String>)> = ENTRIES
-        .iter()
+    let offenders: Vec<(String, Vec<String>)> = catalog_rows()
         .filter(|(command, _)| *command == "install" || *command == "uninstall")
         .map(|(command, note)| {
             let named: Vec<String> = supported
@@ -218,10 +216,9 @@ fn install_and_uninstall_catalog_notes_name_no_harness_subset() {
 /// flag that does not exist.
 #[test]
 fn wrapping_never_splits_a_flag_name() {
-    let all: Vec<String> = ENTRIES
-        .iter()
+    let all: Vec<String> = catalog_rows()
         .flat_map(|(command, note)| {
-            flags_in(cli_help_usage::usage_line(command).unwrap_or_default())
+            flags_in(&cli_help_usage::usage_line(command).unwrap_or_default())
                 .into_iter()
                 .chain(flags_in(note))
                 .collect::<Vec<String>>()
@@ -279,4 +276,71 @@ fn no_rendered_catalog_line_exceeds_its_width() {
         "these catalog lines' wrapped text runs past the 84-column usage or \
          92-column note bound: {over:?}"
     );
+}
+
+/// Every command in the registry is listed by `catalog_commands` exactly once,
+/// so no record's row can be duplicated or dropped.
+#[test]
+fn every_registry_command_is_listed_exactly_once() {
+    let listed: Vec<&str> = super::catalog_commands().collect();
+    for spec in crate::cli_command_registry::all() {
+        let count = listed.iter().filter(|name| **name == spec.name).count();
+        assert_eq!(
+            count, 1,
+            "`{}` must be listed once, found {count} rows",
+            spec.name
+        );
+    }
+}
+
+/// The registry's records sit where their catalog rows were: contiguously,
+/// immediately after `retention set` and before `task get`.
+#[test]
+fn the_registry_records_sit_at_their_original_catalog_seam() {
+    let listed: Vec<&str> = super::catalog_commands().collect();
+    let start = listed
+        .iter()
+        .position(|name| *name == "retention set")
+        .expect("`retention set` is a catalog row");
+    let moved: Vec<&str> = crate::cli_command_registry::names().collect();
+    assert_eq!(
+        &listed[start + 1..start + 1 + moved.len()],
+        moved.as_slice(),
+        "the records must be contiguous at the seam"
+    );
+    assert_eq!(
+        listed[start + 1 + moved.len()],
+        "task get",
+        "the seam must close before the next authored row"
+    );
+}
+
+/// No authored row names a registered command, so a record's row has exactly
+/// one source and the table holds no stale copy of it.
+#[test]
+fn no_authored_row_names_a_registered_command() {
+    for (command, _) in ENTRIES_BEFORE.iter().chain(ENTRIES_AFTER.iter()) {
+        assert!(
+            crate::cli_command_registry::find(command).is_none(),
+            "`{command}` is authored in the catalog table and also registered"
+        );
+    }
+}
+
+/// Every registered command resolves a usage line and a summary through the
+/// catalog, so its row renders rather than falling back to a marker.
+#[test]
+fn every_registry_command_resolves_a_usage_line_and_summary() {
+    for spec in crate::cli_command_registry::all() {
+        assert!(
+            cli_help_usage::usage_line(spec.name).is_some(),
+            "`{}` has no usage line",
+            spec.name
+        );
+        let row = catalog_rows()
+            .find(|(name, _)| *name == spec.name)
+            .expect("a registered name is a catalog row");
+        assert_eq!(row.1, spec.summary, "`{}` summary", spec.name);
+        assert!(!row.1.is_empty(), "`{}` summary is empty", spec.name);
+    }
 }

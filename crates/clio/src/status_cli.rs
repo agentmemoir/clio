@@ -394,7 +394,7 @@ fn print_help() {
          (redacted URL), 34300-34309 listeners, Compose service state, and\n \
          the `ops diagnose` verdict. Never writes.\n \
          Exit codes: 0 healthy, 1 degraded, 2 usage.",
-        crate::cli_help_usage::usage_line("status").unwrap_or("clio status")
+        crate::cli_help_usage::usage_line("status").unwrap_or_else(|| "clio status".to_owned())
     );
 }
 

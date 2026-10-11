@@ -292,7 +292,7 @@ fn a_postgres_restore_is_not_told_about_a_write_ahead_log() {
     for (surface, text, sqlite_swap) in [
         (
             "clio backup restore --help",
-            help,
+            help.as_str(),
             "The swap of a SQLite store clears the target's write-ahead log before it renames the new store in",
         ),
         (
