@@ -27,10 +27,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # `-D warnings` matches CI, so a tree that would fail the test job cannot
-  # reach a release. `strip=symbols` is a shipping concern only and stays here
-  # rather than in a workspace profile that every local build would pay for.
-  RUSTFLAGS: -D warnings -C strip=symbols
+  # Cargo config denies workspace lint warnings. `strip=symbols` is a shipping concern only and stays here rather than in a workspace profile that every local build would pay for.
+  RUSTFLAGS: -C strip=symbols
 
 jobs:
   # The tag is the release's name and the binary's own version, so a mismatch
