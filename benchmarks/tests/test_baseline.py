@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from exec_tempdir import exec_tempdir  # noqa: E402
 
-from benchmarks.clio_bench import baseline, runner  # noqa: E402
+from benchmarks.clio_bench import baseline, report, runner  # noqa: E402
 from benchmarks.tests.support import FAKE_SYSTEM, synthetic_suite  # noqa: E402
 
 
@@ -82,7 +82,7 @@ class TwoSystemBaselineTests(BaselineTestCase):
         out = Path(self.tmpdir) / f"{label}.json"
         md = Path(self.tmpdir) / f"{label}.md"
         with mock.patch.dict(os.environ, {"CLIO_BENCH_FAKE_STATE": self.state}), mock.patch(
-            "benchmarks.clio_bench.runner.load_suite", return_value=synthetic_suite()
+            "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
         ):
             code = self.run_command(self.argv_for(out, md))
         payload = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
@@ -123,7 +123,7 @@ class TwoSystemBaselineTests(BaselineTestCase):
         argv = self.argv_for(out, md)
         argv[argv.index("--mnemosyne-binary") + 1] = "/nonexistent/mnemosyne"
         with mock.patch.dict(os.environ, {"CLIO_BENCH_FAKE_STATE": self.state}), mock.patch(
-            "benchmarks.clio_bench.runner.load_suite", return_value=synthetic_suite()
+            "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
         ):
             code = self.run_command(argv)
         self.assertEqual(code, 2)
@@ -230,7 +230,7 @@ class BlockedGateTests(BaselineTestCase):
         with mock.patch.dict(
             os.environ, {"CLIO_BENCH_API_KEY": planted, "OPENAI_API_KEY": ""}
         ):
-            record = runner.blocked_gate_record(
+            record = report.blocked_gate_record(
                 system_names=["clio"],
                 judge="tier2",
                 generator="tier2",
@@ -250,7 +250,7 @@ class CredentialTests(BaselineTestCase):
             os.environ,
             {"CLIO_BENCH_API_KEY": planted, "CLIO_BENCH_FAKE_STATE": self.state},
         ), mock.patch(
-            "benchmarks.clio_bench.runner.load_suite", return_value=synthetic_suite()
+            "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
         ):
             code = self.run_command(self.argv_for(out, md))
         self.assertEqual(code, 0)

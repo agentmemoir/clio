@@ -36,7 +36,7 @@ pub const MAX_TOTAL_BYTES: usize = 64 * 1024;
 /// Maximum keys per session scratchpad.
 pub const MAX_KEYS: usize = 100;
 /// Inactivity TTL before a session scratchpad is evicted (4 hours).
-pub const TTL: Duration = Duration::from_secs(4 * 60 * 60);
+pub const TTL: Duration = Duration::from_hours(4);
 
 /// Per-`(session, bank)` scratchpad state.
 #[derive(Debug)]
