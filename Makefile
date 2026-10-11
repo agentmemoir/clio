@@ -149,7 +149,7 @@ CLEAN_FIND := find . \( -path ./.git -o -path ./private \) -prune -o
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
 	scripts-check-coverage-policy \
-	coverage cov coverage-fast test-fast gate-boundary coverage-clean coverage-html cov-html coverage-lcov cov-lcov coverage-open coverage-package \
+	coverage cov coverage-fast test-fast coverage-clean coverage-html cov-html coverage-lcov cov-lcov coverage-open coverage-package \
 	compose up down mac linux
 
 help:
