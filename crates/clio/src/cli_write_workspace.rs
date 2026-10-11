@@ -223,7 +223,7 @@ fn unexpected_extra(verb: &str, parsed: &ParsedArgs, accepts: &str) -> CliError 
 fn render_scratchpad_write(payload: &Value) -> String {
     let key = payload.get("key").and_then(Value::as_str).unwrap_or("?");
     let bytes = payload.get("bytes").and_then(Value::as_u64).unwrap_or(0);
-    format!("scratchpad `{key}` stored ({bytes} bytes, ephemeral)")
+    format!("scratchpad `{key}` stored for this process only ({bytes} bytes)")
 }
 
 /// One key renders its content exactly; a whole-pad read renders summary counts.

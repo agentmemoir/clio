@@ -10,6 +10,7 @@ we made where that specification is silent.
 
 ### Fixed
 
+- Reject out-of-range persona observations, unverifiable source text, invalid inspect/export filters, and missing retention profile files; warn when score floors remove all retrieval candidates and explain process-local scratchpad lifetime and hygiene `keep` behavior. [Issue #14](https://github.com/agentmemoir/clio/issues/14)
 - Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; document signal-based shell statuses; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
 - A `triple_add` whose `snapshot_ref` names an item the bank does not hold reports `item_not_found` instead of `invalid_argument`, and a caller that branches on the code no longer reads a missing target as a bad argument; the message and the exit code are unchanged. [PR #104](https://github.com/agentmemoir/clio/pull/104)
 

@@ -189,7 +189,9 @@ pub(crate) fn store_like(name: &'static str, desc: &'static str) -> ToolDef {
         ),
         (
             "source_text",
-            s("Span haystack; required when snapshot is present."),
+            s(
+                "Span haystack for snapshot verification; required with a snapshot and rejected without one.",
+            ),
         ),
         context_prop(),
     ];

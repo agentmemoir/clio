@@ -33,7 +33,8 @@ pub struct VerifiedStoreRequest<'a> {
     pub item: MemoryItem,
     /// Bank / actor context.
     pub ctx: &'a OpContext,
-    /// Inline source text required when `item.snapshot` is present.
+    /// Inline source text required when a snapshot is present; supplied text
+    /// without a snapshot is rejected because it cannot be verified.
     pub source_text: Option<&'a str>,
     /// Store-tool alias; copied into `item.source_ref` when that field is empty.
     pub evidence_ref: Option<&'a str>,
@@ -107,24 +108,24 @@ fn require_source_text<'a>(
     item: &MemoryItem,
     source_text: Option<&'a str>,
 ) -> Result<Option<&'a str>, AmError> {
-    if item.snapshot.is_none() {
-        return Ok(None);
+    match (item.snapshot.is_some(), source_text) {
+        (false, None) => Ok(None),
+        (false, Some(_)) => Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "source_text cannot be verified without a snapshot",
+        )),
+        (true, Some(text)) if !text.trim().is_empty() => Ok(Some(text)),
+        (true, _) => Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "non-empty source_text is required when snapshot is present",
+        )),
     }
-    source_text
-        .filter(|s| !s.is_empty())
-        .map(Some)
-        .ok_or_else(|| {
-            AmError::new(
-                ErrorCode::InvalidArgument,
-                "source_text is required when snapshot is present",
-            )
-        })
 }
 
 /// Preview: structural validate + optional span verify + admission score (no write).
 ///
 /// # Errors
-/// Missing `source_text` when snapshot present; structural / signal errors.
+/// Missing or unverifiable `source_text`; structural / signal errors.
 #[allow(clippy::too_many_arguments)]
 pub fn admit_preview_verified(
     item: &mut MemoryItem,
@@ -161,7 +162,7 @@ pub fn admit_preview_verified(
 /// Gated store with locked order: validate → span verify → taxonomy/score → write.
 ///
 /// # Errors
-/// Missing `source_text` when snapshot present; structural / factor / write errors.
+/// Missing or unverifiable `source_text`; structural / factor / write errors.
 pub fn gated_store_verified(
     req: &mut VerifiedStoreRequest<'_>,
     candidate: Candidate,

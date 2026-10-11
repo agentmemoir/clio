@@ -27,6 +27,7 @@
 
 use crate::runtime::McpState;
 use crate::write_tools_handlers::{belief_observe, graph_link, triple_add, triple_end};
+use chrono::{DateTime, NaiveDate};
 use clio_admission::decision::Candidate;
 use clio_admission::policy::AdmissionPolicy;
 use clio_types::{
@@ -134,6 +135,42 @@ pub(crate) fn opt_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key)
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty())
+}
+
+/// Parse a present string argument without treating invalid values as absent.
+pub(crate) fn strict_opt_str<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, AmError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => strict_string(value, key).map(Some),
+    }
+}
+
+/// Parse a non-empty string value and name its argument on failure.
+pub(crate) fn strict_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AmError> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| AmError::new(ErrorCode::InvalidType, format!("{key} must be a string")))?;
+    if text.trim().is_empty() {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("{key} must not be empty"),
+        ));
+    }
+    Ok(text)
+}
+
+/// Accept an RFC 3339 timestamp or an ISO calendar date as a time bound.
+pub(crate) fn validate_time_bound(key: &str, value: &str) -> Result<(), AmError> {
+    if DateTime::parse_from_rfc3339(value).is_ok()
+        || NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+    {
+        Ok(())
+    } else {
+        Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("{key} must be an RFC 3339 timestamp or YYYY-MM-DD date"),
+        ))
+    }
 }
 
 /// Optional bounded `context` argument (absent/null -> None).

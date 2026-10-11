@@ -225,7 +225,7 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
     (
         "hygiene clean",
-        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only",
+        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only\n       --action keep applies each candidate's suggested action, including archive or discard",
     ),
     (
         "hygiene log",

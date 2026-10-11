@@ -302,7 +302,6 @@ fn update_numeric_new_value_routes_discrete() {
     let args = json!({
         "item": {"id": "itm-num", "subject_id": "s", "gist": "retry limit 3"},
         "category": "schema", "epistemic_kind": "fact",
-        "source_text": "retry limit 3 (1 note since 2024-01-01).",
         "bank": "b", "actor": "agent"
     });
     let stored = call_tool(&s, "store", args);

@@ -38,6 +38,7 @@ fn scratchpad_round_trip_overwrite_and_view() {
         }),
     );
     assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["lifetime"], json!("process"), "{out}");
     let read = call(
         &s,
         "scratchpad_read",
