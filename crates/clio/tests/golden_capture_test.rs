@@ -406,11 +406,12 @@ fn captured_help_output_pins_home_and_never_names_the_caller_home() {
     );
 }
 
-/// A deployment config on the capture machine cannot reach a capture: the
-/// pinned child loads none at all, while the unpinned control beside it does,
-/// so this test fails if the pin stops disabling the load.
+/// A config file under the pinned home cannot reach a pinned child: the pin
+/// loads no deployment config, so `deployment.json` still renders the captured
+/// default. The unpinned control child beside it reads the same file, so this
+/// test fails if the pin stops disabling the load.
 #[test]
-fn a_deployment_config_on_the_capture_machine_cannot_reach_a_capture() {
+fn a_config_file_under_the_pinned_home_cannot_reach_a_pinned_child() {
     let home = Scratch::new("pinned-home-config");
     let dir = home.0.join(".config/clio");
     fs::create_dir_all(&dir).expect("create the config directory");
