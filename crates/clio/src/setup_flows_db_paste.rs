@@ -113,6 +113,17 @@ pub(crate) fn ask_pasted(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
              own sslrootcert",
         ));
     }
+    // A pasted address is kept exactly as given, so any advanced setting it needs
+    // is already in its query string. `--database-option` cannot reach it, and
+    // accepting the flag would be a silent no-op: the run would report success and
+    // the setting would be gone. The typed route is the one that builds the
+    // address from the flag, so the refusal names it.
+    if ctx.has_flag("database-option") {
+        return Err(Signal::usage(
+            "--database-option applies to the typed route; a pasted address is kept as given and \
+             already carries its own settings",
+        ));
+    }
     ctx.section("Postgres address");
     let flag_value = ctx.flag("database-url").map(str::to_owned);
     let default = ctx.defaults().address.clone();
