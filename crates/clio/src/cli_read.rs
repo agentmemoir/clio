@@ -104,7 +104,11 @@ pub(crate) fn run_verb(cmd: &str, args: Vec<String>, io: &mut CliIo) -> ExitCode
     let options = McpOpenOptions {
         backend: resolved.backend,
         database_url: resolved.url,
-        default_bank: parsed.value("bank").unwrap_or("default").to_owned(),
+        // The configured default bank, never the caller's `--bank`: the request
+        // already carries `--bank` in its own arguments, and promoting it to the
+        // runtime default would exempt it from the known-bank check, so an
+        // unknown bank would read as an empty page instead of an error.
+        default_bank: "default".to_owned(),
         default_actor: clio_types::Actor::Agent,
         shared_bank_enabled: false,
         kms_path,

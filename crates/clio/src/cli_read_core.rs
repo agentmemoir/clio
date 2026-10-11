@@ -91,12 +91,15 @@ impl ReadGroup for CoreGroup {
             add_truncated(payload);
         }
         if verb == "recall" {
-            // Echo the query so the text view can head the results with it.
-            if let Ok(query) = one_positional(parsed, "recall", "QUERY")
-                && let Some(map) = payload.as_object_mut()
-            {
-                map.insert("query".into(), Value::from(query));
+            // Echo the query and the limit that actually ran, so the text view
+            // can head the results and the caller can see a defaulted limit.
+            if let Some(map) = payload.as_object_mut() {
+                if let Ok(query) = one_positional(parsed, "recall", "QUERY") {
+                    map.insert("query".into(), Value::from(query));
+                }
+                map.insert("limit".into(), Value::from(recall_effective_limit(parsed)));
             }
+            name_floor_warnings(payload);
         }
     }
 }
@@ -130,6 +133,38 @@ fn recall_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
         args.insert("entity_summary".into(), Value::Bool(true));
     }
     Ok(("retrieve", Value::Object(args)))
+}
+
+/// The limit `recall` will run with: the caller's `--limit`, else the tool's
+/// own default.
+///
+/// The flag is already validated on the build path, so an unparsable value
+/// cannot reach here; the default keeps this total regardless.
+fn recall_effective_limit(parsed: &ParsedArgs) -> u64 {
+    parsed
+        .value("limit")
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(clio_retrieve::DEFAULT_LIMIT as u64)
+}
+
+/// Rewrite the tool's floor names in a `recall` payload's warnings into the
+/// flags the caller typed.
+///
+/// The retrieval layer names a binding floor by its wire name
+/// (`min_scores.final`) so any caller can read it; a shell caller typed
+/// `--min-final`. The same vocabulary that translates a tool error translates
+/// the warning, so the two can never disagree. Every other warning is passed
+/// through untouched.
+fn name_floor_warnings(payload: &mut Value) {
+    let Some(warnings) = payload.get_mut("warnings").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for warning in warnings {
+        if let Some(text) = warning.as_str() {
+            let named = crate::cli_error::name_cli_inputs(text);
+            *warning = Value::from(named);
+        }
+    }
 }
 
 /// The `min_scores` object built from the floor flags the caller actually gave.

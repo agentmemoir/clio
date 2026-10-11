@@ -137,6 +137,16 @@ impl HybridRetriever {
         let (lexical_hits, lexical_before_floor) = self.lexical_leg(req)?;
         let lexical_ms = millis(lexical_started);
         let (window, temporal_ids) = temporal_leg(self.store.as_ref(), req, self.leg_fetch)?;
+        // Each floor that removed every candidate its own arm returned is named
+        // here, where the before and after counts are both known; `finalize`
+        // reports the names only when the page ends empty.
+        let mut floor_binding: Vec<&'static str> = Vec::new();
+        if req.min_scores.semantic.is_some() && dense_before_floor > 0 && dense_hits.is_empty() {
+            floor_binding.push("semantic");
+        }
+        if req.min_scores.keyword.is_some() && lexical_before_floor > 0 && lexical_hits.is_empty() {
+            floor_binding.push("keyword");
+        }
         let mut candidate_ids = dedupe_ordered(
             dense_hits
                 .iter()
@@ -144,13 +154,6 @@ impl HybridRetriever {
                 .chain(lexical_hits.iter().map(|h| &h.id))
                 .chain(temporal_ids.iter()),
         );
-        if candidate_ids.is_empty()
-            && (req.min_scores.semantic.is_some() || req.min_scores.keyword.is_some())
-            && dense_before_floor + lexical_before_floor > 0
-        {
-            warnings
-                .push("The requested min_scores filters removed every retrieval candidate.".into());
-        }
         let expand_started = Instant::now();
         let (expanded, graph_new) = expand_candidates(
             self.expander.as_ref(),
@@ -228,7 +231,12 @@ impl HybridRetriever {
         // and the `reranker` floor prunes it here, so the reinforced page is the
         // candidate page of the floored query. `final` runs later, in
         // `finalize`, and leaves this page alone.
+        let fused_before_reranker_floor = fused.len();
         let fused = apply_reranker_floor(fused, req.min_scores.reranker, |hit| hit.rerank_score);
+        if req.min_scores.reranker.is_some() && fused_before_reranker_floor > 0 && fused.is_empty()
+        {
+            floor_binding.push("reranker");
+        }
         let reinforce_ids = select_page(&fused, &items, req.limit, req.budget_tokens);
         let deduped = dedupe_candidates(
             fused,
@@ -267,6 +275,7 @@ impl HybridRetriever {
                 total_ms: millis(started),
             },
             warnings,
+            floor_binding,
             dedup: dedup_meta,
             backfill_baseline,
         });
