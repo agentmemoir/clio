@@ -233,6 +233,7 @@ fn commit_rejects_bad_carrier_and_missing_snapshot_ref() {
     e2.snapshot_ref = Some("missing-snap".into());
     let err = s.commit_triple_add(&item, &e2, true, "agent").unwrap_err();
     assert!(err.message.contains("snapshot_ref"));
+    assert_eq!(err.code, ErrorCode::ItemNotFound);
     assert!(s.commit_triple_add(&item, &e2, true, "").is_err());
     // Hit the snapshot_ref row-mapper closure (found path).
     let snap_id = unique("snap");
