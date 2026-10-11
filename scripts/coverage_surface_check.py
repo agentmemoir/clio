@@ -1,12 +1,12 @@
 """Checks that a coverage run still measures one thing and reports it once.
 
-The coverage surface carries four protections, and nothing in the tree stops a
+The coverage surface carries five protections, and nothing in the tree stops a
 later change from removing any of them:
 
-- the instrumented run is split into a step that runs the tests and a step that
-  writes the report, so the gate owns a boundary between them;
+- the instrumented run is split into test and report steps, and the merge only fails when every profile buffer is unreadable;
 - a profile buffer too short to hold a raw profile header is deleted before the
   merge, and named when it is;
+- old executables of selected packages are deleted before the next test build, so a changed file's earlier line mapping cannot join the new one;
 - an instrumented binary the run did not build is deleted before the merge, so
   the report cannot union a foreign object's rows into a file's numbers;
 - a per-package measurement builds into an instrumented directory of its own.
@@ -45,13 +45,7 @@ Rules, each read where the thing it describes lives:
    also `--failure-mode any`, which is the tool's default and behaves exactly as
    if the flag were absent: one malformed buffer ends the whole merge after every
    test has passed.
-4. A function that writes a coverage report must drop the profile buffers it
-   cannot read and delete the objects the run did not build, and both must happen
-   before it writes the report, because the merge is what consumes them. This is
-   the one rule here that is not about a command line, and it is here because the
-   other three cannot see it: rule 1 is satisfied when a file names either
-   protection, so deleting one of the two calls leaves the other to answer for it
-   and the file still reads as protected.
+4. A function that writes a coverage report must delete old selected objects before it runs tests, then drop unreadable profile buffers and foreign objects before it writes the report. The first cleanup stops old mappings from joining the new build; the other two protect the merge. This rule is here because the command-line checks cannot see whether the calls happen in the right run or order.
 5. A file this check must read and cannot read is never a pass, and neither is a
    file whose comments this reader cannot tell from its code. A scan that
    declines to look cannot report what it did not see, and a stripper that

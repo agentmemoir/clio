@@ -3,14 +3,132 @@
 from __future__ import annotations
 
 import io
+import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from scoped_profiles import prune_foreign_objects
+from scoped_profiles import drop_selected_objects, prune_foreign_objects
 
 from scoped_selftest_support import shared as globals
+
+
+def _run_checked(command, env=None):
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=60, env=env
+    )
+    if result.returncode:
+        raise RuntimeError(
+            f"command failed: {command!r}\n{result.stdout}\n{result.stderr}"
+        )
+    return result
+
+
+def _llvm_tools() -> tuple[Path, Path]:
+    sysroot = Path(_run_checked(["rustc", "--print", "sysroot"]).stdout.strip())
+    version = _run_checked(["rustc", "-vV"]).stdout
+    host = next(
+        line.partition(": ")[2]
+        for line in version.splitlines()
+        if line.startswith("host: ")
+    )
+    suffix = ".exe" if os.name == "nt" else ""
+    tool_dir = sysroot / "lib" / "rustlib" / host / "bin"
+    return tool_dir / f"llvm-profdata{suffix}", tool_dir / f"llvm-cov{suffix}"
+
+
+def _report_lines(
+    llvm_cov: Path, profile: Path, objects: list[Path], source: Path
+) -> dict:
+    command = [
+        str(llvm_cov), "export", "-summary-only", f"-instr-profile={profile}"
+    ]
+    command.extend(f"-object={path}" for path in objects)
+    report = json.loads(_run_checked(command).stdout)
+    matches = [
+        entry for entry in report["data"][0]["files"]
+        if Path(entry["filename"]).resolve() == source.resolve()
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(f"expected one coverage row for {source}, got {matches!r}")
+    return matches[0]["summary"]["lines"]
+
+
+def _stale_mapping_regression(check) -> None:
+    llvm_profdata, llvm_cov = _llvm_tools()
+    if not llvm_profdata.is_file() or not llvm_cov.is_file():
+        raise RuntimeError("the pinned Rust toolchain must include llvm-tools-preview")
+
+    old_source = "//! old mapping\n//! shifts\n//! current lines\n" + (
+        "fn measured() {\n    let value = 1;\n"
+        "    std::hint::black_box(value);\n}\nfn main() { measured(); }\n"
+    )
+    current_source = "fn measured() {\n    let value = 1;\n" + (
+        "    std::hint::black_box(value);\n}\nfn main() { measured(); }\n"
+    )
+    with tempfile.TemporaryDirectory(prefix="scoped-runner-stale-map-") as scratch:
+        root = Path(scratch)
+        source = root / "audit.rs"
+        object_dir = root / "instrumented" / "debug" / "deps"
+        object_dir.mkdir(parents=True)
+        old_object = object_dir / "clio-aaaaaaaa"
+        current_object = object_dir / "clio-bbbbbbbb"
+
+        def compile(metadata: str, output: Path) -> None:
+            _run_checked(
+                [
+                    "rustc", "--edition=2021", "-Cinstrument-coverage", "-Cdebuginfo=0",
+                    f"-Cmetadata={metadata}", str(source), "-o", str(output),
+                ]
+            )
+
+        source.write_text(old_source, encoding="utf-8")
+        compile("old", old_object)
+        source.write_text(current_source, encoding="utf-8")
+        compile("current", current_object)
+
+        raw_profile = root / "run.profraw"
+        profile_env = dict(os.environ, LLVM_PROFILE_FILE=str(raw_profile))
+        _run_checked([str(current_object)], env=profile_env)
+        profile = root / "run.profdata"
+        _run_checked(
+            [
+                str(llvm_profdata), "merge", "-sparse", str(raw_profile), "-o",
+                str(profile),
+            ]
+        )
+
+        inflated = _report_lines(
+            llvm_cov, profile, [old_object, current_object], source
+        )
+        source_lines = len(current_source.splitlines())
+        check(
+            "old and current source maps inflate the line count and miss the floor",
+            (
+                inflated["count"] > source_lines,
+                inflated["covered"] * 100 < inflated["count"] * 80,
+            ),
+            (True, True),
+        )
+
+        deleted = drop_selected_objects(root / "instrumented", ["clio"])
+        check(
+            "selected stale and current objects are removed before rebuild",
+            (deleted, old_object.exists(), current_object.exists()),
+            (2, False, False),
+        )
+        compile("current", current_object)
+        clean = _report_lines(llvm_cov, profile, [current_object], source)
+        check(
+            "the clean report stays within source lines and clears the floor",
+            (
+                clean["count"] <= source_lines,
+                clean["covered"] * 100 >= clean["count"] * 80,
+            ),
+            (True, True),
+        )
 
 
 def run(check, raises) -> tuple:
@@ -128,6 +246,38 @@ def run(check, raises) -> tuple:
                 (none_deleted, only.exists(), "deleted 0" in all_log.getvalue()),
                 (0, True, True),
             )
+
+        # Old and current selected-package binaries can both match; remove both before rebuilding.
+        with tempfile.TemporaryDirectory(prefix="scoped-runner-selected-") as scratch:
+            selected_root = Path(scratch)
+            selected_deps = selected_root / "debug" / "deps"
+            selected_deps.mkdir(parents=True)
+            stale = selected_deps / "clio-2b3cf5c1458a8f42"
+            current = selected_deps / "clio-1011ac0a5f159ade"
+            target = selected_deps / "additive_tools_test-98ac1e2f3b4d5c6e"
+            foreign = selected_deps / "clio_ops-fa1e5933542c28db"
+            for path in (stale, current, target, foreign):
+                path.write_text("x")
+                os.chmod(path, 0o755)
+            selected_log = io.StringIO()
+            original_stdout_for_selected = sys.stdout
+            try:
+                sys.stdout = selected_log
+                selected_count = drop_selected_objects(selected_root, ["clio"])
+            finally:
+                sys.stdout = original_stdout_for_selected
+            check(
+                "old and current binaries of a selected package are removed",
+                [stale.exists(), current.exists(), target.exists()],
+                [False, False, False],
+            )
+            check("a foreign package's binary remains for the later prune", foreign.exists(), True)
+            check("the selected object count is printed", "deleted 3" in selected_log.getvalue(), True)
+            check("the number of selected objects deleted is returned", selected_count, 3)
+
+        # Reproduce the line-map union that made a doc-comment-only edit fail.
+        _stale_mapping_regression(check)
+
         # An empty selection is a mass deletion, not an empty deletion. With no
         # names the keep pattern matches only the empty stem, so every object it
         # can see goes. The caller returns early on an empty selection, so this
@@ -143,6 +293,12 @@ def run(check, raises) -> tuple:
                 True,
             )
             check("and the refused run deleted nothing", doomed.exists(), True)
+            check(
+                "an empty pre-run selection is also refused",
+                raises(drop_selected_objects, empty_root, []),
+                True,
+            )
+            check("the pre-run refusal leaves the object in place", doomed.exists(), True)
     finally:
         globals()["workspace_packages"] = original_packages_for_prune
     return name, prune_packages, scratch

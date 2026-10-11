@@ -10,8 +10,10 @@ from coverage_surface_fixtures import (
     COMMENTED_AND_CALLED_RUNNER,
     COMMENTED_OBJECT_DELETE_RUNNER,
     HYGIENE_AFTER_REPORT_RUNNER,
+    LATE_SELECTED_OBJECT_DROP_RUNNER,
     NO_BUFFER_DROP_RUNNER,
     NO_OBJECT_DELETE_RUNNER,
+    NO_SELECTED_OBJECT_DROP_RUNNER,
     _fixture,
 )
 
@@ -26,6 +28,40 @@ def hygiene_cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             "a run that never deletes the objects it did not build is a finding",
             EXIT_FINDINGS,
             _fixture(base, "no-object-delete", {RUNNER: NO_OBJECT_DELETE_RUNNER}),
+            ["hygiene"],
+        ),
+        (
+            "a run that keeps old selected objects through the rebuild is a finding",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "no-selected-object-drop",
+                {RUNNER: NO_SELECTED_OBJECT_DROP_RUNNER},
+            ),
+            ["hygiene"],
+        ),
+        (
+            "a run that drops old selected objects after the rebuild is a finding",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "late-selected-object-drop",
+                {RUNNER: LATE_SELECTED_OBJECT_DROP_RUNNER},
+            ),
+            ["hygiene"],
+        ),
+        (
+            "a one-package run that keeps old selected objects is a finding",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "package-no-selected-object-drop",
+                {
+                    PACKAGE_RUNNER: CLEAN_PACKAGE_RUNNER.replace(
+                        "    drop_selected_objects(directory, [name])\n", ""
+                    )
+                },
+            ),
             ["hygiene"],
         ),
         (

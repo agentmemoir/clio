@@ -35,7 +35,7 @@ EXIT_USAGE = 2
 EXIT_UNREADABLE = 3
 
 #: The gate itself. Its two command builders are where the boundary this check
-#: protects is written, and its two hygiene steps are where the boundary is used.
+#: protects is written, and its hygiene steps are where the boundary is used.
 #: The builders and the whole-workspace run are in `scoped_run.py`; the one-package
 #: run is in `scoped_package.py`, which defines no builder and is read for rule 4.
 RUNNER = "scripts/scoped_run.py"
