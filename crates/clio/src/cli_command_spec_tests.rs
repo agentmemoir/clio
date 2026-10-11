@@ -315,3 +315,17 @@ fn required_flags_lists_the_required_documented_flags_in_order() {
     let spec = record("discard", &[REQUIRED_ID], FLAGS, &[], &[], None);
     assert_eq!(spec.required_flags(), ["label", "reason"]);
 }
+
+/// The two flag constructors also run at runtime, so their defaults stay
+/// covered: a value flag takes a value and is optional, a boolean takes none.
+#[test]
+fn flag_constructors_set_the_documented_defaults() {
+    let value = Flag::value("category", "C");
+    assert_eq!(value.long, "category");
+    assert!(value.value.is_some());
+    assert!(!value.required);
+    let boolean = Flag::boolean("dry-run");
+    assert_eq!(boolean.long, "dry-run");
+    assert!(boolean.value.is_none());
+    assert!(!boolean.required);
+}
