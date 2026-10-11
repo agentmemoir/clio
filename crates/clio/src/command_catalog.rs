@@ -105,31 +105,6 @@ pub(crate) const ENTRIES_BEFORE: &[(&str, &str)] = &[
 /// Read by the order accessor as the fallback row for a command that has not
 /// moved into a registry record yet.
 pub(crate) const ENTRIES_AFTER: &[(&str, &str)] = &[
-    ("validate", "attest, update, invalidate, or delete one item"),
-    ("batch", "apply a list of operations in one transaction"),
-    (
-        "export",
-        "(manifest-backed JSON bundle; requires --actor harness|system)",
-    ),
-    ("import", "load a bundle produced by `clio export`"),
-    (
-        "erase",
-        "IRREVERSIBLE compliance erasure (DEK destruction); distinct from `discard` and hygiene cleanup",
-    ),
-    ("remember", ""),
-    (
-        "admit",
-        "score one write without storing it; `--file ops.json` previews a whole batch instead",
-    ),
-    ("summarize", "summarize one scope into a consolidated unit"),
-    ("consolidate", "run the consolidation wave over a bank"),
-    ("update", "set an item's value under a named rule"),
-    ("invalidate", "close an item's validity; never deletes"),
-    (
-        "discard",
-        "operational removal; distinct from compliance erasure",
-    ),
-    ("correct", "replace an item's value with a stated reason"),
     ("config get", "read one configuration path"),
     ("config set", "write one configuration path at a scope"),
     (

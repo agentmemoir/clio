@@ -26,10 +26,12 @@
 //
 
 use crate::cli_command_registry_core_reads as core_reads;
+use crate::cli_command_registry_core_writes as core_writes;
 use crate::cli_command_registry_graph_records as graph_records;
 use crate::cli_command_registry_persona_local as persona_local;
 use crate::cli_command_registry_shared_workspace as shared_workspace;
 use crate::cli_command_registry_task_history as task_history;
+use crate::cli_command_registry_write_operations as write_operations;
 use crate::cli_command_spec::{CommandSpec, Flag};
 
 /// The `--db` path global.
@@ -72,6 +74,8 @@ static TRANCHES: &[&[CommandSpec]] = &[
     graph_records::GRAPH_RECORDS,
     persona_local::PERSONA_LOCAL,
     shared_workspace::SHARED_WORKSPACE,
+    core_writes::CORE_WRITES,
+    write_operations::WRITE_OPERATIONS,
 ];
 
 /// Every global flag name that takes a value, in merge order.

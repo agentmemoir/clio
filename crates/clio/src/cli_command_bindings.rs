@@ -216,19 +216,6 @@ pub(crate) static CATALOG_ORDER: &[&str] = &[
 /// an un-moved command prints, and the row is deleted as the command moves
 /// into a registry record.
 static STATIC_BINDINGS: &[(&str, &str)] = &[
-    ("remember", "store"),
-    ("admit", "admit_preview"),
-    ("summarize", "summarize"),
-    ("consolidate", "consolidate"),
-    ("update", "update"),
-    ("invalidate", "invalidate"),
-    ("discard", "discard"),
-    ("correct", "correct"),
-    ("validate", "validate"),
-    ("batch", "batch"),
-    ("export", "export"),
-    ("import", "import"),
-    ("erase", "erase_request"),
     ("config get", "config_get"),
     ("config set", "config_set"),
     ("config profiles", "config_profiles"),

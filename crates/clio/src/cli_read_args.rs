@@ -107,22 +107,13 @@ pub(crate) fn unexpected_extra(
 ///
 /// A verb whose command record has arrived answers from the record instead (see
 /// [`required_flags`]), so its required set and the usage line that command
-/// prints come from the same data and cannot disagree. The rows left here are
-/// the verbs still waiting for their records. The test beside this table derives
-/// each row from the usage line and fails when the two differ, so the drift is
-/// caught rather than trusted.
-///
-/// `--confirm` is written bare on `discard` and `erase` because it gates the
-/// live run, while a run without it is a dry run rather than a refusal, so
-/// neither row lists it.
-pub(crate) const REQUIRED_FLAGS: &[(&str, &[&str])] = &[
-    ("update", &["rule"]),
-    ("discard", &["reason"]),
-    ("correct", &["reason"]),
-    ("export", &["out"]),
-    ("import", &["source"]),
-    ("erase", &["subject", "basis", "request"]),
-];
+/// prints come from the same data and cannot disagree. Every verb this phase
+/// moved has a record, so the table is empty; an unregistered verb still
+/// enforces its mandated flags in its own build, and a row is added here only
+/// when that verb routes through [`require_flags`]. A new mandated flag on such
+/// a verb must add a row here, and the test beside it derives the row from the
+/// usage line and fails when the two differ.
+pub(crate) const REQUIRED_FLAGS: &[(&str, &[&str])] = &[];
 
 /// A verb's required flags: the registry record's when the verb is registered,
 /// else the table row.
@@ -283,3 +274,7 @@ pub(crate) fn article(label: &str) -> &'static str {
 #[cfg(test)]
 #[path = "cli_read_args_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_read_args_spec_tests.rs"]
+mod spec_tests;

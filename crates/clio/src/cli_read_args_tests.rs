@@ -3,19 +3,20 @@
 //
 //! # Responsibility
 //!
-//! This module tests the shared argument checks the read and write commands use:
-//! that a verb's required flags are the ones its own usage line says are required,
-//! and that a missing one is reported all at once rather than one run at a time.
+//! This module tests the required-flag contract the read and write commands
+//! share: that a verb's required flags are the ones its own usage line says are
+//! required, and that the missing ones are reported all at once rather than one
+//! run at a time.
 //!
 //! ## Owns
 //! - That the resolved required set agrees with the usage registry, record-sourced
 //!   and table-sourced answers alike
-//! - That a moved verb answers from its record while a table verb keeps its row
-//! - The registry-fed parser spec's own errors, requirement, and accepted globals
-//! - Coverage of `require_flags`, `flag`, `unexpected_extra`, `one_positional`,
-//!   `no_positionals` and `validate_choice`
+//! - That a moved verb answers from its record while the table stays empty
+//! - The bare-flag reading of a usage line and the named exceptions to it
+//! - `require_flags`' all-at-once refusal and its pasted hint
 //!
 //! ## Does not own
+//! - The argument checks over parsed arguments (`cli_read_args_spec_tests`)
 //! - The registry it is checked against (`cli_help_usage_tests`)
 //! - The grammar that produces the parsed arguments (`cli_args_tests`)
 //!
@@ -23,10 +24,8 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{REQUIRED_FLAGS, bare_flags, flag, require_flags, required_flags};
+use super::{REQUIRED_FLAGS, bare_flags, require_flags, required_flags};
 use crate::cli_help_usage;
-use crate::cli_read_group::ReadGroup;
-use crate::cli_read_test_support::tokens;
 
 /// Every verb the parity check covers: the table rows plus every record,
 /// including the records whose resolved required set is empty. An empty set is
@@ -162,9 +161,17 @@ fn every_covered_verb_has_a_usage_line() {
     }
 }
 
+/// The table is intentionally empty: every verb this phase moved has a record,
+/// so no verb answers from a row. The loop below stays as future-proofing and
+/// runs only if a row is added later.
 /// A verb without a record still reports its table row unchanged, verbatim.
 #[test]
 fn a_table_verb_keeps_its_required_flag_set() {
+    assert!(
+        REQUIRED_FLAGS.is_empty(),
+        "the table is intentionally empty while every moved verb has a record"
+    );
+    // The table is intentionally empty; this loop runs only if a row lands here.
     for &(verb, row) in REQUIRED_FLAGS {
         assert!(
             crate::cli_command_registry::find(verb).is_none(),
@@ -235,6 +242,42 @@ fn a_moved_verbs_required_bits_and_refusal_match_its_deleted_row() {
             &["category", "epistemic-kind"],
             "`canonical put` requires --category, --epistemic-kind (2 missing)",
             "try `clio canonical put ... --category VALUE --epistemic-kind VALUE`",
+        ),
+        (
+            "update",
+            &["rule"],
+            "`update` requires --rule",
+            "try `clio update ... --rule VALUE`",
+        ),
+        (
+            "discard",
+            &["reason"],
+            "`discard` requires --reason",
+            "try `clio discard ... --reason VALUE`",
+        ),
+        (
+            "correct",
+            &["reason"],
+            "`correct` requires --reason",
+            "try `clio correct ... --reason VALUE`",
+        ),
+        (
+            "export",
+            &["out"],
+            "`export` requires --out",
+            "try `clio export ... --out VALUE`",
+        ),
+        (
+            "import",
+            &["source"],
+            "`import` requires --source",
+            "try `clio import ... --source VALUE`",
+        ),
+        (
+            "erase",
+            &["subject", "basis", "request"],
+            "`erase` requires --subject, --basis, --request (3 missing)",
+            "try `clio erase ... --subject VALUE --basis VALUE --request VALUE`",
         ),
     ];
     let parsed = crate::cli_args::parse(
@@ -323,20 +366,6 @@ fn a_refusal_hint_is_a_command_line_with_a_placeholder_per_flag() {
     );
 }
 
-/// A flag the required list already proved is present reads back as its value, and
-/// an absent one reads as empty rather than panicking, so a forgotten check becomes
-/// a message from the tool rather than a crash.
-#[test]
-fn a_proved_flag_reads_back_as_its_value() {
-    let parsed = crate::cli_args::parse(
-        &crate::cli_args::FlagSpec::new(&["rule"], &[]),
-        ["--rule".to_owned(), "keep".to_owned()],
-    )
-    .expect("parse");
-    assert_eq!(flag(&parsed, "rule"), "keep");
-    assert_eq!(flag(&parsed, "absent"), "");
-}
-
 /// The five core read verbs carry no required flag in their records, so
 /// `required_flags` reports an empty set for each.
 #[test]
@@ -369,74 +398,4 @@ fn a_moved_verbs_missing_flag_refusal_is_unchanged() {
         error.hint(),
         Some("try `clio failure record ... --attempt-n VALUE --what-failed VALUE --lesson VALUE`")
     );
-}
-
-// ---------- the registry-fed parser spec ----------
-
-/// A read verb's required value is still refused with its own message once the
-/// spec comes from the registry: `compose-context` enforces `--budget-tokens` in
-/// its build, not in its record, and that requirement did not move.
-#[test]
-fn a_registry_fed_spec_still_refuses_a_missing_required_value() {
-    let spec = crate::cli_read::spec_for("compose-context").expect("a group spec");
-    let parsed = crate::cli_args::parse(&spec, Vec::<String>::new()).expect("the flag is optional");
-    let error = crate::cli_read_workspace::WorkspaceGroup
-        .build("compose-context", &parsed)
-        .expect_err("--budget-tokens is required");
-    assert_eq!(error.code(), "usage");
-    assert_eq!(
-        error.message(),
-        "`compose-context` requires a --budget-tokens value"
-    );
-    assert_eq!(error.hint(), Some("try `--budget-tokens 2000`"));
-    assert!(
-        required_flags("compose-context").is_empty(),
-        "the record marks no flag required for this verb"
-    );
-}
-
-/// An unknown flag on a read verb is still refused, with the same suggestion,
-/// once the spec comes from the registry.
-#[test]
-fn a_registry_fed_spec_still_refuses_an_unknown_flag() {
-    let spec = crate::cli_read::spec_for("history temporal").expect("a group spec");
-    let error = crate::cli_args::parse(&spec, tokens(&["t", "--time-axiss", "valid"]))
-        .expect_err("an unknown flag fails closed");
-    assert_eq!(error.code(), "usage");
-    assert_eq!(error.message(), "unknown flag `--time-axiss`");
-    assert_eq!(error.hint(), Some("did you mean `--time-axis`?"));
-}
-
-/// A value flag given twice is still refused rather than last-wins, once the
-/// spec comes from the registry.
-#[test]
-fn a_registry_fed_spec_still_refuses_a_repeated_flag() {
-    let spec = crate::cli_read::spec_for("task history").expect("a group spec");
-    let error = crate::cli_args::parse(&spec, tokens(&["t1", "--limit", "1", "--limit", "2"]))
-        .expect_err("a repeated flag is refused");
-    assert_eq!(error.code(), "usage");
-    assert_eq!(error.message(), "--limit was given more than once");
-    assert_eq!(error.hint(), Some("pass --limit once"));
-}
-
-/// Every declared global is still accepted by a read verb's spec once it comes
-/// from the registry, in the value and boolean forms alike.
-#[test]
-fn a_registry_fed_spec_still_accepts_the_globals() {
-    let spec = crate::cli_read::spec_for("memtree query").expect("a group spec");
-    let mut args: Vec<String> = Vec::new();
-    for name in crate::cli_command_registry::global_value_names() {
-        args.push(format!("--{name}"));
-        args.push("value".to_owned());
-    }
-    for name in crate::cli_command_registry::global_bool_names() {
-        args.push(format!("--{name}"));
-    }
-    let parsed = crate::cli_args::parse(&spec, args).expect("every declared global parses");
-    for name in crate::cli_command_registry::global_value_names() {
-        assert_eq!(parsed.value(name), Some("value"), "{name}");
-    }
-    for name in crate::cli_command_registry::global_bool_names() {
-        assert!(parsed.has(name), "{name}");
-    }
 }

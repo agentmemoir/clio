@@ -67,10 +67,10 @@ fn all_lists_the_core_reads_first_and_every_name_exactly_once() {
     assert_eq!(unique.len(), listed.len(), "no command is registered twice");
 }
 
-/// The registry registers the core reads first and the four group tranches
-/// after them, in that order.
+/// The registry registers the core reads first, then the group tranches, then
+/// the two write tranches, in that order.
 #[test]
-fn the_registry_registers_the_core_reads_then_the_four_group_tranches() {
+fn the_registry_registers_the_core_reads_then_the_group_and_write_tranches() {
     assert_eq!(
         super::TRANCHES[0],
         super::core_reads::CORE_READS,
@@ -96,10 +96,20 @@ fn the_registry_registers_the_core_reads_then_the_four_group_tranches() {
         super::shared_workspace::SHARED_WORKSPACE,
         "the shared/workspace tranche follows"
     );
-    assert_eq!(super::TRANCHES.len(), 5, "five tranches are registered");
+    assert_eq!(
+        super::TRANCHES[5],
+        super::core_writes::CORE_WRITES,
+        "the memory-write tranche follows"
+    );
+    assert_eq!(
+        super::TRANCHES[6],
+        super::write_operations::WRITE_OPERATIONS,
+        "the operation-write tranche follows"
+    );
+    assert_eq!(super::TRANCHES.len(), 7, "seven tranches are registered");
 }
 
-/// `names` answers every registered record: it spans all five tranches, and
+/// `names` answers every registered record: it spans all tranches, and
 /// `find` resolves each name it lists while reporting an unregistered miss.
 ///
 /// `names` maps `all` one to one, so the tranche-spanning pin below is the
