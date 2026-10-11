@@ -17,7 +17,7 @@ from gate import run_gate
 from gate_runlog import RUNS_FILE
 from gate_tree import TreeState, cache_root
 
-FIELDS = {"root", "common_dir", "branch", "kind", "started", "finished", "exit", "argv", "replayed"}
+FIELDS = {"root", "common_dir", "branch", "kind", "started", "finished", "exit", "argv", "replayed", "interactive"}
 TREE = TreeState("h1", (("crates/a/src/lib.rs", "one"),), ("crates/a/src/lib.rs",))
 
 
@@ -73,6 +73,7 @@ class RunLogTests(unittest.TestCase):
         self.assertEqual(fresh["common_dir"], str(root / ".git"))
         self.assertEqual(fresh["branch"], "feature/x")
         self.assertEqual(fresh["argv"], argv)
+        self.assertIsInstance(fresh["interactive"], bool)
         self.assertLessEqual(fresh["started"], fresh["finished"])
         self.assertLessEqual(replay["started"], replay["finished"])
 
