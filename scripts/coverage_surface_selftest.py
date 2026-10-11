@@ -11,29 +11,23 @@ from coverage_surface_core import (
     EXIT_FINDINGS,
     EXIT_OK,
     EXIT_UNREADABLE,
-    PACKAGE_RUNNER,
     REPORT_BUILDER,
     RUNNER,
     report,
     scan,
 )
+from coverage_surface_hygiene_cases import hygiene_cases
 from coverage_surface_fixtures import (
     ANY_MODE_RUNNER,
     CLEAN_MAKEFILE,
-    CLEAN_PACKAGE_RUNNER,
     CLEAN_RUNNER,
     CLEAN_WORKFLOW,
-    COMMENTED_AND_CALLED_RUNNER,
     COMMENTED_MARKER_MAKEFILE,
     COMMENTED_MARKER_SCRIPT,
     COMMENTED_MARKER_WORKFLOW,
-    COMMENTED_OBJECT_DELETE_RUNNER,
     EXPANSION_HASH_MAKEFILE,
     HEREDOC_MAKEFILE,
-    HYGIENE_AFTER_REPORT_RUNNER,
-    NO_BUFFER_DROP_RUNNER,
     NO_MODE_RUNNER,
-    NO_OBJECT_DELETE_RUNNER,
     NO_RUN_RUNNER,
     NO_SUBCOMMAND_BOUNDARY,
     ONE_BUILDER_RUNNER,
@@ -275,51 +269,7 @@ def _cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             _fixture(base, "heredoc", {MAKEFILE: HEREDOC_MAKEFILE}),
             [],
         ),
-        # Rule 4, the hygiene steps. Each of these leaves rule 1 satisfied, because
-        # the file still pins a directory of its own for its other mode, which is
-        # the whole reason this rule cannot be folded into rule 1.
-        (
-            "a run that never deletes the objects it did not build is a finding",
-            EXIT_FINDINGS,
-            _fixture(base, "no-object-delete", {RUNNER: NO_OBJECT_DELETE_RUNNER}),
-            ["hygiene"],
-        ),
-        (
-            "a run that never drops an unreadable profile buffer is a finding",
-            EXIT_FINDINGS,
-            _fixture(base, "no-buffer-drop", {RUNNER: NO_BUFFER_DROP_RUNNER}),
-            ["hygiene"],
-        ),
-        (
-            "a one-package run that never drops an unreadable profile buffer is a finding",
-            EXIT_FINDINGS,
-            _fixture(
-                base,
-                "package-no-buffer-drop",
-                {PACKAGE_RUNNER: CLEAN_PACKAGE_RUNNER.replace("    drop_invalid_profraws(directory)\n", "")},
-            ),
-            ["hygiene"],
-        ),
-        (
-            "a step named only in a trailing comment is a finding",
-            EXIT_FINDINGS,
-            _fixture(
-                base, "commented-object-delete", {RUNNER: COMMENTED_OBJECT_DELETE_RUNNER}
-            ),
-            ["hygiene"],
-        ),
-        (
-            "a real call carrying a trailing comment is not a finding",
-            EXIT_OK,
-            _fixture(base, "commented-and-called", {RUNNER: COMMENTED_AND_CALLED_RUNNER}),
-            [],
-        ),
-        (
-            "a run that writes its report before cleaning is a finding",
-            EXIT_FINDINGS,
-            _fixture(base, "hygiene-after", {RUNNER: HYGIENE_AFTER_REPORT_RUNNER}),
-            ["hygiene", "hygiene"],
-        ),
+        *hygiene_cases(base),
         # Rule 5, and the surface a rename would empty.
         (
             "a missing runner is a finding, not a pass",
