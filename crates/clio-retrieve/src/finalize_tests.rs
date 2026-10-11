@@ -77,6 +77,7 @@ fn finalize_one(snapshot: Option<Value>, include_exact: bool) -> ScoredHit {
             total_ms: 0,
         },
         warnings: Vec::new(),
+        floor_binding: Vec::new(),
         dedup: DedupMeta {
             scope: RecallScope::Full,
             scope_empty: false,
@@ -257,6 +258,7 @@ fn finalize_reports_the_carried_age_factor_without_recomputing() {
             total_ms: 0,
         },
         warnings: Vec::new(),
+        floor_binding: Vec::new(),
         dedup: DedupMeta {
             scope: RecallScope::Full,
             scope_empty: false,

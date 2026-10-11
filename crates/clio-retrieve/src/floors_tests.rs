@@ -25,7 +25,7 @@
 
 use crate::floors::{
     MAX_FLOOR, MinScores, apply_keyword_floor, apply_reranker_floor, apply_semantic_floor,
-    final_floor_keeps, min_scores_from_value,
+    binding_floor_warnings, final_floor_keeps, min_scores_from_value,
 };
 use crate::fusion::StageHit;
 use clio_types::ErrorCode;
@@ -287,4 +287,25 @@ fn the_final_floor_keeps_scores_at_or_above_it() {
     );
     assert!(final_floor_keeps(0.03, Some(0.02)));
     assert!(!final_floor_keeps(0.019, Some(0.02)));
+}
+
+/// A binding floor is named by its wire name, in the order given, and an empty
+/// binding list contributes nothing.
+#[test]
+fn binding_floor_warnings_name_only_the_floors_that_bound() {
+    assert!(
+        binding_floor_warnings(&[]).is_empty(),
+        "no floor was binding"
+    );
+    assert_eq!(
+        binding_floor_warnings(&["final"]),
+        ["min_scores.final removed every retrieval candidate."]
+    );
+    assert_eq!(
+        binding_floor_warnings(&["semantic", "reranker"]),
+        [
+            "min_scores.semantic removed every retrieval candidate.",
+            "min_scores.reranker removed every retrieval candidate.",
+        ]
+    );
 }

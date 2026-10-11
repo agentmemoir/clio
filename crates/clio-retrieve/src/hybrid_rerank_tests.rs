@@ -171,3 +171,27 @@ fn rerank_can_be_cleared() {
         .expect("retrieve");
     assert!(!out.reranked);
 }
+
+/// A `reranker` floor above every score removes the whole shortlist, and the
+/// empty page names the floor that did it.
+#[test]
+fn a_reranker_floor_that_removes_every_hit_names_the_floor() {
+    let store = fx::store();
+    let entry = fx::item("A", "bank", "shared token");
+    fx::put_lexical(&store, &entry, "shared token");
+    let mut retriever = fx::retriever(&store);
+    retriever.set_reranker(Arc::new(fx::ReverseReranker));
+    let mut req = request("bank", "shared");
+    // `ReverseReranker` scores the only hit 0.9; a floor above it removes it.
+    req.min_scores.reranker = Some(0.95);
+    let out = retriever.retrieve(&req).expect("retrieve");
+    assert!(out.reranked, "the reranker ran: {out:?}");
+    assert!(out.hits.is_empty(), "{out:?}");
+    assert!(
+        out.warnings
+            .iter()
+            .any(|warning| warning.contains("min_scores.reranker")),
+        "the binding floor is named: {:?}",
+        out.warnings
+    );
+}
