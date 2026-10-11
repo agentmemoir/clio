@@ -56,34 +56,6 @@ fn object_keys(value: &Value) -> Vec<String> {
     keys
 }
 
-/// The frozen fixture's `ranking_env_set` description text and top-level
-/// `catalog_hash` are stale by a pre-existing known drift. Pin the pardon to
-/// exactly those two fields: both catalogs must still carry the description,
-/// the live text replaces the frozen copy, the hash is dropped before the
-/// caller compares, and every other byte of the catalog still compares.
-fn pardon_known_drift(frozen: &mut Value, live: &Value) {
-    let description = live["tools"]
-        .as_array()
-        .expect("live catalog tools array")
-        .iter()
-        .find(|tool| tool["name"] == "ranking_env_set")
-        .expect("live catalog lists ranking_env_set")["description"]
-        .as_str()
-        .expect("the live ranking_env_set description is a string")
-        .to_owned();
-    let tool = frozen["tools"]
-        .as_array_mut()
-        .expect("fixture catalog tools array")
-        .iter_mut()
-        .find(|tool| tool["name"] == "ranking_env_set")
-        .expect("fixture catalog lists ranking_env_set");
-    tool["description"] = Value::String(description);
-    frozen
-        .as_object_mut()
-        .expect("fixture catalog JSON object")
-        .remove("catalog_hash");
-}
-
 /// The help renderer ignores COLUMNS: with the variable unset on the child
 /// and with widths 100 and 200 set on the child only, three captures of the
 /// full plan agree entry for entry, content bytes included.
@@ -181,14 +153,13 @@ fn fixture_matches_the_live_binary_command_for_command() {
 
 /// The frozen capture's whole surface matches the live binary, surface by
 /// surface and in capture order: the `help` catalog, every captured command's
-/// `--help`, and the whole `help --json` catalog.
+/// `--help`, and the whole `help --json` catalog, `catalog_hash` included.
 ///
 /// The byte-for-byte whole-capture comparison lives beside this test. This one
 /// names each surface, so a failure says which one moved, and it compares the
-/// `help --json` entry's stdout key by key: every top-level field, the whole
-/// `tools` array included, except the two fields of a pre-existing known
-/// drift (`pardon_known_drift`), and it compares that entry's exit and stderr
-/// like any other entry's.
+/// `help --json` catalog key by key so a failure names the field that moved.
+/// It excuses nothing: every key compares, `catalog_hash` included, so any
+/// difference is a real drift to re-capture rather than a stale copy to pardon.
 ///
 /// The order comes from the live catalog, not the fixture: the captured argv
 /// sequence must equal the fixture's entry for entry, and the arrays' own
@@ -209,10 +180,13 @@ fn every_captured_surface_matches_the_fixture_in_capture_order() {
 
     for (expected, actual) in fixture.entries.iter().zip(&captured) {
         if expected.argv == ["help".to_owned(), "--json".to_owned()] {
-            let mut want: Value =
-                serde_json::from_str(&expected.stdout).expect("fixture catalog JSON");
+            // The catalog is compared key by key, every key included, so a
+            // failure names the field that moved instead of printing a whole
+            // document. Nothing is excused: `catalog_hash` compares like any
+            // other key, and the byte-for-byte comparison beside this test
+            // still catches a change the key set cannot see.
+            let want: Value = serde_json::from_str(&expected.stdout).expect("fixture catalog JSON");
             let got: Value = serde_json::from_str(&actual.stdout).expect("live catalog JSON");
-            pardon_known_drift(&mut want, &got);
             let mut keys: Vec<String> = want
                 .as_object()
                 .expect("fixture catalog JSON object")
@@ -223,9 +197,6 @@ fn every_captured_surface_matches_the_fixture_in_capture_order() {
             keys.sort();
             keys.dedup();
             for key in keys {
-                if key == "catalog_hash" {
-                    continue;
-                }
                 assert_eq!(
                     got.get(key.as_str()),
                     want.get(key.as_str()),
@@ -296,7 +267,19 @@ fn every_captured_surface_matches_the_fixture_in_capture_order() {
 /// Capture mode freezes the fixture only when `CAPTURE_ENV` is exactly "1";
 /// the variable is read here and never written by tests. CI never sets it, so
 /// the unset branch is what every normal run exercises. The capture branch is
-/// a developer action run by hand.
+/// a developer action run by hand, in two steps, because the guard refuses a
+/// stale artifact rather than freezing output a rebuild would change:
+///
+/// 1. `cargo build -p clio --release --locked --message-format=json` warms the
+///    cache the guard requires; its JSON stream must report the clio bin
+///    artifact with `"fresh": true`.
+/// 2. `CLIO_GOLDEN_CAPTURE=1 cargo nextest run -p clio --test
+///    golden_repeatability_test capture_mode_writes_the_fixture_only_when_asked`
+///    writes the fixture from that artifact.
+///
+/// Take both steps on one commit. A fixture generated from a build of a
+/// different commit is what made the frozen capture stop reproducing, and it is
+/// the diff of this frozen file, not a hand edit, that a refresh lands.
 #[test]
 fn capture_mode_writes_the_fixture_only_when_asked() {
     let path = fixture_path();

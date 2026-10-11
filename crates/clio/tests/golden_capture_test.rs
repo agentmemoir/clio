@@ -10,10 +10,10 @@
 //!
 //! ## Owns
 //! - Every assertion over the golden-capture support module
-//! - The scratch-directory guard the file-writing tests use
 //!
 //! ## Does not own
-//! - The capture tooling itself (`golden_capture_support`)
+//! - The capture tooling itself (`golden_capture_support`, and the scratch
+//!   directory guard it holds)
 //! - The help output the captures freeze (`cli_help`, the binary's `print_help`)
 //!
 //! ## Boundary
@@ -26,17 +26,16 @@
 
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
+use std::process::Command;
 
 #[path = "golden_capture_support/mod.rs"]
 mod golden_capture_support;
 
 use golden_capture_support::{
-    CAPTURE_HOME, CaptureEntry, ContentDiff, FIXTURE_VERSION, GoldenFixture, GuardRefusal, capture,
-    capture_plan, compare, freshness_verdict, load_fixture, require_executable, source_mutated,
-    workspace_root, write_fixture,
+    CAPTURE_HOME, CaptureEntry, ContentDiff, FIXTURE_VERSION, GoldenFixture, GuardRefusal, Scratch,
+    capture, capture_plan, compare, freshness_verdict, load_fixture, pin_capture_env,
+    require_executable, source_mutated, workspace_root, write_fixture,
 };
 
 /// Injected `cargo build -p clio --release --locked --message-format=json`
@@ -45,35 +44,6 @@ const FRESH_BUILD_JSON: &str = concat!(
     "{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"clio\",\"kind\":[\"bin\"]},",
     "\"fresh\":true,\"executable\":\"/repo/target/release/clio\"}\n",
 );
-
-/// A unique scratch directory, removed when the guard drops. `tempfile` is not
-/// a workspace dependency, so this is the repository's own fixture pattern
-/// (see `sync_wire_support::NodeDir`): pid, a monotonic counter, and nanos
-/// keep parallel tests apart, and the drop removes the directory on panic too.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(tag: &str) -> Self {
-        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "clio-golden-{tag}-{}-{nanos}-{}",
-            std::process::id(),
-            SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&path).expect("create the scratch directory");
-        Self(path)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 fn entry(argv: &[&str], exit: Option<i32>, stdout: &str, stderr: &str) -> CaptureEntry {
     CaptureEntry {
@@ -434,4 +404,46 @@ fn captured_help_output_pins_home_and_never_names_the_caller_home() {
         path.starts_with(CAPTURE_HOME),
         "the embedded default db path must start with the pinned home: {path}"
     );
+}
+
+/// A config file under the pinned home cannot reach a pinned child: the pin
+/// loads no deployment config, so `deployment.json` still renders the captured
+/// default. The unpinned control child beside it reads the same file, so this
+/// test fails if the pin stops disabling the load.
+#[test]
+fn a_config_file_under_the_pinned_home_cannot_reach_a_pinned_child() {
+    let home = Scratch::new("pinned-home-config");
+    let dir = home.0.join(".config/clio");
+    fs::create_dir_all(&dir).expect("create the config directory");
+    fs::write(dir.join("deployment.json"), "{\"backend\":\"postgres\"}\n")
+        .expect("write the deployment config");
+    let binary = Path::new(env!("CARGO_BIN_EXE_clio"));
+    let pinned = help_default_line(binary, &home.0, true);
+    let unpinned = help_default_line(binary, &home.0, false);
+    assert!(
+        pinned.ends_with("(backend: sqlite)"),
+        "the pinned child must read no config file: {pinned}"
+    );
+    assert!(
+        unpinned.ends_with("(backend: postgres)"),
+        "the control child must read the config file: {unpinned}"
+    );
+}
+
+/// The `default:` line of one `help` child under `home`, pinned when asked.
+fn help_default_line(binary: &Path, home: &Path, pinned: bool) -> String {
+    let mut command = Command::new(binary);
+    if pinned {
+        pin_capture_env(&mut command, home, None);
+    } else {
+        command.env_clear();
+        command.env("HOME", home);
+    }
+    let output = command.args(["help"]).output().expect("run help");
+    let stdout = String::from_utf8(output.stdout).expect("help writes UTF-8");
+    stdout
+        .lines()
+        .find(|line| line.contains("default:"))
+        .expect("the help prints the default database")
+        .to_owned()
 }
