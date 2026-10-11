@@ -151,6 +151,18 @@ pub(crate) fn context_prop() -> (&'static str, Value) {
     )
 }
 
+/// The `allow_duplicate` parameter shared by every gated write except the item
+/// family, which words its own description. It waives the exact-duplicate
+/// rejection and nothing else.
+pub(crate) fn allow_duplicate_prop() -> (&'static str, Value) {
+    (
+        "allow_duplicate",
+        b(
+            "Store even when identical to an item already in this bank; waives the exact-duplicate rejection only.",
+        ),
+    )
+}
+
 pub(crate) fn store_like(name: &'static str, desc: &'static str) -> ToolDef {
     let mut props = vec![
         ("item", item_shell()),

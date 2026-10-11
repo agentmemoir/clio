@@ -146,7 +146,7 @@ pub(crate) fn task_upsert(state: &McpState, args: &Value) -> Result<Value, AmErr
     let t_args = clio_history::TaskUpsertArgs {
         store: &*state.history,
         ctx: &ctx,
-        subject_id: opt_str(args, "subject_id").unwrap_or(task_id),
+        subject_id: task_id,
         task_id,
         definition: req_str(args, "definition")?,
         steps: &steps,
@@ -195,7 +195,7 @@ pub(crate) fn failure_record(state: &McpState, args: &Value) -> Result<Value, Am
     let f_args = clio_history::FailureRecordArgs {
         store: &*state.history,
         ctx: &ctx,
-        subject_id: opt_str(args, "subject_id").unwrap_or(task_id),
+        subject_id: task_id,
         task_id,
         attempt_n: args
             .get("attempt_n")

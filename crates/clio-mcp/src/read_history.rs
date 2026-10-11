@@ -190,7 +190,7 @@ fn temporal_history(state: &McpState, args: &Value) -> Result<Value, AmError> {
         target: req_str(args, "target")?,
         as_of,
         time_axis: time_axis(args)?,
-        limit: opt_usize(args, "limit"),
+        limit: None,
         policy: &state.history_policy,
         sink: &StderrSinks,
     })?;
@@ -276,7 +276,7 @@ fn belief_history(state: &McpState, args: &Value) -> Result<Value, AmError> {
         &*state.belief,
         ctx.bank.as_str(),
         req_str(args, "belief_id_or_proposition")?,
-        opt_str(args, "as_of"),
+        None,
     )?;
     Ok(serde_json::to_value(&history).expect("serialize belief history"))
 }
