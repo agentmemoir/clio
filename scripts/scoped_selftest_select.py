@@ -11,6 +11,7 @@ from scoped_judge import judge, report_verdicts
 from scoped_run import run_tests
 from scoped_select import (
     changed_files,
+    changed_paths,
     has_no_executable_code,
     is_judgeable,
     is_measureable,
@@ -248,6 +249,7 @@ def run(check) -> tuple:
 
         globals()["git"] = fake_git
         untracked = changed_files("master")
+        every_type = changed_paths("master")
     finally:
         globals()["git"] = original_git
         globals()["merge_base"] = original_merge_base_for_untracked
@@ -255,6 +257,11 @@ def run(check) -> tuple:
         "a Rust file under a wholly untracked directory is seen",
         untracked,
         ["crates/x/src/lib.rs"],
+    )
+    check(
+        "changed_paths keeps every file type and changed_files only the Rust ones",
+        every_type,
+        ["crates/x/Cargo.toml", "crates/x/src/lib.rs"],
     )
 
     # The tests-only mode must be a plain nextest run with no instrumentation

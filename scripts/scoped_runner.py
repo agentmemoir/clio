@@ -27,8 +27,8 @@ the same number, and differ only in which tests produce the measurement.
 `--scope crate` (the default) works out which packages own the changed files,
 adds every package that depends on them, runs that set, and judges the changed
 files at `LINE_FLOOR`. Correct, and slow: a one-file change in a leaf crate runs
-1636 of 4326 tests, because the root of the dependency graph owns 1382 of them
-and every leaf crate's closure includes it.
+the tests of every package that depends on it, and the root of the dependency
+graph is one of them.
 
 `--scope file` runs, for each changed file, only the tests that file owns, and
 judges that file's coverage from exactly those tests against the same
@@ -145,6 +145,8 @@ from scoped_core import EXIT_OK, EXIT_RUN_ERROR, ROOT, RunError
 from scoped_run import TEST_THREADS, hermetic_env
 from scoped_select import (
     changed_files,
+    changed_paths,
+    embedders,
     git,
     is_present,
     merge_base,
@@ -154,7 +156,7 @@ from scoped_select import (
     workspace_packages,
 )
 
-#: What `scripts/quick.py` takes from the scoped runner by name.
+#: What `scripts/quick.py` and its helpers take from the scoped runner by name.
 __all__ = [
     "EXIT_OK",
     "EXIT_RUN_ERROR",
@@ -162,6 +164,8 @@ __all__ = [
     "TEST_THREADS",
     "RunError",
     "changed_files",
+    "changed_paths",
+    "embedders",
     "git",
     "hermetic_env",
     "is_present",
