@@ -207,7 +207,7 @@ fn run_parsed(
     };
     match call_tool(state, tool, &arguments) {
         Ok(mut payload) => {
-            group.decorate(verb, parsed, &mut payload);
+            group.decorate(verb, parsed, &arguments, &mut payload);
             let text = group.render(
                 verb,
                 &payload,

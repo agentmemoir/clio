@@ -310,7 +310,12 @@ fn history_views_mask_planted_secrets() {
     let mut payload = json!({
         "record": {"definition": "x", "api_key": "sk-live-supersecret"},
     });
-    HistoryGroup.decorate("task get", &ParsedArgs::default(), &mut payload);
+    HistoryGroup.decorate(
+        "task get",
+        &ParsedArgs::default(),
+        &serde_json::json!({}),
+        &mut payload,
+    );
     let masked = payload.to_string();
     assert!(!masked.contains("supersecret"), "{masked}");
 }
