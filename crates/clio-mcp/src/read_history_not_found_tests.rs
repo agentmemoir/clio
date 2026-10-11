@@ -49,11 +49,7 @@ fn upsert_task(state: &McpState, task_id: &str) {
 #[test]
 fn task_get_of_an_unknown_task_is_not_found() {
     let s = state();
-    let out = read(
-        &s,
-        "task_get",
-        json!({"task_id": "tsk-nope", "bank": "bank-a"}),
-    );
+    let out = read(&s, "task_get", json!({"task_id": "tsk-nope"}));
     assert_eq!(out["ok"], json!(false), "{out}");
     assert_eq!(out["code"], json!("not_found"), "{out}");
     assert!(

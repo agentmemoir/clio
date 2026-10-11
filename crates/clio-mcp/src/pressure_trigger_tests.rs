@@ -26,7 +26,7 @@
 //!
 //! Keep this module focused on the trigger block's honest rendering contract.
 
-use super::pressure_tests::{BANK, commit_unit, state};
+use super::pressure_tests::{BANK, commit_unit, state, state_for_bank};
 use super::trigger_block;
 use crate::maintenance_trigger::{DeclineReason, MaintenanceTriggerStatus, PressureCounts};
 use crate::read_tools::dispatch;
@@ -173,7 +173,7 @@ fn the_trigger_block_reports_the_next_eligible_time_past_the_hour() {
 
 #[test]
 fn maintenance_status_carries_the_trigger_from_the_trigger_record() {
-    let s = state();
+    let s = state_for_bank(BANK);
     let out = dispatch(&s, "maintenance_status", &json!({"bank": BANK})).expect("dispatch");
     // The fresh state was never evaluated: the block states that explicitly.
     assert_eq!(

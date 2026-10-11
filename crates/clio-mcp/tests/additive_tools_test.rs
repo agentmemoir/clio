@@ -25,13 +25,17 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn handler(shared: bool) -> Arc<McpHandler> {
+    handler_with_default_bank(shared, "bank-a")
+}
+
+fn handler_with_default_bank(shared: bool, default_bank: &str) -> Arc<McpHandler> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let state = McpState::open_with_effective(
         &McpOpenOptions {
             backend: "sqlite".into(),
             database_url: format!("/tmp/am-additive-{}-{n}-{shared}.db", std::process::id()),
-            default_bank: "bank-a".into(),
+            default_bank: default_bank.into(),
             default_actor: clio_types::Actor::Agent,
             shared_bank_enabled: shared,
             kms_path: None,
@@ -290,7 +294,7 @@ fn validate_actions_transcript() {
 
 #[test]
 fn stats_reports_bank_scoped_counts() {
-    let h = handler(false);
+    let h = handler_with_default_bank(false, "empty-bank");
     let stored = call(&h, "store", &store_tool_args("itm-stats", "stats"));
     assert_eq!(stored["isError"], json!(false));
     let report = call(&h, "stats", &json!({"bank": "bank-a"}));

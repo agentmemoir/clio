@@ -175,6 +175,7 @@ fn task_upsert_dry_run_writes_nothing_and_exit_zero() {
 #[test]
 fn task_upsert_stores_the_record_and_counts_one_item() {
     let s = state();
+    s.ops_store.register_bank("demo", TS).unwrap();
     let before = call(&s, "stats", json!({"bank": "demo"}));
     let (code, out, err) = run_write_state(
         "task upsert",
@@ -209,6 +210,7 @@ fn task_upsert_stores_the_record_and_counts_one_item() {
 #[test]
 fn failure_record_dry_run_writes_nothing_and_stored_counts_one_item() {
     let s = state();
+    s.ops_store.register_bank("demo", TS).unwrap();
     let before = call(&s, "stats", json!({"bank": "demo"}));
     let args = [
         "task-9",

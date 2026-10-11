@@ -222,6 +222,7 @@ fn stats_counts_stay_bank_scoped() {
     let report = call_read(&s, "stats", json!({"bank": "bank-a", "actor": "agent"})).unwrap();
     assert_eq!(report["bank"], "bank-a");
     assert!(report["items_total"].as_u64().unwrap_or(0) >= 1);
-    let other = call_read(&s, "stats", json!({"bank": "empty-bank", "actor": "agent"})).unwrap();
+    let other = call_read(&s, "stats", json!({"actor": "agent"})).unwrap();
+    assert_eq!(other["bank"], s.default_bank);
     assert_eq!(other["items_total"], 0);
 }

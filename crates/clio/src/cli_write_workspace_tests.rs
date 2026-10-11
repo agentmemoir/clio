@@ -18,7 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::cli_read_test_support::{call, json_of, state};
+use crate::cli_read_test_support::{call, json_of, seed_item, state};
 use crate::cli_write_group::WriteGroup;
 use crate::cli_write_test_support::{run_write_resolved, run_write_state};
 use serde_json::json;
@@ -249,6 +249,7 @@ fn canonical_put_dry_run_previews_without_writing() {
 #[test]
 fn canonical_get_of_an_empty_slot_exits_one() {
     let s = state();
+    seed_item(&s, "demo", "known-item", "a stored memory");
     let (code, _, err) = run_write_state("canonical get", &["nope", "--bank", "demo"], &s, false);
     assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("empty"), "{err}");
@@ -318,8 +319,8 @@ fn render_views_fall_back_deterministically() {
     // The fallback arms keep text output stable when an optional field is
     // absent from a tool payload.
     assert_eq!(
-        super::render_scratchpad_write(&json!({"key": "k", "bytes": 3})),
-        "scratchpad `k` stored (3 bytes, ephemeral)"
+        super::render_scratchpad_write(&json!({"key": "k", "bytes": 3, "lifetime": "process"})),
+        "scratchpad `k` stored for this process only (3 bytes)"
     );
     assert_eq!(
         super::render_scratchpad_read(&json!({"key": "k", "content": "12A"})),

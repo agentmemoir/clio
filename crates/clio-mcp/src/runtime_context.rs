@@ -131,6 +131,26 @@ impl McpState {
         Ok(ctx)
     }
 
+    /// Refuse a bank-scoped read when the bank is unknown.
+    ///
+    /// The configured default and enabled shared bank are valid even when
+    /// empty; custom banks exist when registered or used by durable data.
+    ///
+    /// # Errors
+    /// `not_found` for an unknown bank, or storage failures.
+    pub fn require_known_bank(&self, bank: &str) -> Result<(), AmError> {
+        if bank == self.default_bank || (bank == SHARED_BANK && self.shared_enabled) {
+            return Ok(());
+        }
+        if self.ops_store.bank_exists(bank)? {
+            return Ok(());
+        }
+        Err(AmError::new(
+            clio_types::ErrorCode::NotFound,
+            format!("bank `{bank}` not found"),
+        ))
+    }
+
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.
     #[must_use]
     pub fn resolve_timestamp(&self, args: &Value) -> String {

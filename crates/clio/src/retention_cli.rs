@@ -204,8 +204,13 @@ fn run(sub: &str, flags: &HashMap<String, String>) -> Result<String, AmError> {
     match sub {
         "schema" => Ok(pretty(&profile_json_schema())),
         "get" => {
+            let bank = bank_of(flags);
+            if bank.is_empty() {
+                return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
+            }
+            require_existing_profiles_file(flags)?;
             let rt = open_runtime(flags)?;
-            let data = ok_data(rt.retention_profile_get(bank_of(flags)))?;
+            let data = ok_data(rt.retention_profile_get(bank))?;
             Ok(pretty(&data))
         }
         "set" => {
@@ -228,6 +233,24 @@ fn run(sub: &str, flags: &HashMap<String, String>) -> Result<String, AmError> {
             format!("unknown retention command `{other}`"),
         )),
     }
+}
+
+/// Refuse a configured profiles path that points to no file instead of showing builtin defaults.
+fn require_existing_profiles_file(flags: &HashMap<String, String>) -> Result<(), AmError> {
+    let explicit = flags.get("profiles").map(PathBuf::from);
+    let path = resolve_retention_path(explicit).ok_or_else(|| {
+        AmError::new(
+            ErrorCode::InvalidArgument,
+            "no retention store configured; pass `--profiles FILE` or set CLIO_RETENTION_PROFILES",
+        )
+    })?;
+    if !path.is_file() {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("retention profiles file does not exist: {}", path.display()),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

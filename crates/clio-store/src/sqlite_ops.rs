@@ -96,7 +96,7 @@ impl OpsStore for SqliteStore {
     fn bank_ids(&self) -> Result<Vec<String>, AmError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT DISTINCT bank_id FROM items ORDER BY bank_id")
+                .prepare("SELECT id FROM banks ORDER BY id")
                 .am("bank ids prepare")?;
             let rows = stmt
                 .query_map([], |r| r.get::<_, String>(0))
@@ -106,6 +106,31 @@ impl OpsStore for SqliteStore {
                 out.push(row.am("bank id row")?);
             }
             Ok(out)
+        })
+    }
+
+    fn bank_exists(&self, bank_id: &str) -> Result<bool, AmError> {
+        self.with_conn(|conn| {
+            let exists = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM banks WHERE id = ?1)",
+                    params![bank_id],
+                    |row| row.get(0),
+                )
+                .am("bank exists")?;
+            Ok(exists)
+        })
+    }
+
+    fn register_bank(&self, bank_id: &str, created_at: &str) -> Result<(), AmError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO banks (id, created_at, updated_at) VALUES (?1, ?2, ?2)
+                 ON CONFLICT (id) DO NOTHING",
+                params![bank_id, created_at],
+            )
+            .am("bank register")?;
+            Ok(())
         })
     }
 

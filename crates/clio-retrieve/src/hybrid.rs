@@ -131,10 +131,10 @@ impl HybridRetriever {
         let domains = SearchDomain::parse_all(&req.domains)?;
         let mut warnings = Vec::new();
         let dense_started = Instant::now();
-        let dense_hits = self.dense_leg(req, &mut warnings);
+        let (dense_hits, dense_before_floor) = self.dense_leg(req, &mut warnings);
         let dense_ms = millis(dense_started);
         let lexical_started = Instant::now();
-        let lexical_hits = self.lexical_leg(req)?;
+        let (lexical_hits, lexical_before_floor) = self.lexical_leg(req)?;
         let lexical_ms = millis(lexical_started);
         let (window, temporal_ids) = temporal_leg(self.store.as_ref(), req, self.leg_fetch)?;
         let mut candidate_ids = dedupe_ordered(
@@ -144,6 +144,13 @@ impl HybridRetriever {
                 .chain(lexical_hits.iter().map(|h| &h.id))
                 .chain(temporal_ids.iter()),
         );
+        if candidate_ids.is_empty()
+            && (req.min_scores.semantic.is_some() || req.min_scores.keyword.is_some())
+            && dense_before_floor + lexical_before_floor > 0
+        {
+            warnings
+                .push("The requested min_scores filters removed every retrieval candidate.".into());
+        }
         let expand_started = Instant::now();
         let (expanded, graph_new) = expand_candidates(
             self.expander.as_ref(),
@@ -319,16 +326,22 @@ impl HybridRetriever {
     /// similarity scale the `scores.semantic` field publishes, so it prunes
     /// before items are fetched and before fusion and never becomes a
     /// cross-arm score comparison.
-    fn dense_leg(&self, req: &RetrieveRequest, warnings: &mut Vec<String>) -> Vec<StageHit> {
-        apply_semantic_floor(
-            dense_candidates(
-                self.embedder.as_ref(),
-                self.index.as_ref(),
-                req,
-                self.leg_fetch,
-                warnings,
-            ),
-            req.min_scores.semantic,
+    fn dense_leg(
+        &self,
+        req: &RetrieveRequest,
+        warnings: &mut Vec<String>,
+    ) -> (Vec<StageHit>, usize) {
+        let candidates = dense_candidates(
+            self.embedder.as_ref(),
+            self.index.as_ref(),
+            req,
+            self.leg_fetch,
+            warnings,
+        );
+        let count = candidates.len();
+        (
+            apply_semantic_floor(candidates, req.min_scores.semantic),
+            count,
         )
     }
 
@@ -338,10 +351,12 @@ impl HybridRetriever {
     /// The floor is applied to this arm's own list on the same raw backend
     /// scale the `scores.keyword` field publishes, so the other arm's
     /// candidates are untouched.
-    fn lexical_leg(&self, req: &RetrieveRequest) -> Result<Vec<StageHit>, AmError> {
-        Ok(apply_keyword_floor(
-            lexical_candidates(self.index.as_ref(), req, self.leg_fetch)?,
-            req.min_scores.keyword,
+    fn lexical_leg(&self, req: &RetrieveRequest) -> Result<(Vec<StageHit>, usize), AmError> {
+        let candidates = lexical_candidates(self.index.as_ref(), req, self.leg_fetch)?;
+        let count = candidates.len();
+        Ok((
+            apply_keyword_floor(candidates, req.min_scores.keyword),
+            count,
         ))
     }
 }

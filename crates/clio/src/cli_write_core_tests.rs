@@ -213,14 +213,14 @@ fn summarize_requires_scope() {
 }
 
 #[test]
-fn summarize_dry_run_previews_without_calling_the_dispatcher() {
+fn summarize_bank_dry_run_previews_without_calling_the_dispatcher() {
     let s = state();
     let (code, out, err) =
-        run_write_state("summarize", &["--scope", "demo", "--dry-run"], &s, false);
+        run_write_state("summarize", &["--scope", "bank", "--dry-run"], &s, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     let payload = json_of(&out);
     assert_eq!(payload["dry_run"], json!(true), "{payload}");
-    assert_eq!(payload["scope"], json!("demo"), "{payload}");
+    assert_eq!(payload["scope"], json!("bank"), "{payload}");
     assert!(
         payload["would"]
             .as_str()
@@ -245,6 +245,9 @@ fn consolidate_dry_run_previews_bank_and_force() {
     assert_eq!(payload["force"], json!(true), "{payload}");
     assert_eq!(payload["bank"], json!("demo"), "{payload}");
 }
+
+#[path = "cli_write_core_validation_tests.rs"]
+mod validation_tests;
 
 #[test]
 fn remember_rejects_unknown_epistemic_kind() {
@@ -401,8 +404,6 @@ fn remember_maps_every_optional_flag() {
             "user_stated",
             "--evidence-ref",
             "ev-1",
-            "--source-text",
-            "The user prefers aisle seats on flights.",
             "--bank",
             "demo",
         ],

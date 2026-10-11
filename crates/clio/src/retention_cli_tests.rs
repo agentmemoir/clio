@@ -67,6 +67,16 @@ fn set_then_get_round_trips_through_the_store_file() {
 }
 
 #[test]
+fn get_refuses_a_missing_profiles_file() {
+    let path = tmp_store("missing");
+    let path_str = path.to_string_lossy().into_owned();
+    let error = run("get", &flags(&[("profiles", &path_str)]))
+        .expect_err("a configured missing file is not a stored profile");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(error.message.contains("profiles file does not exist"));
+}
+
+#[test]
 fn set_reads_a_profile_file_and_the_deployment_scope() {
     let path = tmp_store("deploy");
     let path_str = path.to_string_lossy().into_owned();

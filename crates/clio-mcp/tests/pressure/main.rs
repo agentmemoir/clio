@@ -361,8 +361,8 @@ pub fn dummy_triple() -> TripleRecord {
 
 impl OpsStore for ViewDouble<dyn OpsStore> {
     view_store! {
-        reads { counts() -> Result<StoreCounts, AmError>; ping() -> Result<(), AmError>; schema_version() -> Result<Option<String>, AmError>; embedding_space() -> Result<EmbeddingSpace, AmError>; bank_ids() -> Result<Vec<String>, AmError>; integrity_signals(bank: Option<&str>) -> Result<IntegritySignals, AmError>; }
-        writes { drop_orphan_assoc_edges(bank: &str) -> Result<u64, AmError>; }
+        reads { counts() -> Result<StoreCounts, AmError>; ping() -> Result<(), AmError>; schema_version() -> Result<Option<String>, AmError>; embedding_space() -> Result<EmbeddingSpace, AmError>; bank_ids() -> Result<Vec<String>, AmError>; bank_exists(bank_id: &str) -> Result<bool, AmError>; integrity_signals(bank: Option<&str>) -> Result<IntegritySignals, AmError>; }
+        writes { register_bank(bank_id: &str, created_at: &str) -> Result<(), AmError>; drop_orphan_assoc_edges(bank: &str) -> Result<u64, AmError>; }
     }
 }
 

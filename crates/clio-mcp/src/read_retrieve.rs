@@ -126,6 +126,8 @@ fn retrieve_at(state: &McpState, args: &Value, now: Option<String>) -> Result<Va
     let (retention_curve, retention_floor) = read_curve(state, &ctx);
     let provenance_floor =
         read_provenance_floor(state, ctx.bank.as_str(), args.get("provenance_floor"))?;
+    let min_scores = min_scores_from_value(args.get("min_scores"))?;
+    let has_min_score_filter = !min_scores.is_empty();
     let request = RetrieveRequest {
         bank: ctx.bank.as_str().to_owned(),
         query: req_str(args, "query")?.to_owned(),
@@ -142,13 +144,22 @@ fn retrieve_at(state: &McpState, args: &Value, now: Option<String>) -> Result<Va
         duplicate_tolerance_read,
         retention_curve,
         retention_floor,
-        min_scores: min_scores_from_value(args.get("min_scores"))?,
+        min_scores,
         include_entities: opt_bool(args, "include_entities", true)?,
         entity_summary: opt_bool(args, "entity_summary", false)?,
         include_exact: opt_bool(args, "include_exact", false)?,
         provenance_floor,
     };
-    let outcome = state.retriever.retrieve(&request)?;
+    let mut outcome = state.retriever.retrieve(&request)?;
+    let source_candidates = outcome.dense_candidates + outcome.lexical_candidates;
+    if has_min_score_filter
+        && outcome.hits.is_empty()
+        && (outcome.fused_candidates > 0 || source_candidates > 0)
+    {
+        outcome
+            .warnings
+            .push("The requested min_scores filters removed every retrieval candidate.".into());
+    }
     let mut value = serde_json::to_value(&outcome).expect("serialize retrieve outcome");
     if opt_bool(args, "explain", false)? {
         value["explanation"] = retrieve_explanation(&outcome, &request.domains);
@@ -419,6 +430,10 @@ mod read_retrieve_scores_tests;
 #[cfg(test)]
 #[path = "read_retrieve_temporal_tests.rs"]
 mod read_retrieve_temporal_tests;
+
+#[cfg(test)]
+#[path = "read_retrieve_floor_warning_tests.rs"]
+mod read_retrieve_floor_warning_tests;
 
 #[cfg(test)]
 #[path = "read_retrieve_not_found_tests.rs"]
