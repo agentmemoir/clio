@@ -145,7 +145,7 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
     (
         "canonical put",
-        "usage: clio canonical put KEY VALUE --category C --epistemic-kind K [--source-type T] [--confidence N] [--source-text TEXT] [--evidence-ref E] [--context C] [--dry-run] [--output json|text]",
+        "usage: clio canonical put KEY VALUE --category C --epistemic-kind K [--source-type T] [--confidence N] [--source-text TEXT] [--evidence-ref E] [--context C] [--dry-run] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
     ),
     (
         "canonical get",
@@ -153,7 +153,7 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
     (
         "shared store",
-        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] [--source-text TEXT] --actor A --shared-bank [--output json|text]",
+        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] [--source-text TEXT] --actor A --shared-bank [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
     ),
     (
         "shared retrieve",
@@ -205,7 +205,7 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
     (
         "triple add",
-        "usage: clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--output json|text]",
+        "usage: clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
     ),
     (
         "triple end",

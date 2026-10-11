@@ -27,12 +27,9 @@ use crate::cli_error::CliError;
 use crate::cli_read_args::validate_choice;
 use clio_types::SourceType;
 
-/// The valid `--source-type` values, from the enum so the list cannot drift.
-const SOURCE_TYPES: &[&str] = &[
-    SourceType::UserStated.as_str(),
-    SourceType::AgentInferred.as_str(),
-    SourceType::ThirdParty.as_str(),
-];
+/// The valid `--source-type` values: the type's own wire list, so the CLI cannot
+/// hold a second copy that drifts from the enum.
+const SOURCE_TYPES: &[&str] = SourceType::WIRE;
 
 /// Resolve `--source-type` against `--epistemic-kind`.
 ///
@@ -53,7 +50,7 @@ pub(crate) fn source_type_arg<'a>(
     match (kind, source) {
         ("belief", None) => Err(CliError::usage_hint(
             format!("--epistemic-kind belief requires --source-type ({values})"),
-            "add --source-type user_stated (or agent_inferred, third_party)",
+            format!("add one of: {}", SOURCE_TYPES.join(", ")),
         )),
         ("fact", Some(_)) => Err(CliError::usage_hint(
             format!(
