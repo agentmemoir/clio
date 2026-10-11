@@ -72,7 +72,7 @@ fn verifier(supplied: Option<&str>) -> Arc<WebPkiServerVerifier> {
 /// A fixed instant inside the fixtures' validity, so the test does not read the
 /// wall clock.
 fn now() -> UnixTime {
-    UnixTime::since_unix_epoch(Duration::from_secs(1_800_000_000))
+    UnixTime::since_unix_epoch(Duration::from_hours(500_000))
 }
 
 #[test]
