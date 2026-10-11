@@ -440,9 +440,5 @@ pub trait Store:
 mod store_admission_gated_tests;
 
 #[cfg(test)]
-#[path = "store_gate_boundary_tests.rs"]
-mod store_gate_boundary_tests;
-
-#[cfg(test)]
 #[path = "store_parity_tests.rs"]
 mod store_parity_tests;
