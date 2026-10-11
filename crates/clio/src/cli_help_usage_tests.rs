@@ -8,11 +8,13 @@
 //! pinning usage-line content against the parser and against removed routes.
 //!
 //! ## Owns
-//! - The no-duplicate-verb invariant, and the "a looked-up verb resolves to its
-//!   own text" check
-//! - The usage-line-versus-parser flag agreement pin: every flag a usage line
-//!   names is one its verb's parser accepts, pinned per verb so a verb that
-//!   loses its spec or its usage line fails
+//! - The no-duplicate-verb invariant, the "a looked-up verb resolves to its
+//!   own text" check, and the "only an unregistered verb has a row here" pin
+//! - The both-direction flag agreement pin: every flag a command's help text
+//!   names is one its parser accepts, and every non-global flag its parser
+//!   accepts is named by the command's record (or, while a record is still
+//!   missing, carried by the authored usage row), pinned per command so a
+//!   command that loses its parser or its help text fails
 //! - The never-advertise-a-removed-route pin: the transfer usage lines name the
 //!   store and `CLIO_SYNC_KEY_FILE` routes and never advertise `--sync-key` or
 //!   the removed `CLIO_SYNC_KEY` environment rung
@@ -22,6 +24,7 @@
 //! ## Does not own
 //! - The wording of any other usage line
 //! - The help catalog and tool bindings (`cli_help_tests`)
+//! - The literal-read scan over the flag-reading modules (`flag_read_scan_test`)
 //!
 //! ## Boundary
 //!
@@ -34,11 +37,11 @@ use crate::cli_help;
 use crate::cli_help_usage;
 use crate::help_flags_test_support::flags_in;
 
-/// Regression cover for issue #84: `VERB_USAGE` held two entries keyed
-/// `backup restore` and `usage_for` returns the first match, so the second was
-/// text no command, flag, or output mode could print. A maintainer who rewrote
-/// it saw no change and no diagnostic. `usage_for` has no way to tell two
-/// variants of one verb apart, so the table must hold one entry per verb.
+/// `VERB_USAGE` once held two entries keyed `backup restore`, and `usage_for`
+/// returns the first match, so the second was text no command, flag, or output
+/// mode could print. A maintainer who rewrote it saw no change and no
+/// diagnostic. `usage_for` has no way to tell two variants of one verb apart,
+/// so the table must hold one entry per verb.
 #[test]
 fn every_verb_appears_exactly_once_in_the_usage_table() {
     let mut seen = BTreeSet::new();
@@ -70,9 +73,27 @@ fn a_verb_in_the_table_resolves_through_the_lookup() {
     }
 }
 
-/// The five moved commands answer through their registry records, which is what
-/// makes the table's rows deletable: the lookup reads the record first, so a
-/// command that left the table must still resolve to the same text.
+/// No verb left in the table has a record: `usage_for` reads the registry
+/// first, so a row left behind after a command moved into a record is text no
+/// command can print, and the table would be a second source for one verb.
+#[test]
+fn every_verb_left_in_the_table_has_no_record() {
+    for (verb, _) in VERB_USAGE {
+        assert!(
+            crate::cli_command_registry::find(verb).is_none(),
+            "`{verb}` has a registry record and a row in the usage table"
+        );
+    }
+}
+
+/// Every registered command answers through its registry record, which is what
+/// makes a row's deletion byte-safe: the lookup reads the record, and the record
+/// carries the text the row held.
+///
+/// The independent input here is the lookup's dispatch: registered verbs have
+/// no fallback row in the table (checked above), so this assertion fails if
+/// `usage_for` or `usage_line` stops reading records, and the bytes themselves
+/// are pinned by the per-record tests and the frozen fixture.
 #[test]
 fn a_registered_command_resolves_through_the_lookup() {
     for spec in crate::cli_command_registry::all() {
@@ -116,66 +137,136 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
     assert!(!block.contains("scope"), "{block}");
 }
 
-/// A flag a usage line names is one the verb's parser will accept.
+/// Every flag a command's help text names is one its parser accepts, and every
+/// flag the parser accepts is one the command's record names.
 ///
-/// The other direction is checked elsewhere: a flag in `--help` reaches the catalog.
-/// This is the direction that catches the defect a reader cannot recover from — help
-/// text naming a flag the parser would refuse, so the reader types it and is told it
-/// does not exist. The reported instance was `am compose down`, a help line naming a
-/// binary that is not installed.
+/// The first direction is the one a reader cannot recover from: help text that
+/// names a flag the parser would refuse makes the reader type something that
+/// does not exist. The second catches the opposite - a flag the parser takes
+/// that nothing names, so it can only be found by reading the parser.
 ///
-/// Only decidable for the verbs that share a flag spec. The reserved surfaces read
-/// their flags through a name-to-value map that accepts anything, so there is nothing
-/// to check them against and they are counted separately rather than passed over.
+/// A registered record splits the check. Its help text may be a hand-written
+/// override, so the first direction is real there; the second is true by
+/// construction, because `parser_spec` is built from `documented` plus
+/// `accepted_extra`, and is asserted as a guard that the derivation stays
+/// intact. Its write subcommands still answer from their group's separate flag
+/// list, so for those both directions compare two sources. A command with no
+/// record keeps its parser set and its authored usage row as two sources too;
+/// only the first direction has a record to check there.
+///
+/// The count is pinned, not a floor: a command that loses its parser or its
+/// help text must show up as a number that changed, never as coverage that
+/// quietly shrank. It was 20 while seven read verbs had records and thirteen
+/// write rows did not; the read-head records raise it to 39 registered
+/// commands plus the 13 write rows whose records arrive in a later phase.
 #[test]
-fn a_flag_a_usage_line_names_is_one_the_parser_accepts() {
+fn help_text_and_parser_flags_agree_in_both_directions() {
     let mut checked = 0usize;
     let mut undecidable: Vec<&str> = Vec::new();
     let mut wrong: Vec<String> = Vec::new();
-    for verb in cli_help::READ_VERBS
-        .iter()
-        .chain(cli_help::WRITE_VERBS.iter())
-        .copied()
-    {
-        let Some(usage) = cli_help_usage::usage_line(verb) else {
+
+    // Registered commands: the parser the dispatcher resolves for the verb,
+    // and the help text the record renders.
+    for spec in crate::cli_command_registry::all() {
+        let Some(parser) = parser_for(spec.name) else {
+            undecidable.push(spec.name);
             continue;
         };
-        let spec = crate::cli_read::spec_for(verb).or_else(|| crate::cli_write::spec_for(verb));
-        let Some(spec) = spec else {
-            undecidable.push(verb);
-            continue;
-        };
-        let mut accepted: Vec<String> = spec
-            .value_flags()
-            .iter()
-            .chain(spec.bool_flags().iter())
-            .copied()
-            .chain(crate::cli_command_registry::global_value_names())
-            .chain(crate::cli_command_registry::global_bool_names())
-            .map(|name| format!("--{name}"))
-            .collect();
-        accepted.sort();
-        for flag in flags_in(&usage) {
+        let accepted = parsed_flag_names(&parser);
+        for flag in flags_in(&spec.full_usage()) {
             if !accepted.contains(&flag) {
                 wrong.push(format!(
-                    "`clio {verb}` names {flag}, which its parser refuses"
+                    "`clio {}` help names {flag}, which its parser refuses",
+                    spec.name
+                ));
+            }
+        }
+        let named: Vec<&str> = spec
+            .documented
+            .iter()
+            .map(|flag| flag.long)
+            .chain(spec.accepted_extra.iter().copied())
+            .collect();
+        // The record's own names against the parser: a documented flag a
+        // hand-written usage override hides must still be one the parser takes.
+        for name in &named {
+            if !accepted.contains(&format!("--{name}")) {
+                wrong.push(format!(
+                    "`clio {}` names --{name}, which its parser refuses",
+                    spec.name
+                ));
+            }
+        }
+        for flag in &accepted {
+            if !named.contains(&flag.trim_start_matches("--")) {
+                wrong.push(format!(
+                    "`clio {}` parser accepts {flag}, which the record does not name",
+                    spec.name
                 ));
             }
         }
         checked += 1;
     }
+
+    // Commands whose records arrive in a later phase: the authored usage row is
+    // the surface a reader has, and the parser set is a separate list.
+    for verb in cli_help::READ_VERBS
+        .iter()
+        .chain(cli_help::WRITE_VERBS.iter())
+        .copied()
+    {
+        if crate::cli_command_registry::find(verb).is_some() {
+            continue;
+        }
+        let Some(usage) = cli_help_usage::usage_line(verb) else {
+            continue;
+        };
+        let Some(parser) = parser_for(verb) else {
+            undecidable.push(verb);
+            continue;
+        };
+        let accepted = parsed_flag_names(&parser);
+        for flag in flags_in(&usage) {
+            if !accepted.contains(&flag) {
+                wrong.push(format!(
+                    "`clio {verb}` usage names {flag}, which its parser refuses"
+                ));
+            }
+        }
+        checked += 1;
+    }
+
     assert!(
         wrong.is_empty(),
-        "help text names flags the parser would reject:\n{}",
+        "help text and parser flag sets disagree:\n{}",
         wrong.join("\n")
     );
-    // Pinned rather than a floor, so a verb that loses its spec or its usage line
-    // shows up as a number that changed instead of as coverage that quietly shrank.
+    assert!(
+        undecidable.is_empty(),
+        "these commands have no parser to check against: {undecidable:?}"
+    );
     assert_eq!(
-        checked, 20,
-        "the number of verbs this check decides changed, so it is covering less or more \
+        checked, 52,
+        "the number of commands this check decides changed, so it is covering less or more \
          than it was: undecidable were {undecidable:?}"
     );
+}
+
+/// The flag spec the dispatcher actually parses `verb` with, read side first.
+fn parser_for(verb: &str) -> Option<crate::cli_args::FlagSpec> {
+    crate::cli_read::spec_for(verb).or_else(|| crate::cli_write::spec_for(verb))
+}
+
+/// Every `--name` a parser spec accepts, sorted.
+fn parsed_flag_names(spec: &crate::cli_args::FlagSpec) -> Vec<String> {
+    let mut names: Vec<String> = spec
+        .value_flags()
+        .iter()
+        .chain(spec.bool_flags().iter())
+        .map(|name| format!("--{name}"))
+        .collect();
+    names.sort();
+    names
 }
 
 /// The transfer verbs read their key from the recorded store or the file

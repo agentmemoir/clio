@@ -8,13 +8,17 @@
 //! the verb → tool binding table, and the `did you mean` lookups.
 //!
 //! ## Owns
-//! - The CLI command → MCP tool binding table (including two-token groups)
+//! - The CLI command → MCP tool binding lookup `command_bindings` (including
+//!   two-token groups), answered in the global order `cli_command_bindings`
+//!   holds
 //! - `help --json` catalog assembly from `clio_mcp::schema::schema_pack()`
 //! - The commands the CLI accepts that bind no MCP tool, and so are listed in
 //!   the catalog separately from the binding table
 //! - Unknown-command/subcommand suggestion and per-command usage lookup
 //!
 //! ## Does not own
+//! - The binding table's global order and the rows it still holds statically
+//!   (see `cli_command_bindings`)
 //! - The top-level human help layout (see the binary's `print_help`)
 //! - Tool schemas or dispatch (see `clio-mcp`)
 //! - Per-command usage strings (see `cli_help_usage`) or argument parsing (`cli_args`)
@@ -147,78 +151,13 @@ pub(crate) fn known_commands() -> Vec<&'static str> {
     all
 }
 
-/// The CLI command → MCP tool bindings not yet held in the command registry,
-/// in whole-catalog order. Two-token commands use a space-separated key.
-const STATIC_BINDINGS: &[(&str, &str)] = &[
-    ("remember", "store"),
-    ("admit", "admit_preview"),
-    ("summarize", "summarize"),
-    ("consolidate", "consolidate"),
-    ("update", "update"),
-    ("invalidate", "invalidate"),
-    ("discard", "discard"),
-    ("correct", "correct"),
-    ("task get", "task_get"),
-    ("task history", "task_history"),
-    ("failure list", "failures_for_task"),
-    ("memtree query", "memtree_query"),
-    ("memtree get", "memtree_get"),
-    ("history temporal", "temporal_history"),
-    ("triple query", "triple_query"),
-    ("triple add", "triple_add"),
-    ("triple end", "triple_end"),
-    ("belief history", "belief_history"),
-    ("belief observe", "belief_observe"),
-    ("graph query", "graph_query"),
-    ("graph link", "graph_link"),
-    ("associations", "associations"),
-    ("persona get", "persona_get"),
-    ("persona stable", "persona_put_stable"),
-    ("persona observe", "persona_observe_preference"),
-    ("task upsert", "task_upsert"),
-    ("failure record", "failure_record"),
-    ("scratchpad write", "scratchpad_write"),
-    ("scratchpad read", "scratchpad_read"),
-    ("scratchpad clear", "scratchpad_clear"),
-    ("canonical put", "canonical_put"),
-    ("canonical get", "canonical_get"),
-    ("shared store", "shared_store"),
-    ("shared retrieve", "shared_retrieve"),
-    ("shared discard", "shared_discard"),
-    ("validate", "validate"),
-    ("batch", "batch"),
-    ("maintenance status", "maintenance_status"),
-    ("intent gate", "intent_gate"),
-    ("compose-context", "compose_context"),
-    ("audit trail", "audit_trail"),
-    ("hygiene audit", "hygiene_audit"),
-    ("hygiene clean", "hygiene_clean"),
-    ("hygiene log", "hygiene_log_list"),
-    ("export", "export"),
-    ("import", "import"),
-    ("erase", "erase_request"),
-    ("config get", "config_get"),
-    ("config set", "config_set"),
-    ("config profiles", "config_profiles"),
-    ("config use", "config_profile_apply"),
-    ("ranking get", "ranking_env_get"),
-    ("ranking set", "ranking_env_set"),
-    ("sync status", "sync_status"),
-    ("sync push", "sync_push"),
-    ("sync pull", "sync_pull"),
-    ("sync serve", "sync_serve"),
-    ("sync key status", "sync_key_status"),
-];
-
-/// The CLI command → MCP tool binding, so a command never silently drifts from
-/// its tool: the registry records with a bound tool first, in registry order,
-/// then the rows still held statically.
+/// The CLI command → MCP tool binding, in whole-catalog order.
+///
+/// The order and the resolution live in `cli_command_bindings`: a key prints
+/// its registry record's tool when it binds one, else the row the surface
+/// still holds statically.
 pub(crate) fn command_bindings() -> Vec<(&'static str, &'static str)> {
-    let mut bindings: Vec<(&'static str, &'static str)> = crate::cli_command_registry::all()
-        .filter_map(|spec| spec.tool.map(|tool| (spec.name, tool)))
-        .collect();
-    bindings.extend_from_slice(STATIC_BINDINGS);
-    bindings
+    crate::cli_command_bindings::command_bindings()
 }
 
 /// Whether the CLI accepts `name` as a command, as `group subcommand`, or as

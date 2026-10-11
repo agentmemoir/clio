@@ -374,75 +374,67 @@ fn canonical_put_views_never_claim_writes_for_previews() {
     assert_eq!(refusal.message, "taxonomy rejected");
 }
 
-/// The stored `context` of one `demo` item, for the CLI/MCP parity asserts.
-fn stored_context(s: &Arc<clio_mcp::runtime::McpState>, id: &str) -> Option<String> {
-    let read = s.store.get_memory_item("demo", id).unwrap();
-    read.expect("item").context
-}
-
-/// Required `canonical put` flags shared by the context tests.
-fn canonical_put_args(key: &'static str, value: &'static str) -> Vec<&'static str> {
-    let mut args = vec![key];
-    args.push(value);
-    args.extend(["--category", "tool_config", "--epistemic-kind"]);
-    args.push("fact");
-    args
-}
-
-/// CLI `canonical put` and the equivalent in-process MCP `canonical_put` call
-/// persist the same source `context`; the no-context form omits the key on both.
+/// Every write verb's spec is its record's, and the accepted set that record
+/// carries is the one the group's own list held: same flags, same order,
+/// globals included.
 #[test]
-fn canonical_put_stores_context_identically_to_mcp() {
-    let s = state();
-    let mut with = canonical_put_args("primary_database_host", "db-a");
-    with.push("--context");
-    with.push("release week");
-    with.push("--bank");
-    with.push("demo");
-    let (code, out, err) = run_write_state("canonical put", &with, &s, false);
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    let cli_id = json_of(&out)["id"].as_str().expect("stored id").to_owned();
-    let mcp_args = json!({
-        "key": "secondary_database_host", "value": "db-b", "category": "tool_config",
-        "epistemic_kind": "fact", "context": "release week", "bank": "demo"
-    });
-    let mcp = call(&s, "canonical_put", mcp_args);
-    assert_eq!(mcp["ok"], json!(true), "{mcp}");
-    let mcp_id = mcp["id"].as_str().expect("stored id");
-    let cli_ctx = stored_context(&s, &cli_id);
-    assert_eq!(cli_ctx.as_deref(), Some("release week"));
-    assert_eq!(cli_ctx, stored_context(&s, mcp_id));
-    let mut bare = canonical_put_args("canonical_key", "stored value");
-    bare.push("--bank");
-    bare.push("demo");
-    let (code, out, err) = run_write_state("canonical put", &bare, &s, false);
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    let bare_id = json_of(&out)["id"].as_str().expect("stored id").to_owned();
-    let bare_ctx = stored_context(&s, &bare_id);
-    assert_eq!(bare_ctx, None);
-    let mcp_bare_args = json!({
-        "key": "other_key", "value": "stored value mcp", "category": "tool_config",
-        "epistemic_kind": "fact", "bank": "demo"
-    });
-    let mcp_bare = call(&s, "canonical_put", mcp_bare_args);
-    assert_eq!(mcp_bare["ok"], json!(true), "{mcp_bare}");
-    let mcp_bare_id = mcp_bare["id"].as_str().expect("stored id");
-    assert_eq!(bare_ctx, stored_context(&s, mcp_bare_id));
-}
-
-#[test]
-fn canonical_put_rejects_empty_and_oversized_context() {
-    let s = state();
-    let oversized = "x".repeat(clio_types::CONTEXT_MAX_BYTES + 1);
-    let mut args: Vec<&str> = canonical_put_args("canonical_key", "stored value");
-    args.push("--context");
-    args.push("");
-    let (code, _out, err) = run_write_state("canonical put", &args, &s, false);
-    assert_eq!(code, ExitCode::from(2), "{err}");
-    assert!(err.contains("must not be empty"), "{err}");
-    args.pop();
-    args.push(oversized.as_str());
-    let (code, _out, err) = run_write_state("canonical put", &args, &s, false);
-    assert_eq!(code, ExitCode::from(2), "{err}");
-    assert!(err.contains("at most 4096"), "{err}");
+fn write_group_specs_answer_from_the_registry_with_the_original_accepted_set() {
+    let expected: &[(&str, &[&str], &[&str])] = &[
+        (
+            "scratchpad write",
+            &["db", "backend", "bank", "actor", "output", "session"],
+            &["no-input", "yes"],
+        ),
+        (
+            "scratchpad read",
+            &["db", "backend", "bank", "actor", "output", "session"],
+            &["no-input", "yes"],
+        ),
+        (
+            "scratchpad clear",
+            &["db", "backend", "bank", "actor", "output", "session"],
+            &["no-input", "yes"],
+        ),
+        (
+            "canonical put",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "category",
+                "epistemic-kind",
+                "source-type",
+                "confidence",
+                "source-text",
+                "evidence-ref",
+                "context",
+            ],
+            &["no-input", "yes", "dry-run"],
+        ),
+        (
+            "canonical get",
+            &["db", "backend", "bank", "actor", "output", "as-of"],
+            &["no-input", "yes"],
+        ),
+    ];
+    let group = super::WorkspaceWriteGroup;
+    assert_eq!(group.verbs().len(), expected.len(), "every verb is covered");
+    for &(verb, value, boolean) in expected {
+        let spec = group.spec(verb);
+        assert_eq!(spec.value_flags(), value, "{verb} value flags");
+        assert_eq!(spec.bool_flags(), boolean, "{verb} bool flags");
+        let record = crate::cli_command_registry::find(verb).expect("a record");
+        assert_eq!(
+            spec.value_flags(),
+            record.parser_spec().value_flags(),
+            "{verb}: the group must answer with the record"
+        );
+        assert_eq!(
+            spec.bool_flags(),
+            record.parser_spec().bool_flags(),
+            "{verb}: the group must answer with the record"
+        );
+    }
 }

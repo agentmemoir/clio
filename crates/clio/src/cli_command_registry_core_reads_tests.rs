@@ -22,12 +22,8 @@
 //!
 //! Keep this module focused on the five core read records' data.
 
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
-
-/// One registered record, or a failure that names the missing command.
-fn record(name: &str) -> &'static CommandSpec {
-    crate::cli_command_registry::find(name).unwrap_or_else(|| panic!("`{name}` is registered"))
-}
+use crate::cli_command_registry_test_support::record;
+use crate::cli_command_spec::{Positional, Section};
 
 /// `recall` renders today's usage text and builds today's parser sets.
 #[test]

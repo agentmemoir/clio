@@ -245,19 +245,53 @@ fn audit_text_marks_a_partial_scan() {
     );
 }
 
+/// The group's verbs and their specs: each spec is its record's, and the accepted
+/// set that record carries is the one the group's own list held, globals included.
 #[test]
 fn hygiene_read_group_declares_its_verbs_and_specs() {
     assert_eq!(
         HygieneReadGroup.verbs(),
         &["hygiene audit", "hygiene log"][..]
     );
-    let audit = HygieneReadGroup.spec("hygiene audit");
-    for flag in ["min-score", "limit", "offset"] {
-        assert!(audit.value_flags().contains(&flag), "{flag}");
+    let expected: &[(&str, &[&str], &[&str])] = &[
+        (
+            "hygiene audit",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "min-score",
+                "limit",
+                "offset",
+            ],
+            &["no-input", "yes"],
+        ),
+        (
+            "hygiene log",
+            &[
+                "db", "backend", "bank", "actor", "output", "limit", "offset",
+            ],
+            &["no-input", "yes"],
+        ),
+    ];
+    for &(verb, value, boolean) in expected {
+        let spec = HygieneReadGroup.spec(verb);
+        assert_eq!(spec.value_flags(), value, "{verb} value flags");
+        assert_eq!(spec.bool_flags(), boolean, "{verb} bool flags");
+        let record = crate::cli_command_registry::find(verb).expect("a record");
+        assert_eq!(
+            spec.value_flags(),
+            record.parser_spec().value_flags(),
+            "{verb}: the group must answer with the record"
+        );
+        assert_eq!(
+            spec.bool_flags(),
+            record.parser_spec().bool_flags(),
+            "{verb}: the group must answer with the record"
+        );
     }
-    let log = HygieneReadGroup.spec("hygiene log");
-    assert!(log.value_flags().contains(&"limit"));
-    assert!(!log.value_flags().contains(&"min-score"));
 }
 
 #[test]

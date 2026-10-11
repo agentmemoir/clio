@@ -57,8 +57,13 @@ pub(crate) mod backup_cli_fixtures;
 pub(crate) mod backup_cli_fixtures_handmade;
 mod cli_args;
 mod cli_args_suggest;
+mod cli_command_bindings;
 mod cli_command_registry;
 mod cli_command_registry_core_reads;
+mod cli_command_registry_graph_records;
+mod cli_command_registry_persona_local;
+mod cli_command_registry_shared_workspace;
+mod cli_command_registry_task_history;
 mod cli_command_spec;
 mod cli_confirm;
 mod cli_error;
@@ -284,6 +289,10 @@ mod read_tests;
 #[cfg(test)]
 #[path = "main_write_tests.rs"]
 mod write_tests;
+
+#[cfg(test)]
+#[path = "cli_command_registry_test_support.rs"]
+mod cli_command_registry_test_support;
 
 #[cfg(test)]
 #[path = "cli_read_support_tests.rs"]

@@ -35,13 +35,12 @@ impl ReadGroup for BeliefGroup {
         &["triple query", "belief history"]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "triple query" => FlagSpec::new(
-                &["subject", "predicate", "object", "as-of", "time-axis"],
-                &["explain"],
-            ),
-            _ => FlagSpec::new(&[], &["explain"]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

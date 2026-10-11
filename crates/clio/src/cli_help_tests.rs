@@ -202,3 +202,46 @@ fn canonical_put_usage_documents_context() {
     let (usage, _) = verb_help("canonical put").expect("canonical put usage");
     assert!(usage.contains("[--context C]"), "{usage}");
 }
+
+/// The catalog's two command arrays are one ordered, duplicate-free list.
+///
+/// Set membership alone would pass while a duplicate row changed what a machine
+/// reader sees. Every listed name must be one `clio help <topic>` reaches, no
+/// command may appear twice across the two arrays, and the unbound array must
+/// keep its sorted order.
+#[test]
+fn the_two_catalog_arrays_list_every_command_once_in_order() {
+    let catalog = catalog();
+    let names = |key: &str| -> Vec<String> {
+        catalog[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("{key} must be an array"))
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .or_else(|| entry["command"].as_str())
+                    .expect("a command name")
+                    .to_owned()
+            })
+            .collect()
+    };
+    let bound = names("commands");
+    let unbound = names("commands_without_tools");
+
+    let mut listed: Vec<&str> = Vec::new();
+    for command in bound.iter().chain(unbound.iter()) {
+        assert!(
+            !listed.contains(&command.as_str()),
+            "`{command}` is listed twice across the catalog arrays"
+        );
+        assert!(
+            is_known_command(command),
+            "`{command}` is listed but `clio help <topic>` does not reach it"
+        );
+        listed.push(command);
+    }
+    let mut sorted = unbound.clone();
+    sorted.sort();
+    assert_eq!(unbound, sorted, "the unbound array must stay sorted");
+}

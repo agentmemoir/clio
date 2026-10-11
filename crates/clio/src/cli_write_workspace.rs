@@ -276,3 +276,7 @@ fn render_canonical_get(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_write_workspace_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_workspace_context_tests.rs"]
+mod cli_write_workspace_context_tests;

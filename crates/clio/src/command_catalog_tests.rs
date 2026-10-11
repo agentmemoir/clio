@@ -11,8 +11,8 @@
 //! - Every catalog command has a registered usage line
 //! - Every registered usage line's flags appear in the catalog
 //! - Every catalog command resolves through `cli help <topic>`
-//! - The registry seam: each record's row appears once, in place, with no
-//!   second authored row beside it
+//! - The registry seam: each record's row appears once, at its spine position
+//!   among the remaining authored rows, with no second authored row beside it
 //!
 //! ## Does not own
 //! - The wording of any one usage line (`cli_help_usage_tests`)
@@ -293,25 +293,33 @@ fn every_registry_command_is_listed_exactly_once() {
     }
 }
 
-/// The registry's records sit where their catalog rows were: contiguously,
-/// immediately after `retention set` and before `task get`.
+/// The registry's records render at their spine positions, interleaved with the
+/// authored rows that remain, not as one contiguous block at the seam the move
+/// began from.
+///
+/// `shared discard` is a record and `validate`/`batch` are authored rows that
+/// sit inside the moved span, so a record must resume after them. A catalog
+/// that re-compacted the records into one block, or that dropped the authored
+/// rows between them, fails here.
 #[test]
-fn the_registry_records_sit_at_their_original_catalog_seam() {
+fn the_registry_records_render_at_their_spine_positions() {
     let listed: Vec<&str> = super::catalog_commands().collect();
-    let start = listed
-        .iter()
-        .position(|name| *name == "retention set")
-        .expect("`retention set` is a catalog row");
-    let moved: Vec<&str> = crate::cli_command_registry::names().collect();
+    let at = |name: &str| {
+        listed
+            .iter()
+            .position(|row| *row == name)
+            .unwrap_or_else(|| panic!("`{name}` must be a catalog row"))
+    };
     assert_eq!(
-        &listed[start + 1..start + 1 + moved.len()],
-        moved.as_slice(),
-        "the records must be contiguous at the seam"
+        &listed[at("shared discard") + 1..=at("batch")],
+        ["validate", "batch"].as_slice(),
+        "the authored rows inside the moved span must still print between records"
     );
-    assert_eq!(
-        listed[start + 1 + moved.len()],
-        "task get",
-        "the seam must close before the next authored row"
+    let resume = at("batch") + 1;
+    assert!(
+        crate::cli_command_registry::find(listed[resume]).is_some(),
+        "a record must resume at `{}` after the authored rows",
+        listed[resume]
     );
 }
 
@@ -343,4 +351,55 @@ fn every_registry_command_resolves_a_usage_line_and_summary() {
         assert_eq!(row.1, spec.summary, "`{}` summary", spec.name);
         assert!(!row.1.is_empty(), "`{}` summary is empty", spec.name);
     }
+}
+
+/// The rendered `clio help` block for a registered command shows only flags its
+/// parser accepts.
+///
+/// The usage-line parity check compares the registry text; this one reads the
+/// rendered block a reader actually sees, so a renderer, wrapping, or note
+/// change that puts a flag into the catalog that the command's parser would
+/// refuse fails here even though the usage line itself never changed.
+///
+/// For the records without a `usage_override`, the block and the accepted set
+/// both derive from the same record, so this loop guards the renderer and the
+/// flag scan rather than the record data; the override records are the real
+/// cross-source checks, pinned literally in the test below.
+#[test]
+fn every_registered_catalog_block_shows_only_flags_its_parser_accepts() {
+    for spec in crate::cli_command_registry::all() {
+        let parser = crate::cli_read::spec_for(spec.name)
+            .or_else(|| crate::cli_write::spec_for(spec.name))
+            .unwrap_or_else(|| panic!("`{}` has no parser spec", spec.name));
+        let accepted: Vec<String> = parser
+            .value_flags()
+            .iter()
+            .chain(parser.bool_flags().iter())
+            .map(|name| format!("--{name}"))
+            .collect();
+        let block = catalog_block(spec.name);
+        let wrong: Vec<String> = flags_in(&block)
+            .into_iter()
+            .filter(|flag| !accepted.contains(flag))
+            .collect();
+        assert!(
+            wrong.is_empty(),
+            "`clio {}` shows {wrong:?} in its `clio help` block, which its parser \
+             refuses:\n{block}",
+            spec.name
+        );
+    }
+}
+
+/// The override record's rendered block hides the flag its parser accepts: the
+/// printed line comes from the record's `usage_override`, not from its
+/// documented flag set, so a renderer that ignored the override would print
+/// `--context` here.
+#[test]
+fn the_persona_observe_block_hides_the_context_flag_its_parser_accepts() {
+    let block = catalog_block("persona observe");
+    assert!(
+        !block.contains("--context"),
+        "the override must keep --context out of the catalog: {block}"
+    );
 }

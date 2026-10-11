@@ -15,7 +15,8 @@
 //! - The indefinite article used in a positional's usage hint
 //!
 //! ## Does not own
-//! - Which flags a command group accepts (each group owns its `FlagSpec`)
+//! - Which flags a command group accepts (the command records own the accepted
+//!   set; a group's `spec` answers from the registry)
 //! - Command resolution and dispatch (see `cli_read`)
 //! - Output rendering and error formatting (see `cli_output` / `cli_error`)
 //!
@@ -101,35 +102,26 @@ pub(crate) fn unexpected_extra(
     CliError::usage_hint(format!("unexpected extra argument `{extra}`"), hint)
 }
 
-/// Check that every required flag of one command is present, all at once.
+/// The required flags of every verb whose record has not arrived yet, by the
+/// name a reader would type.
 ///
-/// # Errors
-/// A usage error (exit 2) naming every missing flag in the first run. Reporting
-/// them one at a time made `clio failure record T` fail three times before it
-/// accepted the command, which reads as three separate mistakes rather than one.
-/// Which flags a verb cannot run without, by the name a reader would type.
+/// A verb whose command record has arrived answers from the record instead (see
+/// [`required_flags`]), so its required set and the usage line that command
+/// prints come from the same data and cannot disagree. The rows left here are
+/// the verbs still waiting for their records. The test beside this table derives
+/// each row from the usage line and fails when the two differ, so the drift is
+/// caught rather than trusted.
 ///
-/// The usage registry already says which flags are required: a required flag is
-/// written bare and an optional one inside brackets. This table repeats that, so it
-/// could drift from the help a reader sees — which is the same defect the catalog
-/// had, where a verb's own `--help` and `clio help` disagreed. The test beside this
-/// table derives the required set from the usage line and fails when the two differ,
-/// so the drift is caught rather than trusted.
-///
-/// The three entries that differ from a bare reading each carry their reason below.
+/// `--confirm` is written bare on `discard` and `erase` because it gates the
+/// live run, while a run without it is a dry run rather than a refusal, so
+/// neither row lists it.
 pub(crate) const REQUIRED_FLAGS: &[(&str, &[&str])] = &[
     ("update", &["rule"]),
     ("discard", &["reason"]),
     ("correct", &["reason"]),
-    ("triple end", &["valid-until"]),
-    ("belief observe", &["confidence", "evidence", "source"]),
-    ("graph link", &["relationship"]),
-    ("task upsert", &["definition", "status"]),
-    ("failure record", &["attempt-n", "what-failed", "lesson"]),
     ("export", &["out"]),
     ("import", &["source"]),
     ("erase", &["subject", "basis", "request"]),
-    ("canonical put", &["category", "epistemic-kind"]),
 ];
 
 /// A verb's required flags: the registry record's when the verb is registered,
@@ -179,6 +171,12 @@ pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
     bare
 }
 
+/// Check that every required flag of one command is present, all at once.
+///
+/// # Errors
+/// A usage error (exit 2) naming every missing flag in the first run. Reporting
+/// them one at a time made `clio failure record T` fail three times before it
+/// accepted the command, which reads as three separate mistakes rather than one.
 pub(crate) fn require_flags(
     parsed: &ParsedArgs,
     verb: &str,

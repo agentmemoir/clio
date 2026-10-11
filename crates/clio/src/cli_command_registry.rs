@@ -13,7 +13,8 @@
 //! - `validate`, the static-data contract over one set of records
 //!
 //! ## Does not own
-//! - The command records themselves (see `cli_command_registry_core_reads`)
+//! - The command records themselves (see the `cli_command_registry_*` record
+//!   modules)
 //! - The record model or its rendering (see `cli_command_spec`)
 //!
 //! ## Boundary
@@ -25,6 +26,10 @@
 //
 
 use crate::cli_command_registry_core_reads as core_reads;
+use crate::cli_command_registry_graph_records as graph_records;
+use crate::cli_command_registry_persona_local as persona_local;
+use crate::cli_command_registry_shared_workspace as shared_workspace;
+use crate::cli_command_registry_task_history as task_history;
 use crate::cli_command_spec::{CommandSpec, Flag};
 
 /// The `--db` path global.
@@ -57,8 +62,17 @@ pub(crate) static GLOBAL_VALUE_FLAGS: &[Flag] = &[
 /// Boolean global flags, in the order every parser spec merges them.
 pub(crate) static GLOBAL_BOOL_FLAGS: &[Flag] = &[GLOBAL_NO_INPUT, GLOBAL_YES];
 
-/// The command tranches, in whole-catalog order.
-static TRANCHES: &[&[CommandSpec]] = &[core_reads::CORE_READS];
+/// The command tranches, in registration order.
+///
+/// `all` walks them in this order; both rendered help surfaces read their verb
+/// order from `cli_command_bindings` instead.
+static TRANCHES: &[&[CommandSpec]] = &[
+    core_reads::CORE_READS,
+    task_history::TASK_HISTORY,
+    graph_records::GRAPH_RECORDS,
+    persona_local::PERSONA_LOCAL,
+    shared_workspace::SHARED_WORKSPACE,
+];
 
 /// Every global flag name that takes a value, in merge order.
 pub(crate) fn global_value_names() -> impl Iterator<Item = &'static str> {

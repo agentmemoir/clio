@@ -13,8 +13,7 @@
 //! - The global flag names, order, and short spelling
 //!
 //! ## Does not own
-//! - The five records' bytes and parser sets
-//!   (`cli_command_registry_core_reads_tests`)
+//! - The per-record bytes and parser sets (the tranche test modules)
 //! - The renderer's shapes over pure records (`cli_command_spec_tests`)
 //!
 //! ## Boundary
@@ -54,24 +53,73 @@ const fn record(
     }
 }
 
-/// The tranche lists the five core reads once each, in catalog order.
+/// `all` walks the core reads first and then each group tranche, with every
+/// registered name appearing exactly once.
 #[test]
-fn all_yields_the_five_core_reads_once_in_catalog_order() {
+fn all_lists_the_core_reads_first_and_every_name_exactly_once() {
     let listed: Vec<&str> = all().map(|spec| spec.name).collect();
-    assert_eq!(listed, ["recall", "get", "show", "inspect", "stats"]);
+    assert_eq!(
+        &listed[..5],
+        ["recall", "get", "show", "inspect", "stats"],
+        "the core reads lead the registry"
+    );
     let unique: BTreeSet<&str> = listed.iter().copied().collect();
     assert_eq!(unique.len(), listed.len(), "no command is registered twice");
 }
 
-/// `names` and `find` answer for the visible records only.
+/// The registry registers the core reads first and the four group tranches
+/// after them, in that order.
 #[test]
-fn names_and_find_expose_the_visible_records() {
+fn the_registry_registers_the_core_reads_then_the_four_group_tranches() {
     assert_eq!(
-        names().collect::<Vec<_>>(),
-        ["recall", "get", "show", "inspect", "stats"]
+        super::TRANCHES[0],
+        super::core_reads::CORE_READS,
+        "the core reads are the first tranche"
     );
-    assert_eq!(find("get").map(|spec| spec.name), Some("get"));
-    assert_eq!(find("fetch"), None);
+    assert_eq!(
+        super::TRANCHES[1],
+        super::task_history::TASK_HISTORY,
+        "the task/history tranche follows"
+    );
+    assert_eq!(
+        super::TRANCHES[2],
+        super::graph_records::GRAPH_RECORDS,
+        "the graph/records tranche follows"
+    );
+    assert_eq!(
+        super::TRANCHES[3],
+        super::persona_local::PERSONA_LOCAL,
+        "the persona/local tranche follows"
+    );
+    assert_eq!(
+        super::TRANCHES[4],
+        super::shared_workspace::SHARED_WORKSPACE,
+        "the shared/workspace tranche follows"
+    );
+    assert_eq!(super::TRANCHES.len(), 5, "five tranches are registered");
+}
+
+/// `names` answers every registered record: it spans all five tranches, and
+/// `find` resolves each name it lists while reporting an unregistered miss.
+///
+/// `names` maps `all` one to one, so the tranche-spanning pin below is the
+/// independent input: a lookup that stopped walking a tranche would drop its
+/// names here.
+#[test]
+fn names_and_find_expose_every_registered_record() {
+    let names: Vec<&str> = names().collect();
+    assert!(
+        names.contains(&"audit trail"),
+        "the shared-workspace tranche's names must reach `names`"
+    );
+    for name in &names {
+        assert_eq!(
+            find(name).map(|spec| spec.name),
+            Some(*name),
+            "find `{name}`"
+        );
+    }
+    assert_eq!(find("fetch"), None, "an unregistered name is not found");
 }
 
 /// A name reaches its record through `resolve`; an unknown spelling does not.
