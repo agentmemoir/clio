@@ -35,6 +35,24 @@ def _cases(base: Path) -> list[tuple[str, int, Path]]:
     return [
         ("a clean tree passes", EXIT_OK, _fixture(base, "clean")),
         ("a bare clippy in the Makefile is a finding", EXIT_FINDINGS, _fixture(base, "makefile-bare", {"Makefile": BARE})),
+        ("a bare clippy in mk/coverage.mk is a finding", EXIT_FINDINGS, _fixture(base, "mk-bare", {"mk/coverage.mk": BARE})),
+        (
+            "a scoped clippy in mk/coverage.mk is clean",
+            EXIT_OK,
+            _fixture(base, "mk-clean", {"mk/coverage.mk": "ritual:\n\tcargo clippy --workspace --all-targets --locked -- -D warnings\n"}),
+        ),
+        (
+            "a variable from the Makefile that narrows the scope is a finding on the mk line that reads it",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "mk-narrow-variable",
+                {
+                    "Makefile": "PACKAGES ?= -p clio-store\n\nritual:\n\tcargo clippy --workspace --all-targets --locked -- -D warnings\n",
+                    "mk/lint.mk": "lint:\n\tcargo clippy $(PACKAGES) --all-targets --locked -- -D warnings\n",
+                },
+            ),
+        ),
         ("a bare clippy in a workflow is a finding", EXIT_FINDINGS, _fixture(base, "workflow-bare", {wf: BARE_IN_WORKFLOW})),
         ("a bare clippy in a shell script is a finding", EXIT_FINDINGS, _fixture(base, "script-bare", {"scripts/lint.sh": "#!/bin/sh\ncargo clippy --all-targets -- -D warnings\n"})),
         (
