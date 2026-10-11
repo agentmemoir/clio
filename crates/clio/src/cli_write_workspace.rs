@@ -25,10 +25,13 @@
 
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
-use crate::cli_read::{base_args, flag, one_positional, parse_f64, require_flags, required_flags};
+use crate::cli_read::{
+    base_args, flag, one_positional, parse_unit_f64, require_flags, required_flags, validate_choice,
+};
 use crate::cli_write_core::caller_item_id;
 use crate::cli_write_core::context_arg;
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, decision_refusal};
+use crate::cli_write_source_type::source_type_arg;
 use serde_json::{Map, Value, json};
 
 /// The scratchpad and canonical commands.
@@ -147,21 +150,24 @@ fn canonical_put_call(verb: &str, parsed: &ParsedArgs) -> Result<WriteCall, CliE
         ));
     }
     require_flags(parsed, verb, required_flags(verb))?;
+    let kind = validate_choice(
+        "epistemic-kind",
+        flag(parsed, "epistemic-kind"),
+        &["fact", "belief"],
+    )?;
+    let source_type = source_type_arg(kind, parsed)?;
     let mut args = base_args(parsed);
     args.insert("key".into(), Value::from(positionals[0].as_str()));
     args.insert("value".into(), Value::from(positionals[1].as_str()));
     args.insert("category".into(), Value::from(flag(parsed, "category")));
-    args.insert(
-        "epistemic_kind".into(),
-        Value::from(flag(parsed, "epistemic-kind")),
-    );
-    if let Some(source) = parsed.value("source-type") {
+    args.insert("epistemic_kind".into(), Value::from(kind));
+    if let Some(source) = source_type {
         args.insert("source_type".into(), Value::from(source));
     }
     if let Some(raw) = parsed.value("confidence") {
         args.insert(
             "confidence".into(),
-            Value::from(parse_f64("confidence", raw)?),
+            Value::from(parse_unit_f64("confidence", raw)?),
         );
     }
     if let Some(text) = parsed.value("source-text") {
@@ -213,7 +219,7 @@ fn unexpected_extra(verb: &str, parsed: &ParsedArgs, accepts: &str) -> CliError 
 fn render_scratchpad_write(payload: &Value) -> String {
     let key = payload.get("key").and_then(Value::as_str).unwrap_or("?");
     let bytes = payload.get("bytes").and_then(Value::as_u64).unwrap_or(0);
-    format!("scratchpad `{key}` stored ({bytes} bytes, ephemeral)")
+    format!("scratchpad `{key}` stored for this process only ({bytes} bytes)")
 }
 
 /// One key renders its content exactly; a whole-pad read renders summary counts.

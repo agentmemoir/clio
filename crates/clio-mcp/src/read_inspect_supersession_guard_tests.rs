@@ -130,6 +130,11 @@ fn supersession_section_refuses_a_missing_query_and_a_foreign_bank_item() {
     assert_eq!(out["ok"], json!(false), "{out}");
     assert_eq!(out["code"], json!("invalid_argument"), "{out}");
     assert_eq!(out["message"], json!("query is required"), "{out}");
+    create(
+        &s,
+        &item("bank-b-known", "bank-b", "foreign bank fixture", TS_OLD),
+        "register foreign bank",
+    );
     let args = json!({"bank": "bank-b", "item_id": "ss-new", "query": "deploy cadence"});
     let foreign = dispatch(&s, "inspect", &args);
     assert_eq!(foreign["ok"], json!(false), "{foreign}");

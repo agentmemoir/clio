@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from fnmatch import fnmatch
 from pathlib import Path
 
 from coverage_policy_check import (
@@ -18,10 +19,12 @@ from coverage_policy_check import (
     EXPECTED_FLOOR,
     FLOOR_ASSIGNMENT,
     GATE,
+    GATE_SAMPLE,
     RETIRED_PATHS,
     ROOT,
     SELF_FILES,
     THRESHOLD_FLAG,
+    gate_text,
     Finding,
     candidate_paths,
     prose_findings,
@@ -60,13 +63,13 @@ def self_test() -> int:
                 continue
             findings += scan_text("flag", rel, text, ((THRESHOLD_FLAG.pattern, "flag"),))
             findings += prose_findings(rel, text)
-            if rel != GATE and not rel.endswith(".rs"):
+            if not fnmatch(rel, GATE) and not rel.endswith(".rs"):
                 findings += scan_text("floor", rel, text, ((FLOOR_ASSIGNMENT.pattern, "floor"),))
                 findings += scan_text("cmp", rel, text, ((COMPARISON.pattern, "cmp"),))
         return findings
 
     # A clean tree is clean. The gate as it stands, with its own comparison.
-    clean = with_files({GATE: f"{EXPECTED_FLOOR}\nif row.lines_pct < floor:\n    pass\n"})
+    clean = with_files({GATE_SAMPLE: f"{EXPECTED_FLOOR}\nif row.lines_pct < floor:\n    pass\n"})
     expect("a tree holding only the rule is clean", [f.rule for f in clean], [])
 
     # A threshold flag anywhere is a finding, every family of it.
@@ -83,7 +86,7 @@ def self_test() -> int:
     expect("a second floor constant is a finding", bool(with_files({"scripts/other.py": "MIN_COVERAGE = 90\n"})), True)
     expect("a second comparison site is a finding",
            bool(with_files({"scripts/other.py": "if row.lines_pct >= 80:\n"})), True)
-    expect("the gate's own comparison is not a finding", bool(with_files({GATE: "if row.lines_pct < floor:\n"})), False)
+    expect("the gate's own comparison is not a finding", bool(with_files({GATE_SAMPLE: "if row.lines_pct < floor:\n"})), False)
     expect("a threshold in a makefile is a finding",
            bool(with_files({"Makefile": "MIN_COVERAGE = 90\n"})), True)
     expect("a threshold withdrawn in a comment is not a finding",
@@ -120,15 +123,15 @@ def self_test() -> int:
 
     # The gate's own two invariants, checked against the real file.
     try:
-        gate_text = (ROOT / GATE).read_text(encoding="utf-8")
+        gate_source = gate_text(ROOT)
     except OSError as error:
         expect("the gate is readable", str(error), "readable")
-        gate_text = ""
+        gate_source = ""
     expect("the gate defines the one threshold exactly once",
-           len(re.findall(r"^LINE_FLOOR\s*=", gate_text, re.MULTILINE)), 1)
-    expect("the gate states the number the rule states", EXPECTED_FLOOR in gate_text, True)
+           len(re.findall(r"^LINE_FLOOR\s*=", gate_source, re.MULTILINE)), 1)
+    expect("the gate states the number the rule states", EXPECTED_FLOOR in gate_source, True)
     expect("the gate holds the one comparison once",
-           len(re.findall(re.escape(EXPECTED_COMPARISON), gate_text)), 1)
+           len(re.findall(re.escape(EXPECTED_COMPARISON), gate_source)), 1)
 
     # A git-ignored cache directory holds no rule, so an unreadable file inside
     # one must not be scanned and must not fail the check.

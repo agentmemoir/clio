@@ -292,6 +292,7 @@ fn item_scope_is_bank_scoped() {
     assert_eq!(missing["ok"], json!(false), "{missing}");
     assert_eq!(missing["code"], json!("item_not_found"), "{missing}");
 
+    store_item(&s, "bank-b", "itm-bank-b", true);
     let foreign = call_summarize(
         &s,
         json!({"scope": "itm-5", "bank": "bank-b"}),

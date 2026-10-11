@@ -147,6 +147,10 @@ fn t17_06_retrieve_persists_assoc_edges() {
 #[test]
 fn negatives_are_structured_and_bank_scoped() {
     let state = read_state();
+    state
+        .ops_store
+        .register_bank("other-bank", "2024-01-01T00:00:00Z")
+        .expect("register an empty bank");
     let missing = clio_mcp::write_tools::dispatch(&state, "get", &json!({"item_id": "ghost"}));
     assert_eq!(missing["code"], json!("item_not_found"));
 

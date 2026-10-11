@@ -218,7 +218,7 @@ pub struct ItemInspectFilter {
     pub validity: InspectValidity,
     /// Optional lower bound on `created_at` (inclusive).
     pub time_start: Option<String>,
-    /// Optional upper bound on `created_at` (exclusive: `[start, end)`).
+    /// Optional inclusive upper bound on `created_at`.
     pub time_end: Option<String>,
     /// Include operationally discarded items (default excluded).
     pub include_discarded: bool,

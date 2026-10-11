@@ -210,13 +210,6 @@ impl BeliefStore for StaleFindStore {
     /// `hide` is a budget: it hides exactly that many lookups and then
     /// delegates, which is what the second lookup on the race-loser path relies
     /// on. A call that finds the budget spent is behaving correctly.
-    ///
-    /// The allow covers rustc's `deprecated`, and is here because this call
-    /// stands in for the production one in the connection pool, which carries
-    /// the same allow plus an MSRV diagnostic this target does not reach.
-    /// `fetch_update` gives way to `try_update`, a pure rename that is only
-    /// stable from Rust 1.95; the rename happens when the minimum moves there.
-    #[allow(deprecated)]
     fn find_belief_by_proposition(
         &self,
         bank_id: &str,
@@ -224,7 +217,7 @@ impl BeliefStore for StaleFindStore {
     ) -> Result<Option<BeliefObject>, clio_types::AmError> {
         let hid = self
             .hide
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |h| h.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |h| h.checked_sub(1))
             .is_ok();
         if hid {
             return Ok(None);

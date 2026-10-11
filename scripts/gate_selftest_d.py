@@ -12,11 +12,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from exec_tempdir import exec_tempdir
 from gate import run_gate
 from gate_runlog import RUNS_FILE
 from gate_tree import TreeState, cache_root
 
-FIELDS = {"root", "common_dir", "branch", "kind", "started", "finished", "exit", "argv", "replayed"}
+FIELDS = {"root", "common_dir", "branch", "kind", "started", "finished", "exit", "argv", "replayed", "interactive"}
 TREE = TreeState("h1", (("crates/a/src/lib.rs", "one"),), ("crates/a/src/lib.rs",))
 
 
@@ -72,6 +73,7 @@ class RunLogTests(unittest.TestCase):
         self.assertEqual(fresh["common_dir"], str(root / ".git"))
         self.assertEqual(fresh["branch"], "feature/x")
         self.assertEqual(fresh["argv"], argv)
+        self.assertIsInstance(fresh["interactive"], bool)
         self.assertLessEqual(fresh["started"], fresh["finished"])
         self.assertLessEqual(replay["started"], replay["finished"])
 
@@ -108,6 +110,82 @@ class RunLogTests(unittest.TestCase):
             code = run_gate(["/bin/sh", "-c", "exit 3"])
         self.assertEqual(code, 3)
         self.assertIn("could not append to the run log", err.getvalue())
+
+
+class ScopedRunAdviceTests(unittest.TestCase):
+    def test_a_scoped_run_leaves_the_verdict_to_ci_and_never_asks_for_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw).resolve()
+            root = make_repo(tmp, "main")
+            argv = ["/bin/sh", "-c", "exit 0"]
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(tmp / "cache")}), mock.patch(
+                "gate.repo_root", return_value=str(root)
+            ), mock.patch("gate.read_tree_state", return_value=TREE), mock.patch(
+                "gate.scope_command", return_value=(argv, ["clio-a"])
+            ), contextlib.redirect_stdout(out):
+                run_gate(argv)
+        text = out.getvalue()
+        self.assertIn("gate: not a full-workspace verdict; CI owns that verdict", text)
+        self.assertNotIn("make coverage", text)
+
+
+class TimedTargetHandoffTests(unittest.TestCase):
+    """`make test-fast`, `precommit` and `quick` go to the machine-local hook, and only they do."""
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def run_make(self, args: list[str], hook: bool = True, **extra: str) -> tuple[list[str], list[str]]:
+        """Run the shim as `make`; return the hook's calls and the real make's calls."""
+        with exec_tempdir(purpose="a stand-in make and hook") as raw:
+            tmp = Path(raw)
+            shimdir, realdir = tmp / "shim", tmp / "real"
+            shimdir.mkdir()
+            realdir.mkdir()
+            real_marker, hook_marker = tmp / "real-calls", tmp / "hook-calls"
+            stand_in = realdir / "make"
+            stand_in.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{real_marker}"\nexit 0\n')
+            stand_in.chmod(0o755)
+            (shimdir / "make").symlink_to(self.ROOT / "scripts" / "gate-shim")
+            home = tmp / "home"
+            if hook:
+                (home / ".config" / "clio").mkdir(parents=True)
+                script = home / ".config" / "clio" / "gate-hook"
+                script.write_text(f'#!/bin/sh\nshift 2\nprintf "%s\\n" "$*" >> "{hook_marker}"\nexit 0\n')
+                script.chmod(0o755)
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                PATH=f"{shimdir}{os.pathsep}{realdir}{os.pathsep}{os.environ.get('PATH', '')}",
+                XDG_CACHE_HOME=str(tmp / "cache"),
+            )
+            env.update({"GATE_ACTIVE": "", "GATE_RAW": "", "MAKEFLAGS": "", **extra})
+            subprocess.run([str(shimdir / "make"), *args], cwd=self.ROOT, env=env, capture_output=True, check=False)
+
+            def calls(path: Path) -> list[str]:
+                return path.read_text().splitlines() if path.is_file() else []
+
+            return calls(hook_marker), calls(real_marker)
+
+    def test_the_three_targets_go_to_the_hook_and_not_to_make(self) -> None:
+        for target in ("test-fast", "precommit", "quick"):
+            hooked, real = self.run_make([target])
+            self.assertEqual((hooked, real), ([target], []), target)
+
+    def test_arguments_and_options_travel_with_the_target(self) -> None:
+        hooked, real = self.run_make(["quick", "BASE=origin/master"])
+        self.assertEqual((hooked, real), (["quick BASE=origin/master"], []))
+
+    def test_other_targets_and_the_bypasses_never_reach_the_hook(self) -> None:
+        cases = [(["help"], {}), (["-n", "quick"], {}), (["quick"], {"GATE_RAW": "1"}), (["quick"], {"GATE_ACTIVE": "1"})]
+        for args, extra in cases:
+            hooked, real = self.run_make(args, **extra)
+            self.assertEqual(hooked, [], f"{args} {extra}")
+            self.assertEqual(real, [" ".join(args)], f"{args} {extra}")
+
+    def test_without_a_hook_the_target_runs_unrecorded(self) -> None:
+        hooked, real = self.run_make(["quick"], hook=False)
+        self.assertEqual((hooked, real), ([], ["quick"]))
 
 
 if __name__ == "__main__":

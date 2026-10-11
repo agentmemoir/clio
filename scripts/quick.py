@@ -39,6 +39,7 @@ import scoped_runner as runner  # noqa: E402
 from owned_scanner import SourceError  # noqa: E402
 from quick_estimate import Case, Estimate, estimate, failed_cases, newest_history, wall_seconds  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
+import quick_untested as untested  # noqa: E402
 
 # `owned_selection` re-walks the whole crate, and re-runs `cargo metadata`, for
 # every file it is asked about. One of each is enough for one run, and without
@@ -144,10 +145,11 @@ def plan_lines(selection: Selection, history: list[Case]) -> list[str]:
     return lines
 
 
-def plan_json(selection: Selection, files: Sequence[str]) -> str:
+def plan_json(selection: Selection, files: Sequence[str], left_out: Sequence[str] = ()) -> str:
     return json.dumps(
         {
             "files": list(files),
+            "left_out": list(left_out),
             "filter": union_expression(selection.terms),
             "terms": [
                 {"package": t.package, "kinds": list(t.kinds), "binary": t.binary, "patterns": t.patterns()}
@@ -210,8 +212,8 @@ def failed_target_flags(failed: Sequence[tuple[str, str]]) -> list[str]:
 def nextest(
     packages: Sequence[str], expression: str, extra: Sequence[str] = (), targets: Sequence[str] = ()
 ) -> int:
-    """Run `expression` over `packages`. Without `-p`, cargo builds and runs only the
-    workspace's default member, so the packages must be named."""
+    """Run `expression` over `packages`. Naming the packages keeps the run to them; the
+    root manifest has no `default-members`, so a bare run would select every member."""
     command = ["cargo", "nextest", "run", "--locked", "--profile", "quick", *extra]
     command += [flag for name in packages for flag in ("-p", name)] + [*targets, "-E", expression]
     print("running:", shlex.join(command), flush=True)
@@ -268,15 +270,20 @@ def run(args: argparse.Namespace) -> int:
             return runner.EXIT_OK
         print("\n".join(closure_lines(packages, history)))
         return runner.EXIT_OK
-    files = [rel for rel in runner.changed_files(args.base) if runner.is_present(rel)]
-    if not files:
-        print(NO_CHANGE)
+    changed = runner.changed_files(args.base)
+    files = [rel for rel in changed if runner.is_present(rel)]
+    packages = runner.workspace_packages()
+    extra = untested.classify(args.base, packages, [rel for rel in changed if not runner.is_present(rel)])
+    left_out = untested.left_out_lines(extra.left_out)
+    if not files and not extra.terms:
+        print("\n".join(left_out or [NO_CHANGE]))
         return runner.EXIT_OK
-    selection = select(files, runner.workspace_packages())
+    found = select(files, packages)
+    selection = Selection(merge([*found.terms, *extra.terms]), [*found.notes, *extra.notes])
     if args.json:
-        print(plan_json(selection, files))
+        print(plan_json(selection, files, extra.left_out))
         return runner.EXIT_OK
-    print("\n".join(plan_lines(selection, history)), flush=True)
+    print("\n".join([*plan_lines(selection, history), *left_out]), flush=True)
     if args.plan:
         return runner.EXIT_OK
     return schema_check(files) or run_selection(selection, args.retry_failed)

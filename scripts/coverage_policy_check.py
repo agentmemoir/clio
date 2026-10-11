@@ -61,6 +61,7 @@ import argparse
 import json
 import re
 import sys
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
@@ -68,8 +69,11 @@ from coverage_policy_prose import allowed, context_of
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: Where the rule lives. The gate script, and nothing else.
-GATE = "scripts/scoped_runner.py"
+#: Where the rule lives: the gate's own modules, and nothing else. The threshold is
+#: defined in one of them and compared in another, so the two counts below are made
+#: over all of them together. `GATE_SAMPLE` is one path inside the pattern, for tests.
+GATE = "scripts/scoped_*.py"
+GATE_SAMPLE = "scripts/scoped_core.py"
 
 #: Directories that hold no rule, so a word in them cannot be one.
 SKIP_DIRS = frozenset(
@@ -284,7 +288,7 @@ def scan(root: Path = ROOT) -> tuple[list[Finding], list[str]]:
         # vocabulary as a coverage rule. The flag and phrase scans still read Rust,
         # so a comment in a product file describing a second coverage rule is
         # still found.
-        if rel != GATE and path.suffix != ".rs":
+        if not fnmatch(rel, GATE) and path.suffix != ".rs":
             findings += scan_text(
                 "a second coverage threshold",
                 rel,
@@ -299,9 +303,8 @@ def scan(root: Path = ROOT) -> tuple[list[Finding], list[str]]:
             )
 
     # The gate itself has to hold exactly one of each.
-    gate_path = root / GATE
     try:
-        gate = gate_path.read_text(encoding="utf-8")
+        gate = gate_text(root)
     except (OSError, UnicodeDecodeError) as error:
         unreadable.append(f"{GATE}: {error}")
         return findings, unreadable
@@ -330,6 +333,14 @@ EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_USAGE = 2
 EXIT_ERROR = 3
+
+
+def gate_text(root: Path) -> str:
+    """The text of the gate's modules, joined. Raises when there are none to read."""
+    paths = sorted((root / GATE).parent.glob(Path(GATE).name))
+    if not paths:
+        raise OSError("no gate module found")
+    return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
 def main(argv: list[str]) -> int:

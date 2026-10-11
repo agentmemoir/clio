@@ -119,12 +119,19 @@ fn pg_ping_and_schema_version() {
 fn pg_bank_ids_scoped_and_sorted() {
     let _guard = crate::lock_pg_test();
     let pg = pg();
+    let empty_bank = unique("ops-pg-empty");
     let bank_a = unique("ops-pg-a");
     let bank_b = unique("ops-pg-b");
+    pg.register_bank(&empty_bank, "2026-01-01T00:00:00Z")
+        .unwrap();
+    assert!(pg.bank_exists(&empty_bank).unwrap());
     pg.create_memory_item(&item(&unique("i-b"), &bank_b), "actor")
         .unwrap();
     pg.create_memory_item(&item(&unique("i-a"), &bank_a), "actor")
         .unwrap();
+
+    assert!(pg.bank_exists(&bank_a).unwrap());
+    assert!(!pg.bank_exists(&unique("unknown-bank")).unwrap());
 
     let ids = pg.bank_ids().unwrap();
     assert!(ids.contains(&bank_a));
@@ -141,6 +148,7 @@ fn pg_bank_ids_scoped_and_sorted() {
 
     cleanup(&pg, &bank_a);
     cleanup(&pg, &bank_b);
+    cleanup(&pg, &empty_bank);
 }
 
 #[test]

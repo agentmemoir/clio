@@ -38,9 +38,7 @@ The changelog is written by hand and is not generated from them.
 
 ### The gate
 
-CI is the gate. On every pull request it runs four checks: the format check,
-clippy, the scoped tests, and the scoped coverage judgement. Nothing about a
-change is verified until CI says so.
+CI is the gate. It runs on a pull request that touches a path in the filters of `.github/workflows/ci.yml`, and that file is the list of what it runs: the format check, clippy, the scoped tests, the script suites, the scoped coverage judgement, and the MCP conformance job. Nothing about a change is verified until CI says so.
 
 What you run before you commit is the cheap half:
 
@@ -72,10 +70,10 @@ verdict when you do not.
 There is also a scoped lint, and it is cheaper than `make ritual`:
 
 ```
-make lint                # clippy over the changed crates and their dependents only
+make lint                # clippy over the changed crates and their dependents when the gate shim wraps make (scripts/gate-install.sh); the whole workspace without it
 ```
 
-A change to one file in `clio-ops` selects 3 of the 17 packages against 3 for
+A change to one file in `clio-ops` selects 3 of the 17 packages against 17 for
 `make ritual`'s workspace-wide pass. Use it while iterating. Use `make ritual`
 before you push, because CI's clippy is workspace-wide and a scoped local lint is
 a weaker approximation of it.

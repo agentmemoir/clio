@@ -65,6 +65,7 @@ impl PostgresStore {
         crate::triple_invariant::ensure_no_duplicate_open_triples_pg(&mut client)?;
         let migrate = format!("{SQL_CORE}\n{SQL_VECTORS_POSTGRES}");
         client.batch_execute(&migrate).am("migrate postgres")?;
+        crate::bank_registration::install_postgres_triggers(&mut client)?;
         crate::schema_reshape::bump_schema_version_pg(&mut client)?;
         // The vector table is created for the recorded space, so an existing
         // database keeps its width and a fresh one gets the documented default

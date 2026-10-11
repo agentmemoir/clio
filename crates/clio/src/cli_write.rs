@@ -162,6 +162,11 @@ fn run_parsed(
     };
     match call {
         WriteCall::Preview { payload, text } => {
+            if verb == "summarize"
+                && let Err(error) = validate_summarize_preview(state, parsed)
+            {
+                return fail(io, mode, &error);
+            }
             emit(io, mode, &payload, &text);
             ExitCode::from(EXIT_OK)
         }
@@ -192,6 +197,35 @@ fn run_parsed(
             Err(error) => fail(io, mode, &error),
         },
     }
+}
+
+fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(), CliError> {
+    let mut args = serde_json::Map::new();
+    if let Some(bank) = parsed.value("bank") {
+        args.insert("bank".into(), serde_json::Value::from(bank));
+    }
+    let ctx = state
+        .resolve_ctx(&serde_json::Value::Object(args))
+        .map_err(|error| CliError::from_am_error(&error))?;
+    state
+        .require_known_bank(ctx.bank.as_str())
+        .map_err(|error| CliError::from_am_error(&error))?;
+    let Some(scope) = parsed.value("scope") else {
+        return Ok(());
+    };
+    if scope == "bank"
+        || state
+            .store
+            .get_memory_item(ctx.bank.as_str(), scope)
+            .map_err(|error| CliError::from_am_error(&error))?
+            .is_some()
+    {
+        return Ok(());
+    }
+    Err(CliError::operational(
+        "item_not_found",
+        format!("item `{scope}` not found in bank"),
+    ))
 }
 
 /// Drain one bounded batch of due index jobs so a one-shot write process leaves

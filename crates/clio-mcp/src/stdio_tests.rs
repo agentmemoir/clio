@@ -118,7 +118,6 @@ fn frames() -> String {
         "params": {"name": "store", "arguments": {
             "item": {"id": "itm-s1", "subject_id": "subj-s1", "gist": "prefers terse answers"},
             "category": "persona", "epistemic_kind": "fact",
-            "source_text": "The user prefers terse answers.",
             "bank": "bank-a"
         }}
     });

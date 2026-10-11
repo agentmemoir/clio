@@ -124,8 +124,6 @@ fn shared_store_maps_every_optional_flag() {
             "0.7",
             "--evidence-ref",
             "ev-shared-1",
-            "--source-text",
-            "The shared convention prefers terse answers (1 note since 2024-01-01).",
             "--actor",
             "agent",
             "--shared-bank",
@@ -137,6 +135,28 @@ fn shared_store_maps_every_optional_flag() {
     let payload = json_of(&out);
     assert_eq!(payload["pass"], json!(true), "{payload}");
     assert!(payload["id"].as_str().is_some(), "{payload}");
+}
+
+#[test]
+fn shared_store_rejects_source_text_without_snapshot_support() {
+    let s = shared_state();
+    let (code, out, err) = run_write_state(
+        "shared store",
+        &[
+            "shared convention: terse answers",
+            "--epistemic-kind",
+            "fact",
+            "--category",
+            "tool_config",
+            "--source-text",
+            "unverified",
+            "--shared-bank",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("--source-text"), "{err}");
 }
 
 #[test]

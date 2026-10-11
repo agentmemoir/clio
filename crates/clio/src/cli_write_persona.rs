@@ -28,7 +28,7 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{
-    base_args, flag, one_positional, parse_f64, parse_u64, require_flags, required_flags,
+    base_args, flag, one_positional, parse_u64, parse_unit_f64, require_flags, required_flags,
     validate_choice,
 };
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, decision_refusal};
@@ -218,7 +218,10 @@ fn failure_record_call(verb: &str, parsed: &ParsedArgs) -> Result<WriteCall, Cli
 /// The persona flags `persona stable` and `persona observe` share.
 fn optional_flags(parsed: &ParsedArgs, args: &mut Map<String, Value>) -> Result<(), CliError> {
     if let Some(raw) = parsed.value("confidence") {
-        args.insert("confidence".into(), json!(parse_f64("confidence", raw)?));
+        args.insert(
+            "confidence".into(),
+            json!(parse_unit_f64("confidence", raw)?),
+        );
     }
     if let Some(source) = parsed.value("source") {
         args.insert(

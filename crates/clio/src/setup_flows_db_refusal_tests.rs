@@ -155,11 +155,7 @@ fn a_non_interactive_existing_run_takes_the_pasted_default() {
     // question offers.
     let run = Harness::fresh()
         .non_interactive()
-        .flags([
-            ("database", "existing"),
-            ("database-url", ADDRESS),
-            ("database-password", "pw"),
-        ])
+        .flags([("database", "existing"), ("database-url", ADDRESS)])
         .flags(SERVICES_BY_FLAG)
         .run();
     let plan = &run.answers().database.as_ref().expect("a plan").plan;
@@ -293,4 +289,27 @@ fn the_paste_route_refuses_a_root_certificate_flag() {
         .typing(SERVICES)
         .expect_refusal();
     assert!(reason.contains("--database-ssl-rootcert"), "{reason}");
+}
+
+#[test]
+fn the_paste_route_refuses_an_advanced_option_flag() {
+    // A pasted address is kept as given and carries its own query string, so
+    // `--database-option` cannot reach it. The top-level check only refuses the
+    // flag on the routes that are not `existing`, so the pasted route has to
+    // refuse it here or the run reports success with the setting silently gone.
+    // The flags mirror the reported command, where the pasted route is named
+    // outright rather than chosen at the hand-over question.
+    let reason = Harness::fresh()
+        .non_interactive()
+        .flags([
+            ("database", "existing"),
+            ("database-connect", "pasted"),
+            ("database-url", ADDRESS),
+            ("database-option", "application_name=clio"),
+        ])
+        .flags(SERVICES_BY_FLAG)
+        .expect_refusal();
+    assert!(reason.contains("--database-option"), "{reason}");
+    assert!(reason.contains("applies to"), "{reason}");
+    assert!(reason.contains("not to"), "{reason}");
 }

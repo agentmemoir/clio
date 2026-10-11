@@ -419,11 +419,7 @@ fn memtree_query_and_get() {
 #[test]
 fn maintenance_status_for_an_unknown_item_is_item_not_found() {
     let s = state();
-    let out = call(
-        &s,
-        "maintenance_status",
-        json!({"item_id": "itm-nope", "bank": "bank-a"}),
-    );
+    let out = call(&s, "maintenance_status", json!({"item_id": "itm-nope"}));
     assert_eq!(out["ok"], json!(false), "{out}");
     assert_eq!(out["code"], json!("item_not_found"), "{out}");
 }
