@@ -13,6 +13,7 @@ from unittest import mock
 from exec_tempdir import exec_tempdir
 from gate import *  # noqa: F403 - re-exports every engine name the tests reference
 from gate import _artifact_rel_paths, _purge_coverage_cache, _restore_artifacts, _save_artifacts
+from gate_kinds import NEXTEST_BENCH_KIND, NEXTEST_BENCH_SUBCOMMANDS
 
 def state(head: str, contents=(), changed=()) -> TreeState:
     return TreeState(head, tuple(contents), tuple(changed))
@@ -129,7 +130,7 @@ class Tests(unittest.TestCase):
                     "test", ["cargo", "nextest", sub, "--workspace"], "/repo", ("crates/b/src/lib.rs",)
                 )
             self.assertIn("-p", scoped, f"{sub} runs tests and should be narrowed")
-        for sub in sorted(NEXTEST_KNOWN_SUBCOMMANDS - NEXTEST_EXECUTING_SUBCOMMANDS):
+        for sub in sorted(NEXTEST_KNOWN_SUBCOMMANDS - NEXTEST_EXECUTING_SUBCOMMANDS - NEXTEST_BENCH_SUBCOMMANDS):
             self.assertEqual(NEXTEST_LOOKUP_KIND, command_kind(["cargo", "nextest", sub]), sub)
             self.assertEqual(
                 (["cargo", "nextest", sub, "--workspace"], None),
@@ -141,6 +142,10 @@ class Tests(unittest.TestCase):
                 ),
                 sub,
             )
+        for sub in sorted(NEXTEST_BENCH_SUBCOMMANDS):
+            argv = ["cargo", "nextest", sub, "--workspace"]
+            self.assertEqual(NEXTEST_BENCH_KIND, command_kind(argv), sub)
+            self.assertEqual((argv, None), scope_command(NEXTEST_BENCH_KIND, argv, "/repo", ("crates/b/src/lib.rs",)))
 
     def test_the_package_flag_lands_after_an_option_led_subcommand(self):
         # The bug this shape caused: a fixed index put the package flag in
