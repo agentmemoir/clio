@@ -12,7 +12,7 @@ we made where that specification is silent.
 
 - Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; document signal-based shell statuses; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
 - A `triple_add` whose `snapshot_ref` names an item the bank does not hold reports `item_not_found` instead of `invalid_argument`, and a caller that branches on the code no longer reads a missing target as a bad argument; the message and the exit code are unchanged. [PR #104](https://github.com/agentmemoir/clio/pull/104)
-- Raise the declared minimum Rust version from 1.89 to 1.95 and replace both `fetch_update` calls with the `try_update` rename, so the manifest matches the compiler the code needs and the two deprecation suppressions go away; Clippy now also checks test targets for newer-than-minimum API use.
+- Raise the declared minimum Rust version from 1.89 to 1.95 and replace both `fetch_update` calls with the `try_update` rename, so the manifest matches the compiler the code needs and the two deprecation suppressions go away; Clippy now also checks test targets for newer-than-minimum API use. [PR #115](https://github.com/agentmemoir/clio/pull/115)
 
 ## [0.1.0] - 2026-10-10
 
