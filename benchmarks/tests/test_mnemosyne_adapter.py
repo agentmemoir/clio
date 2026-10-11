@@ -1,14 +1,11 @@
-"""Hermetic unit tests for the Mnemosyne CLI adapter.
+"""Hermetic tests for the Mnemosyne CLI adapter.
 
-A tiny fake ``mnemosyne`` executable stands in for the real system, so no
-binary, database, embedding model, or network is required. The fake inspects
-``sys.argv`` and prints the payloads the real CLI prints; environment flags make
-it fail, refuse a write, or emit garbage on demand.
-
-One test drives the real binary when this host has one, because an adapter whose
-whole claim is that it can drive a real system has to be shown driving one. That
-test skips with the reason when the system is absent, and the skip is reported
-rather than passing silently.
+The stand-in executable and the fixture the fake-driven classes share live in
+`mnemosyne_support.py`; this module holds the assertions. The one test that
+drives the real binary lives here too, because an adapter whose whole claim is
+that it can drive a real system has to be shown driving one. It skips with the
+reason when the system is absent, and the skip is reported rather than passing
+silently.
 """
 
 from __future__ import annotations
@@ -16,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import sys
 import unittest
 from pathlib import Path
@@ -32,6 +28,10 @@ from benchmarks.clio_bench.adapters.mnemosyne import (  # noqa: E402
 from benchmarks.clio_bench.fingerprint import FingerprintError  # noqa: E402
 from benchmarks.clio_bench.tokenizer import get_tokenizer  # noqa: E402
 from benchmarks.clio_bench.types import DialogueTurn  # noqa: E402
+from benchmarks.tests.mnemosyne_support import (  # noqa: E402
+    MnemosyneAdapterTestCase,
+)
+from benchmarks.tests.support import assert_context_accounting  # noqa: E402
 
 def _real_binary() -> str | None:
     """Return an installed mnemosyne, or None when this host has none.
@@ -56,149 +56,8 @@ def _real_binary() -> str | None:
             return candidate
     return None
 
-_FAKE_MNEMOSYNE = '''\
-#!/usr/bin/env python3
-import json
-import os
-import sys
-
-BANK = os.environ.get("MNEMOSYNE_BANK", "default")
-STORE = os.path.join(os.environ.get("CLIO_BENCH_STORE", ""), BANK + ".json")
-
-if os.environ.get("CLIO_BENCH_RECORD"):
-    with open(os.environ["CLIO_BENCH_RECORD"], "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(sys.argv[1:]) + "\\n")
-
-
-def load():
-    try:
-        with open(STORE, encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return []
-
-
-def save(rows):
-    os.makedirs(os.path.dirname(STORE), exist_ok=True)
-    with open(STORE, "w", encoding="utf-8") as handle:
-        json.dump(rows, handle)
-
-
-def main():
-    argv = sys.argv[1:]
-    if not argv:
-        sys.exit(2)
-    command = argv[0]
-
-    if os.environ.get("FAKE_MNEMOSYNE_FAIL"):
-        sys.stderr.write("simulated failure\\n")
-        sys.exit(3)
-    if os.environ.get("FAKE_MNEMOSYNE_GARBAGE"):
-        sys.stdout.write("this is not json\\n")
-        return
-    if command == "bank":
-        return
-    if command == "config":
-        if len(argv) >= 3 and argv[1] == "get":
-            key = argv[2]
-            if os.environ.get("FAKE_MNEMOSYNE_MISSING_KEY") == key:
-                sys.stdout.write(f"{key} = (not set)\\n")
-            else:
-                sys.stdout.write(f"{key} = 0.5\\n")
-        else:
-            sys.exit(2)
-        return
-    if command == "doctor":
-        bank = argv[argv.index("--bank") + 1] if "--bank" in argv else "default"
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "bank_name": bank,
-                    "runtime_diagnostics": {
-                        "status": "ok",
-                        "checks": [
-                            {
-                                "check": "mnemosyne_version",
-                                "detail": "9.7.5",
-                                "status": "OK",
-                            }
-                        ],
-                    },
-                },
-                indent=2,
-            )
-            + "\\n"
-        )
-        return
-    if command == "store":
-        if os.environ.get("FAKE_MNEMOSYNE_REFUSE"):
-            # The real system declines a write by printing no id and exiting zero.
-            sys.stdout.write("Stored: None\\n")
-            return
-        rows = load()
-        rows.append(argv[1])
-        save(rows)
-        sys.stdout.write(f"Stored: mem-{len(rows)}\\n")
-        return
-    if command == "recall":
-        rows = load()
-        top_k = int(argv[2]) if len(argv) > 2 and argv[2].isdigit() else 5
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "query": argv[1] if len(argv) > 1 else "",
-                    "top_k": top_k,
-                    "results": [
-                        {"id": f"mem-{i + 1}", "content": text, "score": 1.0}
-                        for i, text in enumerate(rows[:top_k])
-                    ],
-                }
-            )
-            + "\\n"
-        )
-        return
-    sys.exit(2)
-
-
-main()
-'''
-
 _LINE_1 = "[mem-1] alpha beta gamma"
 _LINE_2 = "[mem-2] delta epsilon"
-
-
-class MnemosyneAdapterTestCase(unittest.TestCase):
-    """Shared fixtures: an executable stand-in and a scratch data directory."""
-
-    def setUp(self) -> None:
-        self._tmp = exec_tempdir(purpose="the fake mnemosyne binary")
-        self.addCleanup(self._tmp.cleanup)
-        self.tmpdir = self._tmp.name
-        self.fake = os.path.join(self.tmpdir, "fake_mnemosyne.py")
-        with open(self.fake, "w", encoding="utf-8") as handle:
-            handle.write(_FAKE_MNEMOSYNE)
-        os.chmod(self.fake, os.stat(self.fake).st_mode | stat.S_IXUSR)
-        self.tokenizer = get_tokenizer()
-        self.data_dir = os.path.join(self.tmpdir, "data")
-        self.store_dir = os.path.join(self.tmpdir, "stand-in-store")
-        os.makedirs(self.store_dir, exist_ok=True)
-
-    def make_adapter(self, **kwargs) -> MnemosyneAdapter:
-        kwargs.setdefault("binary", self.fake)
-        kwargs.setdefault("data_dir", self.data_dir)
-        kwargs.setdefault("tokenizer", self.tokenizer)
-        kwargs.setdefault("extra_env", {"CLIO_BENCH_STORE": self.store_dir})
-        return MnemosyneAdapter(**kwargs)
-
-    @staticmethod
-    def _turn(session_id: str = "session-a", text: str = "hello world") -> DialogueTurn:
-        return DialogueTurn(
-            session_id=session_id,
-            turn_id="turn-1",
-            speaker="user",
-            role="user",
-            text=text,
-        )
 
 
 class HealthcheckTests(MnemosyneAdapterTestCase):
@@ -267,21 +126,21 @@ class RetrieveTests(MnemosyneAdapterTestCase):
         self.assertEqual(result.context, _LINE_1)
         self.assertEqual(result.item_ids, ("mem-1",))
         self.assertEqual(result.tokens_retrieved, budget)
+        assert_context_accounting(self, result, self.tokenizer)
         self.assertLessEqual(self.tokenizer.count(result.context), budget)
 
     def test_retrieve_includes_every_hit_when_the_budget_allows(self) -> None:
         adapter = self._two_turns()
-        # Two packed lines are joined by a newline, so a budget that admits both
-        # has to admit the separator as well. That cost is counted rather than
-        # assumed, because the two tokenizers disagree about what a newline is.
-        budget = (
-            self.tokenizer.count(_LINE_1)
-            + self.tokenizer.count(_LINE_2)
-            + self.tokenizer.count("\n")
-        )
+        # The budget is the measured cost of the two-line context, not a sum of
+        # the two line costs: the joined string is what the harness hands over,
+        # so the separator it holds is part of what the budget has to cover. The
+        # two tokenizers disagree about what a newline costs, so it is measured
+        # through the tokenizer rather than assumed.
+        budget = self.tokenizer.count(f"{_LINE_1}\n{_LINE_2}")
         result = adapter.retrieve("session-a", "alpha", budget)
         self.assertEqual(result.context, f"{_LINE_1}\n{_LINE_2}")
         self.assertEqual(result.item_ids, ("mem-1", "mem-2"))
+        assert_context_accounting(self, result, self.tokenizer)
         self.assertLessEqual(self.tokenizer.count(result.context), budget)
 
     def test_a_budget_too_small_for_one_line_packs_nothing(self) -> None:
