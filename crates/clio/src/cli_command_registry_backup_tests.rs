@@ -28,7 +28,7 @@
 //! Keep this module focused on the six backup records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{Positional, Section};
+use crate::cli_command_spec::{Positional, Section, ValueKind};
 
 /// `backup create` renders today's usage text and builds today's parser sets.
 #[test]
@@ -398,4 +398,39 @@ fn validate_accepts_the_backup_records_against_the_catalog_inventory() {
         crate::cli_command_registry::validate(&specs, &inventory),
         Ok(())
     );
+}
+
+/// Every documented flag in the six backup records carries complete metadata:
+/// a description, and for a value flag a placeholder and a non-empty kind.
+#[test]
+fn metadata_check_accepts_the_backup_records() {
+    let specs: Vec<&crate::cli_command_spec::CommandSpec> =
+        crate::cli_command_registry_backup::BACKUP_LEAVES
+            .iter()
+            .collect();
+    assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
+}
+
+/// Each backup value flag carries the kind its named consumer parses: the
+/// counts are whole numbers, and the two labels stay free text.
+#[test]
+fn the_backup_value_flags_carry_the_kind_their_consumer_parses() {
+    let value = |name: &str, flag: &str| {
+        record(name)
+            .documented
+            .iter()
+            .find(|candidate| candidate.long == flag)
+            .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
+            .value
+            .unwrap_or_else(|| panic!("`{name} --{flag}` takes a value"))
+    };
+    for (name, flag, kind) in [
+        ("backup create", "label", ValueKind::Text),
+        ("backup create", "note", ValueKind::Text),
+        ("backup create", "keep", ValueKind::Uint),
+        ("backup list", "limit", ValueKind::Uint),
+        ("backup prune", "keep", ValueKind::Uint),
+    ] {
+        assert_eq!(value(name, flag).kind, kind, "`{name} --{flag}`");
+    }
 }

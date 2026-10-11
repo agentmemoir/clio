@@ -11,6 +11,7 @@
 //! - `TRANCHES`, the tranche order, and `all` / `find` / `resolve` /
 //!   `resolve_in` / `names` / `aliases`
 //! - `validate`, the static-data contract over one set of records
+//! - `check_flag_metadata` / `check_metadata`, the flag-documentation contract
 //!
 //! ## Does not own
 //! - The command records themselves (see the `cli_command_registry_*` record
@@ -37,25 +38,53 @@ use crate::cli_command_registry_surface as surface;
 use crate::cli_command_registry_sync as sync_leaves;
 use crate::cli_command_registry_task_history as task_history;
 use crate::cli_command_registry_write_operations as write_operations;
-use crate::cli_command_spec::{CommandSpec, Flag};
+use crate::cli_command_spec::{CommandSpec, Flag, ValueKind};
 
 /// The `--db` path global.
-pub(crate) const GLOBAL_DB: Flag = Flag::value("db", "PATH");
+pub(crate) const GLOBAL_DB: Flag = Flag::text(
+    "db",
+    "PATH",
+    "Overrides the store address that `db_target::resolve_target` opens; config and environment decide it when absent.",
+);
 /// The `--backend` global.
-pub(crate) const GLOBAL_BACKEND: Flag = Flag::value("backend", "sqlite|postgres");
+pub(crate) const GLOBAL_BACKEND: Flag = Flag::choice(
+    "backend",
+    "sqlite|postgres",
+    "Selects the store backend that `db_target::resolve_target` hands to the resolver; config or the address decides it when absent.",
+    &["sqlite", "postgres"],
+);
 /// The `--bank` global.
-pub(crate) const GLOBAL_BANK: Flag = Flag::value("bank", "BANK");
+pub(crate) const GLOBAL_BANK: Flag = Flag::text(
+    "bank",
+    "BANK",
+    "Scopes the command to one bank; `cli_read_args::base_args` passes it to the tool and the write scope defaults to `default`.",
+);
 /// The `--actor` global.
-pub(crate) const GLOBAL_ACTOR: Flag = Flag::value("actor", "ACTOR");
+pub(crate) const GLOBAL_ACTOR: Flag = Flag::text(
+    "actor",
+    "ACTOR",
+    "Names the acting identity; `cli_read_args::base_args` passes it to the tool and `auth_cli` reads it for the actor commands.",
+);
 /// The `--output` global; `-o` is its short spelling.
 pub(crate) const GLOBAL_OUTPUT: Flag = Flag {
     short: Some('o'),
-    ..Flag::value("output", "json|text")
+    ..Flag::choice(
+        "output",
+        "json|text",
+        "Selects the output mode that `cli_output::resolve_output` returns; the terminal decides it when absent.",
+        &["json", "text"],
+    )
 };
 /// The `--no-input` global.
-pub(crate) const GLOBAL_NO_INPUT: Flag = Flag::boolean("no-input");
+pub(crate) const GLOBAL_NO_INPUT: Flag = Flag::toggle(
+    "no-input",
+    "Refuses interactive input; `backup_restore_cli` treats a run with it as non-interactive.",
+);
 /// The `--yes` global.
-pub(crate) const GLOBAL_YES: Flag = Flag::boolean("yes");
+pub(crate) const GLOBAL_YES: Flag = Flag::toggle(
+    "yes",
+    "Answers yes to the destructive-confirmation gate that `cli_confirm::confirmed` applies.",
+);
 
 /// Value-taking global flags, in the order every parser spec merges them.
 pub(crate) static GLOBAL_VALUE_FLAGS: &[Flag] = &[
@@ -232,6 +261,48 @@ pub(crate) fn validate(specs: &[&CommandSpec], inventory: &[&str]) -> Result<(),
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+/// Check one flag's documentation metadata is complete.
+///
+/// Rejects a blank description, a value flag with a blank placeholder, and an
+/// `Enum` value kind whose allowed-value list is empty. The metadata is for
+/// readers of the catalog; it never reaches the parser, so a bad record is a
+/// documentation defect, not a grammar change.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn check_flag_metadata(flag: &Flag) -> Result<(), String> {
+    if flag.description.trim().is_empty() {
+        return Err(format!("flag `--{}` has no description", flag.long));
+    }
+    if let Some(value) = flag.value {
+        if value.placeholder.trim().is_empty() {
+            return Err(format!("flag `--{}` has a blank placeholder", flag.long));
+        }
+        if let ValueKind::Enum(allowed) = value.kind
+            && allowed.is_empty()
+        {
+            return Err(format!(
+                "flag `--{}` has an empty allowed-value list",
+                flag.long
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Check the flag metadata of every spec's documented flags and the declared
+/// globals, naming the record that owns the bad flag.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn check_metadata(specs: &[&CommandSpec]) -> Result<(), String> {
+    for spec in specs {
+        for flag in spec.documented {
+            check_flag_metadata(flag).map_err(|error| format!("`{}`: {error}", spec.name))?;
+        }
+    }
+    for flag in GLOBAL_VALUE_FLAGS.iter().chain(GLOBAL_BOOL_FLAGS.iter()) {
+        check_flag_metadata(flag).map_err(|error| format!("global {error}"))?;
     }
     Ok(())
 }

@@ -11,6 +11,8 @@
 //! - `validate` accepted against the catalog inventory, and every rejected
 //!   bad state over pure records
 //! - The global flag names, order, and short spelling
+//! - The flag-metadata contract: `check_metadata` over the real registry, its
+//!   rejection cases, and the enum lists the global consumers parse
 //!
 //! ## Does not own
 //! - The per-record bytes and parser sets (the tranche test modules)
@@ -25,10 +27,10 @@
 use std::collections::BTreeSet;
 
 use super::{
-    aliases, all, find, global_bool_names, global_flag, global_value_names, names, resolve,
-    resolve_in, validate,
+    aliases, all, check_metadata, find, global_bool_names, global_flag, global_value_names, names,
+    resolve, resolve_in, validate,
 };
-use crate::cli_command_spec::{CommandSpec, Flag, Section};
+use crate::cli_command_spec::{CommandSpec, Flag, Section, ValueKind};
 
 /// A pure record with only the name, aliases, and tool these tests vary.
 const fn record(
@@ -357,4 +359,71 @@ fn validate_accepts_a_flag_documented_twice_by_one_record() {
         ..record("auth token add", &[], None)
     };
     assert_eq!(validate(&[&spec], &["auth token add"]), Ok(()));
+}
+
+/// Every documented flag in the real registry and every declared global carries
+/// complete metadata: a description, and for a value flag a placeholder and a
+/// non-empty kind. This is expected to fail until the record tranches fill
+/// their own flag records.
+#[test]
+fn validate_accepts_the_registry_flag_metadata() {
+    let specs: Vec<&CommandSpec> = all().collect();
+    assert_eq!(check_metadata(&specs), Ok(()));
+}
+
+/// A documented flag with a blank description fails the metadata check, and the
+/// error names the owning record.
+#[test]
+fn check_metadata_rejects_a_flag_with_a_blank_description() {
+    const DOCUMENTED: &[Flag] = &[Flag::value("limit", "N")];
+    let spec = CommandSpec {
+        documented: DOCUMENTED,
+        ..record("get", &[], None)
+    };
+    let error = check_metadata(&[&spec]).expect_err("a blank description is rejected");
+    assert!(error.contains("--limit"), "{error}");
+    assert!(error.contains("get"), "{error}");
+}
+
+/// A value flag with a blank placeholder fails the metadata check.
+#[test]
+fn check_metadata_rejects_a_value_flag_with_a_blank_placeholder() {
+    const DOCUMENTED: &[Flag] = &[Flag::text("limit", "", "Page size.")];
+    let spec = CommandSpec {
+        documented: DOCUMENTED,
+        ..record("get", &[], None)
+    };
+    let error = check_metadata(&[&spec]).expect_err("a blank placeholder is rejected");
+    assert!(error.contains("--limit"), "{error}");
+}
+
+/// An `Enum` value kind with an empty allowed-value list fails the check.
+#[test]
+fn check_metadata_rejects_an_enum_with_an_empty_allowed_list() {
+    const DOCUMENTED: &[Flag] = &[Flag::choice("scope", "SCOPE", "Scope.", &[])];
+    let spec = CommandSpec {
+        documented: DOCUMENTED,
+        ..record("get", &[], None)
+    };
+    let error = check_metadata(&[&spec]).expect_err("an empty allowed list is rejected");
+    assert!(error.contains("--scope"), "{error}");
+}
+
+/// The declared globals carry the enum lists their consumers parse:
+/// `clio_store`'s backend parser accepts the two store backends, and
+/// `cli_output::resolve_output` accepts the two output modes.
+#[test]
+fn the_global_enums_name_the_values_their_consumers_parse() {
+    let backend = global_flag("backend").expect("backend is declared");
+    let output = global_flag("output").expect("output is declared");
+    assert_eq!(
+        backend.value.expect("backend takes a value").kind,
+        ValueKind::Enum(&["sqlite", "postgres"]),
+        "global --backend"
+    );
+    assert_eq!(
+        output.value.expect("output takes a value").kind,
+        ValueKind::Enum(&["json", "text"]),
+        "global --output"
+    );
 }

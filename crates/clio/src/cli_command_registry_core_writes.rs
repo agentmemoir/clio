@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The eight `CommandSpec` records and the `CORE_WRITES` tranche that lists
 //!   them in whole-catalog order
+//! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -29,6 +30,7 @@
 
 use crate::cli_command_registry::{GLOBAL_ACTOR, GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use clio_types::{SemanticCategory, SourceType};
 
 /// These records print `--bank`/`--actor`, so only these ride along.
 const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
@@ -63,29 +65,70 @@ const VALUE: Positional = Positional {
 /// `remember` and `admit` cannot run without a category.
 const CATEGORY_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("category", "C")
+    ..Flag::choice(
+        "category",
+        "C",
+        "Names the semantic category (`task_spec`, `schema`, `tool_config`, `output_constraint`, `persona`); `cli_write_core` validates it.",
+        SemanticCategory::WIRE,
+    )
 };
 
 /// `summarize` cannot run without its scope.
 const SCOPE_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("scope", "S")
+    ..Flag::text("scope", "S", "`cli_write_core` requires the scope.")
 };
 
 /// `update` cannot run without its named rule.
 const RULE_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("rule", "discrete|continuous")
+    ..Flag::choice(
+        "rule",
+        "discrete|continuous",
+        "Selects `discrete` or `continuous`; `cli_write_mutate` validates it.",
+        &["discrete", "continuous"],
+    )
 };
 
-/// `discard` cannot run without its reason.
+/// `discard` and `correct` cannot run without their reason.
 const REASON_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::value("reason", "R")
+    ..Flag::text("reason", "R", "`cli_write_mutate` forwards the reason.")
 };
 
 /// The `--epistemic-kind fact|belief` choice of `remember` and `admit`.
-const EPISTEMIC_KIND: Flag = Flag::value("epistemic-kind", "fact|belief");
+const EPISTEMIC_KIND: Flag = Flag {
+    default: Some("fact"),
+    ..Flag::choice(
+        "epistemic-kind",
+        "fact|belief",
+        "Marks `fact` or `belief`; `cli_write_core` defaults to `fact`.",
+        &["fact", "belief"],
+    )
+};
+
+/// The `--confidence N` unit value of `remember` and `admit`.
+const CONFIDENCE: Flag = Flag::float("confidence", "N", "`parse_unit_f64` bounds the value.");
+
+/// The `--source-type T` belief provenance of `remember` and `admit`.
+const SOURCE_TYPE: Flag = Flag::choice(
+    "source-type",
+    "T",
+    "Names belief provenance (`user_stated`, `agent_inferred`, `third_party`); required with belief.",
+    SourceType::WIRE,
+);
+
+/// The `--evidence-ref E` evidence of `remember` and `admit`.
+const EVIDENCE_REF: Flag = Flag::text("evidence-ref", "E", "`cli_write_core` forwards evidence.");
+
+/// The `--context TEXT` bounded note of `remember`, `admit`, and `correct`.
+const CONTEXT: Flag = Flag::text("context", "TEXT", "`context_arg` bounds and rejects it.");
+
+/// The `--dry-run` preview flag the core write commands document.
+const CORE_DRY_RUN: Flag = Flag::toggle("dry-run", "`cli_write_core` previews instead.");
+
+/// The `--dry-run` preview flag the mutation commands document.
+const MUTATE_DRY_RUN: Flag = Flag::toggle("dry-run", "`cli_write_mutate` previews instead.");
 
 /// The `--context` note `remember` and `admit` print under their usage lines.
 const CONTEXT_NOTE: &str = "--context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated";
@@ -127,12 +170,12 @@ pub(crate) const REMEMBER: CommandSpec = CommandSpec {
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         EPISTEMIC_KIND,
-        Flag::value("confidence", "N"),
-        Flag::value("source-type", "T"),
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "TEXT"),
-        Flag::boolean("allow-duplicate"),
-        Flag::boolean("dry-run"),
+        CONFIDENCE,
+        SOURCE_TYPE,
+        EVIDENCE_REF,
+        CONTEXT,
+        Flag::toggle("allow-duplicate", "`cli_write_core` waives duplicates."),
+        CORE_DRY_RUN,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
@@ -157,11 +200,11 @@ pub(crate) const ADMIT: CommandSpec = CommandSpec {
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         EPISTEMIC_KIND,
-        Flag::value("confidence", "N"),
-        Flag::value("source-type", "T"),
-        Flag::value("evidence-ref", "E"),
-        Flag::value("context", "TEXT"),
-        Flag::value("file", "ops.json"),
+        CONFIDENCE,
+        SOURCE_TYPE,
+        EVIDENCE_REF,
+        CONTEXT,
+        Flag::text("file", "ops.json", "`admit` previews the batch."),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
@@ -180,7 +223,7 @@ pub(crate) const SUMMARIZE: CommandSpec = CommandSpec {
     summary: "summarize one scope into a consolidated unit",
     notes: &[],
     positionals: &[],
-    documented: &[SCOPE_REQUIRED, Flag::boolean("dry-run"), GLOBAL_OUTPUT],
+    documented: &[SCOPE_REQUIRED, CORE_DRY_RUN, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -199,8 +242,8 @@ pub(crate) const CONSOLIDATE: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         GLOBAL_BANK,
-        Flag::boolean("force"),
-        Flag::boolean("dry-run"),
+        Flag::toggle("force", "`cli_write_core` runs the full wave."),
+        CORE_DRY_RUN,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK,
@@ -221,7 +264,7 @@ pub(crate) const UPDATE: CommandSpec = CommandSpec {
     positionals: &[ID, VALUE],
     documented: &[
         RULE_REQUIRED,
-        Flag::boolean("dry-run"),
+        MUTATE_DRY_RUN,
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,
@@ -243,8 +286,12 @@ pub(crate) const INVALIDATE: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[ID],
     documented: &[
-        Flag::value("replacement", "ID"),
-        Flag::boolean("dry-run"),
+        Flag::text(
+            "replacement",
+            "ID",
+            "`invalidate` forwards the replacement.",
+        ),
+        MUTATE_DRY_RUN,
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,
@@ -267,8 +314,8 @@ pub(crate) const DISCARD: CommandSpec = CommandSpec {
     positionals: &[ID],
     documented: &[
         REASON_REQUIRED,
-        Flag::boolean("confirm"),
-        Flag::boolean("dry-run"),
+        Flag::toggle("confirm", "`cli_confirm` requires it for removal."),
+        MUTATE_DRY_RUN,
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,
@@ -291,9 +338,9 @@ pub(crate) const CORRECT: CommandSpec = CommandSpec {
     positionals: &[ID, VALUE],
     documented: &[
         REASON_REQUIRED,
-        Flag::value("context", "TEXT"),
-        Flag::boolean("confirm"),
-        Flag::boolean("dry-run"),
+        CONTEXT,
+        Flag::toggle("confirm", "`correct` treats the call as confirmation."),
+        MUTATE_DRY_RUN,
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,

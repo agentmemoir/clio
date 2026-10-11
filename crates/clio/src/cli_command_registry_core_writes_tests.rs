@@ -13,6 +13,8 @@
 //! - The exact `parser_spec` value and boolean flag sequences per command
 //! - Each record's summary, tool, section, positional, and required-flag values
 //! - The tranche's `validate` contract against the catalog inventory
+//! - The tranche's flag metadata: the enum lists the consumers accept and the
+//!   value kinds their parsers use
 //!
 //! ## Does not own
 //! - The registry lookups and `validate` itself (`cli_command_registry_tests`)
@@ -24,8 +26,9 @@
 //!
 //! Keep this module focused on the memory-write records' data.
 
+use crate::cli_command_registry::check_metadata;
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
@@ -381,4 +384,58 @@ fn correct_pins_the_line_and_prints_the_confirm_flag() {
         spec.positionals,
         [positional("ID", true), positional("VALUE", true)].as_slice()
     );
+}
+
+/// Every documented flag in this tranche carries a description and, when it
+/// takes a value, a placeholder and non-empty kind.
+#[test]
+fn the_core_writes_tranche_passes_the_metadata_check() {
+    let specs: Vec<&CommandSpec> = super::CORE_WRITES.iter().collect();
+    assert_eq!(check_metadata(&specs), Ok(()));
+}
+
+/// `remember`/`admit` `--epistemic-kind` records the constant default
+/// `cli_write_core` applies when the flag is omitted.
+#[test]
+fn epistemic_kind_metadata_default_is_fact() {
+    for verb in ["remember", "admit"] {
+        let kind = record(verb)
+            .documented
+            .iter()
+            .find(|flag| flag.long == "epistemic-kind")
+            .expect("the verb documents --epistemic-kind");
+        assert_eq!(
+            kind.default,
+            Some("fact"),
+            "{verb} --epistemic-kind default"
+        );
+    }
+}
+
+/// Every documented flag carries the kind its consumer parses: the enum
+/// lists are the `clio_types` wire tables for categories and provenance,
+/// `cli_write_core`'s two epistemic kinds, and `cli_write_mutate`'s two
+/// rules; the unit-bounded confidences are `Float`, and every remaining
+/// flag stays free text or the shared `--output` global.
+#[test]
+fn the_core_writes_flag_kinds_match_their_consumers() {
+    for spec in super::CORE_WRITES {
+        for flag in spec.documented {
+            let Some(value) = flag.value else { continue };
+            let expected = match (spec.name, flag.long) {
+                ("remember" | "admit", "category") => {
+                    ValueKind::Enum(clio_types::SemanticCategory::WIRE)
+                }
+                ("remember" | "admit", "epistemic-kind") => ValueKind::Enum(&["fact", "belief"]),
+                ("remember" | "admit", "source-type") => {
+                    ValueKind::Enum(clio_types::SourceType::WIRE)
+                }
+                ("update", "rule") => ValueKind::Enum(&["discrete", "continuous"]),
+                ("remember" | "admit", "confidence") => ValueKind::Float,
+                (_, "output") => ValueKind::Enum(&["json", "text"]),
+                _ => ValueKind::Text,
+            };
+            assert_eq!(value.kind, expected, "`{} --{}`", spec.name, flag.long);
+        }
+    }
 }

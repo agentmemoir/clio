@@ -60,7 +60,11 @@ const ID: Positional = Positional {
 /// usage line writes it bare.
 const KEEP: Flag = Flag {
     required: true,
-    ..Flag::value("keep", "N")
+    ..Flag::uint(
+        "keep",
+        "N",
+        "Counts the newest snapshots `backup_prune_cli::required_keep` keeps; it refuses `0` and a value that is not a count.",
+    )
 };
 
 /// The `create` note: what each backend's snapshot is, and the `--keep` prune.
@@ -101,11 +105,29 @@ pub(crate) const BACKUP_CREATE: CommandSpec = CommandSpec {
     documented: &[
         GLOBAL_DB,
         GLOBAL_BACKEND,
-        Flag::value("label", "TEXT"),
-        Flag::value("note", "TEXT"),
-        Flag::value("keep", "N"),
-        Flag::boolean("confirm"),
-        Flag::boolean("dry-run"),
+        Flag::text(
+            "label",
+            "TEXT",
+            "Names the snapshot in its manifest; `backup_create_cli::take_snapshot` stores it with the archive.",
+        ),
+        Flag::text(
+            "note",
+            "TEXT",
+            "Records an operator note in the archive's manifest; `backup_create_cli::take_snapshot` stores it.",
+        ),
+        Flag::uint(
+            "keep",
+            "N",
+            "Runs `clio backup prune --keep N` after a successful create; `backup_create_cli` refuses `0` and a value that is not a count.",
+        ),
+        Flag::toggle(
+            "confirm",
+            "Lets the `--keep` prune delete; `backup_create_cli::confirm_needs_keep` refuses it with no `--keep` because a create deletes nothing else.",
+        ),
+        Flag::toggle(
+            "dry-run",
+            "Prints the plan and writes nothing; `backup_create_cli::dry_run` reports the sizes and the existing snapshot count.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: CREATE_UNPRINTED,
@@ -141,7 +163,14 @@ pub(crate) const BACKUP_LIST: CommandSpec = CommandSpec {
     summary: "List snapshots newest first by manifest time (no database needed); --db and --backend are refused because they cannot change the listing",
     notes: &[LIST_NOTE],
     positionals: &[],
-    documented: &[Flag::value("limit", "N"), GLOBAL_OUTPUT],
+    documented: &[
+        Flag::uint(
+            "limit",
+            "N",
+            "Caps the rows returned; `backup_list_cli::limit` refuses a value that is not a count.",
+        ),
+        GLOBAL_OUTPUT,
+    ],
     accepted_extra: BACKUP_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,
@@ -160,8 +189,14 @@ pub(crate) const BACKUP_PRUNE: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         KEEP,
-        Flag::boolean("confirm"),
-        Flag::boolean("dry-run"),
+        Flag::toggle(
+            "confirm",
+            "Tells `backup_prune_cli::removes` to delete the selected candidates; absent, the run reports and removes nothing.",
+        ),
+        Flag::toggle(
+            "dry-run",
+            "Forces the report path in `backup_prune_cli::removes` even with `--confirm`, so nothing is removed.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: BACKUP_UNPRINTED,
@@ -181,12 +216,30 @@ pub(crate) const BACKUP_RESTORE: CommandSpec = CommandSpec {
     notes: &[RESTORE_NOTE],
     positionals: &[ID],
     documented: &[
-        Flag::boolean("latest"),
-        Flag::boolean("yes"),
-        Flag::boolean("no-input"),
-        Flag::boolean("no-pre-backup"),
-        Flag::boolean("allow-missing-keys"),
-        Flag::boolean("dry-run"),
+        Flag::toggle(
+            "latest",
+            "Selects the newest snapshot instead of a positional id; `backup_cli::resolve_restore_id` resolves it.",
+        ),
+        Flag::toggle(
+            "yes",
+            "Answers the confirmation gate in `backup_restore_cli::confirm`, restoring without a typed snapshot id.",
+        ),
+        Flag::toggle(
+            "no-input",
+            "Forces the non-interactive path in `backup_restore_cli::confirm`, refusing rather than prompting.",
+        ),
+        Flag::toggle(
+            "no-pre-backup",
+            "Skips the pre-restore snapshot the restore backends take by default; that snapshot is the only way back.",
+        ),
+        Flag::toggle(
+            "allow-missing-keys",
+            "Accepts an archive with no key member; `backup_restore_flow::refuse_missing_keys` then restores content that stays permanently unreadable.",
+        ),
+        Flag::toggle(
+            "dry-run",
+            "Prints the restore plan through `backup_restore_flow::planned` and changes no store.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: RESTORE_UNPRINTED,
@@ -205,7 +258,13 @@ pub(crate) const BACKUP_VERIFY: CommandSpec = CommandSpec {
     summary: "Re-check one archive's digests and its payload's validity; --db and --backend are refused because they cannot change the verdict",
     notes: &[VERIFY_NOTE],
     positionals: &[ID],
-    documented: &[Flag::boolean("latest"), GLOBAL_OUTPUT],
+    documented: &[
+        Flag::toggle(
+            "latest",
+            "Selects the newest listed snapshot instead of a positional id; `backup_verify_cli::resolve_id` resolves it.",
+        ),
+        GLOBAL_OUTPUT,
+    ],
     accepted_extra: BACKUP_UNPRINTED,
     flag_aliases: &[],
     usage_override: Some(VERIFY_USAGE),

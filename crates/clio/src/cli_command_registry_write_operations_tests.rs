@@ -13,6 +13,8 @@
 //! - The exact `parser_spec` value and boolean flag sequences per command
 //! - Each record's summary, tool, section, positional, and required-flag values
 //! - The tranche's `validate` contract against the catalog inventory
+//! - The tranche's flag metadata: the enum lists the consumers accept and the
+//!   defaults the tools apply
 //!
 //! ## Does not own
 //! - The registry lookups and `validate` itself (`cli_command_registry_tests`)
@@ -25,7 +27,16 @@
 //! Keep this module focused on the operation-write records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+
+/// One record's documented flag, as the metadata tests read it.
+fn documented_flag(name: &str, flag: &str) -> &'static crate::cli_command_spec::Flag {
+    record(name)
+        .documented
+        .iter()
+        .find(|candidate| candidate.long == flag)
+        .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
+}
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
@@ -269,4 +280,63 @@ fn erase_pins_the_line_and_hides_the_dry_run_flag() {
     assert_eq!(spec.tool, Some("erase_request"));
     assert_eq!(spec.section, Section::Write);
     assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
+}
+
+/// Every documented flag in the tranche carries complete metadata: a
+/// description, and for a value flag a placeholder and a non-empty value kind.
+#[test]
+fn the_write_operations_tranche_has_complete_flag_metadata() {
+    let specs: Vec<&CommandSpec> = super::WRITE_OPERATIONS.iter().collect();
+    assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
+}
+
+/// Every documented flag carries the kind its consumer parses: the enum
+/// lists name exactly the accepted values (`cli_write_shared`'s four review
+/// actions, `cli_write_portability`'s two content modes and two include
+/// labels and the `clio_types` category wire table, and the `erase_request`
+/// tool's two actors), and every remaining flag stays free text or the shared `--output` global.
+#[test]
+fn the_write_operations_flag_kinds_match_their_consumers() {
+    for spec in super::WRITE_OPERATIONS {
+        for flag in spec.documented {
+            let Some(value) = flag.value else { continue };
+            let expected = match (spec.name, flag.long) {
+                ("validate", "action") => {
+                    ValueKind::Enum(&["attest", "update", "invalidate", "delete"])
+                }
+                ("export", "content-mode") => {
+                    ValueKind::Enum(&["dsar_plaintext", "ciphertext_backup"])
+                }
+                ("export", "category") => ValueKind::Enum(clio_types::SemanticCategory::WIRE),
+                ("export", "include-archived" | "include-discarded") => {
+                    ValueKind::Enum(&["true", "false"])
+                }
+                ("erase", "actor") => ValueKind::Enum(&["harness", "system"]),
+                (_, "output") => ValueKind::Enum(&["json", "text"]),
+                _ => ValueKind::Text,
+            };
+            assert_eq!(value.kind, expected, "`{} --{}`", spec.name, flag.long);
+        }
+    }
+}
+
+/// The recorded defaults are the values the tools apply when the flag is
+/// omitted: the export tool bundles plaintext with archived and discarded
+/// rows, and compliance erasure defaults to the crypto-shred reason code,
+/// whose named constant lives in `clio_compliance`, outside this crate's
+/// dependency set.
+#[test]
+fn the_recorded_defaults_are_the_values_the_tools_apply() {
+    for (name, flag, default) in [
+        ("export", "content-mode", Some("dsar_plaintext")),
+        ("export", "include-archived", Some("true")),
+        ("export", "include-discarded", Some("true")),
+        ("erase", "reason-code", Some("COMPLIANCE_CRYPTO_SHRED")),
+    ] {
+        assert_eq!(
+            documented_flag(name, flag).default,
+            default,
+            "`{name} --{flag}` default"
+        );
+    }
 }

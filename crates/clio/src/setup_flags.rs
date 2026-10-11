@@ -36,42 +36,181 @@ use std::collections::HashMap;
 /// and reaches the record and the parser together. `--help` is not here; it is
 /// the surface's own help spelling, answered before the parser runs, and the
 /// parser accepts it by name the way the shared parser does.
+///
+/// A choice's allowed list names every spelling its validator accepts,
+/// synonyms included, so the record never documents a value the wizard refuses.
 pub(crate) static ACCEPTED: &[Flag] = &[
-    Flag::value("database", "managed|sqlite|existing"),
-    Flag::value("config", "PATH"),
-    Flag::value("db-path", "PATH"),
-    Flag::value("database-url", "ADDRESS"),
-    Flag::value("database-connect", "pasted|typed"),
-    Flag::value("database-host", "H"),
-    Flag::value("database-port", "P"),
-    Flag::value("database-name", "N"),
-    Flag::value("database-user", "U"),
-    Flag::value("database-password", "P"),
-    Flag::value("database-ssl", "MODE"),
-    Flag::value("database-ssl-rootcert", "PATH"),
+    Flag::choice(
+        "database",
+        "managed|docker|sqlite|file|existing|external",
+        "Database route `setup_flows_db::ask_database` takes.",
+        &[
+            "managed", "docker", "sqlite", "file", "existing", "external",
+        ],
+    ),
+    Flag::text(
+        "config",
+        "PATH",
+        "Deployment config path `setup_cli::run` resolves; the XDG config path decides it when absent.",
+    ),
+    Flag::text(
+        "db-path",
+        "PATH",
+        "SQLite file `setup_flows_db::ask_sqlite` opens; the standard data path decides it when absent.",
+    ),
+    Flag::text(
+        "database-url",
+        "ADDRESS",
+        "Postgres address `setup_flows_db_paste::ask_pasted` keeps as given.",
+    ),
+    Flag::choice(
+        "database-connect",
+        "pasted|paste|typed|details",
+        "Existing-Postgres route `setup_flows_db_paste::ask_handover` takes.",
+        &["pasted", "paste", "typed", "details"],
+    ),
+    Flag::text(
+        "database-host",
+        "H",
+        "Host `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-port",
+        "P",
+        "Port, or a comma-separated port list, `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-name",
+        "N",
+        "Database name `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-user",
+        "U",
+        "Username `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-password",
+        "P",
+        "Password `setup_flows_db_typed` reads for the existing route.",
+    ),
+    Flag::choice(
+        "database-ssl",
+        "MODE",
+        "SSL mode `setup_flows_db_fields::ask_ssl` reads; the host decides the default.",
+        &["disable", "prefer", "verify-full", "encrypt-no-verify"],
+    ),
+    Flag::text(
+        "database-ssl-rootcert",
+        "PATH",
+        "Root certificate `setup_flows_db_typed` trusts in a verifying mode.",
+    ),
     Flag {
         repeatable: true,
-        ..Flag::value("database-option", "NAME=VALUE")
+        ..Flag::text(
+            "database-option",
+            "NAME=VALUE",
+            "Advanced libpq setting `setup_flows_db_typed::flagged_advanced` validates; repeatable.",
+        )
     },
-    Flag::value("embed", "local|online"),
-    Flag::value("embed-url", "U"),
-    Flag::value("embed-model", "M"),
-    Flag::value("embed-key", "K"),
-    Flag::value("embed-provider", "tei|openai"),
-    Flag::value("embed-dims", "N"),
-    Flag::value("rerank", "local|online|skip"),
-    Flag::value("rerank-url", "U"),
-    Flag::value("rerank-model", "M"),
-    Flag::value("rerank-key", "K"),
-    Flag::value("rerank-provider", "tei|cohere"),
-    Flag::value("extract", "local|skip|online"),
-    Flag::value("compose-dir", "DIR"),
-    Flag::value("key-store", "file|keystore"),
-    Flag::value("sync-store", "file|keystore"),
-    Flag::boolean("allow-untested"),
-    Flag::boolean("yes"),
-    Flag::boolean("non-interactive"),
-    Flag::boolean("interactive"),
+    Flag::choice(
+        "embed",
+        "local|online|hosted|remote|skip|none|off",
+        "Embedding role `setup_step_ask::ask_role` takes.",
+        &["local", "online", "hosted", "remote", "skip", "none", "off"],
+    ),
+    Flag::text(
+        "embed-url",
+        "U",
+        "Embedding endpoint `setup_step_ask` checks and records.",
+    ),
+    Flag::text(
+        "embed-model",
+        "M",
+        "Embedding model `setup_step_ask` records for the endpoint.",
+    ),
+    Flag::text(
+        "embed-key",
+        "K",
+        "Embedding API key `setup_step_ask` reads for the endpoint.",
+    ),
+    Flag::choice(
+        "embed-provider",
+        "tei|openai",
+        "Embedding provider `setup_step_ask::service_provider` restricts.",
+        &["tei", "openai"],
+    ),
+    Flag::uint(
+        "embed-dims",
+        "N",
+        "Hosted embedding dimensions `setup_cli::preflight` requires above zero.",
+    ),
+    Flag::choice(
+        "rerank",
+        "local|online|hosted|remote|skip|none|off",
+        "Reranking role `setup_step_ask::ask_role` takes.",
+        &["local", "online", "hosted", "remote", "skip", "none", "off"],
+    ),
+    Flag::text(
+        "rerank-url",
+        "U",
+        "Reranking endpoint `setup_step_ask` checks and records.",
+    ),
+    Flag::text(
+        "rerank-model",
+        "M",
+        "Reranking model `setup_step_ask` records for the endpoint.",
+    ),
+    Flag::text(
+        "rerank-key",
+        "K",
+        "Reranking API key `setup_step_ask` reads for the endpoint.",
+    ),
+    Flag::choice(
+        "rerank-provider",
+        "tei|cohere",
+        "Reranking provider `setup_step_ask::service_provider` restricts.",
+        &["tei", "cohere"],
+    ),
+    Flag::choice(
+        "extract",
+        "local|skip|none|online|hosted",
+        "Extraction role `setup_step_extract::ask_extract` takes.",
+        &["local", "skip", "none", "online", "hosted"],
+    ),
+    Flag::text(
+        "compose-dir",
+        "DIR",
+        "Compose root `setup_verify::start_and_check` uses; the cwd decides it when absent.",
+    ),
+    Flag::choice(
+        "key-store",
+        "file|keystore",
+        "Encryption key store `setup_key_source::ask` takes.",
+        &["file", "keystore"],
+    ),
+    Flag::choice(
+        "sync-store",
+        "file|keystore",
+        "Sync key store `setup_sync_key_source::ask` takes.",
+        &["file", "keystore"],
+    ),
+    Flag::toggle(
+        "allow-untested",
+        "Saves answers after a failed test in `setup_flows_db::finish`.",
+    ),
+    Flag::toggle(
+        "yes",
+        "Forces non-interactive mode in `setup_cli::interactive_mode`.",
+    ),
+    Flag::toggle(
+        "non-interactive",
+        "Forces non-interactive mode in `setup_cli::interactive_mode`.",
+    ),
+    Flag::toggle(
+        "interactive",
+        "Requires a terminal in `setup_cli::interactive_mode`.",
+    ),
 ];
 
 /// `--type`'s dedicated usage error.

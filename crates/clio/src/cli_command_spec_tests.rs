@@ -329,3 +329,69 @@ fn flag_constructors_set_the_documented_defaults() {
     assert!(boolean.value.is_none());
     assert!(!boolean.required);
 }
+
+/// `text` keeps the base value shape and adds the placeholder, a `Text` kind,
+/// and the description.
+#[test]
+fn text_sets_a_text_value_and_the_description() {
+    let flag = Flag::text("limit", "N", "Page size.");
+    assert_eq!(flag.long, "limit");
+    assert_eq!(flag.description, "Page size.");
+    assert_eq!(
+        flag.value,
+        Some(ValueSpec {
+            placeholder: "N",
+            kind: ValueKind::Text,
+        })
+    );
+}
+
+/// `uint` names a whole-number value.
+#[test]
+fn uint_sets_a_uint_value() {
+    let flag = Flag::uint("limit", "N", "Page size.");
+    assert_eq!(
+        flag.value,
+        Some(ValueSpec {
+            placeholder: "N",
+            kind: ValueKind::Uint,
+        })
+    );
+}
+
+/// `float` names a decimal value.
+#[test]
+fn float_sets_a_float_value() {
+    let flag = Flag::float("min-score", "S", "Score floor.");
+    assert_eq!(
+        flag.value,
+        Some(ValueSpec {
+            placeholder: "S",
+            kind: ValueKind::Float,
+        })
+    );
+}
+
+/// `choice` names the value kind `Enum` and carries the allowed values.
+#[test]
+fn choice_sets_an_enum_value_with_the_allowed_list() {
+    let flag = Flag::choice("output", "json|text", "Output mode.", &["json", "text"]);
+    assert_eq!(flag.description, "Output mode.");
+    assert_eq!(
+        flag.value,
+        Some(ValueSpec {
+            placeholder: "json|text",
+            kind: ValueKind::Enum(&["json", "text"]),
+        })
+    );
+}
+
+/// `toggle` is the boolean constructor with a description: a description and
+/// no value, so it can never invent a placeholder or an enum.
+#[test]
+fn toggle_is_boolean_with_a_description_and_no_value() {
+    let flag = Flag::toggle("yes", "Consent.");
+    assert_eq!(flag.long, "yes");
+    assert_eq!(flag.description, "Consent.");
+    assert!(flag.value.is_none());
+}

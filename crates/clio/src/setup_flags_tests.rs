@@ -8,6 +8,8 @@
 //!
 //! ## Owns
 //! - Flag parsing behavior under test for `setup_flags`
+//! - The setup flag metadata tests: the allowed-value lists and value kinds
+//!   the record documents, checked against the parsers that enforce them
 //!
 //! ## Does not own
 //! - What the flags mean (see `setup_cli_tests` and the flow suites)
@@ -28,6 +30,17 @@ fn accepted() -> &'static [crate::cli_command_spec::Flag] {
     crate::cli_command_registry::find("setup")
         .expect("`setup` is registered")
         .documented
+}
+
+/// Every flag the setup record documents carries complete metadata: a
+/// description, and for a value flag a placeholder and a non-empty kind.
+#[test]
+fn every_accepted_setup_flag_carries_complete_metadata() {
+    for flag in accepted() {
+        if let Err(error) = crate::cli_command_registry::check_flag_metadata(flag) {
+            panic!("{error}");
+        }
+    }
 }
 
 #[test]
@@ -257,4 +270,80 @@ fn every_value_flag_is_read_by_the_wizard() {
             .count(),
         "a recorded reader names a flag that no longer exists"
     );
+}
+
+/// The allowed-value list one choice flag documents.
+///
+/// A non-choice flag here is a test bug, not a refusal: the callers below only
+/// ask for flags they know are choices.
+fn allowed(flag: &str) -> &'static [&'static str] {
+    let documented = accepted()
+        .iter()
+        .find(|documented| documented.long == flag)
+        .unwrap_or_else(|| panic!("--{flag} is not in the accepted table"));
+    let value = documented
+        .value
+        .unwrap_or_else(|| panic!("--{flag} takes no value"));
+    match value.kind {
+        crate::cli_command_spec::ValueKind::Enum(allowed) => allowed,
+        other => panic!("--{flag} is not a choice: {other:?}"),
+    }
+}
+
+/// Every spelling an enum flag documents is one its validator accepts, so the
+/// record never promises a value the wizard would refuse.
+#[test]
+fn every_documented_enum_value_is_accepted_by_its_validator() {
+    for value in allowed("database") {
+        assert!(
+            crate::setup_plan_db::DatabaseChoice::parse(value).is_some(),
+            "--database documents `{value}` but its parser refuses it"
+        );
+    }
+    for value in allowed("database-connect") {
+        assert!(
+            crate::setup_plan_db::HandOver::parse(value).is_some(),
+            "--database-connect documents `{value}` but its parser refuses it"
+        );
+    }
+    for value in allowed("embed").iter().chain(allowed("rerank")) {
+        assert!(
+            crate::setup_services::ServiceRole::parse(value).is_some(),
+            "the service-role parser refuses `{value}`"
+        );
+    }
+}
+
+/// `--extract`'s validator is an inline match in its own file, so the
+/// spellings are pinned by the same source-needle pattern the readers table
+/// uses: the whole skip arm, plus each documented value named in the file.
+#[test]
+fn the_extract_enum_names_only_spellings_its_validator_accepts() {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/setup_step_extract.rs"),
+    )
+    .expect("a source file");
+    assert!(
+        text.contains("\"skip\" | \"none\" | \"online\" | \"hosted\""),
+        "the extract validator no longer accepts the skip spellings: {text}"
+    );
+    for value in allowed("extract") {
+        assert!(
+            text.contains(&format!("\"{value}\"")),
+            "--extract documents `{value}` but the validator never names it"
+        );
+    }
+}
+
+/// `--database-port` takes text, not a uint: its validator accepts a
+/// comma-separated port list, so a whole-number kind would promise a shape the
+/// wizard refuses.
+#[test]
+fn the_port_flag_takes_text_so_a_list_fits_its_validator() {
+    let documented = accepted()
+        .iter()
+        .find(|documented| documented.long == "database-port")
+        .expect("--database-port is in the accepted table");
+    let kind = documented.value.expect("a value flag").kind;
+    assert_eq!(kind, crate::cli_command_spec::ValueKind::Text, "{kind:?}");
 }

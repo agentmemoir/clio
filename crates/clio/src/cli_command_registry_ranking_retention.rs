@@ -56,14 +56,45 @@ const SCHEMA_UNPRINTED: &[&str] = &[
 /// because the verb refuses to run without one.
 const PATCH: Flag = Flag {
     required: true,
-    ..Flag::value("patch", "JSON")
+    ..Flag::text(
+        "patch",
+        "JSON",
+        "Carries the JSON weight patch that `ranking_cli::set_call` parses and passes to the `ranking_env_set` tool.",
+    )
 };
 
 /// The required `--profile JSON` of `retention set`: the usage line writes it
 /// bare because the verb refuses to run without one.
 const PROFILE: Flag = Flag {
     required: true,
-    ..Flag::value("profile", "JSON")
+    ..Flag::text(
+        "profile",
+        "JSON",
+        "Carries the JSON profile that `retention_cli::profile_from_flags` parses into a `RetentionProfile`.",
+    )
+};
+
+/// The `--bank BANK` of `retention get` and `retention set`: `bank_of` falls
+/// back to `default` when the flag is absent.
+const RETENTION_BANK: Flag = Flag {
+    default: Some("default"),
+    ..Flag::text(
+        "bank",
+        "BANK",
+        "Scopes the command to one bank; `retention_cli::bank_of` falls back to `default` when it is absent.",
+    )
+};
+
+/// The `--scope bank|deployment` of `retention set`: the verb stores per bank
+/// unless the caller asks for the deployment default.
+const RETENTION_SCOPE: Flag = Flag {
+    default: Some("bank"),
+    ..Flag::choice(
+        "scope",
+        "bank|deployment",
+        "Selects whether the profile is stored per bank or as the deployment default; `retention_cli::run` accepts `bank` or `deployment` and falls back to `bank`.",
+        &["bank", "deployment"],
+    )
 };
 
 /// `clio ranking get`: the effective ranking/admission environment.
@@ -92,8 +123,15 @@ pub(crate) const RANKING_SET: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         PATCH,
-        Flag::value("patch-file", "FILE"),
-        Flag::boolean("dry-run"),
+        Flag::text(
+            "patch-file",
+            "FILE",
+            "Names the file that `ranking_cli::set_call` reads the JSON weight patch from when `--patch` is absent.",
+        ),
+        Flag::toggle(
+            "dry-run",
+            "Returns the normalized weights without applying them; `ranking_cli::set_call` sets the `ranking_env_set` tool's `dry_run` argument.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED,
@@ -112,7 +150,14 @@ pub(crate) const RETENTION_GET: CommandSpec = CommandSpec {
     summary: "Show the effective per-bank retention profile",
     notes: &[],
     positionals: &[],
-    documented: &[Flag::value("bank", "BANK"), Flag::value("profiles", "FILE")],
+    documented: &[
+        RETENTION_BANK,
+        Flag::text(
+            "profiles",
+            "FILE",
+            "Names the retention store file that `retention_cli::open_runtime` opens; `CLIO_RETENTION_PROFILES` decides it when absent.",
+        ),
+    ],
     accepted_extra: RETENTION_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,
@@ -130,11 +175,19 @@ pub(crate) const RETENTION_SET: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[],
     documented: &[
-        Flag::value("bank", "BANK"),
-        Flag::value("scope", "bank|deployment"),
+        RETENTION_BANK,
+        RETENTION_SCOPE,
         PROFILE,
-        Flag::value("profile-file", "FILE"),
-        Flag::value("profiles", "FILE"),
+        Flag::text(
+            "profile-file",
+            "FILE",
+            "Names the file that `retention_cli::profile_from_flags` reads the JSON profile from when `--profile` is absent.",
+        ),
+        Flag::text(
+            "profiles",
+            "FILE",
+            "Names the retention store file that `retention_cli::open_runtime` opens; `CLIO_RETENTION_PROFILES` decides it when absent.",
+        ),
     ],
     accepted_extra: RETENTION_UNPRINTED,
     flag_aliases: &[],

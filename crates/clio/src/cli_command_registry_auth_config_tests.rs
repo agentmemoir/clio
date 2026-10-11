@@ -30,7 +30,7 @@
 //! Keep this module focused on the seven auth and config records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Positional, Section};
 
 /// `auth token add` renders today's pinned line and note, and its parser keeps
 /// the globals merged with its own flags.
@@ -390,5 +390,28 @@ fn validate_accepts_the_auth_and_config_records_against_the_catalog_inventory() 
     assert_eq!(
         crate::cli_command_registry::validate(&specs, &inventory),
         Ok(())
+    );
+}
+
+/// Every documented flag in the tranche carries complete metadata: a
+/// description, and for a value flag a placeholder and a non-empty value kind.
+#[test]
+fn the_auth_and_config_tranche_has_complete_flag_metadata() {
+    let specs: Vec<&CommandSpec> = super::AUTH_CONFIG_LEAVES.iter().collect();
+    assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
+}
+
+/// The `config set` scope metadata default is the session constant `config_cli`
+/// falls back to when `--scope` is absent.
+#[test]
+fn the_config_scope_default_is_the_session_constant() {
+    let scope = record("config set")
+        .documented
+        .iter()
+        .find(|flag| flag.long == "scope")
+        .expect("config set documents --scope");
+    assert_eq!(
+        scope.default,
+        Some(clio_config::ConfigScope::Session.as_str())
     );
 }

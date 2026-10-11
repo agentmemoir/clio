@@ -13,6 +13,8 @@
 //! - The exact `parser_spec` value and boolean flag sequences per command
 //! - Each record's summary, tool, section, positional values, and required bits
 //! - The tranche's `validate` contract against the catalog inventory
+//! - The tranche's flag metadata: the enum lists the consumers accept, the
+//!   value kinds their parsers use, and the budget default
 //!
 //! ## Does not own
 //! - The registry lookups and `validate` itself (`cli_command_registry_tests`)
@@ -25,7 +27,16 @@
 //! Keep this module focused on the persona and local-state records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+
+/// One record's documented flag, as the metadata tests read it.
+fn documented_flag(name: &str, flag: &str) -> &'static crate::cli_command_spec::Flag {
+    record(name)
+        .documented
+        .iter()
+        .find(|candidate| candidate.long == flag)
+        .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
+}
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
@@ -343,4 +354,58 @@ fn maintenance_status_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("maintenance_status"));
     assert_eq!(spec.section, Section::Read);
     assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
+}
+
+/// Every documented flag in this tranche carries a description and, for a value
+/// flag, a placeholder and a non-empty kind.
+#[test]
+fn the_persona_local_flag_metadata_is_complete() {
+    assert_eq!(
+        crate::cli_command_registry::check_metadata(&tranche()),
+        Ok(())
+    );
+}
+
+/// Every documented flag carries the kind its consumer parses: the enum
+/// lists name exactly the accepted values (`cli_write_persona`'s two sources
+/// and the `clio_types` wire tables for categories and provenance), the
+/// counted flag is `Uint`, the unit-bounded confidences are `Float`, and
+/// every remaining flag stays free text or the shared `--output` global.
+#[test]
+fn the_persona_local_flag_kinds_match_their_consumers() {
+    for spec in super::PERSONA_LOCAL {
+        for flag in spec.documented {
+            let Some(value) = flag.value else { continue };
+            let expected = match (spec.name, flag.long) {
+                ("persona stable" | "persona observe", "source") => {
+                    ValueKind::Enum(&["explicit", "inferred"])
+                }
+                ("canonical put", "category") => {
+                    ValueKind::Enum(clio_types::SemanticCategory::WIRE)
+                }
+                ("canonical put", "epistemic-kind") => ValueKind::Enum(&["fact", "belief"]),
+                ("canonical put", "source-type") => ValueKind::Enum(clio_types::SourceType::WIRE),
+                ("persona get", "budget-tokens") => ValueKind::Uint,
+                ("persona stable" | "persona observe" | "canonical put", "confidence") => {
+                    ValueKind::Float
+                }
+                (_, "output") => ValueKind::Enum(&["json", "text"]),
+                _ => ValueKind::Text,
+            };
+            assert_eq!(value.kind, expected, "`{} --{}`", spec.name, flag.long);
+        }
+    }
+}
+
+/// `persona get --budget-tokens` records `clio_persona`'s constant default.
+#[test]
+fn persona_get_budget_tokens_default_is_the_persona_constant() {
+    let budget = documented_flag("persona get", "budget-tokens")
+        .default
+        .expect("--budget-tokens records a default");
+    assert_eq!(
+        budget.parse::<usize>().expect("the default is a number"),
+        clio_persona::DEFAULT_PERSONA_TOKEN_BUDGET,
+        "persona get --budget-tokens default"
+    );
 }

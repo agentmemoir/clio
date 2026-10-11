@@ -13,6 +13,8 @@
 //! - The exact `parser_spec` value and boolean flag sequences per command
 //! - Each record's summary, tool, section, positional values, and required bits
 //! - The tranche's `validate` contract against the catalog inventory
+//! - The tranche's flag metadata: the enum lists the consumers accept and the
+//!   value kinds their parsers use
 //!
 //! ## Does not own
 //! - The registry lookups and `validate` itself (`cli_command_registry_tests`)
@@ -24,8 +26,9 @@
 //!
 //! Keep this module focused on the shared-workspace records' data.
 
+use crate::cli_command_registry::check_metadata;
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
@@ -374,4 +377,64 @@ fn audit_trail_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("audit_trail"));
     assert_eq!(spec.section, Section::Read);
     assert_eq!(spec.positionals, [positional("ITEM_ID", true)].as_slice());
+}
+
+/// Every documented flag in this tranche carries a description and, when it
+/// takes a value, a placeholder and non-empty kind.
+#[test]
+fn the_shared_workspace_tranche_passes_the_metadata_check() {
+    let specs: Vec<&CommandSpec> = super::SHARED_WORKSPACE.iter().collect();
+    assert_eq!(check_metadata(&specs), Ok(()));
+}
+
+/// The tranche's defaults record what the consumers apply when the flag is
+/// omitted: `cli_write_hygiene` keeps, and `clio_hygiene` scores at 0.40.
+#[test]
+fn the_hygiene_defaults_record_the_values_the_consumers_apply() {
+    let find = |name: &str, flag: &str| {
+        record(name)
+            .documented
+            .iter()
+            .find(|candidate| candidate.long == flag)
+            .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
+    };
+    assert_eq!(find("hygiene clean", "action").default, Some("keep"));
+    let min_score = find("hygiene audit", "min-score");
+    assert_eq!(min_score.default, Some("0.40"), "the recorded default");
+    assert_eq!(
+        min_score.default.expect("a default").parse::<f64>(),
+        Ok(clio_hygiene::DEFAULT_MIN_SCORE),
+        "min-score ties to the constant"
+    );
+}
+
+/// Every documented flag carries the kind its consumer parses: the enum
+/// lists are `cli_write_shared`'s two epistemic kinds, `SourceType`'s wire
+/// table, `cli_write_hygiene`'s five actions, `validate_time_axis`'s two
+/// axes, and the `compose_context` schema's two scopes; the counted flags
+/// are `Uint`, the unit-bounded and score floors `Float`, and every
+/// remaining flag stays free text or the shared `--output` global.
+#[test]
+fn the_shared_workspace_flag_kinds_match_their_consumers() {
+    let actions = ValueKind::Enum(&["flag", "archive", "discard", "delete", "keep"]);
+    for spec in super::SHARED_WORKSPACE {
+        for flag in spec.documented {
+            let Some(value) = flag.value else { continue };
+            let expected = match (spec.name, flag.long) {
+                ("shared store", "epistemic-kind") => ValueKind::Enum(&["fact", "belief"]),
+                ("shared store", "source-type") => ValueKind::Enum(clio_types::SourceType::WIRE),
+                ("hygiene clean", "action") => actions,
+                ("compose-context", "time-axis") => ValueKind::Enum(&["valid", "transaction"]),
+                ("compose-context", "recall-scope") => {
+                    ValueKind::Enum(&["full", "consolidated_only"])
+                }
+                ("shared store", "confidence") | ("hygiene audit", "min-score") => ValueKind::Float,
+                ("hygiene audit" | "hygiene log", "limit" | "offset")
+                | ("compose-context", "budget-tokens") => ValueKind::Uint,
+                (_, "output") => ValueKind::Enum(&["json", "text"]),
+                _ => ValueKind::Text,
+            };
+            assert_eq!(value.kind, expected, "`{} --{}`", spec.name, flag.long);
+        }
+    }
 }

@@ -11,6 +11,7 @@
 //! - The `validate` contract for the two compose records
 //! - The records' usage-line and summary bytes
 //! - The shared accepted set and the record-derived parse names
+//! - The `check_metadata` result over the two compose records
 //!
 //! ## Does not own
 //! - The registry's tranche registration (see `cli_command_registry_tests`)
@@ -21,6 +22,15 @@
 //! Test-only. Never compiled into production builds.
 //!
 //! Keep this module focused on the compose records' data.
+
+/// The compose records' documented flags carry complete metadata.
+#[test]
+fn the_compose_records_carry_complete_metadata() {
+    assert_eq!(
+        crate::cli_command_registry::check_metadata(&[&super::COMPOSE_UP, &super::COMPOSE_DOWN]),
+        Ok(())
+    );
+}
 
 /// The compose records pass `validate` against the catalog inventory.
 #[test]

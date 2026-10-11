@@ -11,6 +11,8 @@
 //!   registered usage text
 //! - The exact `parser_spec` value and boolean flag sequences per command
 //! - Each record's summary, tool, section, and positional values
+//! - The tranche's flag metadata: the enum lists the consumers accept and the
+//!   value kinds their parsers use
 //!
 //! ## Does not own
 //! - The registry lookups and validation (`cli_command_registry_tests`)
@@ -22,8 +24,9 @@
 //!
 //! Keep this module focused on the five core read records' data.
 
+use crate::cli_command_registry::check_metadata;
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
 
 /// `recall` renders today's usage text and builds today's parser sets.
 #[test]
@@ -246,4 +249,75 @@ fn the_five_records_carry_no_extra_surfaces() {
 #[should_panic(expected = "`no-such-command` is registered")]
 fn record_panics_naming_the_missing_command() {
     let _ = record("no-such-command");
+}
+
+/// Every documented flag in this tranche carries a description and, when it
+/// takes a value, a placeholder and non-empty kind.
+#[test]
+fn the_core_reads_tranche_passes_the_metadata_check() {
+    let specs: Vec<&CommandSpec> = super::CORE_READS.iter().collect();
+    assert_eq!(check_metadata(&specs), Ok(()));
+}
+
+/// `recall --limit` records the retrieve tool's constant default.
+#[test]
+fn recall_limit_metadata_default_is_the_retrieve_constant() {
+    let limit = record("recall")
+        .documented
+        .iter()
+        .find(|flag| flag.long == "limit")
+        .expect("recall documents --limit");
+    assert_eq!(
+        limit
+            .default
+            .expect("--limit records a default")
+            .parse::<usize>()
+            .expect("the default is a number"),
+        clio_retrieve::DEFAULT_LIMIT,
+        "recall --limit default"
+    );
+}
+
+/// Every documented flag carries the kind its consumer parses: the enum
+/// lists name exactly the accepted values (`cli_read_args`'s two time axes
+/// and `cli_read_core::inspect_call`'s four validity labels), the counted
+/// flags are `Uint` (`parse_u64`), the score floors are `Float`
+/// (`parse_f64`), and every remaining flag stays free text or the shared
+/// `--output` global.
+#[test]
+fn the_core_reads_flag_kinds_match_their_consumers() {
+    for spec in super::CORE_READS {
+        for flag in spec.documented {
+            let Some(value) = flag.value else { continue };
+            let expected = match (spec.name, flag.long) {
+                ("recall", "time-axis") => ValueKind::Enum(&["valid", "transaction"]),
+                ("inspect", "validity") => {
+                    ValueKind::Enum(&["all", "active", "invalidated", "discarded"])
+                }
+                ("recall" | "inspect", "limit") | ("inspect", "offset") => ValueKind::Uint,
+                ("recall", "min-semantic" | "min-keyword" | "min-reranker" | "min-final") => {
+                    ValueKind::Float
+                }
+                (_, "output") => ValueKind::Enum(&["json", "text"]),
+                _ => ValueKind::Text,
+            };
+            assert_eq!(value.kind, expected, "`{} --{}`", spec.name, flag.long);
+        }
+    }
+}
+
+/// `inspect --limit` and `--offset` record the tool's defaults, which the
+/// `inspect` tool applies inline (50 and 0), with no named constant.
+#[test]
+fn inspect_records_the_limit_and_offset_defaults_the_tool_applies() {
+    let default = |flag: &str| {
+        record("inspect")
+            .documented
+            .iter()
+            .find(|candidate| candidate.long == flag)
+            .unwrap_or_else(|| panic!("inspect documents `--{flag}`"))
+            .default
+    };
+    assert_eq!(default("limit"), Some("50"), "inspect --limit default");
+    assert_eq!(default("offset"), Some("0"), "inspect --offset default");
 }

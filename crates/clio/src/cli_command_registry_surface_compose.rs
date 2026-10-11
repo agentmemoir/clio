@@ -27,9 +27,9 @@ use super::RESERVED_GLOBALS;
 use crate::cli_command_spec::{CommandSpec, Flag, Section};
 
 /// The compose root override.
-const DIR: Flag = Flag::value("dir", "DIR");
+const DIR: Flag = Flag::text("dir", "DIR", "Compose root `compose_cli` resolves.");
 /// The service selection.
-const SERVICES: Flag = Flag::value("services", "LIST");
+const SERVICES: Flag = Flag::text("services", "LIST", "Service selection `compose_cli` takes.");
 
 /// `clio compose up`: materialize the stack and start the chosen services.
 pub(crate) const COMPOSE_UP: CommandSpec = CommandSpec {

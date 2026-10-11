@@ -47,7 +47,11 @@ const SYNC_UNPRINTED: &[&str] = &["db", "backend", "bank", "actor", "no-input", 
 /// line writes it bare because the transfer refuses to run without it.
 const REMOTE: Flag = Flag {
     required: true,
-    ..Flag::value("remote", "HOST:PORT")
+    ..Flag::text(
+        "remote",
+        "HOST:PORT",
+        "Names the peer `sync_cli::transfer_args` sends to, as `host:port`; the transfer refuses to run without it.",
+    )
 };
 
 /// The `status` omission note: what a single-host deployment prints instead.
@@ -87,7 +91,14 @@ pub(crate) const SYNC_STATUS: CommandSpec = CommandSpec {
     summary: "explain what sync would do, and omit when disabled",
     notes: &[STATUS_OMIT_NOTE, STATUS_ROTATION_NOTE],
     positionals: &[],
-    documented: &[Flag::value("banks", "a,b"), GLOBAL_OUTPUT],
+    documented: &[
+        Flag::text(
+            "banks",
+            "a,b",
+            "Selects the banks the status report covers; `sync_cli::banks_arg` splits the comma list and refuses one that names no bank.",
+        ),
+        GLOBAL_OUTPUT,
+    ],
     accepted_extra: SYNC_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,
@@ -106,9 +117,25 @@ pub(crate) const SYNC_PUSH: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         REMOTE,
-        Flag::value("mode", "push|pull|bidirectional"),
-        Flag::value("banks", "a,b"),
-        Flag::value("token", "T"),
+        Flag {
+            default: Some("push"),
+            ..Flag::choice(
+                "mode",
+                "push|pull|bidirectional",
+                "Selects the operation `sync_cli::transfer_args` sends: `push`, `pull`, or `bidirectional`; absent, the sync tool uses `push`.",
+                &["push", "pull", "bidirectional"],
+            )
+        },
+        Flag::text(
+            "banks",
+            "a,b",
+            "Limits the transfer to the named banks; `sync_cli::banks_arg` splits the comma list and refuses one that names no bank.",
+        ),
+        Flag::text(
+            "token",
+            "T",
+            "Bearer token for the peer `sync_cli::secret_flag` sends; absent, it falls back to `CLIO_SYNC_TOKEN`.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: SYNC_UNPRINTED,
@@ -129,9 +156,25 @@ pub(crate) const SYNC_PULL: CommandSpec = CommandSpec {
     positionals: &[],
     documented: &[
         REMOTE,
-        Flag::value("mode", "push|pull|bidirectional"),
-        Flag::value("banks", "a,b"),
-        Flag::value("token", "T"),
+        Flag {
+            default: Some("pull"),
+            ..Flag::choice(
+                "mode",
+                "push|pull|bidirectional",
+                "Selects the operation `sync_cli::transfer_args` sends: `push`, `pull`, or `bidirectional`; absent, the sync tool uses `pull`.",
+                &["push", "pull", "bidirectional"],
+            )
+        },
+        Flag::text(
+            "banks",
+            "a,b",
+            "Limits the transfer to the named banks; `sync_cli::banks_arg` splits the comma list and refuses one that names no bank.",
+        ),
+        Flag::text(
+            "token",
+            "T",
+            "Bearer token for the peer `sync_cli::secret_flag` sends; absent, it falls back to `CLIO_SYNC_TOKEN`.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: SYNC_UNPRINTED,
@@ -151,11 +194,36 @@ pub(crate) const SYNC_SERVE: CommandSpec = CommandSpec {
     notes: &[SERVE_CREDENTIAL_NOTE, SERVE_CLEARTEXT_NOTE],
     positionals: &[],
     documented: &[
-        Flag::value("bind", "ADDR"),
-        Flag::value("banks", "a,b"),
-        Flag::value("token-file", "PATH"),
-        Flag::value("ttl-secs", "N"),
-        Flag::boolean("dev"),
+        Flag {
+            default: Some("127.0.0.1:0"),
+            ..Flag::text(
+                "bind",
+                "ADDR",
+                "Sets the address `sync serve` binds, as `host:port`; port 0 picks an ephemeral port.",
+            )
+        },
+        Flag::text(
+            "banks",
+            "a,b",
+            "Limits the served banks; `sync_cli::banks_arg` splits the comma list and refuses one that names no bank.",
+        ),
+        Flag::text(
+            "token-file",
+            "PATH",
+            "Points at the shared credential store `sync serve` loads once at start; each secret reaches only its record's banks.",
+        ),
+        Flag {
+            default: Some("1800"),
+            ..Flag::uint(
+                "ttl-secs",
+                "N",
+                "Sets the foreground auto-stop TTL in seconds that `sync serve` applies; `sync_cli::serve_args` requires a whole number.",
+            )
+        },
+        Flag::toggle(
+            "dev",
+            "Allows a token-less anonymous bind; `sync serve` refuses one without this outside dev mode.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: SYNC_UNPRINTED,
@@ -174,7 +242,15 @@ pub(crate) const SYNC_KEYGEN: CommandSpec = CommandSpec {
     summary: "Create the sync key in the recorded store and record the choice; the key is printed exactly once and cannot be recovered except with `clio sync key export`",
     notes: &[KEYGEN_NOTE],
     positionals: &[],
-    documented: &[Flag::value("store", "file|keystore"), GLOBAL_OUTPUT],
+    documented: &[
+        Flag::choice(
+            "store",
+            "file|keystore",
+            "Chooses where `sync_key_cli::keygen` writes the key via `KeySource::parse`: `file` or `keystore`; absent, the recorded choice or the recommended `file` store decides.",
+            &["file", "keystore"],
+        ),
+        GLOBAL_OUTPUT,
+    ],
     accepted_extra: SYNC_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,

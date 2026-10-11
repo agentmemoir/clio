@@ -52,13 +52,21 @@ const ADD_UNPRINTED: &[&str] = &["db", "backend", "no-input", "yes"];
 /// bare because the verbs refuse to run without one.
 const LABEL: Flag = Flag {
     required: true,
-    ..Flag::value("label", "LABEL")
+    ..Flag::text(
+        "label",
+        "LABEL",
+        "Names the credential record that `auth_cli` adds or revokes; it is the record's identity.",
+    )
 };
 
 /// The required `--actor ACTOR` of `add`.
 const ACTOR: Flag = Flag {
     required: true,
-    ..Flag::value("actor", "ACTOR")
+    ..Flag::text(
+        "actor",
+        "ACTOR",
+        "Names the actor the credential acts as; `auth_cli::run_add` stores it in the token record.",
+    )
 };
 
 /// The required `--bank BANK` occurrence of `add`: one bank per occurrence and
@@ -66,12 +74,20 @@ const ACTOR: Flag = Flag {
 const BANK_REQUIRED: Flag = Flag {
     required: true,
     repeatable: true,
-    ..Flag::value("bank", "BANK")
+    ..Flag::text(
+        "bank",
+        "BANK",
+        "Scopes the credential to one bank; the parser keeps every occurrence and `auth_cli::run_add` stores them all in the record.",
+    )
 };
 
 /// The optional `--bank` continuation entry: the same one accepted name's
 /// further occurrences, displayed as the optional form.
-const BANK_OPTIONAL: Flag = Flag::value("bank", "BANK");
+const BANK_OPTIONAL: Flag = Flag::text(
+    "bank",
+    "BANK",
+    "Scopes the credential to one bank; the parser keeps every occurrence and `auth_cli::run_add` stores them all in the record.",
+);
 
 /// The optional `PATH` positional of `config get`.
 const PATH_OPTIONAL: Positional = Positional {
@@ -118,8 +134,17 @@ const REVOKE_NOTE: &str = "removes the record; servers load the store at start, 
 /// pair cannot be assembled without changing the printed bytes.
 const ADD_USAGE: &str = "clio auth token add --label LABEL --actor ACTOR --bank BANK [--bank BANK] [--output json|text]";
 
-/// The `config set` scope: one of three named scopes.
-const SCOPE: Flag = Flag::value("scope", "session|profile|deployment");
+/// The `config set` scope: one of three named scopes, and `config_cli::set_call`
+/// falls back to `session` when it is absent.
+const SCOPE: Flag = Flag {
+    default: Some("session"),
+    ..Flag::choice(
+        "scope",
+        "session|profile|deployment",
+        "Selects the configuration scope that `config_cli::set_call` passes to the `config_set` tool; it accepts `session`, `profile`, or `deployment` and falls back to `session`.",
+        &["session", "profile", "deployment"],
+    )
+};
 
 /// `clio auth token add`: mint a credential, print its secret once.
 pub(crate) const AUTH_TOKEN_ADD: CommandSpec = CommandSpec {

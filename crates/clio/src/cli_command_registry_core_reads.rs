@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The five `CommandSpec` records and the tranche that lists them in
 //!   whole-catalog order
+//! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -45,13 +46,19 @@ const ID: Positional = Positional {
 /// `--snapshot`, one arm of the snapshot/gist choice.
 const SNAPSHOT: Flag = Flag {
     exclusive_group: Some("snapshot-gist"),
-    ..Flag::boolean("snapshot")
+    ..Flag::toggle(
+        "snapshot",
+        "Returns the stored snapshot instead of the current item; `cli_read_core::get_call` routes it to `get_snapshot`.",
+    )
 };
 
 /// `--gist`, the other arm of the snapshot/gist choice.
 const GIST: Flag = Flag {
     exclusive_group: Some("snapshot-gist"),
-    ..Flag::boolean("gist")
+    ..Flag::toggle(
+        "gist",
+        "Returns the item's gist instead of the full body; `cli_read_core::get_call` routes it to `get_gist`.",
+    )
 };
 
 /// The flags `get` and `show` document.
@@ -72,17 +79,63 @@ pub(crate) const RECALL: CommandSpec = CommandSpec {
     positionals: &[QUERY],
     documented: &[
         GLOBAL_BANK,
-        Flag::value("limit", "N"),
-        Flag::value("domains", "a,b"),
-        Flag::value("as-of", "TS"),
-        Flag::value("query-anchor", "TS"),
-        Flag::value("time-axis", "valid|transaction"),
-        Flag::value("min-semantic", "N"),
-        Flag::value("min-keyword", "N"),
-        Flag::value("min-reranker", "N"),
-        Flag::value("min-final", "N"),
-        Flag::boolean("no-entities"),
-        Flag::boolean("entity-summary"),
+        Flag {
+            default: Some("10"),
+            ..Flag::uint(
+                "limit",
+                "N",
+                "Caps the result page; `cli_read_core::recall_call` parses it with `parse_u64` for `retrieve` and `cli_read_core` echoes `clio_retrieve::DEFAULT_LIMIT` when omitted.",
+            )
+        },
+        Flag::text(
+            "domains",
+            "a,b",
+            "Restricts retrieval to the listed domains; `cli_read_core::recall_call` splits the comma-separated value with `split_domains`.",
+        ),
+        Flag::text(
+            "as-of",
+            "TS",
+            "Sets the bi-temporal instant the query is evaluated at; `cli_read_core::recall_call` passes it to `retrieve` as `as_of`.",
+        ),
+        Flag::text(
+            "query-anchor",
+            "TS",
+            "Anchors relative time phrases in the query; `cli_read_core::recall_call` passes the RFC 3339 value to `retrieve` as `query_anchor`.",
+        ),
+        Flag::choice(
+            "time-axis",
+            "valid|transaction",
+            "Selects the bi-temporal axis; `cli_read_args::validate_time_axis` accepts `valid` or `transaction` for `retrieve`.",
+            &["valid", "transaction"],
+        ),
+        Flag::float(
+            "min-semantic",
+            "N",
+            "Prunes the semantic arm below this score floor; `cli_read_core::min_scores_arg` parses it with `parse_f64` for `retrieve`.",
+        ),
+        Flag::float(
+            "min-keyword",
+            "N",
+            "Prunes the keyword arm below this score floor; `cli_read_core::min_scores_arg` parses it with `parse_f64` for `retrieve`.",
+        ),
+        Flag::float(
+            "min-reranker",
+            "N",
+            "Filters the ranked page below this reranker score floor; `cli_read_core::min_scores_arg` parses it with `parse_f64`.",
+        ),
+        Flag::float(
+            "min-final",
+            "N",
+            "Filters the ranked page below this final score floor; `cli_read_core::min_scores_arg` parses it with `parse_f64`.",
+        ),
+        Flag::toggle(
+            "no-entities",
+            "Suppresses entity expansion; `cli_read_core::recall_call` sends `include_entities` as false to `retrieve`.",
+        ),
+        Flag::toggle(
+            "entity-summary",
+            "Adds the entity summary; `cli_read_core::recall_call` sends `entity_summary` as true to `retrieve`.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: READS_EXCEPT_BANK_PRINTED,
@@ -136,15 +189,57 @@ pub(crate) const INSPECT: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[],
     documented: &[
-        Flag::value("filter", "JSON"),
-        Flag::value("category", "C"),
-        Flag::value("epistemic-kind", "K"),
-        Flag::value("validity", "V"),
-        Flag::value("time-start", "TS"),
-        Flag::value("time-end", "TS"),
-        Flag::value("limit", "N"),
-        Flag::value("offset", "N"),
-        Flag::boolean("include-discarded"),
+        Flag::text(
+            "filter",
+            "JSON",
+            "Supplies the inspect filter as a JSON object; `cli_read_core::parse_filter` accepts the keys category, epistemic_kind, validity, time_start, time_end, and include_discarded.",
+        ),
+        Flag::text(
+            "category",
+            "C",
+            "Filters by semantic category; `cli_read_core::inspect_call` adds it to the `inspect` filter.",
+        ),
+        Flag::text(
+            "epistemic-kind",
+            "K",
+            "Filters by epistemic kind; `cli_read_core::inspect_call` adds it to the `inspect` filter as `epistemic_kind`.",
+        ),
+        Flag::choice(
+            "validity",
+            "V",
+            "Filters by validity; `cli_read_core::inspect_call` accepts `all`, `active`, `invalidated`, or `discarded`.",
+            &["all", "active", "invalidated", "discarded"],
+        ),
+        Flag::text(
+            "time-start",
+            "TS",
+            "Sets the lower time bound; `cli_read_core::inspect_call` adds it to the `inspect` filter as `time_start`.",
+        ),
+        Flag::text(
+            "time-end",
+            "TS",
+            "Sets the upper time bound; `cli_read_core::inspect_call` adds it to the `inspect` filter as `time_end`.",
+        ),
+        Flag {
+            default: Some("50"),
+            ..Flag::uint(
+                "limit",
+                "N",
+                "Caps the result page; `cli_read_core::inspect_call` parses it with `parse_u64` for `inspect`, which defaults it to 50 when omitted.",
+            )
+        },
+        Flag {
+            default: Some("0"),
+            ..Flag::uint(
+                "offset",
+                "N",
+                "Skips this many leading results; `cli_read_core::inspect_call` parses it with `parse_u64` for `inspect`, which defaults it to 0 when omitted.",
+            )
+        },
+        Flag::toggle(
+            "include-discarded",
+            "Includes discarded memories in the listing; `cli_read_core::inspect_call` adds `include_discarded` as true to the filter.",
+        ),
         GLOBAL_OUTPUT,
     ],
     accepted_extra: READS_EXCEPT_BANK_UNPRINTED,

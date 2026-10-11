@@ -25,7 +25,7 @@
 //! Keep this module focused on the seven sync records' data.
 
 use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::Section;
+use crate::cli_command_spec::{Section, ValueKind};
 
 /// `sync status` renders today's usage text and builds today's parser sets.
 #[test]
@@ -324,5 +324,79 @@ fn validate_accepts_the_sync_records_against_the_catalog_inventory() {
     assert_eq!(
         crate::cli_command_registry::validate(&specs, &inventory),
         Ok(())
+    );
+}
+
+/// Every documented flag in the seven sync records carries complete metadata.
+#[test]
+fn metadata_check_accepts_the_sync_records() {
+    let specs: Vec<&crate::cli_command_spec::CommandSpec> =
+        crate::cli_command_registry_sync::SYNC_LEAVES
+            .iter()
+            .collect();
+    assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
+}
+
+/// Each sync value flag carries the kind its named consumer parses, and the
+/// flags with a fixed code default record it: the per-verb mode, the serve
+/// bind, and the serve TTL. The token and the keygen store are config- and
+/// file-derived, so they stay `None` and name their source.
+#[test]
+fn the_sync_value_flag_kinds_and_defaults_match_their_consumers() {
+    let flag = |name: &str, long: &str| {
+        record(name)
+            .documented
+            .iter()
+            .find(|candidate| candidate.long == long)
+            .unwrap_or_else(|| panic!("`{name}` documents `--{long}`"))
+    };
+    for (name, long) in [
+        ("sync status", "banks"),
+        ("sync push", "remote"),
+        ("sync push", "banks"),
+        ("sync push", "token"),
+        ("sync serve", "bind"),
+        ("sync serve", "banks"),
+        ("sync serve", "token-file"),
+    ] {
+        assert_eq!(
+            flag(name, long).value.expect("a value flag").kind,
+            ValueKind::Text,
+            "`{name} --{long}`"
+        );
+    }
+    assert_eq!(
+        flag("sync push", "mode").value.expect("a value flag").kind,
+        ValueKind::Enum(&["push", "pull", "bidirectional"])
+    );
+    assert_eq!(
+        flag("sync serve", "ttl-secs")
+            .value
+            .expect("a value flag")
+            .kind,
+        ValueKind::Uint
+    );
+    assert_eq!(
+        flag("sync keygen", "store")
+            .value
+            .expect("a value flag")
+            .kind,
+        ValueKind::Enum(&["file", "keystore"])
+    );
+    assert_eq!(flag("sync push", "mode").default, Some("push"));
+    assert_eq!(flag("sync pull", "mode").default, Some("pull"));
+    assert_eq!(flag("sync serve", "bind").default, Some("127.0.0.1:0"));
+    assert_eq!(flag("sync serve", "ttl-secs").default, Some("1800"));
+    assert_eq!(flag("sync push", "token").default, None);
+    assert!(
+        flag("sync push", "token")
+            .description
+            .contains("CLIO_SYNC_TOKEN")
+    );
+    assert_eq!(flag("sync keygen", "store").default, None);
+    assert!(
+        flag("sync keygen", "store")
+            .description
+            .contains("recorded choice")
     );
 }
