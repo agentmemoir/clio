@@ -40,7 +40,7 @@ scripts-check-precommit:
 	python3 scripts/test_precommit_shim.py
 	python3 scripts/test_precommit_all_files.py
 
-# Whether the coverage surface can still measure one run and report it once. The run is split into a test step and a report step so the gate owns a boundary in which to drop a profile buffer it cannot read and an instrumented binary this run did not build, and the report step names a merge failure mode so one bad buffer costs its own coverage instead of the whole verdict. All four protections are invisible to a passing run, which is why nothing else in the tree would notice their removal. Runs no build and no coverage command.
+# Whether the coverage surface can still measure one run and report it once. The test/report split gives hygiene steps a boundary: remove old selected binaries before building, drop unreadable buffers and foreign binaries before the report, and use a merge mode that isolates a bad buffer; the package diagnostic builds in its own instrumented directory. These protections are invisible to a passing run, which is why nothing else in the tree would notice their removal. Runs no build and no coverage command.
 scripts-check-coverage-surface:
 	python3 scripts/coverage_surface_check.py --self-test
 	python3 scripts/coverage_surface_check.py
