@@ -47,7 +47,7 @@ KIND_SHELL = "shell"
 KIND_YAML = "yaml"
 
 #: The suffixes that name a kind on their own.
-KIND_BY_SUFFIX = {".sh": KIND_SHELL, ".yml": KIND_YAML, ".yaml": KIND_YAML}
+KIND_BY_SUFFIX = {".sh": KIND_SHELL, ".yml": KIND_YAML, ".yaml": KIND_YAML, ".mk": KIND_MAKE}
 
 #: The interpreters a shebang may name for an extension-less file to be shell.
 #: The repository lists its own extension-less scripts by name, so the shebang is
