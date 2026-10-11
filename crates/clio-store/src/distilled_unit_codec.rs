@@ -57,3 +57,7 @@ pub(crate) fn revision_from_i64(raw: i64) -> Result<u32, AmError> {
         )
     })
 }
+
+#[cfg(test)]
+#[path = "distilled_unit_codec_tests.rs"]
+mod distilled_unit_codec_tests;
