@@ -155,11 +155,7 @@ fn a_non_interactive_existing_run_takes_the_pasted_default() {
     // question offers.
     let run = Harness::fresh()
         .non_interactive()
-        .flags([
-            ("database", "existing"),
-            ("database-url", ADDRESS),
-            ("database-password", "pw"),
-        ])
+        .flags([("database", "existing"), ("database-url", ADDRESS)])
         .flags(SERVICES_BY_FLAG)
         .run();
     let plan = &run.answers().database.as_ref().expect("a plan").plan;
@@ -314,5 +310,6 @@ fn the_paste_route_refuses_an_advanced_option_flag() {
         .flags(SERVICES_BY_FLAG)
         .expect_refusal();
     assert!(reason.contains("--database-option"), "{reason}");
-    assert!(reason.contains("typed route"), "{reason}");
+    assert!(reason.contains("applies to"), "{reason}");
+    assert!(reason.contains("not to"), "{reason}");
 }
