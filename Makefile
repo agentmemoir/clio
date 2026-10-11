@@ -386,5 +386,11 @@ endif
 ifeq ($(filter down,$(MAKECMDGOALS)),down)
 	$(COMPOSE) -f $(ARCH_FILE) $(PROFILE_FLAG) down
 else
+	# The extract service restart-loops without its model, and Docker creates an
+	# empty models/ itself, so the start is refused before Docker runs. The check
+	# asks Compose which file that service will open, because the name is a
+	# Compose variable that the process environment, `.env`, and the compose file
+	# can each set. `clio compose up` asks the same question on its own path.
+	python3 scripts/compose_extract_model.py --overlay $(ARCH_FILE) $(PROFILE_FLAG)
 	$(COMPOSE) -f $(ARCH_FILE) $(PROFILE_FLAG) up -d
 endif
