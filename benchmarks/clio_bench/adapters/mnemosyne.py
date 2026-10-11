@@ -57,6 +57,7 @@ from ..fingerprint import (
     SettingRecord,
     read_setting,
 )
+from ..packing import pack_context
 from ..tokenizer import ReferenceTokenizer
 from ..types import DialogueTurn, IngestResult, RetrievalResult
 
@@ -285,26 +286,19 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
         if not isinstance(results, list):
             raise MnemosyneAdapterError("mnemosyne recall returned no results list")
 
-        pieces: list[str] = []
-        item_ids: list[str] = []
-        used = 0
+        hits: list[tuple[str, str]] = []
         for hit in results:
             if not isinstance(hit, dict):
                 continue
             item_id = str(hit.get("id") or "")
-            line = f"[{item_id}] {hit.get('content') or ''}"
-            cost = self._tokenizer.count(line)
-            if used + cost > token_budget:
-                break
-            pieces.append(line)
-            item_ids.append(item_id)
-            used += cost
+            hits.append((item_id, f"[{item_id}] {hit.get('content') or ''}"))
 
+        context, used, item_ids = pack_context(hits, token_budget, self._tokenizer)
         return RetrievalResult(
-            context="\n".join(pieces),
+            context=context,
             latency_ms=latency_ms,
             tokens_retrieved=used,
-            item_ids=tuple(item_ids),
+            item_ids=item_ids,
         )
 
     def healthcheck(self) -> bool:

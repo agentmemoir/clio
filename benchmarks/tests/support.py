@@ -8,7 +8,16 @@ import from each other.
 
 from __future__ import annotations
 
-from benchmarks.clio_bench.types import DialogueTurn, Instance, Probe, SuiteData
+import unittest
+
+from benchmarks.clio_bench.packing import accounting_mismatch
+from benchmarks.clio_bench.types import (
+    DialogueTurn,
+    Instance,
+    Probe,
+    RetrievalResult,
+    SuiteData,
+)
 
 # One stand-in answers both documented CLI surfaces. Its recall payload carries
 # the clio key and the mnemosyne key in the same object, and each adapter reads
@@ -158,6 +167,20 @@ def _probe(probe_id: str, instance_id: str, category: str) -> Probe:
         gold_answer="Paris",
         category=category,
     )
+
+
+def assert_context_accounting(
+    case: unittest.TestCase, retrieval: RetrievalResult, tokenizer
+) -> None:
+    """Fail when a retrieval's reported cost is not the cost of its context.
+
+    Every adapter suite calls this, so the invariant is asserted once rather
+    than restated per suite, and a new adapter is covered by the same call.
+    """
+    mismatch = accounting_mismatch(
+        retrieval.context, retrieval.tokens_retrieved, tokenizer
+    )
+    case.assertIsNone(mismatch, mismatch)
 
 
 def synthetic_suite() -> SuiteData:

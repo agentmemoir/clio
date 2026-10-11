@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from benchmarks.clio_bench.adapters.memory import MemoryAdapter
+from benchmarks.clio_bench.cli import main
 from benchmarks.clio_bench.doubles import StubGenerator, StubJudge
 from benchmarks.clio_bench.fetch import PinError, load_pins
 from benchmarks.clio_bench.fingerprint import (
@@ -19,13 +20,14 @@ from benchmarks.clio_bench.fingerprint import (
     FingerprintError,
     unreadable_setting,
 )
-from benchmarks.clio_bench.runner import (
-    _DEFAULT_PINS,
+from benchmarks.clio_bench.report import (
     build_report,
-    load_suite,
-    main,
     render_markdown,
     render_settings_lines,
+)
+from benchmarks.clio_bench.runner import (
+    _DEFAULT_PINS,
+    load_suite,
     run_suite,
     select_work,
 )
@@ -69,6 +71,7 @@ class RunSuiteTests(unittest.TestCase):
             fractions=_FRACTIONS,
             max_probes=None,
             token_budget=4096,
+            tokenizer=get_tokenizer(),
         )
 
     def test_train_partition_runs_all_instances(self) -> None:
@@ -92,6 +95,7 @@ class RunSuiteTests(unittest.TestCase):
             fractions=_FRACTIONS,
             max_probes=None,
             token_budget=4096,
+            tokenizer=get_tokenizer(),
             max_instances=1,
         )
         self.assertEqual(len(results), 2)
@@ -116,6 +120,7 @@ class RunSuiteTests(unittest.TestCase):
             fractions=_FRACTIONS,
             max_probes=None,
             token_budget=4096,
+            tokenizer=get_tokenizer(),
         )
         self.assertEqual(len(results), 2)
         self.assertTrue(all(r.judge is None for r in results))
@@ -138,6 +143,7 @@ class RunSuiteTests(unittest.TestCase):
             fractions=_FRACTIONS,
             max_probes=None,
             token_budget=4096,
+            tokenizer=get_tokenizer(),
             stats=stats,
         )
         self.assertEqual(len(results), 2)
@@ -161,6 +167,7 @@ class ReportTests(unittest.TestCase):
             fractions=_FRACTIONS,
             max_probes=None,
             token_budget=4096,
+            tokenizer=get_tokenizer(),
         )
         return build_report(
             pins=load_pins(_DEFAULT_PINS),
@@ -270,7 +277,7 @@ class CliTests(unittest.TestCase):
             out = Path(tmp) / "baseline.json"
             md = Path(tmp) / "baseline.md"
             with mock.patch(
-                "benchmarks.clio_bench.runner.load_suite", return_value=synthetic_suite()
+                "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
             ):
                 code = self._run_main(
                     [
@@ -347,9 +354,9 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "should-not-exist.json"
             with mock.patch(
-                "benchmarks.clio_bench.runner.load_suite", return_value=synthetic_suite()
+                "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
             ), mock.patch(
-                "benchmarks.clio_bench.runner._build_adapter",
+                "benchmarks.clio_bench.cli._build_adapter",
                 return_value=BrokenFingerprint(get_tokenizer()),
             ):
                 code = self._run_main(
@@ -375,7 +382,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "should-not-exist.json"
             with mock.patch(
-                "benchmarks.clio_bench.runner.load_suite",
+                "benchmarks.clio_bench.cli.load_suite",
                 side_effect=PinError("sha256 mismatch"),
             ):
                 code = self._run_main(
@@ -407,7 +414,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "should-not-exist.json"
             with mock.patch(
-                "benchmarks.clio_bench.runner.load_suite", return_value=synthetic_suite()
+                "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
             ), mock.patch(
                 "benchmarks.clio_bench.judges.llm_judge.LlmJudge.score",
                 side_effect=ChatClientError("judge endpoint down"),

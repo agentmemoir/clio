@@ -70,7 +70,12 @@ class IngestResult:
 
 @dataclass
 class RetrievalResult:
-    """Context returned for one probe under a hard token budget."""
+    """Context returned for one probe under a hard token budget.
+
+    `tokens_retrieved` is the cost of `context`, so the budget bounds the text
+    the answer generator receives rather than a total of the system's own hit
+    costs.
+    """
 
     context: str
     latency_ms: float
