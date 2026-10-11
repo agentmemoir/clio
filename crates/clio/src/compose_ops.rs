@@ -52,8 +52,9 @@ pub(crate) const HEALTH_WAIT_SECONDS: &str = "600";
 ///
 /// # Errors
 /// An unknown service name, an unreachable Docker CLI/daemon, a
-/// materialization or file-write failure, a service that never became healthy,
-/// or a non-zero Compose exit.
+/// materialization or file-write failure, a missing model file for the
+/// `extract` service, a service that never became healthy, or a non-zero
+/// Compose exit.
 #[allow(dead_code, reason = "the stage 6 apply path is its first caller")]
 pub(crate) fn start_services(
     runner: &dyn DockerRunner,
@@ -68,7 +69,7 @@ pub(crate) fn start_services(
     }
     probe(runner)?;
     let root = resolve_root(dir)?;
-    prepare_root(&root, target, stack)?;
+    prepare_root(&root, target, stack, runner)?;
     let args = compose_args(
         target,
         stack,

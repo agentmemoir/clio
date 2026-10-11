@@ -140,13 +140,26 @@ fn bind_mount_check_names_the_missing_source() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Only `extract` mounts `models/`, and the check that reads that mount lives
+/// in `compose_model`, where it tests the file inside the directory. Requiring
+/// the directory here is what let Docker's own auto-created empty one satisfy
+/// the guard for every selection.
 #[test]
-fn gguf_path_lands_in_models() {
-    let root = Path::new("/tmp");
-    assert_eq!(
-        gguf_path(root, GGUF_FILE_NAME),
-        root.join("models").join(GGUF_FILE_NAME)
+fn the_init_script_check_does_not_require_the_model_directory() {
+    let root = temp_root("no-models-dir");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    assert!(
+        root.join("models").is_dir(),
+        "materialize writes the models/ README, so the directory a directory-level check would \
+         trust is there to begin with"
     );
+    std::fs::remove_dir_all(root.join("models")).expect("delete models/");
+    assert_eq!(
+        verify_bind_mounts(&root),
+        Ok(()),
+        "models/ is mounted by extract alone, so this check must not require it"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

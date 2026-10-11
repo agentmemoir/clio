@@ -104,7 +104,13 @@ impl StubDocker {
 }
 
 impl DockerRunner for StubDocker {
-    fn capture(&self, _args: &[&str], _dir: &Path) -> io::Result<(i32, String)> {
+    fn capture(&self, args: &[&str], _dir: &Path) -> io::Result<(i32, String)> {
+        // A resolved-stack query answers with a resolved stack. The selections
+        // these tests start hold no `extract` service, and an empty body is a
+        // shape the engine never prints.
+        if args.contains(&"config") {
+            return Ok((0, crate::compose_docker::tests::no_extract_config()));
+        }
         Ok((i32::from(!self.probe_ok), String::new()))
     }
 
