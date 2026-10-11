@@ -297,13 +297,13 @@ fn anchored_recall_matches_the_mcp_dispatch_payload() {
     );
     assert_eq!(code, ExitCode::from(0), "{err}");
     assert_eq!(json_of(&out)["ok"], json!(true), "CLI surface: {out}");
-    // The CLI deliberately echoes `query` at the top level for its text view;
-    // drop that echo so the retrieval fields compare key for key.
+    // The CLI deliberately echoes `query` and the effective `limit` at the top
+    // level for its text view; drop those echoes so the retrieval fields compare
+    // key for key.
     let mut cli_payload = json_of(&out);
-    cli_payload
-        .as_object_mut()
-        .expect("payload")
-        .remove("query");
+    let cli_object = cli_payload.as_object_mut().expect("payload");
+    cli_object.remove("query");
+    cli_object.remove("limit");
     assert_eq!(
         strip_volatile(cli_payload),
         strip_volatile(mcp),

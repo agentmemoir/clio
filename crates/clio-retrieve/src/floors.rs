@@ -14,6 +14,8 @@
 //! - `MAX_FLOOR` and the per-field ceiling rule
 //! - `apply_semantic_floor`, `apply_keyword_floor`,
 //!   `apply_reranker_floor`, and `final_floor_keeps`
+//! - `binding_floor_warnings`, the wire-name warning for a floor that emptied
+//!   the page
 //! - `provenance_rung` and `provenance_floor_keeps`, the rung a provenance
 //!   class sits at and whether an item clears the named floor
 //!
@@ -232,6 +234,29 @@ pub fn apply_reranker_floor<T>(
 #[must_use]
 pub fn final_floor_keeps(score: f64, floor: Option<f64>) -> bool {
     floor.is_none_or(|floor| score >= floor)
+}
+
+/// The tail shared by every binding-floor warning.
+///
+/// Exported so the CLI, which shows only these warnings on an empty page, keys
+/// on one wording rather than a copy of it.
+pub const FLOOR_BINDING_WARNING_SUFFIX: &str = "removed every retrieval candidate.";
+
+/// One warning per candidate floor named in `binding`, naming the floor by its
+/// wire name.
+///
+/// Each entry is one of `semantic`, `keyword`, `reranker`, or `final`. The
+/// subject is the wire name (`min_scores.semantic`) rather than a phrase, so
+/// the CLI can rewrite it to the flag the caller typed with the same vocabulary
+/// it uses for the tool's error messages. The caller emits these only when the
+/// page came back empty, so a floor that merely shortened a non-empty page
+/// reports nothing.
+#[must_use]
+pub fn binding_floor_warnings(binding: &[&str]) -> Vec<String> {
+    binding
+        .iter()
+        .map(|name| format!("min_scores.{name} {FLOOR_BINDING_WARNING_SUFFIX}"))
+        .collect()
 }
 
 /// The rung an item's own provenance sits at.

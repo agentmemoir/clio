@@ -78,7 +78,7 @@ impl ReadGroup for HistoryGroup {
         }
     }
 
-    fn decorate(&self, verb: &str, parsed: &ParsedArgs, payload: &mut Value) {
+    fn decorate(&self, verb: &str, parsed: &ParsedArgs, _arguments: &Value, payload: &mut Value) {
         // Defence in depth: history views echo task definitions, failure
         // lessons, and gists, so mask secret-keyed string fields and scrub
         // inline `key: secret` prose before anything leaves the command.

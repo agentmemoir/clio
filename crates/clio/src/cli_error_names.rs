@@ -71,6 +71,7 @@ const INPUT_NAMES: &[(&str, &str)] = &[
         "the --min-semantic, --min-keyword, --min-reranker or --min-final flag",
     ),
     ("query_anchor", "--query-anchor"),
+    ("domain", "--domains"),
     ("entity_summary", "--entity-summary"),
     ("include_discarded", "--include-discarded"),
     ("epistemic_kind", "--epistemic-kind"),

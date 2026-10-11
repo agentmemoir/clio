@@ -127,7 +127,6 @@ fn retrieve_at(state: &McpState, args: &Value, now: Option<String>) -> Result<Va
     let provenance_floor =
         read_provenance_floor(state, ctx.bank.as_str(), args.get("provenance_floor"))?;
     let min_scores = min_scores_from_value(args.get("min_scores"))?;
-    let has_min_score_filter = !min_scores.is_empty();
     let request = RetrieveRequest {
         bank: ctx.bank.as_str().to_owned(),
         query: req_str(args, "query")?.to_owned(),
@@ -150,16 +149,7 @@ fn retrieve_at(state: &McpState, args: &Value, now: Option<String>) -> Result<Va
         include_exact: opt_bool(args, "include_exact", false)?,
         provenance_floor,
     };
-    let mut outcome = state.retriever.retrieve(&request)?;
-    let source_candidates = outcome.dense_candidates + outcome.lexical_candidates;
-    if has_min_score_filter
-        && outcome.hits.is_empty()
-        && (outcome.fused_candidates > 0 || source_candidates > 0)
-    {
-        outcome
-            .warnings
-            .push("The requested min_scores filters removed every retrieval candidate.".into());
-    }
+    let outcome = state.retriever.retrieve(&request)?;
     let mut value = serde_json::to_value(&outcome).expect("serialize retrieve outcome");
     if opt_bool(args, "explain", false)? {
         value["explanation"] = retrieve_explanation(&outcome, &request.domains);

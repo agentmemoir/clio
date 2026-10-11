@@ -120,18 +120,7 @@ fn a_floor_that_removes_every_hit_adds_a_warning() {
         result["hits"].as_array().is_some_and(Vec::is_empty),
         "{result}"
     );
-    for warnings in [&result["warnings"], &result["explanation"]["warnings"]] {
-        assert!(
-            warnings
-                .as_array()
-                .is_some_and(|values| values.iter().any(|value| {
-                    value
-                        .as_str()
-                        .is_some_and(|text| text.contains("min_scores"))
-                })),
-            "missing floor warning: {result}"
-        );
-    }
+    assert_floor_warning(&result, "min_scores.final");
 }
 
 #[test]
@@ -160,7 +149,7 @@ fn semantic_floor_that_prunes_the_dense_arm_adds_a_warning() {
         json!({"query": "unmatched words", "min_scores": {"semantic": 1.0}, "explain": true}),
     );
     assert_eq!(result["ok"], json!(true), "{result}");
-    assert_floor_warning(&result);
+    assert_floor_warning(&result, "min_scores.semantic");
 }
 
 #[test]
@@ -172,24 +161,22 @@ fn keyword_floor_that_prunes_the_lexical_arm_adds_a_warning() {
         json!({"query": "alpha beta", "min_scores": {"keyword": 1_000_000.0}, "explain": true}),
     );
     assert_eq!(result["ok"], json!(true), "{result}");
-    assert_floor_warning(&result);
+    assert_floor_warning(&result, "min_scores.keyword");
 }
 
-fn assert_floor_warning(result: &Value) {
+/// The warning names the floor that emptied the page, on the arm scales and on
+/// the `final` page scale, in both the top-level list and the explanation trace.
+fn assert_floor_warning(result: &Value, named: &str) {
     assert!(
         result["hits"].as_array().is_some_and(Vec::is_empty),
         "{result}"
     );
     for warnings in [&result["warnings"], &result["explanation"]["warnings"]] {
         assert!(
-            warnings
-                .as_array()
-                .is_some_and(|values| values.iter().any(|value| {
-                    value
-                        .as_str()
-                        .is_some_and(|text| text.contains("min_scores"))
-                })),
-            "missing floor warning: {result}"
+            warnings.as_array().is_some_and(|values| values
+                .iter()
+                .any(|value| { value.as_str().is_some_and(|text| text.contains(named)) })),
+            "missing `{named}` floor warning: {result}"
         );
     }
 }

@@ -183,6 +183,8 @@ def run(check, raises) -> tuple:
         name: globals()[name]
         for name in (
             "clear_profile_buffers",
+            "resolved_instrumented_dir",
+            "drop_selected_objects",
             "run_coverage_tests",
             "instrumented_dir",
             "drop_invalid_profraws",
@@ -192,6 +194,13 @@ def run(check, raises) -> tuple:
     }
     try:
         globals()["clear_profile_buffers"] = lambda env: step_envs.__setitem__("clear", env)
+        globals()["resolved_instrumented_dir"] = (
+            lambda env=None: step_envs.__setitem__("resolved_dir", env)
+            or ROOT / "target" / "llvm-cov-target"
+        )
+        globals()["drop_selected_objects"] = lambda directory, selected: step_envs.__setitem__(
+            "selected", (directory, tuple(selected))
+        )
         globals()["run_coverage_tests"] = (
             lambda pkgs, filt=None, env=None: step_envs.__setitem__("test", env)
         )
@@ -216,9 +225,22 @@ def run(check, raises) -> tuple:
         True,
     )
     check(
-        "and both hygiene steps inspect the directory that resolution returned",
-        (step_envs.get("buffers"), step_envs.get("prune")),
-        (ROOT / "target" / "llvm-cov-target", ROOT / "target" / "llvm-cov-target"),
+        "pre-run and report hygiene inspect the resolved directory",
+        (
+            step_envs.get("selected"),
+            step_envs.get("buffers"),
+            step_envs.get("prune"),
+        ),
+        (
+            (ROOT / "target" / "llvm-cov-target", ("clio-store",)),
+            ROOT / "target" / "llvm-cov-target",
+            ROOT / "target" / "llvm-cov-target",
+        ),
+    )
+    check(
+        "pre-run object cleanup resolves the same environment as the test step",
+        step_envs.get("resolved_dir") is step_envs.get("test") and step_envs.get("test") is not None,
+        True,
     )
     check(
         "the report step runs in the same environment as the test step",

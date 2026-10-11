@@ -141,6 +141,10 @@ where
     Ok(clio_mcp::runtime::McpOpenOptions {
         backend: resolved.backend,
         database_url: resolved.url,
+        // The MCP server's `--bank` is its configured default: the bank a
+        // request that names none resolves to. A request that names another
+        // bank is still checked against the store, so exempting this default
+        // is safe.
         default_bank: flags
             .get("bank")
             .cloned()

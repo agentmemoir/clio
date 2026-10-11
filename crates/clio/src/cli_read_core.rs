@@ -9,6 +9,7 @@
 //! ## Owns
 //! - Flag decoding for the core read verbs into MCP tool arguments
 //! - The `recall` score-floor, entity-inclusion, and temporal-anchor flag mapping
+//! - The `recall` binding-floor warning rewrite and the echoed effective limit
 //! - The `inspect` truncation decoration and their human text views
 //!
 //! ## Does not own
@@ -59,17 +60,26 @@ impl ReadGroup for CoreGroup {
         crate::cli_read_render::render_text(verb, payload, palette)
     }
 
-    fn decorate(&self, verb: &str, parsed: &ParsedArgs, payload: &mut Value) {
+    fn decorate(&self, verb: &str, parsed: &ParsedArgs, arguments: &Value, payload: &mut Value) {
         if verb == "inspect" {
             add_truncated(payload);
         }
         if verb == "recall" {
-            // Echo the query so the text view can head the results with it.
-            if let Ok(query) = one_positional(parsed, "recall", "QUERY")
-                && let Some(map) = payload.as_object_mut()
-            {
-                map.insert("query".into(), Value::from(query));
+            // Echo the query and the limit that actually ran, so the text view
+            // can head the results and the caller can see a defaulted limit.
+            if let Some(map) = payload.as_object_mut() {
+                if let Ok(query) = one_positional(parsed, "recall", "QUERY") {
+                    map.insert("query".into(), Value::from(query));
+                }
+                // The value `build` sent, defaulted when the caller did not type
+                // `--limit`, so the echo cannot drift from the request.
+                let limit = arguments
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(clio_retrieve::DEFAULT_LIMIT as u64);
+                map.insert("limit".into(), Value::from(limit));
             }
+            name_floor_warnings(payload);
         }
     }
 }
@@ -103,6 +113,26 @@ fn recall_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
         args.insert("entity_summary".into(), Value::Bool(true));
     }
     Ok(("retrieve", Value::Object(args)))
+}
+
+/// Rewrite the tool's floor names in a `recall` payload's warnings into the
+/// flags the caller typed.
+///
+/// The retrieval layer names a binding floor by its wire name
+/// (`min_scores.final`) so any caller can read it; a shell caller typed
+/// `--min-final`. The same vocabulary that translates a tool error translates
+/// the warning, so the two can never disagree. Every other warning is passed
+/// through untouched.
+fn name_floor_warnings(payload: &mut Value) {
+    let Some(warnings) = payload.get_mut("warnings").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for warning in warnings {
+        if let Some(text) = warning.as_str() {
+            let named = crate::cli_error::name_cli_inputs(text);
+            *warning = Value::from(named);
+        }
+    }
 }
 
 /// The `min_scores` object built from the floor flags the caller actually gave.

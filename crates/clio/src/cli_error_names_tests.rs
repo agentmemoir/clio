@@ -43,6 +43,14 @@ fn the_reported_internal_names_become_cli_flags() {
             "--min-reranker must be <= 1",
         ),
         (
+            "retrieve min_scores.final must be <= 1000000",
+            "--min-final must be <= 1000000",
+        ),
+        (
+            "domain must be semantic|episodic|task|failure|temporal|persona, got `bogus`",
+            "--domains must be semantic|episodic|task|failure|temporal|persona, got `bogus`",
+        ),
+        (
             "query_anchor must be an RFC 3339 timestamp with an explicit UTC offset",
             "--query-anchor must be an RFC 3339 timestamp with an explicit UTC offset",
         ),

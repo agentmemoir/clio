@@ -206,6 +206,11 @@ fn recall_with_an_unreachable_final_floor_returns_an_empty_page() {
         unfloored.get("entity_summary").is_none(),
         "a plain recall carries no summary: {unfloored}"
     );
+    assert_eq!(
+        unfloored["limit"],
+        Value::from(10),
+        "the default limit is echoed: {unfloored}"
+    );
 
     let floored = recall_json(
         &db,
@@ -230,6 +235,14 @@ fn recall_with_an_unreachable_final_floor_returns_an_empty_page() {
     assert!(
         floored.get("entity_summary").is_none(),
         "a floored recall carries no summary either: {floored}"
+    );
+    assert!(
+        floored["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings.iter().any(|warning| warning
+                .as_str()
+                .is_some_and(|text| text.contains("--min-final")))),
+        "the empty page names the binding floor by the flag typed: {floored}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -334,6 +347,37 @@ fn recall_entity_summary_with_no_entities_is_refused() {
     // field names, which is what reaches a shell.
     assert!(message.contains("--entity-summary"), "{envelope}");
     assert!(message.contains("--no-entities"), "{envelope}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An unknown bank is an error over the real binary, not an empty page, and the
+/// bank the seed wrote to still reads.
+#[test]
+fn recall_unknown_bank_is_not_found() {
+    let dir = seed_scenario("unknown-bank");
+    let db = dir.join("clio.db");
+
+    let output = run(
+        &db,
+        &["recall", "terse", "--bank", "nope", "--output", "json"],
+    );
+    assert!(
+        !output.status.success(),
+        "an unknown bank must fail: {}",
+        stdout_of(&output)
+    );
+    assert!(
+        stdout_of(&output).is_empty(),
+        "no payload: {}",
+        stdout_of(&output)
+    );
+    let envelope = json_stderr(&output);
+    assert_eq!(envelope["ok"], Value::Bool(false), "{envelope}");
+    assert_eq!(envelope["code"], Value::from("not_found"), "{envelope}");
+
+    let ok = recall_json(&db, &["recall", "terse", "--output", "json"]);
+    assert!(!hits(&ok).is_empty(), "{ok}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

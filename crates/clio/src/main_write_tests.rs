@@ -189,7 +189,9 @@ fn remember_dry_run_against_a_file_store_writes_nothing_and_exits_zero() {
         "json".into(),
     ]);
     assert_eq!(code, ExitCode::SUCCESS);
-    // The file store never received the item: a fresh open has no bank rows.
+    // The file store never received the item, so the dry-run registered no
+    // `demo` bank: a read refuses the unknown bank instead of reporting an
+    // empty page.
     let code = run(vec![
         "--db".into(),
         db.clone(),
@@ -199,7 +201,7 @@ fn remember_dry_run_against_a_file_store_writes_nothing_and_exits_zero() {
         "--output".into(),
         "json".into(),
     ]);
-    assert_eq!(code, ExitCode::SUCCESS);
+    assert_eq!(code, ExitCode::from(1));
     let _ = std::fs::remove_file(&db);
 }
 

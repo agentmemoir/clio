@@ -180,7 +180,12 @@ fn audit_trail_masks_planted_secret() {
         "item_id": "i",
         "revisions": [{"api_key": "sk-live-supersecret"}],
     });
-    WorkspaceGroup.decorate("audit trail", &ParsedArgs::default(), &mut payload);
+    WorkspaceGroup.decorate(
+        "audit trail",
+        &ParsedArgs::default(),
+        &serde_json::json!({}),
+        &mut payload,
+    );
     let masked = payload.to_string();
     assert!(!masked.contains("supersecret"), "{masked}");
     assert!(
@@ -198,7 +203,12 @@ fn audit_trail_masks_planted_secret() {
         "item_id": "i",
         "revisions": [{"api_key": "sk-live-supersecret", "token_count": 3}],
     });
-    WorkspaceGroup.decorate("audit trail", &ParsedArgs::default(), &mut numeric);
+    WorkspaceGroup.decorate(
+        "audit trail",
+        &ParsedArgs::default(),
+        &serde_json::json!({}),
+        &mut numeric,
+    );
     assert_eq!(numeric["revisions"][0]["api_key"], json!("****cret"));
     assert_eq!(numeric["revisions"][0]["token_count"], json!(3));
 

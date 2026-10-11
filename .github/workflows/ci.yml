@@ -229,6 +229,12 @@ jobs:
         if: always()
         run: make scripts-check-lint-scope
 
+      # The admission gate-boundary tripwires scan every crate, so they must run
+      # on every change; `scripts-check-ci-parity` keeps this step in place.
+      - name: Gate-boundary tripwires
+        if: always()
+        run: make scripts-check-gate-boundary
+
       # Whether a workflow installs the compiler the repository pins. The step
       # above the toolchain install already fails on a mismatch, but it runs on
       # the runner, so it answers after the push. This one answers before it.
@@ -287,6 +293,14 @@ jobs:
       - name: CI suite parity
         if: always()
         run: make scripts-check-ci-parity
+
+      # Whether the Makefile's compose path still refuses to start the extract
+      # service without its model. That path runs `docker compose` itself, so the
+      # check inside the CLI does not run there, and the parity step above will
+      # not notice a guard that stopped firing.
+      - name: Compose extract-model guard
+        if: always()
+        run: make scripts-check-compose-model
 
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.

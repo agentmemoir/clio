@@ -115,6 +115,7 @@ mod compose_assets;
 mod compose_cli;
 mod compose_docker;
 mod compose_env;
+mod compose_model;
 mod compose_ops;
 mod config_cli;
 mod connection_text;
