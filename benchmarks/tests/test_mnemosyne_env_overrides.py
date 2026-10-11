@@ -110,11 +110,15 @@ class FingerprintEnvOverrideTests(unittest.TestCase):
                 )
 
     def test_string_boolean_from_config_matches_environment_alias(self) -> None:
-        adapter = self._adapter({"MNEMOSYNE_CROSS_SESSION": "on"})
+        cases = (("on", "yes", True), ("off", "no", False))
 
-        fingerprint = self._fingerprint(adapter, 0.42, "yes")
+        for requested, effective, expected in cases:
+            with self.subTest(requested=requested, effective=effective):
+                adapter = self._adapter({"MNEMOSYNE_CROSS_SESSION": requested})
 
-        self.assertEqual(fingerprint.settings["cross_session"].value, "yes")
+                fingerprint = self._fingerprint(adapter, 0.42, effective)
+
+                self.assertIs(fingerprint.settings["cross_session"].value, expected)
 
 
 if __name__ == "__main__":

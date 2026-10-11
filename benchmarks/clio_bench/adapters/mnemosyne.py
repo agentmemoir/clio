@@ -336,6 +336,11 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
         requested_env = self._env(None)
         for key in REQUIRED_SETTINGS:
             setting = self._read_setting(key)
+            if key == "cross_session":
+                setting = read_setting(
+                    value=self._parse_bool_setting(setting.value),
+                    surface=setting.surface,
+                )
             settings[key] = setting
             env_key = f"MNEMOSYNE_{key.upper()}"
             requested = requested_env.get(env_key)
@@ -343,11 +348,9 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
                 continue
             if key == "cross_session":
                 requested_value = self._parse_bool_setting(requested)
-                effective_value = self._parse_bool_setting(setting.value)
             else:
                 requested_value = self._parse_value(requested)
-                effective_value = setting.value
-            if effective_value != requested_value:
+            if setting.value != requested_value:
                 raise FingerprintError(
                     f"mnemosyne config.yaml overrides {env_key}: effective {key} is "
                     f"{setting.value!r}, requested {requested!r}; use a fresh data directory"
