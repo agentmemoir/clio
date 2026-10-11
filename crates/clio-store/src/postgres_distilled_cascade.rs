@@ -40,9 +40,9 @@ static CASCADE_AUDIT_SEQ: AtomicU64 = AtomicU64::new(0);
 ///
 /// A unit whose current content is unreadable for erasure reasons is left
 /// untouched (dead unit; erasure evidence). A discarded unit id that is the
-/// record's hub leaves the source ids alone: the hub column is the unit's
-/// identity, the unit stays stale, and reconciliation of a discarded hub never
-/// rebuilds. Telemetry is ids and counts only.
+/// record's hub leaves the source ids and the current evidence alone: the hub
+/// column is the unit's identity, the unit stays stale, and reconciliation of a
+/// discarded hub never rebuilds. Telemetry is ids and counts only.
 pub(crate) fn cascade_source_removed_tx(
     tx: &mut postgres::Transaction<'_>,
     kms: &dyn crate::dek::DekProvider,
@@ -59,8 +59,12 @@ pub(crate) fn cascade_source_removed_tx(
         record.source_ids.retain(|id| id != removed_id);
         // The current revision's evidence list follows the claim set: a source
         // that left active use stops counting toward the proof count. Earlier
-        // revisions keep their entries as history of what was claimed then.
-        record.drop_source_from_current_evidence(removed_id);
+        // revisions keep their entries as history of what was claimed then. The
+        // hub is the exception: `claim_ids()` re-inserts it as the unit's
+        // identity, so a discarded hub stays a claim and keeps its entry too.
+        if removed_id != record.hub_id {
+            record.drop_source_from_current_evidence(removed_id);
+        }
         record.stale_reason = Some(crate::distilled_unit::STALE_SOURCE_REMOVED.to_owned());
         record.stale_at = Some(discarded_at.to_owned());
         record.stale_detail = None;

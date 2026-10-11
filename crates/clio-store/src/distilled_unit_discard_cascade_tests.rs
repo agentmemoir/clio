@@ -198,6 +198,11 @@ fn suite_cascade(store: &dyn CascadeBackend) {
         2,
         "one cascade event per discard"
     );
+    // A discarded hub stays a claim, so its evidence entry and the count stay.
+    let discarded = store.discard_item(&bank, &hub, "withdrawn", "2026-06-05", "tester");
+    discarded.unwrap();
+    let after_hub = store.get_distilled_unit(&bank, &unit_id).unwrap().unwrap();
+    assert_eq!(after_hub.proof_count(), after_hub.claim_ids().len());
 
     // A discarded item no unit claims cascades to nothing.
     let stranger = unique("stranger");
