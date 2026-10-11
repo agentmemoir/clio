@@ -27,7 +27,10 @@ from benchmarks.clio_bench.adapters.mnemosyne import (  # noqa: E402
 )
 from benchmarks.clio_bench.fingerprint import FingerprintError  # noqa: E402
 from benchmarks.clio_bench.tokenizer import get_tokenizer  # noqa: E402
-from benchmarks.clio_bench.types import DialogueTurn  # noqa: E402
+from benchmarks.clio_bench.types import (  # noqa: E402
+    REFUSAL_FILTERED,
+    DialogueTurn,
+)
 from benchmarks.tests.mnemosyne_support import (  # noqa: E402
     MnemosyneAdapterTestCase,
 )
@@ -94,6 +97,17 @@ class IngestTests(MnemosyneAdapterTestCase):
         result = adapter.ingest("session-a", self._turn())
         self.assertFalse(result.ok)
         self.assertIsNotNone(result.error)
+
+    def test_a_declined_write_is_recorded_as_a_filtered_turn(self) -> None:
+        """The system's own write filter is not an admission gate.
+
+        Mnemosyne declines by returning no id from its write classifier, which
+        drops a noise pattern or a secret; naming that an admission refusal
+        would relabel filtering as a gate decision.
+        """
+        adapter = self.make_adapter(extra_env={"CLIO_BENCH_STORE": self.store_dir, "FAKE_MNEMOSYNE_REFUSE": "1"})
+        result = adapter.ingest("session-a", self._turn())
+        self.assertEqual(result.refusal, REFUSAL_FILTERED)
 
     def test_ingest_sends_the_pinned_importance(self) -> None:
         record = os.path.join(self.tmpdir, "argv.jsonl")
