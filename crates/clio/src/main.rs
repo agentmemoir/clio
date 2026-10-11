@@ -122,6 +122,7 @@ mod setup_defaults;
 mod setup_flags;
 mod setup_flows_db;
 mod setup_flows_db_fields;
+mod setup_flows_db_flags;
 mod setup_flows_db_paste;
 mod setup_flows_db_typed;
 mod setup_key_source;
