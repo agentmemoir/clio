@@ -186,6 +186,11 @@ fn an_argument_no_handler_acts_on_is_still_refused_by_name() {
             }),
         ),
         ("hygiene_clean", "item_id", json!({"item_id": "itm-1"})),
+        (
+            "sync_ack_skip",
+            "remote",
+            json!({"sync_mutation_id": "m", "remote": "host:1"}),
+        ),
     ];
     for (tool, key, args) in cases {
         let message = refusal(tool, &args);

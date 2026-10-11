@@ -53,7 +53,7 @@ BATCH_PREFIX = "batch"
 ROUTED = "routed by name"
 
 GUARD = "refused on purpose: the handler reads it only to reject it with a message"
-SHARED = "read through a shared helper; not yet judged"
+OPEN = "an open bug: the status report has no source for the remote or the token"
 
 #: Reads of an undeclared argument that exist on `master` today. Remove an entry when the
 #: schema declares the argument or the read goes; a stale entry fails the run.
@@ -62,10 +62,7 @@ KNOWN: dict[tuple[str, str], str] = {
         ("consolidate", "scope"), ("sync_push", "sync_key"), ("sync_pull", "sync_key"),
         ("sync_serve", "token"),
     ]},
-    **{pair: SHARED for pair in [
-        ("sync_ack_skip", "remote"), ("sync_ack_skip", "sync_key"), ("sync_ack_skip", "token"),
-        ("sync_status", "remote"), ("sync_status", "token"),
-    ]},
+    **{pair: OPEN for pair in [("sync_status", "remote"), ("sync_status", "token")]},
 }
 
 _ARM = re.compile(r'"(\w+)"((?:\s*\|\s*"\w+")*)\s*=>')
