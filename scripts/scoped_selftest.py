@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Collection, Iterable, NamedTuple, Sequence
 
-from scoped_runner import EXIT_OK, owned
+from scoped_core import EXIT_OK, owned
 
 from scoped_selftest_select import run as run_select
 from scoped_selftest_refs import run as run_refs

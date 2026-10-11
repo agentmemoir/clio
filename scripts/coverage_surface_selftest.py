@@ -11,6 +11,7 @@ from coverage_surface_core import (
     EXIT_FINDINGS,
     EXIT_OK,
     EXIT_UNREADABLE,
+    PACKAGE_RUNNER,
     REPORT_BUILDER,
     RUNNER,
     report,
@@ -19,6 +20,7 @@ from coverage_surface_core import (
 from coverage_surface_fixtures import (
     ANY_MODE_RUNNER,
     CLEAN_MAKEFILE,
+    CLEAN_PACKAGE_RUNNER,
     CLEAN_RUNNER,
     CLEAN_WORKFLOW,
     COMMENTED_AND_CALLED_RUNNER,
@@ -286,6 +288,16 @@ def _cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             "a run that never drops an unreadable profile buffer is a finding",
             EXIT_FINDINGS,
             _fixture(base, "no-buffer-drop", {RUNNER: NO_BUFFER_DROP_RUNNER}),
+            ["hygiene"],
+        ),
+        (
+            "a one-package run that never drops an unreadable profile buffer is a finding",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "package-no-buffer-drop",
+                {PACKAGE_RUNNER: CLEAN_PACKAGE_RUNNER.replace("    drop_invalid_profraws(directory)\n", "")},
+            ),
             ["hygiene"],
         ),
         (
