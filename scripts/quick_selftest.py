@@ -251,21 +251,21 @@ class RunTests(unittest.TestCase):
         selection = quick.Selection([Term("p")], [])
         calls: list[tuple] = []
         with mock.patch.object(quick, "failed_cases", return_value=[("p", "a::x")]):
-            with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(): calls.append((pkgs, e, tuple(extra))) or 0):
+            with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(), targets=(): calls.append((pkgs, e, tuple(extra))) or 0):
                 self.assertEqual(quick.run_selection(selection, True), 0)
             self.assertEqual(
                 calls,
                 [(["p"], "(binary_id(=p) & test(=a::x))", ("--no-tests=pass",)), (["p"], "package(=p)", ())],
             )
             calls.clear()
-            with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(): calls.append((pkgs, e, tuple(extra))) or 1):
+            with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(), targets=(): calls.append((pkgs, e, tuple(extra))) or 1):
                 self.assertEqual(quick.run_selection(selection, True), 1)
             self.assertEqual(len(calls), 1, "a failing retry must not run the full selection")
 
     def test_without_a_retry_the_full_selection_runs_once(self) -> None:
         calls: list[tuple] = []
         selection = quick.Selection([Term("q", modules=("m",)), Term("p")], [])
-        with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(): calls.append((pkgs, e, tuple(extra))) or 0):
+        with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(), targets=(): calls.append((pkgs, e, tuple(extra))) or 0):
             quick.run_selection(selection, False)
         self.assertEqual(calls, [(["p", "q"], quick.union_expression(selection.terms), ())])
 
@@ -287,6 +287,37 @@ class RunTests(unittest.TestCase):
                 quick.parse(["--base", "b", *flags])
         with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):
             quick.parse([])
+
+
+class TargetTests(unittest.TestCase):
+    def test_a_selection_of_modules_builds_only_the_lib_and_bin_targets(self) -> None:
+        self.assertEqual(quick.target_flags([Term("p", modules=("a",))]), ["--lib", "--bins"])
+        self.assertEqual(quick.target_flags([Term("p", kinds=("lib", "bin"))]), ["--lib", "--bins"])
+
+    def test_an_integration_term_names_its_own_target_once(self) -> None:
+        terms = [Term("p", binary="it"), Term("q", binary="it"), Term("r", binary="aa")]
+        self.assertEqual(quick.target_flags(terms), ["--test", "aa", "--test", "it"])
+        mixed = [Term("p", modules=("a",)), Term("q", binary="it")]
+        self.assertEqual(quick.target_flags(mixed), ["--lib", "--bins", "--test", "it"])
+
+    def test_a_whole_package_term_builds_every_target(self) -> None:
+        self.assertEqual(quick.target_flags([Term("p", modules=("a",)), Term("q")]), [])
+
+    def test_a_retry_names_the_target_each_failure_came_from(self) -> None:
+        failed = [("p", "m::a"), ("p", "m::b"), ("p::bin/p", "x"), ("p::it", "y")]
+        self.assertEqual(
+            quick.failed_target_flags(failed), ["--bin", "p", "--lib", "--test", "it"]
+        )
+
+    def test_the_plan_and_the_command_carry_the_target_filters(self) -> None:
+        selection = quick.Selection([Term("p", modules=("a",))], ["note"])
+        self.assertIn("quick: cargo targets: --lib --bins", quick.plan_lines(selection, []))
+        with mock.patch.object(quick.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            quick.nextest(["p"], "package(=p)", targets=["--lib", "--bins"])
+        self.assertEqual(
+            run.call_args.args[0][-6:], ["-p", "p", "--lib", "--bins", "-E", "package(=p)"]
+        )
 
 
 class SchemaCheckTests(unittest.TestCase):
