@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+import subprocess
 from pathlib import Path
 
 #: Tracked directories searched for hooks, in the order they run.
@@ -127,6 +128,31 @@ def env_hook_paths() -> list[Path]:
     return [Path(part).expanduser() for part in raw.split(os.pathsep) if part.strip()]
 
 
+def main_checkout(root: Path) -> Path | None:
+    """The top of the main checkout when `root` is a linked worktree, else None.
+
+    The machine-local hook directory is git-ignored and registered in the main
+    checkout only, so a worktree has none of its own. git shares one common
+    directory across all worktrees of a repository, and the main checkout is the
+    folder that holds it.
+    """
+    try:
+        done = subprocess.run(  # noqa: S603
+            ["git", "-C", str(root), "rev-parse", "--git-common-dir"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    answer = done.stdout.strip()
+    if done.returncode != 0 or not answer:
+        return None
+    main = (root / answer).resolve().parent  # an absolute answer replaces `root`
+    return main if main != root.resolve() else None
+
+
 def discover(root: Path) -> tuple[list[Path], list[str], list[str]]:
     """Return (hooks, notes, broken).
 
@@ -163,8 +189,11 @@ def discover(root: Path) -> tuple[list[Path], list[str], list[str]]:
             notes.append(f"{label} holds no hook")
 
     take(root / TRACKED_HOOK_DIR, TRACKED_HOOK_DIR)
+    main = main_checkout(root)
     for name in LOCAL_HOOK_DIRS:
         take(root / name, name)
+        if main is not None:
+            take(main / name, f"{name} of the main checkout")
 
     for entry in env_hook_paths():
         if entry.is_dir():

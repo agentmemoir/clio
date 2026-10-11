@@ -45,24 +45,8 @@ if [ ! -f "$runner" ]; then
     exit 1
 fi
 
-# A linked worktree has its own top level, and the machine-local hook directory
-# is registered in the main checkout rather than in each worktree, so a commit
-# made in a worktree would otherwise find no hook at all and pass. git shares
-# the hooks directory across worktrees, which is why the hook is running here at
-# all; the checks it points at are not shared the same way, so they are named
-# explicitly. The runner already knows this directory name, so nothing private is
-# written down by using it.
-common=$(git rev-parse --git-common-dir 2>/dev/null) || common=""
-if [ -n "$common" ]; then
-    case "$common" in
-        /*) ;;
-        *) common="$root/$common" ;;
-    esac
-    main_hooks="$(dirname "$common")/.clio-hooks"
-    if [ "$main_hooks" != "$root/.clio-hooks" ] && [ -d "$main_hooks" ]; then
-        CLIO_PRECOMMIT_HOOKS="$main_hooks${CLIO_PRECOMMIT_HOOKS:+:$CLIO_PRECOMMIT_HOOKS}"
-        export CLIO_PRECOMMIT_HOOKS
-    fi
-fi
+# A linked worktree has no machine-local hook directory of its own. The runner
+# finds the main checkout's, so this hook and `make precommit` run the same
+# checks.
 
 exec python3 "$runner" --commit
