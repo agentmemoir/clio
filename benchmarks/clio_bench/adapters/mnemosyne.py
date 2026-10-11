@@ -50,7 +50,7 @@ import subprocess
 import tempfile
 import time
 
-from ..adapter import MemoryBenchmarkAdapter
+from ..adapter import AdapterError, MemoryBenchmarkAdapter
 from ..fingerprint import (
     Fingerprint,
     FingerprintError,
@@ -59,7 +59,12 @@ from ..fingerprint import (
 )
 from ..packing import pack_context
 from ..tokenizer import ReferenceTokenizer
-from ..types import DialogueTurn, IngestResult, RetrievalResult
+from ..types import (
+    REFUSAL_ADMISSION,
+    DialogueTurn,
+    IngestResult,
+    RetrievalResult,
+)
 
 _STDERR_LIMIT = 500
 _STORED_PREFIX = "Stored: "
@@ -87,7 +92,7 @@ REQUIRED_SETTINGS = (
 )
 
 
-class MnemosyneAdapterError(RuntimeError):
+class MnemosyneAdapterError(AdapterError):
     """Raised when the mnemosyne binary fails or returns unusable output."""
 
 
@@ -269,6 +274,7 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
             latency_ms=latency_ms,
             tokens_processed=self._tokenizer.count(turn.text),
             error=None if ok else "mnemosyne declined to store the turn",
+            refusal=None if ok else REFUSAL_ADMISSION,
         )
 
     def retrieve(

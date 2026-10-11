@@ -58,14 +58,33 @@ class SuiteData:
     pin: dict
 
 
+# The kinds of write decline a system can report, in the harness's own
+# vocabulary rather than any one system's error codes. A run counts them
+# separately, because a duplicate's text is already stored while an admission
+# refusal is not stored at all.
+REFUSAL_ADMISSION = "admission"
+REFUSAL_DUPLICATE = "duplicate"
+
+
 @dataclass
 class IngestResult:
-    """Outcome of ingesting one turn into the system under test."""
+    """Outcome of ingesting one turn into the system under test.
+
+    `ok` is False only for a decline: the system chose not to store the turn,
+    and the adapter records that outcome rather than raising. `refusal` names
+    the kind of decline (`REFUSAL_ADMISSION` or `REFUSAL_DUPLICATE`); it is
+    None when the turn was stored.
+
+    A write that fails for any reason other than a decline is never reported
+    here. The adapter raises instead, so the run stops rather than counting a
+    configuration failure as a refusal by the system.
+    """
 
     ok: bool
     latency_ms: float
     tokens_processed: int
     error: str | None = None
+    refusal: str | None = None
 
 
 @dataclass

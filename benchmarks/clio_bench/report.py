@@ -126,10 +126,13 @@ def render_suite_section(suite: str, block: dict, tier: str) -> list[str]:
     )
     ingestion = block.get("ingestion") or {}
     if ingestion:
+        declined = f"{ingestion.get('turns_rejected', 0)} rejected by admission"
+        duplicates = ingestion.get("turns_duplicate", 0)
+        if duplicates:
+            declined += f", {duplicates} already stored"
         lines.append(
             f"Ingestion: {ingestion.get('instances', 0)} instances, "
-            f"{ingestion.get('turns_ingested', 0)} turns "
-            f"({ingestion.get('turns_rejected', 0)} rejected by admission)"
+            f"{ingestion.get('turns_ingested', 0)} turns ({declined})"
         )
     lines.append("")
     lines.append(f"| Category {label} | Count | Accuracy | Token F1 | p95 retrieval ms |")
