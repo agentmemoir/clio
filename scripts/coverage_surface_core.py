@@ -272,11 +272,18 @@ def scan(root: Path) -> Surface:
     if runner is not None:
         surface.check_runner(runner)
 
-    makefile = surface.read(MAKEFILE)
-    if makefile is not None:
-        stripped = surface.code(MAKEFILE, makefile)
-        if stripped is not None:
-            surface.check(MAKEFILE, stripped)
+    # The Makefile includes `mk/*.mk`, which hold the coverage recipes now, so each is read like it.
+    try:
+        mk_files = [f"mk/{path.name}" for path in sorted((root / "mk").glob("*.mk"))]
+    except OSError as error:
+        surface.unreadable.append(f"mk: {error.strerror or error}")
+        mk_files = []
+    for relative in (MAKEFILE, *mk_files):
+        makefile = surface.read(relative)
+        if makefile is not None:
+            stripped = surface.code(relative, makefile)
+            if stripped is not None:
+                surface.check(relative, stripped)
 
     try:
         workflow_dir = root / ".github/workflows"
