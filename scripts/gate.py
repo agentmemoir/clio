@@ -10,7 +10,7 @@ unchanged tree returns the stored verdict instead of running again. A stored
 failure is replayed too, so retrying the same tree does not reroll a flake;
 a failure stored under a different PATH is re-run, so a broken environment
 does not poison the tree. Edit the tree or pass --force for a fresh run. The
-cache keeps the newest 50 verdicts per repository. Every run and replay is also
+cache keeps the newest 50 verdicts per worktree. Every run and replay is also
 appended to `runs.jsonl` beside the cache, with its worktree and branch, so the
 wait on the gate can be measured after the cache has pruned the verdicts.
 
@@ -226,7 +226,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         log_path = entry / "log"
         if scope:
             print(f"gate: quick scoped run ({kind}) on changed crates: {', '.join(scope)}")
-            print("gate: not a full-workspace verdict; run `make coverage` before claiming done")
+            print("gate: not a full-workspace verdict; CI owns that verdict")
         print(f"gate: running {shlex.join(scoped_argv)}")
         started = time.time()
         env = dict(os.environ)
