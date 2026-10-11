@@ -16,11 +16,9 @@ CARGO_KINDS = {
     "llvm-cov": "coverage",
     "clippy": "clippy",
 }
-#: The `cargo nextest` subcommands that execute tests. Everything else under
-#: `nextest` is a lookup or a utility -- `list`, `show-config`, `archive`,
-#: `self` -- and nextest takes its subcommand before any flag, so the token after
-#: `nextest` is the whole answer. `r` is nextest's own alias for `run`.
+#: `run` executes tests, `bench` executes benchmarks, and other subcommands are lookups or utilities; `r` and `b` are nextest aliases, and the subcommand follows `nextest` before any flag.
 NEXTEST_EXECUTING_SUBCOMMANDS = frozenset({"run", "r"})
+NEXTEST_BENCH_SUBCOMMANDS = frozenset({"bench", "b"})
 #: Every `cargo nextest` subcommand the tool advertises, aliases included, read
 #: off its own `cargo nextest --help` at 0.9.146. This is not a list of options
 #: that take a value, which is what an earlier version of this file carried and
@@ -33,15 +31,9 @@ NEXTEST_EXECUTING_SUBCOMMANDS = frozenset({"run", "r"})
 NEXTEST_KNOWN_SUBCOMMANDS = frozenset(
     {"list", "run", "r", "bench", "b", "archive", "show-config", "self", "help"}
 )
-#: The kind a non-executing `cargo nextest` subcommand is stored and published
-#: under. It used to be `test`, because `CARGO_KINDS` maps the tool rather than
-#: what the tool was asked to do, and that is what let the pre-commit hook which
-#: compares the test lookup against the runner's own list of tests overwrite the
-#: real test verdict and stand in for it. A reader could not tell a listing from
-#: a run, the exit code of a lookup was served as the test result, and the log
-#: tail printed on a failure came from the wrong command entirely. A verdict is
-#: only readable if it names the command that produced it.
+#: This log kind keeps non-executing nextest commands apart from test runs; lookups use this name but no longer use cache verdict slots.
 NEXTEST_LOOKUP_KIND = "nextest-lookup"
+NEXTEST_BENCH_KIND = "nextest-bench"
 #: The `cargo llvm-cov` subcommands that produce a coverage report, read off its
 #: own `cargo llvm-cov --help` at 0.9.0. `test`, `run` and `nextest` run something
 #: and measure it; `report` measures the data an earlier run left behind.
@@ -60,6 +52,10 @@ LLVM_COV_KNOWN_SUBCOMMANDS = frozenset(
 #: exit code of a probe as the coverage result. A verdict is only readable if it
 #: names the command that produced it.
 LLVM_COV_LOOKUP_KIND = "llvm-cov-lookup"
+LOOKUP_KINDS = frozenset({NEXTEST_LOOKUP_KIND, LLVM_COV_LOOKUP_KIND})
+#: Published logs start with these markers; replays keep the previous <kind>.prev entry.
+EXECUTED_LOG_MARKER = b"gate: command ran for this verdict\n"
+REPLAYED_LOG_MARKER = b"gate: cached verdict replay; command did not run for this invocation\n"
 #: The flags that ask the tool to describe itself rather than measure anything.
 #: They stand in for a subcommand, because `cargo llvm-cov --version` carries
 #: none, and a bare `cargo llvm-cov` is `cargo llvm-cov test` in every way the
@@ -158,13 +154,9 @@ ENV_KEYS = (
     "PROFILE",
     "RUSTC_WRAPPER",
     "RUSTFLAGS",
-    # The two the scoping code below reads. Both change what runs while leaving
-    # the argument vector untouched, which is exactly the shape of a key that is
-    # too coarse: `PACKAGES` set in the environment makes `_scope_make` hand the
-    # command back unrewritten, so `make test` with one package list and `make
-    # test` with another were the same command line and shared one entry. The
-    # second run was told the first run's exit code.
+    # These values change which workspace packages or base ref a make target uses.
     "GATE_SCOPE",
+    "BASE",
     "PACKAGES",
 )
 #: Environment values this file reads that are deliberately not in the key, each
@@ -173,6 +165,7 @@ ENV_KEYS = (
 #: and fails on a name that is in neither list.
 #: Reviewed 2026-10-10 per fix-inline-exceptions, keep: read-but-unhashed env values guarded by the env-read self-test.
 ENV_KEY_EXEMPT = {
+    "CLIO_GATE_LOG_DIR": "chooses where logs are published, not what runs",
     "XDG_CACHE_HOME": "chooses where the cache is kept, not what runs",
     "PATH": "a stored failure from another PATH is re-run rather than replayed",
     "GATE_FORCE": "decides only whether to consult the cache, and setting it skips it",
@@ -190,5 +183,6 @@ COVERAGE_ARTIFACT = "target/coverage/coverage.json"
 #: v4 keys the tree on the content of each changed path instead of the diff
 #: text plus a separate untracked list, so a verdict measured before `git add`
 #: replays after it.
-KEY_SCHEME = b"clio-gate-v4\0"
+#: v5 normalises the cargo/make executable paths and includes `BASE`, which make reads from the environment, in the fingerprint.
+KEY_SCHEME = b"clio-gate-v5\0"
 USAGE = "usage: gate.py run [--force] [--log-dir DIR] -- CMD ARGS... | gate.py --self-test"

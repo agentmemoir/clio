@@ -1,26 +1,11 @@
 #!/usr/bin/env python3
 """Content-addressed gate for heavy cargo and make commands in this repo.
 
-Every workflow stage used to re-run the same suites on the same tree. This
-wrapper fingerprints the working tree (HEAD and the content of each changed
-path, relevant environment, command kind, effective command), runs the command at most
-once per fingerprint, serialises concurrent runs with a lock, and stores the
-verdict (exit code and full log) for both pass and fail. A repeated command on an
-unchanged tree returns the stored verdict instead of running again. A stored
-failure is replayed too, so retrying the same tree does not reroll a flake;
-a failure stored under a different PATH is re-run, so a broken environment
-does not poison the tree. Edit the tree or pass --force for a fresh run. The
-cache keeps the newest 50 verdicts per worktree. Every run and replay is also
-appended to `runs.jsonl` beside the cache, with its worktree and branch, so the
-wait on the gate can be measured after the cache has pruned the verdicts.
+Each cached command is keyed by the changed tree, relevant environment, kind, and effective arguments; it runs once per fingerprint and replays its pass or failure until the tree changes or `--force` is used. A failure from a different `PATH` is rerun.
 
-Every verdict is published under the name of the kind it was measured as, so a
-log names the command that produced it. `cargo nextest` subcommands other than
-`run` are stored and published as `nextest-lookup`, each derived coverage target
-as itself, and a `cargo llvm-cov` line that measures nothing (a version probe,
-`show-env`, `clean`) as `llvm-cov-lookup`. That is what stops a listing, a probe
-or a derived report from standing in for a test run or a coverage report in the
-log directory.
+The cache holds up to 50 entries per worktree and removes lookup entries first. Every run and replay is appended to `runs.jsonl` beside the cache with its worktree and branch, so gate wait time can be measured after pruning.
+
+Each published log names the command kind and starts with a fresh-run or replay marker. Nextest and llvm-cov lookups publish to separate log names without using cache verdict slots; nextest benchmarks have their own cached kind.
 
 Quick scoping: `cargo test`, `cargo nextest run`, `cargo clippy`, and the
 `make test`, `make check`, `make lint` targets are scoped to the changed
@@ -60,11 +45,10 @@ Environment:
   GATE_RAW=1   bypass the gate entirely (handled by the shim, not here)
   GATE_FORCE=1 same as --force
   GATE_SCOPE=off  never scope a quick command
-  CLIO_GATE_LOG_DIR  if the shim passes it, a copy of the newest log lands
-                     there as <kind>.log plus <kind>.exit (used by workflows).
-                     The run before the current one is kept beside them as
-                     <kind>.prev: a header line naming the exit code that run
-                     exited with, then its log.
+  CLIO_GATE_LOG_DIR  optional log directory override. By default, logs land
+                     under this repository's clio-gate cache folder. Each
+                     <kind>.log starts with a fresh-run or replay marker.
+                     The previous log is kept beside it as <kind>.prev.
   XDG_CACHE_HOME  cache root; defaults to ~/.cache
 """
 
@@ -112,6 +96,7 @@ from gate_kinds import (
     LLVM_COV_PROBE_FLAGS,
     LLVM_COV_REPORTING_SUBCOMMANDS,
     LOG_TAIL_LINES,
+    LOOKUP_KINDS,
     MAKE_KINDS,
     NEXTEST_EXECUTING_SUBCOMMANDS,
     NEXTEST_KNOWN_SUBCOMMANDS,
@@ -179,8 +164,12 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
     lock_fd = acquire_lock(root)
     ran: dict[str, object] = {"replayed": False}
     try:
-        state = read_tree_state(root)
+        log_dir = log_dir or str(cache_root() / repo_key(root) / "logs")
         kind = command_kind(argv)
+        ran.update(kind=kind, argv=argv)
+        clean_requested = "coverage-clean" in argv[1:] or (
+            len(argv) > 2 and argv[1:3] == ["llvm-cov", "clean"]
+        )
         if Path(argv[0]).name == "cargo" and argv[1:2] == ["nextest"] and not nextest_subcommand(argv):
             # Loud on purpose. A subcommand this file does not recognise is
             # classified as a lookup rather than guessed at, which is the safe
@@ -192,19 +181,37 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
                 f"treating it as {kind}, which may not be what it does",
                 file=sys.stderr,
             )
+        if kind in LOOKUP_KINDS:
+            with tempfile.TemporaryDirectory(
+                prefix="lookup-", dir=cache_root() / repo_key(root)
+            ) as scratch:
+                log_path = Path(scratch) / "log"
+                print(f"gate: running uncached lookup ({kind}) {shlex.join(argv)}")
+                started = time.time()
+                env = dict(os.environ)
+                env["GATE_ACTIVE"] = "1"
+                with open(log_path, "wb") as log:
+                    code = subprocess.call(argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
+                finished = time.time()
+                ran.update(started=started, finished=finished, exit=code)
+                published = _publish_log(log_path, log_dir, kind, code)
+                if clean_requested:
+                    _purge_coverage_cache(root)
+                print(f"gate: {kind} exit {code}; log: {published or log_path}")
+                if code != 0:
+                    _print_tail(log_path)
+                return code
+        state = read_tree_state(root)
         # A command that removes build output must run every time, never replay from a
         # stored verdict: a replay would report success without having done the
         # removal. `make coverage-clean` is named as a target, and `cargo llvm-cov
         # clean` is the same request to the other tool. `clean` is a lookup kind,
         # not a coverage one, so it is not in COVERAGE_KINDS and does not need the
         # artifact handling that set buys.
-        clean_requested = "coverage-clean" in argv[1:] or (
-            len(argv) > 2 and argv[1:3] == ["llvm-cov", "clean"]
-        )
         if clean_requested:
             force = True
         scoped_argv, scope = scope_command(kind, argv, root, state.changed)
-        ran.update(kind=kind, argv=scoped_argv)
+        ran.update(argv=scoped_argv)
         fp = fingerprint(state, os.environ, kind, scoped_argv)
         entry = entry_dir(root, fp)
         meta_path = entry / "meta.json"
@@ -281,10 +288,11 @@ def _self_test() -> int:
     import gate_selftest_b
     import gate_selftest_c
     import gate_selftest_d
+    import gate_selftest_e
 
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    for mod in (gate_selftest_a, gate_selftest_b, gate_selftest_c, gate_selftest_d):
+    for mod in (gate_selftest_a, gate_selftest_b, gate_selftest_c, gate_selftest_d, gate_selftest_e):
         suite.addTests(loader.loadTestsFromModule(mod))
     buffer = io.StringIO()
     result = unittest.TextTestRunner(stream=buffer, verbosity=1).run(suite)
@@ -320,7 +328,7 @@ def main(argv: list[str]) -> int:
     sep = rest.index("--")
     head = list(rest[:sep])
     force = "--force" in head or os.environ.get("GATE_FORCE") == "1"
-    log_dir = ""
+    log_dir = os.environ.get("CLIO_GATE_LOG_DIR", "")
     while "--log-dir" in head:
         index = head.index("--log-dir")
         if index + 1 >= len(head):

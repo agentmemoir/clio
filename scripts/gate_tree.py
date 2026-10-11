@@ -111,17 +111,31 @@ def fingerprint(state: TreeState, env: dict[str, str], kind: str, argv: list[str
     agree about that. Hashing it makes "a stored verdict is replayed only for
     the command it was measured from" a property of the key rather than of how
     carefully the argument vector happens to be spelled.
+
+    Cargo and make are keyed by command name; make's `BASE` assignment is keyed as an environment value, so both spellings share one entry.
     """
     _scheme = getattr(sys.modules.get("gate"), "KEY_SCHEME", KEY_SCHEME)
+    executable = Path(argv[0]).name
     h = hashlib.sha256()
     h.update(_scheme)
     h.update(state.head.encode() + b"\0")
     for rel, digest in state.contents:
         h.update(f"F\0{rel}\0{digest}\0".encode())
     for key in ENV_KEYS:
-        h.update(f"E\0{key}\0{_effective_env(env, key)}\0".encode())
+        value = _effective_env(env, key)
+        if key == "BASE" and executable == "make":
+            assignments = [arg.partition("=")[2] for arg in argv[1:] if arg.startswith("BASE=")]
+            if assignments:
+                value = assignments[-1]
+        elif key == "BASE":
+            value = ""
+        h.update(f"E\0{key}\0{value}\0".encode())
     h.update(f"K\0{kind}\0".encode())
-    h.update(b"C\0" + b"\0".join(arg.encode() for arg in argv) + b"\0")
+    args = argv[1:]
+    if executable == "make":
+        args = [arg for arg in args if not arg.startswith("BASE=")]
+    normalized_argv = [executable if executable in {"cargo", "make"} else argv[0], *args]
+    h.update(b"C\0" + b"\0".join(arg.encode() for arg in normalized_argv) + b"\0")
     return h.hexdigest()
 
 
