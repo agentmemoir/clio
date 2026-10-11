@@ -29,9 +29,10 @@
 
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
-use crate::cli_read::{base_args, no_positionals, one_positional, parse_f64, validate_choice};
+use crate::cli_read::{base_args, no_positionals, one_positional, parse_unit_f64, validate_choice};
 use crate::cli_write_duplicate::{allow_duplicate_arg, remember_refusal};
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, batch_preview_refusal};
+use crate::cli_write_source_type::source_type_arg;
 use clio_types::{CONTEXT_MAX_BYTES, ErrorCode, SemanticCategory, validate_context};
 use serde_json::{Map, Value, json};
 
@@ -196,6 +197,7 @@ fn candidate_args(parsed: &ParsedArgs, verb: &str) -> Result<Map<String, Value>,
         Some(raw) => validate_choice("epistemic-kind", raw, &["fact", "belief"])?,
         None => "fact",
     };
+    let source_type = source_type_arg(kind, parsed)?;
     let mut args = base_args(parsed);
     args.insert("item".into(), json!({"id": caller_item_id(), "gist": text}));
     args.insert("category".into(), Value::from(category));
@@ -203,10 +205,10 @@ fn candidate_args(parsed: &ParsedArgs, verb: &str) -> Result<Map<String, Value>,
     if let Some(raw) = parsed.value("confidence") {
         args.insert(
             "confidence".into(),
-            Value::from(parse_f64("confidence", raw)?),
+            Value::from(parse_unit_f64("confidence", raw)?),
         );
     }
-    if let Some(source) = parsed.value("source-type") {
+    if let Some(source) = source_type {
         args.insert("source_type".into(), Value::from(source));
     }
     if let Some(evidence) = parsed.value("evidence-ref") {

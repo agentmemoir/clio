@@ -41,8 +41,8 @@ use std::sync::Arc;
 /// command group reaches them through this module, and the split into
 /// `cli_read_args` exists for size, not for a second import path.
 pub(crate) use crate::cli_read_args::{
-    base_args, flag, no_positionals, one_positional, parse_f64, parse_u64, read_args,
-    require_flags, required_flags, validate_choice, validate_time_axis,
+    base_args, flag, no_positionals, one_positional, parse_f64, parse_u64, parse_unit_f64,
+    read_args, require_flags, required_flags, validate_choice, validate_time_axis,
 };
 
 /// Injected streams, terminal state, and environment for one read command.

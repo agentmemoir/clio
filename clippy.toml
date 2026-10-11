@@ -1,0 +1,5 @@
+# Clippy checks the declared minimum against the APIs the tree uses, so a
+# call that needs a newer compiler fails the lint instead of landing quietly.
+# Test targets are checked as well: one of the two atomic call sites lives in
+# test code, where the lint is otherwise silent by default.
+check-incompatible-msrv-in-tests = true
