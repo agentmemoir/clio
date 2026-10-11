@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from scoped_core import CoverageRow, RunError, owned
 from scoped_judge import judge, report_path_for
 from scoped_run import TEST_THREADS, coverage_report_command, coverage_test_command
-from scoped_select import resolve_ref, select
+from scoped_select import build_inputs, resolve_ref, select
 
 from scoped_selftest_support import shared as globals
 
@@ -29,7 +29,8 @@ def run(check) -> tuple:
 
     original_ref_exists = globals()["_ref_exists"]
     original_merge_base = globals()["merge_base"]
-    original_changed = globals()["changed_files"]
+    original_changed = globals()["changed_paths"]
+    original_embedders = globals()["embedders"]
     try:
         globals()["_ref_exists"] = lambda ref: False
         globals()["merge_base"] = lambda base: None
@@ -55,7 +56,7 @@ def run(check) -> tuple:
         globals()["_ref_exists"] = lambda ref: True
         # A changed .rs file that no package owns can never be measured, so it
         # must be an error rather than a silent all-clear.
-        globals()["changed_files"] = lambda base: ["stray/tool.rs"]
+        globals()["changed_paths"] = lambda base: ["stray/tool.rs"]
         check(
             "a changed Rust file no package owns is an error",
             raises(select, "master", False),
@@ -64,7 +65,7 @@ def run(check) -> tuple:
 
         # A change with no Rust file at all is a legitimate all-clear: docs, a
         # Makefile, or a Python script cannot move a Rust line count.
-        globals()["changed_files"] = lambda base: []
+        globals()["changed_paths"] = lambda base: []
         globals()["workspace_packages"] = lambda: [{"name": "a", "deps": set()}]
         packages, files, changed = select("master", False)
         check("a change with no Rust file selects nothing", (packages, files, changed), ([], [], []))
@@ -79,7 +80,7 @@ def run(check) -> tuple:
             {"name": "a", "dir": "crates/a", "deps": set()},
             {"name": "b", "dir": "crates/b", "deps": {"a"}},
         ]
-        globals()["changed_files"] = lambda base: ["crates/a/src/thing_tests.rs"]
+        globals()["changed_paths"] = lambda base: ["crates/a/src/thing_tests.rs"]
         packages, files, changed = select("master", False)
         check(
             "a test-only change still selects its package and its dependents",
@@ -89,7 +90,7 @@ def run(check) -> tuple:
         # The same must hold for an integration test, which the suffix half alone
         # let through into the judged list. It is path-excluded, so it can never
         # be measured, but it still has to select its package so the test runs.
-        globals()["changed_files"] = lambda base: ["crates/a/tests/harness.rs"]
+        globals()["changed_paths"] = lambda base: ["crates/a/tests/harness.rs"]
         packages, files, changed = select("master", False)
         check(
             "an integration-test change selects its package and is not judged",
@@ -104,7 +105,7 @@ def run(check) -> tuple:
         globals()["workspace_packages"] = lambda: [
             {"name": "clio-types", "dir": "crates/clio-types", "deps": set()},
         ]
-        globals()["changed_files"] = lambda base: [
+        globals()["changed_paths"] = lambda base: [
             "crates/clio-types/src/civil.rs",
             "crates/clio-types/src/retired.rs",
         ]
@@ -119,10 +120,43 @@ def run(check) -> tuple:
             changed,
             ["crates/clio-types/src/civil.rs", "crates/clio-types/src/retired.rs"],
         )
+
+        # A change to a file that is not Rust source but decides what a crate compiles or
+        # reads (issue #69). Before, none of these selected a package, and the gate called
+        # the tree clean. The lock file reaches every package; a file in a package folder
+        # reaches that package and its dependents; a sql file reaches the packages that
+        # embed it, or every package when none does; Markdown, a script, a workflow and the
+        # Makefile reach none.
+        globals()["workspace_packages"] = lambda: [
+            {"name": "a", "dir": "crates/a", "deps": set()},
+            {"name": "b", "dir": "crates/b", "deps": {"a"}},
+            {"name": "c", "dir": "crates/c", "deps": set()},
+        ]
+        globals()["embedders"] = lambda rel, packages: {"c"}
+        for label, paths, want in (
+            ("the lock file selects every package", ["Cargo.lock"], ["a", "b", "c"]),
+            ("a root manifest selects every package", ["Cargo.toml"], ["a", "b", "c"]),
+            ("a fixture in a package folder selects that package and its dependents", ["crates/a/data/x.json"], ["a", "b"]),
+            ("a sql file selects the packages that embed it", ["sql/001_core.sql"], ["c"]),
+            ("markdown selects nothing", ["README.md", "crates/a/NOTES.md"], []),
+            ("a script, a workflow and the Makefile select nothing", ["scripts/x.py", ".github/workflows/ci.yml", "Makefile"], []),
+        ):
+            globals()["changed_paths"] = lambda base, paths=paths: paths
+            packages, files, changed = select("master", False)
+            check(label, (packages, files), (want, []))
+        globals()["embedders"] = lambda rel, packages: set()
+        globals()["changed_paths"] = lambda base: ["sql/unused.sql"]
+        check("a sql file nothing embeds selects every package", select("master", False)[0], ["a", "b", "c"])
+        check(
+            "build_inputs names the files that reach packages and skips the rest",
+            build_inputs(["Cargo.lock", "README.md", "scripts/x.py", "crates/a/src/lib.rs"], globals()["workspace_packages"]()),
+            (None, ["Cargo.lock"]),
+        )
     finally:
         globals()["_ref_exists"] = original_ref_exists
         globals()["merge_base"] = original_merge_base
-        globals()["changed_files"] = original_changed
+        globals()["changed_paths"] = original_changed
+        globals()["embedders"] = original_embedders
 
     # There is no per-file floor to ratchet and no aggregate to compare against.
     # Both used to be rules here, and both are gone, so the cases that pinned them
