@@ -277,6 +277,16 @@ def _cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             ["hygiene"],
         ),
         (
+            "a multi-line docstring does not hide the code after it from rule 4",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "multiline-docstring",
+                {RUNNER: NO_OBJECT_DELETE_RUNNER.replace('"""A fixture gate."""', '"""A fixture gate.\n\nA second paragraph.\n"""')},
+            ),
+            ["hygiene"],
+        ),
+        (
             "a step named only in a trailing comment is a finding",
             EXIT_FINDINGS,
             _fixture(
