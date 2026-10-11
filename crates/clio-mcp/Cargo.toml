@@ -23,6 +23,7 @@ clio-store = { workspace = true }
 clio-sync = { workspace = true }
 clio-types = { workspace = true }
 clio-write = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

@@ -100,6 +100,13 @@ impl OpsStore for AllSignalsOps {
     fn bank_ids(&self) -> Result<Vec<String>, AmError> {
         Ok(Vec::new())
     }
+    fn bank_exists(&self, _bank_id: &str) -> Result<bool, AmError> {
+        Ok(false)
+    }
+
+    fn register_bank(&self, _bank_id: &str, _created_at: &str) -> Result<(), AmError> {
+        Ok(())
+    }
     fn counts(&self) -> Result<clio_store::StoreCounts, AmError> {
         Ok(clio_store::StoreCounts::default())
     }

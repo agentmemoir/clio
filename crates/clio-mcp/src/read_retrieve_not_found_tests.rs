@@ -52,11 +52,7 @@ fn store_item(state: &McpState, id: &str) {
 #[test]
 fn associations_of_an_unknown_item_is_item_not_found() {
     let s = state();
-    let out = call(
-        &s,
-        "associations",
-        json!({"item_id": "itm-nope", "bank": "bank-a"}),
-    );
+    let out = call(&s, "associations", json!({"item_id": "itm-nope"}));
     assert_eq!(out["ok"], json!(false), "{out}");
     assert_eq!(out["code"], json!("item_not_found"), "{out}");
 }
@@ -64,11 +60,7 @@ fn associations_of_an_unknown_item_is_item_not_found() {
 #[test]
 fn graph_query_from_an_unknown_seed_is_item_not_found() {
     let s = state();
-    let out = call(
-        &s,
-        "graph_query",
-        json!({"seed_id": "itm-nope", "bank": "bank-a"}),
-    );
+    let out = call(&s, "graph_query", json!({"seed_id": "itm-nope"}));
     assert_eq!(out["ok"], json!(false), "{out}");
     assert_eq!(out["code"], json!("item_not_found"), "{out}");
 }

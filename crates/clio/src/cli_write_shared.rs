@@ -54,7 +54,6 @@ impl WriteGroup for SharedWriteGroup {
                     "source-type",
                     "confidence",
                     "evidence-ref",
-                    "source-text",
                 ],
                 &["shared-bank"],
             ),
@@ -131,9 +130,6 @@ fn shared_store_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     }
     if let Some(evidence) = parsed.value("evidence-ref") {
         args.insert("evidence_ref".into(), Value::from(evidence));
-    }
-    if let Some(haystack) = parsed.value("source-text") {
-        args.insert("source_text".into(), Value::from(haystack));
     }
     Ok(WriteCall::Tool {
         tool: "shared_store",

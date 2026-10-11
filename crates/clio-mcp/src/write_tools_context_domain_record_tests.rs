@@ -226,6 +226,10 @@ fn triple_add_and_belief_observe_context_round_trips() {
 #[test]
 fn oversized_domain_record_context_fails_closed() {
     let state = state();
+    state
+        .ops_store
+        .register_bank("bank-a", "2024-01-01T00:00:00Z")
+        .expect("register empty bank fixture");
     let oversized = "a".repeat(4097);
     let out = write(
         &state,

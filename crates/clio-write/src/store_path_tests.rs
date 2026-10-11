@@ -99,6 +99,51 @@ fn empty_source_text_errors_like_missing() {
 }
 
 #[test]
+fn source_text_without_a_snapshot_is_rejected_before_write() {
+    let ctx = ctx();
+    let env = RankingEnv::system_defaults();
+    let policy = AdmissionPolicy::new(&env);
+    let admit = VecSink::default();
+    let verify_sink = VerifyVecSink::default();
+    let fields = default_event_fields();
+    let mut item = item_with_snapshot("i", json!({"entity": "Ada"}));
+    item.snapshot = None;
+    let mut req = VerifiedStoreRequest {
+        item,
+        ctx: &ctx,
+        source_text: Some("haystack"),
+        evidence_ref: None,
+        fields: &fields,
+        verify: VerifyConfig::default(),
+        policy,
+        admit_sink: &admit,
+        verify_sink: &verify_sink,
+        timestamp: "t0",
+    };
+    let mut wrote = false;
+    let error = gated_store_verified(
+        &mut req,
+        Candidate::Semantic(SemanticCategory::Persona),
+        &EmptyNeighbors,
+        &mut |_| {
+            wrote = true;
+            Ok(())
+        },
+    )
+    .expect_err("source text without a snapshot cannot be checked");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(!wrote);
+}
+
+#[test]
+fn whitespace_source_text_is_rejected() {
+    let item = item_with_snapshot("i", json!({"entity": "Ada"}));
+    let error = super::require_source_text(&item, Some(" \n\t "))
+        .expect_err("whitespace source text is empty");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
 fn evidence_ref_maps_to_source_ref() {
     let mut item = item_with_snapshot("i", json!({"entity": "Ada"}));
     apply_evidence_ref(&mut item, Some("turn_99"));
