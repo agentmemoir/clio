@@ -14,6 +14,7 @@ we made where that specification is silent.
 - A `triple_add` whose `snapshot_ref` names an item the bank does not hold reports `item_not_found` instead of `invalid_argument`, and a caller that branches on the code no longer reads a missing target as a bad argument; the message and the exit code are unchanged. [PR #104](https://github.com/agentmemoir/clio/pull/104)
 - Raise the declared minimum Rust version from 1.89 to 1.95 and replace both `fetch_update` calls with the `try_update` rename, so the manifest matches the compiler the code needs and the two deprecation suppressions go away; Clippy now also checks test targets for newer-than-minimum API use. [PR #115](https://github.com/agentmemoir/clio/pull/115)
 - clio-bench records `tokens_retrieved` as the cost of the context it hands to the answer generator, so `--token-budget` now bounds that context instead of a total the adapters charged per retrieval hit; a pack that was over budget is now refused at the margin, and a run refuses to write a report when an adapter's reported cost is not the cost of its context. [PR #113](https://github.com/agentmemoir/clio/pull/113)
+- clio-bench classifies a write by its refusal code instead of its `ok` flag alone, so a configuration failure such as a relative `--data-dir` now stops the run with exit 2 and writes no report, instead of being counted as an admission rejection and scoring an empty store; the scorecard counts an exact duplicate separately from an admission refusal. [PR #117](https://github.com/agentmemoir/clio/pull/117)
 
 ## [0.1.0] - 2026-10-10
 
