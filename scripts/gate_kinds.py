@@ -138,36 +138,74 @@ SCOPED_KINDS = {"test", "clippy"}
 #: spelling used to say it.
 GATE_SCOPE_DEFAULT = "quick"
 GATE_SCOPE_OFF = "off"
-#: The environment values that change what a command does, and so belong in the
-#: cache key. This is an allowlist on purpose: hashing the whole environment
-#: would put a timestamp or a shell session id in the key and every run would
-#: miss. Each entry has to earn its place, because an entry that is missing
-#: gives two different commands one stored verdict. A value read here to decide
-#: what runs, and missing from this tuple, is the defect this file once had; a
-#: self-test checks the two lists against each other.
+#: Explicit environment values and build-tool prefixes that can change a
+#: command belong in the cache key. Hashing the whole environment would put a
+#: timestamp or shell session id in the key and every run would miss. The
+#: self-test checks values read by this module against these lists.
 ENV_KEYS = (
     "CARGO_BUILD_JOBS",
     "CARGO_INCREMENTAL",
+    "CARGO_BUILD_TARGET",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_HOME",
+    "CARGO_TARGET_DIR",
     "CLIO_DEPLOYMENT_CONFIG",
     "CLIO_DATABASE_URL",
+    "CC",
+    "CFLAGS",
+    "CXX",
+    "CXXFLAGS",
+    "GNUMAKEFLAGS",
+    "HOME",
+    "DYLD_LIBRARY_PATH",
+    "LD_LIBRARY_PATH",
+    "LDFLAGS",
+    "MAKEFLAGS",
     "NEXTEST_PROFILE",
+    "OPENSSL_DIR",
+    "OPENSSL_INCLUDE_DIR",
+    "OPENSSL_LIB_DIR",
+    "PATH",
+    "PKG_CONFIG_LIBDIR",
+    "PKG_CONFIG_PATH",
     "PROFILE",
+    "AR",
+    "RUSTC",
     "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "RUSTDOC",
+    "RUSTDOCFLAGS",
     "RUSTFLAGS",
+    "RUSTUP_HOME",
+    "RUSTUP_TOOLCHAIN",
     # These values change which workspace packages or base ref a make target uses.
     "GATE_SCOPE",
     "BASE",
     "PACKAGES",
 )
+ENV_KEY_PREFIXES = (
+    "CARGO_",
+    "RUST",
+    "CC",
+    "CXX",
+    "AR",
+    "CFLAGS",
+    "CXXFLAGS",
+    "LDFLAGS",
+    "PKG_CONFIG_",
+    "OPENSSL_",
+    "CMAKE_",
+    "BINDGEN_",
+    "LIBCLANG_",
+)
 #: Environment values this file reads that are deliberately not in the key, each
 #: with the reason it cannot change what a command does. Anything read to decide
-#: what runs belongs in `ENV_KEYS`; a self-test parses this file's own source
-#: and fails on a name that is in neither list.
+#: what runs belongs in `ENV_KEYS` or `ENV_KEY_PREFIXES`; the self-test also
+#: checks these exemptions.
 #: Reviewed 2026-10-10 per fix-inline-exceptions, keep: read-but-unhashed env values guarded by the env-read self-test.
 ENV_KEY_EXEMPT = {
     "CLIO_GATE_LOG_DIR": "chooses where logs are published, not what runs",
     "XDG_CACHE_HOME": "chooses where the cache is kept, not what runs",
-    "PATH": "a stored failure from another PATH is re-run rather than replayed",
     "GATE_FORCE": "decides only whether to consult the cache, and setting it skips it",
 }
 COVERAGE_ARTIFACT = "target/coverage/coverage.json"
@@ -184,5 +222,7 @@ COVERAGE_ARTIFACT = "target/coverage/coverage.json"
 #: text plus a separate untracked list, so a verdict measured before `git add`
 #: replays after it.
 #: v5 normalises the cargo/make executable paths and includes `BASE`, which make reads from the environment, in the fingerprint.
-KEY_SCHEME = b"clio-gate-v5\0"
+#: v6 hashes tool contents and active Rustup toolchain binaries, relevant Cargo
+#: configuration, prefixed build environment inputs, and equivalent spellings.
+KEY_SCHEME = b"clio-gate-v6\0"
 USAGE = "usage: gate.py run [--force] [--log-dir DIR] -- CMD ARGS... | gate.py --self-test"

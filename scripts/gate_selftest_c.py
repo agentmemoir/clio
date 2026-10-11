@@ -36,6 +36,19 @@ def published(name: str, log_dir: Path) -> str:
 PUBLISHED_NAME = re.compile(r"<kind>\.log|CLIO_GATE_LOG_DIR")
 KEPT_NAME = re.compile(r"<kind>\.prev")
 TEXT_SUFFIXES = (".md", ".py", ".sh", ".yml", ".yaml", ".toml", ".txt", ".json")
+TEST_CODE_SUFFIXES = {".py", ".rs", ".sh", ".yml", ".yaml", ".toml", ".json"}
+
+
+def _is_test_surface_file(name: str) -> bool:
+    path = Path(name)
+    return (
+        any(part.lower() in {"test", "tests"} for part in path.parts[:-1])
+        or (
+            path.suffix.lower() in TEST_CODE_SUFFIXES
+            and re.search(r"(?:^|[-_])(?:tests?|testkit|self[_-]?tests?)(?:[-_.]|$)", path.stem) is not None
+        )
+    )
+
 
 class DirectTests(unittest.TestCase):
     def test_direct_cache_reuse_and_mid_run_change(self) -> None:
@@ -315,6 +328,8 @@ class StandInTests(unittest.TestCase):
         half_described: list[str] = []
         for name in listed.split("\0"):
             if not name:
+                continue
+            if _is_test_surface_file(name):
                 continue
             path = root / name
             try:
