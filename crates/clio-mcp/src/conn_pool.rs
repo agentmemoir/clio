@@ -62,21 +62,10 @@ impl Default for ConnPool {
 
 impl ConnPool {
     /// Take a slot if one is free; `None` when the pool is full.
-    ///
-    /// The allow below sits on the one call rather than on this function, so
-    /// that a different deprecated API added here later is still reported.
-    ///
-    /// `fetch_update` is deprecated in favour of `try_update`, which is a pure
-    /// rename, but `try_update` is only stable from Rust 1.95 and this
-    /// workspace declares an older minimum. The allow therefore covers two
-    /// separate diagnostics: rustc's `deprecated`, which is what the rename
-    /// causes, and clippy's `incompatible_msrv`, which is what the older
-    /// minimum causes. Both go away together when the minimum moves to 1.95.
     pub(crate) fn try_acquire(self: &Arc<Self>) -> Option<PoolGuard> {
-        #[allow(deprecated, clippy::incompatible_msrv)]
         let acquired = self
             .in_use
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < MAX_CONNECTIONS).then_some(n + 1)
             });
         acquired.ok().map(|_| PoolGuard {
