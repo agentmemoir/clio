@@ -9,8 +9,7 @@
 //! ## Owns
 //! - The generated `.env` content (Compose variables only: no API keys), created
 //!   directly with owner-only permissions
-//! - The never-overwrite rule for an existing user-owned `.env`, and reading a
-//!   value an existing `.env` sets
+//! - The never-overwrite rule for an existing user-owned `.env`
 //! - The selection marker file recording the stack started by `up` (read by
 //!   `down` so it tears down the same services)
 //!
@@ -98,29 +97,6 @@ fn create_env_file(path: &Path, contents: &str) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn create_env_file(path: &Path, contents: &str) -> std::io::Result<()> {
     std::fs::write(path, contents)
-}
-
-/// The GGUF file name the `extract` service will mount: the `CLIO_EXTRACT_GGUF`
-/// value in an existing `root/.env`, or the documented default.
-///
-/// `write_env` never overwrites a user's `.env`, so a name set there has to be
-/// read back. A prerequisite check that assumed the default would refuse a
-/// stack that the file itself makes correct, and pass one the file breaks.
-pub(crate) fn extract_gguf_name(root: &Path) -> String {
-    let default = || compose_assets::GGUF_FILE_NAME.to_string();
-    let Ok(contents) = std::fs::read_to_string(root.join(".env")) else {
-        return default();
-    };
-    for line in contents.lines() {
-        let Some(value) = line.trim().strip_prefix("CLIO_EXTRACT_GGUF=") else {
-            continue;
-        };
-        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
-        if !value.is_empty() {
-            return value.to_string();
-        }
-    }
-    default()
 }
 
 /// The marker file recording the selection `clio compose up` started, so
