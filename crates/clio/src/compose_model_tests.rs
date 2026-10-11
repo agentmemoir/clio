@@ -178,6 +178,41 @@ fn an_extract_service_whose_model_is_not_mounted_fails_closed() {
 }
 
 #[test]
+fn a_mount_target_is_matched_as_a_whole_path_segment() {
+    let root = temp_root("prefix-target");
+    // A mount at `/models` must not be read as the parent of a file under
+    // `/models-other`, which would test a file the container never opens.
+    let body = serde_json::json!({
+        "services": {
+            "extract": {
+                "environment": { "LLAMA_ARG_MODEL": "/models-other/numind.gguf" },
+                "volumes": [
+                    { "type": "bind", "source": root.join("models").to_string_lossy(), "target": "/models" },
+                    { "type": "bind", "source": root.join("models-other").to_string_lossy(), "target": "/models-other" },
+                ],
+            }
+        }
+    })
+    .to_string();
+    let runner = RecordingRunner::succeeding().with_config(body);
+    std::fs::create_dir_all(root.join("models-other")).expect("create the model directory");
+    std::fs::write(root.join("models-other/numind.gguf"), b"stub").expect("write the model");
+    std::fs::create_dir_all(root.join("models")).expect("create the decoy directory");
+    std::fs::write(root.join("models/numind.gguf"), b"decoy").expect("write the decoy");
+    assert_eq!(
+        check(&root, Stack::LocalRft, &runner),
+        Ok(()),
+        "the model lives under the mount that is its real parent"
+    );
+    std::fs::remove_file(root.join("models-other/numind.gguf")).expect("remove the real model");
+    assert!(
+        check(&root, Stack::LocalRft, &runner).is_err(),
+        "a file under a mount whose target only shares a prefix must not satisfy the check"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn output_that_is_not_a_resolved_stack_fails_closed() {
     let root = temp_root("bad-json");
     let runner = RecordingRunner::succeeding().with_config("not a resolved stack".to_string());

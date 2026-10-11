@@ -102,8 +102,10 @@ def host_model_path(stack: dict) -> str | None:
         source, target = volume.get("source"), volume.get("target")
         if not isinstance(source, str) or not isinstance(target, str):
             continue
-        if container.startswith(target):
-            return str(Path(source) / container[len(target) :].lstrip("/"))
+        # The target must be a whole path segment, so a mount at `/models` is not
+        # read as the parent of a file at `/models-other/x.gguf`.
+        if container.startswith(f"{target}/"):
+            return str(Path(source) / container[len(target) + 1 :])
     raise ConfigUnavailable(f"the resolved extract service binds nothing at {container}")
 
 
