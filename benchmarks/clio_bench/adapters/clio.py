@@ -22,6 +22,7 @@ from ..fingerprint import (
     read_setting,
     unreadable_setting,
 )
+from ..packing import pack_context
 from ..tokenizer import ReferenceTokenizer
 from ..types import DialogueTurn, IngestResult, RetrievalResult
 
@@ -229,27 +230,20 @@ class ClioAdapter(MemoryBenchmarkAdapter):
         )
         latency_ms = (time.monotonic() - start) * 1000.0
 
-        pieces: list[str] = []
-        item_ids: list[str] = []
-        used = 0
+        hits: list[tuple[str, str]] = []
         for hit in payload.get("hits") or []:
             if not isinstance(hit, dict):
                 continue
             text = hit.get("gist") or hit.get("snapshot") or ""
             item_id = hit.get("item_id", "")
-            line = f"[{item_id}] {text}"
-            cost = self._tokenizer.count(line)
-            if used + cost > token_budget:
-                break
-            pieces.append(line)
-            item_ids.append(item_id)
-            used += cost
+            hits.append((item_id, f"[{item_id}] {text}"))
 
+        context, used, item_ids = pack_context(hits, token_budget, self._tokenizer)
         return RetrievalResult(
-            context="\n".join(pieces),
+            context=context,
             latency_ms=latency_ms,
             tokens_retrieved=used,
-            item_ids=tuple(item_ids),
+            item_ids=item_ids,
         )
 
     def healthcheck(self) -> bool:

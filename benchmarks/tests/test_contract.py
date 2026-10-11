@@ -246,6 +246,39 @@ class RegistryDrivenContractTests(unittest.TestCase):
                 self.assertLessEqual(retrieval.tokens_retrieved, budget)
                 self.assertEqual(len(retrieval.item_ids), 1)
 
+    def test_every_registered_adapter_reports_the_cost_of_its_context(self) -> None:
+        """`tokens_retrieved` is the cost of `context`, for every adapter.
+
+        The query overlaps both stored turns and the budget is wide, so each
+        adapter packs a context holding a separator and an id prefix. Those are
+        what the composed string adds beyond the text each system returned, and
+        a charge taken over the returned text alone used to miss them.
+        """
+        for name in ADAPTER_NAMES:
+            with self.subTest(adapter=name), mock.patch.dict(
+                os.environ, {"CLIO_BENCH_FAKE_STATE": self.stand_in(name)}
+            ):
+                adapter = self.build(name)
+                adapter.reset("s1")
+                first = adapter.ingest("s1", _turn("s1", "t1", "alpha beta gamma"))
+                second = adapter.ingest("s1", _turn("s1", "t2", "delta epsilon"))
+                self.assertTrue(first.ok)
+                self.assertTrue(second.ok)
+
+                retrieval = adapter.retrieve("s1", "alpha delta", 4096)
+
+                self.assertGreaterEqual(
+                    len(retrieval.item_ids),
+                    2,
+                    f"{name} packed one line, so the pack holds no separator",
+                )
+                self.assertEqual(
+                    retrieval.tokens_retrieved,
+                    self.tokenizer.count(retrieval.context),
+                    f"{name} reported a cost that is not its context's cost",
+                )
+                self.assertLessEqual(retrieval.tokens_retrieved, 4096)
+
     def test_every_registered_adapter_isolates_sessions(self) -> None:
         for name in ADAPTER_NAMES:
             with self.subTest(adapter=name), mock.patch.dict(

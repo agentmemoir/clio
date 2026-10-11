@@ -198,11 +198,17 @@ class RetrieveTests(ClioAdapterTestCase):
 
     def test_retrieve_includes_all_hits_when_budget_allows(self) -> None:
         adapter = self.make_adapter()
-        budget = self.tokenizer.count(_LINE_1) + self.tokenizer.count(_LINE_2)
+        # The budget is the cost of the two-line context itself. The harness
+        # hands over the joined string, so the separator it holds is part of
+        # what the budget has to cover; a total of the two line costs is not.
+        budget = self.tokenizer.count(f"{_LINE_1}\n{_LINE_2}")
         result = adapter.retrieve("session-a", "alpha", budget)
         self.assertEqual(result.context, f"{_LINE_1}\n{_LINE_2}")
         self.assertEqual(result.item_ids, ("item-1", "item-2"))
-        self.assertLessEqual(result.tokens_retrieved, budget)
+        self.assertEqual(
+            result.tokens_retrieved, self.tokenizer.count(result.context)
+        )
+        self.assertLessEqual(self.tokenizer.count(result.context), budget)
 
 
 class ResetTests(ClioAdapterTestCase):
