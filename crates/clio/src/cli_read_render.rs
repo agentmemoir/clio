@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The per-verb text views over MCP success payloads
 //! - The per-hit score breakdown and the derived entity-match reason line
+//! - The `recall` limit line and the binding-floor reason under an empty page
 //! - The empty-recall and missing-field fallbacks
 //!
 //! ## Does not own
@@ -84,12 +85,18 @@ fn render_recall(payload: &Value, palette: Palette) -> String {
         .to_owned();
     let hits = payload.get("hits").and_then(Value::as_array);
     let Some(hits) = hits.filter(|hits| !hits.is_empty()) else {
-        return "no results".to_owned();
+        return empty_recall_text(payload);
     };
     let total = hits.len();
     let mut lines = Vec::new();
     if !query.is_empty() {
         lines.push(palette.heading(&format!("Results for: {query}")));
+        lines.push(String::new());
+    }
+    // The limit that actually ran, because an absent one is a default the
+    // caller did not type. Omitted when the payload carries no limit.
+    if let Some(limit) = payload.get("limit").and_then(Value::as_u64) {
+        lines.push(palette.meta(&format!("limit: {limit}")));
         lines.push(String::new());
     }
     lines.push(RELATIVE_SCORE_NOTE.to_owned());
@@ -131,6 +138,26 @@ fn render_recall(payload: &Value, palette: Palette) -> String {
         if index != last {
             lines.push(String::new());
         }
+    }
+    lines.join("\n")
+}
+
+/// The text for a recall that matched nothing: `no results`, plus each floor
+/// warning that names the floor that emptied the page.
+///
+/// The floor warnings are identified by the suffix their owner,
+/// `clio_retrieve::floors`, builds them with, so the two crates share one
+/// wording instead of a copied string.
+fn empty_recall_text(payload: &Value) -> String {
+    let mut lines = vec!["no results".to_owned()];
+    if let Some(warnings) = payload.get("warnings").and_then(Value::as_array) {
+        lines.extend(
+            warnings
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|warning| warning.contains(clio_retrieve::FLOOR_BINDING_WARNING_SUFFIX))
+                .map(str::to_owned),
+        );
     }
     lines.join("\n")
 }

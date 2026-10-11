@@ -54,7 +54,7 @@ impl ReadGroup for HygieneReadGroup {
         }
     }
 
-    fn decorate(&self, verb: &str, parsed: &ParsedArgs, payload: &mut Value) {
+    fn decorate(&self, verb: &str, parsed: &ParsedArgs, _arguments: &Value, payload: &mut Value) {
         if verb != "hygiene audit" {
             return;
         }

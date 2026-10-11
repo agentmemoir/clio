@@ -271,10 +271,15 @@ fn audit_decorate_uses_the_offset_argument_and_skips_the_log() {
     )
     .expect("parse");
     let mut page = json!({"total_candidates": 2, "candidates": [{}]});
-    HygieneReadGroup.decorate("hygiene audit", &parsed, &mut page);
+    HygieneReadGroup.decorate("hygiene audit", &parsed, &serde_json::json!({}), &mut page);
     assert_eq!(page["truncated"], json!(false));
 
     let mut untouched = json!({"total_candidates": 2, "candidates": [{}]});
-    HygieneReadGroup.decorate("hygiene log", &parsed, &mut untouched);
+    HygieneReadGroup.decorate(
+        "hygiene log",
+        &parsed,
+        &serde_json::json!({}),
+        &mut untouched,
+    );
     assert_eq!(untouched.get("truncated"), None);
 }
