@@ -4,7 +4,8 @@
 //! Tests for the generated Compose `.env` and the selection marker file:
 //! content rules (no online-service keys, every name carrying the prefix
 //! `compose.yml` substitutes), owner-only permissions, the never-overwrite rule
-//! for an existing user `.env`, and the marker roundtrip.
+//! for an existing user `.env`, reading the GGUF name back out of one, and the
+//! marker roundtrip.
 
 use super::*;
 
@@ -110,6 +111,38 @@ fn existing_user_env_is_never_overwritten() {
     assert_eq!(
         contents, "CLIO_POSTGRES_PORT=39999\n",
         "user .env must be preserved"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn extract_gguf_name_defaults_and_reads_an_existing_env() {
+    let root = temp_root("gguf-name");
+    assert_eq!(
+        extract_gguf_name(&root),
+        compose_assets::GGUF_FILE_NAME,
+        "no .env means the documented default"
+    );
+    std::fs::write(
+        root.join(".env"),
+        "# generated\nCLIO_POSTGRES_PORT=34310\nCLIO_EXTRACT_GGUF=custom.gguf\n",
+    )
+    .expect("write .env");
+    assert_eq!(extract_gguf_name(&root), "custom.gguf");
+    // Quotes and surrounding space are accepted the way compose's own `.env`
+    // parser accepts them, so a quoted name is still found.
+    std::fs::write(
+        root.join(".env"),
+        "CLIO_EXTRACT_GGUF=\"spaced name.gguf\"\n",
+    )
+    .expect("write");
+    assert_eq!(extract_gguf_name(&root), "spaced name.gguf");
+    // An empty value falls back rather than yielding an empty file name.
+    std::fs::write(root.join(".env"), "CLIO_EXTRACT_GGUF=\n").expect("write");
+    assert_eq!(
+        extract_gguf_name(&root),
+        compose_assets::GGUF_FILE_NAME,
+        "an empty value must not become the name"
     );
     let _ = std::fs::remove_dir_all(&root);
 }

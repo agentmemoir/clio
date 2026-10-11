@@ -12,7 +12,8 @@
 //!   `--services`)
 //! - Compose-root resolution (CWD or `--dir`) with clobber protection
 //! - The ordered `up` pipeline: detect target, probe Docker, materialize,
-//!   verify bind mounts, generate `.env`, select services, invoke Docker
+//!   verify the selected stack's prerequisites, generate `.env`, select
+//!   services, invoke Docker
 //! - The `down` pipeline with its selection resolution and idempotency
 //!
 //! ## Does not own
@@ -137,9 +138,11 @@ fn resolve_root_with(
     Ok(root)
 }
 
-/// `clio compose up`: order matters — every failing step happens BEFORE files
-/// are written, so unsupported targets and unreachable Docker leave no
-/// partial materialization behind.
+/// `clio compose up`: order matters — target detection and the Docker probe run
+/// BEFORE files are written, so an unsupported target or an unreachable Docker
+/// leaves no partial materialization behind. A missing prerequisite fails after
+/// materialization but before `.env`, the marker, and Docker, so nothing is
+/// recorded for `down` and no container is started on a stack that cannot run.
 ///
 /// There is no credential to pass through. The managed Postgres has no password,
 /// so Compose reads only the variables in `.env` and its own defaults.
@@ -177,20 +180,6 @@ pub(crate) fn compose_up_with_env(
     }
     let args = compose_args(target, stack, "up", &["-d"]);
     run_docker_env(runner, &args, &root, "up", env)
-}
-
-/// Warn when `extract` was chosen but its GGUF is not in `models/`; every other
-/// service still starts.
-fn warn_missing_gguf(root: &Path, stack: Stack) {
-    if stack.needs_extract()
-        && !compose_assets::gguf_path(root, compose_assets::GGUF_FILE_NAME).exists()
-    {
-        eprintln!(
-            "warning: extract selected but {} is missing; place the GGUF in models/ \
-             (see models/README.md). Other services start normally.",
-            compose_assets::GGUF_FILE_NAME
-        );
-    }
 }
 
 /// `clio compose down`: stops and removes what `up` started. The selection
@@ -337,23 +326,29 @@ fn effective_embed_model() -> String {
         .to_string()
 }
 
-/// Materialize the checked-in files, write `.env` and the selection marker,
-/// and warn about a missing GGUF. Shared by the standalone `up` and the
-/// wizard's start call, so both write the same files in the same order.
+/// Materialize the checked-in files, verify the selected stack's
+/// prerequisites, then write `.env` and the selection marker. Shared by the
+/// standalone `up` and the wizard's start call, so both write the same files in
+/// the same order.
 ///
 /// # Errors
-/// A materialization failure or a `.env`/marker write failure.
+/// A materialization failure, a missing prerequisite (a Postgres init script,
+/// or the extract model when `extract` is selected), or a `.env`/marker write
+/// failure.
 pub(crate) fn prepare_root(root: &Path, target: ComposeTarget, stack: Stack) -> Result<(), String> {
-    materialize_and_check(root, target)?;
+    materialize_and_check(root, target, stack)?;
     compose_env::write_env(root, &compose_env::env_contents(&effective_embed_model()))?;
     compose_env::write_marker(root, marker_value(stack))?;
-    warn_missing_gguf(root, stack);
     Ok(())
 }
 
-fn materialize_and_check(root: &Path, target: ComposeTarget) -> Result<(), String> {
+/// Materialize, then fail before Docker on a missing prerequisite. The GGUF
+/// name is read back from `.env` so an override there is the name that gets
+/// checked.
+fn materialize_and_check(root: &Path, target: ComposeTarget, stack: Stack) -> Result<(), String> {
     compose_assets::materialize(root, target)?;
-    compose_assets::verify_bind_mounts(root)?;
+    let gguf = compose_env::extract_gguf_name(root);
+    compose_assets::verify_prerequisites(root, stack, &gguf)?;
     Ok(())
 }
 

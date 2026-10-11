@@ -35,6 +35,14 @@ pub(crate) fn probe_calls(runner: &RecordingRunner) -> usize {
         .count()
 }
 
+/// Write a stand-in for the extract GGUF, so a selection that includes
+/// `extract` passes its model prerequisite. The bytes are never read.
+pub(crate) fn write_model(root: &Path) {
+    let models = root.join("models");
+    std::fs::create_dir_all(&models).expect("create models");
+    std::fs::write(models.join(compose_assets::GGUF_FILE_NAME), b"stub").expect("write the model");
+}
+
 #[test]
 fn up_materializes_and_runs_the_selected_profile() {
     let root = temp_root("up-retrieval");
@@ -165,6 +173,20 @@ fn up_keeps_a_user_owned_env_file() {
 }
 
 #[test]
+fn prepare_root_checks_the_gguf_name_a_user_env_sets() {
+    let root = temp_root("configured-gguf");
+    std::fs::create_dir_all(root.join("models")).expect("create models");
+    std::fs::write(root.join(".env"), "CLIO_EXTRACT_GGUF=custom.gguf\n").expect("write .env");
+    std::fs::write(root.join("models/custom.gguf"), b"stub").expect("write the model");
+    // The default name is absent, so only reading the name back from `.env`
+    // makes this pass. Without it the check would refuse a stack the user's own
+    // configuration makes correct.
+    prepare_root(&root, ComposeTarget::MacArm64, Stack::LocalRft)
+        .expect("the configured model satisfies the prerequisite check");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn prompt_defaults_to_local_retrieval_on_empty_answer() {
     let root = temp_root("prompt-default");
     let runner = RecordingRunner::succeeding();
@@ -182,6 +204,7 @@ fn prompt_defaults_to_local_retrieval_on_empty_answer() {
 #[test]
 fn prompt_accepts_menu_answers() {
     let root = temp_root("prompt-menu");
+    write_model(&root);
     let runner = RecordingRunner::succeeding();
     let code = compose_up(
         &flags(&[("dir", root.to_str().unwrap())]),
@@ -269,6 +292,7 @@ fn docker_exit_status_propagates() {
 #[test]
 fn down_reverses_up_using_the_recorded_selection() {
     let root = temp_root("down");
+    write_model(&root);
     let runner = RecordingRunner::succeeding();
     let code = compose_up(
         &flags(&[("dir", root.to_str().unwrap()), ("services", "local-rft")]),

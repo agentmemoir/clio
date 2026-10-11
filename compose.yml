@@ -152,6 +152,10 @@ services:
   # Place GGUF at models/ (DevQuasar Q4_K_M; symlink alias also works):
   #   hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \
   #     numind.NuExtract-tiny-v1.5.Q4_K_M.gguf --local-dir ./models
+  # `create_host_path: false` keeps Compose from creating models/ itself, but
+  # compose does not always honour it (docker/compose#13602), so the CLI and
+  # the Makefile both check the model file before Docker runs. Do not treat
+  # this as the guard.
   extract:
     profiles: ["local-rft"]
     # Multi-arch image; platform pin comes from compose.amd64.yml / compose.arm64.yml
@@ -160,7 +164,17 @@ services:
     ports:
       - "${CLIO_EXTRACT_PORT:-34313}:8080"
     volumes:
-      - ./models:/models:ro
+      # Long syntax with `create_host_path: false`, matching pg-tools below: an
+      # absent models/ is an error, not a silently created root-owned empty
+      # directory that leaves extract restarting forever. Defense in depth only
+      # — docker/compose#13602 shows compose does not always honour it, so the
+      # CLI and the Makefile check the model file before Docker runs.
+      - type: bind
+        source: ./models
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       LLAMA_ARG_MODEL: /models/${CLIO_EXTRACT_GGUF:-numind.NuExtract-tiny-v1.5.Q4_K_M.gguf}
       LLAMA_ARG_HOST: 0.0.0.0

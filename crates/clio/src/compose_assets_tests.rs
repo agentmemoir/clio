@@ -118,10 +118,11 @@ fn a_failed_backup_is_reported_not_silently_overwritten() {
 }
 
 #[test]
-fn bind_mount_check_names_the_missing_source() {
+fn prerequisites_name_the_missing_bind_mount() {
     let root = temp_root("bindmounts");
     // No materialization at all: every source is missing.
-    let err = verify_bind_mounts(&root).expect_err("empty root must fail");
+    let err = verify_prerequisites(&root, Stack::PostgresOnly, GGUF_FILE_NAME)
+        .expect_err("empty root must fail");
     assert!(err.contains("sql/001_core.sql"), "{err}");
     assert!(
         err.contains(&root.display().to_string()),
@@ -129,14 +130,91 @@ fn bind_mount_check_names_the_missing_source() {
     );
     materialize(&root, ComposeTarget::MacArm64).expect("materialize");
     assert_eq!(
-        verify_bind_mounts(&root),
+        verify_prerequisites(&root, Stack::PostgresOnly, GGUF_FILE_NAME),
         Ok(()),
         "materialized set satisfies the mounts"
     );
     // Deleting a mount source after materialization is caught.
     std::fs::remove_file(root.join("sql/002_vectors_postgres.sql")).expect("delete mount");
-    let err = verify_bind_mounts(&root).expect_err("deleted mount must fail");
+    let err = verify_prerequisites(&root, Stack::PostgresOnly, GGUF_FILE_NAME)
+        .expect_err("deleted mount must fail");
     assert!(err.contains("sql/002_vectors_postgres.sql"), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The extract model is the reported defect: `models/` exists (materialize
+/// writes a README into it) but the GGUF does not, so a directory-level check
+/// passes and the container restarts forever.
+#[test]
+fn extract_without_its_model_file_fails() {
+    let root = temp_root("extract-model");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    assert!(
+        root.join("models").is_dir(),
+        "materialize creates models/, the directory a directory-level check would trust"
+    );
+    let err = verify_prerequisites(&root, Stack::LocalRft, GGUF_FILE_NAME)
+        .expect_err("extract without its model must fail");
+    assert!(err.contains(GGUF_FILE_NAME), "{err}");
+    assert!(
+        err.contains("hf download"),
+        "the error must name the command that fetches the model: {err}"
+    );
+    // A directory named like the model is still not the model file.
+    let impostor = root.join("models").join(GGUF_FILE_NAME);
+    std::fs::create_dir(&impostor).expect("create a directory named like the model");
+    let err = verify_prerequisites(&root, Stack::LocalRft, GGUF_FILE_NAME)
+        .expect_err("a directory is not a model file");
+    assert!(err.contains(GGUF_FILE_NAME), "{err}");
+    std::fs::remove_dir(&impostor).expect("remove the impostor");
+    std::fs::write(&impostor, b"stub").expect("write the model");
+    assert_eq!(
+        verify_prerequisites(&root, Stack::LocalRft, GGUF_FILE_NAME),
+        Ok(()),
+        "a present model file satisfies the extract prerequisite"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_model_is_checked_under_the_name_the_caller_passes() {
+    let root = temp_root("extract-name");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    std::fs::write(root.join("models/custom.gguf"), b"stub").expect("write the model");
+    // The configured name is the one that counts: the default is absent here, so
+    // checking the default would refuse a stack the configuration makes correct.
+    assert!(
+        verify_prerequisites(&root, Stack::LocalRft, GGUF_FILE_NAME).is_err(),
+        "the default name is absent, so the default check must fail"
+    );
+    assert_eq!(
+        verify_prerequisites(&root, Stack::LocalRft, "custom.gguf"),
+        Ok(())
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Only `extract` mounts `models/`, so no other stack requires it. Requiring
+/// the directory is what let Docker's auto-created empty one pass the check.
+#[test]
+fn only_the_extract_stack_needs_the_model_directory() {
+    let root = temp_root("extract-not-selected");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    std::fs::remove_dir_all(root.join("models")).expect("delete models/");
+    assert_eq!(
+        verify_prerequisites(&root, Stack::PostgresOnly, GGUF_FILE_NAME),
+        Ok(()),
+        "a stack without extract must not require models/"
+    );
+    assert_eq!(
+        verify_prerequisites(&root, Stack::LocalRetrieval, GGUF_FILE_NAME),
+        Ok(()),
+        "a retrieval stack must not require models/"
+    );
+    assert!(
+        verify_prerequisites(&root, Stack::LocalRft, GGUF_FILE_NAME).is_err(),
+        "the extract stack still requires its model, and models/ is gone"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 

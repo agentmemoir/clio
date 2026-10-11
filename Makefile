@@ -20,6 +20,12 @@
 
 BIN    := clio
 PROFILE ?= local-rft
+# The extract GGUF the `local-rft` profile mounts. The default matches
+# compose.yml's `${CLIO_EXTRACT_GGUF:-...}`. This Makefile does not read `.env`,
+# so set this too if you changed CLIO_EXTRACT_GGUF there. Without the model the
+# extract container starts and restarts forever, so `up` refuses before Docker
+# runs; `clio compose up` checks the same file on its own path.
+CLIO_EXTRACT_GGUF ?= numind.NuExtract-tiny-v1.5.Q4_K_M.gguf
 # Package selection for `test` and `lint`. The gate wrapper (scripts/gate.py)
 # passes PACKAGES="-p a -p b" for a scoped quick pass over the changed crates
 # and their dependents; the default stays the full workspace. Coverage targets
@@ -386,5 +392,13 @@ endif
 ifeq ($(filter down,$(MAKECMDGOALS)),down)
 	$(COMPOSE) -f $(ARCH_FILE) $(PROFILE_FLAG) down
 else
+	@if [ "$(PROFILE)" = "local-rft" ] && [ ! -f "models/$(CLIO_EXTRACT_GGUF)" ]; then \
+		printf '%s\n' \
+			'error: the local-rft profile needs models/$(CLIO_EXTRACT_GGUF), which is missing.' \
+			'       The extract container would start and restart forever without it.' \
+			'       Fetch it with:' \
+			'         hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF $(CLIO_EXTRACT_GGUF) --local-dir ./models' >&2; \
+		exit 1; \
+	fi
 	$(COMPOSE) -f $(ARCH_FILE) $(PROFILE_FLAG) up -d
 endif

@@ -26,7 +26,7 @@
 //!
 //! Keep this module focused on embedded-asset materialization.
 
-use crate::compose_docker::ComposeTarget;
+use crate::compose_docker::{ComposeTarget, Stack};
 use std::path::Path;
 
 /// The base compose file, embedded at build time from the checked-in repo root.
@@ -45,16 +45,12 @@ pub(crate) const SQL_VECTORS: &str = include_str!("../../../sql/002_vectors_post
 pub(crate) const MODELS_README: &str = "\
 # models/ — extract service model directory
 
-The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its
-GGUF model file in this directory. The file is intentionally NOT shipped with
-`clio compose up` (it is large); place it here before selecting `extract`:
+The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its GGUF model file in this directory. The file is intentionally NOT shipped with `clio compose up` (it is large); place it here before selecting `extract`:
 
-    hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \
+    hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \\
       numind.NuExtract-tiny-v1.5.Q4_K_M.gguf --local-dir ./models
 
-The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf`
-(configurable via CLIO_EXTRACT_GGUF in .env). `clio compose up` warns when the
-file is absent; the other services still start.
+The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf` (configurable via CLIO_EXTRACT_GGUF in .env). `clio compose up` and `make compose up` with the `local-rft` profile both refuse to start the extract service while the file is absent.
 ";
 
 struct Asset {
@@ -92,11 +88,13 @@ fn assets(target: ComposeTarget) -> Vec<Asset> {
     ]
 }
 
-/// Every relative bind-mount source the embedded compose file references.
-/// The compose file is a checked-in external contract, so this list is kept in
-/// step with it; the prototype (empty-directory run) validates the set.
+/// Every relative bind-mount source the embedded compose file references
+/// whatever the selection: the Postgres init scripts the managed database reads
+/// on first start. The `models/` mount belongs to `extract` alone, so it is
+/// required only when that service is selected, and at file level rather than
+/// as a directory (see [`verify_prerequisites`]).
 pub(crate) const BIND_MOUNT_SOURCES: &[&str] =
-    &["sql/001_core.sql", "sql/002_vectors_postgres.sql", "models"];
+    &["sql/001_core.sql", "sql/002_vectors_postgres.sql"];
 
 /// Materialize the asset set into `root`, refusing to silently overwrite a
 /// user-edited file: when an existing file differs from the embedded content
@@ -146,17 +144,40 @@ fn backup_edited(path: &Path, expected: &str) -> Result<Option<std::path::PathBu
     Ok(Some(backup))
 }
 
-/// Verify every relative bind-mount source the embedded compose file
-/// references exists in the compose root before Docker runs, naming the first
-/// missing source in the error. This is what prevents Docker from creating
-/// empty directories and Postgres coming up without a schema.
-pub(crate) fn verify_bind_mounts(root: &Path) -> Result<(), String> {
+/// Verify the file-level prerequisites the selected stack needs before Docker
+/// runs, naming the first missing one in the error.
+///
+/// The Postgres init scripts are always required, which is what stops Docker
+/// creating an empty directory and Postgres coming up without a schema. The
+/// extract model is required only when the stack selects `extract`, and it is
+/// tested as a file: `models/` existing proves nothing, because Docker creates
+/// an empty directory for a missing bind source and the extract container then
+/// fails to open the model and restarts forever. Naming the missing file and
+/// the command that fetches it turns that silent loop into one clear failure.
+///
+/// `gguf_name` is the name the `extract` service will mount, so a name set in
+/// `.env` is honoured instead of misreported.
+pub(crate) fn verify_prerequisites(
+    root: &Path,
+    stack: Stack,
+    gguf_name: &str,
+) -> Result<(), String> {
     for source in BIND_MOUNT_SOURCES {
         if !root.join(source).exists() {
             return Err(format!(
                 "missing bind-mount source {source} in {}; `clio compose up` materializes it — \
                  do not delete it before starting Docker",
                 root.display()
+            ));
+        }
+    }
+    if stack.needs_extract() {
+        let model = gguf_path(root, gguf_name);
+        if !model.is_file() {
+            return Err(format!(
+                "missing extract model {}; fetch it with `hf download \
+                 DevQuasar/numind.NuExtract-tiny-v1.5-GGUF {gguf_name} --local-dir ./models`",
+                model.display()
             ));
         }
     }
