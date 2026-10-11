@@ -435,9 +435,7 @@ fn the_eight_records_carry_no_extra_surfaces() {
         if name == "triple add" {
             assert_eq!(
                 spec.notes,
-                [
-                    "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
-                ],
+                [super::SOURCE_TYPE_PAIRING_NOTE],
                 "{name} notes"
             );
         } else {
