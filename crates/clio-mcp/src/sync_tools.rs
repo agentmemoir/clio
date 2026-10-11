@@ -87,7 +87,7 @@ pub(crate) fn sync_transfer_with(
             "`sync_push`/`sync_pull` no longer accept `sync_key`; the key is read from this node's recorded sync key store (run `clio sync keygen`)",
         ));
     }
-    let mut cfg = client_cfg(state, args);
+    let mut cfg = client_cfg(state, opt_str(args, "remote"), opt_str(args, "token"));
     cfg.cipher = custody_cipher(get)?;
     let banks = banks_of(state, args)?;
     let mode = SyncModes::parse(opt_str(args, "mode").unwrap_or(default_mode))?;
@@ -121,7 +121,7 @@ pub(crate) fn sync_status_with(
     args: &Value,
     get: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, AmError> {
-    let mut cfg = client_cfg(state, args);
+    let mut cfg = client_cfg(state, opt_str(args, "remote"), opt_str(args, "token"));
     cfg.cipher = cipher_keys(args)?;
     // With no keys supplied, the recorded custody store fills the client
     // config: the store marker decides which store answers. The transfer path
@@ -273,8 +273,9 @@ fn sync_ack_skip_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     if !confirm {
         return Ok(json!({ "acked": false, "would_ack": id }));
     }
-    let mut cfg = client_cfg(state, args);
-    cfg.cipher = cipher_keys(args)?;
+    // Acknowledging a dead letter is a local store write: it needs neither an
+    // endpoint, a token, nor keys, so none is read from the call.
+    let cfg = client_cfg(state, None, None);
     let acked = ack_skip(&cfg, &id, &state.resolve_timestamp(args))?;
     Ok(json!({
         "acked": acked,
@@ -284,15 +285,16 @@ fn sync_ack_skip_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     }))
 }
 
-/// Build the clio-sync client config from MCP state and args, with no
-/// encryption keys: each caller sets `cipher` from its own source.
-fn client_cfg(state: &McpState, args: &Value) -> SyncClientConfig {
+/// Build the clio-sync client config from MCP state and the caller's endpoint
+/// and token, with no encryption keys: each caller sets `cipher` from its own
+/// source.
+fn client_cfg(state: &McpState, remote: Option<&str>, token: Option<&str>) -> SyncClientConfig {
     SyncClientConfig {
         device_id: state.device_id.clone(),
         store: state.store.clone(),
         sync: state.sync.clone(),
-        remote: opt_str(args, "remote").map(str::to_owned),
-        token: opt_str(args, "token").map(str::to_owned),
+        remote: remote.map(str::to_owned),
+        token: token.map(str::to_owned),
         cipher: Vec::new(),
     }
 }
