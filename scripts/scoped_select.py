@@ -116,8 +116,8 @@ def merge_base(base: str) -> str | None:
     return sha or None
 
 
-def changed_files(base: str) -> list[str]:
-    """Repository-relative paths of changed Rust source files.
+def changed_paths(base: str) -> list[str]:
+    """Repository-relative paths of every changed file, of any type.
 
     Four git queries, each owning exactly one case, because a single status
     parse cannot separate them reliably: committed work since the merge base,
@@ -150,7 +150,59 @@ def changed_files(base: str) -> list[str]:
     for entry in git("ls-files", "--others", "--exclude-standard", "-z").split("\0"):
         if entry:
             paths.add(entry)
-    return sorted(p for p in paths if p.endswith(".rs"))
+    return sorted(paths)
+
+
+def changed_files(base: str) -> list[str]:
+    """Repository-relative paths of changed Rust source files."""
+    return [path for path in changed_paths(base) if path.endswith(".rs")]
+
+
+# Files that are not Rust source but decide what a crate compiles or what its tests read.
+# The lock file, the manifests at the root, the toolchain pin and the cargo and nextest
+# configuration can change any crate, so they reach every package.
+WORKSPACE_WIDE = ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", ".config/nextest.toml")
+WORKSPACE_WIDE_DIRS = (".cargo/",)
+
+
+def embedders(rel: str, packages: Sequence[dict[str, Any]]) -> set[str]:
+    """Packages whose Rust source names `rel`, which they embed with `include_str!`."""
+    try:
+        found = git("grep", "-l", "-F", rel, "--", "*.rs").splitlines()
+    except RunError:  # git grep exits 1 when nothing matches
+        return set()
+    return {owner for path in found for owner in package_owners(path, packages)}
+
+
+def build_inputs(paths: Iterable[str], packages: Sequence[dict[str, Any]]) -> tuple[set[str] | None, list[str]]:
+    """(the packages the changed non-Rust files reach, or None for all of them, and those files).
+
+    `changed_files` keeps only `.rs` paths, so a change to `Cargo.lock`, a manifest, or a `sql/`
+    file a crate embeds selected no package and the gate called the tree clean (issue #69). A file
+    inside a package folder reaches that package. A `sql/` file reaches the packages that embed
+    it. The files in `WORKSPACE_WIDE`, and a `sql/` file nothing embeds, reach every package,
+    because the owner is unclear. Markdown, and files elsewhere (scripts, workflows), reach none.
+    """
+    reached: set[str] | None = set()
+    files: list[str] = []
+    for rel in paths:
+        if rel.endswith((".rs", ".md")):
+            continue
+        owners = set(package_owners(rel, packages))
+        wide = False
+        if not owners and rel.startswith("sql/"):
+            owners = embedders(rel, packages)
+            wide = not owners
+        elif not owners:
+            wide = rel in WORKSPACE_WIDE or rel.startswith(WORKSPACE_WIDE_DIRS)
+        if not owners and not wide:
+            continue
+        files.append(rel)
+        if wide:
+            reached = None
+        elif reached is not None:
+            reached |= owners
+    return reached, files
 
 
 def is_measureable(rel: str) -> bool:
@@ -329,7 +381,8 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
             f"nothing. In a checkout with no local branch for the base, which is "
             f"what CI uses, pass the remote form."
         )
-    files = changed_files(base)
+    paths = changed_paths(base)
+    files = [path for path in paths if path.endswith(".rs")]
     # A file the change deleted joins the other two exclusions, because it is the
     # same case: there is nothing left in it for a report to hold. Left in the
     # judged list, it was reported as a file the run failed to measure, so every
@@ -339,8 +392,11 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
     packages = workspace_packages()
     if everything:
         return [p["name"] for p in packages], judgeable, files
-    if not files:
-        # A genuinely clean tree: no changed file of any type.
+    reached, build_files = build_inputs(paths, packages)
+    if reached is None:
+        return [p["name"] for p in packages], judgeable, files
+    if not files and not build_files:
+        # A genuinely clean tree: no changed file of any type that can move a build.
         return [], judgeable, files
     # Every file a report could hold, codeless ones included. The check is about
     # belonging to a package at all, which has nothing to do with whether the file
@@ -365,6 +421,7 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
         # selected no package and ran no tests at all for exactly the commits that
         # added a test. A test you just wrote has to be run.
         owners.update(package_owners(rel, packages))
+    owners |= reached
     if not owners:
         # Only non-Rust files changed: docs, a Makefile, or a Python script.
         # Nothing there can move a Rust line count.
