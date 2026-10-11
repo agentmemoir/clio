@@ -11,7 +11,7 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
 	scripts-check-coverage-policy scripts-check-gate-install scripts-check-quick \
-	scripts-check-ci-parity
+	scripts-check-ci-parity scripts-check-compose-model
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -59,3 +59,11 @@ scripts-check-gate-install:
 scripts-check-ci-parity:
 	python3 scripts/ci_parity_check.py --self-test
 	python3 scripts/ci_parity_check.py
+
+# Whether the Makefile's compose path still refuses to start the extract service
+# without its model. `make compose up` runs `docker compose` itself, so the
+# check inside the CLI does not run there, and a rename of the profile, of the
+# arch overlay, or of the model file would otherwise break the guard with
+# nothing to report it. Runs a stand-in engine: no container and no build.
+scripts-check-compose-model:
+	python3 scripts/test_compose_extract_model.py

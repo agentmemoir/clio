@@ -17,7 +17,9 @@
 //! - The `down` pipeline with its selection resolution and idempotency
 //!
 //! ## Does not own
-//! - Embedded-asset materialization and bind-mount checks (see `compose_assets`)
+//! - Embedded-asset materialization and the Postgres init-script check (see
+//!   `compose_assets`)
+//! - The extract model's host path (see `compose_model`)
 //! - `.env` and selection-marker files (see `compose_env`)
 //! - Docker target detection, probe, and argument shapes (see `compose_docker`)
 //!
@@ -34,6 +36,7 @@ use crate::cli_top_level::report_surface_usage_error;
 use crate::compose_assets;
 use crate::compose_docker::{ComposeTarget, DockerRunner, RealDocker, Stack, compose_args, probe};
 use crate::compose_env;
+use crate::compose_model;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -175,7 +178,7 @@ pub(crate) fn compose_up_with_env(
         Ok(stack) => stack,
         Err(e) => return fail(&e),
     };
-    if let Err(e) = prepare_root(&root, target, stack) {
+    if let Err(e) = prepare_root(&root, target, stack, runner) {
         return fail(&e);
     }
     let args = compose_args(target, stack, "up", &["-d"]);
@@ -326,29 +329,26 @@ fn effective_embed_model() -> String {
         .to_string()
 }
 
-/// Materialize the checked-in files, verify the selected stack's
-/// prerequisites, then write `.env` and the selection marker. Shared by the
-/// standalone `up` and the wizard's start call, so both write the same files in
-/// the same order.
+/// Materialize the checked-in files, verify what the stack needs before it can
+/// start, then write `.env` and the selection marker. Shared by the standalone
+/// `up` and the wizard's start call, so both write the same files in the same
+/// order.
 ///
 /// # Errors
 /// A materialization failure, a missing prerequisite (a Postgres init script,
-/// or the extract model when `extract` is selected), or a `.env`/marker write
+/// or the model file the `extract` service will open), or a `.env`/marker write
 /// failure.
-pub(crate) fn prepare_root(root: &Path, target: ComposeTarget, stack: Stack) -> Result<(), String> {
-    materialize_and_check(root, target, stack)?;
+pub(crate) fn prepare_root(
+    root: &Path,
+    target: ComposeTarget,
+    stack: Stack,
+    runner: &dyn DockerRunner,
+) -> Result<(), String> {
+    compose_assets::materialize(root, target)?;
+    compose_assets::verify_bind_mounts(root)?;
+    compose_model::verify_extract_model(root, target, stack, runner)?;
     compose_env::write_env(root, &compose_env::env_contents(&effective_embed_model()))?;
     compose_env::write_marker(root, marker_value(stack))?;
-    Ok(())
-}
-
-/// Materialize, then fail before Docker on a missing prerequisite. The GGUF
-/// name is read back from `.env` so an override there is the name that gets
-/// checked.
-fn materialize_and_check(root: &Path, target: ComposeTarget, stack: Stack) -> Result<(), String> {
-    compose_assets::materialize(root, target)?;
-    let gguf = compose_env::extract_gguf_name(root);
-    compose_assets::verify_prerequisites(root, stack, &gguf)?;
     Ok(())
 }
 

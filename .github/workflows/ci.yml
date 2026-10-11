@@ -279,6 +279,14 @@ jobs:
         if: always()
         run: make scripts-check-ci-parity
 
+      # Whether the Makefile's compose path still refuses to start the extract
+      # service without its model. That path runs `docker compose` itself, so the
+      # check inside the CLI does not run there, and the parity step above will
+      # not notice a guard that stopped firing.
+      - name: Compose extract-model guard
+        if: always()
+        run: make scripts-check-compose-model
+
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
       - name: Owned lookup acceptance

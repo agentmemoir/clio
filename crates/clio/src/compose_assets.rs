@@ -26,7 +26,7 @@
 //!
 //! Keep this module focused on embedded-asset materialization.
 
-use crate::compose_docker::{ComposeTarget, Stack};
+use crate::compose_docker::ComposeTarget;
 use std::path::Path;
 
 /// The base compose file, embedded at build time from the checked-in repo root.
@@ -91,8 +91,9 @@ fn assets(target: ComposeTarget) -> Vec<Asset> {
 /// Every relative bind-mount source the embedded compose file references
 /// whatever the selection: the Postgres init scripts the managed database reads
 /// on first start. The `models/` mount belongs to `extract` alone, so it is
-/// required only when that service is selected, and at file level rather than
-/// as a directory (see [`verify_prerequisites`]).
+/// required only when that service is selected, and it is checked through the
+/// `extract` service's own model file rather than as a directory (see
+/// `compose_model`).
 pub(crate) const BIND_MOUNT_SOURCES: &[&str] =
     &["sql/001_core.sql", "sql/002_vectors_postgres.sql"];
 
@@ -144,24 +145,11 @@ fn backup_edited(path: &Path, expected: &str) -> Result<Option<std::path::PathBu
     Ok(Some(backup))
 }
 
-/// Verify the file-level prerequisites the selected stack needs before Docker
-/// runs, naming the first missing one in the error.
-///
-/// The Postgres init scripts are always required, which is what stops Docker
-/// creating an empty directory and Postgres coming up without a schema. The
-/// extract model is required only when the stack selects `extract`, and it is
-/// tested as a file: `models/` existing proves nothing, because Docker creates
-/// an empty directory for a missing bind source and the extract container then
-/// fails to open the model and restarts forever. Naming the missing file and
-/// the command that fetches it turns that silent loop into one clear failure.
-///
-/// `gguf_name` is the name the `extract` service will mount, so a name set in
-/// `.env` is honoured instead of misreported.
-pub(crate) fn verify_prerequisites(
-    root: &Path,
-    stack: Stack,
-    gguf_name: &str,
-) -> Result<(), String> {
+/// Verify every relative bind-mount source the embedded compose file
+/// references exists in the compose root before Docker runs, naming the first
+/// missing source in the error. This is what prevents Docker from creating
+/// empty directories and Postgres coming up without a schema.
+pub(crate) fn verify_bind_mounts(root: &Path) -> Result<(), String> {
     for source in BIND_MOUNT_SOURCES {
         if !root.join(source).exists() {
             return Err(format!(
@@ -171,27 +159,13 @@ pub(crate) fn verify_prerequisites(
             ));
         }
     }
-    if stack.needs_extract() {
-        let model = gguf_path(root, gguf_name);
-        if !model.is_file() {
-            return Err(format!(
-                "missing extract model {}; fetch it with `hf download \
-                 DevQuasar/numind.NuExtract-tiny-v1.5-GGUF {gguf_name} --local-dir ./models`",
-                model.display()
-            ));
-        }
-    }
     Ok(())
 }
 
-/// The GGUF file name the extract service expects (matches compose.yml and
-/// the materialized `models/` README).
+/// The GGUF file name the extract service expects by default (matches
+/// `compose.yml` and the materialized `models/` README). The name the running
+/// stack actually mounts comes from Compose; see `compose_model`.
 pub(crate) const GGUF_FILE_NAME: &str = "numind.NuExtract-tiny-v1.5.Q4_K_M.gguf";
-
-/// Path of the extract GGUF inside the compose root's `models/` directory.
-pub(crate) fn gguf_path(root: &Path, gguf_name: &str) -> std::path::PathBuf {
-    root.join("models").join(gguf_name)
-}
 
 #[cfg(test)]
 #[path = "compose_assets_tests.rs"]

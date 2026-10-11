@@ -7,7 +7,7 @@
 //! reversing `up`. No test starts a real container.
 
 use super::*;
-use crate::compose_docker::tests::RecordingRunner;
+use crate::compose_docker::tests::{RecordingRunner, extract_config, extract_config_with};
 
 pub(crate) fn temp_root(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("am-compose-cli-{name}-{}", std::process::id()));
@@ -41,6 +41,12 @@ pub(crate) fn write_model(root: &Path) {
     let models = root.join("models");
     std::fs::create_dir_all(&models).expect("create models");
     std::fs::write(models.join(compose_assets::GGUF_FILE_NAME), b"stub").expect("write the model");
+}
+
+/// A runner whose resolved stack is the `local-rft` one, so a test that starts
+/// `extract` exercises the model check against a stack the engine described.
+pub(crate) fn extract_runner(root: &Path) -> RecordingRunner {
+    RecordingRunner::succeeding().with_config(extract_config(root))
 }
 
 #[test]
@@ -173,16 +179,32 @@ fn up_keeps_a_user_owned_env_file() {
 }
 
 #[test]
-fn prepare_root_checks_the_gguf_name_a_user_env_sets() {
-    let root = temp_root("configured-gguf");
+fn prepare_root_uses_the_model_compose_resolves_not_the_env_file() {
+    let root = temp_root("engine-not-dotenv");
+    // The user's `.env` names a file that is present; the engine resolves a
+    // different one that is absent. Reading `.env` here would pass a stack whose
+    // container cannot open its model, which is the defect this check closes.
     std::fs::create_dir_all(root.join("models")).expect("create models");
     std::fs::write(root.join(".env"), "CLIO_EXTRACT_GGUF=custom.gguf\n").expect("write .env");
     std::fs::write(root.join("models/custom.gguf"), b"stub").expect("write the model");
-    // The default name is absent, so only reading the name back from `.env`
-    // makes this pass. Without it the check would refuse a stack the user's own
-    // configuration makes correct.
-    prepare_root(&root, ComposeTarget::MacArm64, Stack::LocalRft)
-        .expect("the configured model satisfies the prerequisite check");
+    let runner =
+        RecordingRunner::succeeding().with_config(extract_config_with(&root, "engine.gguf"));
+    let err = prepare_root(&root, ComposeTarget::MacArm64, Stack::LocalRft, &runner)
+        .expect_err("the file the engine named is the one that must exist");
+    assert!(err.contains("engine.gguf"), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn prepare_root_passes_when_the_engine_model_is_present() {
+    let root = temp_root("engine-present");
+    write_model(&root);
+    // The `.env` names a file that does not exist. The engine names the one that
+    // does, so the stack is startable and the check must not refuse it.
+    std::fs::write(root.join(".env"), "CLIO_EXTRACT_GGUF=missing.gguf\n").expect("write .env");
+    let runner = extract_runner(&root);
+    prepare_root(&root, ComposeTarget::MacArm64, Stack::LocalRft, &runner)
+        .expect("the model the engine resolved is present, so the check passes");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -205,7 +227,7 @@ fn prompt_defaults_to_local_retrieval_on_empty_answer() {
 fn prompt_accepts_menu_answers() {
     let root = temp_root("prompt-menu");
     write_model(&root);
-    let runner = RecordingRunner::succeeding();
+    let runner = extract_runner(&root);
     let code = compose_up(
         &flags(&[("dir", root.to_str().unwrap())]),
         &runner,
@@ -293,7 +315,7 @@ fn docker_exit_status_propagates() {
 fn down_reverses_up_using_the_recorded_selection() {
     let root = temp_root("down");
     write_model(&root);
-    let runner = RecordingRunner::succeeding();
+    let runner = extract_runner(&root);
     let code = compose_up(
         &flags(&[("dir", root.to_str().unwrap()), ("services", "local-rft")]),
         &runner,
