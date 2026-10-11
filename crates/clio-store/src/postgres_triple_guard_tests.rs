@@ -160,16 +160,15 @@ fn pg_commit_guard_errors(store: &PostgresStore, bank2: &str) {
         "2024-01-02",
     );
     e.snapshot_ref = Some("missing-ref".into());
-    assert!(
-        store
-            .commit_triple_add(
-                &carrier(&ok_id, bank2, "x", "2024-01-01", "2024-01-02"),
-                &e,
-                true,
-                "agent",
-            )
-            .is_err()
-    );
+    let err = store
+        .commit_triple_add(
+            &carrier(&ok_id, bank2, "x", "2024-01-01", "2024-01-02"),
+            &e,
+            true,
+            "agent",
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::ItemNotFound);
     assert!(
         store
             .commit_triple_add(

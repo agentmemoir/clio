@@ -111,6 +111,24 @@ class RunLogTests(unittest.TestCase):
         self.assertIn("could not append to the run log", err.getvalue())
 
 
+class ScopedRunAdviceTests(unittest.TestCase):
+    def test_a_scoped_run_leaves_the_verdict_to_ci_and_never_asks_for_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw).resolve()
+            root = make_repo(tmp, "main")
+            argv = ["/bin/sh", "-c", "exit 0"]
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(tmp / "cache")}), mock.patch(
+                "gate.repo_root", return_value=str(root)
+            ), mock.patch("gate.read_tree_state", return_value=TREE), mock.patch(
+                "gate.scope_command", return_value=(argv, ["clio-a"])
+            ), contextlib.redirect_stdout(out):
+                run_gate(argv)
+        text = out.getvalue()
+        self.assertIn("gate: not a full-workspace verdict; CI owns that verdict", text)
+        self.assertNotIn("make coverage", text)
+
+
 class TimedTargetHandoffTests(unittest.TestCase):
     """`make test-fast`, `precommit` and `quick` go to the machine-local hook, and only they do."""
 
