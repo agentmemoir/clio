@@ -334,7 +334,15 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
         """
         settings: dict[str, SettingRecord] = {}
         for key in REQUIRED_SETTINGS:
-            settings[key] = self._read_setting(key)
+            setting = self._read_setting(key)
+            settings[key] = setting
+            env_key = f"MNEMOSYNE_{key.upper()}"
+            requested = self._extra_env.get(env_key)
+            if requested is not None and setting.value != self._parse_value(requested):
+                raise FingerprintError(
+                    f"mnemosyne config.yaml overrides {env_key}: effective {key} is "
+                    f"{setting.value!r}, requested {requested!r}; use a fresh data directory"
+                )
         return Fingerprint(
             system="mnemosyne",
             version=self._read_version(),
