@@ -96,6 +96,18 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
     assert!(!block.contains("scope"), "{block}");
 }
 
+#[test]
+fn correct_usage_and_catalog_name_the_confirm_flag() {
+    let usage = usage_for("correct").expect("correct has a usage line");
+    assert!(usage.contains("[--confirm]"), "{usage}");
+
+    let block = crate::help_flags_test_support::entry_block(
+        &crate::command_catalog::catalog_text(),
+        "correct",
+    );
+    assert!(block.contains("[--confirm]"), "{block}");
+}
+
 /// A flag a usage line names is one the verb's parser will accept.
 ///
 /// The other direction is checked elsewhere: a flag in `--help` reaches the catalog.
