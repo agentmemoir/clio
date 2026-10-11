@@ -240,3 +240,10 @@ fn the_five_records_carry_no_extra_surfaces() {
         assert!(record(name).notes.is_empty(), "{name} notes");
     }
 }
+
+/// A lookup for a command no record names fails saying which command is missing.
+#[test]
+#[should_panic(expected = "`no-such-command` is registered")]
+fn record_panics_naming_the_missing_command() {
+    let _ = record("no-such-command");
+}
