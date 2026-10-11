@@ -47,6 +47,17 @@ test-fast:
 	@python3 scripts/scoped_runner.py --self-test
 	@python3 scripts/scoped_runner.py $(if $(PLAN),--plan )--tests-only --base $(or $(BASE),master)
 
+# The admission gate-boundary tripwires. They are `#[test]`s in `clio-store`
+# whose subject is every `.rs` file under `crates/`, so a scoped run reaches them
+# only when the diff happens to pull `clio-store` into the closure. This selects
+# just that module, with no instrumentation and the default nextest profile so it
+# writes no JUnit report over the scoped run's, and CI runs it in a step that
+# ignores the diff.
+#
+#  make gate-boundary
+gate-boundary:
+	$(CARGO) nextest run --locked -p clio-store -E 'test(store_gate_boundary_tests)'
+
 # The cheap gate: format check plus lint, and nothing else.
 #
 # The name is the warning. This target runs no test and judges no coverage, so a green run here says the code is formatted and compiles cleanly, and says nothing at all about whether the tests pass or whether the changed files reach their coverage floor. It was named `verify` until it stopped running the tests, and a command called `verify` that verifies neither is the same kind of lie as a document that says CI runs it. The history has one already: `make check` was fmt, clippy and test wearing one name, a stage swapped it for `make test-fast`, and the formatting and lint checks were dropped without anyone noticing until a pull request said so.
