@@ -4,18 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-from scoped_runner import (
-    CoverageRow,
-    RunError,
-    TEST_THREADS,
-    coverage_report_command,
-    coverage_test_command,
-    judge,
-    owned,
-    report_path_for,
-    resolve_ref,
-    select,
-)
+from scoped_core import CoverageRow, RunError, owned
+from scoped_judge import judge, report_path_for
+from scoped_run import TEST_THREADS, coverage_report_command, coverage_test_command
+from scoped_select import resolve_ref, select
 
 from scoped_selftest_support import shared as globals
 

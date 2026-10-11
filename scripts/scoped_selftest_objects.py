@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from scoped_runner import prune_foreign_objects
+from scoped_profiles import prune_foreign_objects
 
 from scoped_selftest_support import shared as globals
 

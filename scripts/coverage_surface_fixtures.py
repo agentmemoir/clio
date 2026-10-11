@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coverage_surface_core import REPORT_BUILDER, RUNNER
+from coverage_surface_core import PACKAGE_RUNNER, REPORT_BUILDER, RUNNER
 from coverage_surface_text import MAKEFILE
 
 # --- Self-test -----------------------------------------------------------------
@@ -146,8 +146,21 @@ PROSE_RUNNER = CLEAN_RUNNER.replace(
     "    command = [",
 )
 
+#: The one-package run: it defines no builder and is read for the hygiene steps only.
+CLEAN_PACKAGE_RUNNER = '''"""A fixture one-package mode."""
+
+
+def run_package_coverage(name, env):
+    run_coverage_tests([name], env)
+    directory = env["dir"]
+    drop_invalid_profraws(directory)
+    prune_foreign_objects(directory, [name])
+    write_coverage_report(env["report"], env)
+'''
+
 CLEAN_FILES = {
     RUNNER: CLEAN_RUNNER,
+    PACKAGE_RUNNER: CLEAN_PACKAGE_RUNNER,
     MAKEFILE: CLEAN_MAKEFILE,
     ".github/workflows/ci.yml": CLEAN_WORKFLOW,
 }
@@ -339,7 +352,7 @@ def _fixture(base: Path, label: str, changes: dict[str, str | None] | None = Non
     """One case's tree: the clean files, with `changes` applied over them.
 
     The overrides are a dict of real relative paths rather than keyword arguments,
-    because a keyword cannot carry the slash in `scripts/scoped_runner.py`.
+    because a keyword cannot carry the slash in `scripts/scoped_run.py`.
     """
     files = dict(CLEAN_FILES)
     for relative, body in (changes or {}).items():
