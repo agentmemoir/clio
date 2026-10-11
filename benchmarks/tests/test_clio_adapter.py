@@ -22,7 +22,11 @@ from exec_tempdir import exec_tempdir  # noqa: E402  (path set above)
 from benchmarks.clio_bench.adapters.clio import ClioAdapter, ClioAdapterError
 from benchmarks.clio_bench.fingerprint import FingerprintError
 from benchmarks.clio_bench.tokenizer import get_tokenizer
-from benchmarks.clio_bench.types import DialogueTurn
+from benchmarks.clio_bench.types import (
+    REFUSAL_ADMISSION,
+    REFUSAL_DUPLICATE,
+    DialogueTurn,
+)
 from benchmarks.tests.support import assert_context_accounting
 
 _FAKE_CLIO = '''\
@@ -36,6 +40,14 @@ def emit(payload):
     sys.stdout.write(json.dumps(payload) + "\\n")
 
 
+def refuse(code, message):
+    """Report a declined write the way clio does: exit 1, object on stderr."""
+    sys.stderr.write(
+        json.dumps({"ok": False, "code": code, "message": message}) + "\\n"
+    )
+    sys.exit(1)
+
+
 def main():
     record = os.environ.get("FAKE_CLIO_RECORD")
     if record:
@@ -46,13 +58,11 @@ def main():
         sys.stderr.write("simulated failure\\n")
         sys.exit(3)
     if os.environ.get("FAKE_CLIO_REJECT"):
-        sys.stderr.write(
-            json.dumps(
-                {"ok": False, "code": "admission_refused", "message": "score below theta"}
-            )
-            + "\\n"
-        )
-        sys.exit(1)
+        refuse("admission_refused", "score below theta")
+    if os.environ.get("FAKE_CLIO_DUPLICATE"):
+        refuse("duplicate", "duplicate: nothing stored (exact_duplicate)")
+    if os.environ.get("FAKE_CLIO_CONFIG"):
+        refuse("config_corrupt", "no key-file path could be resolved")
     if os.environ.get("FAKE_CLIO_GARBAGE"):
         sys.stdout.write("this is not json\\n")
         return
@@ -165,6 +175,7 @@ class IngestTests(ClioAdapterTestCase):
         result = adapter.ingest("session-a", self._turn(text="hello world"))
         self.assertTrue(result.ok)
         self.assertIsNone(result.error)
+        self.assertIsNone(result.refusal)
         self.assertGreaterEqual(result.latency_ms, 0.0)
         self.assertEqual(result.tokens_processed, self.tokenizer.count("hello world"))
 
@@ -182,8 +193,34 @@ class IngestTests(ClioAdapterTestCase):
         adapter = self.make_adapter(extra_env={"FAKE_CLIO_REJECT": "1"})
         result = adapter.ingest("session-a", self._turn())
         self.assertFalse(result.ok)
+        self.assertEqual(result.refusal, REFUSAL_ADMISSION)
         self.assertIsNotNone(result.error)
         self.assertIn("theta", result.error)
+
+    def test_ingest_records_an_exact_duplicate_as_a_duplicate(self) -> None:
+        """A duplicate is the product's own decision, so it is not fatal.
+
+        The store already holds the text, which is why it is counted apart
+        from an admission refusal.
+        """
+        adapter = self.make_adapter(extra_env={"FAKE_CLIO_DUPLICATE": "1"})
+        result = adapter.ingest("session-a", self._turn())
+        self.assertFalse(result.ok)
+        self.assertEqual(result.refusal, REFUSAL_DUPLICATE)
+        self.assertIn("duplicate", result.error)
+
+    def test_a_write_failure_that_is_not_a_decline_raises(self) -> None:
+        """A configuration failure is not an admission decision.
+
+        Reading only the payload's `ok` flag would record this as a refused
+        turn and score a store that accepted nothing, which is issue #21.
+        """
+        adapter = self.make_adapter(extra_env={"FAKE_CLIO_CONFIG": "1"})
+        with self.assertRaises(ClioAdapterError) as caught:
+            adapter.ingest("session-a", self._turn())
+        message = str(caught.exception)
+        self.assertIn("config_corrupt", message)
+        self.assertIn("no key-file path could be resolved", message)
 
 
 class RetrieveTests(ClioAdapterTestCase):

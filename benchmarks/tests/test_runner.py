@@ -8,9 +8,12 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+from benchmarks.clio_bench.adapter import AdapterError
+from benchmarks.clio_bench.adapters.clio import ClioAdapterError
 from benchmarks.clio_bench.adapters.memory import MemoryAdapter
 from benchmarks.clio_bench.cli import main
 from benchmarks.clio_bench.doubles import StubGenerator, StubJudge
@@ -33,9 +36,47 @@ from benchmarks.clio_bench.runner import (
 )
 from benchmarks.clio_bench.stubs import StubSuiteError
 from benchmarks.clio_bench.tokenizer import get_tokenizer
+from benchmarks.clio_bench.types import (
+    REFUSAL_ADMISSION,
+    REFUSAL_DUPLICATE,
+)
 from benchmarks.tests.support import synthetic_suite
 
 _FRACTIONS = (0.6, 0.2, 0.2)
+
+
+class DecliningAdapter(MemoryAdapter):
+    """An adapter whose every write is declined for one named reason."""
+
+    def __init__(self, tokenizer, refusal: str) -> None:
+        super().__init__(tokenizer)
+        self._refusal = refusal
+
+    def ingest(self, session_id, turn):
+        stored = super().ingest(session_id, turn)
+        return replace(
+            stored,
+            ok=False,
+            error=f"declined as {self._refusal}",
+            refusal=self._refusal,
+        )
+
+
+class FailingWriteAdapter(MemoryAdapter):
+    """An adapter whose writes fail for a reason that is not a decline.
+
+    This is the shape of the issue #21 reproduction: `clio remember` exits
+    non-zero with a `config_corrupt` payload when the data directory is
+    relative, and the harness used to record every such write as an admission
+    refusal and then score the empty store.
+    """
+
+    def ingest(self, session_id, turn):
+        raise ClioAdapterError(
+            "clio remember failed with code 'config_corrupt': "
+            "no key-file path could be resolved"
+        )
+
 
 
 class SelectWorkTests(unittest.TestCase):
@@ -126,16 +167,35 @@ class RunSuiteTests(unittest.TestCase):
         self.assertTrue(all(r.judge is None for r in results))
         self.assertTrue(all("boom" in (r.error or "") for r in results))
 
-    def test_ingest_failure_is_tolerated(self) -> None:
-        class FailingIngest(MemoryAdapter):
-            def ingest(self, session_id, turn):
-                raise RuntimeError("ingest boom")
+    def test_a_failed_write_aborts_the_run(self) -> None:
+        """A write failure is not a declined write.
 
+        Counting it as a decline is issue #21: a configuration failure looked
+        like an admission refusal and the run scored a store that accepted
+        nothing. The adapter raises, and the run stops.
+        """
+        with self.assertRaises(AdapterError):
+            run_suite(
+                "locomo",
+                synthetic_suite(),
+                adapter=FailingWriteAdapter(get_tokenizer()),
+                generator=StubGenerator(),
+                judge=StubJudge(),
+                partition="canary",
+                seed=1,
+                fractions=_FRACTIONS,
+                max_probes=None,
+                token_budget=4096,
+                tokenizer=get_tokenizer(),
+                stats={},
+            )
+
+    def test_an_admission_refusal_is_counted_as_rejected(self) -> None:
         stats: dict = {}
         results = run_suite(
             "locomo",
             synthetic_suite(),
-            adapter=FailingIngest(get_tokenizer()),
+            adapter=DecliningAdapter(get_tokenizer(), REFUSAL_ADMISSION),
             generator=StubGenerator(),
             judge=StubJudge(),
             partition="canary",
@@ -147,8 +207,31 @@ class RunSuiteTests(unittest.TestCase):
             stats=stats,
         )
         self.assertEqual(len(results), 2)
-        self.assertEqual(stats["turns_rejected"], stats["turns_ingested"])
-        self.assertGreater(stats["turns_rejected"], 0)
+        self.assertEqual(stats["turns_ingested"], 1)
+        self.assertEqual(stats["turns_rejected"], 1)
+        self.assertEqual(stats["turns_duplicate"], 0)
+
+    def test_a_duplicate_is_counted_apart_from_an_admission_refusal(self) -> None:
+        """A duplicate is a decline, but the store already holds the text."""
+        stats: dict = {}
+        results = run_suite(
+            "locomo",
+            synthetic_suite(),
+            adapter=DecliningAdapter(get_tokenizer(), REFUSAL_DUPLICATE),
+            generator=StubGenerator(),
+            judge=StubJudge(),
+            partition="canary",
+            seed=1,
+            fractions=_FRACTIONS,
+            max_probes=None,
+            token_budget=4096,
+            tokenizer=get_tokenizer(),
+            stats=stats,
+        )
+        self.assertEqual(len(results), 2)
+        self.assertEqual(stats["turns_ingested"], 1)
+        self.assertEqual(stats["turns_rejected"], 0)
+        self.assertEqual(stats["turns_duplicate"], 1)
 
 
 class ReportTests(unittest.TestCase):
@@ -221,6 +304,34 @@ class ReportTests(unittest.TestCase):
         self.assertIn("# clio-bench scorecard", markdown)
         self.assertIn("single-hop", markdown)
 
+    def test_the_ingestion_line_is_unchanged_without_duplicates(self) -> None:
+        report = self._report()
+        report["suites"]["locomo"]["ingestion"] = {
+            "instances": 1,
+            "turns_ingested": 3,
+            "turns_rejected": 0,
+            "turns_duplicate": 0,
+        }
+        self.assertIn(
+            "Ingestion: 1 instances, 3 turns (0 rejected by admission)",
+            render_markdown(report),
+        )
+
+    def test_the_ingestion_line_names_duplicates_apart_from_refusals(self) -> None:
+        """A duplicate is named for what it is, not folded into the refusals."""
+        report = self._report()
+        report["suites"]["locomo"]["ingestion"] = {
+            "instances": 1,
+            "turns_ingested": 3,
+            "turns_rejected": 1,
+            "turns_duplicate": 2,
+        }
+        self.assertIn(
+            "Ingestion: 1 instances, 3 turns "
+            "(1 rejected by admission, 2 already stored)",
+            render_markdown(report),
+        )
+
     def test_markdown_names_tier_and_probe_count_on_the_number_line(self) -> None:
         markdown = render_markdown(self._report())
         self.assertIn("[tier stub, 6 probes; not quotable]", markdown)
@@ -271,6 +382,42 @@ class CliTests(unittest.TestCase):
 
     def test_stub_suite_is_refused(self) -> None:
         self.assertEqual(self._run_main(["--suite", "beam"]), 2)
+
+    def test_a_write_failure_produces_no_report(self) -> None:
+        """The issue #21 reproduction: a failed store must not be scored.
+
+        Every write fails with a configuration error, so a report would carry
+        numbers measured against an empty store. The run exits 2 instead and
+        writes nothing.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "should-not-exist.json"
+            with mock.patch(
+                "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
+            ), mock.patch(
+                "benchmarks.clio_bench.cli._build_adapter",
+                return_value=FailingWriteAdapter(get_tokenizer()),
+            ):
+                code = self._run_main(
+                    [
+                        "--suite",
+                        "locomo",
+                        "--adapter",
+                        "memory",
+                        "--judge",
+                        "stub",
+                        "--generator",
+                        "stub",
+                        "--partition",
+                        "canary",
+                        "--out",
+                        str(out),
+                        "--cache-dir",
+                        tmp,
+                    ]
+                )
+            self.assertEqual(code, 2)
+            self.assertFalse(out.exists())
 
     def test_end_to_end_hermetic_run_writes_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

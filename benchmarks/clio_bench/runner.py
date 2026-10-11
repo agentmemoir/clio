@@ -5,9 +5,11 @@ probes; `run_suite` drives an adapter, answer generator, and judge over them and
 returns per-probe results. `cli.py` parses the command line and `report.py`
 assembles the scorecard, so this module holds no flag parsing and no rendering.
 
-Failures fail loudly: a snapshot that cannot be loaded raises, and an adapter
-that reports a retrieval cost which is not the cost of its context raises
-`AccountingError` rather than putting that number into a report.
+Failures fail loudly: a snapshot that cannot be loaded raises, an adapter that
+reports a retrieval cost which is not the cost of its context raises
+`AccountingError` rather than putting that number into a report, and a write
+that fails for any reason other than the system declining it raises out of
+`run_suite` instead of being counted as a decline.
 """
 
 from __future__ import annotations
@@ -25,7 +27,13 @@ from .partition import partition_instances
 from .scoring import token_f1
 from .stubs import StubSuiteError, require_implemented
 from .tokenizer import ReferenceTokenizer, get_tokenizer
-from .types import Instance, Probe, ProbeResult, SuiteData
+from .types import (
+    REFUSAL_DUPLICATE,
+    Instance,
+    Probe,
+    ProbeResult,
+    SuiteData,
+)
 
 
 # The suites that can be scored. `cli.py` reads it to expand `--suite both` and
@@ -218,12 +226,17 @@ def run_suite(
 ) -> list[ProbeResult]:
     """Drive one suite end to end and return per-probe results.
 
-    When `stats` is provided it is filled with ingestion counters so the
-    report can show how many turns the product accepted or rejected. A single
-    turn or retrieval that the adapter cannot complete is recorded as a failed
-    probe and the run continues; judge and generator failures still abort, and so
-    does an adapter that reports a retrieval cost which is not the cost of the
-    context it returned, because that number goes into every probe of the report.
+    When `stats` is provided it is filled with ingestion counters so the report
+    can show how many turns the system took and how many it declined. A decline
+    is the system's own decision and is counted (`turns_rejected` for an
+    admission refusal, `turns_duplicate` for text the system already holds); a
+    write that fails for any other reason raises out of this function, because
+    scoring a store the system never accepted would publish numbers that look
+    like a bank filtered by admission. A retrieval the adapter cannot complete
+    is recorded as a failed probe and the run continues; judge and generator
+    failures still abort, and so does an adapter that reports a retrieval cost
+    which is not the cost of the context it returned, because that number goes
+    into every probe of the report.
     """
     parts = partition_instances(data.instances, seed=seed, fractions=fractions)
     if partition not in parts:
@@ -236,6 +249,7 @@ def run_suite(
         stats.setdefault("instances", 0)
         stats.setdefault("turns_ingested", 0)
         stats.setdefault("turns_rejected", 0)
+        stats.setdefault("turns_duplicate", 0)
         stats["instances"] += len(work)
     results: list[ProbeResult] = []
     for instance, probes in work:
@@ -244,14 +258,15 @@ def run_suite(
             for turn in session:
                 if stats is not None:
                     stats["turns_ingested"] += 1
-                try:
-                    ingested = adapter.ingest(instance.instance_id, turn)
-                except Exception:  # noqa: BLE001 - one bad turn must not kill the run
-                    if stats is not None:
-                        stats["turns_rejected"] += 1
+                ingested = adapter.ingest(instance.instance_id, turn)
+                if stats is None or ingested.ok:
                     continue
-                if stats is not None and not ingested.ok:
-                    stats["turns_rejected"] += 1
+                counter = (
+                    "turns_duplicate"
+                    if ingested.refusal == REFUSAL_DUPLICATE
+                    else "turns_rejected"
+                )
+                stats[counter] += 1
         for probe in probes:
             try:
                 retrieval = adapter.retrieve(
