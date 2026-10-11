@@ -118,21 +118,41 @@ def render_suite_section(suite: str, block: dict, tier: str) -> list[str]:
         label += "; not quotable"
     label += "]"
     lines = [f"## {suite}", ""]
-    lines.append(
-        f"Scored probes: {aggregate_block['scored_probes']} "
-        f"(failed {aggregate_block['failed_probes']}) {label}; "
-        f"overall accuracy {aggregate_block['overall']['accuracy']:.4f}; "
-        f"token F1 {aggregate_block['overall']['token_f1']:.4f}"
+    scored = aggregate_block["scored_probes"]
+    headline = (
+        f"Scored probes: {scored} "
+        f"(failed {aggregate_block['failed_probes']}) {label}"
     )
+    if scored:
+        headline += (
+            f"; overall accuracy {aggregate_block['overall']['accuracy']:.4f}; "
+            f"token F1 {aggregate_block['overall']['token_f1']:.4f}"
+        )
+    else:
+        # Nothing was scored, so there is no measurement to report. A zero here
+        # would read as a measured result for a bank that held nothing.
+        headline += (
+            "; no probe was scored, so no accuracy and no token F1 are reported"
+        )
+    lines.append(headline)
     ingestion = block.get("ingestion") or {}
     if ingestion:
-        declined = f"{ingestion.get('turns_rejected', 0)} rejected by admission"
+        outcomes = [f"{ingestion.get('turns_stored', 0)} stored"]
+        outcomes.append(
+            f"{ingestion.get('turns_rejected', 0)} rejected by admission"
+        )
         duplicates = ingestion.get("turns_duplicate", 0)
         if duplicates:
-            declined += f", {duplicates} already stored"
+            outcomes.append(f"{duplicates} already stored")
+        filtered = ingestion.get("turns_filtered", 0)
+        if filtered:
+            outcomes.append(f"{filtered} dropped by the system's write filter")
+        failures = ingestion.get("turns_failed", 0)
+        if failures:
+            outcomes.append(f"{failures} the harness could not write")
         lines.append(
             f"Ingestion: {ingestion.get('instances', 0)} instances, "
-            f"{ingestion.get('turns_ingested', 0)} turns ({declined})"
+            f"{ingestion.get('turns_ingested', 0)} turns ({', '.join(outcomes)})"
         )
     lines.append("")
     lines.append(f"| Category {label} | Count | Accuracy | Token F1 | p95 retrieval ms |")

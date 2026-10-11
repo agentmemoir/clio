@@ -30,15 +30,18 @@ from benchmarks.clio_bench.report import (
 )
 from benchmarks.clio_bench.runner import (
     _DEFAULT_PINS,
+    EmptyStoreError,
     load_suite,
     run_suite,
     select_work,
 )
+from benchmarks.clio_bench.scoring import aggregate
 from benchmarks.clio_bench.stubs import StubSuiteError
 from benchmarks.clio_bench.tokenizer import get_tokenizer
 from benchmarks.clio_bench.types import (
     REFUSAL_ADMISSION,
     REFUSAL_DUPLICATE,
+    REFUSAL_FILTERED,
 )
 from benchmarks.tests.support import synthetic_suite
 
@@ -76,6 +79,20 @@ class FailingWriteAdapter(MemoryAdapter):
             "clio remember failed with code 'config_corrupt': "
             "no key-file path could be resolved"
         )
+
+
+class FlakyWriteAdapter(MemoryAdapter):
+    """An adapter that fails one write and stores the rest."""
+
+    def __init__(self, tokenizer) -> None:
+        super().__init__(tokenizer)
+        self._calls = 0
+
+    def ingest(self, session_id, turn):
+        self._calls += 1
+        if self._calls == 1:
+            raise ClioAdapterError("clio remember failed with code 'internal': boom")
+        return super().ingest(session_id, turn)
 
 
 
@@ -167,14 +184,13 @@ class RunSuiteTests(unittest.TestCase):
         self.assertTrue(all(r.judge is None for r in results))
         self.assertTrue(all("boom" in (r.error or "") for r in results))
 
-    def test_a_failed_write_aborts_the_run(self) -> None:
-        """A write failure is not a declined write.
+    def test_a_broken_write_path_aborts_the_run(self) -> None:
+        """Issue #21: every write fails, so nothing may be scored.
 
-        Counting it as a decline is issue #21: a configuration failure looked
-        like an admission refusal and the run scored a store that accepted
-        nothing. The adapter raises, and the run stops.
+        A bank that took nothing because its writes failed is a broken run, not
+        a filtered one. The run stops and names the first failure.
         """
-        with self.assertRaises(AdapterError):
+        with self.assertRaises(EmptyStoreError) as caught:
             run_suite(
                 "locomo",
                 synthetic_suite(),
@@ -189,13 +205,67 @@ class RunSuiteTests(unittest.TestCase):
                 tokenizer=get_tokenizer(),
                 stats={},
             )
+        self.assertIn("config_corrupt", str(caught.exception))
 
-    def test_an_admission_refusal_is_counted_as_rejected(self) -> None:
+    def test_one_failed_write_costs_its_instance_but_not_the_run(self) -> None:
+        """A single bad turn must not discard a whole run.
+
+        The instance whose store is missing that turn cannot be measured, so
+        its probes are recorded as failed; the other instances are scored.
+        """
         stats: dict = {}
         results = run_suite(
             "locomo",
             synthetic_suite(),
-            adapter=DecliningAdapter(get_tokenizer(), REFUSAL_ADMISSION),
+            adapter=FlakyWriteAdapter(get_tokenizer()),
+            generator=StubGenerator(),
+            judge=StubJudge(),
+            partition="train",
+            seed=1,
+            fractions=_FRACTIONS,
+            max_probes=None,
+            token_budget=4096,
+            tokenizer=get_tokenizer(),
+            stats=stats,
+        )
+        self.assertEqual(stats["turns_ingested"], 3)
+        self.assertEqual(stats["turns_stored"], 2)
+        self.assertEqual(stats["turns_failed"], 1)
+        failed = [r for r in results if r.judge is None]
+        scored = [r for r in results if r.judge is not None]
+        self.assertEqual(len(failed), 2)
+        self.assertEqual(len(scored), 4)
+        self.assertTrue(all("could not write" in (r.error or "") for r in failed))
+
+    def test_an_unknown_decline_kind_stops_the_run(self) -> None:
+        """A decline kind the runner does not know is a bug, not a refusal.
+
+        Absorbing it would count and label it as an admission refusal, which is
+        the mislabelling issue #21 is about.
+        """
+        with self.assertRaises(AdapterError) as caught:
+            run_suite(
+                "locomo",
+                synthetic_suite(),
+                adapter=DecliningAdapter(get_tokenizer(), "mystery"),
+                generator=StubGenerator(),
+                judge=StubJudge(),
+                partition="canary",
+                seed=1,
+                fractions=_FRACTIONS,
+                max_probes=None,
+                token_budget=4096,
+                tokenizer=get_tokenizer(),
+                stats={},
+            )
+        self.assertIn("mystery", str(caught.exception))
+
+    def _declined_run(self, refusal: str) -> tuple[list, dict]:
+        stats: dict = {}
+        results = run_suite(
+            "locomo",
+            synthetic_suite(),
+            adapter=DecliningAdapter(get_tokenizer(), refusal),
             generator=StubGenerator(),
             judge=StubJudge(),
             partition="canary",
@@ -206,32 +276,61 @@ class RunSuiteTests(unittest.TestCase):
             tokenizer=get_tokenizer(),
             stats=stats,
         )
-        self.assertEqual(len(results), 2)
+        return results, stats
+
+    def test_a_store_that_took_nothing_is_never_scored(self) -> None:
+        """Issue #21's Expected behavior: no scored numbers from an empty bank."""
+        results, stats = self._declined_run(REFUSAL_ADMISSION)
+        aggregate_block = aggregate(results)
+        self.assertEqual(aggregate_block["scored_probes"], 0)
+        self.assertEqual(aggregate_block["failed_probes"], 2)
+        self.assertEqual(stats["turns_stored"], 0)
+        self.assertEqual(stats["turns_rejected"], 1)
+        self.assertTrue(all("stored none" in (r.error or "") for r in results))
+
+    def test_an_instance_with_no_turns_is_not_scored(self) -> None:
+        """Nothing was stored, so there is nothing to answer a probe from."""
+        data = synthetic_suite()
+        data.instances = [replace(inst, sessions=[]) for inst in data.instances]
+        results = run_suite(
+            "locomo",
+            data,
+            adapter=MemoryAdapter(get_tokenizer()),
+            generator=StubGenerator(),
+            judge=StubJudge(),
+            partition="canary",
+            seed=1,
+            fractions=_FRACTIONS,
+            max_probes=None,
+            token_budget=4096,
+            tokenizer=get_tokenizer(),
+        )
+        aggregate_block = aggregate(results)
+        self.assertEqual(aggregate_block["scored_probes"], 0)
+        self.assertEqual(aggregate_block["failed_probes"], 2)
+        self.assertTrue(all("no turns" in (r.error or "") for r in results))
+
+    def test_an_admission_refusal_is_counted_as_rejected(self) -> None:
+        _, stats = self._declined_run(REFUSAL_ADMISSION)
         self.assertEqual(stats["turns_ingested"], 1)
         self.assertEqual(stats["turns_rejected"], 1)
         self.assertEqual(stats["turns_duplicate"], 0)
+        self.assertEqual(stats["turns_filtered"], 0)
 
     def test_a_duplicate_is_counted_apart_from_an_admission_refusal(self) -> None:
         """A duplicate is a decline, but the store already holds the text."""
-        stats: dict = {}
-        results = run_suite(
-            "locomo",
-            synthetic_suite(),
-            adapter=DecliningAdapter(get_tokenizer(), REFUSAL_DUPLICATE),
-            generator=StubGenerator(),
-            judge=StubJudge(),
-            partition="canary",
-            seed=1,
-            fractions=_FRACTIONS,
-            max_probes=None,
-            token_budget=4096,
-            tokenizer=get_tokenizer(),
-            stats=stats,
-        )
-        self.assertEqual(len(results), 2)
+        _, stats = self._declined_run(REFUSAL_DUPLICATE)
         self.assertEqual(stats["turns_ingested"], 1)
         self.assertEqual(stats["turns_rejected"], 0)
         self.assertEqual(stats["turns_duplicate"], 1)
+        self.assertEqual(stats["turns_filtered"], 0)
+
+    def test_a_filtered_turn_is_counted_apart(self) -> None:
+        """A system's own write filter is neither a gate nor a duplicate."""
+        _, stats = self._declined_run(REFUSAL_FILTERED)
+        self.assertEqual(stats["turns_ingested"], 1)
+        self.assertEqual(stats["turns_rejected"], 0)
+        self.assertEqual(stats["turns_filtered"], 1)
 
 
 class ReportTests(unittest.TestCase):
@@ -304,33 +403,48 @@ class ReportTests(unittest.TestCase):
         self.assertIn("# clio-bench scorecard", markdown)
         self.assertIn("single-hop", markdown)
 
-    def test_the_ingestion_line_is_unchanged_without_duplicates(self) -> None:
+    def test_the_ingestion_line_names_the_two_counts_a_run_always_has(self) -> None:
         report = self._report()
         report["suites"]["locomo"]["ingestion"] = {
             "instances": 1,
             "turns_ingested": 3,
+            "turns_stored": 3,
             "turns_rejected": 0,
             "turns_duplicate": 0,
+            "turns_filtered": 0,
+            "turns_failed": 0,
         }
         self.assertIn(
-            "Ingestion: 1 instances, 3 turns (0 rejected by admission)",
+            "Ingestion: 1 instances, 3 turns (3 stored, 0 rejected by admission)",
             render_markdown(report),
         )
 
-    def test_the_ingestion_line_names_duplicates_apart_from_refusals(self) -> None:
-        """A duplicate is named for what it is, not folded into the refusals."""
+    def test_the_ingestion_line_names_every_outcome_that_happened(self) -> None:
+        """Each decline kind, and a failed write, are named rather than merged."""
         report = self._report()
         report["suites"]["locomo"]["ingestion"] = {
             "instances": 1,
-            "turns_ingested": 3,
+            "turns_ingested": 6,
+            "turns_stored": 2,
             "turns_rejected": 1,
-            "turns_duplicate": 2,
+            "turns_duplicate": 1,
+            "turns_filtered": 1,
+            "turns_failed": 1,
         }
         self.assertIn(
-            "Ingestion: 1 instances, 3 turns "
-            "(1 rejected by admission, 2 already stored)",
+            "Ingestion: 1 instances, 6 turns (2 stored, 1 rejected by admission, "
+            "1 already stored, 1 dropped by the system's write filter, "
+            "1 the harness could not write)",
             render_markdown(report),
         )
+
+    def test_a_suite_with_no_scored_probe_reports_no_accuracy(self) -> None:
+        """A zero would read as a measured result for a bank that held nothing."""
+        report = self._report()
+        report["suites"]["locomo"]["aggregate"]["scored_probes"] = 0
+        markdown = render_markdown(report)
+        self.assertIn("no probe was scored", markdown)
+        self.assertNotIn("overall accuracy", markdown)
 
     def test_markdown_names_tier_and_probe_count_on_the_number_line(self) -> None:
         markdown = render_markdown(self._report())
@@ -418,6 +532,51 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(code, 2)
             self.assertFalse(out.exists())
+
+    def test_a_declined_store_writes_a_report_with_no_scored_probe(self) -> None:
+        """A system that declines every turn is its own decision, not a fault.
+
+        The report is written and it says that nothing was scored and why,
+        rather than presenting a number measured against an empty bank.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "declined.json"
+            md = Path(tmp) / "declined.md"
+            with mock.patch(
+                "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
+            ), mock.patch(
+                "benchmarks.clio_bench.cli._build_adapter",
+                return_value=DecliningAdapter(get_tokenizer(), REFUSAL_ADMISSION),
+            ):
+                code = self._run_main(
+                    [
+                        "--suite",
+                        "locomo",
+                        "--adapter",
+                        "memory",
+                        "--judge",
+                        "stub",
+                        "--generator",
+                        "stub",
+                        "--partition",
+                        "canary",
+                        "--out",
+                        str(out),
+                        "--report-md",
+                        str(md),
+                        "--cache-dir",
+                        tmp,
+                    ]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(out.read_text())
+            self.assertEqual(payload["overall"]["scored_probes"], 0)
+            self.assertEqual(
+                payload["suites"]["locomo"]["ingestion"]["turns_stored"], 0
+            )
+            scorecard = md.read_text()
+            self.assertIn("no probe was scored", scorecard)
+            self.assertIn("rejected by admission", scorecard)
 
     def test_end_to_end_hermetic_run_writes_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
