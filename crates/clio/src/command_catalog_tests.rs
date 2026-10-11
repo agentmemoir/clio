@@ -20,7 +20,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::ENTRIES;
+use super::{ARROW, ENTRIES, NOTE_INDENT, NOTE_WIDTH, USAGE_WIDTH};
 use crate::cli_help_usage;
 use crate::help_flags_test_support::{entry_block, flags_in};
 
@@ -235,4 +235,48 @@ fn wrapping_never_splits_a_flag_name() {
              catalog does not contain it whole, so a flag name was split by wrapping"
         );
     }
+}
+
+/// The catalog's two wrap columns are pinned as literals: 84 for the usage lines
+/// and 92 for the note lines, indent included. Retuning either constant changes
+/// what a reader sees, so it must change this test in the same commit.
+#[test]
+fn the_catalog_widths_are_pinned_to_their_columns() {
+    assert_eq!(USAGE_WIDTH, 84, "usage lines wrap at 84 columns");
+    assert_eq!(NOTE_WIDTH, 92, "note lines wrap at 92 columns");
+}
+
+/// No rendered catalog line runs past the column it was wrapped to.
+///
+/// The bounds are the rendered columns themselves, so this also fails if the
+/// renderer stops applying a width. The renderer appends the tool arrow to a
+/// command's last usage line after wrapping, so that suffix is stripped before
+/// the check: the wrapped text must fit 84, and the arrow is the only part
+/// allowed to pass it. Note lines carry no suffix and must stay within 92.
+#[test]
+fn no_rendered_catalog_line_exceeds_its_width() {
+    let arrows: Vec<String> = crate::cli_help::command_bindings()
+        .iter()
+        .map(|(_, tool)| format!("{ARROW}{tool}"))
+        .collect();
+    let text = catalog_text();
+    let over: Vec<(usize, &str)> = text
+        .lines()
+        .filter_map(|line| {
+            let leading = line.len() - line.trim_start_matches(' ').len();
+            if leading == NOTE_INDENT.len() {
+                return (line.len() > 92).then_some((line.len(), line));
+            }
+            let wrapped = arrows
+                .iter()
+                .find_map(|arrow| line.strip_suffix(arrow.as_str()))
+                .unwrap_or(line);
+            (wrapped.len() > 84).then_some((wrapped.len(), line))
+        })
+        .collect();
+    assert!(
+        over.is_empty(),
+        "these catalog lines' wrapped text runs past the 84-column usage or \
+         92-column note bound: {over:?}"
+    );
 }
