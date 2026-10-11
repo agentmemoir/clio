@@ -9,25 +9,20 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Collection, Iterable, NamedTuple, Sequence
 
-from scoped_runner import (
+from scoped_core import REPORT, ROOT
+from scoped_judge import _count, report_rows
+from scoped_package import package_env, package_report_path, package_target_override
+from scoped_profiles import (
     CARGO_LLVM_COV_BUILD_KEY,
     CARGO_LLVM_COV_TARGET_KEY,
     INSTRUMENTED_DIR_NAME,
     RAW_PROFILE_HEADER_BYTES,
-    REPORT,
-    ROOT,
-    _count,
-    _run_or_raise,
     clear_profile_buffers,
     drop_invalid_profraws,
     instrumented_dir,
-    package_env,
-    package_report_path,
-    package_target_override,
-    report_rows,
     resolved_instrumented_dir,
-    run_coverage,
 )
+from scoped_run import _run_or_raise, run_coverage
 
 from scoped_selftest_support import shared as globals
 

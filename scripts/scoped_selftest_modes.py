@@ -7,22 +7,14 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from scoped_runner import (
+from scoped_cli import main
+from scoped_core import CoverageRow, EXIT_FAIL, EXIT_OK, EXIT_RUN_ERROR, EXIT_USAGE, ROOT, RunError
+from scoped_judge import judge, renames
+from scoped_package import package_report_path, package_target_override
+from scoped_profiles import (
     CARGO_LLVM_COV_TARGET_KEY,
-    CoverageRow,
-    EXIT_FAIL,
-    EXIT_OK,
-    EXIT_RUN_ERROR,
-    EXIT_USAGE,
     RAW_PROFILE_HEADER_BYTES,
-    ROOT,
-    RunError,
     _inside,
-    judge,
-    main,
-    package_report_path,
-    package_target_override,
-    renames,
     resolved_instrumented_dir,
 )
 

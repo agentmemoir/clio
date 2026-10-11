@@ -65,7 +65,7 @@ been undone, would otherwise turn this into a check of nothing.
 
 What is not scanned, stated rather than left to be assumed:
 
-- **Python other than `scripts/scoped_runner.py`.** The gate's own coverage
+- **Python other than `scripts/scoped_run.py` and `scripts/scoped_package.py`.** The gate's own coverage
   commands are only ever expressed as Python list literals, so a check that
   ignored Python would find nothing to protect and this file would be the third
   copy of the same false negative. What is read is scoped to the two named
