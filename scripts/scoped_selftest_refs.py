@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from scoped_core import CoverageRow, RunError, owned
 from scoped_judge import judge, report_path_for
 from scoped_run import TEST_THREADS, coverage_report_command, coverage_test_command
-from scoped_select import build_inputs, resolve_ref, select
+from scoped_select import build_inputs, embedders, resolve_ref, select
 
 from scoped_selftest_support import shared as globals
 
@@ -132,6 +132,21 @@ def run(check) -> tuple:
             {"name": "b", "dir": "crates/b", "deps": {"a"}},
             {"name": "c", "dir": "crates/c", "deps": set()},
         ]
+        # The embedding packages come from the Rust files that name the sql file. A search
+        # that finds nothing is an empty answer, not an error.
+        pk = globals()["workspace_packages"]()
+        original_git_for_embedders = globals()["git"]
+        try:
+            globals()["git"] = lambda *a: "crates/a/src/m.rs\ncrates/c/src/c.rs\n"
+            check("a sql file is embedded by the packages whose source names it", embedders("sql/x.sql", pk), {"a", "c"})
+
+            def no_match(*a):
+                raise RunError("git grep exit 1")
+
+            globals()["git"] = no_match
+            check("a sql file no source names has no embedder", embedders("sql/x.sql", pk), set())
+        finally:
+            globals()["git"] = original_git_for_embedders
         globals()["embedders"] = lambda rel, packages: {"c"}
         for label, paths, want in (
             ("the lock file selects every package", ["Cargo.lock"], ["a", "b", "c"]),
