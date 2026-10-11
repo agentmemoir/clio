@@ -7,8 +7,9 @@
 //!
 //! ## Owns
 //! - Argument parsing and dispatch for scaffold commands (`version`, `health`, `help`)
-//! - Dispatch into the `mcp`, `ops`, `retention`, `compose`, read, and write
-//!   command surfaces
+//! - Dispatch into the command surfaces: `backup`, `auth`, `mcp`, `ops`,
+//!   `status`, `retention`, `compose`, `setup`, `config`, `ranking`, `sync`,
+//!   `install`/`uninstall`, and the read and write verb surfaces
 //! - Process exit codes for the top-level commands
 //!
 //! ## Does not own
@@ -59,12 +60,16 @@ mod cli_args;
 mod cli_args_suggest;
 mod cli_command_bindings;
 mod cli_command_registry;
+mod cli_command_registry_auth_config;
+mod cli_command_registry_backup;
 mod cli_command_registry_core_reads;
 mod cli_command_registry_core_writes;
 mod cli_command_registry_graph_records;
 mod cli_command_registry_persona_local;
+mod cli_command_registry_ranking_retention;
 mod cli_command_registry_shared_workspace;
 mod cli_command_registry_surface;
+mod cli_command_registry_sync;
 mod cli_command_registry_task_history;
 mod cli_command_registry_write_operations;
 mod cli_command_spec;

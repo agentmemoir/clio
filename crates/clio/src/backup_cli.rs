@@ -8,8 +8,8 @@
 //! creates the resolved backup directory without opening the database.
 //!
 //! ## Owns
-//! - The `backup` group dispatch, its subcommand list, and its did-you-mean
-//!   hint
+//! - The `backup` group dispatch and its did-you-mean hint, both worked over
+//!   the subcommand list the registry derives (see `cli_help_groups`)
 //! - `backup dir`: directory creation, owner-only tightening of the fresh
 //!   leaf, the writability probe, and its text and JSON views
 //! - The restore selectors: the snapshot-id rule and the target resolution
@@ -23,8 +23,10 @@
 //!
 //! ## Boundary
 //!
-//! Changes to the `backup` CLI flags or views should normally require changes
-//! here. Changes to directory resolution should not require changes here.
+//! Changes to a `backup` verb's flags, usage text, or summary should normally
+//! require changes in `cli_command_registry_backup`; changes to its dispatch,
+//! decoding, or views should normally require changes here. Changes to
+//! directory resolution should not require changes here.
 //!
 //! Keep this module focused on the `clio backup` surface.
 
@@ -38,9 +40,6 @@ use clio_config::ResolvedBackupDir;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-
-/// The `backup` subcommands this surface binds. None of them binds an MCP tool.
-const SUBCOMMANDS: &[&str] = &["create", "dir", "list", "prune", "restore", "verify"];
 
 /// Dispatch `clio backup <subcommand>` with the process environment, streams,
 /// and current directory.
@@ -161,10 +160,14 @@ fn run_dir(
     ExitCode::from(EXIT_OK)
 }
 
-/// The flags `backup dir` accepts: its own flags are none; `FlagSpec` adds the
-/// globals, so `--output` (and its `-o` alias) is accepted and nothing else.
+/// The flags `backup dir` accepts: the `backup dir` record's own flags — none
+/// beyond `--output` — decoded through the registry, plus the globals every
+/// parser spec merges (so `--output` and its `-o` alias are accepted).
 fn dir_spec() -> FlagSpec {
-    FlagSpec::new(&[], &[])
+    match crate::cli_command_registry::find("backup dir") {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
+    }
 }
 
 /// Create the backup directory when missing, then tighten the fresh leaf to
@@ -382,8 +385,15 @@ fn render_dir(resolved: &ResolvedBackupDir, created: bool, writable: bool) -> St
 }
 
 /// The error for an unknown subcommand, suggesting the closest verb.
+///
+/// The candidates are the derived subcommand list the group help body prints,
+/// so the two surfaces cannot drift: a verb added to the registry is both
+/// listed and suggested, with no second list to update. The suggestion keeps
+/// the earlier candidate on a tie, which cannot change an answer here because
+/// the six labels share no first letter.
 fn unknown_subcommand(sub: &str) -> CliError {
-    let hint = cli_args::suggest(sub, SUBCOMMANDS).map_or_else(
+    let candidates = cli_help::group_subcommands("backup").unwrap_or(&[]);
+    let hint = cli_args::suggest(sub, candidates).map_or_else(
         || "try `clio backup dir`".to_owned(),
         |best| format!("did you mean `clio backup {best}`?"),
     );

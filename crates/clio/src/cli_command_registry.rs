@@ -25,12 +25,16 @@
 //! Keep this module focused on the registry and the global flags.
 //
 
+use crate::cli_command_registry_auth_config as auth_config;
+use crate::cli_command_registry_backup as backup_leaves;
 use crate::cli_command_registry_core_reads as core_reads;
 use crate::cli_command_registry_core_writes as core_writes;
 use crate::cli_command_registry_graph_records as graph_records;
 use crate::cli_command_registry_persona_local as persona_local;
+use crate::cli_command_registry_ranking_retention as ranking_retention;
 use crate::cli_command_registry_shared_workspace as shared_workspace;
 use crate::cli_command_registry_surface as surface;
+use crate::cli_command_registry_sync as sync_leaves;
 use crate::cli_command_registry_task_history as task_history;
 use crate::cli_command_registry_write_operations as write_operations;
 use crate::cli_command_spec::{CommandSpec, Flag};
@@ -84,6 +88,10 @@ static TRANCHES: &[&[CommandSpec]] = &[
     write_operations::WRITE_OPERATIONS,
     surface::SURFACE,
     COMPOSE_LEAVES,
+    backup_leaves::BACKUP_LEAVES,
+    sync_leaves::SYNC_LEAVES,
+    auth_config::AUTH_CONFIG_LEAVES,
+    ranking_retention::RANKING_RETENTION_LEAVES,
 ];
 
 /// Every global flag name that takes a value, in merge order.

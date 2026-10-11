@@ -8,8 +8,9 @@
 //! holds.
 //!
 //! ## Owns
-//! - The `create` flags (`--label`, `--note`, `--dry-run`, `--keep`,
-//!   `--confirm`) and their views
+//! - The `create` views over its record's flags (`--label`, `--note`,
+//!   `--dry-run`, `--keep`, `--confirm`; the accepted set is the
+//!   `backup create` registry record's)
 //! - The dry-run plan and the wiring from the store half's snapshot and key
 //!   member into the archive half's `create_archive`
 //! - The keep count's refusals and the one call site that runs the prune after a
@@ -45,14 +46,6 @@ use clio_types::AmError;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-
-/// The value flags `create` adds to the globals. `--keep` is the one count
-/// flag: it hands the count to the prune, which is the only thing that reads it.
-const VALUE_FLAGS: &[&str] = &["label", "note", "keep"];
-
-/// The boolean flags `create` adds to the globals. `--confirm` is inherited
-/// from the prune, so both halves of one command share one confirmation rule.
-const BOOL_FLAGS: &[&str] = &["confirm", "dry-run"];
 
 /// Run `clio backup create` against injected streams, env, and cwd.
 pub(crate) fn run(
@@ -145,9 +138,13 @@ fn emit_created(
     ExitCode::from(exit)
 }
 
-/// The flags `backup create` accepts.
+/// The flags `backup create` accepts: the `backup create` record's own flags,
+/// decoded through the registry, plus the globals every parser spec merges.
 fn spec() -> FlagSpec {
-    FlagSpec::new(VALUE_FLAGS, BOOL_FLAGS)
+    match crate::cli_command_registry::find("backup create") {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
+    }
 }
 
 /// Refuse a confirmation with no deletion to confirm.

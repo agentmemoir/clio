@@ -78,24 +78,8 @@ fn the_tranche_lists_its_fifteen_records_once_each() {
 /// unchanged.
 #[test]
 fn the_subcommand_records_keep_their_authored_catalog_rows() {
-    for name in [
-        "mcp schema-export",
-        "mcp stdio",
-        "mcp http",
-        "ops diagnose",
-        "ops verify",
-        "ops doctor",
-        "ops repair",
-        "ops reindex",
-    ] {
-        let authored = crate::command_catalog::ENTRIES_BEFORE
-            .iter()
-            .find(|(entry, _)| *entry == name)
-            .map_or_else(
-                || panic!("`{name}` has an authored catalog row"),
-                |(_, summary)| *summary,
-            );
-        assert_eq!(record(name).summary, authored, "{name} catalog row");
+    for (name, authored) in crate::command_catalog::AUTHORED_ROW_REFERENCES {
+        assert_eq!(record(name).summary, *authored, "{name} catalog row");
     }
 }
 

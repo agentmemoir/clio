@@ -27,7 +27,7 @@
 //!
 //! Keep this module focused on the catalog's registry seam.
 
-use super::{AUTHORED_ROW_REFERENCES, ENTRIES_AFTER, ENTRIES_BEFORE, catalog_rows};
+use super::{AUTHORED_ROW_REFERENCES, catalog_rows};
 use crate::cli_help_usage;
 use crate::help_flags_test_support::{entry_block, flags_in};
 
@@ -57,13 +57,12 @@ fn every_registry_command_is_listed_exactly_once() {
     }
 }
 
-/// The registry's records render at their spine positions: the reserved heads
-/// lead the catalog as one span, the group records run unbroken from `recall`
-/// to `graph link`, and `install`, `uninstall`, and `help` close it; the
-/// authored rows that remain sit between the spans, never inside one.
+/// The registry's records render at their spine positions: every spine key is
+/// a record now, so the catalog is one unbroken record span from `version` to
+/// `help`, with no authored row between or inside it.
 ///
 /// A catalog that compacted the records elsewhere, dropped one, or let an
-/// authored row slip inside a span fails here.
+/// authored row slip inside the span fails here.
 #[test]
 fn the_registry_records_render_at_their_spine_positions() {
     let listed: Vec<&str> = super::catalog_commands().collect();
@@ -84,11 +83,7 @@ fn the_registry_records_render_at_their_spine_positions() {
         .collect();
     assert_eq!(
         bounds,
-        [
-            ("version", "setup"),
-            ("recall", "graph link"),
-            ("install", "help")
-        ],
+        [("version", "help")],
         "the record spans' bounds changed; move them only when the catalog's \
          record shape is intended to change"
     );
@@ -100,20 +95,62 @@ fn the_registry_records_render_at_their_spine_positions() {
     );
 }
 
-/// No authored row names a registered command, except the eight subcommand
-/// rows the reserved-surface record tests read as their byte reference: those
-/// stay, and this check pins each one byte-equal to its record's summary, so a
-/// registered command's row still has exactly one rendered source.
+/// The authored reference table holds exactly the eight `mcp` and `ops` rows
+/// the reserved-surface record tests read, in the table's own order; a row
+/// dropped or added fails here.
+///
+/// The seam check owns the table's contract, and both consumers iterate it, so
+/// the length and the exact names are pinned here rather than in
+/// `cli_command_registry_surface_tests`: otherwise a dropped row would narrow
+/// both loops in step and pass unnoticed.
 #[test]
-fn no_authored_row_names_a_registered_command() {
-    for (command, summary) in ENTRIES_BEFORE.iter().chain(ENTRIES_AFTER.iter()) {
-        let Some(spec) = crate::cli_command_registry::find(command) else {
-            continue;
-        };
-        assert!(
-            AUTHORED_ROW_REFERENCES.contains(command),
-            "`{command}` is authored in the catalog table and also registered"
-        );
+fn the_authored_row_reference_keeps_its_eight_named_rows() {
+    assert_eq!(
+        AUTHORED_ROW_REFERENCES.len(),
+        8,
+        "AUTHORED_ROW_REFERENCES is the eight-row mcp/ops byte reference"
+    );
+    let names: Vec<&str> = AUTHORED_ROW_REFERENCES
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "mcp schema-export",
+            "mcp stdio",
+            "mcp http",
+            "ops diagnose",
+            "ops verify",
+            "ops doctor",
+            "ops repair",
+            "ops reindex",
+        ],
+        "AUTHORED_ROW_REFERENCES keeps these eight rows in this order"
+    );
+}
+
+/// Every authored reference row names its registered command, and the row's
+/// summary equals that record's summary byte-equal, so the reference cannot
+/// drift from the record it documents.
+///
+/// The length and names are pinned in this module's
+/// `the_authored_row_reference_keeps_its_eight_named_rows`, so a dropped row
+/// fails there rather than narrowing this loop. The duplicate-source guard
+/// proper is
+/// `cli_help_dispatch_tests::the_deleted_duplicate_row_sources_stay_deleted`:
+/// its eighteen needles trip on the deleted tables returning — the nine
+/// registry-table identifiers (the usage rows, the catalog fallback rows, the
+/// static bindings, and the hand-written group tables) and the nine backup
+/// leaves' flag tables (`VALUE_FLAGS` and `BOOL_FLAGS` across
+/// `backup_create_cli`, `backup_list_cli`, `backup_prune_cli`,
+/// `backup_restore_cli`, and `backup_verify_cli`). This check does not see a
+/// new duplicate row source under an identifier none of those needles names.
+#[test]
+fn every_authored_row_names_a_registered_command() {
+    for (command, summary) in AUTHORED_ROW_REFERENCES {
+        let spec = crate::cli_command_registry::find(command)
+            .unwrap_or_else(|| panic!("`{command}` is an authored reference row with no record"));
         assert_eq!(
             *summary, spec.summary,
             "`{command}`'s authored row and its record's summary"

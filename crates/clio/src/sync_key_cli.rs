@@ -4,36 +4,39 @@
 //! # Responsibility
 //!
 //! This module is responsible for the `clio sync` key-management verbs:
-//! `keygen`, `key export`, and `key status`, with their own flag specs, help,
-//! and refusals.
+//! `keygen`, `key export`, and `key status`, with their dispatch, help, and
+//! refusals.
 //!
 //! ## Owns
-//! - `keygen`, `key export`, and `key status` with their own flag specs
+//! - `keygen`, `key export`, and `key status` with their own dispatch
 //! - Recording which store a generated key was written to
-//! - The help text and the argument refusals the three verbs share
+//! - The argument refusals the three verbs share
 //!
 //! ## Does not own
 //! - Generating, storing, reading, and resolving the key a push or pull sends;
 //!   the sync tool reads the recorded store and `CLIO_SYNC_KEY_FILE` itself
 //!   (see `clio-config`'s `sync_key`)
 //! - `sync status`, `push`, `pull`, and `serve` (see `sync_cli`)
-//! - The help tables the verbs are registered in (see `cli_help`,
-//!   `cli_help_usage`, and `command_catalog`)
+//! - The verbs' static records (see `cli_command_registry_sync`) and the help
+//!   surfaces that render them (see `cli_help`, `cli_help_usage`, and
+//!   `command_catalog`)
 //!
 //! ## Boundary
 //!
-//! Changes to a key verb's flags or output should normally require changes
-//! here. Changes to how a transfer key is resolved or to how a key is stored
-//! should not.
+//! Changes to a key verb's flags, usage text, or summary should normally
+//! require changes in `cli_command_registry_sync`; changes to its dispatch,
+//! output, or refusals should normally require changes here. Changes to how a
+//! transfer key is resolved or to how a key is stored should not require
+//! changes here.
 //!
 //! Keep this module focused on the key verbs.
 //!
 //! # Why this is not part of `sync_cli`
 //!
-//! Two reasons, and only the first was true when this was written. `spec()`'s
-//! catch-all hands every unlisted verb `sync serve`'s flags, so these verbs carry
-//! their own spec. And `sync_cli` was within two lines of the workspace file-size
-//! limit, so the views moved out of it rather than into it.
+//! The key verbs dispatch differently: `keygen` sits at the top level while
+//! `export` and `status` nest under `key`, and the shared module stays focused
+//! on the four transfer verbs. `sync_cli` was also within two lines of the
+//! workspace file-size limit, so the views moved out of it rather than into it.
 
 use crate::cli_args::{self, FlagSpec, ParsedArgs};
 use crate::cli_error::{CliError, EXIT_OK};
@@ -133,12 +136,12 @@ pub(crate) fn run(io: &mut CliIo, args: Vec<String>) -> ExitCode {
 
 /// The flags one key verb accepts, globals included.
 ///
-/// Every key verb owns this spec: neither `sync_cli`'s catch-all nor its serve
-/// flags can reach them.
+/// Decoded through the registry, plus the globals every parser spec merges:
+/// neither `sync_cli`'s verbs nor their flags can reach these records.
 fn spec(verb: &str) -> FlagSpec {
-    match verb {
-        "sync keygen" => FlagSpec::new(&["store"], &[]),
-        _ => FlagSpec::new(&[], &[]),
+    match crate::cli_command_registry::find(verb) {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
     }
 }
 

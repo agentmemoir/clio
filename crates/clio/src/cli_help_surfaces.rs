@@ -6,15 +6,15 @@
 //! This module is responsible for the reserved surfaces' usage lines and the
 //! wrapping every help surface shares. A moved command's line lives on its
 //! registry record; the table holds the same bytes as the record rows' byte
-//! reference, and the three retention rows are the lines of the commands that
-//! have not moved yet.
+//! reference, and the only rows a surface renders from it are the five `ops`
+//! rows.
 //!
 //! ## Owns
 //! - `SURFACE_USAGE`, the reserved surfaces' lines: the record rows' byte
-//!   reference the reserved-surface record tests read, plus the retention
-//!   lines of the commands without a record and the `ops` lines the ops
+//!   reference the reserved-surface and ranking/retention record tests read
+//!   through the test-only `surface_usage_line`, plus the `ops` lines the ops
 //!   surface renders as its group help
-//! - `surface_usage_line`, the table half of the shared usage lookup
+//! - `surface_usage_line`, the test-only byte reference into `SURFACE_USAGE`
 //! - The wrapping every help surface and the catalog share, so one command's line
 //!   breaks the same way in both places
 //! - `ops_usage_lines`, because `ops` is one verb with five subcommands and each
@@ -133,8 +133,11 @@ fn split_first(text: &str) -> (&str, &str) {
 
 /// One command's registered usage line from the reserved surfaces, if any.
 ///
-/// The shared lookup lives in `cli_help_usage`, so this is the table half of it
-/// rather than a second lookup that could answer differently.
+/// Test-only: no production caller reads the table through here, because
+/// `cli_help_usage` answers every registered command from its record. The
+/// reserved-surface record tests read it as the byte reference their records
+/// are pinned against.
+#[cfg(test)]
 pub(crate) fn surface_usage_line(command: &str) -> Option<&'static str> {
     SURFACE_USAGE
         .iter()
@@ -168,13 +171,13 @@ pub(crate) fn ops_usage_lines(sub: &str) -> Option<Vec<&'static str>> {
 /// the flag list is the part that drifts.
 ///
 /// The fifteen reserved-surface rows stay: the reserved-surface record tests
-/// read them through `surface_usage_line` as the byte reference their records
-/// are pinned against. The five `ops` rows also render: the ops surface reads
-/// them through `ops_usage_lines` for its group and per-subcommand help. The
-/// other ten never render through the shared lookup, because `cli_help_usage`
-/// answers a registered command from its record first. The two `compose` rows
-/// are gone: their records' bytes are pinned directly by the compose record
-/// tests.
+/// read them through the test-only `surface_usage_line` as the byte reference
+/// their records are pinned against. The five `ops` rows also render: the ops
+/// surface reads them through `ops_usage_lines` for its group and per-subcommand
+/// help. The other ten never render through the shared lookup, because
+/// `cli_help_usage` answers every registered command from its record. The two
+/// `compose` rows are gone: their records' bytes are pinned directly by the
+/// compose record tests.
 const SURFACE_USAGE: &[(&str, &str)] = &[
     ("version", "clio version"),
     ("health", "clio health"),

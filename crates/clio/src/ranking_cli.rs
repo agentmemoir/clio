@@ -8,11 +8,13 @@
 //! patch, with `--dry-run` returning the normalized weights without applying.
 //!
 //! ## Owns
-//! - The `ranking get|set` verbs, their flags, and their text views
+//! - The `ranking get|set` verbs and their text views
 //! - Decoding the `--patch` / `--patch-file` JSON object
 //!
 //! ## Does not own
 //! - Ranking weight math or validation (`clio-config`)
+//! - The verbs' static records and verb list (see
+//!   `cli_command_registry_ranking_retention`)
 //! - The runtime-backed command engine (see `runtime_cli`)
 //!
 //! ## Boundary
@@ -35,14 +37,18 @@ use std::process::ExitCode;
 pub(crate) struct RankingGroup;
 
 impl RuntimeGroup for RankingGroup {
+    /// The group's verb keys: the registry records' own names, so the
+    /// dispatcher has no second list to drift.
     fn verbs(&self) -> &'static [&'static str] {
-        &["ranking get", "ranking set"]
+        crate::cli_command_registry_ranking_retention::RANKING_VERBS
     }
 
+    /// The flags `verb` accepts: the verb's registry record's parser spec,
+    /// globals included.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "ranking set" => FlagSpec::new(&["patch", "patch-file"], &["dry-run"]),
-            _ => FlagSpec::new(&[], &[]),
+        match crate::cli_command_registry::find(verb) {
+            Some(spec) => spec.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 
