@@ -4,17 +4,20 @@
 //! # Responsibility
 //!
 //! This module holds the test-only golden-capture tooling for the CLI's help
-//! surfaces: the fixture records, the cargo freshness guard, the bounded child
-//! runner, the capture plan, and the baseline comparator. No tests live here.
+//! surfaces: the fixture records, the cargo freshness guard, the capture gate,
+//! the capture plan, the baseline comparator, and the two helpers a test needs
+//! to run a pinned child and to write a scratch file. No tests live here.
 //!
 //! ## Owns
-//! - The capture gate, the freshness guards, the bounded child runs, the
-//!   capture plan, and the baseline comparator
-//! - The fixture records and their public re-exports (`fixture`)
+//! - The capture gate, the freshness guards, the capture plan, and the
+//!   baseline comparator
+//! - The public re-exports of its child modules
 //!
 //! ## Does not own
-//! - Any assertion (`golden_capture_test`)
-//! - The fixture file's shape and writer (`fixture`)
+//! - Any assertion (`golden_capture_test`, `golden_repeatability_test`)
+//! - The fixture records and their writer (`fixture`)
+//! - The pinned child environment, the bounded run, and one capture (`child`)
+//! - The scratch directory a file-writing test uses (`scratch`)
 //! - The help text and catalog themselves (`cli_help`, the binary's `print_help`)
 //!
 //! ## Boundary
@@ -32,23 +35,30 @@ use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
+mod child;
 mod fixture;
+mod scratch;
+
+use child::run_bounded;
 
 // Compiled into two test targets; each uses a different slice of the re-exports.
+#[allow(unused_imports)]
+pub use child::{capture, pin_capture_env};
 #[allow(unused_imports)]
 pub use fixture::{
     CaptureEntry, FIXTURE_VERSION, GoldenFixture, fixture_path, load_fixture, write_fixture,
 };
+#[allow(unused_imports)]
+pub use scratch::Scratch;
 
 /// Set on the capture run's environment to turn capture mode on.
 pub const CAPTURE_ENV: &str = "CLIO_GOLDEN_CAPTURE";
 /// Pinned onto every captured child so its output never names the host's home.
+/// [`child::pin_capture_env`] is what holds the rest of the child's identity.
 pub const CAPTURE_HOME: &str = "/home/clio";
 
 /// Generous bounds: a hang safety net, never a synchronization mechanism.
@@ -242,93 +252,6 @@ pub fn compare(fixture: &GoldenFixture, captured: &[CaptureEntry]) -> Vec<Conten
         });
     }
     diffs
-}
-
-/// One finished child: its exit code and both drained streams.
-struct BoundedOutput {
-    code: Option<i32>,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-}
-
-/// Read one piped stream to the end on its own thread, so a chatty child can
-/// never block on a full pipe while the parent waits for its exit.
-fn drain(pipe: impl Read + Send + 'static) -> thread::JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let (mut pipe, mut buffer) = (pipe, Vec::new());
-        let _ = pipe.read_to_end(&mut buffer);
-        buffer
-    })
-}
-
-/// Run one child to completion with stdin null and both streams drained,
-/// bounded by `deadline`: on the deadline the child is killed and reaped.
-fn run_bounded(command: &mut Command, deadline: Duration) -> Result<BoundedOutput, String> {
-    let label = format!("{command:?}");
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("could not spawn {label}: {error}"))?;
-    let stdout = drain(child.stdout.take().expect("stdout was piped"));
-    let stderr = drain(child.stderr.take().expect("stderr was piped"));
-    let deadline_at = Instant::now() + deadline;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline_at => thread::sleep(Duration::from_millis(10)),
-            other => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout.join();
-                let _ = stderr.join();
-                return Err(match other {
-                    Ok(_) => format!("{label} did not exit within {deadline:?} and was killed"),
-                    Err(error) => format!("{label} could not be waited for: {error}"),
-                });
-            }
-        }
-    };
-    let stdout = stdout
-        .join()
-        .map_err(|_| format!("{label} stdout read failed"))?;
-    let stderr = stderr
-        .join()
-        .map_err(|_| format!("{label} stderr read failed"))?;
-    Ok(BoundedOutput {
-        code: status.code(),
-        stdout,
-        stderr,
-    })
-}
-
-/// Capture one command's exact output from a bounded child of `binary`.
-/// The child's environment is cleared first: it sees no caller variable, only
-/// `HOME = CAPTURE_HOME` and an optional pinned `COLUMNS`, so its help output
-/// is identical on every host and under every runner. Non-UTF-8 output is a refusal.
-pub fn capture(
-    binary: &Path,
-    argv: &[String],
-    columns: Option<&str>,
-) -> Result<CaptureEntry, String> {
-    let mut command = Command::new(binary);
-    command.env_clear();
-    command.env("HOME", CAPTURE_HOME);
-    if let Some(width) = columns {
-        command.env("COLUMNS", width);
-    }
-    let output = run_bounded(command.args(argv), CHILD_DEADLINE)?;
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|error| format!("`{}` wrote non-UTF-8 stdout: {error}", argv.join(" ")))?;
-    let stderr = String::from_utf8(output.stderr)
-        .map_err(|error| format!("`{}` wrote non-UTF-8 stderr: {error}", argv.join(" ")))?;
-    Ok(CaptureEntry {
-        argv: argv.to_vec(),
-        exit: output.code,
-        stdout,
-        stderr,
-    })
 }
 
 /// The capture plan from the running binary itself: top-level help and the
