@@ -12,9 +12,9 @@
 //!   own text" check, and the "only an unregistered verb has a row here" pin
 //! - The both-direction flag agreement pin: every flag a command's help text
 //!   names is one its parser accepts, and every non-global flag its parser
-//!   accepts is named by the command's record (or, while a record is still
-//!   missing, carried by the authored usage row), pinned per command so a
-//!   command that loses its parser or its help text fails
+//!   accepts is named by the command's record, pinned per command so a
+//!   command that loses its parser or its help text fails, with the record
+//!   contributor count and the authored-row contributor count pinned apart
 //! - The never-advertise-a-removed-route pin: the transfer usage lines name the
 //!   store and `CLIO_SYNC_KEY_FILE` routes and never advertise `--sync-key` or
 //!   the removed `CLIO_SYNC_KEY` environment rung
@@ -149,19 +149,18 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
 /// override, so the first direction is real there; the second is true by
 /// construction, because `parser_spec` is built from `documented` plus
 /// `accepted_extra`, and is asserted as a guard that the derivation stays
-/// intact. Its write subcommands still answer from their group's separate flag
-/// list, so for those both directions compare two sources. A command with no
-/// record keeps its parser set and its authored usage row as two sources too;
-/// only the first direction has a record to check there.
+/// intact.
 ///
-/// The count is pinned, not a floor: a command that loses its parser or its
-/// help text must show up as a number that changed, never as coverage that
-/// quietly shrank. It was 20 while seven read verbs had records and thirteen
-/// write rows did not; the read-head records raise it to 39 registered
-/// commands plus the 13 write rows whose records arrive in a later phase.
+/// Both contributor counts are pinned apart, never summed into one number:
+/// every registered command is decided through its record, and no top-level
+/// verb is decided through an authored row. A command that loses its record
+/// or its parser moves the first count; a verb that gains an authored row
+/// without a record moves the second. Either change fails here instead of
+/// hiding inside a total that still adds up.
 #[test]
 fn help_text_and_parser_flags_agree_in_both_directions() {
-    let mut checked = 0usize;
+    let mut registered_checked = 0usize;
+    let mut fallback_checked = 0usize;
     let mut undecidable: Vec<&str> = Vec::new();
     let mut wrong: Vec<String> = Vec::new();
 
@@ -205,11 +204,14 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
                 ));
             }
         }
-        checked += 1;
+        registered_checked += 1;
     }
 
-    // Commands whose records arrive in a later phase: the authored usage row is
-    // the surface a reader has, and the parser set is a separate list.
+    // Verbs with no record are group prefixes (`task`, `sync`), not commands:
+    // they hold no usage row, so there is no authored text to compare with a
+    // parser. A verb that gains a row without a record is decided here and
+    // moves the fallback count below; a row-less prefix states its reason and
+    // contributes to neither count.
     for verb in cli_help::READ_VERBS
         .iter()
         .chain(cli_help::WRITE_VERBS.iter())
@@ -233,7 +235,7 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
                 ));
             }
         }
-        checked += 1;
+        fallback_checked += 1;
     }
 
     assert!(
@@ -246,9 +248,14 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
         "these commands have no parser to check against: {undecidable:?}"
     );
     assert_eq!(
-        checked, 52,
-        "the number of commands this check decides changed, so it is covering less or more \
+        registered_checked, 52,
+        "the registered commands this check decides changed, so it is covering less or more \
          than it was: undecidable were {undecidable:?}"
+    );
+    assert_eq!(
+        fallback_checked, 0,
+        "a verb without a record gained an authored row, so the fallback branch decides \
+         it now: re-pin this count only when that row is intended"
     );
 }
 

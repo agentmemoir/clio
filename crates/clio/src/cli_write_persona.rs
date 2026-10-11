@@ -47,30 +47,12 @@ impl WriteGroup for PersonaWriteGroup {
         ]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "persona stable" => FlagSpec::new(
-                &["confidence", "source", "evidence-ref", "context"],
-                &["dry-run"],
-            ),
-            // The EMA observation tool has no no-write path, so no `--dry-run`.
-            "persona observe" => {
-                FlagSpec::new(&["confidence", "source", "evidence-ref", "context"], &[])
-            }
-            "task upsert" => FlagSpec::new(
-                &["definition", "status", "steps", "evidence-ref", "context"],
-                &["dry-run"],
-            ),
-            _ => FlagSpec::new(
-                &[
-                    "attempt-n",
-                    "what-failed",
-                    "lesson",
-                    "evidence-ref",
-                    "context",
-                ],
-                &["dry-run"],
-            ),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

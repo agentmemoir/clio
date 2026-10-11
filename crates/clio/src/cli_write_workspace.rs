@@ -45,22 +45,12 @@ impl WriteGroup for WorkspaceWriteGroup {
         ]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "canonical put" => FlagSpec::new(
-                &[
-                    "category",
-                    "epistemic-kind",
-                    "source-type",
-                    "confidence",
-                    "source-text",
-                    "evidence-ref",
-                    "context",
-                ],
-                &["dry-run"],
-            ),
-            "canonical get" => FlagSpec::new(&["as-of"], &[]),
-            _ => FlagSpec::new(&["session"], &[]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

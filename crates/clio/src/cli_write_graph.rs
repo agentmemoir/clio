@@ -40,35 +40,12 @@ impl WriteGroup for GraphWriteGroup {
         &["triple add", "triple end", "belief observe", "graph link"]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "triple add" => FlagSpec::new(
-                &[
-                    "epistemic-kind",
-                    "source-type",
-                    "confidence",
-                    "context",
-                    "valid-from",
-                    "valid-until",
-                    "supersede",
-                    "subject-id",
-                    "update-rule",
-                ],
-                &["dry-run"],
-            ),
-            "triple end" => FlagSpec::new(&["object", "valid-until", "update-rule"], &["dry-run"]),
-            "belief observe" => FlagSpec::new(
-                &[
-                    "confidence",
-                    "evidence",
-                    "source",
-                    "as-of",
-                    "subject-id",
-                    "context",
-                ],
-                &["dry-run"],
-            ),
-            _ => FlagSpec::new(&["relationship", "weight"], &["dry-run"]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

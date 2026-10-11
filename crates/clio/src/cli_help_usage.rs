@@ -43,58 +43,6 @@
 /// merged into the entry that is reachable rather than left to rot.
 const VERB_USAGE: &[(&str, &str)] = &[
     (
-        "validate",
-        "usage: clio validate ITEM_ID --action attest|update|invalidate|delete [--note N] [--new-content C] [--bank B] [--actor A] [--output json|text]",
-    ),
-    (
-        "batch",
-        "usage: clio batch --file ops.json [--dry-run] [--bank B] [--actor A] [--output json|text]\n       or: clio batch --file - (reads operations JSON from stdin)",
-    ),
-    (
-        "remember",
-        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--source-text TEXT] [--allow-duplicate] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated",
-    ),
-    (
-        "admit",
-        "usage: clio admit TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--output json|text]\n       or: clio admit --file ops.json [--bank BANK] [--actor ACTOR]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated",
-    ),
-    (
-        "summarize",
-        "usage: clio summarize --scope S [--dry-run] [--output json|text]",
-    ),
-    (
-        "consolidate",
-        "usage: clio consolidate [--bank BANK] [--force] [--dry-run] [--output json|text]\n       --bank selects the target bank for the maintenance wave; --force runs the full wave: refresh every dirty ancestor, then reconcile the bank's consolidated units",
-    ),
-    (
-        "update",
-        "usage: clio update ID VALUE --rule discrete|continuous [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
-    ),
-    (
-        "invalidate",
-        "usage: clio invalidate ID [--replacement ID] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
-    ),
-    (
-        "discard",
-        "usage: clio discard ID --reason R --confirm [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
-    ),
-    (
-        "correct",
-        "usage: clio correct ID VALUE --reason R [--context TEXT] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
-    ),
-    (
-        "export",
-        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--bank BANK] [--actor ACTOR] [--output json|text]",
-    ),
-    (
-        "import",
-        "usage: clio import --source FILE [--dry-run] [--force] [--reason R] [--bank BANK] [--output json|text]",
-    ),
-    (
-        "erase",
-        "usage: clio erase --subject S --basis B --request R [--reason-code C] --confirm [--actor harness|system] [--bank BANK] [--output json|text]\n       compliance erasure is IRREVERSIBLE (DEK destruction) and is distinct from `discard` and hygiene cleanup",
-    ),
-    (
         "config get",
         "usage: clio config get [PATH] [--output json|text]",
     ),

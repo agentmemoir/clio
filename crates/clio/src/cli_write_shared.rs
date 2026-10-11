@@ -43,23 +43,12 @@ impl WriteGroup for SharedWriteGroup {
         ]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "shared store" => FlagSpec::new(
-                &[
-                    "category",
-                    "episodic-type",
-                    "epistemic-kind",
-                    "source-type",
-                    "confidence",
-                    "evidence-ref",
-                    "source-text",
-                ],
-                &["shared-bank"],
-            ),
-            "shared retrieve" => FlagSpec::new(&[], &["shared-bank"]),
-            "shared discard" => FlagSpec::new(&["reason"], &["confirm", "shared-bank"]),
-            _ => FlagSpec::new(&["action", "note", "new-content"], &[]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

@@ -60,8 +60,9 @@ struct ReservedSurface {
 /// The production files the scan reads, with each path derived from
 /// `CARGO_MANIFEST_DIR` rather than the process working directory. The bound is
 /// explicit and short rather than a tree walk: the read engine, the shared read
-/// helpers, the six read groups whose records own their flags, the export
-/// fallback, and the reserved-surface files that refuse store flags in a loop.
+/// helpers, the six read groups whose records own their flags, the portability
+/// write group whose record owns its flags, and the reserved-surface files
+/// that refuse store flags in a loop.
 const READ_SCAN_FILES: &[&str] = &[
     "src/cli_read.rs",
     "src/cli_read_args.rs",
@@ -115,7 +116,7 @@ const READ_EXEMPTIONS: &[ReadExemption] = &[
     ReadExemption {
         file: "src/cli_write_portability.rs",
         needle: "parsed.value(flag)",
-        reason: "table-driven read over the export filter table and the include-flag helper; the authored export row documents each name, and the verb's record arrives in a later phase",
+        reason: "table-driven read over the export filter table and the include-flag helper; the registry record documents each name and the reads stay table-driven over parsed args",
         route_check: "cli_write_portability::tests::export_import_round_trip_is_idempotent",
     },
     ReadExemption {
