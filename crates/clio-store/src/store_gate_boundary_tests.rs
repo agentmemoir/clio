@@ -26,8 +26,12 @@
 //! differs from the create primitive.
 //!
 //! The repository primitives stay public so the wrapper itself can call them,
-//! which means bypass is one direct call away. These tests fail CI if any new
-//! direct caller appears outside the allowlists below. Test-only.
+//! which means bypass is one direct call away. These tests scan every crate in
+//! the workspace, so a scoped run reaches them only when the diff happens to
+//! pull `clio-store` into the closure. CI therefore runs `make gate-boundary`,
+//! which selects this module and nothing else, in a step that ignores the diff,
+//! so a new direct caller outside the allowlists below fails CI either way.
+//! Test-only.
 
 use std::path::{Path, PathBuf};
 
