@@ -25,17 +25,27 @@ class FingerprintEnvOverrideTests(unittest.TestCase):
         )
 
     def _fingerprint(
-        self, adapter: MnemosyneAdapter, effective_vec_weight: float
+        self,
+        adapter: MnemosyneAdapter,
+        effective_vec_weight: float,
+        effective_cross_session: object = True,
+        ambient_env: dict[str, str] | None = None,
     ) -> Fingerprint:
         def effective_setting(key: str) -> SettingRecord:
-            value = effective_vec_weight if key == "vec_weight" else 1
+            if key == "vec_weight":
+                value = effective_vec_weight
+            elif key == "cross_session":
+                value = effective_cross_session
+            else:
+                value = 1
             return read_setting(value=value, surface=f"mnemosyne config get {key}")
 
-        with (
-            patch.object(adapter, "_read_setting", side_effect=effective_setting),
-            patch.object(adapter, "_read_version", return_value="3.15.1"),
-        ):
-            return adapter.fingerprint()
+        with patch.dict("os.environ", ambient_env or {}, clear=True):
+            with (
+                patch.object(adapter, "_read_setting", side_effect=effective_setting),
+                patch.object(adapter, "_read_version", return_value="3.15.1"),
+            ):
+                return adapter.fingerprint()
 
     def test_mismatched_override_fails_with_a_fresh_data_dir_hint(self) -> None:
         adapter = self._adapter({"MNEMOSYNE_VEC_WEIGHT": "0.9"})
@@ -61,6 +71,50 @@ class FingerprintEnvOverrideTests(unittest.TestCase):
         fingerprint = self._fingerprint(adapter, 0.42)
 
         self.assertEqual(fingerprint.settings["vec_weight"].value, 0.42)
+
+    def test_ambient_override_mismatch_is_rejected(self) -> None:
+        adapter = self._adapter({})
+
+        with self.assertRaises(FingerprintError) as raised:
+            self._fingerprint(
+                adapter,
+                0.42,
+                ambient_env={"MNEMOSYNE_VEC_WEIGHT": "0.9"},
+            )
+
+        self.assertIn("MNEMOSYNE_VEC_WEIGHT", str(raised.exception))
+
+    def test_extra_env_override_takes_precedence_over_ambient_value(self) -> None:
+        adapter = self._adapter({"MNEMOSYNE_VEC_WEIGHT": "0.42"})
+
+        fingerprint = self._fingerprint(
+            adapter,
+            0.42,
+            ambient_env={"MNEMOSYNE_VEC_WEIGHT": "0.9"},
+        )
+
+        self.assertEqual(fingerprint.settings["vec_weight"].value, 0.42)
+
+    def test_cross_session_boolean_aliases_match_effective_value(self) -> None:
+        cases = (("YES", True), ("on", True), ("NO", False), ("off", False))
+
+        for requested, effective in cases:
+            with self.subTest(requested=requested):
+                adapter = self._adapter({"MNEMOSYNE_CROSS_SESSION": requested})
+
+                fingerprint = self._fingerprint(adapter, 0.42, effective)
+
+                self.assertIs(
+                    fingerprint.settings["cross_session"].value,
+                    effective,
+                )
+
+    def test_string_boolean_from_config_matches_environment_alias(self) -> None:
+        adapter = self._adapter({"MNEMOSYNE_CROSS_SESSION": "on"})
+
+        fingerprint = self._fingerprint(adapter, 0.42, "yes")
+
+        self.assertEqual(fingerprint.settings["cross_session"].value, "yes")
 
 
 if __name__ == "__main__":
