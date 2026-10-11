@@ -63,43 +63,6 @@ if [ "$self_name" = "cargo" ]; then
         test | nextest | llvm-cov | clippy) heavy=1 ;;
     esac
 elif [ "$self_name" = "make" ]; then
-    # A dry run prints its recipes instead of running them, so its exit code and
-    # its output describe no verdict at all. Caching one publishes a fake result
-    # under a real kind's name and, because the kinds are shared with real runs,
-    # overwrites the log of the run it stood in for. The loop below skips every
-    # argument starting with `-`, so the flag alone never stopped it: `make -n
-    # coverage` was classified heavy and its printed recipe list was published as
-    # the coverage verdict. Long forms are listed too, and a single-dash bundle
-    # counts if it carries `n`, because GNU make accepts `-ns` and `-jn`.
-    #
-    # MAKEFLAGS is checked as well, because GNU make reads the dry-run flag from
-    # there too and an export reaches this shim exactly as an argument does.
-    # Reading argv alone left `MAKEFLAGS=-n make coverage` publishing a recipe
-    # list as the coverage verdict.
-    #
-    # A short flag is matched as a bundle of letters after one dash, and a long
-    # flag only by its exact name. The `--*` arm has to come before the bundle
-    # arm, because a `case` pattern of `-[!-]*` also matches a long flag: the
-    # second character is a `-`, which is inside that class. Without that arm,
-    # `--output-sync=target` reads as a bundle carrying an `n` and passes through,
-    # which would mean every real coverage run went ungated on a machine whose
-    # build exports it. The dry-run names are listed rather than searched for
-    # because an `n` anywhere in a flag is far too weak a test: several ordinary
-    # make options carry that letter.
-    dry_run_flag() {
-        case "$1" in
-            -n | --dry-run | --just-print | --recon) return 0 ;;
-            --*) return 1 ;;
-            -?*) case "${1#-}" in *n*) return 0 ;; esac ;;
-        esac
-        return 1
-    }
-    for flag in ${MAKEFLAGS:-}; do
-        dry_run_flag "$flag" && pass_through "$@"
-    done
-    for arg in "$@"; do
-        dry_run_flag "$arg" && pass_through "$@"
-    done
     timed=0
     for arg in "$@"; do
         case "$arg" in
@@ -116,6 +79,10 @@ elif [ "$self_name" = "make" ]; then
                 ;;
         esac
     done
+    if [ "$heavy" = 1 ] || [ "$timed" = 1 ]; then
+        dry_run=$(python3 "$root/scripts/gate_classify.py" "$real" "$@") || pass_through "$@"
+        [ "$dry_run" = 1 ] && pass_through "$@"
+    fi
     [ "$timed" = 1 ] && [ -x "${HOME:-}/.config/clio/gate-hook" ] &&
         exec "${HOME:-}/.config/clio/gate-hook" "$root" "$real" "$@"
 fi

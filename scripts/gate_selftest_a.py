@@ -104,10 +104,10 @@ class Tests(unittest.TestCase):
             self.assertNotEqual(
                 baseline, fingerprint(state("h", changed=touched), env, kind, argv)
             )
-        self.assertEqual(b"clio-gate-v4\0", KEY_SCHEME)
-        # The version is the fourth, so an entry from the scheme before this
+        self.assertEqual(b"clio-gate-v6\0", KEY_SCHEME)
+        # The version is the sixth, so an entry from the scheme before this
         # one cannot be mistaken for one from this one.
-        self.assertTrue(KEY_SCHEME.endswith(b"v4\0"))
+        self.assertTrue(KEY_SCHEME.endswith(b"v6\0"))
 
     def test_a_test_lookup_is_not_a_test_verdict(self):
         self.assertEqual("test", command_kind(["cargo", "nextest", "run"]))
@@ -116,11 +116,6 @@ class Tests(unittest.TestCase):
             ["cargo", "nextest", "list", "--workspace", "--locked"],
             ["cargo", "nextest", "show-config"],
             ["cargo", "nextest", "archive", "--workspace"],
-            # `bench` executes benchmark binaries, so it is not a lookup in
-            # the ordinary sense. It is bucketed with them anyway because it
-            # does not run the test suite, and a benchmark's verdict must
-            # never be able to stand in for one.
-            ["cargo", "nextest", "bench"],
             ["cargo", "nextest", "help"],
             # Nothing to read, so nothing is claimed.
             ["cargo", "nextest"],
