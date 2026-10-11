@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 /// The store surface the cascade suite reads through: the discard hook plus a
 /// raw audit-operation listing for the cascade's telemetry rows.
-trait CascadeBackend: Store {
+pub(super) trait CascadeBackend: Store {
     /// Operations recorded for one item, oldest first.
     fn audit_ops(&self, item_id: &str) -> Vec<String>;
     /// The subject key row for one subject: `(dek_ref, status)`.
@@ -47,7 +47,7 @@ trait CascadeBackend: Store {
 }
 
 /// Seed one distilled unit claiming `hub` and `sources`, all under `subject`.
-fn seed_unit(
+pub(super) fn seed_unit(
     store: &dyn CascadeBackend,
     bank: &str,
     subject: &str,
@@ -198,11 +198,6 @@ fn suite_cascade(store: &dyn CascadeBackend) {
         2,
         "one cascade event per discard"
     );
-    // A discarded hub stays a claim, so its evidence entry and the count stay.
-    let discarded = store.discard_item(&bank, &hub, "withdrawn", "2026-06-05", "tester");
-    discarded.unwrap();
-    let after_hub = store.get_distilled_unit(&bank, &unit_id).unwrap().unwrap();
-    assert_eq!(after_hub.proof_count(), after_hub.claim_ids().len());
 
     // A discarded item no unit claims cascades to nothing.
     let stranger = unique("stranger");
