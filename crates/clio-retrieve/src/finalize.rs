@@ -17,6 +17,7 @@
 //!   and the derived `entity_match` flag computed from the query and those names
 //! - Applying the `final` score floor to the returned page, the entity-inclusion
 //!   toggle, and the requested top-level entity summary
+//! - Reporting the floors that emptied an empty page, by wire name
 //! - Attaching each hit's optional bounded `exact_render` rendering from the
 //!   item's own snapshot, only when the request asked for it
 //!
@@ -49,7 +50,7 @@
 use crate::dedup::{DedupMeta, DedupReport, consolidated_source_ids, is_consolidated_item};
 use crate::entities::snapshot_entities;
 use crate::entity_summary::summarize_entities;
-use crate::floors::final_floor_keeps;
+use crate::floors::{binding_floor_warnings, final_floor_keeps};
 use crate::fusion::{ARM_DENSE, ARM_LEXICAL, ARM_TEMPORAL, FusedHit};
 use crate::hybrid_util::doc_text;
 use crate::render::render_exact;
@@ -72,6 +73,9 @@ pub(crate) struct FinalizeArgs<'a> {
     pub(crate) graph_expanded: usize,
     pub(crate) metrics: RetrieveMetrics,
     pub(crate) warnings: Vec<String>,
+    /// The arm and reranker floors that removed every candidate they examined,
+    /// by wire name. Reported as warnings only when the page ends empty.
+    pub(crate) floor_binding: Vec<&'static str>,
     pub(crate) dedup: DedupMeta,
     /// Page the scope filter would have returned before suppression; ids absent
     /// from it entered the result only because suppression freed slots.
@@ -120,6 +124,7 @@ pub(crate) fn finalize(args: FinalizeArgs<'_>) -> RetrieveOutcome {
         args.req.limit,
         args.req.budget_tokens,
     );
+    let page_before_final_floor = page_ids.len();
     let selected: BTreeSet<&String> = page_ids.iter().collect();
     let mut hits = Vec::with_capacity(page_ids.len());
     let mut estimated_tokens = 0_usize;
@@ -133,56 +138,20 @@ pub(crate) fn finalize(args: FinalizeArgs<'_>) -> RetrieveOutcome {
             continue;
         }
         estimated_tokens += estimate_tokens(&doc_text(Some(item)));
-        let consolidated = is_consolidated_item(item);
-        let semantic = hit
-            .arms
-            .get(ARM_DENSE)
-            .and_then(|arm| arm.score)
-            .map(semantic_from_distance);
-        let keyword = hit.arms.get(ARM_LEXICAL).and_then(|arm| arm.score);
-        // The toggle suppresses the names themselves, so the derived
-        // `entity_match` flag has no names to compare and stays absent too.
-        let entities = if args.req.include_entities {
-            snapshot_entities(item)
-        } else {
-            Vec::new()
-        };
-        let entity_match = crate::entity_match::query_matches_any(&args.req.query, &entities);
-        // The one construction site for the hit, so the rendering is attached
-        // here. It reads the snapshot the assembler already holds on the item,
-        // so it costs no storage read, and it is gated on the request's own
-        // control so a request that does not ask produces nothing.
-        let mut hit_fields = RetrieveHit::from_item(item);
-        if args.req.include_exact {
-            hit_fields.exact_render = item.snapshot.as_ref().and_then(render_exact);
+        hits.push(scored_hit(hit, item, &args));
+    }
+    // Every empty page names the floors that emptied it; a page that is empty
+    // for another reason names none. The `final` floor runs here, so it is
+    // judged here rather than in `hybrid`.
+    let final_binding =
+        args.req.min_scores.final_score.is_some() && page_before_final_floor > 0 && hits.is_empty();
+    let mut warnings = args.warnings;
+    if hits.is_empty() {
+        let mut binding = args.floor_binding;
+        if final_binding {
+            binding.push("final");
         }
-        hits.push(ScoredHit {
-            hit: hit_fields,
-            score: hit.score,
-            scores: HitScores {
-                final_score: hit.score,
-                reranker: hit.rerank_score,
-                semantic,
-                keyword,
-                // Carried from the shaping site; never recomputed here.
-                age_factor: hit.age_factor,
-                trust_factor: hit.trust_factor,
-            },
-            dense_rank: args.dense_rank.get(&hit.id).copied(),
-            lexical_rank: args.lexical_rank.get(&hit.id).copied(),
-            // The temporal rank is the hit's own rank in the temporal arm's
-            // fusion list, so it cannot drift from the list that produced it.
-            temporal_rank: hit.arms.get(ARM_TEMPORAL).and_then(|arm| arm.rank),
-            snapshot_ref: item.snapshot.as_ref().map(|_| item.id.clone()),
-            entities,
-            entity_match,
-            consolidated,
-            source_ids: if consolidated {
-                consolidated_source_ids(item).into_iter().collect()
-            } else {
-                Vec::new()
-            },
-        });
+        warnings.extend(binding_floor_warnings(&binding));
     }
     let baseline: BTreeSet<&String> = args.backfill_baseline.iter().collect();
     let backfilled_ids: Vec<String> = page_ids
@@ -223,9 +192,65 @@ pub(crate) fn finalize(args: FinalizeArgs<'_>) -> RetrieveOutcome {
         pairs_reinforced: 0,
         estimated_tokens,
         metrics: args.metrics,
-        warnings: args.warnings,
+        warnings,
         dedup,
         entity_summary,
+    }
+}
+
+/// Map one fused hit and its fetched item into the returned hit.
+///
+/// The one construction site for a hit, so the render and entity rules are
+/// applied in one place, and it reads only the item the assembler already
+/// fetched, so it costs no storage read.
+fn scored_hit(hit: &FusedHit, item: &MemoryItem, args: &FinalizeArgs<'_>) -> ScoredHit {
+    let consolidated = is_consolidated_item(item);
+    let semantic = hit
+        .arms
+        .get(ARM_DENSE)
+        .and_then(|arm| arm.score)
+        .map(semantic_from_distance);
+    let keyword = hit.arms.get(ARM_LEXICAL).and_then(|arm| arm.score);
+    // The toggle suppresses the names themselves, so the derived `entity_match`
+    // flag has no names to compare and stays absent too.
+    let entities = if args.req.include_entities {
+        snapshot_entities(item)
+    } else {
+        Vec::new()
+    };
+    let entity_match = crate::entity_match::query_matches_any(&args.req.query, &entities);
+    // The rendering is gated on the request's own control, so a request that
+    // does not ask produces nothing.
+    let mut hit_fields = RetrieveHit::from_item(item);
+    if args.req.include_exact {
+        hit_fields.exact_render = item.snapshot.as_ref().and_then(render_exact);
+    }
+    ScoredHit {
+        hit: hit_fields,
+        score: hit.score,
+        scores: HitScores {
+            final_score: hit.score,
+            reranker: hit.rerank_score,
+            semantic,
+            keyword,
+            // Carried from the shaping site; never recomputed here.
+            age_factor: hit.age_factor,
+            trust_factor: hit.trust_factor,
+        },
+        dense_rank: args.dense_rank.get(&hit.id).copied(),
+        lexical_rank: args.lexical_rank.get(&hit.id).copied(),
+        // The temporal rank is the hit's own rank in the temporal arm's fusion
+        // list, so it cannot drift from the list that produced it.
+        temporal_rank: hit.arms.get(ARM_TEMPORAL).and_then(|arm| arm.rank),
+        snapshot_ref: item.snapshot.as_ref().map(|_| item.id.clone()),
+        entities,
+        entity_match,
+        consolidated,
+        source_ids: if consolidated {
+            consolidated_source_ids(item).into_iter().collect()
+        } else {
+            Vec::new()
+        },
     }
 }
 

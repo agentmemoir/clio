@@ -110,6 +110,7 @@ pub(super) fn run_with_budget(
             total_ms: 0,
         },
         warnings: Vec::new(),
+        floor_binding: Vec::new(),
         dedup: meta,
         backfill_baseline,
     })

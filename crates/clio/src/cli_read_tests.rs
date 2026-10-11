@@ -425,5 +425,9 @@ mod entities_tests;
 mod floors_tests;
 
 #[cfg(test)]
+#[path = "cli_read_tests_recall_output_tests.rs"]
+mod recall_output_tests;
+
+#[cfg(test)]
 #[path = "cli_read_tests_scores_tests.rs"]
 mod scores_tests;
