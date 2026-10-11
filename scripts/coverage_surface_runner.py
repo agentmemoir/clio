@@ -132,8 +132,13 @@ def strip_python_prose(text: str) -> str | None:
             if line is None:
                 continue
             first = start_col if row == start_row else 0
-            last = end_col if row == end_row else len(chars)
-            for index in range(line + first, min(line + last, len(chars))):
+            if row == end_row:
+                stop = line + end_col
+            else:  # a row inside the span is blanked to its end, and no further
+                stop = line
+                while stop < len(chars) and chars[stop] != "\n":
+                    stop += 1
+            for index in range(line + first, min(stop, len(chars))):
                 if chars[index] != "\n":
                     chars[index] = " "
     return "".join(chars)
