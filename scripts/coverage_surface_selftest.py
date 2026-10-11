@@ -134,6 +134,18 @@ def _cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             ["object-restriction"],
         ),
         (
+            "a per-package command nothing protects, in mk/coverage.mk, is a finding",
+            EXIT_FINDINGS,
+            _fixture(base, "mk-unprotected", {"mk/coverage.mk": UNPROTECTED_MAKEFILE}),
+            ["object-restriction"],
+        ),
+        (
+            "a per-package run that pins its own directory, in mk/coverage.mk, is clean",
+            EXIT_OK,
+            _fixture(base, "mk-pinned", {"mk/coverage.mk": PINNED_MAKEFILE}),
+            [],
+        ),
+        (
             "a per-package run in a makefile that pins its own directory is clean",
             EXIT_OK,
             _fixture(base, "pinned", {MAKEFILE: PINNED_MAKEFILE}),
