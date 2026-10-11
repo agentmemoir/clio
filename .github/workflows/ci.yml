@@ -170,12 +170,6 @@ jobs:
       - name: Scoped tests (changed files' packages and their dependents)
         run: make test-fast BASE="$SCOPED_BASE"
 
-      # The admission gate-boundary tripwires scan every crate but live in
-      # `clio-store`, so this step ignores the diff and runs them every time.
-      - name: Gate-boundary tripwires (whole workspace)
-        if: always()
-        run: make gate-boundary
-
       # No doctest step. It cost 7 of the 11 minutes of a local full gate and ran
       # 0 tests: the workspace has two doc examples, both marked `ignore`.
 
@@ -225,6 +219,12 @@ jobs:
       - name: Lint scope check
         if: always()
         run: make scripts-check-lint-scope
+
+      # The admission gate-boundary tripwires scan every crate, so they must run
+      # on every change; `scripts-check-ci-parity` keeps this step in place.
+      - name: Gate-boundary tripwires
+        if: always()
+        run: make scripts-check-gate-boundary
 
       # Whether a workflow installs the compiler the repository pins. The step
       # above the toolchain install already fails on a mismatch, but it runs on
