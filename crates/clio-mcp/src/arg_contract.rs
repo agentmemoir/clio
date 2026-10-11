@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - Refusing an argument name the tool's schema does not declare
+//! - Refusing an argument value the tool's schema does not type
 //! - Refusing a missing required argument and a blank required string
 //!
 //! ## Does not own
@@ -34,10 +35,92 @@ use std::sync::OnceLock;
 /// are used, not dropped, so they are never an unknown argument.
 const RUNTIME_ARGUMENTS: &[&str] = &["bank", "actor", "timestamp"];
 
+/// One JSON type a published property may declare.
+///
+/// `null` is absent here on purpose: an explicit null reads as absent in every
+/// argument reader in this crate, so it is not a type fault. A `type` this
+/// build does not know leaves its argument to the handler, so an unrecognised
+/// schema shape cannot refuse every call by accident.
+#[derive(Clone, Copy)]
+enum JsonType {
+    String,
+    Number,
+    Integer,
+    Boolean,
+    Array,
+    Object,
+}
+
+impl JsonType {
+    /// The type named by a schema `type`, or `None` when the name is not one
+    /// this build checks.
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "string" => Some(Self::String),
+            "number" => Some(Self::Number),
+            "integer" => Some(Self::Integer),
+            "boolean" => Some(Self::Boolean),
+            "array" => Some(Self::Array),
+            "object" => Some(Self::Object),
+            _ => None,
+        }
+    }
+
+    /// Whether `value` is of this type. `integer` accepts any number with no
+    /// fractional part, which is the JSON Schema rule and not the JSON spelling.
+    fn accepts(self, value: &Value) -> bool {
+        match self {
+            Self::String => value.is_string(),
+            Self::Number => value.is_number(),
+            Self::Integer => value.as_f64().is_some_and(|n| n.fract() == 0.0),
+            Self::Boolean => value.is_boolean(),
+            Self::Array => value.is_array(),
+            Self::Object => value.is_object(),
+        }
+    }
+
+    /// The clause a message completes: `limit must be a number`.
+    fn name(self) -> &'static str {
+        match self {
+            Self::String => "a string",
+            Self::Number => "a number",
+            Self::Integer => "an integer",
+            Self::Boolean => "a boolean",
+            Self::Array => "an array",
+            Self::Object => "an object",
+        }
+    }
+}
+
+/// The JSON types each declared property accepts, by argument name.
+///
+/// A property with no `type`, or with one this build does not know, is absent
+/// from the map: its value is left to the handler.
+fn declared_types(properties: Option<&Map<String, Value>>) -> HashMap<String, Vec<JsonType>> {
+    let mut types = HashMap::new();
+    for (key, property) in properties.into_iter().flatten() {
+        let names: Vec<JsonType> = match property.get("type") {
+            Some(Value::String(name)) => JsonType::parse(name).into_iter().collect(),
+            Some(Value::Array(list)) => list
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(JsonType::parse)
+                .collect(),
+            _ => Vec::new(),
+        };
+        if !names.is_empty() {
+            types.insert(key.clone(), names);
+        }
+    }
+    types
+}
+
 /// What one tool's published schema declares about its arguments.
 struct Contract {
     /// Declared argument names, or `None` when the schema declares none.
     declared: Option<HashSet<String>>,
+    /// The types each declared property accepts.
+    types: HashMap<String, Vec<JsonType>>,
     required: Vec<String>,
     required_strings: Vec<String>,
 }
@@ -64,8 +147,10 @@ impl Contract {
             })
             .cloned()
             .collect();
+        let types = declared_types(properties);
         Self {
             declared: properties.map(|props| props.keys().cloned().collect()),
+            types,
             required,
             required_strings,
         }
@@ -94,8 +179,9 @@ fn contracts() -> &'static HashMap<String, Contract> {
 /// no published contract is left to its handler.
 ///
 /// # Errors
-/// An argument the schema does not declare, a missing required argument, or a
-/// required string that is empty or whitespace-only.
+/// An argument the schema does not declare, a missing required argument, a
+/// required string that is empty or whitespace-only, or a declared argument
+/// whose JSON type the schema does not accept.
 pub(crate) fn check(name: &str, args: &Value) -> Result<(), AmError> {
     let Some(contract) = contracts().get(name) else {
         return Ok(());
@@ -130,6 +216,25 @@ pub(crate) fn check(name: &str, args: &Value) -> Result<(), AmError> {
             }
             _ => {}
         }
+    }
+    for (key, value) in fields {
+        let Some(types) = contract.types.get(key) else {
+            continue;
+        };
+        // An explicit null reads as absent, which is what every argument reader
+        // in this crate already does, so it is not a type fault.
+        if value.is_null() || types.iter().any(|declared| declared.accepts(value)) {
+            continue;
+        }
+        let expected = types
+            .iter()
+            .map(|declared| declared.name())
+            .collect::<Vec<_>>()
+            .join(" or ");
+        return Err(AmError::new(
+            ErrorCode::InvalidType,
+            format!("{key} must be {expected}"),
+        ));
     }
     Ok(())
 }

@@ -396,9 +396,10 @@ pub(crate) fn read_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "new_value",
-                    s(
-                        "Corrected value for item/attribute corrections (a JSON object also replaces the structured snapshot). Required for item and attribute corrections; MUST be omitted for belief context-only corrections, which supply `context` instead — a non-empty `new_value` on a belief correction is rejected (values evolve only via `belief_observe`).",
-                    ),
+                    // No `type`: a non-string value is serialized, not refused.
+                    json!({
+                        "description": "Corrected value for item/attribute corrections (a JSON object also replaces the structured snapshot). Required for item and attribute corrections; MUST be omitted for belief context-only corrections, which supply `context` instead — a non-empty `new_value` on a belief correction is rejected (values evolve only via `belief_observe`).",
+                    }),
                 ),
                 (
                     "reason",

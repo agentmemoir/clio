@@ -226,7 +226,10 @@ pub fn core_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "new_value",
-                    s("New value; numeric for the continuous path."),
+                    json!({
+                        "type": ["string", "number"],
+                        "description": "New value; numeric for the continuous path.",
+                    }),
                 ),
                 ("update_rule", en("Which rule to apply.", &UPDATE_RULES)),
             ]
