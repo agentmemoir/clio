@@ -276,7 +276,7 @@ class ThisCheckoutTests(unittest.TestCase):
             self.assertEqual(check.main([]), 0, out.getvalue())
 
     def test_each_baseline_entry_carries_one_of_the_two_reasons(self) -> None:
-        self.assertTrue(set(check.KNOWN.values()) <= {check.GUARD, check.SHARED})
+        self.assertTrue(set(check.KNOWN.values()) <= {check.GUARD, check.OPEN})
 
 
 if __name__ == "__main__":
