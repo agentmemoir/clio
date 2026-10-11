@@ -16,6 +16,98 @@ from gate_kinds import (
     NEXTEST_LOOKUP_KIND,
 )
 
+MAKE_DRY_RUN_OPTIONS = frozenset({"--dry-run", "--just-print", "--recon"})
+MAKE_OPTIONS_WITH_ARGUMENTS = frozenset(
+    {
+        "--assume-new",
+        "--assume-old",
+        "--directory",
+        "--eval",
+        "--file",
+        "--include-dir",
+        "--makefile",
+        "--new-file",
+        "--old-file",
+        "--what-if",
+    }
+)
+MAKE_SHORT_OPTIONS_WITH_ARGUMENTS = "CfIoWE"
+MAKE_SHORT_OPTIONS_WITH_OPTIONAL_ARGUMENTS = "jlO"
+
+
+def _make_flags_include_dry_run(flags: list[str], makeflags: bool = False) -> bool:
+    index = 0
+    while index < len(flags):
+        flag = flags[index]
+        if makeflags and not flag.startswith("-") and "=" not in flag:
+            flag = f"-{flag}"
+        if flag == "--":
+            return False
+        long_option = flag.split("=", 1)[0]
+        if long_option in MAKE_DRY_RUN_OPTIONS or any(
+            option.startswith(long_option) for option in MAKE_DRY_RUN_OPTIONS
+        ):
+            return True
+        if flag.startswith("--"):
+            if flag in MAKE_OPTIONS_WITH_ARGUMENTS:
+                index += 2
+            else:
+                index += 1
+            continue
+        if flag.startswith("-") and flag != "-":
+            short = flag[1:]
+            while short:
+                option, short = short[0], short[1:]
+                if option == "n":
+                    return True
+                if option in "CfIoWE":
+                    if not short:
+                        index += 1
+                    break
+                if option in "jlO":
+                    break
+        index += 1
+    return False
+
+
+def make_is_dry_run(argv: list[str], env: dict[str, str]) -> bool:
+    """Whether make was asked to print recipes without running them."""
+    if not argv or Path(argv[0]).name != "make":
+        return False
+    inherited = [*env.get("GNUMAKEFLAGS", "").split(), *env.get("MAKEFLAGS", "").split()]
+    return _make_flags_include_dry_run(inherited, makeflags=True) or _make_flags_include_dry_run(argv[1:])
+
+
+def make_target_indexes(argv: list[str]) -> list[int]:
+    """Return make goal positions while skipping option values and assignments."""
+    targets: list[int] = []
+    index = 1
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            return [*targets, *range(index + 1, len(argv))]
+        if argument.startswith("--"):
+            option = argument.partition("=")[0]
+            index += 2 if option in MAKE_OPTIONS_WITH_ARGUMENTS and "=" not in argument else 1
+            continue
+        if argument.startswith("-") and argument != "-":
+            short = argument[1:]
+            while short:
+                option, short = short[0], short[1:]
+                if option in MAKE_SHORT_OPTIONS_WITH_ARGUMENTS:
+                    if not short:
+                        index += 1
+                    break
+                if option in MAKE_SHORT_OPTIONS_WITH_OPTIONAL_ARGUMENTS:
+                    break
+            index += 1
+            continue
+        if "=" not in argument:
+            targets.append(index)
+        index += 1
+    return targets
+
+
 def nextest_subcommand_index(argv: list[str]) -> int | None:
     """Where the `cargo nextest` subcommand sits in argv, or None if unreadable.
 
@@ -118,7 +210,8 @@ def llvm_cov_measures_coverage(argv: list[str]) -> bool:
 def command_kind(argv: list[str]) -> str:
     base = Path(argv[0]).name
     if base == "make":
-        for arg in argv[1:]:
+        for index in make_target_indexes(argv):
+            arg = argv[index]
             if arg in MAKE_KINDS:
                 return MAKE_KINDS[arg]
         return "make"
@@ -151,3 +244,10 @@ def command_kind(argv: list[str]) -> str:
             return LLVM_COV_LOOKUP_KIND
         return CARGO_KINDS.get(argv[1], "cargo")
     return "command"
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+
+    print("1" if make_is_dry_run(sys.argv[1:], os.environ) else "0")

@@ -1,3 +1,5 @@
+"""The published log uses <kind>.log for newest and <kind>.prev for kept run."""
+
 from __future__ import annotations
 
 import contextlib
@@ -18,10 +20,20 @@ from exec_tempdir import exec_tempdir
 
 
 class CacheIdentityTests(unittest.TestCase):
-    def test_executable_location_does_not_change_the_key(self):
+    def test_same_executable_alias_shares_a_key(self):
         tree = TreeState("head", (), ())
-        left = fingerprint(tree, {}, "test", ["/one/bin/cargo", "nextest", "run"])
-        right = fingerprint(tree, {}, "test", ["/two/bin/cargo", "nextest", "run"])
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            first = root / "one" / "bin" / "cargo"
+            alias = root / "two" / "bin" / "cargo"
+            first.parent.mkdir(parents=True)
+            alias.parent.mkdir(parents=True)
+            first.write_text("#!/bin/sh\n# same cargo binary\n")
+            first.chmod(0o755)
+            alias.symlink_to(first)
+            env = {"PATH": os.environ.get("PATH", "")}
+            left = fingerprint(tree, env, "test", [str(first), "nextest", "run"])
+            right = fingerprint(tree, env, "test", [str(alias), "nextest", "run"])
         self.assertEqual(left, right)
         left = fingerprint(tree, {}, "command", ["/one/bin/custom", "--help"])
         right = fingerprint(tree, {}, "command", ["/two/bin/custom", "--help"])
@@ -33,7 +45,7 @@ class CacheIdentityTests(unittest.TestCase):
         left = fingerprint(tree, {"BASE": "master"}, "coverage-fast", command)
         right = fingerprint(tree, {"BASE": "origin/master"}, "coverage-fast", command)
         self.assertIn("BASE", ENV_KEYS)
-        self.assertTrue(KEY_SCHEME.endswith(b"v5\0"))
+        self.assertTrue(KEY_SCHEME.endswith(b"v6\0"))
         self.assertNotEqual(left, right)
         argument = fingerprint(tree, {}, "coverage-fast", [*command, "BASE=origin/master"])
         environment = fingerprint(tree, {"BASE": "origin/master"}, "coverage-fast", command)
@@ -119,4 +131,3 @@ class DefaultLogTests(unittest.TestCase):
 
         self.assertEqual(0, proc.returncode, proc.stderr)
         self.assertTrue(published.endswith("checked\n"))
-

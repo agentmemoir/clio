@@ -104,10 +104,10 @@ class Tests(unittest.TestCase):
             self.assertNotEqual(
                 baseline, fingerprint(state("h", changed=touched), env, kind, argv)
             )
-        self.assertEqual(b"clio-gate-v5\0", KEY_SCHEME)
-        # The version is the fifth, so an entry from the scheme before this
+        self.assertEqual(b"clio-gate-v6\0", KEY_SCHEME)
+        # The version is the sixth, so an entry from the scheme before this
         # one cannot be mistaken for one from this one.
-        self.assertTrue(KEY_SCHEME.endswith(b"v5\0"))
+        self.assertTrue(KEY_SCHEME.endswith(b"v6\0"))
 
     def test_a_test_lookup_is_not_a_test_verdict(self):
         self.assertEqual("test", command_kind(["cargo", "nextest", "run"]))
