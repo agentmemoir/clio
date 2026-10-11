@@ -162,6 +162,15 @@ jobs:
         with:
           tool: nextest
 
+      # The scoped runner cleans profile buffers through `cargo llvm-cov`, so
+      # this job needs the tool even though it never judges coverage: a change
+      # carrying build inputs (fixtures, lock files, manifests) takes the path
+      # that cleans, and without the tool that path fails every such change.
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
       # The test gate. Runs the tests of the changed crate and every crate that
       # depends on it, uninstrumented, and returns nextest's own exit code, so a
       # failing test fails the step and is named by nextest. The instrumented

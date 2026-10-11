@@ -140,8 +140,15 @@ def run(check) -> tuple:
     original_select = globals()["select"]
     original_filter = globals()["file_scope_filter"]
     original_file_judge = globals()["judge_file_scope"]
+    original_build_inputs = globals()["build_inputs"]
     real_stderr = sys.stderr
     try:
+        # These scenarios mock the selection, so the live tree's own diff must
+        # not reach the run through the build-input scan: a fixture, lock file,
+        # or manifest in the ambient change would switch the run off the mocked
+        # filter path and the expectations below would read the tree instead of
+        # the mocks.
+        globals()["build_inputs"] = lambda paths, packages: (set(), [])
         globals()["select"] = lambda base, everything: (
             [],
             [],
@@ -194,6 +201,7 @@ def run(check) -> tuple:
         globals()["select"] = original_select
         globals()["file_scope_filter"] = original_filter
         globals()["judge_file_scope"] = original_file_judge
+        globals()["build_inputs"] = original_build_inputs
 
     # The two halves of the tool's exclusion, pinned separately. The suffix half
     # alone let every integration test be judged, and llvm-cov can never report
