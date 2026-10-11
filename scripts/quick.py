@@ -212,8 +212,8 @@ def failed_target_flags(failed: Sequence[tuple[str, str]]) -> list[str]:
 def nextest(
     packages: Sequence[str], expression: str, extra: Sequence[str] = (), targets: Sequence[str] = ()
 ) -> int:
-    """Run `expression` over `packages`. Without `-p`, cargo builds and runs only the
-    workspace's default member, so the packages must be named."""
+    """Run `expression` over `packages`. Naming the packages keeps the run to them; the
+    root manifest has no `default-members`, so a bare run would select every member."""
     command = ["cargo", "nextest", "run", "--locked", "--profile", "quick", *extra]
     command += [flag for name in packages for flag in ("-p", name)] + [*targets, "-E", expression]
     print("running:", shlex.join(command), flush=True)

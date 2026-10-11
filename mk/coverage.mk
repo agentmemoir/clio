@@ -28,12 +28,7 @@ coverage cov:
 #  make coverage-fast PLAN=1       # print the selection, run nothing
 #  make coverage-fast BASE=<ref>   # measure against a ref other than master
 #
-# Scoped by package, because that is the only unit cargo-llvm-cov supports, and by dependency closure, because the tests that cover a changed crate live in the crates that depend on it. Measured on an idle machine, one changed file in a leaf crate, which selects that crate plus its four dependents and runs 2190 of 4326 tests:
-#
-#  first run after `make clean`   1m29s   (184 crates compiled from empty)
-#  subsequent runs                0m38s   (nothing to recompile)
-#
-# What it does not establish is in the script's own docstring: it is not a workspace verdict, and a green run is "no problem in the files you touched".
+# Scoped by package, because that is the only unit cargo-llvm-cov supports, and by dependency closure, because the tests that cover a changed crate live in the crates that depend on it. What it does not establish is in the script's own docstring: it is not a workspace verdict, and a green run is "no problem in the files you touched".
 COVERAGE_FAST_FLAGS := $(if $(PLAN),--plan )
 coverage-fast:
 	@python3 scripts/scoped_runner.py --self-test
@@ -47,12 +42,7 @@ coverage-fast:
 #
 # It shares the coverage gate's package closure, so the two can never disagree about what a change touches, and that closure is also what pulls in every crate that depends on the one you edited, which is where a signature change shows up as a compile error rather than a test failure. `make test` scopes the same way but stops at the changed crates; this one goes all the way down the closure.
 #
-# Measured on an idle machine, one changed file in a leaf crate:
-#
-#  first run after `make clean`   1m26s   (uninstrumented build from empty)
-#  subsequent runs                0m34s
-#
-# Compare `make coverage-fast` on the same change: 1m29s cold, 0m38s warm. The two are close once a build exists, because what dominates is the test run rather than the instrumentation; test-fast wins on a cold tree and on a change that does not need a coverage verdict.
+# Compare `make coverage-fast` on the same change: the two are close once a build exists, because what dominates is the test run rather than the instrumentation; test-fast wins on a cold tree and on a change that does not need a coverage verdict. Measured times are in the CI timing record, not in this file.
 test-fast:
 	@python3 scripts/scoped_runner.py --self-test
 	@python3 scripts/scoped_runner.py $(if $(PLAN),--plan )--tests-only --base $(or $(BASE),master)
@@ -61,11 +51,11 @@ test-fast:
 #
 # The name is the warning. This target runs no test and judges no coverage, so a green run here says the code is formatted and compiles cleanly, and says nothing at all about whether the tests pass or whether the changed files reach their coverage floor. It was named `verify` until it stopped running the tests, and a command called `verify` that verifies neither is the same kind of lie as a document that says CI runs it. The history has one already: `make check` was fmt, clippy and test wearing one name, a stage swapped it for `make test-fast`, and the formatting and lint checks were dropped without anyone noticing until a pull request said so.
 #
-# The tests and the coverage judgement are the two scoped targets below, and CI runs both of them on every pull request. That is the gate. This target is what is cheap enough to run before every commit, which is why a pipeline stage runs it and leaves the rest to the runner.
+# The tests and the coverage judgement are the two scoped targets below, and CI runs both of them on every pull request that touches a path in its path filters. That is the gate. This target is what is cheap enough to run before every commit, which is why a pipeline stage runs it and leaves the rest to the runner.
 #
 # fmt is checked, not written: this target reports, it does not repair. clippy is workspace-wide and takes no PACKAGES, deliberately. A crate you did not touch can still fail to compile against a signature you changed, and --all-targets means the test code is compiled too, so a test file that does not build is caught here even though no test is run.
 #
-# --workspace is spelled out on the clippy line rather than arriving through a variable, so the scope is readable where clippy is run and a check can read the guarantee off this line instead of inferring it. Without it this target meant `default-members`, which was one crate: sixteen of the seventeen crates, and their test targets, were never compiled here and the target still reported success.
+# --workspace is spelled out on the clippy line rather than arriving through a variable, so the scope is readable where clippy is run and a check can read the guarantee off this line instead of inferring it.
 #
 # The clippy line below spells a bare `cargo`, not $(CARGO). $(CARGO) exists so llvm-cov comes from the same toolchain as the compiler that produced the coverage map, and clippy needs no such match. A toolchain binary invoked by path does not read rust-toolchain.toml, so a clippy run through $(CARGO) would lint with the compiler this host carries under `stable` while the runner uses the pinned one.
 #
