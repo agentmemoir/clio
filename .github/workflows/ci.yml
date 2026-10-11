@@ -190,11 +190,10 @@ jobs:
       # One step per suite, and `if: always()` on every one of them, because
       # `make` stops at the first failing command: a single step would report one
       # failure even when three suites are broken, and one broken suite would
-      # hide the four behind it. The check list then shows nine statuses where
-      # there are nine suites, and a reader can see which one went red. Count them
-      # with `grep -cE '^ +run: make scripts-check' .github/workflows/ci.yml`, or
-      # count the prerequisites of the aggregate `scripts-check` target in the
-      # Makefile; the two answers have to agree.
+      # hide the four behind it. The check list then shows one status per suite,
+      # and a reader can see which one went red. `make scripts-check-ci-parity`
+      # fails when this list and the prerequisites of the aggregate
+      # `scripts-check` target in mk/scripts.mk differ.
       #
       # The two steps that already existed keep the names they had. The others
       # are new to this workflow: nothing on master ran them, and one
@@ -267,6 +266,18 @@ jobs:
       - name: One coverage rule check
         if: always()
         run: make scripts-check-coverage-policy
+
+      - name: Quick tool and schema check
+        if: always()
+        run: make scripts-check-quick
+
+      - name: Gate installer check
+        if: always()
+        run: make scripts-check-gate-install
+
+      - name: CI suite parity
+        if: always()
+        run: make scripts-check-ci-parity
 
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
