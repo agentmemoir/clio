@@ -30,6 +30,10 @@
 /// Per-command usage lines (command, usage) for the commands still held here;
 /// `cli_help::verb_help` looks one up through `usage_for`.
 ///
+/// **Only an unregistered verb has a row here, enforced by a test.**
+/// `usage_for` reads the registry first, so a row left behind after its command
+/// moved into a record would be text no command can print.
+///
 /// The lines keep the canonical long `--output` spelling. The `-o` alias is a
 /// global flag documented once in the top-level help catalog, not repeated here.
 ///
@@ -38,114 +42,6 @@
 /// maintainer who rewrites it sees no change and no diagnostic. A duplicate is
 /// merged into the entry that is reachable rather than left to rot.
 const VERB_USAGE: &[(&str, &str)] = &[
-    (
-        "task get",
-        "usage: clio task get TASK_ID [--explain] [--output json|text]",
-    ),
-    (
-        "task history",
-        "usage: clio task history TASK_ID [--limit N] [--explain] [--output json|text]",
-    ),
-    (
-        "failure list",
-        "usage: clio failure list TASK_ID_OR_QUERY [--limit N] [--explain] [--output json|text]",
-    ),
-    (
-        "memtree query",
-        "usage: clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--output json|text]",
-    ),
-    (
-        "memtree get",
-        "usage: clio memtree get NODE_ID [--explain] [--output json|text]",
-    ),
-    (
-        "history temporal",
-        "usage: clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--output json|text]",
-    ),
-    (
-        "triple query",
-        "usage: clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--output json|text]",
-    ),
-    (
-        "belief history",
-        "usage: clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--output json|text]",
-    ),
-    (
-        "graph query",
-        "usage: clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--output json|text]",
-    ),
-    (
-        "associations",
-        "usage: clio associations ITEM_ID [--min-weight W] [--explain] [--output json|text]",
-    ),
-    (
-        "persona get",
-        "usage: clio persona get [--budget-tokens N] [--explain] [--output json|text]",
-    ),
-    (
-        "maintenance status",
-        "usage: clio maintenance status [--item-id ID] [--explain] [--output json|text]",
-    ),
-    (
-        "intent gate",
-        "usage: clio intent gate TURN_TEXT [--explain] [--output json|text]",
-    ),
-    (
-        "compose-context",
-        "usage: clio compose-context [QUERY] --budget-tokens N [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--recall-scope full|consolidated_only] [--expand-graph] [--prefer-consolidated] [--explain] [--output json|text]",
-    ),
-    (
-        "audit trail",
-        "usage: clio audit trail ITEM_ID [--explain] [--output json|text]",
-    ),
-    (
-        "persona stable",
-        "usage: clio persona stable KEY VALUE [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
-    ),
-    (
-        "persona observe",
-        "usage: clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]",
-    ),
-    (
-        "task upsert",
-        "usage: clio task upsert TASK_ID --definition D --status S [--steps a,b] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
-    ),
-    (
-        "failure record",
-        "usage: clio failure record TASK_ID --attempt-n N --what-failed W --lesson L [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
-    ),
-    (
-        "scratchpad write",
-        "usage: clio scratchpad write KEY CONTENT [--session S] [--bank B] [--actor A] [--output json|text]",
-    ),
-    (
-        "scratchpad read",
-        "usage: clio scratchpad read [KEY] [--session S] [--bank B] [--actor A] [--output json|text]",
-    ),
-    (
-        "scratchpad clear",
-        "usage: clio scratchpad clear [KEY] [--session S] [--bank B] [--actor A] [--output json|text]",
-    ),
-    (
-        "canonical put",
-        "usage: clio canonical put KEY VALUE --category C --epistemic-kind K [--source-type T] [--confidence N] [--source-text TEXT] [--evidence-ref E] [--context C] [--dry-run] [--output json|text]",
-    ),
-    (
-        "canonical get",
-        "usage: clio canonical get KEY [--as-of TS] [--output json|text]",
-    ),
-    (
-        "shared store",
-        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] [--source-text TEXT] --actor A --shared-bank [--output json|text]",
-    ),
-    (
-        "shared retrieve",
-        "usage: clio shared retrieve QUERY --actor A --shared-bank [--output json|text]",
-    ),
-    (
-        "shared discard",
-        "usage: clio shared discard ITEM_ID --reason R [--confirm] --actor A --shared-bank [--output json|text]",
-    ),
     (
         "validate",
         "usage: clio validate ITEM_ID --action attest|update|invalidate|delete [--note N] [--new-content C] [--bank B] [--actor A] [--output json|text]",
@@ -185,34 +81,6 @@ const VERB_USAGE: &[(&str, &str)] = &[
     (
         "correct",
         "usage: clio correct ID VALUE --reason R [--context TEXT] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
-    ),
-    (
-        "triple add",
-        "usage: clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--output json|text]",
-    ),
-    (
-        "triple end",
-        "usage: clio triple end S P [--object O] --valid-until TS [--update-rule discrete] [--dry-run] [--output json|text]",
-    ),
-    (
-        "belief observe",
-        "usage: clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
-    ),
-    (
-        "graph link",
-        "usage: clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
-    ),
-    (
-        "hygiene audit",
-        "usage: clio hygiene audit [--min-score N] [--limit N] [--offset N] [--bank BANK] [--output json|text]",
-    ),
-    (
-        "hygiene clean",
-        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only",
-    ),
-    (
-        "hygiene log",
-        "usage: clio hygiene log [--limit N] [--offset N] [--bank BANK] [--output json|text]",
     ),
     (
         "export",
@@ -315,6 +183,9 @@ const VERB_USAGE: &[(&str, &str)] = &[
 
 /// The full usage text for a verb: the registry record's `full_usage` when a
 /// record is registered, else this table's row.
+///
+/// A registered verb's row is not consulted: the record carries the same bytes
+/// its authored row held, and the row is deleted when the record lands.
 pub(crate) fn usage_for(verb: &str) -> Option<String> {
     if let Some(spec) = crate::cli_command_registry::find(verb) {
         return Some(spec.full_usage());

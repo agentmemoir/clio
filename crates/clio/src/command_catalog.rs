@@ -7,14 +7,14 @@
 //! command, carrying the command's flags and a short description.
 //!
 //! ## Owns
-//! - The catalog's ordered rows for the commands without a registry record, and
-//!   the seam where the registry's records are interpolated
+//! - The catalog's authored rows for the commands without a registry record
 //! - The renderer that lays an entry out: wrapped usage line, tool arrow, note
 //!
 //! ## Does not own
 //! - The usage lines themselves (see `cli_help_usage`), which every command's own
 //!   `--help` also reads
 //! - A registered command's name, summary, or flags (see `cli_command_registry`)
+//! - The global order the rows print in (see `cli_command_bindings`)
 //! - The help layout around the catalog (see the binary `help_text`)
 //! - The machine-readable `help --json` catalog and the command suggestions
 //!   (see `cli_help`)
@@ -22,10 +22,10 @@
 //! ## Boundary
 //!
 //! Changes to an unregistered command's catalog row should normally require changes
-//! here. A registered command's row should not: it is rendered from its record.
-//! Adding or renaming a flag should not require changes here either: the flag list
-//! is rendered from the usage registry, so a flag added there appears here with no
-//! edit.
+//! here. A registered command's row should not: it is rendered from its record,
+//! in the order `cli_command_bindings` holds. Adding or renaming a flag should
+//! not require changes here either: the flag list is rendered from the usage
+//! registry, so a flag added there appears here with no edit.
 //!
 //! Keep this module focused on the catalog text itself.
 
@@ -36,7 +36,10 @@
 /// which is also where each command's own `--help` reads them. Two hand-written
 /// lists of the same flags is how 159 flags came to exist in a command's help and
 /// nowhere in the catalog, including `--source-type`, which a belief write needs.
-const ENTRIES_BEFORE: &[(&str, &str)] = &[
+///
+/// Read by the order accessor as the fallback row for a command that has not
+/// moved into a registry record yet.
+pub(crate) const ENTRIES_BEFORE: &[(&str, &str)] = &[
     ("version", "Print package identity"),
     ("health", "Machine-readable health/version JSON"),
     (
@@ -92,70 +95,18 @@ const ENTRIES_BEFORE: &[(&str, &str)] = &[
     ),
 ];
 
-/// The catalog rows after the registry's records.
+/// The catalog rows after the registry's first record, in whole-catalog order.
 ///
-/// [`catalog_rows`] walks this block after the records, so the two blocks and the
-/// records between them read as the one list the catalog used to hold.
-const ENTRIES_AFTER: &[(&str, &str)] = &[
-    ("task get", "one task and its current state"),
-    ("task history", "a task's recorded transitions"),
-    ("failure list", "failures recorded against one task"),
-    ("memtree query", "walk the memory tree from a seed"),
-    ("memtree get", "one memory-tree node and its lineage"),
-    (
-        "history temporal",
-        "the item history as it stood at a point in time",
-    ),
-    ("triple query", "match subject/predicate/object patterns"),
-    ("belief history", "one belief's confidence history"),
-    ("graph query", "neighbours of one item, by edge type"),
-    ("associations", "co-activation links for one item"),
-    ("persona get", "the persona model, within a token budget"),
-    ("persona stable", "set a stable persona key"),
-    (
-        "persona observe",
-        "feed one numeric observation into the EMA",
-    ),
-    ("task upsert", "create or update one task"),
-    (
-        "failure record",
-        "record one attempt, its failure, and the lesson",
-    ),
-    (
-        "scratchpad write",
-        "store an ephemeral key for this session",
-    ),
-    ("scratchpad read", "read one key, or the whole pad"),
-    ("scratchpad clear", "drop one key, or the whole pad"),
-    (
-        "canonical put",
-        "gated single-slot upsert with bi-temporal supersession",
-    ),
-    ("canonical get", "read one canonical key"),
-    ("shared store", "write into a shared bank"),
-    ("shared retrieve", "read from a shared bank"),
-    ("shared discard", "remove one item from a shared bank"),
+/// A row for a command the registry knows is gone from here: that command's row
+/// is rendered from its record, so this block holds one row per command with no
+/// record, and the records and these rows interleave in the one order the
+/// catalog always printed.
+///
+/// Read by the order accessor as the fallback row for a command that has not
+/// moved into a registry record yet.
+pub(crate) const ENTRIES_AFTER: &[(&str, &str)] = &[
     ("validate", "attest, update, invalidate, or delete one item"),
     ("batch", "apply a list of operations in one transaction"),
-    (
-        "maintenance status",
-        "queue depth, failures, and drain progress",
-    ),
-    ("intent gate", "decide whether a turn should reach memory"),
-    (
-        "compose-context",
-        "assemble a budgeted context block for a turn",
-    ),
-    (
-        "audit trail",
-        "masked lifecycle reconstruction for one item",
-    ),
-    ("hygiene audit", "score stored items and list the weakest"),
-    (
-        "hygiene clean",
-        "(or --file - for stdin; without --confirm, or with --dry-run: zero-write dry-run only)",
-    ),
-    ("hygiene log", "what hygiene has already done"),
     (
         "export",
         "(manifest-backed JSON bundle; requires --actor harness|system)",
@@ -179,10 +130,6 @@ const ENTRIES_AFTER: &[(&str, &str)] = &[
         "operational removal; distinct from compliance erasure",
     ),
     ("correct", "replace an item's value with a stated reason"),
-    ("triple add", "write one subject/predicate/object fact"),
-    ("triple end", "close an open fact without a replacement"),
-    ("belief observe", "record evidence and a new confidence"),
-    ("graph link", "add an explicit edge between two items"),
     ("config get", "read one configuration path"),
     ("config set", "write one configuration path at a scope"),
     (
@@ -261,18 +208,15 @@ const ENTRIES_AFTER: &[(&str, &str)] = &[
     ),
 ];
 
-/// Every catalog row in whole-catalog order: the authored rows before the
-/// registry's records, each record's name with its summary, then the authored
-/// rows after it.
+/// Every catalog row in whole-catalog order, resolved by the order accessor:
+/// a key prints its registry record's name and summary, else the authored row
+/// it still holds.
 ///
-/// The seam between the two blocks is where the registry's records sit, so the
-/// rendered catalog keeps its one order.
+/// The order spine lists the authored rows before the records, the records,
+/// then the authored rows after them, so the rendered catalog keeps its one
+/// order while commands move.
 fn catalog_rows() -> impl Iterator<Item = (&'static str, &'static str)> {
-    ENTRIES_BEFORE
-        .iter()
-        .copied()
-        .chain(crate::cli_command_registry::all().map(|spec| (spec.name, spec.summary)))
-        .chain(ENTRIES_AFTER.iter().copied())
+    crate::cli_command_bindings::catalog_rows().into_iter()
 }
 
 /// Every command the catalog lists, in the order it lists them.

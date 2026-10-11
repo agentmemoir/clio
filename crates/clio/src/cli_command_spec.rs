@@ -109,7 +109,10 @@ pub(crate) struct Example {
     pub(crate) comment: Option<&'static str>,
 }
 
-/// Where the catalog groups a command.
+/// How a command affects stored data.
+///
+/// `Read` for read-only verbs, `Write` for verbs that create, modify, or
+/// delete data, and `Reserved` for surfaces that do not consume it yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Section {
     Read,
