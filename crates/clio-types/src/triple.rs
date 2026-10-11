@@ -206,7 +206,10 @@ impl TripleRecord {
                 if self.source_type.is_none() {
                     return Err(AmError::new(
                         ErrorCode::InvalidArgument,
-                        "belief triples require source_type",
+                        format!(
+                            "belief triples require source_type ({})",
+                            SourceType::WIRE.join("|")
+                        ),
                     ));
                 }
             }
@@ -214,7 +217,7 @@ impl TripleRecord {
                 if self.source_type.is_some() {
                     return Err(AmError::new(
                         ErrorCode::InvalidArgument,
-                        "fact triples must not include source_type",
+                        "fact triples must not include source_type; set it only for belief",
                     ));
                 }
             }

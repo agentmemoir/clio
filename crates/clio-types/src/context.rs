@@ -60,6 +60,12 @@ pub enum Actor {
 }
 
 impl Actor {
+    /// Every actor in canonical order.
+    pub const ALL: &[Self] = &[Self::Agent, Self::Harness, Self::User, Self::System];
+
+    /// Wire strings in canonical order (parallel to `ALL`).
+    pub const WIRE: &[&'static str] = &["agent", "harness", "user", "system"];
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -82,7 +88,7 @@ impl Actor {
             "system" => Ok(Self::System),
             other => Err(AmError::new(
                 ErrorCode::InvalidArgument,
-                format!("actor must be agent|harness|user|system, got `{other}`"),
+                format!("actor must be {}, got `{other}`", Self::WIRE.join("|")),
             )),
         }
     }
@@ -258,6 +264,15 @@ mod tests {
         )
         .expect("override");
         assert_eq!(bank.as_str(), "custom");
+    }
+
+    #[test]
+    fn actor_tables_are_parallel() {
+        assert_eq!(Actor::ALL.len(), Actor::WIRE.len());
+        for (variant, wire) in Actor::ALL.iter().zip(Actor::WIRE) {
+            assert_eq!(variant.as_str(), *wire);
+            assert_eq!(Actor::parse(wire).unwrap(), *variant);
+        }
     }
 
     #[test]

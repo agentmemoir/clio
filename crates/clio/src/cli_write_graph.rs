@@ -26,10 +26,12 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{
-    base_args, flag, one_positional, parse_f64, require_flags, required_flags, validate_choice,
+    base_args, flag, one_positional, parse_f64, parse_unit_f64, require_flags, required_flags,
+    validate_choice,
 };
 use crate::cli_write_core::context_arg;
 use crate::cli_write_group::{WriteCall, WriteGroup};
+use crate::cli_write_source_type::source_type_arg;
 use serde_json::{Map, Value, json};
 
 /// The triple/belief/graph write commands.
@@ -110,18 +112,19 @@ fn triple_add_call(verb: &str, parsed: &ParsedArgs) -> Result<WriteCall, CliErro
         Some(raw) => validate_choice("epistemic-kind", raw, &["fact", "belief"])?,
         None => "fact",
     };
+    let source_type = source_type_arg(kind, parsed)?;
     let mut args = base_args(parsed);
     args.insert("subject".into(), Value::from(positionals[0].as_str()));
     args.insert("predicate".into(), Value::from(positionals[1].as_str()));
     args.insert("object".into(), Value::from(positionals[2].as_str()));
     args.insert("epistemic_kind".into(), Value::from(kind));
-    if let Some(source) = parsed.value("source-type") {
+    if let Some(source) = source_type {
         args.insert("source_type".into(), Value::from(source));
     }
     if let Some(raw) = parsed.value("confidence") {
         args.insert(
             "confidence".into(),
-            Value::from(parse_f64("confidence", raw)?),
+            Value::from(parse_unit_f64("confidence", raw)?),
         );
     }
     if let Some(ts) = parsed.value("valid-from") {
@@ -200,7 +203,7 @@ fn belief_observe_call(verb: &str, parsed: &ParsedArgs) -> Result<WriteCall, Cli
     let confidence = flag(parsed, "confidence");
     args.insert(
         "confidence".into(),
-        Value::from(parse_f64("confidence", confidence)?),
+        Value::from(parse_unit_f64("confidence", confidence)?),
     );
     args.insert("evidence_ref".into(), Value::from(flag(parsed, "evidence")));
     args.insert("source_type".into(), Value::from(flag(parsed, "source")));

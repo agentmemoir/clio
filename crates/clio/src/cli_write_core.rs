@@ -29,7 +29,7 @@
 
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
-use crate::cli_read::{base_args, no_positionals, one_positional, parse_f64, validate_choice};
+use crate::cli_read::{base_args, no_positionals, one_positional, parse_unit_f64, validate_choice};
 use crate::cli_write_duplicate::{allow_duplicate_arg, remember_refusal};
 use crate::cli_write_group::{Refusal, WriteCall, WriteGroup, batch_preview_refusal};
 use crate::cli_write_source_type::source_type_arg;
@@ -206,7 +206,7 @@ fn candidate_args(parsed: &ParsedArgs, verb: &str) -> Result<Map<String, Value>,
     if let Some(raw) = parsed.value("confidence") {
         args.insert(
             "confidence".into(),
-            Value::from(parse_f64("confidence", raw)?),
+            Value::from(parse_unit_f64("confidence", raw)?),
         );
     }
     if let Some(source) = source_type {

@@ -111,14 +111,70 @@ fn admit_shares_the_source_type_pairing() {
     assert!(err.contains("--source-type"), "{err}");
 }
 
-/// The message lists the wire values the enum accepts, so the list cannot drift
-/// from `SourceType`. A variant added to the enum is a failing assertion here.
 #[test]
-fn the_value_list_is_the_enum_wire_values() {
-    let expected: &[&str] = &[
-        SourceType::UserStated.as_str(),
-        SourceType::AgentInferred.as_str(),
-        SourceType::ThirdParty.as_str(),
-    ];
-    assert_eq!(SOURCE_TYPES, expected);
+fn admit_rejects_an_unknown_source_type() {
+    let s = state();
+    let (code, out, err) = run_write_state(
+        "admit",
+        &[
+            "x",
+            "--category",
+            "persona",
+            "--epistemic-kind",
+            "belief",
+            "--source-type",
+            "bogus",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("--source-type"), "{err}");
+}
+
+/// Every write verb that takes the two flags applies the same pairing rule, so
+/// the trap is fixed on the whole family and not only on `remember`/`admit`.
+#[test]
+fn the_sibling_write_verbs_share_the_pairing_rule() {
+    let s = state();
+    for (verb, args) in [
+        (
+            "triple add",
+            vec!["a", "b", "c", "--epistemic-kind", "belief"],
+        ),
+        (
+            "canonical put",
+            vec![
+                "k",
+                "v",
+                "--category",
+                "persona",
+                "--epistemic-kind",
+                "belief",
+            ],
+        ),
+        (
+            "shared store",
+            vec![
+                "x",
+                "--epistemic-kind",
+                "belief",
+                "--actor",
+                "agent",
+                "--shared-bank",
+            ],
+        ),
+    ] {
+        let (code, out, err) = run_write_state(verb, &args, &s, false);
+        assert_eq!(code, ExitCode::from(2), "{verb}: {out}{err}");
+        assert!(err.contains("--source-type"), "{verb}: {err}");
+    }
+}
+
+/// The CLI's value list is the type's own wire list. The structural guard that
+/// keeps the enum, `ALL`, and `WIRE` in step lives with the type in `clio-types`;
+/// this pins that the CLI reads it rather than a second hardcoded copy.
+#[test]
+fn the_value_list_is_the_enum_wire_list() {
+    assert_eq!(SOURCE_TYPES, SourceType::WIRE);
 }

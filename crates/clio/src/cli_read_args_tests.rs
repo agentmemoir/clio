@@ -20,7 +20,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{REQUIRED_FLAGS, bare_flags, flag, require_flags};
+use super::{REQUIRED_FLAGS, bare_flags, flag, parse_unit_f64, require_flags};
 use crate::cli_help_usage;
 
 /// The flags a verb's usage line writes bare, with the bracket that opens an
@@ -195,4 +195,32 @@ fn a_proved_flag_reads_back_as_its_value() {
     .expect("parse");
     assert_eq!(flag(&parsed, "rule"), "keep");
     assert_eq!(flag(&parsed, "absent"), "");
+}
+
+/// A unit-interval flag (`--confidence`) parses a finite number and bounds it, so
+/// an out-of-range value is a usage error rather than a domain `out_of_range`.
+#[test]
+fn parse_unit_f64_bounds_the_value_to_the_unit_interval() {
+    assert_eq!(parse_unit_f64("confidence", "0").unwrap(), 0.0);
+    assert_eq!(parse_unit_f64("confidence", "1").unwrap(), 1.0);
+    assert_eq!(parse_unit_f64("confidence", "0.5").unwrap(), 0.5);
+
+    let error = parse_unit_f64("confidence", "1.5").expect_err("out of range");
+    assert_eq!(error.code(), "usage");
+    assert!(
+        error
+            .message()
+            .contains("--confidence must be between 0.0 and 1.0"),
+        "{}",
+        error.message()
+    );
+
+    let error = parse_unit_f64("confidence", "abc").expect_err("not a number");
+    assert!(
+        error
+            .message()
+            .contains("--confidence must be a finite number"),
+        "{}",
+        error.message()
+    );
 }

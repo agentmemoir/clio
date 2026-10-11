@@ -195,43 +195,61 @@ impl EpistemicKind {
     }
 }
 
-/// Belief provenance (required iff `epistemic_kind = belief`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SourceType {
-    UserStated,
-    AgentInferred,
-    ThirdParty,
+/// Defines [`SourceType`] and its derived tables from one list.
+///
+/// The invocation at the bottom of this block is the single source of truth:
+/// adding or removing a value there updates the enum variants, the `ALL` table,
+/// the `WIRE` strings, `as_str`, and `parse` together. The CLI's `--source-type`
+/// values and every message that names them read these tables, so the value list
+/// cannot drift — the same shape `semantic_categories!` uses above.
+macro_rules! source_types {
+    ($( $variant:ident => $wire:literal; )+) => {
+        /// Belief provenance (required iff `epistemic_kind = belief`).
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum SourceType {
+            $( $variant, )+
+        }
+
+        impl SourceType {
+            /// Every value in canonical order.
+            pub const ALL: &[Self] = &[ $( Self::$variant, )+ ];
+
+            /// Wire/SQL strings in canonical order (parallel to `ALL`).
+            pub const WIRE: &[&'static str] = &[ $( $wire, )+ ];
+
+            /// Stable wire/SQL string.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $wire, )+
+                }
+            }
+
+            /// Parse from SQL/wire.
+            ///
+            /// # Errors
+            /// Unknown source type.
+            pub fn parse(raw: &str) -> Result<Self, AmError> {
+                match raw {
+                    $( $wire => Ok(Self::$variant), )+
+                    other => Err(AmError::new(
+                        ErrorCode::InvalidArgument,
+                        format!(
+                            "source_type must be {}, got `{other}`",
+                            Self::WIRE.join("|")
+                        ),
+                    )),
+                }
+            }
+        }
+    };
 }
 
-impl SourceType {
-    /// Stable wire/SQL string.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::UserStated => "user_stated",
-            Self::AgentInferred => "agent_inferred",
-            Self::ThirdParty => "third_party",
-        }
-    }
-
-    /// Parse from SQL/wire.
-    ///
-    /// # Errors
-    /// Unknown source type.
-    pub fn parse(raw: &str) -> Result<Self, AmError> {
-        match raw {
-            "user_stated" => Ok(Self::UserStated),
-            "agent_inferred" => Ok(Self::AgentInferred),
-            "third_party" => Ok(Self::ThirdParty),
-            other => Err(AmError::new(
-                ErrorCode::InvalidArgument,
-                format!(
-                    "source_type must be user_stated|agent_inferred|third_party, got `{other}`"
-                ),
-            )),
-        }
-    }
+source_types! {
+    UserStated => "user_stated";
+    AgentInferred => "agent_inferred";
+    ThirdParty => "third_party";
 }
 
 /// Published maximum size for one source `context` value, in UTF-8 bytes
@@ -369,7 +387,10 @@ impl MemoryItem {
                 if self.source_type.is_none() {
                     return Err(AmError::new(
                         ErrorCode::InvalidArgument,
-                        "belief items require source_type",
+                        format!(
+                            "belief items require source_type ({})",
+                            SourceType::WIRE.join("|")
+                        ),
                     ));
                 }
             }
@@ -377,7 +398,7 @@ impl MemoryItem {
                 if self.source_type.is_some() {
                     return Err(AmError::new(
                         ErrorCode::InvalidArgument,
-                        "fact items must not include source_type",
+                        "fact items must not include source_type; set it only for belief",
                     ));
                 }
             }
