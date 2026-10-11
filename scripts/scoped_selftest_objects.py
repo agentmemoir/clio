@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from scoped_profiles import prune_foreign_objects
+from scoped_profiles import drop_selected_objects, prune_foreign_objects
 
 from scoped_selftest_support import shared as globals
 
@@ -128,6 +128,35 @@ def run(check, raises) -> tuple:
                 (none_deleted, only.exists(), "deleted 0" in all_log.getvalue()),
                 (0, True, True),
             )
+
+        # Old and current selected-package binaries can both match; remove both before rebuilding.
+        with tempfile.TemporaryDirectory(prefix="scoped-runner-selected-") as scratch:
+            selected_root = Path(scratch)
+            selected_deps = selected_root / "debug" / "deps"
+            selected_deps.mkdir(parents=True)
+            stale = selected_deps / "clio-2b3cf5c1458a8f42"
+            current = selected_deps / "clio-1011ac0a5f159ade"
+            target = selected_deps / "additive_tools_test-98ac1e2f3b4d5c6e"
+            foreign = selected_deps / "clio_ops-fa1e5933542c28db"
+            for path in (stale, current, target, foreign):
+                path.write_text("x")
+                os.chmod(path, 0o755)
+            selected_log = io.StringIO()
+            original_stdout_for_selected = sys.stdout
+            try:
+                sys.stdout = selected_log
+                selected_count = drop_selected_objects(selected_root, ["clio"])
+            finally:
+                sys.stdout = original_stdout_for_selected
+            check(
+                "old and current binaries of a selected package are removed",
+                [stale.exists(), current.exists(), target.exists()],
+                [False, False, False],
+            )
+            check("a foreign package's binary remains for the later prune", foreign.exists(), True)
+            check("the selected object count is printed", "deleted 3" in selected_log.getvalue(), True)
+            check("the number of selected objects deleted is returned", selected_count, 3)
+
         # An empty selection is a mass deletion, not an empty deletion. With no
         # names the keep pattern matches only the empty stem, so every object it
         # can see goes. The caller returns early on an empty selection, so this
@@ -143,6 +172,12 @@ def run(check, raises) -> tuple:
                 True,
             )
             check("and the refused run deleted nothing", doomed.exists(), True)
+            check(
+                "an empty pre-run selection is also refused",
+                raises(drop_selected_objects, empty_root, []),
+                True,
+            )
+            check("the pre-run refusal leaves the object in place", doomed.exists(), True)
     finally:
         globals()["workspace_packages"] = original_packages_for_prune
     return name, prune_packages, scratch
