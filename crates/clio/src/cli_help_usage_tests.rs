@@ -108,6 +108,27 @@ fn correct_usage_and_catalog_name_the_confirm_flag() {
     assert!(block.contains("[--confirm]"), "{block}");
 }
 
+/// `remember`/`admit` take `--epistemic-kind` and `--source-type` as a pair, and
+/// the command's own `--help` must say so: the value is required with belief and
+/// refused with fact. The catalog renders the first usage line only, so it shows
+/// the flag and the pairing sentence stays in `--help`.
+#[test]
+fn the_candidate_usage_lines_state_the_source_type_pairing() {
+    for verb in ["remember", "admit"] {
+        let usage = usage_for(verb).expect("a usage line is registered");
+        assert!(usage.contains("--epistemic-kind"), "{verb}: {usage}");
+        assert!(usage.contains("--source-type"), "{verb}: {usage}");
+        for value in ["user_stated", "agent_inferred", "third_party"] {
+            assert!(usage.contains(value), "{verb} is missing {value}: {usage}");
+        }
+        let block = crate::help_flags_test_support::entry_block(
+            &crate::command_catalog::catalog_text(),
+            verb,
+        );
+        assert!(block.contains("--source-type"), "{verb}: {block}");
+    }
+}
+
 /// A flag a usage line names is one the verb's parser will accept.
 ///
 /// The other direction is checked elsewhere: a flag in `--help` reaches the catalog.
