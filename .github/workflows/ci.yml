@@ -59,7 +59,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
   CLIO_DATABASE_URL: postgres://clio:clio@127.0.0.1:5432/clio
   # Build parallelism, capped so the gate survives a small runner.
   #
@@ -154,13 +153,9 @@ jobs:
       # argument for scoping it, but that argument depends on master staying green
       # and it was not worth trading a lint regression for.
       #
-      # --workspace is named here rather than left to the root manifest. This step
-      # once read as workspace-wide and was not: with `default-members` set to a
-      # single crate and no selector on the command, it linted that crate alone and
-      # returned success. A -D warnings error in any of the other sixteen crates,
-      # including in their test targets, could not fail this job.
+      # --workspace is named here rather than left to the root manifest. This step once read as workspace-wide and was not: with `default-members` set to a single crate and no selector on the command, it linted that crate alone and returned success. A lint denied by `.cargo/config.toml` in any of the other sixteen crates, including their test targets, could not fail this job.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked
 
       - name: Install nextest
         uses: taiki-e/install-action@v2

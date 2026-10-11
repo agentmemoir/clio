@@ -12,10 +12,10 @@
 //!   writer emits for a distilled unit and the erasure purge matches
 //! - `STALE_SOURCE_REMOVED` / `STALE_REVISION_REJECTED` / `STALE_SOURCE_CHANGED`,
 //!   the stale reason codes
-//! - Claim-set dedup, evidence recording, the proof count, record validation,
-//!   and the `source_ids_json` codec
+//! - Claim-set dedup, evidence recording, the proof count, and record validation
 //!
 //! ## Does not own
+//! - The stored-value codec, re-exported from `distilled_unit_codec`
 //! - Backend SQL (`sqlite_distilled_unit` / `postgres_distilled_unit`)
 //! - Building records from a hub cluster (`clio-write`)
 //! - The evidence entry shapes and the freshness decision
@@ -26,13 +26,16 @@
 //!
 //! Changes to the record shape or its versioning should normally require
 //! changes here. Changes to revision identity should require
-//! `distilled_revision`; changes to backend SQL should not require changes here.
+//! `distilled_revision`; changes to the stored encoding should require
+//! `distilled_unit_codec`; changes to backend SQL should not require changes here.
 //!
 //! Keep this module focused on the derivation record.
 
 use crate::distilled_evidence::RevisionEvidence;
 pub use crate::distilled_revision::revision_item_id;
-use crate::migrate::IntoAmError;
+pub(crate) use crate::distilled_unit_codec::{
+    decode_source_ids, encode_source_ids, record_version_from_i64, revision_from_i64,
+};
 use clio_types::{AmError, ErrorCode, MemoryItem};
 use std::collections::BTreeSet;
 
@@ -404,37 +407,6 @@ impl DistilledUnitRecord {
     }
 }
 
-/// Serialize a source-id list for the `source_ids_json` column.
-pub(crate) fn encode_source_ids(ids: &[String]) -> String {
-    serde_json::to_string(ids).expect("distilled unit source ids serialize")
-}
-
-/// Parse the `source_ids_json` column.
-pub(crate) fn decode_source_ids(raw: &str) -> Result<Vec<String>, AmError> {
-    serde_json::from_str(raw).am("distilled unit source ids")
-}
-
-/// Convert a stored `record_version` into the in-memory `u32`.
-pub(crate) fn record_version_from_i64(raw: i64) -> Result<u32, AmError> {
-    u32::try_from(raw).map_err(|_| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("distilled unit record_version out of range: {raw}"),
-        )
-    })
-}
-
-/// Convert a stored `revision` into the in-memory `u32`. Pre-v2 rows store the
-/// column default 1.
-pub(crate) fn revision_from_i64(raw: i64) -> Result<u32, AmError> {
-    u32::try_from(raw).map_err(|_| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("distilled unit revision out of range: {raw}"),
-        )
-    })
-}
-
 #[cfg(test)]
 #[path = "distilled_unit_cas_tests.rs"]
 mod distilled_unit_cas_tests;
@@ -450,3 +422,7 @@ pub(crate) mod distilled_unit_reconcile_tests;
 #[cfg(test)]
 #[path = "distilled_unit_discard_cascade_tests.rs"]
 mod distilled_unit_discard_cascade_tests;
+
+#[cfg(test)]
+#[path = "distilled_unit_discard_hub_tests.rs"]
+mod distilled_unit_discard_hub_tests;

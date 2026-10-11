@@ -131,6 +131,8 @@ def estimate_line(found: Estimate | None, budget: float, label: str) -> list[str
 def plan_lines(selection: Selection, history: list[Case]) -> list[str]:
     lines = [f"quick: {note}" for note in selection.notes]
     lines.append(f"quick: filter: {union_expression(selection.terms)}")
+    if target_flags(selection.terms):
+        lines.append(f"quick: cargo targets: {' '.join(target_flags(selection.terms))}")
     keep = lambda terms: (lambda case: any(t.matches(case.binary_id, case.name) for t in terms))  # noqa: E731
     total = estimate(history, keep(selection.terms))
     lines += estimate_line(total, QUICK_BUDGET_S, "estimate")
@@ -174,11 +176,44 @@ def schema_check(files: Sequence[str]) -> int:
     return subprocess.run([sys.executable, str(SCHEMA_CHECK)], cwd=runner.ROOT).returncode
 
 
-def nextest(packages: Sequence[str], expression: str, extra: Sequence[str] = ()) -> int:
+def target_flags(terms: Sequence[Term]) -> list[str]:
+    """Cargo target filters for a selection.
+
+    Unit tests live in the lib and bin targets, and an integration test in its own
+    target. A selection with no whole-package term needs only those, so the rest
+    are not built. Without this, a one-module change relinked every integration
+    binary of the package and ran each once to list its tests, and that took
+    minutes on a package with twenty of them.
+    """
+    if any(term.is_wide for term in terms):
+        return []
+    flags = ["--lib", "--bins"] if any(term.modules or term.kinds for term in terms) else []
+    for name in sorted({term.binary for term in terms if term.binary}):
+        flags += ["--test", name]
+    return flags
+
+
+def failed_target_flags(failed: Sequence[tuple[str, str]]) -> list[str]:
+    """Cargo target filters for the binaries that held the failed tests."""
+    targets: set[tuple[str, ...]] = set()
+    for binary_id in {binary for binary, _ in failed}:
+        _, _, target = binary_id.partition("::")
+        if not target:
+            targets.add(("--lib",))
+        elif target.startswith("bin/"):
+            targets.add(("--bin", target[4:]))
+        else:
+            targets.add(("--test", target))
+    return [flag for entry in sorted(targets) for flag in entry]
+
+
+def nextest(
+    packages: Sequence[str], expression: str, extra: Sequence[str] = (), targets: Sequence[str] = ()
+) -> int:
     """Run `expression` over `packages`. Without `-p`, cargo builds and runs only the
     workspace's default member, so the packages must be named."""
     command = ["cargo", "nextest", "run", "--locked", "--profile", "quick", *extra]
-    command += [flag for name in packages for flag in ("-p", name)] + ["-E", expression]
+    command += [flag for name in packages for flag in ("-p", name)] + [*targets, "-E", expression]
     print("running:", shlex.join(command), flush=True)
     return subprocess.run(command, cwd=runner.ROOT, env=runner.hermetic_env()).returncode
 
@@ -194,12 +229,17 @@ def run_selection(selection: Selection, retry_failed: bool) -> int:
                 sorted({binary.split("::")[0] for binary, _ in failed}),
                 failed_expression(failed),
                 ("--no-tests=pass",),
+                failed_target_flags(failed),
             )
             if code != 0:
                 return code
         else:
             print("quick: no failed test in the last Quick run; running the full selection", flush=True)
-    return nextest(sorted({term.package for term in selection.terms}), union_expression(selection.terms))
+    return nextest(
+        sorted({term.package for term in selection.terms}),
+        union_expression(selection.terms),
+        targets=target_flags(selection.terms),
+    )
 
 
 def parse(argv: Sequence[str]) -> argparse.Namespace:

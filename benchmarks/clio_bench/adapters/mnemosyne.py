@@ -333,8 +333,28 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
         version comes from ``doctor``.
         """
         settings: dict[str, SettingRecord] = {}
+        requested_env = self._env(None)
         for key in REQUIRED_SETTINGS:
-            settings[key] = self._read_setting(key)
+            setting = self._read_setting(key)
+            if key == "cross_session":
+                setting = read_setting(
+                    value=self._parse_bool_setting(setting.value),
+                    surface=setting.surface,
+                )
+            settings[key] = setting
+            env_key = f"MNEMOSYNE_{key.upper()}"
+            requested = requested_env.get(env_key)
+            if requested is None:
+                continue
+            if key == "cross_session":
+                requested_value = self._parse_bool_setting(requested)
+            else:
+                requested_value = self._parse_value(requested)
+            if setting.value != requested_value:
+                raise FingerprintError(
+                    f"mnemosyne config.yaml overrides {env_key}: effective {key} is "
+                    f"{setting.value!r}, requested {requested!r}; use a fresh data directory"
+                )
         return Fingerprint(
             system="mnemosyne",
             version=self._read_version(),
@@ -379,6 +399,13 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
             return json.loads(raw)
         except json.JSONDecodeError:
             return raw
+
+    @staticmethod
+    def _parse_bool_setting(raw: object) -> bool:
+        """Match Mnemosyne's `get_bool` conversion for cross_session."""
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
     def _read_version(self) -> str:
         """Read the system version from ``doctor``, the only surface reporting it.
