@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import time
 
-from ..adapter import MemoryBenchmarkAdapter
+from ..adapter import AdapterError, MemoryBenchmarkAdapter
 from ..fingerprint import (
     Fingerprint,
     FingerprintError,
@@ -24,10 +24,26 @@ from ..fingerprint import (
 )
 from ..packing import pack_context
 from ..tokenizer import ReferenceTokenizer
-from ..types import DialogueTurn, IngestResult, RetrievalResult
+from ..types import (
+    REFUSAL_ADMISSION,
+    REFUSAL_DUPLICATE,
+    DialogueTurn,
+    IngestResult,
+    RetrievalResult,
+)
 
 _STDERR_LIMIT = 500
 _RETENTION_ENV = "CLIO_RETENTION_PROFILES"
+# The codes `clio remember` uses for a write the product declined on its own
+# rules: an admission or span-verify refusal (`admission_refused`), and the
+# exact duplicate it reports separately (`duplicate`), which is the admission
+# gate's own `exact_duplicate` rejection. Both exit non-zero with an
+# `{ok, code, message}` object, and both are normal outcomes for a benchmark
+# turn. Every other code is a failure rather than a decision, so it raises.
+_DECLINE_CODES = {
+    "admission_refused": REFUSAL_ADMISSION,
+    "duplicate": REFUSAL_DUPLICATE,
+}
 # The settings this system's own surfaces expose. A fingerprint that leaves
 # one of them unreadable is incomplete, and a blocked record names them when
 # a read fails outright.
@@ -40,7 +56,7 @@ REQUIRED_SETTINGS = ("retention_profile", "ranking_environment")
 _PROBE_BANK = "clio-bench-fingerprint"
 
 
-class ClioAdapterError(RuntimeError):
+class ClioAdapterError(AdapterError):
     """Raised when the clio binary fails or returns unusable output."""
 
 
@@ -89,8 +105,9 @@ class ClioAdapter(MemoryBenchmarkAdapter):
         """Run clio and return the last JSON object printed on stdout.
 
         When ``allow_failure`` is set and the process exits non-zero but still
-        printed a JSON object (for example an admission rejection), that object
-        is returned instead of raising. A crash with no JSON still raises.
+        printed a JSON object (for example a declined write), that object is
+        returned instead of raising. The caller classifies the payload; a crash
+        with no JSON still raises.
         """
         try:
             proc = subprocess.run(
@@ -176,8 +193,11 @@ class ClioAdapter(MemoryBenchmarkAdapter):
     def ingest(self, session_id: str, turn: DialogueTurn) -> IngestResult:
         """Store one dialogue turn through ``clio remember``.
 
-        The product's admission gate can reject a turn; that is a normal,
-        recorded outcome (``ok=False``), not a harness failure.
+        The product can decline a write on its own rules, and that is a normal,
+        recorded outcome (``ok=False``). Classification reads the payload's
+        ``code``, not its ``ok`` flag alone: a write that fails for any other
+        reason is not a decision, so it raises instead of entering the run's
+        counters as a refusal by the system.
         """
         bank = self._bank_for(session_id)
         start = time.monotonic()
@@ -197,17 +217,23 @@ class ClioAdapter(MemoryBenchmarkAdapter):
             allow_failure=True,
         )
         latency_ms = (time.monotonic() - start) * 1000.0
-        ok = bool(payload.get("ok"))
-        error = None
-        if not ok:
-            error = str(
-                payload.get("message") or payload.get("code") or "ingest rejected"
+        tokens = self._tokenizer.count(turn.text)
+        if payload.get("ok") is True:
+            return IngestResult(
+                ok=True, latency_ms=latency_ms, tokens_processed=tokens
+            )
+        code = payload.get("code")
+        message = str(payload.get("message") or code or "ingest rejected")
+        if code not in _DECLINE_CODES:
+            raise ClioAdapterError(
+                f"clio remember failed with code {code!r}: {message}"
             )
         return IngestResult(
-            ok=ok,
+            ok=False,
             latency_ms=latency_ms,
-            tokens_processed=self._tokenizer.count(turn.text),
-            error=error,
+            tokens_processed=tokens,
+            error=message,
+            refusal=_DECLINE_CODES[code],
         )
 
     def retrieve(

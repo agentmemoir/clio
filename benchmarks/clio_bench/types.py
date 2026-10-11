@@ -58,14 +58,38 @@ class SuiteData:
     pin: dict
 
 
+# The kinds of write decline a system can report, in the harness's own
+# vocabulary rather than any one system's error codes. A run counts them
+# separately, because what each one means for the store differs: an admission
+# refusal is not stored, a duplicate's text is already there, and a filtered
+# turn was dropped by the system's own write classifier. Every kind has a
+# counter in the runner, which stops on a kind it does not know.
+REFUSAL_ADMISSION = "admission"
+REFUSAL_DUPLICATE = "duplicate"
+REFUSAL_FILTERED = "filtered"
+
+
 @dataclass
 class IngestResult:
-    """Outcome of ingesting one turn into the system under test."""
+    """Outcome of ingesting one turn into the system under test.
+
+    `ok` is False only for a decline: the system chose not to store the turn,
+    and the adapter records that outcome rather than raising. `refusal` names
+    the kind of decline and must be one the runner counts, `REFUSAL_ADMISSION`
+    or `REFUSAL_DUPLICATE`; it is None when the turn was stored. A kind the
+    runner does not know stops the run, because that is an adapter bug rather
+    than an admission refusal.
+
+    A write that fails for any reason other than a decline raises
+    `AdapterError` instead. The runner records that as a failed write, never as
+    a decline, and stops the run when the bank ends up holding nothing.
+    """
 
     ok: bool
     latency_ms: float
     tokens_processed: int
     error: str | None = None
+    refusal: str | None = None
 
 
 @dataclass

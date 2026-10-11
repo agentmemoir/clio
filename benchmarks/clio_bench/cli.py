@@ -28,6 +28,7 @@ from .runner import (
     ADAPTER_NAMES,
     IMPLEMENTED_SUITES,
     AccountingError,
+    EmptyStoreError,
     capture_fingerprints,
     load_suite,
     run_suite,
@@ -236,13 +237,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"clio-bench: snapshot failure, no score produced: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:  # noqa: BLE001 - judge/endpoint failures abort the run
-        from .adapters.clio import ClioAdapterError
+        from .adapter import AdapterError
         from .judges.llm_judge import JudgeError
         from .llm import ChatClientError
 
-        if isinstance(exc, (ChatClientError, JudgeError, ClioAdapterError, AccountingError)):
+        if isinstance(
+            exc,
+            (
+                ChatClientError,
+                JudgeError,
+                AdapterError,
+                AccountingError,
+                EmptyStoreError,
+            ),
+        ):
             print(
-                f"clio-bench: judge/generator/adapter failure, no score produced: {exc}",
+                f"clio-bench: run aborted, no score produced: {exc}",
                 file=sys.stderr,
             )
             return 2
