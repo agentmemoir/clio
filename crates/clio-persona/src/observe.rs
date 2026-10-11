@@ -47,7 +47,8 @@ pub struct PersonaObservePreferenceArgs<'a> {
     pub ctx: &'a OpContext,
     /// Preference key (e.g. `brevity_affinity`).
     pub key: &'a str,
-    /// Observed scalar intensity (finite; NaN/Inf rejected).
+    /// Observed scalar intensity; defaults to `0.0..=1.0` unless the key has
+    /// declared bounds. NaN and infinity are always rejected.
     pub observed_value: f64,
     /// Optional confidence in `0.0..=1.0`.
     pub confidence: Option<f64>,
@@ -115,19 +116,14 @@ pub enum PersonaObserveOutcome {
 /// transactional RMW.
 ///
 /// # Errors
-/// Missing bank, non-finite value, discrete-declared key (pointing at
+/// Missing bank, an observation outside its declared range (or `0.0..=1.0`
+/// when the key has no bounds), discrete-declared key (pointing at
 /// `persona_put_stable`), or store failures.
 pub fn persona_observe_preference(
     args: &PersonaObservePreferenceArgs<'_>,
 ) -> Result<PersonaObserveOutcome, AmError> {
     require_bank_and_timestamp(args.ctx, args.timestamp)?;
     crate::require_nonempty(args.key, "key")?;
-    if !args.observed_value.is_finite() {
-        return Err(AmError::new(
-            clio_types::ErrorCode::OutOfRange,
-            "observed_value must be a finite number (NaN/Inf rejected)",
-        ));
-    }
     if let Some(c) = args.confidence.filter(|v| !(0.0..=1.0).contains(v)) {
         return Err(AmError::new(
             clio_types::ErrorCode::OutOfRange,
@@ -156,6 +152,7 @@ pub fn persona_observe_preference(
             ),
         ));
     }
+    validate_observed_value(args.observed_value, declared.as_ref())?;
     let existing = args.store.get_preference(bank, args.key)?;
     let admission_score = if let Some(pref) = existing {
         pref.admission_score
@@ -222,6 +219,29 @@ pub fn persona_observe_preference(
     })
 }
 
+/// Refuse a non-finite observation or one outside its configured scalar range.
+fn validate_observed_value(value: f64, declared: Option<&AttributeSchema>) -> Result<(), AmError> {
+    if !value.is_finite() {
+        return Err(AmError::new(
+            clio_types::ErrorCode::OutOfRange,
+            "observed_value must be a finite number (NaN/Inf rejected)",
+        ));
+    }
+    if declared.is_some_and(|schema| schema.clamp_values) {
+        return Ok(());
+    }
+    let (lo, hi) = declared
+        .and_then(|schema| schema.bounds_lo.zip(schema.bounds_hi))
+        .unwrap_or((0.0, 1.0));
+    if !(lo..=hi).contains(&value) {
+        return Err(AmError::new(
+            clio_types::ErrorCode::OutOfRange,
+            format!("observed_value must be in {lo}..={hi}, got {value}"),
+        ));
+    }
+    Ok(())
+}
+
 fn emit(
     args: &PersonaObservePreferenceArgs<'_>,
     outcome: &str,
@@ -245,9 +265,9 @@ fn emit(
     });
 }
 
-/// Register the continuous declaration when the key is undeclared (declaration
-/// is immutable per key). Called only after the create gate passes: a rejected
-/// candidate must write nothing.
+/// Register the continuous declaration with the default intensity range when
+/// the key is undeclared. Called only after the create gate passes: a rejected
+/// candidate must write nothing. A predeclared range remains authoritative.
 ///
 /// # Errors
 /// Registration failure (with the concurrent first-observe race resolved
@@ -266,8 +286,8 @@ fn ensure_continuous_declaration(
         update_rule: UpdateRule::Continuous,
         alpha: None,
         trend_window: None,
-        bounds_lo: None,
-        bounds_hi: None,
+        bounds_lo: Some(0.0),
+        bounds_hi: Some(1.0),
         clamp_values: false,
         created_at: args.timestamp.to_owned(),
         updated_at: None,

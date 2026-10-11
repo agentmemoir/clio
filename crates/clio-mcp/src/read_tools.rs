@@ -25,7 +25,7 @@
 //! Keep this module focused on read dispatch plus item-level reads.
 
 use crate::runtime::McpState;
-use crate::write_tools::{opt_str, req_str};
+use crate::write_tools::{opt_str, req_str, strict_string, validate_time_bound};
 use clio_types::{AmError, ErrorCode, TimeAxis, ToolResult};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -255,25 +255,60 @@ fn persona_get(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn inspect(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let scope = args.get("filter");
-    let field = |key: &str| scope.and_then(|f| f.get(key));
-    let text = |key: &str| {
-        field(key)
-            .and_then(Value::as_str)
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned)
+    let scope = match args.get("filter") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(_)) => args.get("filter"),
+        Some(_) => {
+            return Err(AmError::new(
+                ErrorCode::InvalidType,
+                "filter must be an object",
+            ));
+        }
     };
+    if let Some(fields) = scope.and_then(Value::as_object)
+        && let Some(key) = fields
+            .keys()
+            .find(|key| !INSPECT_FILTER_KEYS.contains(&key.as_str()))
+    {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("unknown filter key `{key}`"),
+        ));
+    }
+    let category = inspect_filter_string(scope, "category")?;
+    if let Some(value) = category {
+        clio_types::SemanticCategory::parse(value)?;
+    }
+    let epistemic_kind = inspect_filter_string(scope, "epistemic_kind")?;
+    if let Some(value) = epistemic_kind {
+        clio_types::EpistemicKind::parse(value)?;
+    }
+    let time_start = inspect_filter_string(scope, "time_start")?;
+    if let Some(value) = time_start {
+        validate_time_bound("filter.time_start", value)?;
+    }
+    let time_end = inspect_filter_string(scope, "time_end")?;
+    if let Some(value) = time_end {
+        validate_time_bound("filter.time_end", value)?;
+    }
     let mut filter = clio_store::ItemInspectFilter::new(ctx.bank.as_str());
-    filter.category = text("category");
-    filter.epistemic_kind = text("epistemic_kind");
-    if let Some(raw) = field("validity").and_then(Value::as_str) {
+    filter.category = category.map(str::to_owned);
+    filter.epistemic_kind = epistemic_kind.map(str::to_owned);
+    if let Some(raw) = inspect_filter_string(scope, "validity")? {
         filter.validity = clio_store::InspectValidity::parse(raw)?;
     }
-    filter.time_start = text("time_start");
-    filter.time_end = text("time_end");
-    filter.include_discarded = field("include_discarded")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    filter.time_start = time_start.map(str::to_owned);
+    filter.time_end = time_end.map(str::to_owned);
+    filter.include_discarded = match scope.and_then(|value| value.get("include_discarded")) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => {
+            return Err(AmError::new(
+                ErrorCode::InvalidType,
+                "filter.include_discarded must be a boolean",
+            ));
+        }
+    };
     filter.limit = opt_usize(args, "limit").unwrap_or(50).min(200);
     filter.offset = opt_usize(args, "offset").unwrap_or(0);
     let rows = state.store.inspect_items(&filter)?;
@@ -328,6 +363,26 @@ fn inspect(state: &McpState, args: &Value) -> Result<Value, AmError> {
     Ok(payload)
 }
 
+const INSPECT_FILTER_KEYS: &[&str] = &[
+    "category",
+    "epistemic_kind",
+    "validity",
+    "time_start",
+    "time_end",
+    "include_discarded",
+];
+
+/// Read an optional non-empty string selector from an inspect filter.
+fn inspect_filter_string<'a>(
+    filter: Option<&'a Value>,
+    key: &str,
+) -> Result<Option<&'a str>, AmError> {
+    match filter.and_then(|value| value.get(key)) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => strict_string(value, &format!("filter.{key}")).map(Some),
+    }
+}
+
 /// `audit_trail(item_id)`: masked lifecycle reconstruction.
 ///
 /// Traverses `corrects_item_id`/`superseded_by_id` lineage both ways and
@@ -344,3 +399,7 @@ fn audit_trail(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[cfg(test)]
 #[path = "read_tools_tests.rs"]
 mod read_tools_tests;
+
+#[cfg(test)]
+#[path = "read_tools_filter_validation_tests.rs"]
+mod read_tools_filter_validation_tests;

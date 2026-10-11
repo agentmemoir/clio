@@ -83,6 +83,15 @@ fn the_consolidate_usage_line_advertises_bank_and_never_scope() {
     assert!(!usage.contains("scope"), "{usage}");
 }
 
+#[test]
+fn hygiene_keep_help_says_it_applies_the_suggested_action() {
+    let usage = usage_for("hygiene clean").expect("hygiene clean has a usage line");
+    assert!(
+        usage.contains("--action keep applies each candidate's suggested action"),
+        "{usage}"
+    );
+}
+
 /// The same pin over the catalog block `clio help` prints, which is the second
 /// surface a reader meets for the same flags.
 #[test]

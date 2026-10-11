@@ -318,8 +318,8 @@ fn render_views_fall_back_deterministically() {
     // The fallback arms keep text output stable when an optional field is
     // absent from a tool payload.
     assert_eq!(
-        super::render_scratchpad_write(&json!({"key": "k", "bytes": 3})),
-        "scratchpad `k` stored (3 bytes, ephemeral)"
+        super::render_scratchpad_write(&json!({"key": "k", "bytes": 3, "lifetime": "process"})),
+        "scratchpad `k` stored for this process only (3 bytes)"
     );
     assert_eq!(
         super::render_scratchpad_read(&json!({"key": "k", "content": "12A"})),

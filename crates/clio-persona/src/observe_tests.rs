@@ -94,6 +94,58 @@ fn t04_observe_moves_ema_and_trend() {
     assert!(persona_events[0].trend.is_some());
 }
 
+#[test]
+fn out_of_range_observations_fail_before_writing() {
+    let s = setup();
+    for value in [-0.1, 1.5] {
+        let error = persona_observe_preference(&observe_args(&s, "bounded", value))
+            .expect_err("observation outside the declared scale");
+        assert_eq!(error.code, ErrorCode::OutOfRange, "value {value}");
+    }
+    let document = (&s.store as &dyn clio_store::PersonaStore)
+        .get_persona_document(s.ctx.bank.as_str())
+        .expect("persona document");
+    assert!(
+        document
+            .preferences
+            .iter()
+            .all(|preference| preference.key != "bounded")
+    );
+    assert!(
+        (&s.store as &dyn clio_store::ContinuousStore)
+            .get_attribute_schema(s.ctx.bank.as_str(), "bounded")
+            .expect("attribute schema")
+            .is_none()
+    );
+}
+
+#[test]
+fn declared_bounds_allow_a_custom_preference_range() {
+    let s = setup();
+    let schema = AttributeSchema {
+        bank_id: s.ctx.bank.as_str().into(),
+        attr_key: "custom_range".into(),
+        update_rule: UpdateRule::Continuous,
+        alpha: None,
+        trend_window: None,
+        bounds_lo: Some(-2.0),
+        bounds_hi: Some(2.0),
+        clamp_values: false,
+        created_at: "t".into(),
+        updated_at: None,
+    };
+    (&s.store as &dyn ContinuousStore)
+        .put_attribute_schema(&schema, "agent")
+        .expect("declare custom range");
+
+    let result = persona_observe_preference(&observe_args(&s, "custom_range", 1.5))
+        .expect("custom bounds allow the observation");
+    let PersonaObserveOutcome::Observed { state, .. } = result else {
+        panic!("expected observed");
+    };
+    assert_eq!(state, 1.5);
+}
+
 /// A discrete-declared key is rejected with a pointer to the stable path;
 /// categorical strings cannot arrive (typed f64 surface).
 #[test]

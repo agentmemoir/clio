@@ -95,7 +95,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
         },
         scratchpad_like(
             "scratchpad_write",
-            "Store ephemeral working notes; never durable, never indexed (64 KB / 100-key caps).",
+            "Store process-local working notes; data is lost when the MCP process exits. Never durable or indexed (64 KB / 100-key caps).",
             &["key", "content"],
         ),
         scratchpad_like(
@@ -122,7 +122,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
                         "description": "Optional authoritative structured snapshot (verified against source_text). It may carry only the non-empty leaves entity, amount, and date; any other non-empty leaf is rejected."
                     }),
                 ),
-                ("source_text", s("Span haystack the snapshot is verified against; required when snapshot is present.")),
+                ("source_text", s("Span haystack for snapshot verification; required with a snapshot and rejected without one.")),
                 ("evidence_ref", s("Optional evidence reference.")),
                 ("category", en("Semantic category of the slot value.", SEMANTIC_CATEGORIES)),
                 ("epistemic_kind", en("Fact or belief.", &EPISTEMIC_KINDS)),
@@ -182,7 +182,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
                 ("source_type", en("Provenance source type.", &SOURCE_TYPES)),
                 ("confidence", num("Optional confidence.")),
                 ("evidence_ref", s("Provenance alias.")),
-                ("source_text", s("Span haystack; required when snapshot is present.")),
+                ("source_text", s("Span haystack for snapshot verification; required with a snapshot and rejected without one.")),
                 context_prop(),
             ]
             .into_iter()
