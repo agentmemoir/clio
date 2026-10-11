@@ -3,13 +3,16 @@
 //
 //! # Responsibility
 //!
-//! This module tests the MCP argument contract: an undeclared argument, a missing
-//! required argument, and a blank required string are refused before the tool runs.
+//! This module tests the MCP argument contract: an undeclared argument, a wrongly
+//! typed argument, a missing required argument, and a blank required string are
+//! refused before the tool runs.
 //!
 //! ## Owns
 //! - Assertions over `check` for representative tools from the published schema
+//! - The undeclared-name, missing-required, and blank-required rules
 //!
 //! ## Does not own
+//! - The type rules (see `arg_contract_type_tests`)
 //! - The tool handlers' own value rules (see each tool's test module)
 //!
 //! ## Boundary
