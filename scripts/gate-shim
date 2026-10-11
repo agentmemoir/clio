@@ -10,6 +10,11 @@
 # unchanged, except that an installed ~/.config/clio/gate-hook may run it
 # and record the run. Inside a run started by the gate (GATE_ACTIVE=1) it
 # passes through too, so nested commands run for real.
+#
+# Inside a checkout, `make test-fast`, `make precommit` and `make quick` are
+# timed and never cached: a stored result would replay a pass, and their output
+# has to stream. An installed gate-hook runs them and records the run; without
+# one they pass through.
 set -u
 
 self_dir=$(cd "$(dirname "$0")" && pwd -P) || exit 127
@@ -95,6 +100,7 @@ elif [ "$self_name" = "make" ]; then
     for arg in "$@"; do
         dry_run_flag "$arg" && pass_through "$@"
     done
+    timed=0
     for arg in "$@"; do
         case "$arg" in
             -*) continue ;;
@@ -104,8 +110,14 @@ elif [ "$self_name" = "make" ]; then
                 heavy=1
                 break
                 ;;
+            test-fast | precommit | quick)
+                timed=1
+                break
+                ;;
         esac
     done
+    [ "$timed" = 1 ] && [ -x "${HOME:-}/.config/clio/gate-hook" ] &&
+        exec "${HOME:-}/.config/clio/gate-hook" "$root" "$real" "$@"
 fi
 [ "$heavy" = 1 ] || pass_through "$@"
 

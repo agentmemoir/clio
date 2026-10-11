@@ -21,7 +21,7 @@
 
 use super::{HygieneReadGroup, render_audit, render_log};
 use crate::cli_read_group::ReadGroup;
-use crate::cli_read_test_support::{json_of, run_state, seed_item, state};
+use crate::cli_read_test_support::{TS, json_of, run_state, seed_item, state};
 use crate::cli_write_test_support::run_write_state;
 use serde_json::json;
 use std::process::ExitCode;
@@ -94,6 +94,7 @@ fn audit_ranks_candidates_and_never_leaks_the_planted_secret() {
 #[test]
 fn audit_on_an_empty_bank_reports_zero_candidates() {
     let s = state();
+    s.ops_store.register_bank("empty", TS).unwrap();
     let (code, out, err) = run_state("hygiene audit", &["--bank", "empty"], &s, false);
     assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
     let payload = json_of(&out);
@@ -193,6 +194,7 @@ fn hygiene_log_renders_rows_after_a_confirmed_clean() {
 #[test]
 fn hygiene_log_on_a_fresh_bank_renders_zero_entries() {
     let s = state();
+    s.ops_store.register_bank("demo", TS).unwrap();
     let (code, out, err) = run_state("hygiene log", &["--bank", "demo"], &s, false);
     assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
     assert_eq!(json_of(&out)["count"], json!(0), "{out}");

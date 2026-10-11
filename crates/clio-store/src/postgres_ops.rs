@@ -62,9 +62,34 @@ impl OpsStore for PostgresStore {
     fn bank_ids(&self) -> Result<Vec<String>, AmError> {
         self.with_client(|client| {
             let rows = client
-                .query("SELECT DISTINCT bank_id FROM items ORDER BY bank_id", &[])
+                .query("SELECT id FROM banks ORDER BY id", &[])
                 .am("bank ids")?;
             Ok(rows.into_iter().map(|r| r.get::<_, String>(0)).collect())
+        })
+    }
+
+    fn bank_exists(&self, bank_id: &str) -> Result<bool, AmError> {
+        self.with_client(|client| {
+            let row = client
+                .query_one(
+                    "SELECT EXISTS(SELECT 1 FROM banks WHERE id = $1)",
+                    &[&bank_id],
+                )
+                .am("bank exists")?;
+            Ok(row.get(0))
+        })
+    }
+
+    fn register_bank(&self, bank_id: &str, created_at: &str) -> Result<(), AmError> {
+        self.with_client(|client| {
+            client
+                .execute(
+                    "INSERT INTO banks (id, created_at, updated_at) VALUES ($1, $2, $2)
+                     ON CONFLICT (id) DO NOTHING",
+                    &[&bank_id, &created_at],
+                )
+                .am("bank register")?;
+            Ok(())
         })
     }
 

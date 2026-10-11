@@ -96,7 +96,8 @@ fn scratchpad_write(state: &McpState, args: &Value) -> Result<Value, AmError> {
         "stored": true,
         "key": key,
         "bytes": content.len(),
-        "ephemeral": true
+        "ephemeral": true,
+        "lifetime": "process"
     }))
 }
 

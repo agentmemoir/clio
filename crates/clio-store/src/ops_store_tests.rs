@@ -22,6 +22,7 @@
 //! Keep this module focused on SQLite operator-health tests.
 
 use crate::LocalDevKms;
+use crate::migrate::IntoAmError;
 use crate::model::{AssocEdgeRecord, AssocKind};
 use crate::ops_store::{IntegritySignals, OpsStore, StoreCounts};
 use crate::sqlite::SqliteStore;
@@ -88,15 +89,100 @@ fn sqlite_bank_ids_sorted_and_empty() {
     let store = store();
     let banks = store.bank_ids().unwrap();
     assert!(banks.is_empty(), "{banks:?}");
+    assert!(!store.bank_exists("unknown-bank").unwrap());
+    store
+        .register_bank("empty-bank", "2024-01-01T00:00:00Z")
+        .unwrap();
+    assert_eq!(store.bank_ids().unwrap(), vec!["empty-bank"]);
+    store
+        .register_bank("empty-bank", "2025-01-01T00:00:00Z")
+        .unwrap();
+    assert!(store.bank_exists("empty-bank").unwrap());
     store
         .create_memory_item(&item("i-b", "bank-b"), "actor")
         .unwrap();
     store
         .create_memory_item(&item("i-a", "bank-a"), "actor")
         .unwrap();
+    assert!(store.bank_exists("bank-a").unwrap());
     assert_eq!(
         store.bank_ids().unwrap(),
-        vec!["bank-a".to_owned(), "bank-b".to_owned()]
+        vec![
+            "bank-a".to_owned(),
+            "bank-b".to_owned(),
+            "empty-bank".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn sqlite_open_backfills_registered_banks_from_all_durable_rows() {
+    let dir = std::env::temp_dir().join(format!("clio-bank-registry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("store.db");
+    let _ = std::fs::remove_file(&path);
+    let store = SqliteStore::open(&path, Arc::new(LocalDevKms::new())).expect("open");
+    store
+        .create_memory_item(&item("legacy-item", "legacy-bank"), "actor")
+        .unwrap();
+    store
+        .test_execute(
+            "INSERT INTO persona_stable_entries
+                 (id, bank_id, attr_key, value_cipher, source, admission_score,
+                  valid_from, tx_from, created_at)
+             VALUES
+                 ('legacy-persona', 'legacy-persona-bank', 'style', 'sealed',
+                  'explicit', 1.0, '2020-01-01T00:00:00Z',
+                  '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+        )
+        .unwrap();
+    store
+        .test_execute("DELETE FROM banks WHERE id IN ('legacy-bank', 'legacy-persona-bank')")
+        .unwrap();
+    store
+        .test_execute("DELETE FROM schema_settings WHERE key = 'bank_catalog_backfilled'")
+        .unwrap();
+    drop(store);
+
+    let reopened = SqliteStore::open(&path, Arc::new(LocalDevKms::new())).expect("reopen");
+    assert!(reopened.bank_exists("legacy-bank").unwrap());
+    assert!(reopened.bank_exists("legacy-persona-bank").unwrap());
+    let registered: bool = reopened
+        .with_conn(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM banks WHERE id = 'legacy-bank')
+                     AND EXISTS(SELECT 1 FROM banks WHERE id = 'legacy-persona-bank')",
+                [],
+                |row| row.get(0),
+            )
+            .am("check bank backfill")
+        })
+        .expect("bank catalog query");
+    assert!(registered);
+    drop(reopened);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn sqlite_persona_only_write_registers_its_bank() {
+    let store = store();
+    store
+        .test_execute(
+            "INSERT INTO persona_stable_entries
+                 (id, bank_id, attr_key, value_cipher, source, admission_score,
+                  valid_from, tx_from, created_at)
+             VALUES
+                 ('persona-only', 'persona-only-bank', 'style', 'sealed',
+                  'explicit', 1.0, '2024-01-01T00:00:00Z',
+                  '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+        )
+        .unwrap();
+    assert!(store.bank_exists("persona-only-bank").unwrap());
+    assert!(
+        store
+            .bank_ids()
+            .unwrap()
+            .contains(&"persona-only-bank".into())
     );
 }
 

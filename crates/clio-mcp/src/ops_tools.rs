@@ -56,6 +56,10 @@ pub(crate) fn dispatch_ops(state: &McpState, name: &str, args: &Value) -> Value 
 
 /// Run the in-process surface, returning the serialized report/outcome.
 fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
+    if matches!(name, "verify" | "doctor") && opt_str(args, "bank").is_some() {
+        let ctx = state.resolve_ctx(args)?;
+        state.require_known_bank(ctx.bank.as_str())?;
+    }
     let timestamp = state.resolve_timestamp(args);
     match name {
         "diagnose" => {

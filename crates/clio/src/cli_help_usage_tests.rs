@@ -124,6 +124,15 @@ fn the_consolidate_usage_line_advertises_bank_and_never_scope() {
     assert!(!usage.contains("scope"), "{usage}");
 }
 
+#[test]
+fn hygiene_keep_help_says_it_applies_the_suggested_action() {
+    let usage = usage_for("hygiene clean").expect("hygiene clean has a usage line");
+    assert!(
+        usage.contains("--action keep applies each candidate's suggested action"),
+        "{usage}"
+    );
+}
+
 /// The same pin over the catalog block `clio help` prints, which is the second
 /// surface a reader meets for the same flags.
 #[test]
@@ -139,6 +148,54 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
 
 /// Every flag a command's help text names is one its parser accepts, and every
 /// flag the parser accepts is one the command's record names.
+#[test]
+fn correct_usage_and_catalog_name_the_confirm_flag() {
+    let usage = usage_for("correct").expect("correct has a usage line");
+    assert!(usage.contains("[--confirm]"), "{usage}");
+
+    let block = crate::help_flags_test_support::entry_block(
+        &crate::command_catalog::catalog_text(),
+        "correct",
+    );
+    assert!(block.contains("[--confirm]"), "{block}");
+}
+
+/// Every verb that takes `--epistemic-kind` and `--source-type` documents the
+/// pairing in its own `--help`: the value is required with belief and refused
+/// with fact. The catalog renders the first usage line only, so it shows the flag
+/// and the pairing sentence stays in `--help`.
+#[test]
+fn the_candidate_usage_lines_state_the_source_type_pairing() {
+    for verb in [
+        "remember",
+        "admit",
+        "triple add",
+        "canonical put",
+        "shared store",
+    ] {
+        let usage = usage_for(verb).expect("a usage line is registered");
+        assert!(usage.contains("--epistemic-kind"), "{verb}: {usage}");
+        assert!(usage.contains("--source-type"), "{verb}: {usage}");
+        for value in ["user_stated", "agent_inferred", "third_party"] {
+            assert!(usage.contains(value), "{verb} is missing {value}: {usage}");
+        }
+    }
+}
+
+/// The pairing sentence survives to the surface a user reads: run the real
+/// `--help` path, not the registry string the usage-line test reads.
+#[test]
+fn the_rendered_help_shows_the_pairing_line() {
+    let (code, out, err) =
+        crate::cli_write_test_support::run_write_resolved("remember", &["--help"]);
+    assert_eq!(code, std::process::ExitCode::SUCCESS, "{err}");
+    assert!(out.contains("are a pair"), "{out}");
+    for value in ["user_stated", "agent_inferred", "third_party"] {
+        assert!(out.contains(value), "help is missing {value}: {out}");
+    }
+}
+
+/// A flag a usage line names is one the verb's parser will accept.
 ///
 /// The first direction is the one a reader cannot recover from: help text that
 /// names a flag the parser would refuse makes the reader type something that

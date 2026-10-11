@@ -16,6 +16,7 @@ benchmarks/
 ├── README.md
 ├── clio_bench/
 │   ├── adapter.py             # unified system-adapter interface
+│   ├── packing.py             # budget-aware packing of retrieval hits
 │   ├── fingerprint.py         # shared configuration-fingerprint shape
 │   ├── types.py               # shared data model
 │   ├── partition.py           # 60/20/20 and 5-fold session-isolated splits
@@ -25,7 +26,9 @@ benchmarks/
 │   ├── llm.py                 # OpenAI-compatible chat client (stdlib)
 │   ├── answerer.py            # context-only answer generator
 │   ├── doubles.py             # deterministic stub judge/generator
-│   ├── runner.py              # orchestration + report building
+│   ├── runner.py              # suite loading and the run loop
+│   ├── report.py              # report assembly and Markdown scorecard
+│   ├── cli.py                 # command line: flags, registry wiring, output
 │   ├── baseline.py            # two-system baseline and blocked-gate record
 │   ├── stubs.py               # BEAM / MemoryAgentBench / AMA-Bench stubs
 │   ├── pins.json              # dataset pins and judge settings

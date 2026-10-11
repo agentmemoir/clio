@@ -64,8 +64,15 @@ const FIXTURE_WEIGHTS: HygieneWeights = HygieneWeights {
 };
 
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+    state_for_bank("default")
+}
+
+pub(crate) fn state_for_bank(bank: &str) -> Arc<McpState> {
+    let options = McpOpenOptions {
+        default_bank: bank.to_owned(),
+        ..McpOpenOptions::default()
+    };
+    McpState::open_with_effective(&options, &serde_json::json!({})).expect("state")
 }
 
 fn item(id: &str, gist: &str, admission: f64, created_at: &str) -> MemoryItem {
@@ -357,7 +364,7 @@ fn archive_count_carries_the_incomplete_flag() {
 
 #[test]
 fn maintenance_status_merges_pressure_without_touching_existing_fields() {
-    let s = state();
+    let s = state_for_bank(BANK);
     let out = crate::read_tools::dispatch(
         &s,
         "maintenance_status",

@@ -234,6 +234,23 @@ pub(crate) fn parse_f64(flag: &str, raw: &str) -> Result<f64, CliError> {
         })
 }
 
+/// Parse a floating-point flag that must lie in `0.0..=1.0`.
+///
+/// A value that parses but is out of range is a usage error, like every other
+/// caller-supplied flag mistake, rather than an `out_of_range` from the domain
+/// layer. The unit-interval flags (`--confidence`, and the floors in `cli_read`)
+/// already bound their values at the boundary.
+pub(crate) fn parse_unit_f64(flag: &str, raw: &str) -> Result<f64, CliError> {
+    let value = parse_f64(flag, raw)?;
+    if (0.0..=1.0).contains(&value) {
+        return Ok(value);
+    }
+    Err(CliError::usage_hint(
+        format!("--{flag} must be between 0.0 and 1.0, got `{raw}`"),
+        format!("try `--{flag} 0.5`"),
+    ))
+}
+
 /// Validate that a flag value is one of `allowed`, fail closed otherwise.
 ///
 /// The hint names the value closest to what was typed, and lists every value when

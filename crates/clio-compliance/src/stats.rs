@@ -218,50 +218,48 @@ fn count_bank_totals(
 /// Active rows by age band, in half-lives of age at the resolved unit.
 ///
 /// The four bands partition `created_at` space, so their counts sum to the
-/// active total with no gap and no overlap. Each edge is inclusive on the
-/// older side and exclusive on the younger side, so an item created exactly
-/// on an edge counts in the younger band.
+/// active total with no gap and no overlap. An item created exactly on an edge
+/// belongs to the younger band.
 fn count_age_bands(
     store: &dyn clio_store::Store,
     active: &ItemInspectFilter,
     unit: f64,
     now: &str,
+    total_active: usize,
 ) -> Result<Vec<Count>, AmError> {
     let edge_1 = band_edge(now, unit, 1.0)?;
     let edge_2 = band_edge(now, unit, 2.0)?;
     let edge_4 = band_edge(now, unit, 4.0)?;
-    let mut by_age_band = Vec::with_capacity(4);
-    for (label, time_start, time_end) in [
-        (
-            format!("0–1 half-life (0–{unit} days)"),
-            Some(edge_1.clone()),
-            None,
-        ),
-        (
-            format!("1–2 half-lives ({unit}–{} days)", 2.0 * unit),
-            Some(edge_2.clone()),
-            Some(edge_1),
-        ),
-        (
-            format!("2–4 half-lives ({}–{} days)", 2.0 * unit, 4.0 * unit),
-            Some(edge_4.clone()),
-            Some(edge_2),
-        ),
-        (
-            format!("4+ half-lives ({}+ days)", 4.0 * unit),
-            None,
-            Some(edge_4),
-        ),
-    ] {
+    let count_since = |edge: &str| {
         let mut filter = active.clone();
-        filter.time_start = time_start;
-        filter.time_end = time_end;
-        by_age_band.push(Count {
-            label,
-            count: count(store, &filter)?,
-        });
-    }
-    Ok(by_age_band)
+        filter.time_start = Some(edge.to_owned());
+        count(store, &filter)
+    };
+    let within_one = count_since(&edge_1)?;
+    let within_two = count_since(&edge_2)?;
+    let within_four = count_since(&edge_4)?;
+    let band_counts = [
+        within_one,
+        within_two.checked_sub(within_one).ok_or_else(|| {
+            AmError::new(ErrorCode::Internal, "age-band counts are not cumulative")
+        })?,
+        within_four.checked_sub(within_two).ok_or_else(|| {
+            AmError::new(ErrorCode::Internal, "age-band counts are not cumulative")
+        })?,
+        total_active.checked_sub(within_four).ok_or_else(|| {
+            AmError::new(ErrorCode::Internal, "age-band counts exceed active total")
+        })?,
+    ];
+    Ok([
+        format!("0–1 half-life (0–{unit} days)"),
+        format!("1–2 half-lives ({unit}–{} days)", 2.0 * unit),
+        format!("2–4 half-lives ({}–{} days)", 2.0 * unit, 4.0 * unit),
+        format!("4+ half-lives ({}+ days)", 4.0 * unit),
+    ]
+    .into_iter()
+    .zip(band_counts)
+    .map(|(label, count)| Count { label, count })
+    .collect())
 }
 
 /// Active rows by provenance class: the stored `source_type` values plus the
@@ -362,7 +360,13 @@ pub fn stats(
     }
     let (items_total, items_active, items_discarded) = count_bank_totals(store, bank_id)?;
     let active = bank_filter(bank_id, InspectValidity::Active, false);
-    let by_age_band = count_age_bands(store, &active, inputs.band_unit_days, &inputs.now)?;
+    let by_age_band = count_age_bands(
+        store,
+        &active,
+        inputs.band_unit_days,
+        &inputs.now,
+        items_active,
+    )?;
     let by_provenance_class = count_provenance_classes(store, &active)?;
     let pressure_counts = relay_pressure_counts(inputs);
     let (by_category, semantic_active) = count_categories(store, bank_id)?;

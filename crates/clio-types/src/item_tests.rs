@@ -69,6 +69,21 @@ fn parses_and_rejects_enums() {
     assert_eq!(EpisodicType::Temporal.as_str(), "temporal");
 }
 
+/// The value tables are generated from the one macro list, so `ALL`, `WIRE`,
+/// `as_str`, and `parse` cannot disagree. A new value added to the invocation
+/// updates all four together.
+#[test]
+fn source_type_tables_are_generated_from_one_list() {
+    assert_eq!(SourceType::ALL.len(), SourceType::WIRE.len());
+    for (variant, wire) in SourceType::ALL.iter().zip(SourceType::WIRE) {
+        assert_eq!(variant.as_str(), *wire);
+        assert_eq!(SourceType::parse(wire).unwrap(), *variant);
+    }
+    assert!(SourceType::WIRE.contains(&"user_stated"));
+    assert!(SourceType::WIRE.contains(&"agent_inferred"));
+    assert!(SourceType::WIRE.contains(&"third_party"));
+}
+
 #[test]
 fn semantic_category_help_list_matches_the_whitelist() {
     // `ALL`/`WIRE` are generated from one list, so every entry must round-trip

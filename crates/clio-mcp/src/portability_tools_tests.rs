@@ -84,7 +84,11 @@ fn export_writes_bundle_manifest_for_privileged_actor() {
     let out = call(
         &s,
         "export",
-        json!({"destination": dest, "bank": "bank-a", "actor": "harness"}),
+        json!({
+            "destination": dest,
+            "bank": "bank-a",
+            "actor": "harness"
+        }),
     );
     assert_eq!(out["ok"], Value::Bool(true), "{out}");
     assert_eq!(out["content_mode"], "dsar_plaintext");
@@ -105,6 +109,46 @@ fn export_denies_unprivileged_actor_without_file() {
         json!({"destination": dest, "bank": "bank-a", "actor": "agent"}),
     );
     assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert!(!std::path::Path::new(&dest).exists());
+}
+
+#[test]
+fn export_rejects_an_unknown_category_without_writing_a_bundle() {
+    let s = state();
+    let dest = temp_path("bad-category");
+    let out = call(
+        &s,
+        "export",
+        json!({
+            "destination": dest,
+            "category": "bogus",
+            "bank": "bank-a",
+            "actor": "harness"
+        }),
+    );
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert_eq!(out["code"], "invalid_argument", "{out}");
+    assert!(!std::path::Path::new(&dest).exists());
+}
+
+#[test]
+fn export_rejects_an_invalid_time_bound() {
+    assert!(crate::write_tools::validate_time_bound("time_start", "2026-01-01").is_ok());
+    assert!(crate::write_tools::validate_time_bound("time_end", "2026-01-01T00:00:00Z").is_ok());
+    let s = state();
+    let dest = temp_path("bad-time");
+    let out = call(
+        &s,
+        "export",
+        json!({
+            "destination": dest,
+            "time_start": "not-a-time",
+            "bank": "bank-a",
+            "actor": "harness"
+        }),
+    );
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert_eq!(out["code"], "invalid_argument", "{out}");
     assert!(!std::path::Path::new(&dest).exists());
 }
 

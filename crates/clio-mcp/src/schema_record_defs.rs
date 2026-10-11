@@ -65,7 +65,7 @@ pub(crate) fn record_defs() -> Vec<ToolDef> {
             required: &["key", "observed_value"],
             props: vec![
                 ("key", s("Preference key.")),
-                ("observed_value", num("Observed scalar intensity (finite).")),
+                ("observed_value", num("Preference intensity; defaults to 0.0..=1.0 unless the attribute declares bounds. Declared bounds and clamping control custom ranges.")),
                 ("confidence", num("Optional confidence in 0.0..=1.0.")),
                 (
                     "source",

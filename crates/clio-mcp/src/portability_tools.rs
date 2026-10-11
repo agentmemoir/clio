@@ -24,7 +24,9 @@
 //! Keep this module focused on MCP portability dispatch.
 
 use crate::runtime::{McpState, StderrSinks, StoreSignals};
-use crate::write_tools::{gated_write_policy, opt_bool, opt_str, req_str};
+use crate::write_tools::{
+    gated_write_policy, opt_bool, opt_str, req_str, strict_opt_str, validate_time_bound,
+};
 use clio_compliance::{ExportContentMode, ExportFilter, ImportArgs, import as import_bundle};
 use clio_types::AmError;
 use serde_json::{Value, json};
@@ -46,10 +48,22 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
 fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
+    let category = strict_opt_str(args, "category")?.map(str::to_owned);
+    if let Some(category) = category.as_deref() {
+        clio_types::SemanticCategory::parse(category)?;
+    }
+    let time_start = strict_opt_str(args, "time_start")?;
+    if let Some(value) = time_start {
+        validate_time_bound("time_start", value)?;
+    }
+    let time_end = strict_opt_str(args, "time_end")?;
+    if let Some(value) = time_end {
+        validate_time_bound("time_end", value)?;
+    }
     let filter = ExportFilter {
-        category: opt_str(args, "category").map(str::to_owned),
-        time_start: opt_str(args, "time_start").map(str::to_owned),
-        time_end: opt_str(args, "time_end").map(str::to_owned),
+        category,
+        time_start: time_start.map(str::to_owned),
+        time_end: time_end.map(str::to_owned),
         include_archived: opt_bool(args, "include_archived", true)?,
         include_discarded: opt_bool(args, "include_discarded", true)?,
     };

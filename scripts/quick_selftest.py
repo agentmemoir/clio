@@ -336,7 +336,8 @@ class SchemaCheckTests(unittest.TestCase):
         ), mock.patch.object(quick.runner, "is_present", return_value=True), mock.patch.object(
             quick.runner, "workspace_packages", return_value=[]
         ), mock.patch.object(quick, "select", return_value=quick.Selection([Term("p")], [])), mock.patch.object(
-            quick, "schema_check", return_value=1
+            quick.untested, "classify", return_value=quick.untested.Untested([], [], [])
+        ), mock.patch.object(quick, "schema_check", return_value=1
         ), mock.patch.object(quick, "run_selection") as run_tests, mock.patch.object(quick, "newest_history", return_value=[]):
             with mock.patch("builtins.print"):
                 self.assertEqual(quick.run(args), 1)

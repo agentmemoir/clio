@@ -2,7 +2,7 @@
 #
 # One target per suite, and one CI step per suite, because `make` stops at the first failing command. A single target running all of them reports one failure even when three suites are broken, and the check list shows one status where there is one per suite. Three of them had no step in CI on master and nothing ran them there; the others were steps of their own, and kept their names.
 #
-# What each one is, taken from its own file. `gate.py` answers whether to run a heavy command and what verdict to store, so its suite is the one that matters most here. `lint_scope_check.py` reads the Makefile, the workflows and the root manifest, and refuses a clippy run that could select fewer crates than the file claims it selects. `toolchain_pin_check.py` refuses a workflow that installs a compiler other than the pin. The two are separate files because they answer unrelated questions and a reader debugging one should not have to read the other to find out which file to open. `span_verify.py` is not machinery: it is the reference span-grounding check that `extract_quality.py` imports, and running it directly executes the self-check in its `__main__`. `test_phase_timer.py` and the `test_precommit*.py` files are suites for the phase timer and the pre-commit runner. `coverage_surface_check.py` reads the coverage commands in this Makefile, the workflows and the gate's own two command builders, and refuses a shape that could no longer measure one run and report it once: a per-package run nothing keeps inside its selection, one command doing both jobs at once, and a report step whose merge one malformed buffer can end.
+# What each one is, taken from its own file. `gate.py` answers whether to run a heavy command and what verdict to store, so its suite is the one that matters most here. `lint_scope_check.py` reads the Makefile, `mk/*.mk`, the workflows and the root manifest, and refuses a clippy run that could select fewer crates than the file claims it selects. `toolchain_pin_check.py` refuses a workflow that installs a compiler other than the pin. The two are separate files because they answer unrelated questions and a reader debugging one should not have to read the other to find out which file to open. `span_verify.py` is not machinery: it is the reference span-grounding check that `extract_quality.py` imports, and running it directly executes the self-check in its `__main__`. `test_phase_timer.py` and the `test_precommit*.py` files are suites for the phase timer and the pre-commit runner. `coverage_surface_check.py` reads the coverage commands in the Makefile and `mk/*.mk`, the workflows and the gate's own two command builders, and refuses a shape that could no longer measure one run and report it once: a per-package run nothing keeps inside its selection, one command doing both jobs at once, and a report step whose merge one malformed buffer can end.
 #
 #  make scripts-check                   all of them, stopping at the first failure
 #  make scripts-check-precommit         one of them, named
@@ -10,7 +10,8 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
 	scripts-check-phase-timer \
 	scripts-check-precommit scripts-check-coverage-surface \
-	scripts-check-coverage-policy scripts-check-gate-install scripts-check-quick
+	scripts-check-coverage-policy scripts-check-gate-install scripts-check-quick \
+	scripts-check-ci-parity
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -52,3 +53,9 @@ scripts-check-coverage-policy:
 # Whether the gate installer tells the truth about a shim it just linked. A symlink that comes after the real tool on PATH never runs, and the installer used to print a success line for it. This pins the NOT ACTIVE message and the non-zero exit, with a controlled PATH so the answer is the same on any host.
 scripts-check-gate-install:
 	python3 scripts/test_gate_install.py
+
+# Whether CI runs every suite `scripts-check` runs, and nothing else. A suite added here with no step in the workflow runs on a developer's machine and nowhere else, which is how the gate installer check and the Quick check went unrun. Reads this file and the workflow; runs no build.
+.PHONY: scripts-check-ci-parity
+scripts-check-ci-parity:
+	python3 scripts/ci_parity_check.py --self-test
+	python3 scripts/ci_parity_check.py

@@ -68,7 +68,7 @@ pub(crate) fn commit_triple_add_tx(
             .am("snapshot_ref lookup")?;
         if ok.is_none() {
             return Err(AmError::new(
-                ErrorCode::InvalidArgument,
+                ErrorCode::ItemNotFound,
                 format!("snapshot_ref `{ref_id}` not found in bank"),
             ));
         }
@@ -264,3 +264,7 @@ pub(crate) mod postgres_triple_seal_erase_tests;
 #[cfg(test)]
 #[path = "postgres_triple_tests.rs"]
 mod postgres_triple_tests;
+
+#[cfg(test)]
+#[path = "postgres_triple_guard_tests.rs"]
+mod postgres_triple_guard_tests;

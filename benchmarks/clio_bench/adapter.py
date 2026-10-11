@@ -13,6 +13,16 @@ from .fingerprint import Fingerprint
 from .types import DialogueTurn, IngestResult, RetrievalResult
 
 
+class AdapterError(RuntimeError):
+    """Raised when an adapter cannot carry out an operation at all.
+
+    Distinct from the system under test declining a write on its own rules,
+    which the adapter records as `IngestResult(ok=False)`. An `AdapterError`
+    means the harness could not do what it set out to do, so a run that hits
+    one stops instead of scoring what it managed to collect.
+    """
+
+
 class MemoryBenchmarkAdapter(ABC):
     """The interface every benchmarked system adapter implements."""
 
@@ -28,7 +38,12 @@ class MemoryBenchmarkAdapter(ABC):
     def retrieve(
         self, session_id: str, query: str, token_budget: int
     ) -> RetrievalResult:
-        """Return a context string for `query` within a hard token budget."""
+        """Return a context string for `query` within a hard token budget.
+
+        The budget bounds the context that is returned, so `tokens_retrieved`
+        is the cost of that context string itself and never more than the
+        budget it was given.
+        """
 
     def answer(self, session_id: str, query: str, generator_llm: str) -> str:
         """Optional end-to-end answering using the system's own retrieval."""

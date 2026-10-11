@@ -111,7 +111,14 @@ pub(crate) fn compile_inspect(
         ));
     }
     if let Some(end) = &filter.time_end {
-        clauses.push(format!("created_at < {}", bind(&mut params, end.clone())));
+        let (operator, value) = match next_day(end)? {
+            Some(next_day) => ("<", next_day),
+            None => ("<=", end.clone()),
+        };
+        clauses.push(format!(
+            "created_at {operator} {}",
+            bind(&mut params, value)
+        ));
     }
     if !filter.include_discarded && filter.validity != InspectValidity::Discarded {
         clauses.push("discarded_at IS NULL".to_owned());
@@ -120,6 +127,43 @@ pub(crate) fn compile_inspect(
         where_sql: clauses.join(" AND "),
         params,
     })
+}
+
+/// Return the day after an ISO date bound, or `None` for a timestamp bound.
+fn next_day(value: &str) -> Result<Option<String>, AmError> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return Ok(None);
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+    {
+        return Err(invalid_date_error());
+    }
+    let year = value[..4]
+        .parse::<i64>()
+        .map_err(|_| invalid_date_error())?;
+    let month = value[5..7]
+        .parse::<u32>()
+        .map_err(|_| invalid_date_error())?;
+    let day = value[8..10]
+        .parse::<u32>()
+        .map_err(|_| invalid_date_error())?;
+    if month == 0 || day == 0 || day > clio_types::days_in_month(year, month) {
+        return Err(invalid_date_error());
+    }
+    let (year, month, day) =
+        clio_types::civil_from_days(clio_types::days_from_civil(year, month, day) + 1);
+    Ok(Some(format!("{year:04}-{month:02}-{day:02}")))
+}
+
+fn invalid_date_error() -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        "time_end must be a valid RFC 3339 timestamp or YYYY-MM-DD date",
+    )
 }
 
 #[cfg(test)]

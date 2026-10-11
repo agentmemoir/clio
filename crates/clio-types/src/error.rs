@@ -41,6 +41,28 @@ use std::fmt;
 /// as "this is the only way this condition can surface". What is guaranteed is
 /// the wire string in [`ErrorCode::as_str`], which is covered by
 /// `all_error_codes_have_stable_strings`.
+///
+/// # Which code a missing target gets
+///
+/// The code follows the resource the caller named, so one condition can surface
+/// under different codes for different resources:
+///
+/// - an item row, including a reference to a missing item inside a payload such
+///   as a triple's `snapshot_ref` or a distilled unit's hub, is
+///   [`ErrorCode::ItemNotFound`];
+/// - a distilled-unit record is [`ErrorCode::NotFound`], although the caller
+///   names it by item id;
+/// - a belief id is [`ErrorCode::InvalidArgument`] on the append and correct
+///   paths, and [`ErrorCode::NotFound`] on the belief history read;
+/// - a task id, and a triple addressed by subject and predicate, are
+///   [`ErrorCode::NotFound`];
+/// - a memtree node is [`ErrorCode::UnknownPath`];
+/// - a `graph_link` endpoint is [`ErrorCode::ItemNotFound`] through the batch
+///   pre-flight and [`ErrorCode::UnknownPath`] on the retrieve-side route.
+///
+/// Two of those depart from the item-row rule and are recorded here rather than
+/// silently relied on: the distilled-unit record, and the retrieve-side
+/// `graph_link` endpoint check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {

@@ -16,7 +16,47 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from precommit_testkit import LEAK_HOOK, LEAK_MARKER, MERGE_SHIM, RUNNER, RepoCase, SHIM, write_hook  # noqa: E402
+from precommit_testkit import LEAK_HOOK, LEAK_MARKER, MERGE_SHIM, RUNNER, RepoCase, SHIM, run, write_hook  # noqa: E402
+
+
+def add_worktree(case: RepoCase) -> Path:
+    """A linked worktree of the case's repository, removed with the case, or a skipped test."""
+    main = case.root
+    work = main.parent / f"{main.name}-wt"
+    added = subprocess.run(  # noqa: S603
+        ["git", "worktree", "add", "-q", "-b", "wt", str(work)],  # noqa: S607
+        cwd=main,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    case.addCleanup(subprocess.run, ["git", "worktree", "remove", "--force", str(work)], cwd=main, check=False)  # noqa: S603, S607
+    if added.returncode != 0:
+        case.skipTest(f"git worktree add is unavailable here: {added.stderr.strip()}")
+    return work
+
+
+class TheRunnerInALinkedWorktree(RepoCase):
+    """`make precommit` calls the runner with no git hook in front of it."""
+
+    def test_it_finds_the_machine_local_hooks_of_the_main_checkout(self):
+        subprocess.run(["git", "commit", "-qm", "base", "--allow-empty"], cwd=self.root, check=True)  # noqa: S603, S607
+        work = add_worktree(self)
+        (self.root / ".clio-hooks").mkdir()
+        write_hook(self.root / ".clio-hooks" / "20-local", body=LEAK_HOOK)
+        (work / "leak.txt").write_text(f"// {LEAK_MARKER}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "leak.txt"], cwd=work, check=True)  # noqa: S603, S607
+        done = run(work, "--commit", "--all-files")
+        self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertIn("20-local", done.stdout + done.stderr)
+        self.assertIn("found a leak", done.stdout + done.stderr)
+
+    def test_the_main_checkout_itself_is_not_searched_twice(self):
+        (self.root / ".clio-hooks").mkdir()
+        write_hook(self.root / ".clio-hooks" / "20-local", body="exit 0")
+        done = run(self.root, "--commit", "--all-files")
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertEqual(1, (done.stdout + done.stderr).count("20-local: pass"))
 
 
 class TheCommitHookScript(RepoCase):
@@ -255,17 +295,7 @@ class TheCommitHookScript(RepoCase):
         self.leak_hook()
         self.commit_all("base")
         main = self.root
-        work = self.root.parent / f"{self.root.name}-wt"
-        added = subprocess.run(  # noqa: S603
-            ["git", "worktree", "add", "-q", "-b", "wt", str(work)],  # noqa: S607
-            cwd=main,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.addCleanup(subprocess.run, ["git", "worktree", "remove", "--force", str(work)], cwd=main, check=False)  # noqa: S603, S607
-        if added.returncode != 0:
-            self.skipTest(f"git worktree add is unavailable here: {added.stderr.strip()}")
+        work = add_worktree(self)
         # The machine-local directory lives in the main checkout, as it does on a
         # real machine: the worktree is a second working tree, not a second clone.
         (main / ".clio-hooks").mkdir(exist_ok=True)

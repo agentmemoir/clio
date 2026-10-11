@@ -155,6 +155,12 @@ pub(crate) fn create_memory_item_tx(
     let (category, episodic_type) = kind_columns(item);
     let source_type = source_type_sql(item);
     let ts = now_iso();
+    tx.execute(
+        "INSERT INTO banks (id, created_at, updated_at) VALUES (?1, ?2, ?2)
+         ON CONFLICT (id) DO NOTHING",
+        params![item.bank_id, item.created_at],
+    )
+    .am("bank register")?;
     let sk_rows = tx
         .execute(
             "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)

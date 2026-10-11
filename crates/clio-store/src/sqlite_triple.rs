@@ -69,7 +69,7 @@ pub(crate) fn commit_triple_add_tx(
             .am("snapshot_ref lookup")?;
         if ok.is_none() {
             return Err(AmError::new(
-                ErrorCode::InvalidArgument,
+                ErrorCode::ItemNotFound,
                 format!("snapshot_ref `{ref_id}` not found in bank"),
             ));
         }

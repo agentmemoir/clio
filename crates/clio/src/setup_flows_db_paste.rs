@@ -103,16 +103,8 @@ pub(crate) fn ask_handover(ctx: &mut Ctx<'_>) -> Result<HandOver, Signal> {
 /// string because most cloud providers put `?sslmode=verify-full` in there and
 /// rebuilding it would break the connection.
 pub(crate) fn ask_pasted(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
-    // A pasted address is kept exactly as given, so it carries its own
-    // `sslrootcert` when it needs one. Accepting the flag here would be a
-    // silent no-op: the run would report success and the root would never reach
-    // the address, which is worse than refusing it.
-    if ctx.has_flag("database-ssl-rootcert") {
-        return Err(Signal::usage(
-            "--database-ssl-rootcert applies to the typed route; a pasted address carries its \
-             own sslrootcert",
-        ));
-    }
+    // The flags this route does not read are refused by the applicability table
+    // in `ask_existing`, before this route runs.
     ctx.section("Postgres address");
     let flag_value = ctx.flag("database-url").map(str::to_owned);
     let default = ctx.defaults().address.clone();

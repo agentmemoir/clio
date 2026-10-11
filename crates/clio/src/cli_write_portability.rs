@@ -102,6 +102,11 @@ fn export_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
         ("time-end", "time_end"),
     ] {
         if let Some(value) = parsed.value(flag) {
+            let value = if flag == "category" {
+                validate_choice(flag, value, clio_types::SemanticCategory::WIRE)?
+            } else {
+                value
+            };
             args.insert(key.into(), Value::from(value));
         }
     }
@@ -277,3 +282,7 @@ fn render_erase(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_write_portability_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_portability_category_tests.rs"]
+mod category_tests;

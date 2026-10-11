@@ -47,6 +47,7 @@
 //! reach the step loop.
 
 use crate::setup_cli_flows::Ctx;
+use crate::setup_flows_db_flags::{DbRoute, refuse_foreign};
 use crate::setup_flows_db_paste::ask_handover;
 use crate::setup_plan_db::{DatabaseChoice, DatabasePlan, HandOver};
 use crate::setup_prompt::Choice;
@@ -96,21 +97,14 @@ pub(crate) fn ask_database(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal>
     let at_run_start = ctx.back_leaves_run();
     loop {
         let choice = ask_choice_of_three(ctx)?;
-        // The advanced settings belong to the typed route, because that is the only
-        // route where the operator is typing the address. Accepting the flag on the
-        // other two would be a silent no-op: the run would report success and the
-        // setting would never reach the address, which is worse than refusing.
-        if choice != DatabaseChoice::Existing && ctx.has_flag("database-option") {
-            return Err(Signal::usage(
-                "--database-option applies to `--database existing` with \
-                 `--database-connect typed`, which is the only route that asks for it",
-            ));
-        }
-        if choice != DatabaseChoice::Existing && ctx.has_flag("database-ssl-rootcert") {
-            return Err(Signal::usage(
-                "--database-ssl-rootcert applies to `--database existing`, the only route that \
-                 reaches a server whose certificate Clio did not issue",
-            ));
+        // A flag the chosen route does not read would be a silent no-op: the run
+        // would report success and the setting would never reach the address,
+        // which is worse than refusing. The table knows which route reads which
+        // flag; the existing sub-route is checked after the hand-over.
+        match choice {
+            DatabaseChoice::Managed => refuse_foreign(ctx, DbRoute::Managed)?,
+            DatabaseChoice::Sqlite => refuse_foreign(ctx, DbRoute::Sqlite)?,
+            DatabaseChoice::Existing => {}
         }
         // A sub-route has questions of its own, so a back from inside one lands
         // here rather than leaving the wizard. The hand-over question is the first
@@ -264,17 +258,8 @@ fn refuse_managed_without_docker(ctx: &Ctx<'_>, choice: DatabaseChoice) -> Resul
 /// Every field is still reachable as a flag, so a script that needs a specific
 /// port has one and an interactive operator is never asked for any of it.
 fn ask_managed(ctx: &mut Ctx<'_>) -> Result<DatabasePlan, Signal> {
-    // A password for the managed database would be a credential for a server
-    // that has none, and one that silently did nothing. Refuse it by name
-    // rather than ignore it, the same way `--database-option` is refused on the
-    // routes that cannot use it.
-    if ctx.has_flag("database-password") {
-        return Err(Signal::usage(
-            "--database-password does not apply to `--database managed`: Clio's own Postgres has \
-             no password and is published on this machine only. It is for \
-             `--database existing --database-connect typed`.",
-        ));
-    }
+    // A password for the managed database is refused by the applicability table
+    // in `ask_database`, before this route runs.
     // The deliberate no-check mode is for a server whose certificate Clio did
     // not issue. A container Clio just started has no certificate and is
     // published on this machine only, so the mode can neither succeed nor be
@@ -386,8 +371,14 @@ fn ask_existing(ctx: &mut Ctx<'_>) -> Result<DatabaseAnswers, Signal> {
     loop {
         let route = ask_handover(ctx)?;
         let outcome = match route {
-            HandOver::Pasted => ask_pasted(ctx),
-            HandOver::Typed => ask_typed(ctx),
+            HandOver::Pasted => {
+                refuse_foreign(ctx, DbRoute::Pasted)?;
+                ask_pasted(ctx)
+            }
+            HandOver::Typed => {
+                refuse_foreign(ctx, DbRoute::Typed)?;
+                ask_typed(ctx)
+            }
         };
         if asked && matches!(outcome, Err(Signal::Back)) {
             continue;
