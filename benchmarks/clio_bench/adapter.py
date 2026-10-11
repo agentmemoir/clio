@@ -28,7 +28,12 @@ class MemoryBenchmarkAdapter(ABC):
     def retrieve(
         self, session_id: str, query: str, token_budget: int
     ) -> RetrievalResult:
-        """Return a context string for `query` within a hard token budget."""
+        """Return a context string for `query` within a hard token budget.
+
+        The budget bounds the context that is returned, so `tokens_retrieved`
+        is the cost of that context string itself and never more than the
+        budget it was given.
+        """
 
     def answer(self, session_id: str, query: str, generator_llm: str) -> str:
         """Optional end-to-end answering using the system's own retrieval."""
