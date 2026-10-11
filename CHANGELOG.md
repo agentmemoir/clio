@@ -12,6 +12,7 @@ we made where that specification is silent.
 
 - Make CLI error codes and exit groups consistent for domain failures, missing items and snapshots, auth tokens, and ops reports; document signal-based shell statuses; unhealthy reports and incomplete restores now exit nonzero. [PR #63](https://github.com/agentmemoir/clio/pull/63)
 - A `triple_add` whose `snapshot_ref` names an item the bank does not hold reports `item_not_found` instead of `invalid_argument`, and a caller that branches on the code no longer reads a missing target as a bad argument; the message and the exit code are unchanged. [PR #104](https://github.com/agentmemoir/clio/pull/104)
+- clio-bench now records `tokens_retrieved` as the cost of the context it hands to the answer generator, so `--token-budget` bounds that context instead of a smaller total the adapters charged per retrieval hit; every recorded retrieval cost moves up, and a report recorded before this change is not comparable with a new one. [PR #113](https://github.com/agentmemoir/clio/pull/113)
 
 ## [0.1.0] - 2026-10-10
 
