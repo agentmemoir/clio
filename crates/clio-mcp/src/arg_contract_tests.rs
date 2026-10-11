@@ -119,7 +119,7 @@ fn dry_run_is_declared_on_the_record_tools_whose_handlers_honor_it() {
 }
 
 #[test]
-fn the_duplicate_waiver_and_evidence_are_declared_where_the_handlers_read_them() {
+fn an_argument_a_handler_reads_is_declared_in_its_schema() {
     // These handlers read the argument, so a client that follows `tools/list` must be able to send it.
     let cases = [
         (
@@ -148,6 +148,7 @@ fn the_duplicate_waiver_and_evidence_are_declared_where_the_handlers_read_them()
                 "epistemic_kind": "fact", "evidence_ref": "e"
             }),
         ),
+        ("sync_status", json!({"remote": "host:1", "token": "t"})),
     ];
     for (tool, args) in cases {
         assert!(
