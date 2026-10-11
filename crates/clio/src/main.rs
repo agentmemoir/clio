@@ -64,6 +64,7 @@ mod cli_command_registry_core_writes;
 mod cli_command_registry_graph_records;
 mod cli_command_registry_persona_local;
 mod cli_command_registry_shared_workspace;
+mod cli_command_registry_surface;
 mod cli_command_registry_task_history;
 mod cli_command_registry_write_operations;
 mod cli_command_spec;
@@ -89,7 +90,7 @@ mod cli_top_level;
 
 use cli_top_level::{
     help_topic, print_health_help, print_help, print_version_help, report_usage_error,
-    unknown_command, wants_help,
+    unknown_command, wants_help, wants_json_catalog,
 };
 mod cli_write;
 mod cli_write_batch;
@@ -117,6 +118,10 @@ mod http_bind;
 mod install_cli;
 mod mcp_cli;
 mod ops_cli;
+/// The shared Postgres test address, declared once so two test modules share
+/// it through `use` rather than loading the file twice.
+#[cfg(test)]
+mod pg_test_helpers;
 mod port_scan;
 mod ranking_cli;
 mod retention_cli;
@@ -231,7 +236,7 @@ fn dispatch(cmd: &str, trailing: Vec<String>) -> ExitCode {
             ExitCode::SUCCESS
         }
         "help" | "--help" | "-h" => {
-            if trailing.iter().any(|arg| arg == "--json") {
+            if wants_json_catalog(&trailing) {
                 cli_help::write_catalog(&mut std::io::stdout()).expect("write help catalog");
                 return ExitCode::SUCCESS;
             }
@@ -283,6 +288,10 @@ mod help_flags_test_support;
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "main_help_topic_tests.rs"]
+mod help_topic_tests;
 
 #[cfg(test)]
 #[path = "main_read_tests.rs"]

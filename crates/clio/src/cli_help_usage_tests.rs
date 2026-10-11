@@ -152,11 +152,25 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
 /// intact.
 ///
 /// Both contributor counts are pinned apart, never summed into one number:
-/// every registered command is decided through its record, and no top-level
-/// verb is decided through an authored row. A command that loses its record
-/// or its parser moves the first count; a verb that gains an authored row
-/// without a record moves the second. Either change fails here instead of
-/// hiding inside a total that still adds up.
+/// every registered command is decided through its record — a group verb
+/// through its group's parser, a parse-gated reserved leaf (`status`,
+/// `install`, `uninstall`, and the two `compose` leaves) through the
+/// record-derived names its real parser gates on, `version` and `health`
+/// through their global-only accepted set, and `help` and `setup` through
+/// their record's documented entries — and no top-level verb is decided through
+/// an authored row. A command that loses its record or its parser moves the
+/// first count; a verb that gains an authored row without a record moves the
+/// second. Either change fails here instead of hiding inside a total that
+/// still adds up.
+///
+/// The reserved leaves below stay undecidable here for two stated reasons:
+/// the two transports accept the hidden `--shared-bank` their records never
+/// name, while `mcp schema-export` and the five `ops` leaves have no arm in
+/// `parser_for` below. All eight keep their parser cases pinned by the
+/// reserved-surface record tests instead, and are printed separately from the
+/// literal-read scan's bounded flag-read exemption list. The two `compose`
+/// leaves are decided through the same record-plus-globals derivation as the
+/// singles, matching the derivation their dispatcher gates on.
 #[test]
 fn help_text_and_parser_flags_agree_in_both_directions() {
     let mut registered_checked = 0usize;
@@ -167,11 +181,10 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
     // Registered commands: the parser the dispatcher resolves for the verb,
     // and the help text the record renders.
     for spec in crate::cli_command_registry::all() {
-        let Some(parser) = parser_for(spec.name) else {
+        let Some(accepted) = parser_for(spec.name) else {
             undecidable.push(spec.name);
             continue;
         };
-        let accepted = parsed_flag_names(&parser);
         for flag in flags_in(&spec.full_usage()) {
             if !accepted.contains(&flag) {
                 wrong.push(format!(
@@ -223,11 +236,10 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
         let Some(usage) = cli_help_usage::usage_line(verb) else {
             continue;
         };
-        let Some(parser) = parser_for(verb) else {
+        let Some(accepted) = parser_for(verb) else {
             undecidable.push(verb);
             continue;
         };
-        let accepted = parsed_flag_names(&parser);
         for flag in flags_in(&usage) {
             if !accepted.contains(&flag) {
                 wrong.push(format!(
@@ -243,12 +255,27 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
         "help text and parser flag sets disagree:\n{}",
         wrong.join("\n")
     );
-    assert!(
-        undecidable.is_empty(),
-        "these commands have no parser to check against: {undecidable:?}"
-    );
+    // The remaining undecidable commands, bounded and printed separately from
+    // the bounded flag-read exemption list the literal-read scan prints.
+    let mut remaining = undecidable.clone();
+    remaining.sort_unstable();
+    let mut bounded: Vec<&str> = UNDECIDABLE_RESERVED.to_vec();
+    bounded.sort_unstable();
     assert_eq!(
-        registered_checked, 52,
+        remaining, bounded,
+        "the commands without a decidable parser changed; move this bound only \
+         when a command's new shape is intended"
+    );
+    println!(
+        "remaining parser-parity undecidable commands ({}), printed separately \
+         from the literal-read scan's bounded flag-read exemption list:",
+        remaining.len()
+    );
+    for name in &remaining {
+        println!("  clio {name}");
+    }
+    assert_eq!(
+        registered_checked, 61,
         "the registered commands this check decides changed, so it is covering less or more \
          than it was: undecidable were {undecidable:?}"
     );
@@ -259,9 +286,66 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
     );
 }
 
-/// The flag spec the dispatcher actually parses `verb` with, read side first.
-fn parser_for(verb: &str) -> Option<crate::cli_args::FlagSpec> {
-    crate::cli_read::spec_for(verb).or_else(|| crate::cli_write::spec_for(verb))
+/// The reserved leaves with no `parser_for` arm below: the two transports
+/// accept the hidden `--shared-bank` their records never name, while
+/// `mcp schema-export` and the five `ops` leaves are bounded because no arm
+/// decides them. Each one's parser cases are pinned by the reserved-surface
+/// record tests instead. Bounded: a command outside this list that loses its
+/// parser fails the check above.
+const UNDECIDABLE_RESERVED: &[&str] = &[
+    "mcp schema-export",
+    "mcp stdio",
+    "mcp http",
+    "ops diagnose",
+    "ops verify",
+    "ops doctor",
+    "ops repair",
+    "ops reindex",
+];
+
+/// The `--flag` names the dispatcher actually parses `verb` with, sorted and
+/// de-duplicated.
+///
+/// A read/write group verb decides through its group's `FlagSpec`. The reserved
+/// surfaces have no group: `status`, `install`, `uninstall`, and the two
+/// `compose` leaves accept their record's derived names plus the declared
+/// globals the shared parse rule admits, matching the derivation their
+/// dispatchers gate on. `version` and `health` name no flag of their own and
+/// their dispatch answers without reading trailing tokens, so their derived
+/// sets pin the record's global-only accepted set rather than a parse gate the
+/// dispatch enforces. `help`'s dispatch reads the
+/// record's documented boolean alone; `setup`'s wizard parser reads its
+/// record's documented entries alone and refuses the globals the other
+/// surfaces accept. The shared `--help` spelling is a route, not a data flag,
+/// so it appears in no set here, exactly as `flags_in` leaves it out of help
+/// text. The remaining reserved subcommands stay undecidable here: the two
+/// transports gate on the same derivation plus the hidden `--shared-bank`
+/// their records never name, and `mcp schema-export` plus the five `ops`
+/// leaves have no arm here at all, so all eight are bounded in the check above.
+fn parser_for(verb: &str) -> Option<Vec<String>> {
+    if let Some(spec) = crate::cli_read::spec_for(verb).or_else(|| crate::cli_write::spec_for(verb))
+    {
+        return Some(parsed_flag_names(&spec));
+    }
+    let record = crate::cli_command_registry::find(verb)?;
+    let mut names: Vec<String> = match record.name {
+        "version" | "health" | "status" | "install" | "uninstall" | "compose up"
+        | "compose down" => crate::cli_command_registry_surface::parse_flag_names(verb)
+            .into_iter()
+            .chain(crate::cli_command_registry::global_value_names())
+            .chain(crate::cli_command_registry::global_bool_names())
+            .map(|name| format!("--{name}"))
+            .collect(),
+        "help" | "setup" => record
+            .documented
+            .iter()
+            .map(|flag| format!("--{}", flag.long))
+            .collect(),
+        _ => return None,
+    };
+    names.sort_unstable();
+    names.dedup();
+    Some(names)
 }
 
 /// Every `--name` a parser spec accepts, sorted.
