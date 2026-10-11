@@ -156,10 +156,10 @@ fn fixture_matches_the_live_binary_command_for_command() {
 /// `--help`, and the whole `help --json` catalog, `catalog_hash` included.
 ///
 /// The byte-for-byte whole-capture comparison lives beside this test. This one
-/// names each surface, so a failure says which one moved. It excuses no field:
-/// the fixture is captured by the same guarded run that the strict test
-/// compares against, so any difference between the two is a real drift to
-/// re-capture rather than a stale copy to pardon.
+/// names each surface, so a failure says which one moved, and it compares the
+/// `help --json` catalog key by key so a failure names the field that moved.
+/// It excuses nothing: every key compares, `catalog_hash` included, so any
+/// difference is a real drift to re-capture rather than a stale copy to pardon.
 ///
 /// The order comes from the live catalog, not the fixture: the captured argv
 /// sequence must equal the fixture's entry for entry, and the arrays' own
@@ -179,6 +179,39 @@ fn every_captured_surface_matches_the_fixture_in_capture_order() {
     );
 
     for (expected, actual) in fixture.entries.iter().zip(&captured) {
+        if expected.argv == ["help".to_owned(), "--json".to_owned()] {
+            // The catalog is compared key by key, every key included, so a
+            // failure names the field that moved instead of printing a whole
+            // document. Nothing is excused: `catalog_hash` compares like any
+            // other key, and the byte-for-byte comparison beside this test
+            // still catches a change the key set cannot see.
+            let want: Value = serde_json::from_str(&expected.stdout).expect("fixture catalog JSON");
+            let got: Value = serde_json::from_str(&actual.stdout).expect("live catalog JSON");
+            let mut keys: Vec<String> = want
+                .as_object()
+                .expect("fixture catalog JSON object")
+                .keys()
+                .chain(got.as_object().expect("live catalog JSON object").keys())
+                .cloned()
+                .collect();
+            keys.sort();
+            keys.dedup();
+            for key in keys {
+                assert_eq!(
+                    got.get(key.as_str()),
+                    want.get(key.as_str()),
+                    "command {:?}: the live catalog's `{key}` drifted from the frozen capture",
+                    expected.argv
+                );
+            }
+            assert_eq!(
+                (&actual.exit, &actual.stderr),
+                (&expected.exit, &expected.stderr),
+                "command {:?} drifted from the frozen capture",
+                expected.argv
+            );
+            continue;
+        }
         assert_eq!(
             (&actual.exit, &actual.stdout, &actual.stderr),
             (&expected.exit, &expected.stdout, &expected.stderr),
