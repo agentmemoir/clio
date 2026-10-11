@@ -6,7 +6,7 @@
 //! propagation, and selection-resolution errors. Companion to
 //! `compose_cli_tests.rs` (which owns the happy-path coverage).
 
-use super::tests::{flags, last_call, temp_root};
+use super::tests::{extract_runner, flags, last_call, temp_root, write_model};
 use super::*;
 use crate::compose_docker::tests::RecordingRunner;
 
@@ -47,7 +47,8 @@ fn down_docker_failure_propagates() {
 #[test]
 fn down_services_flag_overrides_the_marker() {
     let root = temp_root("down-override");
-    let runner = RecordingRunner::succeeding();
+    write_model(&root);
+    let runner = extract_runner(&root);
     let code = compose_up(
         &flags(&[("dir", root.to_str().unwrap()), ("services", "local-rft")]),
         &runner,
@@ -70,9 +71,9 @@ fn down_services_flag_overrides_the_marker() {
 }
 
 #[test]
-fn extract_without_gguf_still_starts_other_services() {
+fn extract_without_gguf_fails_before_docker() {
     let root = temp_root("gguf-missing");
-    let runner = RecordingRunner::succeeding();
+    let runner = extract_runner(&root);
     let code = compose_up(
         &flags(&[
             ("dir", root.to_str().unwrap()),
@@ -84,15 +85,36 @@ fn extract_without_gguf_still_starts_other_services() {
     );
     assert_eq!(
         code,
-        ExitCode::SUCCESS,
-        "a missing GGUF warns but must not stop the stack"
+        ExitCode::from(1),
+        "a missing extract model must fail the start, not warn and continue"
     );
-    assert!(last_call(&runner).contains(&"local-rft".to_string()));
     assert!(
-        !root
-            .join("models")
-            .join(compose_assets::GGUF_FILE_NAME)
-            .exists()
+        compose_env::read_marker(&root).is_none(),
+        "a failed start records no selection for `down` to reuse"
+    );
+    assert!(
+        runner
+            .recorded()
+            .iter()
+            .all(|call| !call.iter().any(|arg| arg == "up")),
+        "no Docker start may happen while the model is missing: {:?}",
+        runner.recorded()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn prepare_root_reports_the_missing_extract_model() {
+    let root = temp_root("gguf-message");
+    // The process-level tests can only read the exit code, so the message itself
+    // is asserted here, where `prepare_root` returns it.
+    let runner = extract_runner(&root);
+    let err = prepare_root(&root, ComposeTarget::MacArm64, Stack::LocalRft, &runner)
+        .expect_err("a missing model must be reported, not warned about");
+    assert!(err.contains(compose_assets::GGUF_FILE_NAME), "{err}");
+    assert!(
+        err.contains("hf download"),
+        "the error must name the command that fetches the model: {err}"
     );
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -283,7 +305,12 @@ fn down_fails_without_a_recorded_selection_or_services() {
 fn docker_spawn_failure_is_reported() {
     struct ErrRunner;
     impl DockerRunner for ErrRunner {
-        fn capture(&self, _args: &[&str], _dir: &Path) -> std::io::Result<(i32, String)> {
+        fn capture(&self, args: &[&str], _dir: &Path) -> std::io::Result<(i32, String)> {
+            // The stack resolves, so the run that cannot spawn stays the failure
+            // under test rather than being replaced by an unreadable resolution.
+            if args.contains(&"config") {
+                return Ok((0, crate::compose_docker::tests::no_extract_config()));
+            }
             Ok((0, String::new()))
         }
         fn run_inherited(&self, _args: &[&str], _dir: &Path) -> std::io::Result<i32> {

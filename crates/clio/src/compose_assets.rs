@@ -45,16 +45,12 @@ pub(crate) const SQL_VECTORS: &str = include_str!("../../../sql/002_vectors_post
 pub(crate) const MODELS_README: &str = "\
 # models/ — extract service model directory
 
-The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its
-GGUF model file in this directory. The file is intentionally NOT shipped with
-`clio compose up` (it is large); place it here before selecting `extract`:
+The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its GGUF model file in this directory. The file is intentionally NOT shipped with `clio compose up` (it is large); place it here before selecting `extract`:
 
-    hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \
+    hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \\
       numind.NuExtract-tiny-v1.5.Q4_K_M.gguf --local-dir ./models
 
-The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf`
-(configurable via CLIO_EXTRACT_GGUF in .env). `clio compose up` warns when the
-file is absent; the other services still start.
+The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf` (configurable via CLIO_EXTRACT_GGUF in .env). `clio compose up` and `make compose up` with the `local-rft` profile both refuse to start the extract service while the file is absent.
 ";
 
 struct Asset {
@@ -92,11 +88,14 @@ fn assets(target: ComposeTarget) -> Vec<Asset> {
     ]
 }
 
-/// Every relative bind-mount source the embedded compose file references.
-/// The compose file is a checked-in external contract, so this list is kept in
-/// step with it; the prototype (empty-directory run) validates the set.
+/// Every relative bind-mount source the embedded compose file references
+/// whatever the selection: the Postgres init scripts the managed database reads
+/// on first start. The `models/` mount belongs to `extract` alone, so it is
+/// required only when that service is selected, and it is checked through the
+/// `extract` service's own model file rather than as a directory (see
+/// `compose_model`).
 pub(crate) const BIND_MOUNT_SOURCES: &[&str] =
-    &["sql/001_core.sql", "sql/002_vectors_postgres.sql", "models"];
+    &["sql/001_core.sql", "sql/002_vectors_postgres.sql"];
 
 /// Materialize the asset set into `root`, refusing to silently overwrite a
 /// user-edited file: when an existing file differs from the embedded content
@@ -163,14 +162,10 @@ pub(crate) fn verify_bind_mounts(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The GGUF file name the extract service expects (matches compose.yml and
-/// the materialized `models/` README).
+/// The GGUF file name the extract service expects by default (matches
+/// `compose.yml` and the materialized `models/` README). The name the running
+/// stack actually mounts comes from Compose; see `compose_model`.
 pub(crate) const GGUF_FILE_NAME: &str = "numind.NuExtract-tiny-v1.5.Q4_K_M.gguf";
-
-/// Path of the extract GGUF inside the compose root's `models/` directory.
-pub(crate) fn gguf_path(root: &Path, gguf_name: &str) -> std::path::PathBuf {
-    root.join("models").join(gguf_name)
-}
 
 #[cfg(test)]
 #[path = "compose_assets_tests.rs"]

@@ -102,6 +102,7 @@ pub(crate) struct RecordingRunner {
     calls: std::cell::RefCell<Vec<Vec<String>>>,
     envs: std::cell::RefCell<Vec<Vec<(String, String)>>>,
     exit: i32,
+    config: std::cell::RefCell<Option<String>>,
 }
 impl RecordingRunner {
     pub(crate) fn succeeding() -> Self {
@@ -109,6 +110,7 @@ impl RecordingRunner {
             calls: std::cell::RefCell::new(Vec::new()),
             envs: std::cell::RefCell::new(Vec::new()),
             exit: 0,
+            config: std::cell::RefCell::new(None),
         }
     }
     pub(crate) fn failing(exit: i32) -> Self {
@@ -116,7 +118,14 @@ impl RecordingRunner {
             calls: std::cell::RefCell::new(Vec::new()),
             envs: std::cell::RefCell::new(Vec::new()),
             exit,
+            config: std::cell::RefCell::new(None),
         }
+    }
+    /// Serve `body` as the output of a `docker compose config` call, so a test
+    /// can hand the extract-model check a resolved stack it wrote itself.
+    pub(crate) fn with_config(self, body: String) -> Self {
+        *self.config.borrow_mut() = Some(body);
+        self
     }
     pub(crate) fn recorded(&self) -> Vec<Vec<String>> {
         self.calls.borrow().clone()
@@ -134,7 +143,18 @@ impl RecordingRunner {
 impl DockerRunner for RecordingRunner {
     fn capture(&self, args: &[&str], _dir: &Path) -> std::io::Result<(i32, String)> {
         self.record(args);
-        Ok((0, String::new()))
+        // Only a resolved-stack call carries a body. A probe call collects
+        // output that is never read, and an empty body is the honest answer for
+        // a stack the test did not describe.
+        let body = if args.contains(&"config") {
+            self.config
+                .borrow()
+                .clone()
+                .unwrap_or_else(no_extract_config)
+        } else {
+            String::new()
+        };
+        Ok((0, body))
     }
     fn run_inherited(&self, args: &[&str], _dir: &Path) -> std::io::Result<i32> {
         self.record(args);
@@ -320,4 +340,36 @@ fn real_docker_runner_spawns_the_cli() {
     let _ = RealDocker.capture(&["--version"], Path::new("."));
     let _ = RealDocker.run_inherited(&["--version"], Path::new("."));
     let _ = RealDocker.run_inherited_env(&["--version"], Path::new("."), &[]);
+}
+
+/// A resolved stack with no `extract` service, which is what a selection
+/// outside `local-rft` resolves to.
+pub(crate) fn no_extract_config() -> String {
+    serde_json::json!({ "services": { "postgres": {} } }).to_string()
+}
+
+/// A resolved stack naming `extract` with its model under `root/models`, the
+/// shape `docker compose config --format json` produces, so a test can drive
+/// the extract-model check without a real engine.
+pub(crate) fn extract_config(root: &Path) -> String {
+    extract_config_with(root, crate::compose_assets::GGUF_FILE_NAME)
+}
+
+/// [`extract_config`] for a stack that names `name` instead of the shipped
+/// default, the way a `CLIO_EXTRACT_GGUF` override does.
+pub(crate) fn extract_config_with(root: &Path, name: &str) -> String {
+    serde_json::json!({
+        "services": {
+            "extract": {
+                "environment": { "LLAMA_ARG_MODEL": format!("/models/{name}") },
+                "volumes": [{
+                    "type": "bind",
+                    "source": root.join("models").to_string_lossy(),
+                    "target": "/models",
+                    "read_only": true,
+                }],
+            }
+        }
+    })
+    .to_string()
 }
