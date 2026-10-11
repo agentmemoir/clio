@@ -103,6 +103,18 @@ pub fn sync_defs() -> Vec<ToolDef> {
             props: vec![
                 ("banks", banks.clone()),
                 (
+                    "remote",
+                    s(
+                        "Remote sync server endpoint `host:port` to report; the call makes no connection.",
+                    ),
+                ),
+                (
+                    "token",
+                    s(
+                        "Bearer token for the remote; the report says only whether auth is set, never the token.",
+                    ),
+                ),
+                (
                     "sync_key",
                     sync_key_prop(
                         "Optional override for this report: with no argument the tool reads the keys the node itself holds, so the encryption state reflects the node's real custody; one string or a newest-first array of strings overrides those keys when the summary is computed. Never returns key material.",
