@@ -264,3 +264,7 @@ pub(crate) mod postgres_triple_seal_erase_tests;
 #[cfg(test)]
 #[path = "postgres_triple_tests.rs"]
 mod postgres_triple_tests;
+
+#[cfg(test)]
+#[path = "postgres_triple_guard_tests.rs"]
+mod postgres_triple_guard_tests;
