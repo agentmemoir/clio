@@ -235,26 +235,34 @@ def scan(root: Path) -> Surface:
                 Finding(relative, 0, "surface", "a file this check must read is missing")
             )
 
-    makefile = surface.read("Makefile")
+    # The Makefile includes `mk/*.mk`, so its targets live in all of them, and a variable
+    # defined in one can select the scope of a clippy line in another.
+    try:
+        mk_files = [f"mk/{path.name}" for path in sorted((root / "mk").glob("*.mk"))]
+    except OSError as error:
+        surface.unreadable.append(f"mk: {error.strerror or error}")
+        mk_files = []
+    texts = [(relative, surface.read(relative)) for relative in ("Makefile", *mk_files)]
+    present = [(relative, text) for relative, text in texts if text is not None]
     whole: set[str] = set()
     selections: dict[str, list[list[str]]] = {}
-    if makefile is not None:
-        selections = variable_selections(makefile)
+    if present:
+        selections = variable_selections("\n".join(text for _, text in present))
         whole = _workspace_variables(selections)
         # No finding is raised here for a variable that merely fails to name the
         # workspace. Most variables in this Makefile are paths and flags, and
         # reporting all of them produced twenty-four findings on a clean tree. A
         # narrowing variable is caught where it matters instead: on the clippy
         # line that reads it, below.
-        if surface.invocations_in("Makefile", makefile, whole, selections) == 0:
+        if sum(surface.invocations_in(relative, text, whole, selections) for relative, text in present) == 0:
             surface.findings.append(
                 Finding(
                     "Makefile",
                     0,
                     "presence",
-                    "no clippy run at all. A check that reports on the lines it "
-                    "finds would call an empty file clean, which is how a target "
-                    "ends up keeping its name after the check stops running",
+                    "no clippy run at all in the Makefile or mk/*.mk. A check that "
+                    "reports on the lines it finds would call an empty file clean, "
+                    "which is how a target keeps its name after the check stops running",
                 )
             )
 
