@@ -133,6 +133,20 @@ fn sync_serve_bind_failure_surfaces_as_error() {
 }
 
 #[test]
+fn sync_status_reports_the_endpoint_and_auth_it_is_given_without_echoing_the_token() {
+    let st = state();
+    let out = dispatch(
+        &st,
+        "sync_status",
+        &json!({ "remote": "host:7000", "token": "secret-token-1234" }),
+    );
+    assert_eq!(out["ok"], Value::Bool(true), "{out}");
+    assert_eq!(out["remote"], "host:7000");
+    assert_eq!(out["auth"], "token");
+    assert!(!out.to_string().contains("secret-token-1234"), "{out}");
+}
+
+#[test]
 fn sync_status_returns_masked_report_shape() {
     let st = state();
     let result = dispatch(&st, "sync_status", &json!({}));
