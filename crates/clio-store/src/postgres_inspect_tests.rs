@@ -121,14 +121,14 @@ fn inspect_items_parity_and_filters() {
     assert_eq!(lite_page, pg_page);
     assert_eq!(pg.count_items(&page).expect("pg page count"), 2);
 
-    // Half-open `[start, end)`: an end at `created_at` excludes the row on both backends; a later end includes it.
-    let mut half_open = ItemInspectFilter::new(&bank);
-    half_open.time_start = Some("2024-01-01T00:00:00Z".into());
-    half_open.time_end = Some("2024-01-01T00:00:00Z".into());
-    let lite_half_open_rows = lite.inspect_items(&half_open).expect("sqlite half-open");
-    assert!(lite_half_open_rows.is_empty(), "{lite_half_open_rows:?}");
-    let pg_half_open_rows = pg.inspect_items(&half_open).expect("pg half-open");
-    assert!(pg_half_open_rows.is_empty(), "{pg_half_open_rows:?}");
+    // The inclusive end keeps rows whose created_at matches the bound.
+    let mut inclusive = ItemInspectFilter::new(&bank);
+    inclusive.time_start = Some("2024-01-01T00:00:00Z".into());
+    inclusive.time_end = Some("2024-01-01T00:00:00Z".into());
+    let lite_inclusive_rows = lite.inspect_items(&inclusive).expect("sqlite inclusive");
+    assert_eq!(lite_inclusive_rows.len(), 2, "{lite_inclusive_rows:?}");
+    let pg_inclusive_rows = pg.inspect_items(&inclusive).expect("pg inclusive");
+    assert_eq!(pg_inclusive_rows.len(), 2, "{pg_inclusive_rows:?}");
     let mut window = ItemInspectFilter::new(&bank);
     window.time_start = Some("2024-01-01T00:00:00Z".into());
     window.time_end = Some("2024-01-02T00:00:00Z".into());

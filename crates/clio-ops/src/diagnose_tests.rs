@@ -110,6 +110,14 @@ impl OpsStore for FakeOps {
         }
     }
 
+    fn bank_exists(&self, _bank_id: &str) -> Result<bool, AmError> {
+        Ok(self.banks_ok)
+    }
+
+    fn register_bank(&self, _bank_id: &str, _created_at: &str) -> Result<(), AmError> {
+        Ok(())
+    }
+
     fn counts(&self) -> Result<clio_store::StoreCounts, AmError> {
         Ok(clio_store::StoreCounts::default())
     }

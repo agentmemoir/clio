@@ -93,11 +93,23 @@ pub trait OpsStore: Send + Sync {
     /// Storage failures.
     fn embedding_space(&self) -> Result<EmbeddingSpace, AmError>;
 
-    /// Distinct bank ids seen in the item table, sorted.
+    /// Distinct registered or durable bank ids, sorted.
     ///
     /// # Errors
     /// Storage failures.
     fn bank_ids(&self) -> Result<Vec<String>, AmError>;
+
+    /// Whether this id is registered or appears in durable bank-scoped data.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn bank_exists(&self, bank_id: &str) -> Result<bool, AmError>;
+
+    /// Register an empty bank or preserve the existing catalog row.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn register_bank(&self, bank_id: &str, created_at: &str) -> Result<(), AmError>;
 
     /// Content-free integrity signal counts for the requested scope.
     ///

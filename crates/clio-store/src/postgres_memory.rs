@@ -129,6 +129,12 @@ pub(crate) fn create_memory_item_tx(
     let src = source_type_sql(item).map(str::to_owned);
     let ts = now_iso();
     let audit_id = format!("audit-{}-{}", item.id, ts);
+    tx.execute(
+        "INSERT INTO banks (id, created_at, updated_at) VALUES ($1, $2, $2)
+         ON CONFLICT (id) DO NOTHING",
+        &[&item.bank_id, &item.created_at],
+    )
+    .am("bank register")?;
     let sk_rows = tx
         .execute(
             "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)

@@ -43,6 +43,7 @@ mod assoc;
 mod async_store;
 mod attribute_map;
 mod audit_model;
+mod bank_registration;
 mod batch_model;
 mod batch_postgres;
 mod batch_sqlite;

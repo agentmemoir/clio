@@ -53,7 +53,6 @@ impl WriteGroup for CoreWriteGroup {
                     "source-type",
                     "evidence-ref",
                     "context",
-                    "source-text",
                 ],
                 &["dry-run", "allow-duplicate"],
             ),
@@ -212,9 +211,6 @@ fn candidate_args(parsed: &ParsedArgs, verb: &str) -> Result<Map<String, Value>,
     }
     if let Some(evidence) = parsed.value("evidence-ref") {
         args.insert("evidence_ref".into(), Value::from(evidence));
-    }
-    if let Some(haystack) = parsed.value("source-text") {
-        args.insert("source_text".into(), Value::from(haystack));
     }
     if let Some(context) = context_arg(parsed)? {
         args.insert("context".into(), Value::from(context));
