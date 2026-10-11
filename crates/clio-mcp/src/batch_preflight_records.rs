@@ -126,7 +126,7 @@ fn task_preflight(
     let t_args = clio_history::TaskUpsertArgs {
         store: &*state.history,
         ctx,
-        subject_id: opt_str(params, "subject_id").unwrap_or(task_id),
+        subject_id: task_id,
         task_id,
         definition: req_str(params, "definition")?,
         steps: &steps,
@@ -177,7 +177,7 @@ fn failure_preflight(
     let f_args = clio_history::FailureRecordArgs {
         store: &*state.history,
         ctx,
-        subject_id: opt_str(params, "subject_id").unwrap_or(task_id),
+        subject_id: task_id,
         task_id,
         attempt_n: params
             .get("attempt_n")

@@ -23,8 +23,8 @@
 //! Keep this module focused on additive schema definitions.
 
 use crate::schema_defs::{
-    EPISTEMIC_KINDS, SEMANTIC_CATEGORIES, SOURCE_TYPES, ToolDef, b, bank_actor, context_prop, en,
-    num, s,
+    EPISTEMIC_KINDS, SEMANTIC_CATEGORIES, SOURCE_TYPES, ToolDef, allow_duplicate_prop, b,
+    bank_actor, context_prop, en, num, s,
 };
 use serde_json::Value;
 
@@ -123,6 +123,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
                     }),
                 ),
                 ("source_text", s("Span haystack the snapshot is verified against; required when snapshot is present.")),
+                ("evidence_ref", s("Optional evidence reference.")),
                 ("category", en("Semantic category of the slot value.", SEMANTIC_CATEGORIES)),
                 ("epistemic_kind", en("Fact or belief.", &EPISTEMIC_KINDS)),
                 ("source_type", en("Provenance source type.", &SOURCE_TYPES)),
@@ -138,7 +139,7 @@ pub fn additive_defs() -> Vec<ToolDef> {
                         "additionalProperties": false
                     }),
                 ),
-                ("allow_duplicate", b("Store even when identical to an item already in this bank; waives the exact-duplicate rejection only.")),
+                allow_duplicate_prop(),
             ]
             .into_iter()
             .chain(bank_actor())
