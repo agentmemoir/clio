@@ -189,13 +189,9 @@ fn a_source_that_moved_is_stale_before_any_wave_runs() {
 #[test]
 fn a_withdrawn_source_leaves_the_unit_stale_and_out_of_its_proof_count() {
     let (f, unit) = distilled_bank();
-    let before = evidence_of(&f, &unit);
-    let claimed = entry_ids(&current_list(&before));
-    let source = claimed
-        .iter()
-        .find(|id| !id.starts_with("hub-distill:"))
-        .expect("a raw source in the claim set")
-        .clone();
+    // A real neighbour, not the hub: `claim_set` excludes the unit's hub, so this
+    // test exercises the withdrawn-source path it names.
+    let (_, _, source) = claim_set(&f, &unit);
     f.assert_ok(&[
         "discard",
         &source,
