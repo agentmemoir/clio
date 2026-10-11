@@ -28,6 +28,12 @@ def pack_context(
 
     A hit that does not fit stops the pack rather than being skipped, so the
     composed context ranks the way the system returned it.
+
+    One candidate is measured per hit offered, and the loop stops at the first
+    hit that does not fit, so the work grows with the pack it accepted rather
+    than with the hits offered. At the harness limits (`--retrieve-limit` 10,
+    `--token-budget` 4096) that is unmeasurable; the repeated measurement shows
+    only if a very large limit is combined with a very large budget.
     """
     pieces: list[str] = []
     item_ids: list[str] = []
@@ -41,3 +47,20 @@ def pack_context(
         item_ids.append(item_id)
         used = cost
     return "\n".join(pieces), used, tuple(item_ids)
+
+
+def accounting_mismatch(
+    context: str, tokens_retrieved: int, tokenizer: ReferenceTokenizer
+) -> str | None:
+    """Return a message when a reported cost is not the cost of its context.
+
+    One implementation of the invariant the interface states, so a run can
+    refuse a report and a test can fail on the same comparison in the same
+    words. An adapter that packs through `pack_context` cannot reach a
+    mismatch; one that builds its own context can.
+    """
+    measured = tokenizer.count(context)
+    if measured == tokens_retrieved:
+        return None
+    return f"tokens_retrieved={tokens_retrieved} but the context costs {measured}"
+

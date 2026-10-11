@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from benchmarks.clio_bench.packing import pack_context
+from benchmarks.clio_bench.packing import accounting_mismatch, pack_context
 from benchmarks.clio_bench.tokenizer import get_tokenizer
 
 # Lines shaped like the ones the adapters compose: an id prefix, then the text
@@ -84,6 +84,34 @@ class PackingTests(unittest.TestCase):
         self.assertEqual(context, _FIRST)
         self.assertEqual(item_ids, ("t1",))
         self.assertEqual(used, self.tokenizer.count(_FIRST))
+
+
+class AccountingTests(unittest.TestCase):
+    """The comparison the runner refuses a report on, and the tests fail on."""
+
+    def setUp(self) -> None:
+        self.tokenizer = get_tokenizer()
+
+    def test_a_cost_that_is_the_context_cost_has_no_message(self) -> None:
+        context = f"{_FIRST}\n{_SECOND}"
+        self.assertIsNone(
+            accounting_mismatch(
+                context, self.tokenizer.count(context), self.tokenizer
+            )
+        )
+
+    def test_an_empty_context_costs_nothing(self) -> None:
+        self.assertIsNone(accounting_mismatch("", 0, self.tokenizer))
+
+    def test_a_cost_that_is_not_the_context_cost_names_both_numbers(self) -> None:
+        # The under-report this harness was fixed for: the reported cost is the
+        # text each system returned, and the context also holds its prefix.
+        context = f"{_FIRST}\n{_SECOND}"
+        real = self.tokenizer.count(context)
+        message = accounting_mismatch(context, real - 1, self.tokenizer)
+        self.assertIsNotNone(message)
+        self.assertIn(str(real - 1), message)
+        self.assertIn(str(real), message)
 
 
 if __name__ == "__main__":

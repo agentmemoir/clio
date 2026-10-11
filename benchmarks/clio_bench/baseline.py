@@ -19,17 +19,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import runner
+from . import cli
 from .fetch import load_pins
 from .llm import frontier_key_present
-from .runner import (
-    _DEFAULT_PINS,
+from .report import (
     blocked_gate_record,
-    capture_fingerprints,
     render_settings_lines,
     render_suite_section,
     write_blocked_outputs,
 )
+from .runner import _DEFAULT_PINS, capture_fingerprints
 
 SYSTEMS = ("clio", "mnemosyne")
 DEFAULT_OUT = "benchmarks/reports/baseline.json"
@@ -211,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         for name in SYSTEMS:
             runner_out = Path(tmp) / f"{name}.json"
             runner_md = Path(tmp) / f"{name}.md"
-            code = runner.main(_runner_argv(name, args, runner_out, runner_md))
+            code = cli.main(_runner_argv(name, args, runner_out, runner_md))
             if code != 0:
                 print(
                     f"clio-bench baseline: {name} run exited {code}; no baseline "

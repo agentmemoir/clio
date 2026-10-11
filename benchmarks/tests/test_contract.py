@@ -8,7 +8,6 @@ inspected for method names.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import stat
@@ -22,15 +21,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from exec_tempdir import exec_tempdir  # noqa: E402  (path set above)
 
 from benchmarks.clio_bench.adapter import MemoryBenchmarkAdapter  # noqa: E402
+from benchmarks.clio_bench.cli import build_parser  # noqa: E402
 from benchmarks.clio_bench.runner import (  # noqa: E402
     ADAPTER_BUILDERS,
     ADAPTER_DEFAULT_BINARIES,
     ADAPTER_NAMES,
-    build_parser,
 )
 from benchmarks.clio_bench.tokenizer import get_tokenizer  # noqa: E402
 from benchmarks.clio_bench.types import DialogueTurn  # noqa: E402
-from benchmarks.tests.support import FAKE_SYSTEM  # noqa: E402
+from benchmarks.tests.support import (  # noqa: E402
+    FAKE_SYSTEM,
+    assert_context_accounting,
+)
 
 
 def _turn(session_id: str, turn_id: str, text: str) -> DialogueTurn:
@@ -249,10 +251,12 @@ class RegistryDrivenContractTests(unittest.TestCase):
     def test_every_registered_adapter_reports_the_cost_of_its_context(self) -> None:
         """`tokens_retrieved` is the cost of `context`, for every adapter.
 
-        The query overlaps both stored turns and the budget is wide, so each
-        adapter packs a context holding a separator and an id prefix. Those are
-        what the composed string adds beyond the text each system returned, and
-        a charge taken over the returned text alone used to miss them.
+        The budget is wide, so each adapter packs everything its own recall
+        returns. Whether that is one hit or two is that adapter's retrieval
+        behaviour and is not something the interface requires, so the invariant
+        is asserted on whatever was returned. The separator and prefix cases are
+        asserted where the shape is known: in `test_packing` for the rule, and
+        in each adapter's own suite for its own line shape.
         """
         for name in ADAPTER_NAMES:
             with self.subTest(adapter=name), mock.patch.dict(
@@ -267,16 +271,8 @@ class RegistryDrivenContractTests(unittest.TestCase):
 
                 retrieval = adapter.retrieve("s1", "alpha delta", 4096)
 
-                self.assertGreaterEqual(
-                    len(retrieval.item_ids),
-                    2,
-                    f"{name} packed one line, so the pack holds no separator",
-                )
-                self.assertEqual(
-                    retrieval.tokens_retrieved,
-                    self.tokenizer.count(retrieval.context),
-                    f"{name} reported a cost that is not its context's cost",
-                )
+                self.assertTrue(retrieval.context, f"{name} packed nothing")
+                assert_context_accounting(self, retrieval, self.tokenizer)
                 self.assertLessEqual(retrieval.tokens_retrieved, 4096)
 
     def test_every_registered_adapter_isolates_sessions(self) -> None:
