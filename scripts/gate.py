@@ -10,7 +10,9 @@ unchanged tree returns the stored verdict instead of running again. A stored
 failure is replayed too, so retrying the same tree does not reroll a flake;
 a failure stored under a different PATH is re-run, so a broken environment
 does not poison the tree. Edit the tree or pass --force for a fresh run. The
-cache keeps the newest 50 verdicts per repository.
+cache keeps the newest 50 verdicts per repository. Every run and replay is also
+appended to `runs.jsonl` beside the cache, with its worktree and branch, so the
+wait on the gate can be measured after the cache has pruned the verdicts.
 
 Every verdict is published under the name of the kind it was measured as, so a
 log names the command that produced it. `cargo nextest` subcommands other than
@@ -154,6 +156,7 @@ from gate_classify import (
 )
 
 
+from gate_runlog import append_run
 from gate_cache import (
     _artifact_rel_paths,
     _blob_name,
@@ -174,6 +177,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
     if root is None:
         raise GateError("not inside a git checkout")
     lock_fd = acquire_lock(root)
+    ran: dict[str, object] = {"replayed": False}
     try:
         state = read_tree_state(root)
         kind = command_kind(argv)
@@ -200,6 +204,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         if clean_requested:
             force = True
         scoped_argv, scope = scope_command(kind, argv, root, state.changed)
+        ran.update(kind=kind, argv=scoped_argv)
         fp = fingerprint(state, os.environ, kind, scoped_argv)
         entry = entry_dir(root, fp)
         meta_path = entry / "meta.json"
@@ -211,8 +216,11 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
             if isinstance(meta, dict) and meta.get("schema") == 1 and meta.get("tree") == fp:
                 fresh_env = meta.get("exit", 1) == 0 or meta.get("path") == os.environ.get("PATH", "")
                 if fresh_env:
+                    replay_started = time.time()
                     _restore_artifacts(entry, root, meta)
-                    return _reuse(entry, meta, log_dir)
+                    code = _reuse(entry, meta, log_dir)
+                    ran.update(replayed=True, started=replay_started, finished=time.time(), exit=code)
+                    return code
                 print("gate: stored failure came from a different PATH; re-running", file=sys.stderr)
         entry.mkdir(parents=True, exist_ok=True)
         log_path = entry / "log"
@@ -226,6 +234,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         with open(log_path, "wb") as log:
             code = subprocess.call(scoped_argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
         finished = time.time()
+        ran.update(started=started, finished=finished, exit=code)
         published = _publish_log(log_path, log_dir, kind, code)
         if clean_requested:
             _purge_coverage_cache(root)
@@ -260,6 +269,8 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
             _print_tail(log_path)
         return code
     finally:
+        if "exit" in ran:
+            append_run(root, ran)
         os.close(lock_fd)
 
 
@@ -269,10 +280,11 @@ def _self_test() -> int:
     import gate_selftest_a
     import gate_selftest_b
     import gate_selftest_c
+    import gate_selftest_d
 
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    for mod in (gate_selftest_a, gate_selftest_b, gate_selftest_c):
+    for mod in (gate_selftest_a, gate_selftest_b, gate_selftest_c, gate_selftest_d):
         suite.addTests(loader.loadTestsFromModule(mod))
     buffer = io.StringIO()
     result = unittest.TextTestRunner(stream=buffer, verbosity=1).run(suite)
