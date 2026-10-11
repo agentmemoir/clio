@@ -3,19 +3,21 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for Postgres parity tests of bi-temporal triples.
+//! This module is responsible for Postgres parity reads of bi-temporal triples.
 //!
 //! ## Owns
-//! - As-of parity, invalidate/end guards, continuous rejection, and query pushdown cases
+//! - As-of and context parity reads, and the fixtures both Postgres triple test modules share
 //!
 //! ## Does not own
-//! - SQLite triple behavior (see `triple_tests` / `triple_edge_tests`)
-//! - Pool open/migrate (see `postgres`)
+//! - Write guards and commit refusals (see `postgres_triple_guard_tests`)
+//! - SQLite triple behavior (see `sqlite_triple_tests` / `sqlite_triple_edge_tests`)
 //!
 //! ## Boundary
 //!
-//! Changes to Postgres triple SQL should normally update tests here.
-//! Changes to SQLite-only behavior should not require changes here.
+//! Changes to Postgres triple read SQL should normally update tests here.
+//! Changes to the triple write guards should not require changes here.
+//!
+//! Keep this module focused on what a Postgres triple read returns.
 
 use crate::db_url::postgres_url_or_default;
 use crate::dek::{DekProvider, LocalDevKms};
@@ -23,15 +25,14 @@ use crate::pg_lock::lock_pg_test;
 use crate::postgres::PostgresStore;
 use crate::store::Store;
 use clio_types::{
-    EpisodicType, EpistemicKind, ErrorCode, ItemKind, MemoryItem, TimeAxis, TripleQuery,
-    TripleRecord,
+    EpisodicType, EpistemicKind, ItemKind, MemoryItem, TimeAxis, TripleQuery, TripleRecord,
 };
 use serde_json::json;
 use std::sync::Arc;
 
 use crate::test_unique::unique;
 
-fn open_pg() -> Option<PostgresStore> {
+pub(crate) fn open_pg() -> Option<PostgresStore> {
     let url = postgres_url_or_default(std::env::var("CLIO_DATABASE_URL"));
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
     let store = match PostgresStore::open(&url, kms) {
@@ -47,7 +48,13 @@ fn open_pg() -> Option<PostgresStore> {
     Some(store)
 }
 
-fn carrier(id: &str, bank: &str, object: &str, valid_from: &str, tx_from: &str) -> MemoryItem {
+pub(crate) fn carrier(
+    id: &str,
+    bank: &str,
+    object: &str,
+    valid_from: &str,
+    tx_from: &str,
+) -> MemoryItem {
     MemoryItem {
         id: id.into(),
         bank_id: bank.into(),
@@ -72,7 +79,7 @@ fn carrier(id: &str, bank: &str, object: &str, valid_from: &str, tx_from: &str) 
     }
 }
 
-fn edge(
+pub(crate) fn edge(
     id: &str,
     bank: &str,
     item_id: &str,
@@ -162,233 +169,6 @@ fn t10_postgres_as_of_parity_sample() {
         .triple_end(&bank, "Alice", "lives_in", None, "2025-01-01", "2025-01-01")
         .unwrap();
     assert!(noop.already_ended);
-}
-
-#[test]
-fn postgres_invalidate_and_guards() {
-    let _guard = lock_pg_test();
-    let Some(store) = open_pg() else {
-        return;
-    };
-    let bank = unique("pg-inv");
-    pg_invalidate_gist_and_edge_id(&store, &bank);
-    pg_continuous_rejected(&store, &bank);
-    let bank2 = unique("pg-co");
-    pg_supersede_false_and_lookup_guards(&store, &bank2);
-    pg_commit_guards_and_duplicate(&store, &bank2);
-    pg_query_object_filter(&store, &bank2);
-}
-
-fn pg_invalidate_gist_and_edge_id(store: &PostgresStore, bank: &str) {
-    let gist_id = unique("gist");
-    let mut item = carrier(&gist_id, bank, "x", "t0", "t0");
-    item.episodic_type = Some(EpisodicType::Gist);
-    store.create_memory_item(&item, "agent").unwrap();
-    store
-        .invalidate_item(bank, &gist_id, "t1", "t1", Some("r1"), "agent")
-        .unwrap();
-    let again = store
-        .invalidate_item(bank, &gist_id, "t2", "t2", None, "agent")
-        .unwrap();
-    assert!(again.already_ended);
-    let i1 = unique("i1");
-    let edge_x = unique("edge");
-    store
-        .commit_triple_add(
-            &carrier(&i1, bank, "Boston", "2024-01-01", "2024-01-02"),
-            &edge(&edge_x, bank, &i1, "Boston", "2024-01-01", "2024-01-02"),
-            true,
-            "agent",
-        )
-        .unwrap();
-    assert!(
-        store
-            .invalidate_item(bank, &edge_x, "t", "t", None, "agent")
-            .unwrap_err()
-            .message
-            .contains("triple_end")
-    );
-}
-
-fn pg_continuous_rejected(store: &PostgresStore, bank: &str) {
-    store
-        .test_execute(&format!(
-            "INSERT INTO attribute_schemas (bank_id, attr_key, attr_class, created_at)
-             VALUES ('{bank}', 'lives_in', 'continuous', 't0')
-             ON CONFLICT (bank_id, attr_key) DO NOTHING"
-        ))
-        .ok();
-    let i3 = unique("i3");
-    let e3 = unique("e3");
-    let err = store
-        .commit_triple_add(
-            &carrier(&i3, bank, "0.5", "2024-02-01", "2024-02-02"),
-            &edge(&e3, bank, &i3, "0.5", "2024-02-01", "2024-02-02"),
-            true,
-            "agent",
-        )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::WrongUpdateRule);
-}
-
-fn pg_supersede_false_and_lookup_guards(store: &PostgresStore, bank2: &str) {
-    let ia = unique("ia");
-    let ib = unique("ib");
-    let ea = unique("ea");
-    let eb = unique("eb");
-    store
-        .commit_triple_add(
-            &carrier(&ia, bank2, "Boston", "2024-01-01", "2024-01-02"),
-            &edge(&ea, bank2, &ia, "Boston", "2024-01-01", "2024-01-02"),
-            true,
-            "agent",
-        )
-        .unwrap();
-    let err = store
-        .commit_triple_add(
-            &carrier(&ib, bank2, "NYC", "2024-02-01", "2024-02-02"),
-            &edge(&eb, bank2, &ib, "NYC", "2024-02-01", "2024-02-02"),
-            false,
-            "agent",
-        )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-    assert!(store.get_triple(bank2, "missing").unwrap().is_none());
-    assert!(store.triple_end("", "a", "b", None, "t", "t").is_err());
-    let missing = store
-        .invalidate_item(bank2, "nope", "t", "t", None, "agent")
-        .unwrap_err();
-    assert_eq!(missing.code, ErrorCode::ItemNotFound);
-}
-
-fn pg_commit_guards_and_duplicate(store: &PostgresStore, bank2: &str) {
-    pg_commit_guard_errors(store, bank2);
-    pg_snapshot_belief_and_duplicate(store, bank2);
-}
-
-fn pg_commit_guard_errors(store: &PostgresStore, bank2: &str) {
-    let bad = unique("bad");
-    let mut item = carrier(&bad, bank2, "x", "2024-01-01", "2024-01-02");
-    item.episodic_type = Some(EpisodicType::Gist);
-    assert!(
-        store
-            .commit_triple_add(
-                &item,
-                &edge(
-                    &unique("ebad"),
-                    bank2,
-                    &bad,
-                    "x",
-                    "2024-01-01",
-                    "2024-01-02"
-                ),
-                true,
-                "agent",
-            )
-            .is_err()
-    );
-    let ok_id = unique("ok");
-    let mut e = edge(
-        &unique("eref"),
-        bank2,
-        &ok_id,
-        "x",
-        "2024-01-01",
-        "2024-01-02",
-    );
-    e.snapshot_ref = Some("missing-ref".into());
-    let err = store
-        .commit_triple_add(
-            &carrier(&ok_id, bank2, "x", "2024-01-01", "2024-01-02"),
-            &e,
-            true,
-            "agent",
-        )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::ItemNotFound);
-    assert!(
-        store
-            .commit_triple_add(
-                &carrier(&unique("act"), bank2, "x", "2024-01-01", "2024-01-02"),
-                &edge(
-                    &unique("eact"),
-                    bank2,
-                    "mismatch",
-                    "x",
-                    "2024-01-01",
-                    "2024-01-02"
-                ),
-                true,
-                "agent",
-            )
-            .is_err()
-    );
-}
-
-fn pg_snapshot_belief_and_duplicate(store: &PostgresStore, bank2: &str) {
-    // Hit snapshot_ref found-path row mapper.
-    let snap_id = unique("snap");
-    let mut snap = carrier(&snap_id, bank2, "snap", "2024-01-01", "2024-01-02");
-    snap.episodic_type = Some(EpisodicType::Gist);
-    store.create_memory_item(&snap, "agent").unwrap();
-    let iid = unique("iok");
-    let eid = unique("eok");
-    let mut eok = edge(&eid, bank2, &iid, "Paris", "2024-04-01", "2024-04-02");
-    eok.snapshot_ref = Some(snap_id);
-    store
-        .commit_triple_add(
-            &carrier(&iid, bank2, "Paris", "2024-04-01", "2024-04-02"),
-            &eok,
-            true,
-            "agent",
-        )
-        .unwrap();
-    // Belief source_type.map + duplicate insert map_err.
-    let ib = unique("ibel");
-    let eb = unique("ebel");
-    let mut belief_item = carrier(&ib, bank2, "Maybe", "2024-05-01", "2024-05-02");
-    belief_item.epistemic_kind = EpistemicKind::Belief;
-    belief_item.source_type = Some(clio_types::SourceType::UserStated);
-    let mut belief_edge = edge(&eb, bank2, &ib, "Maybe", "2024-05-01", "2024-05-02");
-    belief_edge.epistemic_kind = EpistemicKind::Belief;
-    belief_edge.source_type = Some(clio_types::SourceType::UserStated);
-    store
-        .commit_triple_add(&belief_item, &belief_edge, true, "agent")
-        .unwrap();
-    let err = store
-        .commit_triple_add(
-            &carrier(&iid, bank2, "Dup", "2024-06-01", "2024-06-02"),
-            &edge(
-                &unique("edup"),
-                bank2,
-                &iid,
-                "Dup",
-                "2024-06-01",
-                "2024-06-02",
-            ),
-            true,
-            "agent",
-        )
-        .unwrap_err();
-    assert!(
-        err.message.contains("duplicate") || err.message.contains("items insert"),
-        "{err}"
-    );
-}
-
-fn pg_query_object_filter(store: &PostgresStore, bank: &str) {
-    let rows = store
-        .query_triples(&TripleQuery {
-            bank_id: bank.into(),
-            subject: None,
-            predicate: None,
-            object: Some("Maybe".into()),
-            as_of: None,
-            time_axis: TimeAxis::Valid,
-        })
-        .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].object, "Maybe");
 }
 
 #[test]
