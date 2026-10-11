@@ -57,9 +57,12 @@ def compose_command(overlay: str, profile: str | None) -> list[str]:
 
 def resolved_stack(overlay: str, profile: str | None) -> dict:
     """The stack Compose resolves for this selection."""
-    result = subprocess.run(
-        compose_command(overlay, profile), capture_output=True, text=True, check=False
-    )
+    try:
+        result = subprocess.run(
+            compose_command(overlay, profile), capture_output=True, text=True, check=False
+        )
+    except OSError as error:
+        raise ConfigUnavailable(f"cannot ask Docker for the resolved stack: {error}") from error
     if result.returncode != 0:
         detail = result.stderr.strip() or "run it here to see why"
         raise ConfigUnavailable(

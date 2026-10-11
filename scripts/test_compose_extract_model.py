@@ -84,12 +84,19 @@ class ComposeExtractModelTests(unittest.TestCase):
         (models / name).write_text("stub", encoding="utf-8")
         return models
 
-    def run_guard(self, overlay: str = "compose.arm64.yml", profile: str | None = "local-rft"):
+    def run_guard(
+        self,
+        overlay: str = "compose.arm64.yml",
+        profile: str | None = "local-rft",
+        path: str | None = None,
+    ):
         command = [sys.executable, str(SCRIPT), "--overlay", overlay]
         if profile:
             command += ["--profile", profile]
         env = dict(os.environ)
-        env["PATH"] = os.pathsep.join((str(self.bin), SYSTEM_PATH))
+        # The default PATH is the stand-in engine first, then the system tools.
+        # A test that needs no engine passes a PATH of its own.
+        env["PATH"] = path or os.pathsep.join((str(self.bin), SYSTEM_PATH))
         return subprocess.run(
             command, capture_output=True, text=True, cwd=self.root, env=env, check=False
         )
@@ -179,6 +186,18 @@ class ComposeExtractModelTests(unittest.TestCase):
         (other / "numind.gguf").unlink()
         output = self.assert_fails_with()
         self.assertIn("models-other", output)
+
+    def test_a_missing_docker_is_reported_without_a_traceback(self) -> None:
+        # The Makefile path has no Docker probe of its own, so this is the state
+        # a host without Docker reaches: a message, not a stack trace. The PATH
+        # is one empty directory, so no host's engine can satisfy the call.
+        empty = self.root / "empty"
+        empty.mkdir()
+        result = self.run_guard(path=str(empty))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 2, output)
+        self.assertIn("cannot ask Docker", output)
+        self.assertNotIn("Traceback", output)
 
     def test_a_config_call_that_fails_is_reported(self) -> None:
         self.engine_refuses()
