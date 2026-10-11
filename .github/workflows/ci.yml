@@ -170,13 +170,8 @@ jobs:
       - name: Scoped tests (changed files' packages and their dependents)
         run: make test-fast BASE="$SCOPED_BASE"
 
-      # The admission gate-boundary tripwires. They are tests in `clio-store` but
-      # scan every crate, so the scoped step above reaches them only when the diff
-      # pulls `clio-store` into the closure, which is not where the changes least
-      # likely to be reviewed live. This step ignores the diff and selects just
-      # that module, so a new ungated write in a leaf crate still fails the job.
-      # `if: always()` so the tripwires report even when the scoped run above is
-      # red rather than being hidden behind another failure.
+      # The admission gate-boundary tripwires scan every crate but live in
+      # `clio-store`, so this step ignores the diff and runs them every time.
       - name: Gate-boundary tripwires (whole workspace)
         if: always()
         run: make gate-boundary
