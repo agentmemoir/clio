@@ -13,6 +13,16 @@ from .fingerprint import Fingerprint
 from .types import DialogueTurn, IngestResult, RetrievalResult
 
 
+class AdapterError(RuntimeError):
+    """Raised when an adapter cannot carry out an operation at all.
+
+    Distinct from the system under test declining a write on its own rules,
+    which the adapter records as `IngestResult(ok=False)`. An `AdapterError`
+    means the harness could not do what it set out to do, so a run that hits
+    one stops instead of scoring what it managed to collect.
+    """
+
+
 class MemoryBenchmarkAdapter(ABC):
     """The interface every benchmarked system adapter implements."""
 
