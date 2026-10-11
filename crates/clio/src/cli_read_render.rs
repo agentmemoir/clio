@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The per-verb text views over MCP success payloads
 //! - The per-hit score breakdown and the derived entity-match reason line
+//! - The `recall` limit line and the binding-floor reason under an empty page
 //! - The empty-recall and missing-field fallbacks
 //!
 //! ## Does not own
@@ -141,14 +142,12 @@ fn render_recall(payload: &Value, palette: Palette) -> String {
     lines.join("\n")
 }
 
-/// The tail of the warning a binding floor leaves behind when it empties the
-/// page. The empty-page view shows only these warnings: an unavailable sidecar
-/// is not an answer about the query, and naming no floor would leave the reader
-/// without the one fact that explains the empty page.
-const FLOOR_EMPTY_WARNING_MARKER: &str = "removed every retrieval candidate";
-
 /// The text for a recall that matched nothing: `no results`, plus each floor
 /// warning that names the floor that emptied the page.
+///
+/// The floor warnings are identified by the suffix their owner,
+/// `clio_retrieve::floors`, builds them with, so the two crates share one
+/// wording instead of a copied string.
 fn empty_recall_text(payload: &Value) -> String {
     let mut lines = vec!["no results".to_owned()];
     if let Some(warnings) = payload.get("warnings").and_then(Value::as_array) {
@@ -156,7 +155,7 @@ fn empty_recall_text(payload: &Value) -> String {
             warnings
                 .iter()
                 .filter_map(Value::as_str)
-                .filter(|warning| warning.contains(FLOOR_EMPTY_WARNING_MARKER))
+                .filter(|warning| warning.contains(clio_retrieve::FLOOR_BINDING_WARNING_SUFFIX))
                 .map(str::to_owned),
         );
     }

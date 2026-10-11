@@ -9,6 +9,7 @@
 //! ## Owns
 //! - Flag decoding for the core read verbs into MCP tool arguments
 //! - The `recall` score-floor, entity-inclusion, and temporal-anchor flag mapping
+//! - The `recall` binding-floor warning rewrite and the echoed effective limit
 //! - The `inspect` truncation decoration and their human text views
 //!
 //! ## Does not own
@@ -86,7 +87,7 @@ impl ReadGroup for CoreGroup {
         crate::cli_read_render::render_text(verb, payload, palette)
     }
 
-    fn decorate(&self, verb: &str, parsed: &ParsedArgs, payload: &mut Value) {
+    fn decorate(&self, verb: &str, parsed: &ParsedArgs, arguments: &Value, payload: &mut Value) {
         if verb == "inspect" {
             add_truncated(payload);
         }
@@ -97,7 +98,13 @@ impl ReadGroup for CoreGroup {
                 if let Ok(query) = one_positional(parsed, "recall", "QUERY") {
                     map.insert("query".into(), Value::from(query));
                 }
-                map.insert("limit".into(), Value::from(recall_effective_limit(parsed)));
+                // The value `build` sent, defaulted when the caller did not type
+                // `--limit`, so the echo cannot drift from the request.
+                let limit = arguments
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(clio_retrieve::DEFAULT_LIMIT as u64);
+                map.insert("limit".into(), Value::from(limit));
             }
             name_floor_warnings(payload);
         }
@@ -133,18 +140,6 @@ fn recall_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
         args.insert("entity_summary".into(), Value::Bool(true));
     }
     Ok(("retrieve", Value::Object(args)))
-}
-
-/// The limit `recall` will run with: the caller's `--limit`, else the tool's
-/// own default.
-///
-/// The flag is already validated on the build path, so an unparsable value
-/// cannot reach here; the default keeps this total regardless.
-fn recall_effective_limit(parsed: &ParsedArgs) -> u64 {
-    parsed
-        .value("limit")
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .unwrap_or(clio_retrieve::DEFAULT_LIMIT as u64)
 }
 
 /// Rewrite the tool's floor names in a `recall` payload's warnings into the

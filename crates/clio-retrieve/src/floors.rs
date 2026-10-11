@@ -236,6 +236,12 @@ pub fn final_floor_keeps(score: f64, floor: Option<f64>) -> bool {
     floor.is_none_or(|floor| score >= floor)
 }
 
+/// The tail shared by every binding-floor warning.
+///
+/// Exported so the CLI, which shows only these warnings on an empty page, keys
+/// on one wording rather than a copy of it.
+pub const FLOOR_BINDING_WARNING_SUFFIX: &str = "removed every retrieval candidate.";
+
 /// One warning per candidate floor named in `binding`, naming the floor by its
 /// wire name.
 ///
@@ -249,7 +255,7 @@ pub fn final_floor_keeps(score: f64, floor: Option<f64>) -> bool {
 pub fn binding_floor_warnings(binding: &[&str]) -> Vec<String> {
     binding
         .iter()
-        .map(|name| format!("min_scores.{name} removed every retrieval candidate."))
+        .map(|name| format!("min_scores.{name} {FLOOR_BINDING_WARNING_SUFFIX}"))
         .collect()
 }
 

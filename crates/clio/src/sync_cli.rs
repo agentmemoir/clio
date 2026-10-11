@@ -196,6 +196,9 @@ fn open_state(io: &CliIo, parsed: &ParsedArgs) -> Result<Arc<McpState>, CliError
     let options = McpOpenOptions {
         backend: resolved.backend,
         database_url: resolved.url,
+        // Sync transfer treats `--bank` as the operation's configured bank: the
+        // transfer reads or creates it directly, so it is not run through the
+        // read-side known-bank check.
         default_bank: parsed.value("bank").unwrap_or("default").to_owned(),
         default_actor: clio_types::Actor::Agent,
         shared_bank_enabled: false,

@@ -83,7 +83,11 @@ pub(crate) fn run_resolved(verb: &str, args: Vec<String>, io: &mut CliIo) -> Exi
     let options = McpOpenOptions {
         backend: resolved.backend,
         database_url: resolved.url,
-        default_bank: parsed.value("bank").unwrap_or("default").to_owned(),
+        // The runtime default is configuration, never the caller's `--bank`.
+        // The request carries `--bank` in its own arguments, and promoting it
+        // here would exempt the bank from a caller that checks it (the
+        // summarize dry-run validates the named bank).
+        default_bank: "default".to_owned(),
         default_actor: clio_types::Actor::Agent,
         // The shared surface is opt-in, mirroring `clio mcp stdio --shared-bank`;
         // without the flag the shared tools return the same Forbidden gate.

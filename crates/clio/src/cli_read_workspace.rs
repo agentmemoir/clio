@@ -70,7 +70,7 @@ impl ReadGroup for WorkspaceGroup {
         }
     }
 
-    fn decorate(&self, verb: &str, _parsed: &ParsedArgs, payload: &mut Value) {
+    fn decorate(&self, verb: &str, _parsed: &ParsedArgs, _arguments: &Value, payload: &mut Value) {
         if verb == "audit trail" {
             // Defence in depth: the tool already masks, but never let a
             // secret-looking string field leave through the audit view. The

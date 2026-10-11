@@ -88,9 +88,9 @@ pub use dedup::{
 pub use entity_summary::{EntitySummary, resolve_entity_controls, summarize_entities};
 pub use filter::{age_days, item_in_domains, item_visible_at, recency_score, system_now_iso};
 pub use floors::{
-    MAX_FLOOR, MinScores, apply_keyword_floor, apply_reranker_floor, apply_semantic_floor,
-    binding_floor_warnings, final_floor_keeps, min_scores_from_value, provenance_floor_keeps,
-    provenance_rung,
+    FLOOR_BINDING_WARNING_SUFFIX, MAX_FLOOR, MinScores, apply_keyword_floor, apply_reranker_floor,
+    apply_semantic_floor, binding_floor_warnings, final_floor_keeps, min_scores_from_value,
+    provenance_floor_keeps, provenance_rung,
 };
 pub use fusion::{
     ARM_DENSE, ARM_LEXICAL, ARM_TEMPORAL, ArmSignal, DEFAULT_RRF_K, DEFAULT_TEMPORAL_ARM_WEIGHT,
