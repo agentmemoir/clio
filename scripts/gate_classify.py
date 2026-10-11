@@ -8,6 +8,8 @@ from gate_kinds import (
     LLVM_COV_LOOKUP_KIND,
     LLVM_COV_PROBE_FLAGS,
     LLVM_COV_REPORTING_SUBCOMMANDS,
+    NEXTEST_BENCH_KIND,
+    NEXTEST_BENCH_SUBCOMMANDS,
     MAKE_KINDS,
     NEXTEST_EXECUTING_SUBCOMMANDS,
     NEXTEST_KNOWN_SUBCOMMANDS,
@@ -128,7 +130,10 @@ def command_kind(argv: list[str]) -> str:
             # for a run's verdict. A subcommand this file does not know lands
             # here too, which is the safe side: it is published under its own
             # name rather than claiming to be a test run.
-            if nextest_subcommand(argv) in NEXTEST_EXECUTING_SUBCOMMANDS:
+            subcommand = nextest_subcommand(argv)
+            if subcommand in NEXTEST_BENCH_SUBCOMMANDS:
+                return NEXTEST_BENCH_KIND
+            if subcommand in NEXTEST_EXECUTING_SUBCOMMANDS:
                 return CARGO_KINDS["nextest"]
             return NEXTEST_LOOKUP_KIND
         if argv[1] == "llvm-cov":

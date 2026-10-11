@@ -8,7 +8,14 @@ import shutil
 import sys
 from pathlib import Path
 
-from gate_kinds import COVERAGE_ARTIFACT, COVERAGE_KINDS, LOG_TAIL_LINES
+from gate_kinds import (
+    COVERAGE_ARTIFACT,
+    COVERAGE_KINDS,
+    EXECUTED_LOG_MARKER,
+    LOOKUP_KINDS,
+    LOG_TAIL_LINES,
+    REPLAYED_LOG_MARKER,
+)
 from gate_tree import cache_root, repo_key
 
 def acquire_lock(root: str) -> int:
@@ -105,10 +112,15 @@ def _prune_cache(root: str, keep: int = 50) -> None:
     repo_cache = cache_root() / repo_key(root)
     if not repo_cache.is_dir():
         return
-    metas = sorted(
-        repo_cache.glob("*/meta.json"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
-    for stale in (meta.parent for meta in metas[keep:]):
+    metas = []
+    for path in repo_cache.glob("*/meta.json"):
+        try:
+            kind = json.loads(path.read_text()).get("kind")
+        except (OSError, ValueError, AttributeError):
+            kind = None
+        metas.append((kind in LOOKUP_KINDS, -path.stat().st_mtime, path.parent))
+    metas.sort()
+    for _lookup, _newest, stale in metas[keep:]:
         shutil.rmtree(stale, ignore_errors=True)
 
 
@@ -123,7 +135,9 @@ def _print_tail(log_path: Path) -> None:
         print(f"gate| {line}")
 
 
-def _publish_log(log_path: Path, log_dir: str, kind: str, code: int) -> Path | None:
+def _publish_log(
+    log_path: Path, log_dir: str, kind: str, code: int, replayed: bool = False
+) -> Path | None:
     """Publish the newest run's log and keep the run it replaces.
 
     Three files, and only the first two existed before:
@@ -143,11 +157,7 @@ def _publish_log(log_path: Path, log_dir: str, kind: str, code: int) -> Path | N
     different. An empty one is what a shell redirect leaves behind, so it is the
     common case and not a corner: preserving it would overwrite the previous
     run's record with nothing and lose the evidence this function exists to keep.
-    Republishing identical bytes is a replay rather than a new run, and rotates
-    nothing, so a replay cannot file a copy of the current log as an earlier one.
-    Two genuinely different runs whose output happens to be identical are
-    therefore not separated; that is accepted, because inventing a false earlier
-    run is the worse error for an evidence store.
+    A replay adds an explicit marker to the published log and does not rotate `<kind>.prev`; the cached command output stays unchanged. Identical fresh logs are not separated, because inventing a false earlier run is the worse error for an evidence store.
 
     A log that cannot be read is not overwritten on the strength of a failure to
     read it: the read is guarded separately so an unreadable leftover costs the
@@ -160,14 +170,15 @@ def _publish_log(log_path: Path, log_dir: str, kind: str, code: int) -> Path | N
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{kind}.log"
         exit_file = dest_dir / f"{kind}.exit"
-        fresh = log_path.read_bytes()
+        marker = REPLAYED_LOG_MARKER if replayed else EXECUTED_LOG_MARKER
+        fresh = marker + log_path.read_bytes()
         existing = b""
         if dest.is_file():
             try:
                 existing = dest.read_bytes()
             except OSError:
                 existing = b""
-        if existing and existing != fresh:
+        if existing and existing != fresh and not replayed:
             try:
                 carried = exit_file.read_text().strip() or "unknown"
             except OSError:
@@ -193,7 +204,7 @@ def _reuse(entry: Path, meta: dict, log_dir: str) -> int:
         f"exit {code} ({meta.get('seconds', '?')}s)"
     )
     log_path = entry / meta.get("log", "log")
-    published = _publish_log(log_path, log_dir, meta["kind"], code)
+    published = _publish_log(log_path, log_dir, meta["kind"], code, replayed=True)
     print(f"gate: log: {published or log_path}")
     if code != 0:
         _print_tail(log_path)

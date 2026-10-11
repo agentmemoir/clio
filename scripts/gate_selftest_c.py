@@ -16,6 +16,7 @@ from unittest import mock
 
 from exec_tempdir import exec_tempdir
 from gate import *  # noqa: F403 - re-exports every engine name the tests reference
+from gate_kinds import EXECUTED_LOG_MARKER, REPLAYED_LOG_MARKER
 
 def state(head: str, contents=(), changed=()) -> TreeState:
     return TreeState(head, tuple(contents), tuple(changed))
@@ -129,14 +130,17 @@ class StandInTests(unittest.TestCase):
                     )
                 )
                 checks.append(
-                    ("the lookup replays itself", run_gate(lookup, log_dir=str(log_dir)) == 7 and counter.read_text().count("run") == 2)
+                    ("a lookup runs again without a cache slot", run_gate(lookup, log_dir=str(log_dir)) == 7 and counter.read_text().count("run") == 3)
                 )
                 checks.append(
-                    ("the run still replays afterwards", run_gate(run, log_dir=str(log_dir)) == 7 and counter.read_text().count("run") == 2)
+                    ("the run still replays afterwards", run_gate(run, log_dir=str(log_dir)) == 7 and counter.read_text().count("run") == 3)
                 )
+                metas = list((cache_root() / repo_key("/repo")).glob("*/meta.json"))
+                checks.append(("only the real test run has a stored verdict", len(metas) == 1))
             lookup_log = published(f"{NEXTEST_LOOKUP_KIND}.log", log_dir)
             run_log = published("test.log", log_dir)
             checks.append(("the lookup publishes under its own kind", "nextest list" in lookup_log))
+            checks.append(("the lookup log marks an executed command", lookup_log.startswith(EXECUTED_LOG_MARKER.decode())))
             checks.append(
                 (
                     "the run's verdict is not the lookup's",
@@ -190,7 +194,7 @@ class StandInTests(unittest.TestCase):
             checks.append(
                 (
                     "the published log names the package list that ran",
-                    published("test.log", log_dir).strip() == "PACKAGES=-p b",
+                    published("test.log", log_dir).endswith("PACKAGES=-p b\n"),
                 )
             )
 
@@ -245,6 +249,8 @@ class StandInTests(unittest.TestCase):
                 newest = published("command.log", log_dir)
                 newest_code = published("command.exit", log_dir)
                 replay = run_gate(cmd, log_dir=str(log_dir))
+                replay_log = published("command.log", log_dir)
+                kept_after_replay = published("command.prev", log_dir)
                 # A shell redirect truncates the published log before the command
                 # starts, which is how the empty file gets there. It must not cost
                 # the run already kept.
@@ -257,7 +263,8 @@ class StandInTests(unittest.TestCase):
                     "the run a later run replaced is still readable",
                     first == 101 and second == 0
                     and kept.splitlines()[-1:] == ["before the fix"]
-                    and newest.strip() == "after the fix",
+                    and newest.endswith("after the fix\n")
+                    and newest.startswith(EXECUTED_LOG_MARKER.decode()),
                 )
             )
             checks.append(
@@ -270,8 +277,9 @@ class StandInTests(unittest.TestCase):
                 (
                     "replaying a verdict does not invent an earlier run",
                     replay == 0
-                    and published("command.prev", log_dir).startswith("exit: 101\n")
-                    and published("command.log", log_dir).strip() == "after the fix",
+                    and kept_after_replay.startswith("exit: 101\n")
+                    and replay_log.endswith("after the fix\n")
+                    and replay_log.startswith(REPLAYED_LOG_MARKER.decode()),
                 )
             )
             checks.append(
