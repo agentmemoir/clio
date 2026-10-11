@@ -2,7 +2,8 @@
 
 The cache keeps the newest verdict per command and prunes the rest, so it cannot say
 how long anyone waited on the gate over a day. This file can. Each line records the
-worktree the gate ran in, the branch, the command, and when it started and finished.
+worktree the gate ran in, the branch, the command, when it started and finished, and whether
+a terminal was attached, which tells a run someone typed from a run a program started.
 
 A failed append prints a warning and changes nothing else: the gate's exit code is the
 command's own.
@@ -41,6 +42,13 @@ def _rev_parse(root: str, *args: str) -> str | None:
     return answer if done.returncode == 0 and answer else None
 
 
+def _terminal_attached() -> bool:
+    try:
+        return os.isatty(0)
+    except OSError:
+        return False
+
+
 def append_run(root: str, run: dict[str, Any]) -> None:
     """Append one line describing `run`, which holds kind, argv, started, finished, exit, replayed.
 
@@ -59,6 +67,7 @@ def append_run(root: str, run: dict[str, Any]) -> None:
             "exit": run["exit"],
             "argv": [str(arg)[:ARG_CHARS] for arg in run["argv"][:ARGV_KEEP]],
             "replayed": run["replayed"],
+            "interactive": _terminal_attached(),
         }
         path = cache_root() / RUNS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
