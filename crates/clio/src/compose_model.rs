@@ -123,7 +123,9 @@ fn environment_value(service: &serde_json::Value, name: &str) -> Option<String> 
 
 /// The host path behind a path inside the container: the bind mount whose
 /// target is a parent of `container`, with the remainder re-joined. That is the
-/// same join the runtime performs when it mounts the host directory.
+/// same join the runtime performs when it mounts the host directory. The target
+/// must be a whole path segment, so a mount at `/models` is not read as the
+/// parent of a file at `/models-other/x.gguf`.
 fn bind_source(service: &serde_json::Value, container: &str) -> Option<PathBuf> {
     for volume in service.get("volumes")?.as_array()? {
         if volume.get("type").and_then(serde_json::Value::as_str) != Some("bind") {
@@ -135,8 +137,11 @@ fn bind_source(service: &serde_json::Value, container: &str) -> Option<PathBuf> 
         ) else {
             continue;
         };
-        if let Some(rest) = container.strip_prefix(target) {
-            return Some(Path::new(source).join(rest.strip_prefix('/').unwrap_or(rest)));
+        let rest = container
+            .strip_prefix(target)
+            .and_then(|rest| rest.strip_prefix('/'));
+        if let Some(rest) = rest {
+            return Some(Path::new(source).join(rest));
         }
     }
     None

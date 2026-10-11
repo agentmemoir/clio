@@ -152,6 +152,34 @@ class ComposeExtractModelTests(unittest.TestCase):
         result = self.run_guard()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_a_mount_target_is_matched_as_a_whole_path_segment(self) -> None:
+        # A mount at `/models` must not be read as the parent of a file under
+        # `/models-other`, which would test a file the container never opens.
+        models = self.root / "models"
+        models.mkdir()
+        (models / "numind.gguf").write_text("decoy", encoding="utf-8")
+        other = self.root / "models-other"
+        other.mkdir()
+        (other / "numind.gguf").write_text("stub", encoding="utf-8")
+        self.engine(
+            {
+                "services": {
+                    "extract": {
+                        "environment": {"LLAMA_ARG_MODEL": "/models-other/numind.gguf"},
+                        "volumes": [
+                            {"type": "bind", "source": str(models), "target": "/models"},
+                            {"type": "bind", "source": str(other), "target": "/models-other"},
+                        ],
+                    }
+                }
+            }
+        )
+        result = self.run_guard()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (other / "numind.gguf").unlink()
+        output = self.assert_fails_with()
+        self.assertIn("models-other", output)
+
     def test_a_config_call_that_fails_is_reported(self) -> None:
         self.engine_refuses()
         result = self.run_guard()
