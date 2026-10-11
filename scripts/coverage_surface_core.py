@@ -36,11 +36,14 @@ EXIT_UNREADABLE = 3
 
 #: The gate itself. Its two command builders are where the boundary this check
 #: protects is written, and its two hygiene steps are where the boundary is used.
-RUNNER = "scripts/scoped_runner.py"
+#: The builders and the whole-workspace run are in `scoped_run.py`; the one-package
+#: run is in `scoped_package.py`, which defines no builder and is read for rule 4.
+RUNNER = "scripts/scoped_run.py"
+PACKAGE_RUNNER = "scripts/scoped_package.py"
 
 #: Files that must exist for this check to have read the whole surface. A missing
 #: one is a finding rather than a pass, for the reason rule 4 gives.
-REQUIRED = (RUNNER, MAKEFILE)
+REQUIRED = (RUNNER, PACKAGE_RUNNER, MAKEFILE)
 
 #: The two command builders. Named rather than grepped, so a Python file's prose
 #: and its own fixtures cannot read as coverage commands.
@@ -176,7 +179,7 @@ class Surface:
                     Finding(relative, invocation.line, "failure-mode", problem)
                 )
 
-    def check_runner(self, text: str) -> None:
+    def check_runner(self, path: str, text: str, builders: bool = True) -> None:
         """Read the gate's two command builders, which are Python literals.
 
         The whole-file rules cannot see them: a Python list literal has one token
@@ -195,23 +198,25 @@ class Surface:
         left the names behind in a comment. The strip blanks prose rather than
         deleting it, so a line number this check reports is the line number in the
         source.
+
+        `builders` is False for a file that runs the steps and defines no builder.
         """
         code = strip_python_prose(text)
         if code is None:
             self.unreadable.append(
-                f"{RUNNER}: this reader cannot tell its comments from its code, so a "
+                f"{path}: this reader cannot tell its comments from its code, so a "
                 "comment naming a protection would answer for one"
             )
             return
         protected = PRUNE_MARKER in code or DIRECTORY_KEY in code
         for line, rule, message in _hygiene_problem(code):
-            self.findings.append(Finding(RUNNER, line, rule, message))
-        for name, is_test in ((TEST_BUILDER, True), (REPORT_BUILDER, False)):
+            self.findings.append(Finding(path, line, rule, message))
+        for name, is_test in ((TEST_BUILDER, True), (REPORT_BUILDER, False)) if builders else ():
             found = builder_body(text, name)
             if found is None:
                 self.findings.append(
                     Finding(
-                        RUNNER,
+                        path,
                         0,
                         "boundary",
                         f"`{name}` is not defined here, so the coverage run has no "
@@ -227,20 +232,20 @@ class Surface:
             start = _cargo_index(tokens)
             if start is None or "llvm-cov" not in tokens[start + 1 :]:
                 continue
-            invocation = Invocation(RUNNER, number, tokens[start:])
+            invocation = Invocation(path, number, tokens[start:])
             self.invocations += 1
             subset = names_subset(tokens)
             if subset and not protected:
                 self.findings.append(
-                    Finding(RUNNER, number, "object-restriction", _object_problem(invocation))
+                    Finding(path, number, "object-restriction", _object_problem(invocation))
                 )
             if subset and runs_tests(tokens) and writes_report(tokens):
                 self.findings.append(
-                    Finding(RUNNER, number, "boundary", _boundary_problem(invocation))
+                    Finding(path, number, "boundary", _boundary_problem(invocation))
                 )
             problem = _report_problem(invocation)
             if writes_report(tokens) and problem is not None:
-                self.findings.append(Finding(RUNNER, number, "failure-mode", problem))
+                self.findings.append(Finding(path, number, "failure-mode", problem))
 
 
 # --- scanning -----------------------------------------------------------------
@@ -268,9 +273,10 @@ def scan(root: Path) -> Surface:
                 Finding(relative, 0, "surface", "a file this check must read is missing")
             )
 
-    runner = surface.read(RUNNER)
-    if runner is not None:
-        surface.check_runner(runner)
+    for path, builders in ((RUNNER, True), (PACKAGE_RUNNER, False)):
+        runner = surface.read(path)
+        if runner is not None:
+            surface.check_runner(path, runner, builders)
 
     # The Makefile includes `mk/*.mk`, which hold the coverage recipes now, so each is read like it.
     try:

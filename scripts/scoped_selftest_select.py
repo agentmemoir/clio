@@ -5,23 +5,17 @@ from __future__ import annotations
 import io
 import sys
 
-from scoped_runner import (
-    CoverageRow,
-    EXIT_FAIL,
-    EXIT_OK,
-    LINE_FLOOR,
+from scoped_cli import main
+from scoped_core import CoverageRow, EXIT_FAIL, EXIT_OK, LINE_FLOOR, offenders, owned
+from scoped_judge import judge, report_verdicts
+from scoped_run import run_tests
+from scoped_select import (
     changed_files,
     has_no_executable_code,
     is_judgeable,
     is_measureable,
     is_present,
-    judge,
-    main,
-    offenders,
-    owned,
     package_owners,
-    report_verdicts,
-    run_tests,
 )
 
 from scoped_selftest_support import shared as globals
