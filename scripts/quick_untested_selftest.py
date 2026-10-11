@@ -19,35 +19,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import quick  # noqa: E402
 import quick_untested as untested  # noqa: E402
-from scoped_runner import RunError  # noqa: E402
 
 PACKAGES = [{"name": "store", "dir": "crates/store"}, {"name": "app", "dir": "crates/app"}]
 
 
-def fake_git(committed: str = "", staged: str = "", unstaged: str = "", untracked: str = ""):
-    def git(*args: str) -> str:
-        if args[0] == "ls-files":
-            return untracked
-        if args[-1].endswith("..HEAD"):
-            return committed
-        return staged if args[-1] == "--cached" else unstaged
-
-    return git
-
-
 class OtherChangedTests(unittest.TestCase):
-    def test_it_reads_all_four_queries_and_drops_rust_and_markdown(self) -> None:
-        git = fake_git("Cargo.lock\na.rs\n", "sql/x.sql\nREADME.md\n", "Makefile\n", "new.json\0")
-        with mock.patch.object(untested.runner, "merge_base", return_value="abc"), mock.patch.object(
-            untested.runner, "git", side_effect=git
-        ):
+    def test_it_drops_rust_and_markdown_from_the_runners_changed_paths(self) -> None:
+        paths = ["Cargo.lock", "Makefile", "a.rs", "new.json", "README.md", "sql/x.sql"]
+        with mock.patch.object(untested.runner, "changed_paths", return_value=paths):
             self.assertEqual(untested.other_changed("b"), ["Cargo.lock", "Makefile", "new.json", "sql/x.sql"])
 
 
 class ClassifyTests(unittest.TestCase):
     def classify(self, changed: list[str], deleted=(), owners=None) -> untested.Untested:
         with mock.patch.object(untested, "other_changed", return_value=changed), mock.patch.object(
-            untested, "sql_owners", return_value=owners or []
+            untested.runner, "embedders", return_value=set(owners or [])
         ):
             return untested.classify("b", PACKAGES, list(deleted))
 
@@ -69,16 +55,6 @@ class ClassifyTests(unittest.TestCase):
     def test_a_sql_file_nothing_embeds_is_listed(self) -> None:
         found = self.classify(["sql/unused.sql"])
         self.assertEqual((found.terms, found.left_out), ([], ["sql/unused.sql"]))
-
-
-class SqlOwnersTests(unittest.TestCase):
-    def test_no_match_is_an_empty_answer_not_an_error(self) -> None:
-        with mock.patch.object(untested.runner, "git", side_effect=RunError("exit 1")):
-            self.assertEqual(untested.sql_owners("sql/x.sql", PACKAGES), [])
-
-    def test_owners_come_from_the_files_that_name_it(self) -> None:
-        with mock.patch.object(untested.runner, "git", return_value="crates/store/src/m.rs\ncrates/app/src/c.rs\n"):
-            self.assertEqual(untested.sql_owners("sql/x.sql", PACKAGES), ["app", "store"])
 
 
 class LeftOutLinesTests(unittest.TestCase):

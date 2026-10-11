@@ -2,9 +2,11 @@
 
 `scoped_runner.changed_files` keeps only `.rs` paths, so a change to `Cargo.lock`, a
 `.sql` file a crate embeds, or a deleted Rust file selected nothing, and Quick said
-"no changed Rust file" and exited 0. A reader took that for a pass. This module finds
-those files so Quick can widen to the package that owns one, or say plainly that it
-tested nothing for it.
+"no changed Rust file" and exited 0. A reader took that for a pass. This module takes the
+other changed paths from `scoped_runner.changed_paths` so Quick can widen to the package
+that owns one, or say plainly that it tested nothing for it. The scoped runner treats the
+same files as build inputs (`scoped_select.build_inputs`) and runs every package a lock
+file reaches; Quick keeps to the 60 s budget and lists those instead.
 
     in a package folder        -> the whole package (the file can change what its tests read)
     under sql/                 -> every package whose source names the file
@@ -29,25 +31,8 @@ class Untested(NamedTuple):
 
 
 def other_changed(base: str) -> list[str]:
-    """Changed paths that are neither Rust source nor Markdown: the same four git queries as
-    `scoped_runner.changed_files`, without its `.rs` filter."""
-    paths: set[str] = set()
-    sha = runner.merge_base(base)
-    if sha is not None:
-        paths.update(runner.git("diff", "--name-only", f"{sha}..HEAD").splitlines())
-    paths.update(runner.git("diff", "--name-only", "--cached").splitlines())
-    paths.update(runner.git("diff", "--name-only").splitlines())
-    paths.update(runner.git("ls-files", "--others", "--exclude-standard", "-z").split("\0"))
-    return sorted(p for p in paths if p and not p.endswith((".rs", ".md")))
-
-
-def sql_owners(rel: str, packages: Sequence[dict]) -> list[str]:
-    """Packages whose Rust source names `rel`, which they embed with `include_str!`."""
-    try:
-        found = runner.git("grep", "-l", "-F", rel, "--", "*.rs").splitlines()
-    except runner.RunError:  # git grep exits 1 when nothing matches
-        return []
-    return sorted({owner for path in found for owner in runner.package_owners(path, packages)})
+    """Changed paths that are neither Rust source nor Markdown."""
+    return [path for path in runner.changed_paths(base) if not path.endswith((".rs", ".md"))]
 
 
 def classify(base: str, packages: Sequence[dict], deleted: Sequence[str]) -> Untested:
@@ -55,7 +40,7 @@ def classify(base: str, packages: Sequence[dict], deleted: Sequence[str]) -> Unt
     notes: list[str] = []
     left_out = [f"{rel} (deleted; only CI checks what depended on it)" for rel in deleted]
     for rel in other_changed(base):
-        owners = runner.package_owners(rel, packages) or (sql_owners(rel, packages) if rel.startswith("sql/") else [])
+        owners = runner.package_owners(rel, packages) or (sorted(runner.embedders(rel, packages)) if rel.startswith("sql/") else [])
         if not owners:
             left_out.append(rel)
             continue
