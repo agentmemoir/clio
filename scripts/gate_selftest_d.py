@@ -125,14 +125,14 @@ class TimedTargetHandoffTests(unittest.TestCase):
             realdir.mkdir()
             real_marker, hook_marker = tmp / "real-calls", tmp / "hook-calls"
             stand_in = realdir / "make"
-            stand_in.write_text(f'#!/bin/sh\necho "$@" >> "{real_marker}"\nexit 0\n')
+            stand_in.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{real_marker}"\nexit 0\n')
             stand_in.chmod(0o755)
             (shimdir / "make").symlink_to(self.ROOT / "scripts" / "gate-shim")
             home = tmp / "home"
             if hook:
                 (home / ".config" / "clio").mkdir(parents=True)
                 script = home / ".config" / "clio" / "gate-hook"
-                script.write_text(f'#!/bin/sh\nshift 2\necho "$@" >> "{hook_marker}"\nexit 0\n')
+                script.write_text(f'#!/bin/sh\nshift 2\nprintf "%s\\n" "$*" >> "{hook_marker}"\nexit 0\n')
                 script.chmod(0o755)
             env = dict(
                 os.environ,
