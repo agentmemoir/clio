@@ -48,7 +48,7 @@ fn catalog_commands_bind_read_verbs_to_tools() {
     let commands = catalog()["commands"].as_array().expect("commands").clone();
     for (command, tool) in command_bindings() {
         let found = commands.iter().any(|entry| {
-            entry["command"].as_str() == Some(*command) && entry["tool"].as_str() == Some(*tool)
+            entry["command"].as_str() == Some(command) && entry["tool"].as_str() == Some(tool)
         });
         assert!(found, "missing binding {command} -> {tool}");
     }
@@ -112,8 +112,8 @@ fn the_catalog_lists_the_commands_that_bind_no_mcp_tool() {
         .clone();
     assert_eq!(commands.len(), command_bindings().len());
     for (entry, (command, tool)) in commands.iter().zip(command_bindings()) {
-        assert_eq!(entry["command"].as_str(), Some(*command));
-        assert_eq!(entry["tool"].as_str(), Some(*tool));
+        assert_eq!(entry["command"].as_str(), Some(command));
+        assert_eq!(entry["tool"].as_str(), Some(tool));
     }
 
     // Every command this surface knows is in one of the two arrays, so a verb
@@ -140,7 +140,7 @@ fn verb_help_names_each_read_verb_and_its_tool() {
     for (verb, tool) in command_bindings() {
         let (usage, bound) = verb_help(verb).unwrap_or_else(|| panic!("{verb}"));
         assert!(usage.starts_with("usage: clio "), "{verb}: {usage}");
-        assert_eq!(bound, *tool, "{verb}");
+        assert_eq!(bound, tool, "{verb}");
     }
     assert!(verb_help("bogus").is_none());
 }

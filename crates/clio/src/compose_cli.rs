@@ -98,7 +98,7 @@ fn print_help() {
     ] {
         println!(
             "{}\n{}",
-            crate::cli_help_usage::usage_line(command).unwrap_or(command),
+            crate::cli_help_usage::usage_line(command).unwrap_or_else(|| command.to_owned()),
             note
         );
     }

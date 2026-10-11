@@ -79,7 +79,7 @@ fn print_mcp_help() {
     for command in ["mcp schema-export", "mcp stdio", "mcp http"] {
         println!(
             "{}",
-            crate::cli_help_usage::usage_line(command).unwrap_or(command)
+            crate::cli_help_usage::usage_line(command).unwrap_or_else(|| command.to_owned())
         );
     }
     println!("Ask a subcommand for its flags with `clio mcp <subcommand> --help`.");
@@ -94,7 +94,7 @@ pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitC
             "{}\n\n--out FILE writes the pack to a file; --path is an accepted alias.\n\
              With neither flag the pack is written to stdout.",
             crate::cli_help_usage::usage_line("mcp schema-export")
-                .unwrap_or("clio mcp schema-export")
+                .unwrap_or_else(|| "clio mcp schema-export".to_owned())
         );
         return ExitCode::SUCCESS;
     }
@@ -170,7 +170,8 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     if wants_help(&collected) {
         println!(
             "{}\n\n{}",
-            crate::cli_help_usage::usage_line("mcp stdio").unwrap_or("clio mcp stdio"),
+            crate::cli_help_usage::usage_line("mcp stdio")
+                .unwrap_or_else(|| "clio mcp stdio".to_owned()),
             database_help_block(&|key| std::env::var(key).ok())
         );
         return ExitCode::SUCCESS;
@@ -409,7 +410,8 @@ pub(crate) fn mcp_http_help() -> String {
              Omit it (or keep a loopback bind) for the credential-free local default.
 
 {}",
-        crate::cli_help_usage::usage_line("mcp http").unwrap_or("clio mcp http"),
+        crate::cli_help_usage::usage_line("mcp http")
+            .unwrap_or_else(|| "clio mcp http".to_owned()),
         database_help_block(&|key| std::env::var(key).ok())
     )
 }

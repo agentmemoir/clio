@@ -47,7 +47,7 @@ pub(crate) fn wrapped_usage(command: &str, width: usize, lead: usize) -> Vec<Str
     let indent = " ".repeat(lead + 5 + command.len() + 1);
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
-    for unit in flag_units(usage) {
+    for unit in flag_units(&usage) {
         let candidate = if current.is_empty() {
             unit.to_owned()
         } else {

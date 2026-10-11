@@ -7,11 +7,13 @@
 //! `clio <verb> --help` and by the help catalog.
 //!
 //! ## Owns
-//! - The command → usage-line table (`VERB_USAGE`) and its lookup
+//! - The command → usage-line table (`VERB_USAGE`) for the commands not yet moved
+//!   into the command registry, and the lookup over it
 //! - `usage_line`, the one flag list every command's `--help` and the catalog read
 //!
-//! The commands that bind no MCP tool keep their lines in `cli_help_surfaces`, and
-//! `usage_line` reads both so every caller has one lookup.
+//! The registry records in `cli_command_registry` hold the moved commands; the
+//! commands that bind no MCP tool keep their lines in `cli_help_surfaces`, and
+//! `usage_line` reads all three so every caller has one lookup.
 //!
 //! ## Does not own
 //! - The command → MCP tool bindings or the `help --json` catalog (see `cli_help`)
@@ -25,7 +27,8 @@
 //!
 //! Keep this module focused on the CLI usage strings.
 
-/// Per-command usage lines (command, usage); `cli_help::verb_help` looks one up.
+/// Per-command usage lines (command, usage) for the commands still held here;
+/// `cli_help::verb_help` looks one up through `usage_for`.
 ///
 /// The lines keep the canonical long `--output` spelling. The `-o` alias is a
 /// global flag documented once in the top-level help catalog, not repeated here.
@@ -35,26 +38,6 @@
 /// maintainer who rewrites it sees no change and no diagnostic. A duplicate is
 /// merged into the entry that is reachable rather than left to rot.
 const VERB_USAGE: &[(&str, &str)] = &[
-    (
-        "recall",
-        "usage: clio recall QUERY [--bank BANK] [--limit N] [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--min-semantic N] [--min-keyword N] [--min-reranker N] [--min-final N] [--no-entities] [--entity-summary] [--output json|text]\n       a score floor is a relative filter over this query's own scores, not a calibrated relevance threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)",
-    ),
-    (
-        "get",
-        "usage: clio get ID [--snapshot|--gist] [--output json|text]",
-    ),
-    (
-        "show",
-        "usage: clio show ID [--snapshot|--gist] [--output json|text]",
-    ),
-    (
-        "inspect",
-        "usage: clio inspect [--filter JSON] [--category C] [--epistemic-kind K] [--validity V] [--time-start TS] [--time-end TS] [--limit N] [--offset N] [--include-discarded] [--output json|text]",
-    ),
-    (
-        "stats",
-        "usage: clio stats [--bank BANK] [--output json|text]",
-    ),
     (
         "task get",
         "usage: clio task get TASK_ID [--explain] [--output json|text]",
@@ -330,30 +313,40 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
 ];
 
-pub(crate) fn usage_for(verb: &str) -> Option<&'static str> {
+/// The full usage text for a verb: the registry record's `full_usage` when a
+/// record is registered, else this table's row.
+pub(crate) fn usage_for(verb: &str) -> Option<String> {
+    if let Some(spec) = crate::cli_command_registry::find(verb) {
+        return Some(spec.full_usage());
+    }
     VERB_USAGE
         .iter()
         .find(|(name, _)| *name == verb)
-        .map(|(_, usage)| *usage)
+        .map(|(_, usage)| (*usage).to_owned())
 }
 
 /// The canonical usage line for any command, with no prose and no `usage: `
 /// prefix, for the surfaces that render it on their own.
 ///
-/// Every command the catalog lists resolves here, so the catalog and each
-/// command's own `--help` read the same string. When the two were separate
-/// hand-written texts, a flag added to one was absent from the other, and a
-/// belief write needed `--source-type` that the catalog never showed.
+/// A registry record answers first, then the reserved surfaces, then this
+/// table's rows. Every command the catalog lists resolves here, so the catalog
+/// and each command's own `--help` read the same string. When the two were
+/// separate hand-written texts, a flag added to one was absent from the other,
+/// and a belief write needed `--source-type` that the catalog never showed.
 ///
-/// A command with no entry here returns `None`, which the catalog renders as an
-/// explicit "no usage line registered" marker rather than as a silent omission.
-pub(crate) fn usage_line(command: &str) -> Option<&'static str> {
+/// A command with no entry in any of the three returns `None`, which the catalog
+/// renders as an explicit "no usage line registered" marker rather than as a
+/// silent omission.
+pub(crate) fn usage_line(command: &str) -> Option<String> {
+    if let Some(spec) = crate::cli_command_registry::find(command) {
+        return Some(spec.usage_line());
+    }
     if let Some(line) = crate::cli_help_surfaces::surface_usage_line(command) {
-        return Some(line);
+        return Some(line.to_owned());
     }
     let usage = usage_for(command)?;
     let first = usage.lines().next()?;
-    first.strip_prefix("usage: ")
+    first.strip_prefix("usage: ").map(str::to_owned)
 }
 
 #[cfg(test)]

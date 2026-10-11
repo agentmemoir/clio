@@ -89,7 +89,7 @@ pub(crate) fn help_topic(args: &[String]) -> Result<Option<(String, Vec<String>)
 pub(crate) fn print_version_help() -> ExitCode {
     println!(
         "{}\n\nPrints the package name and version. Takes no flags.",
-        cli_help_usage::usage_line("version").unwrap_or("clio version")
+        cli_help_usage::usage_line("version").unwrap_or_else(|| "clio version".to_owned())
     );
     ExitCode::SUCCESS
 }
@@ -99,7 +99,7 @@ pub(crate) fn print_health_help() -> ExitCode {
     println!(
         "{}\n\nPrints the machine-readable health JSON: name and version only.\n\
          It opens no database and checks no service.",
-        cli_help_usage::usage_line("health").unwrap_or("clio health")
+        cli_help_usage::usage_line("health").unwrap_or_else(|| "clio health".to_owned())
     );
     ExitCode::SUCCESS
 }
@@ -226,16 +226,20 @@ fn insert_known(
 fn accepted_by_surface(name: &str, known: &[&str]) -> bool {
     name == "help"
         || known.contains(&name)
-        || crate::cli_args::GLOBAL_VALUE_FLAGS.contains(&name)
-        || crate::cli_args::GLOBAL_BOOL_FLAGS.contains(&name)
+        || crate::cli_command_registry::global_value_names().any(|flag| flag == name)
+        || crate::cli_command_registry::global_bool_names().any(|flag| flag == name)
 }
 
 /// The flags a suggestion may name: the surface's own, then the globals and
 /// `help`, which it also accepts.
 fn suggestion_candidates<'a>(known: &'a [&'a str]) -> Vec<&'a str> {
     let mut candidates: Vec<&'a str> = known.to_vec();
-    candidates.extend_from_slice(crate::cli_args::GLOBAL_VALUE_FLAGS);
-    candidates.extend_from_slice(crate::cli_args::GLOBAL_BOOL_FLAGS);
+    for name in crate::cli_command_registry::global_value_names() {
+        candidates.push(name);
+    }
+    for name in crate::cli_command_registry::global_bool_names() {
+        candidates.push(name);
+    }
     candidates.push("help");
     candidates
 }

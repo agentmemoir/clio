@@ -147,74 +147,78 @@ pub(crate) fn known_commands() -> Vec<&'static str> {
     all
 }
 
+/// The CLI command → MCP tool bindings not yet held in the command registry,
+/// in whole-catalog order. Two-token commands use a space-separated key.
+const STATIC_BINDINGS: &[(&str, &str)] = &[
+    ("remember", "store"),
+    ("admit", "admit_preview"),
+    ("summarize", "summarize"),
+    ("consolidate", "consolidate"),
+    ("update", "update"),
+    ("invalidate", "invalidate"),
+    ("discard", "discard"),
+    ("correct", "correct"),
+    ("task get", "task_get"),
+    ("task history", "task_history"),
+    ("failure list", "failures_for_task"),
+    ("memtree query", "memtree_query"),
+    ("memtree get", "memtree_get"),
+    ("history temporal", "temporal_history"),
+    ("triple query", "triple_query"),
+    ("triple add", "triple_add"),
+    ("triple end", "triple_end"),
+    ("belief history", "belief_history"),
+    ("belief observe", "belief_observe"),
+    ("graph query", "graph_query"),
+    ("graph link", "graph_link"),
+    ("associations", "associations"),
+    ("persona get", "persona_get"),
+    ("persona stable", "persona_put_stable"),
+    ("persona observe", "persona_observe_preference"),
+    ("task upsert", "task_upsert"),
+    ("failure record", "failure_record"),
+    ("scratchpad write", "scratchpad_write"),
+    ("scratchpad read", "scratchpad_read"),
+    ("scratchpad clear", "scratchpad_clear"),
+    ("canonical put", "canonical_put"),
+    ("canonical get", "canonical_get"),
+    ("shared store", "shared_store"),
+    ("shared retrieve", "shared_retrieve"),
+    ("shared discard", "shared_discard"),
+    ("validate", "validate"),
+    ("batch", "batch"),
+    ("maintenance status", "maintenance_status"),
+    ("intent gate", "intent_gate"),
+    ("compose-context", "compose_context"),
+    ("audit trail", "audit_trail"),
+    ("hygiene audit", "hygiene_audit"),
+    ("hygiene clean", "hygiene_clean"),
+    ("hygiene log", "hygiene_log_list"),
+    ("export", "export"),
+    ("import", "import"),
+    ("erase", "erase_request"),
+    ("config get", "config_get"),
+    ("config set", "config_set"),
+    ("config profiles", "config_profiles"),
+    ("config use", "config_profile_apply"),
+    ("ranking get", "ranking_env_get"),
+    ("ranking set", "ranking_env_set"),
+    ("sync status", "sync_status"),
+    ("sync push", "sync_push"),
+    ("sync pull", "sync_pull"),
+    ("sync serve", "sync_serve"),
+    ("sync key status", "sync_key_status"),
+];
+
 /// The CLI command → MCP tool binding, so a command never silently drifts from
-/// its tool. Two-token commands use a space-separated key.
-pub(crate) fn command_bindings() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("recall", "retrieve"),
-        ("get", "get"),
-        ("show", "get"),
-        ("inspect", "inspect"),
-        ("stats", "stats"),
-        ("remember", "store"),
-        ("admit", "admit_preview"),
-        ("summarize", "summarize"),
-        ("consolidate", "consolidate"),
-        ("update", "update"),
-        ("invalidate", "invalidate"),
-        ("discard", "discard"),
-        ("correct", "correct"),
-        ("task get", "task_get"),
-        ("task history", "task_history"),
-        ("failure list", "failures_for_task"),
-        ("memtree query", "memtree_query"),
-        ("memtree get", "memtree_get"),
-        ("history temporal", "temporal_history"),
-        ("triple query", "triple_query"),
-        ("triple add", "triple_add"),
-        ("triple end", "triple_end"),
-        ("belief history", "belief_history"),
-        ("belief observe", "belief_observe"),
-        ("graph query", "graph_query"),
-        ("graph link", "graph_link"),
-        ("associations", "associations"),
-        ("persona get", "persona_get"),
-        ("persona stable", "persona_put_stable"),
-        ("persona observe", "persona_observe_preference"),
-        ("task upsert", "task_upsert"),
-        ("failure record", "failure_record"),
-        ("scratchpad write", "scratchpad_write"),
-        ("scratchpad read", "scratchpad_read"),
-        ("scratchpad clear", "scratchpad_clear"),
-        ("canonical put", "canonical_put"),
-        ("canonical get", "canonical_get"),
-        ("shared store", "shared_store"),
-        ("shared retrieve", "shared_retrieve"),
-        ("shared discard", "shared_discard"),
-        ("validate", "validate"),
-        ("batch", "batch"),
-        ("maintenance status", "maintenance_status"),
-        ("intent gate", "intent_gate"),
-        ("compose-context", "compose_context"),
-        ("audit trail", "audit_trail"),
-        ("hygiene audit", "hygiene_audit"),
-        ("hygiene clean", "hygiene_clean"),
-        ("hygiene log", "hygiene_log_list"),
-        ("export", "export"),
-        ("import", "import"),
-        ("erase", "erase_request"),
-        ("config get", "config_get"),
-        ("config set", "config_set"),
-        ("config profiles", "config_profiles"),
-        ("config use", "config_profile_apply"),
-        ("ranking get", "ranking_env_get"),
-        ("ranking set", "ranking_env_set"),
-        ("sync status", "sync_status"),
-        ("sync push", "sync_push"),
-        ("sync pull", "sync_pull"),
-        ("sync serve", "sync_serve"),
-        ("sync key status", "sync_key_status"),
-    ]
+/// its tool: the registry records with a bound tool first, in registry order,
+/// then the rows still held statically.
+pub(crate) fn command_bindings() -> Vec<(&'static str, &'static str)> {
+    let mut bindings: Vec<(&'static str, &'static str)> = crate::cli_command_registry::all()
+        .filter_map(|spec| spec.tool.map(|tool| (spec.name, tool)))
+        .collect();
+    bindings.extend_from_slice(STATIC_BINDINGS);
+    bindings
 }
 
 /// Whether the CLI accepts `name` as a command, as `group subcommand`, or as
@@ -384,7 +388,7 @@ pub(crate) fn commands_without_tools() -> Vec<String> {
 ///
 /// Returns `None` for a command this surface does not own, so an unknown
 /// command's `--help` still fails as an unknown command rather than printing help.
-pub(crate) fn verb_help(verb: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn verb_help(verb: &str) -> Option<(String, &'static str)> {
     let tool = bound_tool(verb)?;
     let usage = crate::cli_help_usage::usage_for(verb)?;
     Some((usage, tool))

@@ -7,31 +7,36 @@
 //! command, carrying the command's flags and a short description.
 //!
 //! ## Owns
-//! - The catalog's command list and each command's description
+//! - The catalog's ordered rows for the commands without a registry record, and
+//!   the seam where the registry's records are interpolated
 //! - The renderer that lays an entry out: wrapped usage line, tool arrow, note
 //!
 //! ## Does not own
 //! - The usage lines themselves (see `cli_help_usage`), which every command's own
 //!   `--help` also reads
+//! - A registered command's name, summary, or flags (see `cli_command_registry`)
 //! - The help layout around the catalog (see the binary `help_text`)
 //! - The machine-readable `help --json` catalog and the command suggestions
 //!   (see `cli_help`)
 //!
 //! ## Boundary
 //!
-//! Changes to what a command is called or described should normally require changes
-//! here. Adding or renaming a flag should not: the flag list is rendered from the
-//! usage registry, so a flag added there appears here with no edit.
+//! Changes to an unregistered command's catalog row should normally require changes
+//! here. A registered command's row should not: it is rendered from its record.
+//! Adding or renaming a flag should not require changes here either: the flag list
+//! is rendered from the usage registry, so a flag added there appears here with no
+//! edit.
 //!
 //! Keep this module focused on the catalog text itself.
 
-/// One catalog entry: the command, and what it is for.
+/// The catalog rows before the registry's records: one row per command, and what
+/// it is for.
 ///
 /// The flags are deliberately absent. They come from [`crate::cli_help_usage`],
 /// which is also where each command's own `--help` reads them. Two hand-written
 /// lists of the same flags is how 159 flags came to exist in a command's help and
 /// nowhere in the catalog, including `--source-type`, which a belief write needs.
-const ENTRIES: &[(&str, &str)] = &[
+const ENTRIES_BEFORE: &[(&str, &str)] = &[
     ("version", "Print package identity"),
     ("health", "Machine-readable health/version JSON"),
     (
@@ -85,17 +90,13 @@ const ENTRIES: &[(&str, &str)] = &[
         "retention set",
         "Store a validated retention profile (persists to --profiles/env)",
     ),
-    (
-        "recall",
-        "score floors are relative filters over this query's own scores, not calibrated thresholds",
-    ),
-    ("get", "fetch one memory by id"),
-    ("show", "alias of `get`"),
-    ("inspect", "metadata-only listing, no decrypted body"),
-    (
-        "stats",
-        "count memories, entities, and index state in one bank",
-    ),
+];
+
+/// The catalog rows after the registry's records.
+///
+/// [`catalog_rows`] walks this block after the records, so the two blocks and the
+/// records between them read as the one list the catalog used to hold.
+const ENTRIES_AFTER: &[(&str, &str)] = &[
     ("task get", "one task and its current state"),
     ("task history", "a task's recorded transitions"),
     ("failure list", "failures recorded against one task"),
@@ -260,13 +261,27 @@ const ENTRIES: &[(&str, &str)] = &[
     ),
 ];
 
+/// Every catalog row in whole-catalog order: the authored rows before the
+/// registry's records, each record's name with its summary, then the authored
+/// rows after it.
+///
+/// The seam between the two blocks is where the registry's records sit, so the
+/// rendered catalog keeps its one order.
+fn catalog_rows() -> impl Iterator<Item = (&'static str, &'static str)> {
+    ENTRIES_BEFORE
+        .iter()
+        .copied()
+        .chain(crate::cli_command_registry::all().map(|spec| (spec.name, spec.summary)))
+        .chain(ENTRIES_AFTER.iter().copied())
+}
+
 /// Every command the catalog lists, in the order it lists them.
 ///
 /// The help catalog and the tests that check the flag lists agree because both
 /// read this one list.
 #[cfg(test)]
 pub(crate) fn catalog_commands() -> impl Iterator<Item = &'static str> {
-    ENTRIES.iter().map(|(command, _)| *command)
+    catalog_rows().map(|(command, _)| command)
 }
 
 /// The catalog text `clio help` prints under its `Usage:` heading.
@@ -278,7 +293,7 @@ pub(crate) fn catalog_commands() -> impl Iterator<Item = &'static str> {
 /// flags" and is believed.
 pub(crate) fn catalog_text() -> String {
     let mut out = String::new();
-    for (command, note) in ENTRIES {
+    for (command, note) in catalog_rows() {
         let mut usage = crate::cli_help_surfaces::wrapped_usage(command, USAGE_WIDTH, LEAD);
         if let Some(last) = usage.last_mut()
             && let Some(tool) = crate::cli_help::bound_tool_name(command)

@@ -409,9 +409,9 @@ fn print_help(verb: Verb) {
 /// help lists every supported harness, and an Antigravity user needs to know
 /// which file received the entry.
 fn help_text(verb: Verb) -> String {
-    let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or(match verb {
-        Verb::Install => "clio install --harness <name>",
-        Verb::Uninstall => "clio uninstall --harness <name>",
+    let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or_else(|| match verb {
+        Verb::Install => "clio install --harness <name>".to_owned(),
+        Verb::Uninstall => "clio uninstall --harness <name>".to_owned(),
     });
     let mut text = format!(
         "{usage}\n\n{}\n\n{}\n\nExample: clio {} --harness claude",

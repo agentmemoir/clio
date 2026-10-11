@@ -30,7 +30,6 @@
 use std::collections::BTreeSet;
 
 use super::{VERB_USAGE, usage_for};
-use crate::cli_args;
 use crate::cli_help;
 use crate::cli_help_usage;
 use crate::help_flags_test_support::flags_in;
@@ -65,8 +64,29 @@ fn a_verb_in_the_table_resolves_through_the_lookup() {
     for (verb, usage) in VERB_USAGE {
         assert_eq!(
             usage_for(verb),
-            Some(*usage),
+            Some((*usage).to_owned()),
             "{verb} is in the table but the lookup does not return its text"
+        );
+    }
+}
+
+/// The five moved commands answer through their registry records, which is what
+/// makes the table's rows deletable: the lookup reads the record first, so a
+/// command that left the table must still resolve to the same text.
+#[test]
+fn a_registered_command_resolves_through_the_lookup() {
+    for spec in crate::cli_command_registry::all() {
+        assert_eq!(
+            usage_for(spec.name),
+            Some(spec.full_usage()),
+            "{} is registered but the lookup does not return its record text",
+            spec.name
+        );
+        assert_eq!(
+            cli_help_usage::usage_line(spec.name),
+            Some(spec.usage_line()),
+            "{} is registered but its usage line does not resolve",
+            spec.name
         );
     }
 }
@@ -129,12 +149,13 @@ fn a_flag_a_usage_line_names_is_one_the_parser_accepts() {
             .value_flags()
             .iter()
             .chain(spec.bool_flags().iter())
-            .chain(cli_args::GLOBAL_VALUE_FLAGS.iter())
-            .chain(cli_args::GLOBAL_BOOL_FLAGS.iter())
+            .copied()
+            .chain(crate::cli_command_registry::global_value_names())
+            .chain(crate::cli_command_registry::global_bool_names())
             .map(|name| format!("--{name}"))
             .collect();
         accepted.sort();
-        for flag in flags_in(usage) {
+        for flag in flags_in(&usage) {
             if !accepted.contains(&flag) {
                 wrong.push(format!(
                     "`clio {verb}` names {flag}, which its parser refuses"

@@ -31,10 +31,6 @@
 use crate::cli_error::CliError;
 use std::collections::{HashMap, HashSet};
 
-/// Value-taking global flags, accepted before or after the verb.
-pub(crate) const GLOBAL_VALUE_FLAGS: &[&str] = &["db", "backend", "bank", "actor", "output"];
-/// Boolean global flags (never consume a following token).
-pub(crate) const GLOBAL_BOOL_FLAGS: &[&str] = &["no-input", "yes"];
 /// Value flags whose value is a timestamp, on every verb. Checked here, so a
 /// value the store cannot read is refused before any verb stores or filters by it.
 const TIMESTAMP_VALUE_FLAGS: &[&str] = &[
@@ -56,8 +52,9 @@ pub(crate) struct FlagSpec {
 impl FlagSpec {
     /// Build a spec from a command's value flags and boolean flags; globals are
     /// merged in, de-duplicated.
-    pub(crate) fn new(value: &'static [&'static str], boolean: &'static [&'static str]) -> Self {
-        let mut all_value = GLOBAL_VALUE_FLAGS.to_vec();
+    pub(crate) fn new(value: &[&'static str], boolean: &[&'static str]) -> Self {
+        let mut all_value: Vec<&'static str> =
+            crate::cli_command_registry::global_value_names().collect();
         for flag in value {
             if !all_value.contains(flag) {
                 all_value.push(flag);
@@ -66,7 +63,8 @@ impl FlagSpec {
         Self {
             value: all_value,
             boolean: {
-                let mut all_boolean = GLOBAL_BOOL_FLAGS.to_vec();
+                let mut all_boolean: Vec<&'static str> =
+                    crate::cli_command_registry::global_bool_names().collect();
                 for flag in boolean {
                     if !all_boolean.contains(flag) {
                         all_boolean.push(flag);
@@ -82,7 +80,7 @@ impl FlagSpec {
     /// and read back with `ParsedArgs::values_of` instead of the last one
     /// winning. A repeatable flag is parsed as a value flag by every other
     /// rule (unknown-flag checks, missing-value errors).
-    pub(crate) fn repeating(mut self, flags: &'static [&'static str]) -> Self {
+    pub(crate) fn repeating(mut self, flags: &[&'static str]) -> Self {
         self.repeat.extend_from_slice(flags);
         self
     }
@@ -327,12 +325,12 @@ pub(crate) fn split_leading_globals(args: &[String]) -> (Vec<String>, Vec<String
         } else {
             break;
         };
-        if GLOBAL_BOOL_FLAGS.contains(&name) && !inline {
+        if crate::cli_command_registry::global_bool_names().any(|flag| flag == name) && !inline {
             globals.push(token.clone());
             index += 1;
             continue;
         }
-        if GLOBAL_VALUE_FLAGS.contains(&name) {
+        if crate::cli_command_registry::global_value_names().any(|flag| flag == name) {
             globals.push(token.clone());
             index += 1;
             // A following flag token is not a value: leave it for the next

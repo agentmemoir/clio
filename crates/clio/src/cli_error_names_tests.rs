@@ -159,7 +159,7 @@ fn every_tool_prefix_is_a_real_tool() {
 fn all_flag_names() -> Vec<String> {
     let mut names: Vec<String> = crate::command_catalog::catalog_commands()
         .filter_map(crate::cli_help_usage::usage_line)
-        .flat_map(crate::help_flags_test_support::flags_in)
+        .flat_map(|usage| crate::help_flags_test_support::flags_in(&usage))
         .collect();
     names.sort();
     names.dedup();

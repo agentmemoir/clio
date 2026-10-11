@@ -171,8 +171,8 @@ fn help_if_requested(verb: &str, parsed: &ParsedArgs, io: &mut CliIo) -> Option<
     if !parsed.has("help") {
         return None;
     }
-    let usage = crate::cli_help_usage::usage_for(verb).unwrap_or(TOKEN_HELP);
-    let _ = cli_output::write_text(&mut io.out, usage);
+    let usage = crate::cli_help_usage::usage_for(verb).unwrap_or_else(|| TOKEN_HELP.to_owned());
+    let _ = cli_output::write_text(&mut io.out, &usage);
     Some(ExitCode::from(EXIT_OK))
 }
 
