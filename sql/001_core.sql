@@ -787,3 +787,54 @@ CREATE TABLE IF NOT EXISTS distill_intents
   revision_item_id                                                                             text NOT NULL,
   PRIMARY KEY (bank_id, hub_id)
 );
+
+INSERT INTO banks (id, created_at, updated_at)
+SELECT bank_id, MIN(created_at), MAX(updated_at)
+FROM items
+GROUP BY bank_id
+ON CONFLICT (id) DO NOTHING;
+
+-- Backfill legacy banks from every durable bank-scoped table once. New rows use
+-- backend triggers so their catalog insert shares their data transaction.
+INSERT INTO banks (id, created_at, updated_at)
+SELECT bank_id, '1970-01-01T00:00:00Z', NULL
+FROM (
+  SELECT bank_id FROM attribute_schemas
+  UNION SELECT bank_id FROM continuous_state
+  UNION SELECT bank_id FROM continuous_observations
+  UNION SELECT bank_id FROM items
+  UNION SELECT bank_id FROM index_pending
+  UNION SELECT bank_id FROM triples
+  UNION SELECT bank_id FROM task_records
+  UNION SELECT bank_id FROM failure_records
+  UNION SELECT bank_id FROM beliefs
+  UNION SELECT bank_id FROM persona_stable_entries
+  UNION SELECT bank_id FROM persona_preferences
+  UNION SELECT bank_id FROM tasks
+  UNION SELECT bank_id FROM failures
+  UNION SELECT bank_id FROM memtree_nodes
+  UNION SELECT bank_id FROM assoc_edges
+  UNION SELECT bank_id FROM audit_events
+  UNION SELECT bank_id FROM hygiene_audit_logs
+  UNION SELECT bank_id FROM tombstones
+  UNION SELECT bank_id FROM compliance_tombstones
+  UNION SELECT bank_id FROM sync_cursors
+  UNION SELECT bank_id FROM sync_mutations
+  UNION SELECT bank_id FROM sync_conflicts
+  UNION SELECT bank_id FROM sync_dead_letter
+  UNION SELECT bank_id FROM persona_erase_tombstones
+  UNION SELECT bank_id FROM distilled_units
+  UNION SELECT bank_id FROM distill_intents
+) AS durable_bank_ids
+WHERE NOT EXISTS
+(
+  SELECT 1
+  FROM schema_settings
+  WHERE key = 'bank_catalog_backfilled'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO schema_settings (key, value, created_at, updated_at)
+VALUES
+  ('bank_catalog_backfilled', '1', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z')
+ON CONFLICT (key) DO NOTHING;

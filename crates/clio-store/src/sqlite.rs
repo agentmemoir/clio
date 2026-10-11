@@ -126,6 +126,7 @@ impl SqliteStore {
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;
         conn.execute_batch(SQL_VECTORS_SQLITE)
             .map_err(crate::migrate::sqlite_vec_missing)?;
+        crate::bank_registration::install_sqlite_triggers(&conn)?;
         let _version: String = conn
             .query_row("SELECT vec_version()", [], |r| r.get(0))
             .map_err(crate::migrate::sqlite_vec_missing)?;

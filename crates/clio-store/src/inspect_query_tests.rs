@@ -35,8 +35,28 @@ fn compile_orders_predicates_and_binds_values() {
     );
     assert_eq!(
         compiled.params,
-        ["bank-a", "persona", "fact", "2024-01-01", "2024-12-31"]
+        ["bank-a", "persona", "fact", "2024-01-01", "2025-01-01"]
     );
+}
+
+#[test]
+fn compile_keeps_timestamp_end_inclusive() {
+    let mut filter = ItemInspectFilter::new("bank-a");
+    filter.time_end = Some("2024-12-31T23:00:00Z".into());
+    let compiled = compile_inspect(&filter, '?').expect("compile");
+    assert_eq!(
+        compiled.where_sql,
+        "bank_id = ?1 AND created_at <= ?2 AND discarded_at IS NULL"
+    );
+    assert_eq!(compiled.params, ["bank-a", "2024-12-31T23:00:00Z"]);
+}
+
+#[test]
+fn compile_advances_a_leap_day_bound_to_the_next_date() {
+    let mut filter = ItemInspectFilter::new("bank-a");
+    filter.time_end = Some("2024-02-29".into());
+    let compiled = compile_inspect(&filter, '?').expect("compile");
+    assert_eq!(compiled.params, ["bank-a", "2024-03-01"]);
 }
 
 #[test]
