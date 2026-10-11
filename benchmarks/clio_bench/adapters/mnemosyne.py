@@ -60,7 +60,7 @@ from ..fingerprint import (
 from ..packing import pack_context
 from ..tokenizer import ReferenceTokenizer
 from ..types import (
-    REFUSAL_ADMISSION,
+    REFUSAL_FILTERED,
     DialogueTurn,
     IngestResult,
     RetrievalResult,
@@ -253,9 +253,17 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
     def ingest(self, session_id: str, turn: DialogueTurn) -> IngestResult:
         """Store one dialogue turn through ``mnemosyne store``.
 
-        The system can decline a write on its own admission rules and reports
-        that by printing no id. That is a normal, recorded outcome
-        (``ok=False``), not a harness failure.
+        The system can decline a write, and reports that by printing no id and
+        exiting zero. That is a normal, recorded outcome (``ok=False``), not a
+        harness failure.
+
+        The decline is recorded as `REFUSAL_FILTERED` because that is what it
+        is: `Mnemosyne.remember` returns `None` when the core write classifier
+        rejects the content as a noise pattern or a secret, and the CLI prints
+        that `None` as the id. Verified against mnemosyne-memory 3.15.1, whose
+        `MNEMOSYNE_WRITE_CLASSIFIER=strict` mode declines a secret-shaped turn.
+        It is not an admission or importance decision, so naming it one would
+        relabel the system's own filtering as a gate refusal.
         """
         start = time.monotonic()
         stdout = self._run(
@@ -274,7 +282,7 @@ class MnemosyneAdapter(MemoryBenchmarkAdapter):
             latency_ms=latency_ms,
             tokens_processed=self._tokenizer.count(turn.text),
             error=None if ok else "mnemosyne declined to store the turn",
-            refusal=None if ok else REFUSAL_ADMISSION,
+            refusal=None if ok else REFUSAL_FILTERED,
         )
 
     def retrieve(
