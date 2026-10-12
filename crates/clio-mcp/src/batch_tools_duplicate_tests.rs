@@ -51,6 +51,37 @@ fn allow_duplicate_waives_the_in_batch_duplicate_gate() {
 }
 
 #[test]
+fn the_same_text_in_two_banks_commits_in_both() {
+    let s = state();
+    let op = |id: &str, bank: &str| {
+        json!({
+            "tool": "store",
+            "params": {
+                "item": {
+                    "id": id,
+                    "subject_id": format!("subj-{id}"),
+                    "gist": "shared text across banks",
+                    "snapshot": {"entity": "x", "amount": 1, "date": "2024-01-01"}
+                },
+                "category": "persona",
+                "epistemic_kind": "fact",
+                "source_text": "x (1 note since 2024-01-01).",
+                "bank": bank,
+                "actor": "agent"
+            }
+        })
+    };
+    let out = batch(
+        &s,
+        json!([op("itm-bank-a", "bank-a"), op("itm-bank-b", "bank-b")]),
+        false,
+    );
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(count_bank(&s, "bank-a"), 1, "a duplicate is bank-scoped");
+    assert_eq!(count_bank(&s, "bank-b"), 1);
+}
+
+#[test]
 fn a_duplicate_of_a_preexisting_row_still_aborts() {
     let s = state();
     let seeded = batch(&s, json!([store_op("itm-seed", "seed")]), false);
