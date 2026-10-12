@@ -25,6 +25,11 @@
 # 674 s to 991 s, and the plain and instrumented runs were 533 s to 832 s of
 # that. Running them at the same time removes the shorter run from the
 # critical path; it pays a second runner and a second cache restore per run.
+#
+# The pinned MCP conformance suite is a workflow of its own,
+# `.github/workflows/mcp-conformance.yml`, gated by a path filter instead of by a
+# step here that asks git what changed. Keeping it out of this file is also what
+# keeps this file inside the size its own rules expect.
 name: CI
 
 on:
@@ -162,10 +167,12 @@ jobs:
         with:
           tool: nextest
 
-      # The scoped runner cleans profile buffers through `cargo llvm-cov`, so
-      # this job needs the tool even though it never judges coverage: a change
-      # carrying build inputs (fixtures, lock files, manifests) takes the path
-      # that cleans, and without the tool that path fails every such change.
+      # The runner cleans profile buffers through `cargo llvm-cov`, and the gate's
+      # self-test carries a check group that reads the installed tool and skips
+      # itself when the tool is absent. This job needs it even though it judges no
+      # coverage: without it a cleaning path failed with `error: no such command:
+      # llvm-cov`, which reads as a defect in the change rather than a missing
+      # tool, and one check group skipped under a green run.
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
@@ -394,73 +401,4 @@ jobs:
       - name: Out-of-memory check
         if: failure()
         run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
-
-  mcp-conformance-2025-11-25:
-    name: MCP conformance (2025-11-25 pin)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: clio
-          POSTGRES_PASSWORD: clio
-          POSTGRES_DB: clio
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U clio -d clio"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      # Full history, for the same reason as the check job: the path test below
-      # asks git for the diff and a depth-1 clone cannot produce one.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # The same pin the check job uses. Two jobs on different compilers would
-      # give two different answers about the same tree.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      # Same base resolution as the check job, and for the same reason: a
-      # detached checkout has no local base branch, so the bare name does not
-      # resolve.
-      - name: Resolve the diff base
-        run: |
-          if [ -n "${GITHUB_BASE_REF:-}" ]; then
-            echo "SCOPED_BASE=origin/$GITHUB_BASE_REF" >> "$GITHUB_ENV"
-          else
-            echo "SCOPED_BASE=HEAD~1" >> "$GITHUB_ENV"
-          fi
-
-      # This job is one pinned conformance suite for one crate. It used to run on
-      # every push regardless of the diff, which is the full-suite cost this
-      # workflow removed: a change to `crates/clio-config` paid for `clio-mcp`'s
-      # entire test suite to prove nothing about `clio-config`. It now runs when
-      # the change touches `clio-mcp` or the workspace manifest, and says so when
-      # it does not, so the skipped state is visible in the log rather than
-      # looking like a pass.
-      - name: Decide whether the change touches clio-mcp
-        id: scope
-        run: |
-          if git diff --name-only "$SCOPED_BASE"..HEAD -- crates/clio-mcp Cargo.toml Cargo.lock \
-             | grep -q .; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "change touches clio-mcp; the pinned conformance suite runs"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "change does not touch clio-mcp; the pinned conformance suite is skipped"
-          fi
-
-      - name: Run MCP schema, unit, and conformance tests (pinned 2025-11-25)
-        if: steps.scope.outputs.run == 'true'
-        run: cargo test -p clio-mcp --locked
 

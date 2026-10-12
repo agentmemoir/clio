@@ -1,0 +1,70 @@
+# The one pinned MCP conformance suite, in a workflow of its own.
+#
+# It used to be a job inside `ci.yml`, gated by a step that asked git whether the
+# change touched `clio-mcp` or the workspace manifest. The trigger filter below
+# asks the same question before the job is scheduled, so that step and its diff
+# resolution are gone with it.
+#
+# The path list is this workflow's own subject - `clio-mcp` and the manifest that
+# can change what it compiles - and is deliberately not a copy of `ci.yml`'s wider
+# filter, so the two lists cannot drift apart into a claim about each other.
+name: MCP conformance
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'crates/clio-mcp/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/mcp-conformance.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'crates/clio-mcp/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/mcp-conformance.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  CLIO_DATABASE_URL: postgres://clio:clio@127.0.0.1:5432/clio
+  # The same cap the jobs in ci.yml use, so this suite cannot outgrow a small
+  # runner either.
+  CARGO_BUILD_JOBS: "1"
+
+jobs:
+  mcp-conformance-2025-11-25:
+    name: MCP conformance (2025-11-25 pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: clio
+          POSTGRES_PASSWORD: clio
+          POSTGRES_DB: clio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clio -d clio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      # No diff is asked for here any more, so the default shallow clone is enough.
+      - uses: actions/checkout@v4
+
+      # The same pin the other jobs use. Two jobs on different compilers would give
+      # two different answers about the same tree.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run MCP schema, unit, and conformance tests (pinned 2025-11-25)
+        run: cargo test -p clio-mcp --locked

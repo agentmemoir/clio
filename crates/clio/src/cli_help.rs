@@ -11,7 +11,8 @@
 //! - The CLI command → MCP tool binding lookup `command_bindings` (including
 //!   two-token groups), answered in the global order `cli_command_bindings`
 //!   holds
-//! - `help --json` catalog assembly from `clio_mcp::schema::schema_pack()`
+//! - `help --json` catalog assembly from `clio_mcp::schema::schema_pack()`,
+//!   with the document's shape in the `catalog` submodule
 //! - The commands the CLI accepts that bind no MCP tool, and so are listed in
 //!   the catalog separately from the binding table
 //! - Unknown-command/subcommand suggestion and per-command usage lookup
@@ -19,6 +20,8 @@
 //!
 //! ## Does not own
 //! - The binding table's global order (see `cli_command_bindings`)
+//! - The catalog document's field serialization, derived groups, and CLI
+//!   metadata hash (see the `catalog` submodule)
 //! - The top-level human help layout (see the binary's `print_help`)
 //! - Tool schemas or dispatch (see `clio-mcp`)
 //! - Per-command usage strings (see `cli_help_usage`) or argument parsing (`cli_args`)
@@ -31,14 +34,16 @@
 //! Keep this module focused on the CLI help catalog and suggestion.
 
 use crate::cli_args::suggest;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::io::{self, Write};
 
 #[cfg(test)]
 pub(crate) use self::groups::all_known_commands;
 /// The derived group and prefix lists (see the `groups` submodule). The
 /// completeness list is test-only, because the completeness checks are.
-pub(crate) use self::groups::{group_subcommands, known_commands, shared_groups, subcommands_of};
+pub(crate) use self::groups::{
+    all_groups, group_subcommands, known_commands, shared_groups, subcommands_of,
+};
 
 /// The CLI command → MCP tool binding, in whole-catalog order.
 ///
@@ -162,43 +167,11 @@ pub(crate) fn verb_help(verb: &str) -> Option<(String, &'static str)> {
 
 /// Build the machine-readable CLI catalog from the published MCP schema pack.
 ///
-/// The `tools` array is the pack's tool list verbatim (each entry gains a `tool`
-/// field equal to its `name`), so the CLI catalog and the MCP schema cannot drift.
-/// The `commands` array is the binding table verbatim. Both stay derived from
-/// the MCP side alone, so neither the schema pack nor the binding table can be
-/// read as having drifted because a command the CLI accepts binds no tool;
-/// `commands_without_tools` is where those commands are listed instead.
+/// The document's shape — the verbatim pack fields, the two command
+/// projections, the record serialization, and the CLI metadata hash — lives in
+/// the `catalog` submodule; this entry point stays the one caller-facing name.
 pub(crate) fn catalog() -> Value {
-    let pack = clio_mcp::schema::schema_pack();
-    let tools: Vec<Value> = pack
-        .get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| {
-                    let mut tool = tool.clone();
-                    if let Some(name) = tool.get("name").and_then(Value::as_str) {
-                        tool["tool"] = Value::String(name.to_owned());
-                    }
-                    tool
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let commands: Vec<Value> = command_bindings()
-        .iter()
-        .map(|(command, tool)| json!({ "command": command, "tool": tool }))
-        .collect();
-    json!({
-        "format": "clio_cli_catalog",
-        "format_version": 1,
-        "mcp_protocol_revision": pack.get("mcp_protocol_revision").cloned().unwrap_or(Value::Null),
-        "catalog_hash": pack.get("catalog_hash").cloned().unwrap_or(Value::Null),
-        "commands": commands,
-        "commands_without_tools": commands_without_tools(),
-        "tools": tools,
-    })
+    catalog::catalog()
 }
 
 /// Write the catalog as one compact JSON line.
@@ -210,6 +183,12 @@ pub(crate) fn write_catalog<W: Write>(w: &mut W) -> io::Result<()> {
 /// catalog and the suggestion lookups.
 #[path = "cli_help_groups.rs"]
 pub(crate) mod groups;
+
+/// The catalog document's shape: its assembly from the MCP schema pack, the
+/// record serialization, and the CLI metadata hash that fingerprints the
+/// CLI-side metadata.
+#[path = "cli_help_catalog.rs"]
+pub(crate) mod catalog;
 
 #[cfg(test)]
 #[path = "cli_help_dispatch_tests.rs"]

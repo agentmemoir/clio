@@ -130,6 +130,15 @@ fn is_shared(prefix: &str) -> bool {
     !SURFACE_OWNED_GROUPS.contains(&prefix)
 }
 
+/// Every derived group, in derived order: the prefix, its subcommand labels,
+/// and whether the shared group machinery resolves it. The catalog document
+/// serializes this table, so a reader sees the groups the records derive.
+pub(crate) fn all_groups() -> impl Iterator<Item = (&'static str, &'static [&'static str], bool)> {
+    GROUPS
+        .iter()
+        .map(|group| (group.prefix, group.subs, group.shared))
+}
+
 /// The subcommands of `cmd` when it is a shared group.
 pub(crate) fn group_subcommands(cmd: &str) -> Option<&'static [&'static str]> {
     let group = GROUPS.iter().find(|group| group.prefix == cmd)?;
