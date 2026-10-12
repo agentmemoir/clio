@@ -241,8 +241,8 @@ fn version_and_health_accept_trailing_tokens_and_answer() {
     }
 }
 
-/// The help record documents `--json` alone, and the dispatch reads the
-/// spelling from the record: only a documented boolean selects the catalog.
+/// The help record documents `--json` and `--markdown`, and the dispatch reads
+/// the spellings from the record: only a documented boolean selects a mode.
 #[test]
 fn help_documents_json_and_the_dispatch_reads_it_from_the_record() {
     let spec = record("help");
@@ -252,7 +252,11 @@ fn help_documents_json_and_the_dispatch_reads_it_from_the_record() {
         .filter(|flag| flag.value.is_none())
         .map(|flag| flag.long)
         .collect();
-    assert_eq!(booleans, ["json"], "the help record's boolean flags");
+    assert_eq!(
+        booleans,
+        ["json", "markdown"],
+        "the help record's boolean flags"
+    );
     assert!(
         spec.positionals
             .iter()

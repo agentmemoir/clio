@@ -181,7 +181,7 @@ pub(crate) fn ops_usage_lines(sub: &str) -> Option<Vec<&'static str>> {
 const SURFACE_USAGE: &[(&str, &str)] = &[
     ("version", "clio version"),
     ("health", "clio health"),
-    ("help", "clio help [--json] [TOPIC]"),
+    ("help", "clio help [--json] [--markdown --out DIR] [TOPIC]"),
     (
         "mcp schema-export",
         "clio mcp schema-export [--out FILE] [--path FILE]",

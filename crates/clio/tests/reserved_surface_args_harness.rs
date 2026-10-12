@@ -5,13 +5,13 @@
 //!
 //! This module tests the reserved surfaces' argument contract against the real
 //! `clio` binary: the documented global flags in both positions, the refusal of
-//! an unknown flag and of a stray positional, and that a usage error keeps the
-//! caller's requested output mode.
+//! an unknown flag and of a stray positional, the help surface's `--markdown`
+//! request, and that a usage error keeps the caller's requested output mode.
 //!
 //! ## Owns
 //!
 //! - End-to-end assertions over spawned `clio` processes for the reserved
-//!   surfaces (`status`, `mcp schema-export`)
+//!   surfaces (`status`, `mcp schema-export`, and `help --markdown`)
 //!
 //! ## Does not own
 //!
@@ -27,7 +27,9 @@
 
 mod common;
 
+use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The `clio` binary with a cleared environment plus the coverage pattern.
 fn clio() -> Command {
@@ -55,6 +57,32 @@ fn run(args: &[&str]) -> Output {
 
 fn stderr_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// Calls served so far in this test binary, so a scratch directory never
+/// repeats: the process id alone is constant, and two scenarios must not share
+/// one manual directory.
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Unique scratch directory for one scenario, the pid-nanos-counter pattern the
+/// sibling harnesses use.
+fn temp_dir(tag: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    // Canonicalize the temp root before joining: the writer refuses every
+    // symlink path component, and on macOS the system temp directory sits
+    // behind symlinks (`/var` and `/tmp` point into `/private`), which would
+    // fail the successful writes below for an environmental reason.
+    let base = std::fs::canonicalize(std::env::temp_dir()).expect("the temp root resolves");
+    let dir = base.join(format!(
+        "clio-reserved-args-{tag}-{}-{nanos}-{sequence}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
 }
 
 /// A documented global flag before the verb must reach the surface, not be
@@ -120,4 +148,48 @@ fn a_bare_double_dash_is_accepted() {
     let output = run(&["status", "--db", "sqlite::memory:", "--"]);
     let err = stderr_of(&output);
     assert_eq!(output.status.code(), Some(0), "{err}");
+}
+
+/// `clio help --markdown` without `--out` exits 2 at the process boundary: the
+/// missing output directory is a usage refusal, not a partial write.
+#[test]
+fn a_markdown_request_without_out_exits_two() {
+    let output = run(&["help", "--markdown"]);
+    let err = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(2), "{err}");
+    assert!(err.contains("--markdown"), "{err}");
+}
+
+/// The complete manual request writes the directory and exits 0: the success the
+/// in-process tests cannot pin at the process boundary.
+#[test]
+fn a_markdown_request_writes_the_manual_and_exits_zero() {
+    let out = temp_dir("manual");
+    let out_arg = out.to_str().expect("utf-8 scratch path");
+    let output = run(&["help", "--markdown", "--out", out_arg]);
+    let err = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{err}");
+    assert!(out.join("index.md").is_file(), "the index page: {err}");
+    assert!(out.join("help.md").is_file(), "the help leaf page: {err}");
+}
+
+/// A leading global's value is not the TOPIC the manual request refuses:
+/// `clio --db PATH help --markdown --out DIR` writes the manual and exits 0,
+/// even though `main` lifted `--db PATH` and appended its value after the verb.
+#[test]
+fn a_leading_global_value_is_not_the_markdown_topic() {
+    let out = temp_dir("manual-global");
+    let db = out.join("led.db");
+    let manual = out.join("manual");
+    let output = run(&[
+        "--db",
+        db.to_str().expect("utf-8 db path"),
+        "help",
+        "--markdown",
+        "--out",
+        manual.to_str().expect("utf-8 manual path"),
+    ]);
+    let err = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{err}");
+    assert!(manual.join("index.md").is_file(), "the index page: {err}");
 }
