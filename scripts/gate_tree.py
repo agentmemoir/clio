@@ -104,7 +104,16 @@ def _effective_env(env: dict[str, str], key: str) -> str:
 
 
 def _tool_identity(command: str, env: dict[str, str]) -> str:
+    """Hash the bytes of the command a run would use.
+
+    `shutil.which` refuses a file the host will not execute, and a `noexec`
+    mount refuses every file. This key is about the bytes, so a command
+    spelled as a path is fingerprinted from the file itself even when the
+    mount rules out running it.
+    """
     resolved = shutil.which(command, path=env.get("PATH"))
+    if resolved is None and os.path.dirname(command) and Path(command).is_file():
+        resolved = command
     if resolved is None:
         return f"missing:{command}:{env.get('PATH', '')}"
     path = Path(resolved).resolve()

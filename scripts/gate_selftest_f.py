@@ -110,7 +110,8 @@ class MakeDryRunTests(unittest.TestCase):
 
 
 class CacheIdentityTests(unittest.TestCase):
-    def test_tool_aliases_share_content_identity_but_distinct_binaries_do_not(self) -> None:
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_tool_aliases_share_content_identity_but_distinct_binaries_do_not(self, _rustup) -> None:
         tree = TreeState("head", (), ())
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
@@ -213,7 +214,8 @@ class CacheIdentityTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertTrue(all(command[-3:-1] == ["--toolchain", "nightly"] for command in resolved))
 
-    def test_result_changing_environment_values_separate_cache_keys(self) -> None:
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_result_changing_environment_values_separate_cache_keys(self, _rustup) -> None:
         tree = TreeState("head", (), ())
         base = {"PATH": os.environ.get("PATH", "")}
         command = ["cargo", "nextest", "run"]
@@ -226,7 +228,8 @@ class CacheIdentityTests(unittest.TestCase):
                     fingerprint(tree, changed, "test", command),
                 )
 
-    def test_cargo_configuration_content_separates_cache_keys(self) -> None:
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_cargo_configuration_content_separates_cache_keys(self, _rustup) -> None:
         tree = TreeState("head", (), ())
         with tempfile.TemporaryDirectory() as raw:
             cargo_home = Path(raw) / "cargo"
@@ -244,7 +247,8 @@ class CacheIdentityTests(unittest.TestCase):
             fingerprint(tree, dynamic, "test", ["cargo", "test"]),
         )
 
-    def test_make_target_alias_and_base_spellings_share_keys(self) -> None:
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_make_target_alias_and_base_spellings_share_keys(self, _rustup) -> None:
         tree = TreeState("head", (), ())
         env = {"PATH": os.environ.get("PATH", ""), "BASE": "origin/master"}
         alias = fingerprint(tree, env, "coverage", ["make", "cov"])
