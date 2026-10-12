@@ -288,6 +288,7 @@ pub use clio_types::{
 #[cfg(test)]
 mod erase_test_support;
 
+mod pg_advisory_keys;
 mod pg_lock;
 mod pg_probe;
 mod pg_scoped_schema;

@@ -35,15 +35,19 @@
 //! hold when the process exits, so a lock file left behind by a dead process
 //! never blocks a later run: the next process locks the same file again, and
 //! a stale file is harmless. Shared holds coexist with each other; a hold
-//! that would contend waits a bounded time and then refuses, naming the
-//! contending process where the platform reports it — Linux lists flock
-//! holders with their pid in `/proc/locks`; elsewhere the refusal names the
-//! lock file. The exclusive hold records its own pid in the lock file, so a
-//! store open refused during a restore names the restoring process
-//! everywhere. The lock is advisory: it guards a restore's swap, it does not
-//! make the store multi-process safe for concurrent writes, and a process
-//! that opens the database without going through a store open path is not
-//! covered.
+//! that would contend waits a bounded time and then refuses, always naming
+//! the lock and the direction of the contention, and naming the holding
+//! process where the platform reports one. Linux lists flock holders with
+//! their pid in `/proc/locks`; elsewhere the list is empty. The exclusive
+//! hold records its own pid in the lock file, so a store open refused during
+//! a restore names the restoring process on every platform. Naming a
+//! *shared* holder is best effort: the pid list is whatever `/proc/locks`
+//! reports for the lock file, and the refusal is complete and correct when
+//! it names none, because the platform may list no entry or the file may not
+//! be readable. The lock is advisory: it guards a restore's swap, it does
+//! not make the store multi-process safe for concurrent writes, and a
+//! process that opens the database without going through a store open path
+//! is not covered.
 
 use crate::migrate::map_db_err;
 use crate::store_lock_pids::holder_pids;
@@ -276,19 +280,40 @@ impl Mode {
         }
     }
 
-    /// The refusal for a hold that waited out its bounded wait.
+    /// The pids the platform reports for this direction's contending holders.
     ///
-    /// A shared hold refused by a restore may name the pid the exclusive
-    /// hold recorded, which a live exclusive holder keeps current. An
-    /// exclusive hold refused by shared holders does not use that record: a
-    /// restore that died mid-swap leaves its pid line behind, and naming it
-    /// would point the operator at a process that no longer holds the store.
+    /// The lookup is best effort. A shared hold refused by a restore falls
+    /// back to the pid the exclusive hold records in the lock file, which a
+    /// live exclusive holder keeps current, so that direction names the
+    /// restoring process even when the platform reports nothing. An exclusive
+    /// hold refused by shared holders uses only the platform's flock listing:
+    /// a restore that died mid-swap leaves its own pid line behind, and a
+    /// shared holder records nothing, so there is no record to fall back to.
+    fn reported_holders(self, lock_path: &Path) -> Vec<u32> {
+        match self {
+            Mode::Shared => holder_pids(lock_path, "WRITE", true),
+            Mode::Exclusive => holder_pids(lock_path, "READ", false),
+        }
+    }
+
+    /// The refusal for a hold that waited out its bounded wait.
     fn refused(self, store: &Path, lock_path: &Path) -> AmError {
-        let (held, holders) = match self {
-            Mode::Shared => ("held exclusively", holder_pids(lock_path, "WRITE", true)),
-            Mode::Exclusive => ("held shared", holder_pids(lock_path, "READ", false)),
+        self.refusal(store, lock_path, &self.reported_holders(lock_path))
+    }
+
+    /// The refusal text for a holder list, split from the platform lookup so
+    /// both branches are unit-testable without a live second process.
+    ///
+    /// The lock and the direction of the contention are always named. The pids
+    /// are best effort: an empty list adds nothing, because the lookup may
+    /// find no `/proc/locks` entry or may not read the file. Given a list, the
+    /// message names every pid in order.
+    fn refusal(self, store: &Path, lock_path: &Path, holders: &[u32]) -> AmError {
+        let held = match self {
+            Mode::Shared => "held exclusively",
+            Mode::Exclusive => "held shared",
         };
-        let named = match holders.as_slice() {
+        let named = match holders {
             [] => String::new(),
             holders => format!(
                 " by pid(s) {}",
