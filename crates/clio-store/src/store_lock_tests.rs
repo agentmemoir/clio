@@ -252,12 +252,15 @@ fn a_shared_hold_waits_a_bounded_time_and_refuses_while_the_lock_is_held_exclusi
         "the refusal says what holds the store: {}",
         error.message
     );
-    #[cfg(target_os = "linux")]
+    // The restoring process's pid is a promise: the exclusive hold records
+    // it, and the shared direction falls back to that record when the
+    // platform reports nothing, so this holds on every platform.
     assert!(
-        error
-            .message
-            .contains(&format!("pid(s) {}", std::process::id())),
-        "the holder's pid is named on Linux: {}",
+        error.message.contains(&format!(
+            "held exclusively by pid(s) {};",
+            std::process::id()
+        )),
+        "the restoring process is named from the pid it recorded: {}",
         error.message
     );
     drop(holder);
@@ -276,16 +279,16 @@ fn an_exclusive_hold_waits_a_bounded_time_and_refuses_naming_the_shared_holders(
         "the refusal says the lock is shared: {}",
         error.message
     );
-    // Naming a shared holder is best effort: the pid list comes from
-    // `/proc/locks`, and the refusal is correct when it names none. A named
-    // holder must be the real one, which is this process's raw descriptor.
+    // This process's own raw descriptor is the holder, and it cannot exit
+    // between the lock attempt and the lookup, so the in-process flock
+    // listing names it; a cross-process holder is best effort (see
+    // `store_lock`).
     #[cfg(target_os = "linux")]
     assert!(
-        !error.message.contains("by pid(s) ")
-            || error
-                .message
-                .contains(&format!("by pid(s) {}", std::process::id())),
-        "a named holder is the process that holds the store: {}",
+        error
+            .message
+            .contains(&format!("held shared by pid(s) {};", std::process::id())),
+        "the in-process shared holder is named: {}",
         error.message
     );
     drop(holder);
@@ -319,6 +322,35 @@ fn a_refusal_with_no_reported_holder_names_the_lock_without_pids() {
         !error.message.contains("by pid(s)"),
         "no holder is reported, so no pid is named: {}",
         error.message
+    );
+}
+
+/// The refusal text is a promise given a holder list, split from the platform
+/// lookup so both branches are deterministic: an empty list adds no pid, and
+/// a non-empty list names every pid in order. This pins the named branch that
+/// the cross-process tests may not reach (issue #156).
+#[test]
+fn a_refusal_names_every_reported_holder_and_omits_an_empty_list() {
+    let scratch = Scratch::new("refusal-text");
+    let store = a_store(&scratch);
+    let lock = lock_file_path(&store);
+    let named = Mode::Exclusive.refusal(&store, &lock, &[4242, 4243]);
+    assert!(
+        named.message.contains("held shared by pid(s) 4242, 4243;"),
+        "the refusal names every reported holder in order: {}",
+        named.message
+    );
+    let none = Mode::Exclusive.refusal(&store, &lock, &[]);
+    assert!(
+        !none.message.contains("by pid(s)"),
+        "an empty holder list names no pid: {}",
+        none.message
+    );
+    let shared = Mode::Shared.refusal(&store, &lock, &[7]);
+    assert!(
+        shared.message.contains("held exclusively by pid(s) 7;"),
+        "the shared direction names its holder too: {}",
+        shared.message
     );
 }
 

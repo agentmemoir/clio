@@ -181,15 +181,13 @@ fn a_restore_through_the_real_command_refuses_while_another_process_holds_the_st
         err.contains("store lock"),
         "the refusal names the store lock: {err}"
     );
-    // Naming a contending shared holder is best effort on Linux: the pid list
-    // comes from `/proc/locks`, and the refusal is complete and correct when
-    // the platform reports no holder (see `clio-store`'s store lock). What is
-    // promised is that a named holder is a real one, so when the message names
-    // holders they must be the child, the only process holding the store.
-    #[cfg(target_os = "linux")]
+    // Naming a contending shared holder is best effort: the pid list comes
+    // from `/proc/locks`, and the refusal is complete when it names none (see
+    // `clio-store`'s store lock). A named list is the child, the only process
+    // holding the store.
     assert!(
-        !err.contains("by pid(s) ") || err.contains(&format!("by pid(s) {}", child.0.id())),
-        "a named holder is the process that holds the store: {err}"
+        !err.contains("by pid(s) ") || err.contains(&format!("by pid(s) {};", child.0.id())),
+        "a named holder list is exactly the process that holds the store: {err}"
     );
     assert_eq!(
         std::fs::read(&keys).expect("read the key store"),
