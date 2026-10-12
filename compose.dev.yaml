@@ -7,11 +7,6 @@
 # `/tmp` and `/dev/shm` are mounted noexec, which is the hardened case the
 # checks exist for. The checkout is mounted read-only at /workspace.
 #
-# The image carries a Rust toolchain and a linker, because the checks that matter
-# here compile a program and then RUN it, and a `noexec` mount is exactly what
-# breaks the running half. `dev/Dockerfile` reads the pinned version out of
-# `rust-toolchain.toml`, so the box and the repository agree on the compiler.
-#
 # macOS only. On Linux, run the checks on the host.
 name: clio-dev
 
