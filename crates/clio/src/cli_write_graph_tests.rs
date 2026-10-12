@@ -324,6 +324,7 @@ fn graph_link_missing_endpoint_is_refused_like_mcp() {
         false,
     );
     assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    let cli = json_of(&err);
     let direct = call(
         &s,
         "graph_link",
@@ -331,6 +332,9 @@ fn graph_link_missing_endpoint_is_refused_like_mcp() {
                "relationship": "relates_to"}),
     );
     assert_eq!(direct["ok"], json!(false), "{direct}");
+    // One condition, one code: the CLI route and the dispatcher route agree.
+    assert_eq!(cli["code"], json!("item_not_found"), "CLI: {err}");
+    assert_eq!(cli["code"], direct["code"], "CLI: {err} / MCP: {direct}");
     let message = direct["message"].as_str().unwrap_or_default();
     assert!(err.contains(message), "CLI: {err} / MCP: {message}");
 }

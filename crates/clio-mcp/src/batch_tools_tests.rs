@@ -320,6 +320,8 @@ fn batch_preflight_admission_rejection_and_validation_edges() {
             .contains("not found"),
         "{missing}"
     );
+    // The code matches the retrieve-side route for the same condition.
+    assert_eq!(missing["code"], json!("item_not_found"), "{missing}");
 
     // The unreachable pre-flight routing arms are internal invariants; call
     // them directly to pin the fail-closed behavior.
@@ -338,4 +340,64 @@ fn batch_preflight_admission_rejection_and_validation_edges() {
         panic!("unknown tool must fail closed");
     };
     assert_eq!(rec_err.code, ErrorCode::Internal);
+}
+
+/// One condition, one code: the single-operation route and the batch pre-flight
+/// must report the same code, and must refuse the same endpoints.
+#[test]
+fn graph_link_routes_agree_on_missing_and_discarded_endpoints() {
+    let s = state();
+    let seeded = batch(
+        &s,
+        json!([store_op("itm-live", "alpha"), store_op("itm-gone", "beta")]),
+        false,
+    );
+    assert_eq!(seeded["ok"], json!(true), "{seeded}");
+
+    let direct = |target: &str| {
+        crate::write_tools::dispatch(
+            &s,
+            "graph_link",
+            &json!({
+                "bank": "bank-a", "source_id": "itm-live", "target_id": target,
+                "relationship": "relates_to"
+            }),
+        )
+    };
+    let through_batch = |target: &str| {
+        batch(
+            &s,
+            json!([{"tool": "graph_link", "params": {
+                "source_id": "itm-live", "target_id": target,
+                "relationship": "relates_to", "bank": "bank-a"
+            }}]),
+            true,
+        )
+    };
+
+    // An item the bank does not hold.
+    let (direct_out, batch_out) = (direct("itm-nowhere"), through_batch("itm-nowhere"));
+    assert_eq!(direct_out["code"], json!("item_not_found"), "{direct_out}");
+    assert_eq!(
+        direct_out["code"], batch_out["code"],
+        "direct {direct_out} / batch {batch_out}"
+    );
+
+    // An item discarded before the link: out of active use, so refused the same
+    // way, on both routes.
+    let removed = crate::write_tools::dispatch(
+        &s,
+        "discard",
+        &json!({
+            "bank": "bank-a", "item_id": "itm-gone", "reason": "ops cleanup",
+            "confirm": true, "timestamp": "2026-01-04T00:00:00Z"
+        }),
+    );
+    assert_eq!(removed["ok"], json!(true), "{removed}");
+    let (direct_out, batch_out) = (direct("itm-gone"), through_batch("itm-gone"));
+    assert_eq!(direct_out["code"], json!("item_not_found"), "{direct_out}");
+    assert_eq!(
+        direct_out["code"], batch_out["code"],
+        "direct {direct_out} / batch {batch_out}"
+    );
 }
