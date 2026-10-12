@@ -68,7 +68,8 @@ def _report_lines(
     return matches[0]["summary"]["lines"]
 
 
-def _stale_mapping_regression(check) -> None:
+def _stale_mapping_regression(check) -> bool:
+    """The stale source map, reproduced. False when this host skipped the scenario."""
     llvm_profdata, llvm_cov = _llvm_tools()
     if not llvm_profdata.is_file() or not llvm_cov.is_file():
         raise RuntimeError("the pinned Rust toolchain must include llvm-tools-preview")
@@ -106,9 +107,12 @@ def _stale_mapping_regression(check) -> None:
         )
     except unittest.SkipTest as reason:
         # A skip is not a pass: nothing below ran, so the stale source map this
-        # scenario exists to catch was never reproduced on this host.
+        # scenario exists to catch was never reproduced on this host. The caller
+        # says so in the summary line too, because a green "all passed" over a
+        # scenario that never ran is the same claim this helper's own docstring
+        # warns about.
         print(f"self-test skipped: {reason}")
-        return
+        return False
     with scratch_directory as scratch:
         root = Path(scratch)
         source = root / "audit.rs"
@@ -170,6 +174,7 @@ def _stale_mapping_regression(check) -> None:
             ),
             (True, True),
         )
+    return True
 
 
 def run(check, raises) -> tuple:
@@ -316,8 +321,10 @@ def run(check, raises) -> tuple:
             check("the selected object count is printed", "deleted 3" in selected_log.getvalue(), True)
             check("the number of selected objects deleted is returned", selected_count, 3)
 
-        # Reproduce the line-map union that made a doc-comment-only edit fail.
-        _stale_mapping_regression(check)
+        # Reproduce the line-map union that made a doc-comment-only edit fail. Its
+        # result says whether it ran: a host with nowhere to run the compiled object
+        # skips it, and the summary has to carry that rather than a bare pass.
+        stale_map_ran = _stale_mapping_regression(check)
 
         # An empty selection is a mass deletion, not an empty deletion. With no
         # names the keep pattern matches only the empty stem, so every object it
@@ -342,4 +349,4 @@ def run(check, raises) -> tuple:
             check("the pre-run refusal leaves the object in place", doomed.exists(), True)
     finally:
         globals()["workspace_packages"] = original_packages_for_prune
-    return name, prune_packages, scratch
+    return name, prune_packages, scratch, stale_map_ran

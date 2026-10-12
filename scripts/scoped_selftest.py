@@ -29,7 +29,7 @@ def self_test() -> int:
     printed, = run_select(check)
     raises, = run_refs(check)
     name, scratch, value = run_steps(check, raises)
-    name, prune_packages, scratch = run_objects(check, raises)
+    name, prune_packages, scratch, stale_map_ran = run_objects(check, raises)
     run_modes(check, name, prune_packages)
 
 # The lookup's own check, anchored to the test runner's list rather than to
@@ -45,5 +45,10 @@ def self_test() -> int:
         else:
             print("self-test ok: every test module the runner reports is claimed")
 
-    print(f"self-test: {'all passed' if failures == 0 else f'{failures} failed'}")
+    summary = "all passed" if failures == 0 else f"{failures} failed"
+    if failures == 0 and not stale_map_ran:
+        # A skip is not a pass. The line a reader checks last has to carry it, or a
+        # green summary hides a scenario that never ran on this host.
+        summary += ", the stale source-map scenario was skipped"
+    print(f"self-test: {summary}")
     return EXIT_OK if failures == 0 else 1
