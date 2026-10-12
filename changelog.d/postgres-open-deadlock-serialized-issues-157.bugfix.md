@@ -1,0 +1,1 @@
+Concurrent Clio commands that open a Postgres bank no longer fail with `deadlock detected`: each open runs its schema and trigger setup under one advisory lock, so two commands starting at the same time cannot take conflicting table locks.
