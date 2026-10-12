@@ -50,3 +50,21 @@ fn help_unknown_topic_exits_two() {
         ExitCode::from(2)
     );
 }
+
+#[test]
+fn help_reaches_the_catalog_with_a_global_value_flag() {
+    // The value of a global value flag is not a topic, whichever side of the
+    // verb the global sits on, and a topic after it still resolves.
+    for argv in [
+        vec!["help".into(), "--db".into(), "/tmp/led.db".into()],
+        vec!["--db".into(), "/tmp/led.db".into(), "help".into()],
+        vec![
+            "help".into(),
+            "--db".into(),
+            "/tmp/led.db".into(),
+            "backup".into(),
+        ],
+    ] {
+        assert_eq!(run(argv.clone()), ExitCode::SUCCESS, "{argv:?}");
+    }
+}

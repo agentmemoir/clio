@@ -112,6 +112,54 @@ fn two_words_after_an_unknown_topic_say_the_topic_takes_one() {
     );
 }
 
+/// A global value flag's value is not a topic: it is skipped, so a global flag
+/// before or after the verb leaves the catalog or the named topic reachable.
+///
+/// `main` lifts a leading global out from before the verb and appends it after
+/// the verb, so both spellings reach `help_topic` as `--db PATH`. Without the
+/// skip the path was read as an unknown topic and the command exited 2.
+#[test]
+fn a_global_value_flags_value_is_not_a_help_topic() {
+    for argv in [
+        vec!["--db".to_owned(), "/tmp/led.db".to_owned()],
+        vec!["--output".to_owned(), "json".to_owned()],
+        vec!["-o".to_owned(), "json".to_owned()],
+        vec!["--bank".to_owned(), "b".to_owned()],
+    ] {
+        assert_eq!(
+            super::help_topic(&argv).expect("a global flag is not an error"),
+            None,
+            "{argv:?} names no topic"
+        );
+    }
+
+    // The topic after the global value still resolves, and the global value is
+    // not counted as a second topic word.
+    let (verb, kept) = super::help_topic(&[
+        "--db".to_owned(),
+        "/tmp/led.db".to_owned(),
+        "backup".to_owned(),
+    ])
+    .expect("known topic")
+    .expect("a topic was named");
+    assert_eq!(verb, "backup");
+    assert_eq!(kept, vec!["--help".to_owned()]);
+
+    let unknown = super::help_topic(&[
+        "frobnicate".to_owned(),
+        "--db".to_owned(),
+        "/tmp/led.db".to_owned(),
+    ])
+    .expect_err("unknown");
+    assert!(
+        !unknown
+            .hint()
+            .is_some_and(|hint| hint.contains("takes one topic")),
+        "a global value is not a second topic word: {:?}",
+        unknown.hint()
+    );
+}
+
 /// A usage failure is reported in the mode the raw arguments select, and exits 2.
 #[test]
 fn a_usage_failure_is_reported_in_the_selected_mode_and_exits_two() {

@@ -204,6 +204,46 @@ fn split_leading_globals_stops_at_the_end_of_options_delimiter() {
 }
 
 #[test]
+fn a_global_value_flags_value_is_not_a_word() {
+    for flag in ["--db", "--backend", "--bank", "--actor", "--output", "-o"] {
+        assert!(is_global_value_flag(flag), "{flag} is a global value flag");
+    }
+    for token in ["--yes", "--no-input", "--help", "backup", "-x"] {
+        assert!(
+            !is_global_value_flag(token),
+            "{token} is not a global value flag"
+        );
+    }
+    // An inline `--db=x` is one token, so its value travels with it.
+    assert!(!is_global_value_flag("--db=x.db"));
+}
+
+#[test]
+fn word_positions_skip_a_global_value_flags_value() {
+    assert_eq!(
+        word_positions(&tokens(&["--db", "/tmp/led.db", "backup"])),
+        vec![2]
+    );
+    assert_eq!(
+        word_positions(&tokens(&["backup", "--db", "/tmp/led.db"])),
+        vec![0]
+    );
+    assert_eq!(
+        word_positions(&tokens(&["--db", "/tmp/led.db"])),
+        Vec::<usize>::new()
+    );
+    // A value-less global leaves the next flag visible, and `-o`'s value is
+    // skipped like any other global value flag's.
+    assert_eq!(
+        word_positions(&tokens(&["--db", "--output", "json"])),
+        Vec::<usize>::new()
+    );
+    assert_eq!(word_positions(&tokens(&["-o", "json", "recall"])), vec![2]);
+    // A trailing flag with no value is not a word.
+    assert_eq!(word_positions(&tokens(&["--db"])), Vec::<usize>::new());
+}
+
+#[test]
 fn merge_leading_globals_preserves_the_delimiter_as_the_option_boundary() {
     let cases = [
         (
