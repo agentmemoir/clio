@@ -149,6 +149,21 @@ fn backlog_item(bank: &str, id: &str) -> MemoryItem {
     }
 }
 
+/// Seed `count` older outbox rows in `bank`, then drop the seed store before the
+/// binary opens the schema. The backlog is sealed under a process-local KMS, so
+/// the binary cannot read it and skips it: the point is that the older rows
+/// still fill the bounded drain batch.
+fn seed_backlog(db: &str, bank: &str, count: usize) {
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = PostgresStore::open(db, kms).expect("open seeding store");
+    for i in 0..count {
+        let id = format!("itm-lag-backlog-{i}");
+        store
+            .create_memory_item(&backlog_item(bank, &id), "agent")
+            .expect("seed backlog item");
+    }
+}
+
 #[test]
 fn a_remember_behind_a_full_backlog_is_recallable_by_the_next_command() {
     let base = pg_url();
@@ -164,20 +179,9 @@ fn a_remember_behind_a_full_backlog_is_recallable_by_the_next_command() {
     let kms_path = dir.join("clio.kms.json");
 
     // Seed an older backlog larger than one bounded drain batch, then drop the
-    // seed store before the binary opens the schema. The backlog is sealed under
-    // a process-local KMS, so the binary cannot read it and skips it: the point
-    // is that the older rows still fill the bounded drain batch.
+    // seed store before the binary opens the schema.
     let backlog = clio::index::DEFAULT_JOB_BATCH + 8;
-    {
-        let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
-        let store = PostgresStore::open(&db, kms).expect("open seeding store");
-        for i in 0..backlog {
-            let id = format!("itm-lag-backlog-{i}");
-            store
-                .create_memory_item(&backlog_item(&bank, &id), "agent")
-                .expect("seed backlog item");
-        }
-    }
+    seed_backlog(&db, &bank, backlog);
 
     let fact = "Nadia keeps the amber sail on the top shelf";
     let stored = run(
@@ -252,6 +256,109 @@ fn a_remember_behind_a_full_backlog_is_recallable_by_the_next_command() {
         ids.contains(&id.as_str()),
         "the just-written item must be recallable by the next command; got {ids:?} from {hits}"
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_batch_behind_a_full_backlog_is_recallable_by_the_next_command() {
+    // A multi-item write reports every id it created, so all of them must be
+    // searchable by the next command, not only the first.
+    let base = pg_url();
+    if !postgres_reachable(&base) {
+        eprintln!("skip write-lag harness: no Postgres at the configured URL");
+        return;
+    }
+    let _guard = lock_pg_test();
+    let schema = ScopedSchema::new(&base);
+    let db = schema.url().to_owned();
+    let bank = unique("batch-bank");
+    let dir = temp_dir("write-lag-batch");
+    let kms_path = dir.join("clio.kms.json");
+
+    let backlog = clio::index::DEFAULT_JOB_BATCH + 8;
+    seed_backlog(&db, &bank, backlog);
+
+    let shelves = ["top", "middle", "bottom"];
+    let ids: Vec<String> = (1..=shelves.len())
+        .map(|n| format!("itm-lag-batch-{n}"))
+        .collect();
+    let operations: Vec<Value> = ids
+        .iter()
+        .zip(shelves)
+        .map(|(id, shelf)| {
+            // Each op names its own bank: pre-flight resolves one context per
+            // operation, so the bank an op writes into is the op's own.
+            json!({
+                "tool": "store",
+                "params": {
+                    "item": {"id": id, "gist": format!("Nadia keeps the amber sail on the {shelf} shelf")},
+                    "category": "persona",
+                    "epistemic_kind": "fact",
+                    "bank": bank.as_str()
+                }
+            })
+        })
+        .collect();
+    let ops_path = dir.join("ops.json");
+    std::fs::write(&ops_path, json!({"operations": operations}).to_string())
+        .expect("write ops file");
+
+    let batched = run(
+        &kms_path,
+        &db,
+        &[
+            "batch",
+            "--file",
+            ops_path.to_str().expect("utf8 ops path"),
+            "--bank",
+            &bank,
+            "--output",
+            "json",
+        ],
+    );
+    assert_eq!(
+        batched.status.code(),
+        Some(0),
+        "batch failed: {}",
+        String::from_utf8_lossy(&batched.stderr)
+    );
+
+    let recalled = run(
+        &kms_path,
+        &db,
+        &[
+            "recall",
+            "Nadia amber sail shelf",
+            "--bank",
+            &bank,
+            "--limit",
+            "10",
+            "--output",
+            "json",
+        ],
+    );
+    assert_eq!(
+        recalled.status.code(),
+        Some(0),
+        "recall failed: {}",
+        String::from_utf8_lossy(&recalled.stderr)
+    );
+    let hits = json_stdout(&recalled);
+    let found: Vec<&str> = hits["hits"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row["item_id"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    for id in &ids {
+        assert!(
+            found.contains(&id.as_str()),
+            "every item the batch wrote must be recallable by the next command; {id} is missing from {found:?} ({hits})"
+        );
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }

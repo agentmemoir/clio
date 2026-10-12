@@ -29,7 +29,7 @@
 //! Keep this module focused on Postgres index SQL.
 
 use crate::index_store::{
-    IndexStore, domain_predicate, encode_lexical_document, encode_lexical_query,
+    IndexStore, domain_predicate, encode_lexical_document, encode_lexical_query, require_bank,
 };
 use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{IndexCoverage, IndexJob, KnnHit, SearchHit};
@@ -431,11 +431,4 @@ impl IndexStore for PostgresStore {
             Ok(n)
         })
     }
-}
-
-fn require_bank(bank_id: &str) -> Result<(), AmError> {
-    if bank_id.is_empty() {
-        return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
-    }
-    Ok(())
 }

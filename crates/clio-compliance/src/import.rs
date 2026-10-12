@@ -84,6 +84,10 @@ pub struct ImportReport {
     pub would_reject: usize,
     /// Existing entities overwritten under `force`.
     pub would_overwrite: usize,
+    /// Item ids this run created, in staging order. Empty on a dry run or a run
+    /// that created nothing. A caller indexes these so a restored item is
+    /// searchable without waiting on the whole index backlog.
+    pub created_ids: Vec<String>,
     /// Masked rejection reasons (capped at 10).
     pub rejection_samples: Vec<String>,
     /// Whether this run was a dry run.
@@ -156,11 +160,32 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
         would_skip: planner.skip,
         would_reject: planner.reject,
         would_overwrite: planner.overwrite,
+        created_ids: if applied {
+            planner.staged.iter().filter_map(staged_item_id).collect()
+        } else {
+            Vec::new()
+        },
         rejection_samples: planner.samples,
         dry_run: args.dry_run,
         applied,
         notes: planner.notes,
     })
+}
+
+/// The item id a staged batch write creates, when it creates one.
+///
+/// A `ciphertext_backup` opaque row is left out on purpose: it carries no dual
+/// content, so the index drain skips it and there is nothing to index.
+fn staged_item_id(write: &clio_store::BatchWrite) -> Option<String> {
+    match write {
+        clio_store::BatchWrite::CreateItem { item, .. }
+        | clio_store::BatchWrite::CanonicalPut { item, .. }
+        | clio_store::BatchWrite::CommitTriple { item, .. }
+        | clio_store::BatchWrite::CommitTaskUpsert { item, .. }
+        | clio_store::BatchWrite::CommitFailureRecord { item, .. }
+        | clio_store::BatchWrite::UpsertMemoryItem { item, .. } => Some(item.id.clone()),
+        _ => None,
+    }
 }
 
 /// Verify the completeness manifest before any write.

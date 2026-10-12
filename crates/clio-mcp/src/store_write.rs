@@ -129,6 +129,23 @@ pub(crate) fn store_path(
     if let Some(id) = stored_id.as_deref() {
         out.insert("id".into(), Value::from(id));
     }
+    // The write reports the bank each item landed in and its id, so a one-shot
+    // caller can index exactly those items without resolving the bank again. A
+    // refused or dry run reports no written item.
+    out.insert(
+        "written".into(),
+        Value::Array(
+            stored_id
+                .iter()
+                .map(|id| {
+                    Value::Object(Map::from_iter([
+                        ("bank".to_owned(), Value::from(ctx.bank.as_str())),
+                        ("id".to_owned(), Value::from(id.as_str())),
+                    ]))
+                })
+                .collect(),
+        ),
+    );
     // An exact-duplicate rejection stored nothing, so the payload says so
     // explicitly. Hosts turn this into a no-op success rather than a failure:
     // the caller already holds the fact, and repeating it is not an error.

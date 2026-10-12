@@ -31,6 +31,7 @@
 
 use crate::embed::Embedder;
 use crate::report::{EmbedStatus, IndexStatus, ProcessReport, RebuildReport, RebuildTargets};
+use crate::worker_observe::ObservingEmbedder;
 use clio_store::{IndexJob, IndexStore, Store, VectorSlot};
 use clio_types::{AmError, ErrorCode, MemoryItem};
 use std::sync::{Arc, Mutex};
@@ -46,9 +47,9 @@ pub const DEFAULT_MAX_ATTEMPTS: u32 = 10;
 
 /// Rolling process-local observability (best-effort; never persisted).
 #[derive(Debug, Default)]
-struct WorkerState {
-    last_latency_ms: Option<u128>,
-    last_error: Option<String>,
+pub(crate) struct WorkerState {
+    pub(crate) last_latency_ms: Option<u128>,
+    pub(crate) last_error: Option<String>,
 }
 
 /// How one drained job resolved.
@@ -274,10 +275,10 @@ impl IndexCoordinator {
     ) -> Result<RebuildReport, AmError> {
         // Route sweep embeds through the observing wrapper so rebuild activity
         // keeps feeding the rolling latency/error state surfaced by `status`.
-        let observed = self.embedder.as_ref().map(|embedder| ObservingEmbedder {
-            inner: &**embedder,
-            state: &self.state,
-        });
+        let observed = self
+            .embedder
+            .as_ref()
+            .map(|embedder| ObservingEmbedder::new(&**embedder, &self.state));
         crate::rebuild::rebuild(
             &*self.store,
             &*self.index,
@@ -419,44 +420,6 @@ fn epoch_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)
-}
-
-/// [`Embedder`] wrapper that records sweep embed latency/error into the
-/// coordinator's rolling worker state, preserving the observability
-/// contract (`status().embed.last_latency_ms` / `last_error`) for rebuilds.
-struct ObservingEmbedder<'a> {
-    inner: &'a dyn Embedder,
-    state: &'a Mutex<WorkerState>,
-}
-
-impl Embedder for ObservingEmbedder<'_> {
-    fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, AmError> {
-        let t0 = Instant::now();
-        let vectors = self.inner.embed_batch(texts);
-        match &vectors {
-            Ok(_) => {
-                let mut state = self.state.lock().expect("index coordinator state poisoned");
-                state.last_latency_ms = Some(t0.elapsed().as_millis());
-            }
-            Err(e) => {
-                let mut state = self.state.lock().expect("index coordinator state poisoned");
-                state.last_error = Some(e.to_string());
-            }
-        }
-        vectors
-    }
-
-    fn health(&self) -> Result<(), AmError> {
-        self.inner.health()
-    }
-
-    fn model_id(&self) -> String {
-        self.inner.model_id()
-    }
-
-    fn dims(&self) -> usize {
-        self.inner.dims()
-    }
 }
 
 #[cfg(test)]
