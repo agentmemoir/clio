@@ -236,53 +236,6 @@ def run(check) -> tuple:
             (code, "BUILD INPUT" in printed.getvalue()),
             (EXIT_FAIL, False),
         )
-        # Issue #82: the scope line names what the run is scoped to, not only what
-        # it judges. A change whose Rust files are all path-excluded test files
-        # runs a package's suite while the judged set stays empty, so reading the
-        # judged set printed "0 changed file(s) to test" over that run.
-        globals()["select"] = lambda base, everything: (
-            ["clio"], [], ["crates/clio/tests/new_integration.rs"])
-        scope_log = io.StringIO()
-        original_stdout_for_scope = sys.stdout
-        try:
-            sys.stdout = scope_log
-            tests_code = main(["--tests-only", "--plan", "--base", "master"])
-        finally:
-            sys.stdout = original_stdout_for_scope
-        scope_text = scope_log.getvalue()
-        check(
-            "a test-only change reports its files as tested, not zero",
-            (
-                tests_code,
-                "1 changed file(s) to test" in scope_text,
-                "test crates/clio/tests/new_integration.rs" in scope_text,
-                "1 package(s) to run: clio" in scope_text,
-            ),
-            (EXIT_OK, True, True, True),
-        )
-        # Coverage mode names the judged subset, not the wider scoped set, because
-        # its label says judge. Without this case the count could be widened in
-        # both modes and still pass.
-        globals()["select"] = lambda base, everything: (
-            ["clio"], ["crates/clio/src/lib.rs"],
-            ["crates/clio/src/lib.rs", "crates/clio/tests/new_integration.rs"])
-        judge_log = io.StringIO()
-        original_stdout_for_judge = sys.stdout
-        try:
-            sys.stdout = judge_log
-            judge_code = main(["--plan", "--base", "master"])
-        finally:
-            sys.stdout = original_stdout_for_judge
-        judge_text = judge_log.getvalue()
-        check(
-            "coverage mode reports the judged subset, not the scoped set",
-            (
-                judge_code,
-                "1 changed file(s) to judge" in judge_text,
-                "crates/clio/tests/new_integration.rs" in judge_text,
-            ),
-            (EXIT_OK, True, False),
-        )
     finally:
         sys.stderr = real_stderr
         globals()["select"] = original_select

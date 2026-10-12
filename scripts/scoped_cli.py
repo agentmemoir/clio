@@ -96,11 +96,11 @@ def main(argv: list[str]) -> int:
     # set here printed "0 changed file(s) to test" over exactly that run, so the
     # scope line read as no work while a full package suite ran (#82). Coverage
     # mode still names the judged subset, because its label says judge.
-    scoped = changed if args.tests_only else files
+    files_in_scope = changed if args.tests_only else files
     codeless = parse_codeless(changed)
     no_code = [rel for rel in changed if rel in codeless and is_present(rel)]
     print(f"scoped-runner: scope={args.scope}")
-    print(f"scoped-runner: {len(scoped)} changed file(s) to {label}")
+    print(f"scoped-runner: {len(files_in_scope)} changed file(s) to {label}")
     if no_code:
         # Printed rather than silently dropped: the gate's contract is that the
         # reader can see every file the run did not judge. The source decided it
@@ -160,7 +160,7 @@ def main(argv: list[str]) -> int:
         print(f"scoped-runner: file-scoped filter over {len(changed)} file(s)")
 
     if args.plan:
-        for rel in scoped:
+        for rel in files_in_scope:
             print(f"  {label} {rel}")
         if file_filter:
             print(f"  filter {file_filter}")
