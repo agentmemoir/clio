@@ -251,7 +251,7 @@ fn bounded_help_capture_records_exit_zero_and_streams() {
 }
 
 /// The plan starts with top-level help and the catalog, then holds exactly one
-/// `["<cmd>", "--help"]` per catalog leaf plus the auth-token extras, with no duplicates.
+/// `["<cmd>", "--help"]` per catalog leaf, with no duplicates.
 #[test]
 fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
     let binary = Path::new(env!("CARGO_BIN_EXE_clio"));
@@ -276,7 +276,7 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
     for unbound in array("commands_without_tools") {
         names.extend(unbound.as_str().map(str::to_owned));
     }
-    let mut leaves: Vec<Vec<String>> = names
+    let leaves: Vec<Vec<String>> = names
         .iter()
         .filter(|name| {
             !names
@@ -289,15 +289,10 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
             argv
         })
         .collect();
-    for name in golden_capture_support::EXTRA_LEAVES {
-        let mut argv: Vec<String> = name.split(' ').map(str::to_owned).collect();
-        argv.push("--help".to_owned());
-        leaves.push(argv);
-    }
     assert_eq!(
         &plan[2..],
         leaves.as_slice(),
-        "plan leaves must match the catalog plus the auth token extras"
+        "plan leaves must match the catalog leaves"
     );
     let mut unique = leaves.clone();
     unique.sort();
