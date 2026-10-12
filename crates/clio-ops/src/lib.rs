@@ -37,6 +37,9 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod diagnose;
+
+#[cfg(test)]
+mod diagnose_fixtures;
 pub mod doctor;
 pub mod finding;
 pub mod reindex;

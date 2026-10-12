@@ -22,7 +22,7 @@
 //! Keep this module focused on the backend-agnostic index contract.
 
 use crate::model::{IndexCoverage, IndexJob, KnnHit, SearchHit};
-use clio_types::{AmError, SearchDomain};
+use clio_types::{AmError, ErrorCode, SearchDomain};
 use std::fmt::Write as _;
 
 /// Dual-backend index pipeline repository (queue + lexical + scoped search).
@@ -114,6 +114,23 @@ pub trait IndexStore: Send + Sync {
         backoff_cutoff_ms: Option<&str>,
         max_attempts: u32,
     ) -> Result<Vec<IndexJob>, AmError>;
+
+    /// The pending job for one `(bank, item)`, if it is still queued and due.
+    ///
+    /// The same due rules as [`Self::pending_index_jobs`]: a row retried after
+    /// `backoff_cutoff_ms` and a row whose `attempts` reached `max_attempts` are
+    /// never returned. A one-shot write uses this to index the item it just
+    /// stored even when an older backlog fills the bounded batch.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn pending_index_job(
+        &self,
+        bank_id: &str,
+        item_id: &str,
+        backoff_cutoff_ms: Option<&str>,
+        max_attempts: u32,
+    ) -> Result<Option<IndexJob>, AmError>;
 
     /// Remove a completed (or skipped) queue row.
     ///
@@ -235,6 +252,17 @@ pub(crate) fn domain_predicate(domains: &[SearchDomain]) -> String {
         })
         .collect();
     format!("({})", parts.join(" OR "))
+}
+
+/// Refuse an empty bank id before a query reaches either backend.
+///
+/// # Errors
+/// [`ErrorCode::MissingBank`] when `bank_id` is empty.
+pub(crate) fn require_bank(bank_id: &str) -> Result<(), AmError> {
+    if bank_id.is_empty() {
+        return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
+    }
+    Ok(())
 }
 
 /// Escape FTS5 query syntax: double embedded quotes and quote each token so

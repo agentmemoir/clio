@@ -154,6 +154,9 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
         would_skip,
         would_reject,
         would_overwrite: 0,
+        // The provider adapter is reached through MCP only, never through the
+        // one-shot CLI drain, so it reports no per-item ids.
+        created_ids: Vec::new(),
         rejection_samples,
         dry_run,
         applied: !dry_run,

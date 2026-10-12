@@ -115,8 +115,14 @@ fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         timestamp: &ts,
     };
     let report = import_bundle(&i_args)?;
+    let written: Vec<Value> = report
+        .created_ids
+        .iter()
+        .map(|id| json!({"bank": ctx.bank.as_str(), "id": id}))
+        .collect();
     Ok(json!({
         "ok": true,
+        "written": written,
         "report": serde_json::to_value(&report).expect("import report serializes")
     }))
 }

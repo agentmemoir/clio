@@ -36,6 +36,7 @@ use crate::cli_output::{self, OutputMode};
 use crate::cli_read::{CliIo, call_tool, emit, fail};
 use crate::cli_write_group::{WriteCall, WriteGroup};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
+use serde_json::Value;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -192,7 +193,7 @@ fn run_parsed(
                     )),
                 );
                 emit(io, mode, &payload, &text);
-                drain_after_write(group, verb, state);
+                drain_after_write(group, verb, state, &payload);
                 match group.failure_exit(verb, &payload) {
                     Some(code) => ExitCode::from(code),
                     None => ExitCode::from(EXIT_OK),
@@ -232,15 +233,45 @@ fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(
     ))
 }
 
-/// Drain one bounded batch of due index jobs so a one-shot write process leaves
-/// the item searchable for the next command. The response is already emitted;
-/// a drain failure never fails the write (it stays on the durable job row).
-fn drain_after_write(group: &dyn WriteGroup, verb: &str, state: &Arc<McpState>) {
+/// Drain the index work a one-shot write just enqueued so the items are
+/// searchable for the next command. The general backlog drain stays bounded;
+/// the items this write reported are drained on their own, so a full batch of
+/// older jobs cannot leave them unindexed. The response is already emitted; a
+/// drain failure never fails the write (it stays on the durable job row).
+fn drain_after_write(group: &dyn WriteGroup, verb: &str, state: &Arc<McpState>, payload: &Value) {
     if !group.mutates(verb) {
         return;
     }
     if let Err(error) = state.drain_index() {
         clio_config::log::warn("index_drain_failed", &[("error", error.message.as_str())]);
+    }
+    drain_written_items(state, payload);
+}
+
+/// Index the items this write reported, even when an older backlog filled the
+/// bounded batch drain. The write tool reports, per item, the bank it landed in
+/// and the item id (`written`), so this never resolves either again; a payload
+/// without `written` wrote nothing to target.
+///
+/// Best-effort, and bounded by the retry backoff: an item whose job just failed
+/// is left on its durable row for a later drain rather than retried at once.
+fn drain_written_items(state: &Arc<McpState>, payload: &Value) {
+    let Some(written) = payload.get("written").and_then(Value::as_array) else {
+        return;
+    };
+    for item in written {
+        let (Some(bank), Some(id)) = (
+            item.get("bank").and_then(Value::as_str),
+            item.get("id").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if let Err(error) = state.drain_index_item(bank, id) {
+            clio_config::log::warn(
+                "index_item_drain_failed",
+                &[("error", error.message.as_str())],
+            );
+        }
     }
 }
 

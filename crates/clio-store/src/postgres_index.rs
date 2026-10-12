@@ -29,7 +29,7 @@
 //! Keep this module focused on Postgres index SQL.
 
 use crate::index_store::{
-    IndexStore, domain_predicate, encode_lexical_document, encode_lexical_query,
+    IndexStore, domain_predicate, encode_lexical_document, encode_lexical_query, require_bank,
 };
 use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{IndexCoverage, IndexJob, KnnHit, SearchHit};
@@ -300,6 +300,38 @@ impl IndexStore for PostgresStore {
         })
     }
 
+    fn pending_index_job(
+        &self,
+        bank_id: &str,
+        item_id: &str,
+        backoff_cutoff_ms: Option<&str>,
+        max_attempts: u32,
+    ) -> Result<Option<IndexJob>, AmError> {
+        self.with_client(|client| {
+            let row = client
+                .query_opt(
+                    "SELECT bank_id, item_id, attempts, last_error
+                     FROM index_pending
+                     WHERE bank_id = $1 AND item_id = $2
+                       AND ($3::text IS NULL OR last_attempt_at IS NULL OR last_attempt_at < $3)
+                       AND attempts < $4",
+                    &[
+                        &bank_id,
+                        &item_id,
+                        &backoff_cutoff_ms,
+                        &i32::try_from(max_attempts).unwrap_or(i32::MAX),
+                    ],
+                )
+                .am("pending job row")?;
+            Ok(row.map(|r| IndexJob {
+                bank_id: r.get(0),
+                item_id: r.get(1),
+                attempts: u32::try_from(r.get::<_, i32>(2).max(0)).unwrap_or(0),
+                last_error: r.get(3),
+            }))
+        })
+    }
+
     fn finish_index_job(&self, bank_id: &str, item_id: &str) -> Result<(), AmError> {
         self.with_client(|client| {
             client
@@ -399,11 +431,4 @@ impl IndexStore for PostgresStore {
             Ok(n)
         })
     }
-}
-
-fn require_bank(bank_id: &str) -> Result<(), AmError> {
-    if bank_id.is_empty() {
-        return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
-    }
-    Ok(())
 }
