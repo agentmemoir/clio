@@ -312,6 +312,19 @@ fn repeated_bank_flags_collapse_and_keep_order() {
 }
 
 #[test]
+fn add_help_refuses_only_unusable_store_flags() {
+    let store = scratch("add-help-flags");
+    let (code, out, err) = run_auth(&store, &["token", "add", "--help"]);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(out.contains("--bank BANK [--bank BANK]"), "{out}");
+    assert!(
+        out.contains("--db and --backend are refused because they cannot change what is written"),
+        "{out}"
+    );
+    assert!(!out.contains("--bank are refused"), "{out}");
+}
+
+#[test]
 fn help_and_unknown_input_follow_the_cli_convention() {
     let store = scratch("help");
     let (code, out, _) = run_auth(&store, &["--help"]);
