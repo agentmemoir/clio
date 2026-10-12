@@ -12,6 +12,7 @@ from scoped_selftest_refs import run as run_refs
 from scoped_selftest_steps import run as run_steps
 from scoped_selftest_objects import run as run_objects
 from scoped_selftest_modes import run as run_modes
+from scoped_selftest_scope import run as run_scope
 
 
 def self_test() -> int:
@@ -27,6 +28,7 @@ def self_test() -> int:
             print(f"self-test ok: {name}")
 
     printed, = run_select(check)
+    run_scope(check)
     raises, = run_refs(check)
     name, scratch, value = run_steps(check, raises)
     name, prune_packages, scratch, stale_map_ran = run_objects(check, raises)
