@@ -318,7 +318,7 @@ const VERB_USAGE: &[(&str, &str)] = &[
     ),
     (
         "auth token add",
-        "usage: clio auth token add --label LABEL --actor ACTOR --bank BANK [--bank BANK] [--output json|text]\n       generates a credential, prints its secret exactly once, and stores only the digest in the owner-only token store; the secret cannot be recovered — save it when you see it; the store file is held under a lock for the whole write, so a run that cannot take the lock refuses without printing a secret, and --db, --backend, and --bank are refused because they cannot change what is written",
+        "usage: clio auth token add --label LABEL --actor ACTOR --bank BANK [--bank BANK] [--output json|text]\n       generates a credential, prints its secret exactly once, and stores only the digest in the owner-only token store; the secret cannot be recovered — save it when you see it; the store file is held under a lock for the whole write, so a run that cannot take the lock refuses without printing a secret, and --db and --backend are refused because they cannot change what is written",
     ),
     (
         "auth token list",
