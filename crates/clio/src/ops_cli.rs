@@ -117,7 +117,7 @@ where
 
 /// The `ops` usage lines: the requested subcommand's own, or all five joined.
 fn ops_usage(sub: &str) -> String {
-    let lines: Vec<&str> = crate::cli_help_surfaces::ops_usage_lines(sub)
+    let lines = crate::cli_help_surfaces::ops_usage_lines(sub)
         .expect("only a real ops subcommand reaches this help branch");
     lines.join("\n")
 }
