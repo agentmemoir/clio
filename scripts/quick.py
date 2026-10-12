@@ -11,14 +11,18 @@ there and not here.
     python3 scripts/quick.py --base origin/master --plan     # plan only
     python3 scripts/quick.py --base origin/master --plan --json
     python3 scripts/quick.py --base origin/master --plan --closure
+    python3 scripts/quick.py --base origin/master --plan --closure --json
     python3 scripts/quick.py --base origin/master --retry-failed
 
 The mapping from a file to its tests is `owned_tests.owned_selection`, which
 reads the module declarations the compiler obeys, so a `#[path]` rename is
-followed. The plan prints the estimate from the last run's per-test times; it
-builds nothing and runs nothing. `--closure` estimates the packages `make
-coverage-fast` would run, which is how an agent decides whether the optional
-Done check fits its 3 minute budget.
+followed. The plan prints the estimate from the last run's per-test times, read
+from this checkout and from the main checkout when this is a linked worktree;
+it builds nothing and runs nothing. `--closure` estimates the packages `make
+coverage-fast` would run, with the build and coverage cost counted, which is how
+an agent decides whether the optional Done check fits its 3 minute budget. The
+gate asks for the same estimate with `--json` and refuses an agent's run that
+does not fit.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import owned_tests as owned  # noqa: E402
 import scoped_runner as runner  # noqa: E402
 from owned_scanner import SourceError  # noqa: E402
+from precommit_hooks import main_checkout  # noqa: E402
 from quick_estimate import Case, Estimate, estimate, failed_cases, newest_history, wall_seconds  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
 import quick_untested as untested  # noqa: E402
@@ -49,14 +54,19 @@ owned.workspace_crates = functools.lru_cache(maxsize=None)(owned.workspace_crate
 
 QUICK_BUDGET_S = 60.0
 DONE_BUDGET_S = 180.0
+# A Done run costs more than its tests: it builds the instrumented tree and records coverage.
+# Five runs on two branches (2026-10-12) took 1.7 to 3.1 times the summed test time at
+# THREADS workers (103 to 273 s against 62 to 115 s); 3 is the smallest whole number that
+# covers them. The gate logs each estimate beside the run, so the factor can be checked.
+DONE_FACTOR = 3.0
 THREADS = int(runner.TEST_THREADS)
 NEXTEST = runner.ROOT / "target" / "nextest"
 QUICK_JUNIT = NEXTEST / "quick" / "junit.xml"
-HISTORY = [
-    runner.ROOT / "target" / "llvm-cov-target" / "nextest" / "ci" / "junit.xml",
-    NEXTEST / "ci" / "junit.xml",
-    QUICK_JUNIT,
-]
+HISTORY = (
+    Path("target/llvm-cov-target/nextest/ci/junit.xml"),
+    Path("target/nextest/ci/junit.xml"),
+    Path("target/nextest/quick/junit.xml"),
+)
 NO_CHANGE = "quick: no changed Rust file"
 SCHEMA_CHECK = runner.ROOT / "scripts" / "schema_args_check.py"
 
@@ -115,14 +125,29 @@ def select(files: Sequence[str], packages: Sequence[dict], lookup: Lookup = owne
     return Selection(merge(terms), notes)
 
 
-def estimate_line(found: Estimate | None, budget: float, label: str) -> list[str]:
+def history_files() -> list[Path]:
+    """The JUnit files nextest wrote here and, in a linked worktree, in the main checkout.
+
+    A new worktree has run nothing, so alone it would never have a time to estimate from.
+    """
+    roots = [runner.ROOT]
+    main = main_checkout(runner.ROOT)
+    if main is not None:
+        roots.append(main)
+    return [root / relative for root in roots for relative in HISTORY]
+
+
+def estimate_line(found: Estimate | None, budget: float, label: str, factor: float = 1.0) -> list[str]:
     if found is None:
         return [f"quick: {label}: unknown (no per-test times under target/nextest yet)"]
-    wall = wall_seconds(found.seconds, THREADS)
-    lines = [
-        f"quick: {label}: {found.seconds:.1f} s of test time over {found.tests} test(s) with history, "
-        f"about {wall:.1f} s at {THREADS} test threads; build time and tests never run are not counted"
-    ]
+    threaded = wall_seconds(found.seconds, THREADS)
+    wall = threaded * factor
+    counted = f"about {threaded:.1f} s at {THREADS} test threads"
+    if factor == 1.0:
+        counted += "; build time and tests never run are not counted"
+    else:
+        counted += f", {wall:.1f} s with the build and coverage (times {factor:g}); tests never run are not counted"
+    lines = [f"quick: {label}: {found.seconds:.1f} s of test time over {found.tests} test(s) with history, {counted}"]
     lines.append(
         f"quick: over the {budget:.0f} s budget" if wall > budget else f"quick: within the {budget:.0f} s budget"
     )
@@ -160,15 +185,43 @@ def plan_json(selection: Selection, files: Sequence[str], left_out: Sequence[str
     )
 
 
-def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
+def closure_estimate(packages: Sequence[str], history: list[Case]) -> Estimate | None:
     names = set(packages)
-    found = estimate(history, lambda case: case.binary_id.split("::")[0] in names)
+    return estimate(history, lambda case: case.binary_id.split("::")[0] in names)
+
+
+def done_seconds(found: Estimate | None) -> float | None:
+    """What the Done run likely takes: the test time at THREADS workers, times DONE_FACTOR."""
+    return None if found is None else wall_seconds(found.seconds, THREADS) * DONE_FACTOR
+
+
+def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
+    found = closure_estimate(packages, history)
     lines = [f"quick: closure: {len(packages)} package(s): {', '.join(packages)}"]
-    lines += estimate_line(found, DONE_BUDGET_S, "closure estimate")
-    lines.append("quick: the Done run is instrumented, so this estimate likely reads low")
-    if found is not None and wall_seconds(found.seconds, THREADS) > DONE_BUDGET_S:
+    lines += estimate_line(found, DONE_BUDGET_S, "closure estimate", DONE_FACTOR)
+    seconds = done_seconds(found)
+    if seconds is not None and seconds > DONE_BUDGET_S:
         lines.append("quick: leave the coverage verdict to CI")
     return lines
+
+
+def closure_json(packages: Sequence[str], history: list[Case]) -> str:
+    """The closure estimate for a program: `within` is null when there is no history to judge by.
+
+    With no package there is nothing to run, so the run takes no time.
+    """
+    found = closure_estimate(packages, history)
+    seconds = done_seconds(found) if packages else 0.0
+    return json.dumps(
+        {
+            "packages": list(packages),
+            "tests": found.tests if found else 0,
+            "done_seconds": seconds,
+            "budget_seconds": DONE_BUDGET_S,
+            "within": None if seconds is None else seconds <= DONE_BUDGET_S,
+        },
+        indent=2,
+    )
 
 
 def schema_check(files: Sequence[str]) -> int:
@@ -248,23 +301,24 @@ def parse(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the tests of the modules a change touched.")
     parser.add_argument("--base", required=True, help="ref to diff against, e.g. origin/master")
     parser.add_argument("--plan", action="store_true", help="print the selection and the estimate, run nothing")
-    parser.add_argument("--json", action="store_true", help="with --plan, print the selection as JSON")
+    parser.add_argument("--json", action="store_true", help="with --plan, print the selection (with --closure, the estimate) as JSON")
     parser.add_argument("--closure", action="store_true", help="with --plan, estimate the coverage-fast closure")
     parser.add_argument("--retry-failed", action="store_true", help="run last run's failures first")
     args = parser.parse_args(argv)
     if (args.json or args.closure) and not args.plan:
         parser.error("--json and --closure need --plan")
-    if args.json and args.closure:
-        parser.error("--json and --closure cannot be combined")
     return args
 
 
 def run(args: argparse.Namespace) -> int:
     if runner.resolve_ref(args.base) is None:
         raise runner.RunError(f"base ref {args.base!r} resolves to no commit, so the changed files cannot be determined")
-    history = newest_history(HISTORY)
+    history = newest_history(history_files())
     if args.closure:
         packages = runner.select(args.base, False)[0]
+        if args.json:
+            print(closure_json(packages, history))
+            return runner.EXIT_OK
         if not packages:
             print(NO_CHANGE)
             return runner.EXIT_OK

@@ -3,7 +3,8 @@
 The cache keeps the newest verdict per command and prunes the rest, so it cannot say
 how long anyone waited on the gate over a day. This file can. Each line records the
 worktree the gate ran in, the branch, the command, when it started and finished, and whether
-a terminal was attached, which tells a run someone typed from a run a program started.
+a terminal was attached, which tells a run someone typed from a run a program started. A
+`coverage-fast` run the Done check let go on also records the seconds it was estimated to take.
 
 A failed append prints a warning and changes nothing else: the gate's exit code is the
 command's own.
@@ -68,6 +69,7 @@ def append_run(root: str, run: dict[str, Any]) -> None:
             "argv": [str(arg)[:ARG_CHARS] for arg in run["argv"][:ARGV_KEEP]],
             "replayed": run["replayed"],
             "interactive": _terminal_attached(),
+            "estimate_s": run.get("estimate_s"),
         }
         path = cache_root() / RUNS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
