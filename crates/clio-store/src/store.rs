@@ -302,8 +302,10 @@ pub trait Store:
 
     /// Bank-scoped item identity columns (no content/DEK access).
     ///
-    /// `Ok(None)` = missing / wrong bank. The discard tool uses this to resolve
-    /// its dry-run target without decrypting the payload.
+    /// `Ok(None)` = missing / wrong bank / discarded: the read excludes a row
+    /// whose `discarded_at` is set, so `Some` means present and in active use,
+    /// while `get_memory_item` still returns a discarded row. The discard tool
+    /// uses it to resolve its dry-run target without decrypting the payload.
     ///
     /// # Errors
     /// Storage failures.

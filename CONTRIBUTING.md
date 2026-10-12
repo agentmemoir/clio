@@ -2,17 +2,19 @@
 
 ## Changelog
 
-Add a line to [CHANGELOG.md](CHANGELOG.md) in the same pull request that makes
-the change, under `[Unreleased]` and under one of the six types
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) defines: `Added`,
-`Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+Never edit [CHANGELOG.md](CHANGELOG.md) by hand on a normal pull request. Add one fragment per user-facing change under `changelog.d/`, named `<slug>.<category>.md`, for example `add-user-authentication.feature.md`. The slug is lowercase words joined by hyphens, at least 8 characters, and it ends with `-issues-<numbers>` when the change has issues, for example `fix-session-expiration-issues-45-46.bugfix.md`. The name carries no pull request number: the number does not exist yet when the file is written, and the name must already be unique inside `changelog.d/`. One fragment holds one logical change, written as a concise, user-facing description.
 
-Leave a type out when it has nothing in it. That specification asks for empty
-sections to be left out rather than shown as empty.
+The category is `feature`, `bugfix`, or `improvement`, which the release build renders as `Added`, `Fixed`, or `Changed` under [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). A security fix, a deprecation, or a removal still starts as a fragment with the closest category and a plain name; the release manager places it under the right heading when building the release. The build leaves a type out when it has nothing in it. That specification asks for empty sections to be left out rather than shown as empty.
 
-The specification says nothing about linking, so this is our choice: end each
-entry with a link to its pull request, so a reader can see the change and the
-discussion.
+The specification says nothing about linking, so this is our choice: the release build appends `[Issue #N]` links from the `-issues-` marker in the filename, so a reader can trace the change to its discussion. A pull request link is no longer required on an entry, because the number does not exist when the fragment is written.
+
+Check the fragments before you push:
+
+```
+python3 scripts/changelog_fragments.py --check --base origin/master
+```
+
+That validates every name and every paragraph, and it fails a pull request that changes production code outside tests and fixtures with no fragment added. A production-code change with no user-visible effect carries exactly `No user-facing change.`, which the check accepts and the release build leaves out. CI runs the same check with the pull request's own diff base.
 
 ### Writing the entry
 
@@ -212,11 +214,9 @@ passing, so the runner refuses to report a verdict it cannot support.
 
 ### Cutting a release
 
-1. Move the `[Unreleased]` entries under a new `## [X.Y.Z] - YYYY-MM-DD`
-   heading, dated today. Leave `[Unreleased]` in place, empty, above it.
-2. Add the link for the new version at the bottom of the file.
-3. Bump `version` in `[workspace.package]` in `Cargo.toml`. Every crate inherits
-   it, so that one line covers all of them.
+1. Run `python3 scripts/changelog_fragments.py --build --version X.Y.Z`, which groups the fragments under their headings, writes one `## [X.Y.Z] - YYYY-MM-DD` section dated today below the empty `[Unreleased]`, and deletes the consumed fragments as part of the change. It also names any fragments that may belong under Security, Deprecated, or Removed, which you place by hand. Pass `--date` to set another date.
+2. Move any leftover `[Unreleased]` hand entries under the new heading when the release still carries entries written before fragments existed.
+3. Bump `version` in `[workspace.package]` in `Cargo.toml`. Every crate inherits it, so that one line covers all of them.
 4. Commit, open a pull request, and merge.
 5. Tag the merge commit `vX.Y.Z` and push the tag.
 
