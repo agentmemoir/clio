@@ -78,6 +78,7 @@ mod cli_error;
 mod cli_error_names;
 mod cli_help;
 mod cli_help_markdown;
+mod cli_help_request;
 mod cli_help_surfaces;
 mod cli_help_usage;
 mod cli_manual_write;
