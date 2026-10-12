@@ -10,6 +10,7 @@
 //!
 //! ## Owns
 //! - Batch op decoding, `$ref` substitution, and the per-op report shape
+//! - The command-level `bank`/`actor` defaults each operation inherits
 //! - The pre-flight (score-without-write) wiring per recognized op tool
 //!
 //! ## Does not own
@@ -87,6 +88,11 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
         let raw_params = op.get("params").unwrap_or(&empty);
         let in_batch_ids: Vec<String> = resolved.iter().flatten().cloned().collect();
         let params = substitute_refs(raw_params, &resolved)?;
+        // The command-level `bank`/`actor` are defaults for every operation; an
+        // operation that names its own keeps it. Without this the tool scored
+        // each operation against the session defaults and stored the record in
+        // the wrong bank under the wrong actor.
+        let params = with_command_context(args, &params);
         // The same argument contract as a direct call. An undeclared or blank
         // argument aborts the batch, instead of being dropped and written without it.
         crate::arg_contract::check(tool, &params).map_err(|e| {
@@ -98,15 +104,19 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
                 ),
             )
         })?;
-        let staged = preflight(state, tool, &params, &in_batch_ids).map_err(|e| {
-            AmError::new(
-                e.code,
-                format!(
-                    "batch aborted at operation {index} (`{tool}`): {}",
-                    e.message
-                ),
-            )
-        })?;
+        // `created_items` carries the operations before this one, so a repeat of
+        // an earlier operation's text fails the duplicate gate instead of both
+        // rows committing.
+        let staged =
+            preflight(state, tool, &params, &in_batch_ids, &created_items).map_err(|e| {
+                AmError::new(
+                    e.code,
+                    format!(
+                        "batch aborted at operation {index} (`{tool}`): {}",
+                        e.message
+                    ),
+                )
+            })?;
         resolved.push(staged.id.clone());
         collect_carriers(tool, &staged.writes, &mut created_items);
         writes.extend(staged.writes);
@@ -139,6 +149,25 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
         "operations".to_owned(),
         Value::Array(reports),
     )])))
+}
+
+/// Apply the batch call's `bank`/`actor` to one operation as defaults.
+///
+/// An operation that names its own `bank` or `actor` keeps it; one that omits
+/// either inherits the command-level value, which is what the CLI advertises.
+/// Other arguments are untouched.
+fn with_command_context(batch_args: &Value, params: &Value) -> Value {
+    let Value::Object(mut fields) = params.clone() else {
+        return params.clone();
+    };
+    for key in ["bank", "actor"] {
+        if !fields.contains_key(key)
+            && let Some(value) = batch_args.get(key)
+        {
+            fields.insert(key.to_owned(), value.clone());
+        }
+    }
+    Value::Object(fields)
 }
 
 /// Record the admitted carriers of each op type for post-commit attach.
@@ -231,3 +260,11 @@ mod batch_tools_context_batch_canonical_tests;
 #[cfg(test)]
 #[path = "batch_tools_contract_tests.rs"]
 mod batch_tools_contract_tests;
+
+#[cfg(test)]
+#[path = "batch_tools_command_context_tests.rs"]
+mod batch_tools_command_context_tests;
+
+#[cfg(test)]
+#[path = "batch_tools_duplicate_tests.rs"]
+mod batch_tools_duplicate_tests;

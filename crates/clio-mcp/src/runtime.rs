@@ -47,7 +47,7 @@ use crate::principal::Principal;
 use serde_json::Value;
 use std::sync::{Arc, Condvar};
 
-pub use crate::runtime_sinks::{NoSignals, StderrSinks, StoreSignals};
+pub use crate::runtime_sinks::{BatchSignals, NoSignals, StderrSinks, StoreSignals};
 
 /// Pinned protocol revision carried for diagnostics assertions.
 pub const PROTOCOL_REVISION: &str = crate::MCP_PROTOCOL_REVISION;
