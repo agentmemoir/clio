@@ -1,0 +1,1 @@
+`clio help` accepts the global value flags (`--db`, `--backend`, `--bank`, `--actor`, `--output`) on either side of the verb, so `clio --db PATH help`, `clio help --db PATH`, and `clio help --db PATH backup` print help and exit 0 instead of reading the flag's value as an unknown command.
