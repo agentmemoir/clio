@@ -11,7 +11,8 @@
 //! ## Owns
 //! - `FlagSpec` (global + command flags) and `ParsedArgs` (positionals + flags)
 //! - The `parse` grammar and its `did you mean` suggestions
-//! - Splitting leading global flags from the verb
+//! - Splitting leading global flags from the verb, and the word scan that skips
+//!   a global value flag's value
 //!
 //! ## Does not own
 //! - Command semantics (see `cli_read`) or output rendering (see `cli_output`)
@@ -366,6 +367,42 @@ pub(crate) fn merge_leading_globals(
         command_args.extend(globals);
     }
     command_args
+}
+
+/// Whether `arg` is a global flag that takes a value: one of the declared long
+/// names, or `-o`, the short spelling of `--output`. The token after it is that
+/// flag's value, which no caller may read as a word.
+pub(crate) fn is_global_value_flag(arg: &str) -> bool {
+    let name = arg.strip_prefix("--").unwrap_or(arg);
+    arg == "-o" || crate::cli_command_registry::global_value_names().any(|flag| flag == name)
+}
+
+/// The positions of the tokens that are words, not flags and not the value of a
+/// global value flag. `clio help` reads the first as its topic.
+///
+/// `main` lifts a leading global out from before the verb and appends it after
+/// the verb, so `clio --db PATH help` and `clio help --db PATH` both reach the
+/// topic reader with `--db PATH`. Without the skip the path was read as an
+/// unknown topic and the command exited 2 instead of printing help.
+pub(crate) fn word_positions(args: &[String]) -> Vec<usize> {
+    let mut positions = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if is_global_value_flag(arg)
+            && args
+                .get(index + 1)
+                .is_some_and(|value| !value.starts_with("--"))
+        {
+            index += 2;
+            continue;
+        }
+        if !arg.starts_with('-') {
+            positions.push(index);
+        }
+        index += 1;
+    }
+    positions
 }
 
 /// Build the fail-closed unknown-flag error, suggesting the closest known flag.
