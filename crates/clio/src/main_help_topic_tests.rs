@@ -94,3 +94,24 @@ fn the_json_catalog_is_selected_when_a_global_value_flag_is_present() {
         ExitCode::SUCCESS
     );
 }
+
+/// `clio help --help` and `clio help -h` are word-less help requests, so they
+/// print the top-level document exactly as `clio help` does. Every other leaf
+/// command prints its registry record's usage for `--help`; `help` is the
+/// exception by design, because the document is its own subject. This pins the
+/// decision so a later consistency pass cannot "fix" the flag into the record's
+/// usage line while the `help help` topic path would still print the document.
+#[test]
+fn help_with_a_help_flag_prints_the_top_level_document() {
+    for argv in [
+        vec!["help".to_owned(), "--help".to_owned()],
+        vec!["help".to_owned(), "-h".to_owned()],
+    ] {
+        assert_eq!(
+            crate::cli_top_level::help_topic(&argv[1..]).expect("no error"),
+            None,
+            "a help flag is not a topic: {argv:?}"
+        );
+        assert_eq!(run(argv.clone()), ExitCode::SUCCESS, "{argv:?}");
+    }
+}

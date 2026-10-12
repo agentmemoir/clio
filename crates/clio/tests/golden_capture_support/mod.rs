@@ -256,19 +256,40 @@ pub fn compare(fixture: &GoldenFixture, captured: &[CaptureEntry]) -> Vec<Conten
 
 /// The capture plan from the running binary itself: top-level help and the
 /// JSON catalog first, then one `["<cmd>", "--help"]` per leaf command in
-/// catalog order. No duplicates.
+/// catalog order, then one `["<group>", "--help"]` per group prefix in the
+/// catalog's `groups` order. No duplicates.
 pub fn capture_plan(binary: &Path) -> Vec<Vec<String>> {
     let help = capture(binary, &["help".to_owned()], None).expect("top-level help capture");
     let catalog =
         capture(binary, &["help".to_owned(), "--json".to_owned()], None).expect("catalog capture");
     let mut plan = vec![help.argv, catalog.argv];
     let parsed: Value = serde_json::from_str(&catalog.stdout).expect("catalog stdout is JSON");
-    for name in leaf_commands(&parsed) {
+    for name in leaf_commands(&parsed)
+        .into_iter()
+        .chain(group_prefixes(&parsed))
+    {
         let mut argv: Vec<String> = name.split(' ').map(str::to_owned).collect();
         argv.push("--help".to_owned());
         plan.push(argv);
     }
     plan
+}
+
+/// Every group prefix in the catalog's `groups` array, in that order: the
+/// group-level `--help` screens are product surfaces too, so the plan pins
+/// them beside the leaves. A prefix is never a leaf (each one is a strict
+/// prefix of a listed command), so the two lists cannot collide.
+fn group_prefixes(catalog: &Value) -> Vec<String> {
+    static NO_GROUPS: [Value; 0] = [];
+    let groups: &[Value] = match catalog.get("groups").and_then(Value::as_array) {
+        Some(groups) => groups,
+        None => &NO_GROUPS,
+    };
+    groups
+        .iter()
+        .filter_map(|group| group.get("prefix").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Every leaf command in the catalog: `commands` in binding-table order, then
@@ -334,13 +355,66 @@ pub fn workspace_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The guarded release build's outcome: `Stale` is the one refusal a second
+/// build clears (the first build is the one that recompiled clio, so it warmed
+/// the cache the second requires), and `Refused` carries any other refusal,
+/// already rendered for the caller.
+pub enum GuardedBuildError {
+    Stale { cargo_stderr: String },
+    Refused(String),
+}
+
+impl GuardedBuildError {
+    /// The message a refusal prints. The retry is spent by the time this
+    /// renders, so it never asks for another manual run, and cargo's stderr
+    /// tail names what recompiled.
+    #[must_use]
+    pub fn render(self) -> String {
+        match self {
+            Self::Stale { cargo_stderr } => format!(
+                "capture refused: cargo recompiled clio on both the build and its retry, \
+                 so the capture was not taken\ncargo stderr: {}",
+                last_lines(&cargo_stderr, 5)
+            ),
+            Self::Refused(message) => message,
+        }
+    }
+}
+
+/// Run the guarded release build, allowing one retry when the first build is
+/// the one that recompiled clio.
+///
+/// A cold tree's first capture meets a cold release cache: the guard's own
+/// build compiles clio, cargo reports `fresh: false`, and the documented
+/// procedure asks for a manual re-run. The retry performs that re-run here, so
+/// one capture command is enough; a cache that recompiles on both builds still
+/// refuses rather than freezing output the cache is not settling on.
+pub fn guarded_build(root: &Path) -> Result<String, String> {
+    guarded_build_retrying(|| guarded_build_once(root)).map_err(GuardedBuildError::render)
+}
+
+/// The retry rule, injectable so a test can drive it without a real cargo:
+/// only a stale first build is retried, exactly once.
+pub fn guarded_build_retrying<F>(mut build: F) -> Result<String, GuardedBuildError>
+where
+    F: FnMut() -> Result<String, GuardedBuildError>,
+{
+    match build() {
+        Err(GuardedBuildError::Stale { .. }) => build(),
+        other => other,
+    }
+}
+
 /// Run `cargo build -p clio --release --locked --message-format=json` in the
 /// workspace root above `root`, accept the clio bin artifact's executable only
 /// with its freshness proof, verify the path exists, and return it; every
 /// refusal names its guard.
-pub fn guarded_build(root: &Path) -> Result<String, String> {
-    let workspace = workspace_root(root)
-        .ok_or_else(|| "capture refused: no workspace root found above the root".to_owned())?;
+fn guarded_build_once(root: &Path) -> Result<String, GuardedBuildError> {
+    let workspace = workspace_root(root).ok_or_else(|| {
+        GuardedBuildError::Refused(
+            "capture refused: no workspace root found above the root".to_owned(),
+        )
+    })?;
     let mut command = Command::new("cargo");
     command.current_dir(&workspace).args([
         "build",
@@ -350,20 +424,27 @@ pub fn guarded_build(root: &Path) -> Result<String, String> {
         "--locked",
         "--message-format=json",
     ]);
-    let output = run_bounded(&mut command, BUILD_DEADLINE)
-        .map_err(|error| format!("the release build did not finish: {error}"))?;
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|error| format!("cargo build stdout is not UTF-8: {error}"))?;
-    let stderr = String::from_utf8(output.stderr)
-        .map_err(|error| format!("cargo build stderr is not UTF-8: {error}"))?;
+    let output = run_bounded(&mut command, BUILD_DEADLINE).map_err(|error| {
+        GuardedBuildError::Refused(format!("the release build did not finish: {error}"))
+    })?;
+    let stdout = String::from_utf8(output.stdout).map_err(|error| {
+        GuardedBuildError::Refused(format!("cargo build stdout is not UTF-8: {error}"))
+    })?;
+    let stderr = String::from_utf8(output.stderr).map_err(|error| {
+        GuardedBuildError::Refused(format!("cargo build stderr is not UTF-8: {error}"))
+    })?;
     let exit = output.code.unwrap_or(-1);
     let executable = freshness_verdict(exit, &stdout).map_err(|refusal| match refusal {
-        GuardRefusal::BuildFailed { .. } => format!(
+        GuardRefusal::BuildFailed { .. } => GuardedBuildError::Refused(format!(
             "capture refused: the release build failed with exit {exit}\ncargo stderr: {}",
             last_lines(&stderr, 5)
-        ),
-        refusal => refusal.to_string(),
+        )),
+        GuardRefusal::StaleArtifact => GuardedBuildError::Stale {
+            cargo_stderr: stderr,
+        },
+        refusal => GuardedBuildError::Refused(refusal.to_string()),
     })?;
-    require_executable(Path::new(&executable)).map_err(|refusal| refusal.to_string())?;
+    require_executable(Path::new(&executable))
+        .map_err(|refusal| GuardedBuildError::Refused(refusal.to_string()))?;
     Ok(executable)
 }
