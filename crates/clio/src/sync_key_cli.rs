@@ -111,7 +111,7 @@ pub(crate) fn run(io: &mut CliIo, args: Vec<String>) -> ExitCode {
         Err(error) => return fail(io, fallback, &error),
     };
     if parsed.has("help") {
-        return match crate::cli_help_usage::usage_for(verb) {
+        return match crate::cli_help_usage::help_for(verb) {
             Some(usage) => {
                 let _ = cli_output::write_text(&mut io.out, &usage);
                 ExitCode::from(EXIT_OK)

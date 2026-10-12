@@ -251,10 +251,9 @@ fn bounded_help_capture_records_exit_zero_and_streams() {
 }
 
 /// The plan starts with top-level help and the catalog, then holds exactly one
-/// `["<cmd>", "--help"]` per catalog leaf, derived independently, with no duplicates.
+/// `["<cmd>", "--help"]` per catalog leaf plus the auth-token extras, with no duplicates.
 #[test]
 fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
-    static NO_ENTRIES: [Value; 0] = [];
     let binary = Path::new(env!("CARGO_BIN_EXE_clio"));
     let plan = capture_plan(binary);
     assert_eq!(plan[0], vec!["help".to_owned()], "top-level help first");
@@ -265,7 +264,7 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
     let array = |key: &str| -> &[Value] {
         match catalog.get(key).and_then(Value::as_array) {
             Some(commands) => commands,
-            None => &NO_ENTRIES,
+            None => &[],
         }
     };
     let mut names: Vec<String> = Vec::new();
@@ -275,12 +274,9 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
         }
     }
     for unbound in array("commands_without_tools") {
-        if let Some(name) = unbound.as_str() {
-            names.push(name.to_owned());
-        }
+        names.extend(unbound.as_str().map(str::to_owned));
     }
-    // An independent traversal: a leaf is a catalog name no other name extends.
-    let leaves: Vec<Vec<String>> = names
+    let mut leaves: Vec<Vec<String>> = names
         .iter()
         .filter(|name| {
             !names
@@ -293,10 +289,15 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
             argv
         })
         .collect();
+    for name in golden_capture_support::EXTRA_LEAVES {
+        let mut argv: Vec<String> = name.split(' ').map(str::to_owned).collect();
+        argv.push("--help".to_owned());
+        leaves.push(argv);
+    }
     assert_eq!(
         &plan[2..],
         leaves.as_slice(),
-        "plan leaves must match the catalog"
+        "plan leaves must match the catalog plus the auth token extras"
     );
     let mut unique = leaves.clone();
     unique.sort();

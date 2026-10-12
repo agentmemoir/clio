@@ -156,7 +156,7 @@ pub(crate) fn commands_without_tools() -> Vec<String> {
 /// command's `--help` still fails as an unknown command rather than printing help.
 pub(crate) fn verb_help(verb: &str) -> Option<(String, &'static str)> {
     let tool = bound_tool(verb)?;
-    let usage = crate::cli_help_usage::usage_for(verb)?;
+    let usage = crate::cli_help_usage::help_for(verb)?;
     Some((usage, tool))
 }
 

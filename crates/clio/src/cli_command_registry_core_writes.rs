@@ -138,7 +138,7 @@ const CORE_DRY_RUN: Flag = Flag::toggle("dry-run", "`cli_write_core` previews in
 const MUTATE_DRY_RUN: Flag = Flag::toggle("dry-run", "`cli_write_mutate` previews instead.");
 
 /// The `--context` note `remember` and `admit` print under their usage lines.
-const CONTEXT_NOTE: &str = "--context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated";
+const CONTEXT_NOTE: &str = "--context records where the memory came from, such as a conversation type or workflow stage; it is not searchable and recall does not match on it, so put anything you want to find later in TEXT. It is at most 4096 UTF-8 bytes, rejected when empty or oversized, never truncated";
 
 /// The `consolidate` note: what the maintenance wave does.
 const CONSOLIDATE_NOTE: &str = "--bank selects the target bank for the maintenance wave; --force runs the full wave: refresh every dirty ancestor, then reconcile the bank's consolidated units";

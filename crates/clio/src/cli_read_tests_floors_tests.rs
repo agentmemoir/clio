@@ -278,8 +278,5 @@ fn recall_help_lists_the_floor_and_entity_flags() {
     ] {
         assert!(out.contains(flag), "{flag} must be documented: {out}");
     }
-    assert!(
-        out.contains("not a calibrated relevance threshold"),
-        "{out}"
-    );
+    assert!(out.contains("not a calibrated threshold"), "{out}");
 }

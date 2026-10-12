@@ -33,7 +33,7 @@ const fn example(command: &'static str, comment: Option<&'static str>) -> Exampl
 }
 
 /// The `recall` note: what a score floor is, and which flags conflict.
-const RECALL_NOTE: &str = "a score floor is a relative filter over this query's own scores, not a calibrated relevance threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)";
+const RECALL_NOTE: &str = "a score floor is a relative filter over this query's own scores, not a calibrated threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)";
 
 /// The required `QUERY` positional.
 const QUERY: Positional = Positional {

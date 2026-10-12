@@ -49,6 +49,11 @@ const CREATE_UNPRINTED: &[&str] = &["bank", "actor", "no-input", "yes"];
 /// documents `--yes`, `--no-input`, and `--output`.
 const RESTORE_UNPRINTED: &[&str] = &["db", "backend", "bank", "actor"];
 
+/// The globals `backup list` and `backup verify` accept without printing:
+/// both read archives, never a store, so `--db` and `--backend` are refused
+/// at runtime and the other four print here.
+const LIST_VERIFY_UNPRINTED: &[&str] = &["bank", "actor", "no-input", "yes"];
+
 /// The required `ID` positional of `restore` and `verify`.
 const ID: Positional = Positional {
     label: "ID",
@@ -194,7 +199,7 @@ pub(crate) const BACKUP_LIST: CommandSpec = CommandSpec {
         ),
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: BACKUP_UNPRINTED,
+    accepted_extra: LIST_VERIFY_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -327,7 +332,7 @@ pub(crate) const BACKUP_VERIFY: CommandSpec = CommandSpec {
         ),
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: BACKUP_UNPRINTED,
+    accepted_extra: LIST_VERIFY_UNPRINTED,
     flag_aliases: &[],
     usage_override: Some(VERIFY_USAGE),
     usage_alternates: &[],

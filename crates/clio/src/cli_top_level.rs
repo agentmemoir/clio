@@ -109,11 +109,19 @@ pub(crate) fn help_topic(args: &[String]) -> Result<Option<(String, Vec<String>)
 }
 
 /// One registry record's `--help` screen: its usage line, a blank line, then
-/// its notes, so the surface's prose lives on the record beside its flags.
+/// its notes, then the same options block `help_for` appends, so the surface's
+/// prose lives on the record beside its flags and every help path shows the
+/// same flag data.
 pub(crate) fn print_record_help(name: &str) -> ExitCode {
     let spec =
         crate::cli_command_registry::find(name).unwrap_or_else(|| panic!("`{name}` is registered"));
-    println!("{}\n\n{}", spec.usage_line(), spec.notes.join("\n\n"));
+    let mut text = format!("{}\n\n{}", spec.usage_line(), spec.notes.join("\n\n"));
+    let options = spec.options_help();
+    if !options.is_empty() {
+        text.push_str("\n\n");
+        text.push_str(&options);
+    }
+    println!("{text}");
     ExitCode::SUCCESS
 }
 

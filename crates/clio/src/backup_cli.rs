@@ -125,7 +125,7 @@ fn run_dir(
         Err(error) => return fail(io, fallback, &error),
     };
     if parsed.has("help") {
-        let usage = crate::cli_help_usage::usage_for("backup dir")
+        let usage = crate::cli_help_usage::help_for("backup dir")
             .unwrap_or_else(|| "usage: clio backup dir".to_owned());
         let _ = cli_output::write_text(&mut io.out, &usage);
         return ExitCode::from(EXIT_OK);

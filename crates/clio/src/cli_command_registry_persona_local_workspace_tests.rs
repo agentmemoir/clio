@@ -34,7 +34,7 @@ fn scratchpad_write_matches_the_registered_usage_and_parser() {
     let spec = record("scratchpad write");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio scratchpad write KEY CONTENT [--session S] [--bank B] [--actor A] [--output json|text]"
+        "usage: clio scratchpad write KEY CONTENT [--session S] [--bank BANK] [--actor ACTOR] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -57,7 +57,7 @@ fn scratchpad_read_matches_the_registered_usage_and_parser() {
     let spec = record("scratchpad read");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio scratchpad read [KEY] [--session S] [--bank B] [--actor A] [--output json|text]"
+        "usage: clio scratchpad read [KEY] [--session S] [--bank BANK] [--actor ACTOR] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -80,7 +80,7 @@ fn scratchpad_clear_matches_the_registered_usage_and_parser() {
     let spec = record("scratchpad clear");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio scratchpad clear [KEY] [--session S] [--bank B] [--actor A] [--output json|text]"
+        "usage: clio scratchpad clear [KEY] [--session S] [--bank BANK] [--actor ACTOR] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),

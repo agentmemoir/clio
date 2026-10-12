@@ -71,7 +71,7 @@ pub(crate) fn run_with_probe(
         Err(error) => return fail(io, fallback, &error),
     };
     if parsed.has("help") {
-        let usage = cli_help_usage::usage_for("backup restore")
+        let usage = cli_help_usage::help_for("backup restore")
             .unwrap_or_else(|| "usage: clio backup restore".to_owned());
         let _ = cli_output::write_text(&mut io.out, &usage);
         return ExitCode::from(EXIT_OK);

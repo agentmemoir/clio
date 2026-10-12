@@ -71,11 +71,13 @@ const CANONICAL_VALUE: Positional = Positional {
 /// The `--session S` of the scratchpad commands.
 const SESSION: Flag = Flag::text("session", "S", "`insert_session` sets the session id.");
 
-/// The scratchpad lines print `--bank B`; the global's own placeholder is longer.
-const SCRATCHPAD_BANK: Flag = Flag::text("bank", "B", "`base_args` scopes the call to one bank.");
+/// The scratchpad lines print the global `--bank BANK` placeholder.
+const SCRATCHPAD_BANK: Flag =
+    Flag::text("bank", "BANK", "`base_args` scopes the call to one bank.");
 
-/// The scratchpad lines print `--actor A`.
-const SCRATCHPAD_ACTOR: Flag = Flag::text("actor", "A", "`base_args` names the acting identity.");
+/// The scratchpad lines print the global `--actor ACTOR` placeholder.
+const SCRATCHPAD_ACTOR: Flag =
+    Flag::text("actor", "ACTOR", "`base_args` names the acting identity.");
 
 /// `canonical put` cannot run without its selector flags.
 const CATEGORY_REQUIRED: Flag = Flag {
