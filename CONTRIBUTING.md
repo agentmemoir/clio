@@ -69,6 +69,8 @@ so running all three repeats the suite. Run `make ritual` every time. Run the
 other two when you want a local answer before you push, and let CI be the
 verdict when you do not.
 
+Through the gate shim, a `make coverage-fast` run with no terminal attached, such as a program's run, exits 3 and runs nothing when it already ran on this branch in this worktree, when `python3 scripts/quick.py --base origin/master --plan --closure` shows it will not fit in 180 s, or when that estimate cannot be made. CI gives the verdict then.
+
 There is also a scoped lint, and it is cheaper than `make ritual`:
 
 ```
