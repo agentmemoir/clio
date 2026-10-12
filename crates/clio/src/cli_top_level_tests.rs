@@ -45,6 +45,34 @@ fn help_is_recognised_in_every_spelling_and_nothing_else_is() {
     }
 }
 
+/// A global value flag's value is not a help request: `--db help` names a
+/// database called `help`, so the command runs instead of printing help.
+#[test]
+fn a_global_value_flags_value_is_not_a_help_request() {
+    // Every declared global value flag, and the short `-o`, drops its value.
+    let mut flags: Vec<String> = crate::cli_command_registry::global_value_names()
+        .map(str::to_owned)
+        .collect();
+    flags.push("-o".to_owned());
+    for flag in flags {
+        assert!(
+            !super::wants_help(&[flag.clone(), "help".to_owned()]),
+            "`{flag} help` must not ask for help"
+        );
+        assert!(
+            !super::wants_help(&[flag.clone(), "-h".to_owned()]),
+            "`{flag} -h` must not ask for help"
+        );
+        assert!(
+            super::wants_help(&[flag, "--help".to_owned()]),
+            "an explicit --help after a global value flag still asks"
+        );
+    }
+    // A word that is not a value still asks, and `--helpful` never does.
+    assert!(super::wants_help(&["recall".to_owned(), "help".to_owned()]));
+    assert!(!super::wants_help(&["--helpful".to_owned()]));
+}
+
 /// An unknown command suggests the closest one when there is one, and points at
 /// `clio help` when there is not.
 #[test]

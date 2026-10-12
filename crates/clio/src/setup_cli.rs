@@ -153,8 +153,7 @@ pub(crate) fn setup_core<R: BufRead, W: Write, E: Write>(
 }
 
 fn is_help(raw: &[String]) -> bool {
-    raw.iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h" | "help"))
+    crate::cli_help_request::help_requested(raw, &crate::setup_flags::takes_value)
 }
 
 fn fail(err: &mut impl Write, e: &CliError) -> ExitCode {

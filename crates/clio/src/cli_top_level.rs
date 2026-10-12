@@ -47,8 +47,7 @@ use crate::port_scan;
 
 /// Whether the arguments ask for help rather than for the command's work.
 pub(crate) fn wants_help(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
+    crate::cli_help_request::help_requested(args, &crate::cli_args::is_global_value_flag)
 }
 
 /// The flag names a surface's registry record documents, in print order: the
