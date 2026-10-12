@@ -42,10 +42,6 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// The flags `clio compose` accepts. Any other flag is a usage error rather than
-/// a silently ignored token.
-const COMPOSE_FLAGS: &[&str] = &["dir", "services"];
-
 /// Exit-code contract for `clio compose`:
 /// - `0`: success (Docker reported success).
 /// - `1`: a precondition failed (unsupported platform, Docker CLI/daemon not
@@ -57,7 +53,11 @@ pub(crate) fn compose(args: impl IntoIterator<Item = String>) -> ExitCode {
     let (sub, rest) = raw
         .split_first()
         .map_or(("", &[][..]), |(s, r)| (s.as_str(), r));
-    let flags = match parse_flags(rest.to_vec(), COMPOSE_FLAGS) {
+    // `up` and `down` accept the same flag set (pinned in the record tests),
+    // and the dispatcher parses before it dispatches, so the parse gates on
+    // the `up` record's names whatever subcommand follows.
+    let names = crate::cli_command_registry_surface::parse_flag_names("compose up");
+    let flags = match parse_flags(rest.to_vec(), &names) {
         Ok(flags) => flags,
         Err(error) => return report_surface_usage_error(&error, &raw),
     };
@@ -102,7 +102,7 @@ fn print_help() {
     ] {
         println!(
             "{}\n{}",
-            crate::cli_help_usage::usage_line(command).unwrap_or(command),
+            crate::cli_help_usage::usage_line(command).unwrap_or_else(|| command.to_owned()),
             note
         );
     }

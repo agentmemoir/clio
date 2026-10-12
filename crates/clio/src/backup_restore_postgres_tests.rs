@@ -27,11 +27,8 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-/// The shared test database's URL: the gate runs every test with `CLIO_DATABASE_URL`.
-pub(crate) fn base_url() -> String {
-    std::env::var("CLIO_DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://clio:clio@127.0.0.1:34310/clio".to_owned())
-}
+/// `base_url` stays as the name the sibling refusal module imports.
+pub(crate) use crate::pg_test_helpers::pg_base_url as base_url;
 
 /// Seed a scoped schema's store with `items` items over a persistent key store
 /// at `kms_path`.

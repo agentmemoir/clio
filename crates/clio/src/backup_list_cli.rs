@@ -7,7 +7,8 @@
 //! in the backup directory from its manifest alone, newest first.
 //!
 //! ## Owns
-//! - The `list` flags (`--limit`) and its text and JSON views
+//! - The `list` views over its record's flags (`--limit`; the accepted set is
+//!   the `backup list` registry record's)
 //! - The refusal for the store flags `list` cannot honor
 //!
 //! ## Does not own
@@ -33,9 +34,6 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// The value flags `list` adds to the globals.
-const VALUE_FLAGS: &[&str] = &["limit"];
-
 /// Run `clio backup list` against injected streams, env, and cwd.
 pub(crate) fn run(
     io: &mut CliIo,
@@ -52,8 +50,9 @@ pub(crate) fn run(
         Err(error) => return fail(io, fallback, &error),
     };
     if parsed.has("help") {
-        let usage = cli_help_usage::usage_for("backup list").unwrap_or("usage: clio backup list");
-        let _ = cli_output::write_text(&mut io.out, usage);
+        let usage = cli_help_usage::help_for("backup list")
+            .unwrap_or_else(|| "usage: clio backup list".to_owned());
+        let _ = cli_output::write_text(&mut io.out, &usage);
         return ExitCode::from(EXIT_OK);
     }
     let mode = match cli_output::resolve_output(parsed.value("output"), io.is_tty) {
@@ -83,9 +82,13 @@ pub(crate) fn run(
     ExitCode::from(EXIT_OK)
 }
 
-/// The flags `backup list` accepts.
+/// The flags `backup list` accepts: the `backup list` record's own flags,
+/// decoded through the registry, plus the globals every parser spec merges.
 fn spec() -> FlagSpec {
-    FlagSpec::new(VALUE_FLAGS, &[])
+    match crate::cli_command_registry::find("backup list") {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
+    }
 }
 
 /// `--limit`, refused when it is not a count.

@@ -44,33 +44,12 @@ impl WriteGroup for CoreWriteGroup {
         &["remember", "admit", "summarize", "consolidate"]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "remember" => FlagSpec::new(
-                &[
-                    "category",
-                    "epistemic-kind",
-                    "confidence",
-                    "source-type",
-                    "evidence-ref",
-                    "context",
-                ],
-                &["dry-run", "allow-duplicate"],
-            ),
-            "admit" => FlagSpec::new(
-                &[
-                    "category",
-                    "epistemic-kind",
-                    "confidence",
-                    "source-type",
-                    "evidence-ref",
-                    "context",
-                    "file",
-                ],
-                &[],
-            ),
-            "summarize" => FlagSpec::new(&["scope"], &["dry-run"]),
-            _ => FlagSpec::new(&[], &["force", "dry-run"]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

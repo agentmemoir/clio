@@ -8,7 +8,8 @@
 //! a single-host explanation for `sync status` instead of an obscure failure.
 //!
 //! ## Owns
-//! - The `sync status|push|pull|serve` verbs, their flags, and their text views
+//! - The `sync status|push|pull|serve` verbs and their text views; the
+//!   accepted flags and usage text are the verbs' registry records'
 //! - The single-host detection (`sync.omit`) and explanation path
 //! - The serve lifecycle: emit the bound address, then hold the process for the
 //!   resolved TTL so the background server is reachable
@@ -20,8 +21,10 @@
 //!
 //! ## Boundary
 //!
-//! Changes to the sync CLI flags or views should normally require changes here.
-//! Changes to sync behavior should not require changes here.
+//! Changes to a sync verb's flags, usage text, or summary should normally
+//! require changes in `cli_command_registry_sync`; changes to its dispatch,
+//! decoding, or views should normally require changes here. Changes to sync
+//! behavior should not require changes here.
 //!
 //! Keep this module focused on the `clio sync` surface.
 
@@ -43,9 +46,8 @@ const SUBCOMMANDS: &[&str] = &["status", "push", "pull", "serve"];
 
 /// Dispatch `clio sync <subcommand>`.
 pub(crate) fn sync(args: Vec<String>) -> ExitCode {
-    // The key-management verbs own their own module and their own flag spec, so
-    // they are routed before this module's whitelist and parser. Routing them
-    // through `spec()`'s catch-all would hand `keygen` the serve flags.
+    // The key-management verbs own their own module, dispatch, and flag spec, so
+    // they are routed to it before this module's whitelist and parser.
     if matches!(args.first().map(String::as_str), Some("keygen" | "key")) {
         return crate::sync_key_cli::sync_key(args);
     }
@@ -165,11 +167,12 @@ fn unknown_subcommand(sub: &str) -> CliError {
 }
 
 /// The flags a sync verb accepts, globals included.
+///
+/// Decoded through the registry, plus the globals every parser spec merges.
 fn spec(verb: &str) -> FlagSpec {
-    match verb {
-        "sync status" => FlagSpec::new(&["banks"], &[]),
-        "sync push" | "sync pull" => FlagSpec::new(&["remote", "mode", "banks", "token"], &[]),
-        _ => FlagSpec::new(&["bind", "banks", "token-file", "ttl-secs"], &["dev"]),
+    match crate::cli_command_registry::find(verb) {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
     }
 }
 

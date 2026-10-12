@@ -3,78 +3,73 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for testing that the CLI usage-line table is
-//! keyed one-entry-per-verb, so every string in it is reachable, and for
-//! pinning usage-line content against the parser and against removed routes.
+//! This module is responsible for pinning the usage lines the registry records
+//! carry: that every registered command resolves through the lookup, that a
+//! command's help text and its parser agree on flags in both directions, and
+//! that no line a reader sees advertises a removed route.
 //!
 //! ## Owns
-//! - The no-duplicate-verb invariant, and the "a looked-up verb resolves to its
-//!   own text" check
-//! - The usage-line-versus-parser flag agreement pin: every flag a usage line
-//!   names is one its verb's parser accepts, pinned per verb so a verb that
-//!   loses its spec or its usage line fails
+//! - The registry-resolution pin: every registered command resolves through
+//!   `usage_for` and `usage_line` to its record's own text, so a record the
+//!   lookup stops answering fails here rather than printing the catalog's
+//!   "no usage line registered" marker
+//! - The both-direction flag agreement pin: every flag a command's help text
+//!   names is one its parser accepts, and every non-global flag its parser
+//!   accepts is named by the command's record, pinned per command so a
+//!   command that loses its parser or its help text fails, with the record
+//!   contributor count and the authored-row contributor count pinned apart
 //! - The never-advertise-a-removed-route pin: the transfer usage lines name the
 //!   store and `CLIO_SYNC_KEY_FILE` routes and never advertise `--sync-key` or
 //!   the removed `CLIO_SYNC_KEY` environment rung
 //! - The consolidate rename pin: the two help strings the rename touched keep
 //!   advertising `--bank` and never advertise the removed `scope` again
+//! - The surviving-content pins: the candidate verbs keep their
+//!   `--epistemic-kind`/`--source-type` pairing in the line and in the rendered
+//!   `--help`, and `correct` and `hygiene clean` keep the flags and the
+//!   sentence their help text owes
 //!
 //! ## Does not own
 //! - The wording of any other usage line
 //! - The help catalog and tool bindings (`cli_help_tests`)
+//! - The literal-read scan over the flag-reading modules (`flag_read_scan_test`)
 //!
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
 
-use std::collections::BTreeSet;
-
-use super::{VERB_USAGE, usage_for};
-use crate::cli_args;
+use super::usage_for;
 use crate::cli_help;
 use crate::cli_help_usage;
 use crate::help_flags_test_support::flags_in;
 
-/// Regression cover for issue #84: `VERB_USAGE` held two entries keyed
-/// `backup restore` and `usage_for` returns the first match, so the second was
-/// text no command, flag, or output mode could print. A maintainer who rewrote
-/// it saw no change and no diagnostic. `usage_for` has no way to tell two
-/// variants of one verb apart, so the table must hold one entry per verb.
+/// The lookup must answer for every registered command, which is what makes a
+/// command's `--help` renderable in the first place. A registered command the
+/// lookup misses would print the catalog's "no usage line registered" marker.
 #[test]
-fn every_verb_appears_exactly_once_in_the_usage_table() {
-    let mut seen = BTreeSet::new();
-    let mut duplicated = Vec::new();
-    for (verb, _) in VERB_USAGE {
-        if !seen.insert(*verb) {
-            duplicated.push(*verb);
-        }
-    }
-    assert!(
-        duplicated.is_empty(),
-        "a duplicate verb is unreachable text: `usage_for` returns the first \
-         match, so every entry after it can never be printed: {duplicated:?}"
-    );
-}
-
-/// The lookup must answer for every verb the table declares, which is what
-/// makes a table entry reachable in the first place. A verb present in the
-/// table but absent from `usage_for` would be a second, different way to write
-/// unreachable help text.
-#[test]
-fn a_verb_in_the_table_resolves_through_the_lookup() {
-    for (verb, usage) in VERB_USAGE {
+fn every_registered_command_resolves_through_the_lookup() {
+    for spec in crate::cli_command_registry::all() {
         assert_eq!(
-            usage_for(verb),
-            Some(*usage),
-            "{verb} is in the table but the lookup does not return its text"
+            usage_for(spec.name),
+            Some(spec.full_usage()),
+            "{} is registered but the lookup does not return its record text",
+            spec.name
+        );
+        assert_eq!(
+            cli_help_usage::usage_line(spec.name),
+            Some(spec.usage_line()),
+            "{} is registered but its usage line does not resolve",
+            spec.name
         );
     }
 }
 
 /// The consolidate selector was renamed to `bank` with no alias, so the usage
-/// line must keep advertising `--bank` and must never advertise `scope` again:
-/// a caller reading stale help would send a flag the parser rejects with a
-/// usage error, and a dropped selector would fall back to the session's bank.
+/// line must keep advertising `--bank` and must never advertise the removed
+/// `scope` spelling again: a caller reading stale help would send a flag the
+/// parser rejects with a usage error, and a dropped selector would fall back
+/// to the session's bank. The spelling is checked bare because `usage_for`
+/// carries only the usage line, alternates, and notes with no flag
+/// descriptions, so any `scope` here is the removed selector returning.
 #[test]
 fn the_consolidate_usage_line_advertises_bank_and_never_scope() {
     let usage = usage_for("consolidate").expect("consolidate has a usage line");
@@ -105,6 +100,8 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
     assert!(!block.contains("scope"), "{block}");
 }
 
+/// Every flag a command's help text names is one its parser accepts, and every
+/// flag the parser accepts is one the command's record names.
 #[test]
 fn correct_usage_and_catalog_name_the_confirm_flag() {
     let usage = usage_for("correct").expect("correct has a usage line");
@@ -154,63 +151,232 @@ fn the_rendered_help_shows_the_pairing_line() {
 
 /// A flag a usage line names is one the verb's parser will accept.
 ///
-/// The other direction is checked elsewhere: a flag in `--help` reaches the catalog.
-/// This is the direction that catches the defect a reader cannot recover from — help
-/// text naming a flag the parser would refuse, so the reader types it and is told it
-/// does not exist. The reported instance was `am compose down`, a help line naming a
-/// binary that is not installed.
+/// The first direction is the one a reader cannot recover from: help text that
+/// names a flag the parser would refuse makes the reader type something that
+/// does not exist. The second catches the opposite - a flag the parser takes
+/// that nothing names, so it can only be found by reading the parser.
 ///
-/// Only decidable for the verbs that share a flag spec. The reserved surfaces read
-/// their flags through a name-to-value map that accepts anything, so there is nothing
-/// to check them against and they are counted separately rather than passed over.
+/// A registered record splits the check. Its help text may be a hand-written
+/// override, so the first direction is real there; the second is true by
+/// construction, because `parser_spec` is built from `documented` plus
+/// `accepted_extra`, and is asserted as a guard that the derivation stays
+/// intact.
+///
+/// Both contributor counts are pinned apart, never summed into one number:
+/// every registered command is decided through its record — a group verb
+/// through its group's parser, a parse-gated reserved leaf (`status`,
+/// `install`, `uninstall`, the two `compose` leaves, and the `mcp` and `ops`
+/// subcommands) through the record-derived names its real parser gates on
+/// plus the globals that rule admits, the record-backed leaf surfaces
+/// (`backup`, `sync`, `auth token`, `config`, `ranking`, `retention`) through
+/// their record's `parser_spec`, and `help` and `setup` through their record's
+/// documented entries — and no top-level verb is decided through an authored
+/// row. A command that loses its record or its parser moves the first count; a
+/// verb that gains an authored row without a record moves the second. Either
+/// change fails here instead of hiding inside a total that still adds up.
+///
+/// The undecidable list must be empty and is printed even so, separately from
+/// the literal-read scan's bounded flag-read exemption list: the transports'
+/// hidden `--shared-bank` counts as recorded, because the records carry it in
+/// `hidden_accepted_flags`.
 #[test]
-fn a_flag_a_usage_line_names_is_one_the_parser_accepts() {
-    let mut checked = 0usize;
+fn help_text_and_parser_flags_agree_in_both_directions() {
+    let mut registered_checked = 0usize;
+    let mut fallback_checked = 0usize;
     let mut undecidable: Vec<&str> = Vec::new();
     let mut wrong: Vec<String> = Vec::new();
-    for verb in cli_help::READ_VERBS
-        .iter()
-        .chain(cli_help::WRITE_VERBS.iter())
-        .copied()
-    {
-        let Some(usage) = cli_help_usage::usage_line(verb) else {
+
+    // Registered commands: the parser the dispatcher resolves for the verb,
+    // and the help text the record renders.
+    for spec in crate::cli_command_registry::all() {
+        let Some(accepted) = parser_for(spec.name) else {
+            undecidable.push(spec.name);
             continue;
         };
-        let spec = crate::cli_read::spec_for(verb).or_else(|| crate::cli_write::spec_for(verb));
-        let Some(spec) = spec else {
-            undecidable.push(verb);
-            continue;
-        };
-        let mut accepted: Vec<String> = spec
-            .value_flags()
-            .iter()
-            .chain(spec.bool_flags().iter())
-            .chain(cli_args::GLOBAL_VALUE_FLAGS.iter())
-            .chain(cli_args::GLOBAL_BOOL_FLAGS.iter())
-            .map(|name| format!("--{name}"))
-            .collect();
-        accepted.sort();
-        for flag in flags_in(usage) {
+        for flag in flags_in(&spec.full_usage()) {
             if !accepted.contains(&flag) {
                 wrong.push(format!(
-                    "`clio {verb}` names {flag}, which its parser refuses"
+                    "`clio {}` help names {flag}, which its parser refuses",
+                    spec.name
                 ));
             }
         }
-        checked += 1;
+        let named: Vec<&str> = spec
+            .documented
+            .iter()
+            .map(|flag| flag.long)
+            .chain(spec.accepted_extra.iter().copied())
+            .chain(
+                crate::cli_command_registry_surface::flags::hidden_accepted_flags(spec.name)
+                    .iter()
+                    .copied(),
+            )
+            .collect();
+        // The record's own names against the parser: a documented flag a
+        // hand-written usage override hides must still be one the parser takes.
+        for name in &named {
+            if !accepted.contains(&format!("--{name}")) {
+                wrong.push(format!(
+                    "`clio {}` names --{name}, which its parser refuses",
+                    spec.name
+                ));
+            }
+        }
+        for flag in &accepted {
+            let short = flag.trim_start_matches("--");
+            // The group parser unions the globals into every
+            // spec, so it accepts flags the leaf refuses at runtime (exit 2)
+            // and the record carries no flag entry for by design. Each
+            // record's own note is the authority for its refused set, so
+            // only those flags are exempt here; any other unnamed flag
+            // still fails.
+            if !named.contains(&short) && !refused_but_parsed(spec.name).contains(&short) {
+                wrong.push(format!(
+                    "`clio {}` parser accepts {flag}, which the record does not name",
+                    spec.name
+                ));
+            }
+        }
+        registered_checked += 1;
     }
+
+    // Verbs with no record are group prefixes (`task`, `sync`), not commands:
+    // they hold no usage row, so there is no authored text to compare with a
+    // parser. A verb that gains a row without a record is decided here and
+    // moves the fallback count below; a row-less prefix states its reason and
+    // contributes to neither count.
+    for verb in cli_help::known_commands() {
+        if crate::cli_command_registry::find(verb).is_some() {
+            continue;
+        }
+        let Some(usage) = cli_help_usage::usage_line(verb) else {
+            continue;
+        };
+        let Some(accepted) = parser_for(verb) else {
+            undecidable.push(verb);
+            continue;
+        };
+        for flag in flags_in(&usage) {
+            if !accepted.contains(&flag) {
+                wrong.push(format!(
+                    "`clio {verb}` usage names {flag}, which its parser refuses"
+                ));
+            }
+        }
+        fallback_checked += 1;
+    }
+
     assert!(
         wrong.is_empty(),
-        "help text names flags the parser would reject:\n{}",
+        "help text and parser flag sets disagree:\n{}",
         wrong.join("\n")
     );
-    // Pinned rather than a floor, so a verb that loses its spec or its usage line
-    // shows up as a number that changed instead of as coverage that quietly shrank.
+    // The parser-parity undecidable list must be empty: every leaf's parser is
+    // decided here. The list is printed even when empty, so a reader sees the
+    // bound was checked rather than skipped.
+    let mut remaining = undecidable.clone();
+    remaining.sort_unstable();
+    println!(
+        "parser-parity undecidable commands ({}), printed separately from the \
+         literal-read scan's bounded flag-read exemption list:",
+        remaining.len()
+    );
+    for name in &remaining {
+        println!("  clio {name}");
+    }
+    assert!(
+        remaining.is_empty(),
+        "these commands have no decidable parser; extend `parser_for` with the \
+         derivation their dispatcher really parses with: {remaining:?}"
+    );
     assert_eq!(
-        checked, 20,
-        "the number of verbs this check decides changed, so it is covering less or more \
+        registered_checked, 94,
+        "the registered commands this check decides changed, so it is covering less or more \
          than it was: undecidable were {undecidable:?}"
     );
+    assert_eq!(
+        fallback_checked, 0,
+        "a verb without a record gained an authored row, so the fallback branch decides \
+         it now: re-pin this count only when that row is intended"
+    );
+}
+
+/// Flags the group parser accepts but the leaf refuses at runtime (exit 2),
+/// so the record carries no flag entry for them by design (the record's own
+/// refusal note requires it: help must not advertise refused flags). The authority is each record's
+/// own note: `backup list` and `backup verify` refuse `--db`/`--backend`
+/// (archive-only reads), `auth token add` refuses `--db`/`--backend` (its
+/// own `--actor`/`--bank` stay named and parsed), and `auth token list` and
+/// `auth token revoke` refuse all four (one credential file, never a store).
+fn refused_but_parsed(verb: &str) -> &'static [&'static str] {
+    match verb {
+        "backup list" | "backup verify" | "auth token add" => &["db", "backend"],
+        "auth token list" | "auth token revoke" => &["db", "backend", "actor", "bank"],
+        _ => &[],
+    }
+}
+
+/// The `--flag` names the dispatcher actually parses `verb` with, sorted and
+/// de-duplicated.
+///
+/// A read/write group verb decides through its group's `FlagSpec`. Every other
+/// registered command decides through the dispatch that runs it: the
+/// parse-gated reserved surfaces (`version`, `health`, `status`, `install`,
+/// `uninstall`, the two `compose` leaves, the `mcp` and `ops` subcommands)
+/// through the record-derived names their shared parser gates on plus the
+/// declared globals that rule admits, and the record-backed leaf surfaces
+/// (`backup`, `sync`, `auth token`, `config`, `ranking`, `retention`) through
+/// their record's own `parser_spec`. `help`'s dispatch reads the record's
+/// documented boolean alone; `setup`'s wizard parser reads its record's
+/// documented entries alone and refuses the globals the other surfaces accept.
+/// The shared `--help` spelling is a route, not a data flag, so it appears in
+/// no set here, exactly as `flags_in` leaves it out of help text.
+fn parser_for(verb: &str) -> Option<Vec<String>> {
+    if let Some(spec) = crate::cli_read::spec_for(verb).or_else(|| crate::cli_write::spec_for(verb))
+    {
+        return Some(parsed_flag_names(&spec));
+    }
+    let record = crate::cli_command_registry::find(verb)?;
+    let mut names: Vec<String> = match record.name {
+        "version" | "health" | "status" | "install" | "uninstall" | "compose up"
+        | "compose down" | "mcp schema-export" | "mcp stdio" | "mcp http" | "ops diagnose"
+        | "ops verify" | "ops doctor" | "ops repair" | "ops reindex" => {
+            crate::cli_command_registry_surface::parse_flag_names(verb)
+                .into_iter()
+                .chain(crate::cli_command_registry::global_value_names())
+                .chain(crate::cli_command_registry::global_bool_names())
+                .map(|name| format!("--{name}"))
+                .collect()
+        }
+        "help" | "setup" => record
+            .documented
+            .iter()
+            .map(|flag| format!("--{}", flag.long))
+            .collect(),
+        _ => {
+            let spec = record.parser_spec();
+            spec.value_flags()
+                .iter()
+                .chain(spec.bool_flags().iter())
+                .map(|name| format!("--{name}"))
+                .collect()
+        }
+    };
+    names.sort_unstable();
+    names.dedup();
+    Some(names)
+}
+
+/// Every `--name` a parser spec accepts, sorted.
+fn parsed_flag_names(spec: &crate::cli_args::FlagSpec) -> Vec<String> {
+    let mut names: Vec<String> = spec
+        .value_flags()
+        .iter()
+        .chain(spec.bool_flags().iter())
+        .map(|name| format!("--{name}"))
+        .collect();
+    names.sort();
+    names
 }
 
 /// The transfer verbs read their key from the recorded store or the file

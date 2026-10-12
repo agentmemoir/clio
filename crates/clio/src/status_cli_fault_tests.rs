@@ -194,7 +194,8 @@ fn a_leading_global_flag_survives_the_verb_and_is_accepted() {
     let mut it = rest.into_iter();
     assert_eq!(it.next().as_deref(), Some("status"));
     let trailing = crate::cli_args::merge_leading_globals(it, globals);
-    let flags = crate::cli_top_level::parse_flags(trailing, STATUS_FLAGS).expect("accepted");
+    let names = crate::cli_command_registry_surface::parse_flag_names("status");
+    let flags = crate::cli_top_level::parse_flags(trailing, &names).expect("accepted");
     assert_eq!(flags.get("actor").map(String::as_str), Some("bob"));
     assert_eq!(flags.get("db").map(String::as_str), Some("sqlite::memory:"));
 }

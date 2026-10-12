@@ -1,0 +1,1 @@
+Every command registry record now carries its positional arguments, its working aliases, and two to four worked examples, and per-group checks pin each record's value kinds, allowed values, alias pairs, hygiene entries, and examples to the code that reads them, so a wrong record fails its own test.

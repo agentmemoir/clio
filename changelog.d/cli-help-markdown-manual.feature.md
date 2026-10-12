@@ -1,0 +1,1 @@
+`clio help --markdown --out DIR` renders one deterministic Markdown page per command, with an index and See-also links, through a bounded writer that refuses a `--out` with a symlink component, a page target it did not generate, a directory or non-regular file in a page's place, and a value spelled to look like a flag, and leaves nothing behind when a check refuses.

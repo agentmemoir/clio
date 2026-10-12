@@ -259,20 +259,79 @@ fn usage_errors_exit_two() {
     }
 }
 
+/// Every verb's spec is its record's, and the accepted set that record carries is
+/// the one the group's own list held: same flags, same order, globals included.
 #[test]
-fn spec_covers_every_verb() {
+fn spec_answers_from_the_registry_with_the_original_accepted_set() {
+    let expected: &[(&str, &[&str], &[&str])] = &[
+        (
+            "task get",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "task history",
+            &["db", "backend", "bank", "actor", "output", "limit"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "failure list",
+            &["db", "backend", "bank", "actor", "output", "limit"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "memtree query",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "time-start",
+                "time-end",
+                "task-id",
+                "depth",
+                "limit",
+            ],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "memtree get",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "history temporal",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "as-of",
+                "time-axis",
+            ],
+            &["no-input", "yes", "explain"],
+        ),
+    ];
     let group = HistoryGroup;
-    for verb in group.verbs() {
+    assert_eq!(group.verbs().len(), expected.len(), "every verb is covered");
+    for &(verb, value, boolean) in expected {
         let spec = group.spec(verb);
-        assert!(spec.bool_flags().contains(&"explain"), "{verb}");
+        assert_eq!(spec.value_flags(), value, "{verb} value flags");
+        assert_eq!(spec.bool_flags(), boolean, "{verb} bool flags");
+        let record = crate::cli_command_registry::find(verb).expect("a record");
+        assert_eq!(
+            spec.value_flags(),
+            record.parser_spec().value_flags(),
+            "{verb}: the group must answer with the record"
+        );
+        assert_eq!(
+            spec.bool_flags(),
+            record.parser_spec().bool_flags(),
+            "{verb}: the group must answer with the record"
+        );
     }
-    assert!(group.spec("memtree query").value_flags().contains(&"depth"));
-    assert!(
-        group
-            .spec("history temporal")
-            .value_flags()
-            .contains(&"as-of")
-    );
 }
 
 #[test]

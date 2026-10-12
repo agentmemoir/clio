@@ -57,16 +57,17 @@ pub(crate) fn ops(args: impl IntoIterator<Item = String>) -> ExitCode {
     ops_with(args, &|key| std::env::var(key).ok())
 }
 
-/// The flags each `clio ops` subcommand accepts on top of the globals. A flag a
-/// sibling subcommand owns is a usage error rather than a silently ignored
-/// token. `--db`, `--backend` and `--bank` are global value flags, so they are
-/// accepted everywhere and are not listed here.
-fn ops_flags(sub: &str) -> &'static [&'static str] {
+/// The flag names each `clio ops` subcommand parses with, from its record. A
+/// subcommand with no record keeps the old empty list: only the globals and
+/// the help spelling are accepted, and the dispatcher refuses the subcommand
+/// itself. A flag a sibling subcommand owns is a usage error rather than a
+/// silently ignored token.
+fn ops_flag_names(sub: &str) -> Vec<&'static str> {
     match sub {
-        "doctor" => &["dry-run"],
-        "repair" => &["actions", "confirm", "plan"],
-        "reindex" => &["confirm", "dry-run", "target"],
-        _ => &[],
+        "diagnose" | "verify" | "doctor" | "repair" | "reindex" => {
+            crate::cli_command_registry_surface::parse_flag_names(&format!("ops {sub}"))
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -86,7 +87,8 @@ where
     let (sub, rest) = raw
         .split_first()
         .map_or(("", &[][..]), |(s, r)| (s.as_str(), r));
-    let flags = match crate::cli_top_level::parse_flags(rest.to_vec(), ops_flags(sub)) {
+    let flag_names = ops_flag_names(sub);
+    let flags = match crate::cli_top_level::parse_flags(rest.to_vec(), &flag_names) {
         Ok(flags) => flags,
         Err(error) => return report_surface_usage_error(&error, &raw),
     };
@@ -115,7 +117,7 @@ where
 
 /// The `ops` usage lines: the requested subcommand's own, or all five joined.
 fn ops_usage(sub: &str) -> String {
-    let lines: Vec<&str> = crate::cli_help_surfaces::ops_usage_lines(sub)
+    let lines = crate::cli_help_surfaces::ops_usage_lines(sub)
         .expect("only a real ops subcommand reaches this help branch");
     lines.join("\n")
 }
@@ -433,6 +435,10 @@ fn redact(message: &str) -> String {
 #[cfg(test)]
 #[path = "ops_cli_fault_tests.rs"]
 mod ops_cli_fault_tests;
+
+#[cfg(test)]
+#[path = "ops_cli_open_tests.rs"]
+mod ops_cli_open_tests;
 
 #[cfg(test)]
 #[path = "ops_cli_tests.rs"]

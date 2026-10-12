@@ -315,6 +315,19 @@ fn the_shared_bank_flag_turns_the_shared_surface_on() {
     assert!(opts_with(memory(&["--shared-bank"]), &[]).shared_bank_enabled);
 }
 
+#[test]
+fn an_undeclared_flag_fails_the_shared_options_builder_with_the_flag_named() {
+    // The handlers pre-validate their own flag sets, so this refusal is the
+    // builder's own fail-closed contract; the reason names the flag so a typo
+    // is diagnosable at either layer.
+    let reason = mcp_options_with(args_of(&["--bogus"]), &lookup(&[]))
+        .expect_err("an unknown flag is refused");
+    assert!(
+        reason.contains("--bogus"),
+        "the reason must name it: {reason}"
+    );
+}
+
 // --------------------------------------------------------------- help tests
 
 #[test]

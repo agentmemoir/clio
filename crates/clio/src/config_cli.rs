@@ -8,11 +8,13 @@
 //! deployment scope, listing named profiles, and applying one.
 //!
 //! ## Owns
-//! - The `config get|set|profiles|use` verbs, their flags, and their text views
+//! - The `config get|set|profiles|use` verbs and their text views
 //! - Decoding the `VALUE` positional into the tool's JSON value
 //!
 //! ## Does not own
 //! - Config merge order, validation, masking, or persistence (`clio-config`)
+//! - The verbs' static records and verb list (see
+//!   `cli_command_registry_auth_config`)
 //! - The runtime-backed command engine (see `runtime_cli`)
 //!
 //! ## Boundary
@@ -35,14 +37,18 @@ use std::process::ExitCode;
 pub(crate) struct ConfigGroup;
 
 impl RuntimeGroup for ConfigGroup {
+    /// The group's verb keys: the registry records' own names, so the
+    /// dispatcher has no second list to drift.
     fn verbs(&self) -> &'static [&'static str] {
-        &["config get", "config set", "config profiles", "config use"]
+        crate::cli_command_registry_auth_config::CONFIG_VERBS
     }
 
+    /// The flags `verb` accepts: the verb's registry record's parser spec,
+    /// globals included.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "config set" => FlagSpec::new(&["scope"], &[]),
-            _ => FlagSpec::new(&[], &[]),
+        match crate::cli_command_registry::find(verb) {
+            Some(spec) => spec.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

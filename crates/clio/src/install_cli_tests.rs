@@ -5,14 +5,16 @@
 //!
 //! This module tests the `clio install` / `clio uninstall` surfaces: the shared
 //! parse-and-decide step, delegate-outcome-to-exit-code mapping, and the help
-//! text. Every test injects the executable lookup and both delegate calls; no
-//! test spawns a process, reads the filesystem, or touches the host
-//! environment.
+//! text. Most tests inject the executable lookup and both delegate calls, so
+//! no test spawns a process or touches the host environment; the help test
+//! calls the pub entry points with the production wiring, and the executable
+//! test reads the live process executable.
 //!
 //! ## Owns
 //! - Assertions over `decide`, `run_with`, `failure_message`,
 //!   `exe_failure_message`, `success_text`, and `help_text`, with delegate
 //!   doubles that must never run
+//! - The pub-entry-point help wiring and the live-executable lookup contract
 //!
 //! ## Does not own
 //! - The surface implementation under test (`install_cli`)
@@ -425,4 +427,22 @@ fn non_antigravity_success_text_carries_no_config_surface_note() {
     let text = success_text(record, "registered clio with claude");
     assert_eq!(text, "registered clio with claude");
     assert!(!text.contains("note:"), "{text}");
+}
+
+#[test]
+fn install_and_uninstall_answer_help_through_the_pub_entry_points() {
+    // The pub wrappers build the production closures before parsing, so a
+    // help call exercises the whole `run` wiring without touching either.
+    assert_eq!(install(&args(&["--help"])), ExitCode::SUCCESS);
+    assert_eq!(uninstall(&args(&["--help"])), ExitCode::SUCCESS);
+}
+
+#[test]
+fn current_exe_names_the_live_process_executable() {
+    // The wrapper is the lookup production `run` wires in, so it must name
+    // the live file the process reports; the install-success test pins the
+    // lookup-to-delegate handoff for whatever the lookup returns.
+    let exe = current_exe().expect("the test process has an executable");
+    assert_eq!(exe, std::env::current_exe().expect("resolves"));
+    assert!(exe.is_file(), "must name a real file: {}", exe.display());
 }

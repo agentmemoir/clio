@@ -118,13 +118,10 @@ fn status_with(raw: &[String], deps: &dyn StatusDeps) -> ExitCode {
     }
 }
 
-/// The flags `clio status` accepts. Any other flag is a usage error rather than
-/// a silently ignored token.
-const STATUS_FLAGS: &[&str] = &["db", "backend", "dir"];
-
 /// Build the report from the injected probes. The error case is a usage error.
 fn build(raw: &[String], deps: &dyn StatusDeps) -> Result<(StatusReport, Output), CliError> {
-    let flags = crate::cli_top_level::parse_flags(raw.iter().cloned(), STATUS_FLAGS)?;
+    let names = crate::cli_command_registry_surface::parse_flag_names("status");
+    let flags = crate::cli_top_level::parse_flags(raw.iter().cloned(), &names)?;
     let output = match flags.get("output").map(String::as_str) {
         None | Some("text") => Output::Text,
         Some("json") => Output::Json,
@@ -394,7 +391,7 @@ fn print_help() {
          (redacted URL), 34300-34309 listeners, Compose service state, and\n \
          the `ops diagnose` verdict. Never writes.\n \
          Exit codes: 0 healthy, 1 degraded, 2 usage.",
-        crate::cli_help_usage::usage_line("status").unwrap_or("clio status")
+        crate::cli_help_usage::usage_line("status").unwrap_or_else(|| "clio status".to_owned())
     );
 }
 
