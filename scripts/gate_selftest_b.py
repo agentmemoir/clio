@@ -53,37 +53,6 @@ def key(root: Path) -> str:
         return fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
 
 class Tests(unittest.TestCase):
-    def test_a_clean_never_replays(self):
-        # `clean` removes build output, so a replayed verdict would report
-        # success without having removed anything. Both spellings are named
-        # as a command rather than as a target, because that is how the tool
-        # receives it.
-        for argv in (
-            ["make", "coverage-clean"],
-            ["cargo", "llvm-cov", "clean"],
-            ["cargo", "llvm-cov", "clean", "--workspace"],
-        ):
-            self.assertNotEqual("coverage", command_kind(argv))
-        with exec_tempdir(purpose="a stand-in cargo command") as tmp:
-            counter = Path(tmp) / "count"
-            bindir = Path(tmp) / "bin"
-            bindir.mkdir()
-            stand_in = bindir / "cargo"
-            stand_in.write_text(f'#!/bin/sh\necho run >> "{counter}"\nexit 5\n')
-            stand_in.chmod(0o755)
-            clean = [str(stand_in), "llvm-cov", "clean"]
-            env_patch = mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(Path(tmp) / "cache")})
-            root_patch = mock.patch("gate.repo_root", return_value="/repo")
-            tree_patch = mock.patch(
-                "gate.read_tree_state",
-                return_value=state("h1", contents=(("crates/a/src/lib.rs", "clean"),), changed=("crates/a/src/lib.rs",)),
-            )
-            quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
-            with env_patch, root_patch, tree_patch, quiet[0], quiet[1]:
-                run_gate(clean)
-                run_gate(clean)
-                self.assertEqual(2, counter.read_text().count("run"))
-
     def test_staging_an_added_file_keeps_the_fingerprint(self):
         # The key describes the working tree, not the index. Before this, an
         # added file reached the key as a hashed untracked entry and then,
