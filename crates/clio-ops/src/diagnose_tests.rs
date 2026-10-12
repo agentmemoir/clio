@@ -201,6 +201,15 @@ impl IndexStore for FakeIndex {
     ) -> Result<Vec<clio_store::IndexJob>, AmError> {
         unimplemented!()
     }
+    fn pending_index_job(
+        &self,
+        _b: &str,
+        _i: &str,
+        _c: Option<&str>,
+        _m: u32,
+    ) -> Result<Option<clio_store::IndexJob>, AmError> {
+        unimplemented!()
+    }
     fn finish_index_job(&self, _b: &str, _i: &str) -> Result<(), AmError> {
         unimplemented!()
     }

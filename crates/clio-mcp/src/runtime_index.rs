@@ -51,6 +51,18 @@ impl McpState {
         self.index_drain.drain()
     }
 
+    /// Drain the one pending index job for `(bank_id, item_id)`, if it is still
+    /// queued (the one-shot write's targeted drain).
+    ///
+    /// A one-shot write calls this after the bounded drain so the item it just
+    /// wrote is searchable even when an older backlog fills the batch.
+    ///
+    /// # Errors
+    /// Queue read/write failures (per-job failures land on the job row).
+    pub fn drain_index_item(&self, bank_id: &str, item_id: &str) -> Result<ProcessReport, AmError> {
+        self.index_drain.drain_item(bank_id, item_id)
+    }
+
     /// Nudge the background index sweeper that new outbox rows may be due.
     ///
     /// O(1) and non-blocking: it never embeds on the response path.
