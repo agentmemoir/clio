@@ -140,8 +140,35 @@ def run(check) -> tuple:
     original_select = globals()["select"]
     original_filter = globals()["file_scope_filter"]
     original_file_judge = globals()["judge_file_scope"]
+    original_build_inputs = globals()["build_inputs"]
+    original_changed_paths = globals()["changed_paths"]
+    original_run_coverage = globals()["run_coverage"]
     real_stderr = sys.stderr
     try:
+        # The scenarios below mock the selection, so the live tree's own diff must
+        # not reach the run through the build-input scan. `main` reads that scan to
+        # decide whether a changed fixture, lock file, or manifest turns the file
+        # filter off and takes the build-input path instead of the mocked one. On a
+        # branch carrying such a file the run left the mocked branch, these
+        # expectations then read the ambient tree rather than the mocks, and the
+        # self-test failed on every change that added a fixture or touched
+        # Cargo.lock while passing on a clean tree. Reporting no build inputs keeps
+        # the scenario about what it says it is about, whatever the tree holds.
+        globals()["build_inputs"] = lambda paths, packages: (set(), [])
+        # That mock is load-bearing, and the case at the end of this block proves it
+        # by behaviour instead of reading the name back. `changed_paths` reports a
+        # diff carrying a fixture, which is the ambient state that broke this
+        # scenario on PR #83: if the mock is ever removed, the real scan sees that
+        # fixture, turns the file filter off, and main prints BUILD INPUT instead of
+        # the file-scope verdict the case asserts. `run_coverage` is a no-op so that
+        # the failure is a wrong verdict and not a real instrumented run.
+        globals()["changed_paths"] = lambda base: [
+            "crates/clio/tests/fixtures-probe.json",
+            "crates/clio-types/src/civil.rs",
+        ]
+        globals()["run_coverage"] = (
+            lambda packages, filter_expression=None, report_path=None: None
+        )
         globals()["select"] = lambda base, everything: (
             [],
             [],
@@ -189,11 +216,34 @@ def run(check) -> tuple:
             "NOT MEASURED crates/clio-types/src/vanished.rs" in captured.getvalue(),
             True,
         )
+        # The same verdict, with the ambient diff now carrying a fixture. This is
+        # the only case here that would fail if the build-input mock were removed,
+        # so the interaction that broke on PR #83 stays an executable requirement
+        # rather than a comment.
+        globals()["file_scope_filter"] = lambda files: (
+            "",
+            ["crates/clio-types/src/civil.rs"],
+        )
+        printed = io.StringIO()
+        original_stdout = sys.stdout
+        try:
+            sys.stdout = printed
+            code = main(["--scope", "file", "--base", "master"])
+        finally:
+            sys.stdout = original_stdout
+        check(
+            "a build input in the diff does not flip the mocked file scope",
+            (code, "BUILD INPUT" in printed.getvalue()),
+            (EXIT_FAIL, False),
+        )
     finally:
         sys.stderr = real_stderr
         globals()["select"] = original_select
         globals()["file_scope_filter"] = original_filter
         globals()["judge_file_scope"] = original_file_judge
+        globals()["build_inputs"] = original_build_inputs
+        globals()["changed_paths"] = original_changed_paths
+        globals()["run_coverage"] = original_run_coverage
 
     # The two halves of the tool's exclusion, pinned separately. The suffix half
     # alone let every integration test be judged, and llvm-cov can never report
