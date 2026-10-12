@@ -101,3 +101,48 @@ fn operation_bank_and_actor_override_the_command_level_values() {
         "the operation actor must win over the command actor: {trail:?}"
     );
 }
+
+#[test]
+fn a_null_operation_bank_and_actor_inherit_the_command_level_values() {
+    let s = state();
+    let mut op = store_op_without_context("itm-null", "nullbank");
+    op["params"]["bank"] = Value::Null;
+    op["params"]["actor"] = Value::Null;
+    let out = crate::batch_tools::batch_tool(
+        &s,
+        &json!({
+            "operations": [op],
+            "bank": "agents",
+            "actor": "harness"
+        }),
+    );
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(count_bank(&s, "agents"), 1);
+    assert_eq!(count_bank(&s, "default"), 0);
+    let trail = s.store.audit_trail("agents", "itm-null").unwrap();
+    assert!(
+        trail.events.iter().any(|event| event.actor == "harness"),
+        "a null actor must inherit the command actor: {trail:?}"
+    );
+}
+
+#[test]
+fn dry_run_resolves_the_command_level_bank_for_each_operation() {
+    let s = state();
+    // `shared` is refused when the deployment has not enabled the shared
+    // surface. An operation that omits `bank` must inherit the command value
+    // and be refused in the dry run; a fallback to the session default would
+    // report a successful preview instead.
+    let out = crate::batch_tools::batch_tool(
+        &s,
+        &json!({
+            "operations": [store_op_without_context("itm-dry", "dry")],
+            "bank": "shared",
+            "actor": "harness",
+            "dry_run": true
+        }),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("forbidden"), "{out}");
+    assert_eq!(count_bank(&s, "shared"), 0, "a dry run writes nothing");
+}

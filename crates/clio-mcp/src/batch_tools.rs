@@ -155,15 +155,16 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
 ///
 /// An operation that names its own `bank` or `actor` keeps it; one that omits
 /// either inherits the command-level value, which is what the CLI advertises.
-/// Other arguments are untouched.
+/// A JSON `null` reads as omitted, matching every other argument reader in this
+/// crate, so it inherits the command-level value instead of silently resolving
+/// to the session default. Other arguments are untouched.
 fn with_command_context(batch_args: &Value, params: &Value) -> Value {
     let Value::Object(mut fields) = params.clone() else {
         return params.clone();
     };
     for key in ["bank", "actor"] {
-        if !fields.contains_key(key)
-            && let Some(value) = batch_args.get(key)
-        {
+        let named = fields.get(key).is_some_and(|value| !value.is_null());
+        if !named && let Some(value) = batch_args.get(key).filter(|value| !value.is_null()) {
             fields.insert(key.to_owned(), value.clone());
         }
     }

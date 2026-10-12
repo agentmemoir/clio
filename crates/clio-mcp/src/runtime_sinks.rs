@@ -262,14 +262,17 @@ impl BeliefSignalSource for StoreSignals {
 }
 
 /// Store-backed neighbor signals plus the items already staged earlier in the
-/// same `batch`, so a later operation's duplicate gate sees the operations in
-/// front of it before the batch transaction commits them.
+/// same `batch`, so a later operation is scored against the operations in front
+/// of it before the batch transaction commits them.
 ///
 /// Pre-flight scores each operation against committed rows only. Without the
 /// staged texts, an operation that repeats an earlier operation's item text
-/// slips past the exact-duplicate gate and both rows commit. Staged items are
-/// matched by bank: a duplicate in another bank is not a duplicate for this
-/// item, and `batch` may span several banks.
+/// slips past the exact-duplicate gate and both rows commit. The staged items
+/// join the neighbor set on purpose, so the whole admission decision — the
+/// exact-duplicate rejection and the novelty factor behind the score threshold —
+/// sees the batch as it will exist after commit. Staged items are matched by
+/// bank: a duplicate in another bank is not a duplicate for this item, and
+/// `batch` may span several banks.
 #[derive(Debug)]
 pub struct BatchSignals<'a> {
     inner: StoreSignals,
