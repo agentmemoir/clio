@@ -10,6 +10,7 @@ we made where that specification is silent.
 
 ### Added
 
+- `clio help --markdown --out DIR` renders one deterministic Markdown page per command, with an index and See-also links, through a bounded writer that refuses a `--out` with a symlink component, a page target it did not generate, a directory or non-regular file in a page's place, and a value spelled to look like a flag, and leaves nothing behind when a check refuses. ([#83](https://github.com/agentmemoir/clio/pull/83))
 - Every command registry record now carries its positional arguments, its working aliases, and two to four worked examples, and per-group checks pin each record's value kinds, allowed values, alias pairs, hygiene entries, and examples to the code that reads them, so a wrong record fails its own test. ([#83](https://github.com/agentmemoir/clio/pull/83))
 
 ### Fixed
