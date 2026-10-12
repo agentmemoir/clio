@@ -22,6 +22,7 @@
 
 use crate::index_store::{
     IndexStore, domain_predicate, encode_lexical_document, encode_lexical_query, fts5_query,
+    require_bank,
 };
 use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{IndexCoverage, IndexJob, KnnHit, SearchHit};
@@ -441,11 +442,4 @@ impl SqliteStore {
         })?;
         Ok(n > 0)
     }
-}
-
-fn require_bank(bank_id: &str) -> Result<(), AmError> {
-    if bank_id.is_empty() {
-        return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
-    }
-    Ok(())
 }

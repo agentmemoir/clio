@@ -108,6 +108,8 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
             )
         })?;
         resolved.push(staged.id.clone());
+        // The op's own bank, read before `staged.writes` moves into the batch.
+        let op_bank = staged_bank(&staged).map(str::to_owned);
         collect_carriers(tool, &staged.writes, &mut created_items);
         writes.extend(staged.writes);
         reports.push(serde_json::json!({
@@ -115,6 +117,7 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
             "tool": tool,
             "status": "STAGED",
             "id": staged.id,
+            "bank": op_bank,
             "admission_score": staged.admission_score
         }));
         // Carriers staged inside this op attach to the MemTree only after the
@@ -124,7 +127,11 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
         for report in &mut reports {
             report["status"] = Value::from("WOULD_COMMIT");
         }
-        return Ok(serde_json::json!({ "dry_run": true, "operations": reports }));
+        return Ok(serde_json::json!({
+            "dry_run": true,
+            "written": [],
+            "operations": reports
+        }));
     }
     state.batch.apply_batch(&writes)?;
     // Attach + publish committed leaves so reads see them immediately.
@@ -135,10 +142,35 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
     for report in &mut reports {
         report["status"] = Value::from("COMMITTED");
     }
-    Ok(Value::Object(Map::from_iter([(
-        "operations".to_owned(),
-        Value::Array(reports),
-    )])))
+    let written: Vec<Value> = reports
+        .iter()
+        .filter_map(|report| {
+            let id = report.get("id").and_then(Value::as_str)?;
+            let bank = report.get("bank").and_then(Value::as_str)?;
+            Some(serde_json::json!({"bank": bank, "id": id}))
+        })
+        .collect();
+    Ok(Value::Object(Map::from_iter([
+        ("written".to_owned(), Value::Array(written)),
+        ("operations".to_owned(), Value::Array(reports)),
+    ])))
+}
+
+/// The bank a staged operation writes into, when it writes an item.
+///
+/// The operation's own bank, not the batch call's: `bank` is a declared
+/// per-operation argument, and pre-flight resolves each operation's context
+/// separately.
+fn staged_bank(staged: &Staged) -> Option<&str> {
+    staged.writes.iter().find_map(|write| match write {
+        BatchWrite::CreateItem { item, .. }
+        | BatchWrite::CanonicalPut { item, .. }
+        | BatchWrite::CommitTriple { item, .. }
+        | BatchWrite::CommitTaskUpsert { item, .. }
+        | BatchWrite::CommitFailureRecord { item, .. }
+        | BatchWrite::UpsertMemoryItem { item, .. } => Some(item.bank_id.as_str()),
+        _ => None,
+    })
 }
 
 /// Record the admitted carriers of each op type for post-commit attach.
