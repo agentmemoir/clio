@@ -89,10 +89,18 @@ def main(argv: list[str]) -> int:
         return EXIT_RUN_ERROR
 
     label = "test" if args.tests_only else "judge"
+    # The count names what the run is scoped to, not only what is judged. Tests
+    # mode runs the packages that every changed Rust file selects, and that set is
+    # wider than the judged one: a new test file is path-excluded from a coverage
+    # report but still selects and runs its package's suite. Reading the judged
+    # set here printed "0 changed file(s) to test" over exactly that run, so the
+    # scope line read as no work while a full package suite ran (#82). Coverage
+    # mode still names the judged subset, because its label says judge.
+    scoped = changed if args.tests_only else files
     codeless = parse_codeless(changed)
     no_code = [rel for rel in changed if rel in codeless and is_present(rel)]
     print(f"scoped-runner: scope={args.scope}")
-    print(f"scoped-runner: {len(files)} changed file(s) to {label}")
+    print(f"scoped-runner: {len(scoped)} changed file(s) to {label}")
     if no_code:
         # Printed rather than silently dropped: the gate's contract is that the
         # reader can see every file the run did not judge. The source decided it
@@ -152,7 +160,7 @@ def main(argv: list[str]) -> int:
         print(f"scoped-runner: file-scoped filter over {len(changed)} file(s)")
 
     if args.plan:
-        for rel in files:
+        for rel in scoped:
             print(f"  {label} {rel}")
         if file_filter:
             print(f"  filter {file_filter}")
