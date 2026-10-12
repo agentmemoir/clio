@@ -9,6 +9,8 @@
 //!
 //! ## Owns
 //! - The bootstrap-lock regression: a concurrent open waits for the lock
+//! - The fresh-database regression: concurrent opens of an unmigrated
+//!   database all finish
 //! - The release guarantee on the refused-bootstrap path
 //!
 //! ## Does not own
@@ -107,6 +109,83 @@ fn overlapping_opens_all_finish() {
             opened.err().unwrap_or_default()
         );
     }
+}
+
+/// Concurrent opens of a fresh database all finish.
+///
+/// This is the catalog leg of the race: two sessions creating the schema
+/// together collide on `pg_type` with a unique-constraint violation. Without
+/// the bootstrap lock this test fails on a database neither opener has
+/// touched; with it, one session creates the schema while the other waits.
+/// The scratch database is dropped on exit, including on panic.
+#[test]
+fn concurrent_opens_of_a_fresh_database_all_finish() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        eprintln!("skip: shared Postgres unreachable");
+        return;
+    };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let scratch = ScratchDatabase::create(&mut admin, "bootstrap");
+    drop(admin);
+    let fresh = url_for_database(&scratch.name);
+    let openers: Vec<_> = (0..4)
+        .map(|_| {
+            let url = fresh.clone();
+            std::thread::spawn(move || {
+                PostgresStore::open(&url, local_kms())
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+        })
+        .collect();
+    for opener in openers {
+        let opened = opener.join().expect("join opener");
+        assert!(
+            opened.is_ok(),
+            "an overlapping fresh-database open failed: {}",
+            opened.err().unwrap_or_default()
+        );
+    }
+}
+
+/// A database created for one test, dropped when the test ends — including
+/// when it ends in a panic.
+struct ScratchDatabase {
+    name: String,
+}
+
+impl ScratchDatabase {
+    /// Create a database with a run-unique name, clearing any leftover from
+    /// a previous run that did not clean up.
+    fn create(admin: &mut postgres::Client, label: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let name = format!("clio_fresh_{label}_{}_{nanos}", std::process::id());
+        admin
+            .batch_execute(&format!("DROP DATABASE IF EXISTS {name}"))
+            .expect("drop a leftover scratch database");
+        admin
+            .batch_execute(&format!("CREATE DATABASE {name}"))
+            .expect("create a scratch database");
+        Self { name }
+    }
+}
+
+impl Drop for ScratchDatabase {
+    fn drop(&mut self) {
+        if let Ok(mut admin) = crate::pg_tls::connect(&postgres_url_from_env()) {
+            let _ = admin.batch_execute(&format!("DROP DATABASE IF EXISTS {}", self.name));
+        }
+    }
+}
+
+/// The shared URL pointed at a different database on the same server.
+fn url_for_database(name: &str) -> String {
+    let base = postgres_url_from_env();
+    let server = base.rsplit_once('/').map_or(base.as_str(), |(s, _)| s);
+    format!("{server}/{name}")
 }
 
 /// A refused bootstrap must not leave the lock held.
