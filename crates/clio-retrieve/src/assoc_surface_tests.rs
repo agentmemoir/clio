@@ -91,7 +91,7 @@ fn graph_link_surface_rejects_missing_endpoint() {
             &json!({"bank": "bank", "source_id": "A", "target_id": "ghost", "relationship": "r"}),
         ),
         ToolResult::Err {
-            code: ErrorCode::UnknownPath,
+            code: ErrorCode::ItemNotFound,
             ..
         }
     ));

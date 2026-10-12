@@ -124,7 +124,7 @@ impl AssociationEngine {
         for id in [source_id, target_id] {
             if self.store.get_memory_item(bank, id)?.is_none() {
                 return Err(AmError::new(
-                    ErrorCode::UnknownPath,
+                    ErrorCode::ItemNotFound,
                     format!("graph_link endpoint `{id}` not found in bank"),
                 ));
             }
