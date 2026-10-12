@@ -43,10 +43,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from exec_tempdir import CANDIDATE_PARENTS, can_execute, exec_tempdir, make_exec_dir  # noqa: E402
+from exec_tempdir import CANDIDATE_PARENTS, can_execute, exec_tempdir, make_exec_dir, refuses_execution  # noqa: E402
 from precommit_testkit import RUNNER, RepoCase, build_repo, run, write_hook  # noqa: E402
 
 
@@ -66,6 +67,39 @@ class FixturesLandWhereGitCanRunThem(unittest.TestCase):
                 can_execute(tmp),
                 f"{tmp} was chosen for the fixtures but refuses to run a hook",
             )
+            self.assertFalse(
+                refuses_execution(tmp), f"{tmp} runs a hook, so it does not refuse"
+            )
+
+    def test_only_a_kernel_permission_refusal_is_a_refusal(self):
+        # A `noexec` mount makes `execve` fail with `EACCES`, which Python raises
+        # as `PermissionError`. That is the one error read here as "the directory
+        # refuses execution"; a timeout proves nothing, and a host cannot be made
+        # `noexec` on demand, so both errors are driven.
+        cases = (
+            ("permission refusal", PermissionError("noexec"), True),
+            ("timeout", subprocess.TimeoutExpired("_probe.sh", 10), False),
+        )
+        for label, error, refused in cases:
+            with self.subTest(case=label):
+                with exec_tempdir() as tmp, mock.patch(
+                    "exec_tempdir.subprocess.run", side_effect=error
+                ):
+                    self.assertEqual(refused, refuses_execution(tmp), label)
+                    self.assertFalse(can_execute(tmp), label)
+
+    def test_a_probe_that_cannot_be_written_is_not_a_refusal(self):
+        # The write's own failure is the other thing a plain yes or no merged with
+        # a refusal. It says nothing about execution, so it is not a refusal.
+        with tempfile.TemporaryDirectory() as tmp:
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                self.skipTest("root can write to a read-only directory")
+            os.chmod(tmp, 0o500)
+            try:
+                self.assertFalse(refuses_execution(tmp))
+                self.assertFalse(can_execute(tmp))
+            finally:
+                os.chmod(tmp, 0o700)
 
     def test_a_hook_git_consults_really_runs_in_the_fixture_directory(self):
         # The failure this pins is not visible from the runner's own output: the
