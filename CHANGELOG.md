@@ -10,6 +10,7 @@ we made where that specification is silent.
 
 ### Fixed
 
+- Correct the `clio auth token add --help` note so it lists only `--db` and `--backend` as refused while the required `--bank` flag stays in the usage line. [Issue #142](https://github.com/agentmemoir/clio/issues/142)
 - Scoped coverage runs remove old executable objects for selected packages and targets before rebuilding, so stale source maps cannot inflate a changed file's line count. [Issue #47](https://github.com/agentmemoir/clio/issues/47) [PR #141](https://github.com/agentmemoir/clio/pull/141)
 - The admission gate-boundary tripwires scan the whole workspace but were tests in `clio-store`, so a scoped run skipped them for a change that did not reach that crate; they are now a `scripts/` check that runs on every change. [Issue #40](https://github.com/agentmemoir/clio/issues/40) [PR #140](https://github.com/agentmemoir/clio/pull/140)
 - `clio compose up` and `make compose up` with the `local-rft` profile refuse to start the extract service while its GGUF model is missing, naming the file and the command that fetches it; the file they require is the one Compose itself resolves and mounts, so a `CLIO_EXTRACT_GGUF` override in the environment or in `.env` is followed rather than guessed at, and a `models/` directory Docker created itself no longer satisfies the check. [Issue #18](https://github.com/agentmemoir/clio/issues/18) [PR #139](https://github.com/agentmemoir/clio/pull/139)
