@@ -45,6 +45,14 @@ pub struct PostgresStore {
     space_was_absent: bool,
 }
 
+/// Advisory-lock key that serializes the Postgres store bootstrap (`"clio_bst"`).
+///
+/// Every open runs schema and trigger DDL, and two concurrent opens deadlock on
+/// the table locks those statements take. One key held for the whole bootstrap
+/// lets only one open run that DDL at a time. It is distinct from the key
+/// `pg_lock` uses to serialize shared-Postgres tests.
+const PG_BOOTSTRAP_ADVISORY_KEY: i64 = 0x636C_696F_5F62_7374;
+
 impl PostgresStore {
     /// Connect, migrate, and verify the `vector` extension.
     ///
@@ -53,31 +61,19 @@ impl PostgresStore {
     pub fn open(database_url: &str, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
         let mut client = crate::pg_tls::connect(database_url).am("postgres connect")?;
         crate::postgres_ext::require_extension(&mut client, "vector")?;
-        // Validate the MemTree table shape BEFORE core DDL stamps schema_version:
-        // a refused reshape must never leave version metadata ahead of the real schema.
-        crate::memtree_schema::ensure_memtree_shape_pg(&mut client)?;
-        // The legacy plaintext-shape guard must run BEFORE the migrate batch:
-        // that batch writes columns on an existing database, and a refused
-        // open must leave the database unchanged.
-        crate::triple_reshape::refuse_legacy_triples_pg(&mut client)?;
-        // Duplicate-open-triple guard must run BEFORE the unique index build:
-        // a legacy duplicate fails CREATE UNIQUE INDEX with a raw driver error.
-        crate::triple_invariant::ensure_no_duplicate_open_triples_pg(&mut client)?;
-        let migrate = format!("{SQL_CORE}\n{SQL_VECTORS_POSTGRES}");
-        client.batch_execute(&migrate).am("migrate postgres")?;
-        crate::bank_registration::install_postgres_triggers(&mut client)?;
-        crate::schema_reshape::bump_schema_version_pg(&mut client)?;
-        // The vector table is created for the recorded space, so an existing
-        // database keeps its width and a fresh one gets the documented default
-        // recorded (and can then adopt the configured space with nothing to purge).
-        let (space, space_was_absent) = if let Some(space) = read_space(&mut client)? {
-            (space, false)
-        } else {
-            let space = EmbeddingSpace::default_space();
-            write_space(&mut client, &space)?;
-            (space, true)
-        };
-        apply_vector_ddl(&mut client, &space)?;
+        // Every open runs schema and trigger DDL. Two opens that overlap take
+        // the same table locks in different orders and the server aborts one of
+        // them with `deadlock detected`, so the whole bootstrap runs under one
+        // cross-session advisory lock.
+        lock_bootstrap(&mut client)?;
+        let outcome = bootstrap_schema(&mut client);
+        // Release on both paths. A refused bootstrap must not leave the next
+        // opener waiting here; a release failure is only worth reporting when
+        // the bootstrap itself succeeded, because otherwise the client is
+        // dropped on the error path and the session lock goes with it.
+        let released = unlock_bootstrap(&mut client);
+        let (space, space_was_absent) = outcome?;
+        released?;
         Ok(Self {
             client: Mutex::new(client),
             kms,
@@ -161,6 +157,59 @@ impl PostgresStore {
     pub(crate) fn validate_model(&self, model_id: &str) -> Result<(), AmError> {
         self.space.require_model(model_id)
     }
+}
+
+/// Run the open-time schema, trigger, and embedding-space work on one connection.
+///
+/// Every caller reaches this through `PostgresStore::open`, which holds
+/// [`PG_BOOTSTRAP_ADVISORY_KEY`] for the whole call so two opens cannot run this
+/// DDL at once.
+fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, bool), AmError> {
+    // Validate the MemTree table shape BEFORE core DDL stamps schema_version:
+    // a refused reshape must never leave version metadata ahead of the real schema.
+    crate::memtree_schema::ensure_memtree_shape_pg(client)?;
+    // The legacy plaintext-shape guard must run BEFORE the migrate batch:
+    // that batch writes columns on an existing database, and a refused
+    // open must leave the database unchanged.
+    crate::triple_reshape::refuse_legacy_triples_pg(client)?;
+    // Duplicate-open-triple guard must run BEFORE the unique index build:
+    // a legacy duplicate fails CREATE UNIQUE INDEX with a raw driver error.
+    crate::triple_invariant::ensure_no_duplicate_open_triples_pg(client)?;
+    let migrate = format!("{SQL_CORE}\n{SQL_VECTORS_POSTGRES}");
+    client.batch_execute(&migrate).am("migrate postgres")?;
+    crate::bank_registration::install_postgres_triggers(client)?;
+    crate::schema_reshape::bump_schema_version_pg(client)?;
+    // The vector table is created for the recorded space, so an existing
+    // database keeps its width and a fresh one gets the documented default
+    // recorded (and can then adopt the configured space with nothing to purge).
+    let (space, space_was_absent) = if let Some(space) = read_space(client)? {
+        (space, false)
+    } else {
+        let space = EmbeddingSpace::default_space();
+        write_space(client, &space)?;
+        (space, true)
+    };
+    apply_vector_ddl(client, &space)?;
+    Ok((space, space_was_absent))
+}
+
+/// Take the bootstrap advisory lock, blocking while another open holds it.
+fn lock_bootstrap(client: &mut Client) -> Result<(), AmError> {
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&PG_BOOTSTRAP_ADVISORY_KEY])
+        .am("postgres bootstrap lock")?;
+    Ok(())
+}
+
+/// Release the bootstrap advisory lock taken by [`lock_bootstrap`].
+fn unlock_bootstrap(client: &mut Client) -> Result<(), AmError> {
+    client
+        .query_one(
+            "SELECT pg_advisory_unlock($1)",
+            &[&PG_BOOTSTRAP_ADVISORY_KEY],
+        )
+        .am("postgres bootstrap unlock")?;
+    Ok(())
 }
 
 /// Distance expression for the active width, honouring the `halfvec` cast.
@@ -292,3 +341,7 @@ fn switch_pg(client: &mut Client, space: &EmbeddingSpace) -> Result<u64, AmError
 #[cfg(test)]
 #[path = "postgres_distilled_evidence_tests.rs"]
 mod postgres_distilled_evidence_tests;
+
+#[cfg(test)]
+#[path = "postgres_bootstrap_lock_tests.rs"]
+mod postgres_bootstrap_lock_tests;
