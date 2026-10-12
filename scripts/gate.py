@@ -34,6 +34,9 @@ Usage:
 Exit codes:
   the command's own exit code, on a fresh run or a reused verdict
   2   usage error
+  3   refused: a run with no terminal attached of `make coverage-fast` that the
+      Done check rules out (it ran before on this branch, or it is estimated
+      over its budget, or it cannot be estimated); nothing ran
   70  gate internal error (callers should run the command directly)
 
 Environment:
@@ -138,6 +141,7 @@ from gate_classify import (
 
 
 from gate_runlog import append_run
+from gate_done_check import EXIT_REFUSED, decide as done_check
 from gate_cache import (
     _artifact_rel_paths,
     _blob_name,
@@ -229,6 +233,12 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
                     ran.update(replayed=True, started=replay_started, finished=time.time(), exit=code)
                     return code
                 print("gate: stored failure came from a different PATH; re-running", file=sys.stderr)
+        decision = done_check(kind, scoped_argv, root)
+        if decision.reason:
+            print(f"gate: {kind} refused: {decision.reason}", file=sys.stderr)
+            return EXIT_REFUSED
+        if decision.estimate_s is not None:
+            ran["estimate_s"] = decision.estimate_s
         entry.mkdir(parents=True, exist_ok=True)
         log_path = entry / "log"
         if scope:
@@ -323,6 +333,7 @@ def _self_test() -> int:
     import gate_selftest_d
     import gate_selftest_e
     import gate_selftest_f
+    import gate_selftest_g
 
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
@@ -333,6 +344,7 @@ def _self_test() -> int:
         gate_selftest_d,
         gate_selftest_e,
         gate_selftest_f,
+        gate_selftest_g,
     ):
         suite.addTests(loader.loadTestsFromModule(mod))
     buffer = io.StringIO()
