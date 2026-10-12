@@ -12,6 +12,8 @@
 //!   `canonical_put`, `persona_put_stable`, `task_upsert`, `failure_record`,
 //!   `graph_link`)
 //! - The shared capture-only gated scoring helper
+//! - Threading the earlier staged items into each op's neighbor signals, so a
+//!   duplicate inside one batch is visible to the op that repeats it
 //!
 //! ## Does not own
 //! - Batch orchestration, `$ref` resolution, or report shape (`batch_tools`)
@@ -25,30 +27,39 @@
 //! Keep this module focused on batch pre-flight staging.
 
 use crate::batch_tools::Staged;
-use crate::runtime::{McpState, StderrSinks, StoreSignals};
+use crate::runtime::{BatchSignals, McpState, StderrSinks};
 use crate::write_tools::{
     build_candidate, build_item, gated_write_policy, opt_context, opt_num, opt_str, req_str,
 };
+use clio_admission::gated::SignalSource;
 use clio_store::{AssocEdgeRecord, AssocKind, BatchWrite};
 use clio_types::{AmError, EpistemicKind, ErrorCode, MemoryItem, OpContext, SemanticCategory};
 use serde_json::Value;
 use std::sync::Arc;
 
 /// Score and stage ONE operation without writing anything durable.
+///
+/// `staged` carries the items produced by the operations before this one, so a
+/// duplicate inside the same batch is rejected the same way a duplicate already
+/// in the bank is.
 pub(crate) fn preflight(
     state: &McpState,
     tool: &str,
     params: &Value,
     in_batch_ids: &[String],
+    staged: &[MemoryItem],
 ) -> Result<Staged, AmError> {
     let ctx = state.resolve_ctx(params)?;
     let ts = state.resolve_timestamp(params);
+    let signals = BatchSignals::new(Arc::clone(&state.store), Arc::clone(&state.index), staged);
     match tool {
-        "store" => store_preflight(state, &ctx, &ts, params),
-        "canonical_put" => canonical_preflight(state, &ctx, &ts, params),
-        "triple_add" => triple_preflight(state, &ctx, &ts, params),
+        "store" => store_preflight(state, &ctx, &ts, params, &signals),
+        "canonical_put" => canonical_preflight(state, &ctx, &ts, params, &signals),
+        "triple_add" => triple_preflight(state, &ctx, &ts, params, &signals),
         "persona_put_stable" | "task_upsert" | "failure_record" => {
-            crate::batch_preflight_records::records_preflight(state, tool, &ctx, &ts, params)
+            crate::batch_preflight_records::records_preflight(
+                state, tool, &ctx, &ts, params, &signals,
+            )
         }
         "graph_link" => graph_link_preflight(state, &ctx, params, in_batch_ids),
         _ => Err(AmError::new(
@@ -77,6 +88,7 @@ fn score_item(
     item: MemoryItem,
     params: &Value,
     candidate: clio_admission::decision::Candidate,
+    source: &dyn SignalSource,
 ) -> Result<(MemoryItem, f64), AmError> {
     let fields = clio_write::default_event_fields();
     let mut req = clio_write::VerifiedStoreRequest {
@@ -91,9 +103,7 @@ fn score_item(
         verify_sink: &StderrSinks,
         timestamp: ts,
     };
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
-    let decision =
-        clio_write::gated_store_verified(&mut req, candidate, &signals, &mut |_| Ok(()))?;
+    let decision = clio_write::gated_store_verified(&mut req, candidate, source, &mut |_| Ok(()))?;
     if !decision.pass {
         return Err(admission_rejected(&decision));
     }
@@ -105,6 +115,7 @@ fn store_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
     let candidate = build_candidate(params)?;
     let item_id = params
@@ -113,7 +124,7 @@ fn store_preflight(
         .filter(|v| !v.is_empty())
         .map_or_else(|| state.next_item_id(), str::to_owned);
     let item = build_item(state, ctx, params, item_id)?;
-    let (item, score) = score_item(state, ctx, ts, item, params, candidate)?;
+    let (item, score) = score_item(state, ctx, ts, item, params, candidate, source)?;
     let id = item.id.clone();
     Ok(Staged {
         writes: vec![BatchWrite::CreateItem {
@@ -130,6 +141,7 @@ fn canonical_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
     let key = req_str(params, "key")?;
     let value = req_str(params, "value")?;
@@ -172,6 +184,7 @@ fn canonical_preflight(
         item,
         params,
         clio_admission::decision::Candidate::Semantic(category),
+        source,
     )?;
     item.admission_score = Some(score);
     // The prior slot row is resolved at commit time inside the batch
@@ -193,6 +206,7 @@ fn triple_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
     let subject = req_str(params, "subject")?;
     let context = opt_context(params, "context")?;
@@ -226,8 +240,7 @@ fn triple_preflight(
         timestamp: ts,
         dry_run: true,
     };
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
-    let r = clio_write::triple::triple_add(&*state.store, &signals, &t_args)?;
+    let r = clio_write::triple::triple_add(&*state.store, source, &t_args)?;
     if !r.decision.pass {
         return Err(admission_rejected(&r.decision));
     }
