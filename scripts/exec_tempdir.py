@@ -103,6 +103,10 @@ class _ProbeOutcome(enum.Enum):
     be run is not a directory that refuses execution, and reading it as one is the
     defect issue #60 records. `can_execute` may merge them because its callers only
     need "try the next candidate"; nothing that needs the refusal claim may.
+
+    A three-valued enum, rather than two booleans or loose string flags, so each
+    answer is named once and a caller cannot read an unprobed result as a refusal
+    by accident.
     """
 
     #: The filesystem started the probe and it exited cleanly.
