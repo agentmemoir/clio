@@ -33,11 +33,6 @@
 use crate::cli_command_registry::{GLOBAL_ACTOR, GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
-/// One example line with an optional short comment.
-const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
-    Example { command, comment }
-}
-
 /// These records print `--bank`/`--actor`, so only these ride along.
 const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
 
@@ -176,15 +171,15 @@ pub(crate) const VALIDATE: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio validate itm-sample-1 --action attest --note \"reviewed\" --db ./memory.db",
             None,
         ),
-        example(
+        Example::new(
             "clio validate itm-sample-1 --action update --new-content \"Toronto\" --note \"user fix\"",
             Some("update carries the replacement"),
         ),
-        example(
+        Example::new(
             "clio validate itm-sample-1 --action attest -o json --db ./memory.db",
             None,
         ),
@@ -224,8 +219,8 @@ pub(crate) const BATCH: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[BATCH_STDIN_ALTERNATE],
     examples: &[
-        example("clio batch --file ops.json --db ./memory.db", None),
-        example(
+        Example::new("clio batch --file ops.json --db ./memory.db", None),
+        Example::new(
             "clio batch --file ops.json --dry-run -o json",
             Some("preview"),
         ),
@@ -295,15 +290,15 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio export --out bundle.json --actor harness --db ./memory.db",
             None,
         ),
-        example(
+        Example::new(
             "clio export --out bundle.json --content-mode ciphertext_backup --actor system",
             Some("backup bundle"),
         ),
-        example(
+        Example::new(
             "clio export --out bundle.json --category persona --actor harness -o json",
             None,
         ),
@@ -342,12 +337,12 @@ pub(crate) const IMPORT: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio import --source bundle.json --db ./memory.db", None),
-        example(
+        Example::new("clio import --source bundle.json --db ./memory.db", None),
+        Example::new(
             "clio import --source bundle.json --dry-run -o json",
             Some("preview"),
         ),
-        example(
+        Example::new(
             "clio import --source bundle.json --force --reason \"restore\"",
             Some("overwrite with a reason"),
         ),
@@ -393,15 +388,15 @@ pub(crate) const ERASE: CommandSpec = CommandSpec {
     usage_override: Some(ERASE_USAGE),
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio erase --subject subj-1 --basis \"DSAR\" --request req-1 --confirm --actor system --db ./memory.db",
             None,
         ),
-        example(
+        Example::new(
             "clio erase --subject subj-1 --basis \"DSAR\" --request req-2 --dry-run",
             Some("preview, zero writes"),
         ),
-        example(
+        Example::new(
             "clio erase --subject subj-2 --basis \"GDPR\" --request req-3 --reason-code AUDITED_SHRED --confirm --actor harness --bank bank-2",
             Some("other basis, actor, and reason code"),
         ),

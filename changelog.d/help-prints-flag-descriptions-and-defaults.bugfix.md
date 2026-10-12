@@ -1,0 +1,1 @@
+Every command's `--help` now prints its flags' descriptions and real defaults from the command registry, commands that refuse a global flag no longer list it as accepted, and refusal notes agree with the usage lines.

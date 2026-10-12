@@ -34,11 +34,6 @@
 use crate::cli_command_registry::GLOBAL_OUTPUT;
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
-/// One example line with an optional short comment.
-const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
-    Example { command, comment }
-}
-
 /// The required `TASK_ID` positional of `task get`, `task history`,
 /// `task upsert`, and `failure record`.
 const TASK_ID: Positional = Positional {
@@ -147,8 +142,8 @@ pub(crate) const TASK_GET: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio task get t-1 --db ./memory.db", None),
-        example("clio task get t-1 --explain -o json", Some("trace")),
+        Example::new("clio task get t-1 --db ./memory.db", None),
+        Example::new("clio task get t-1 --explain -o json", Some("trace")),
     ],
     tool: Some("task_get"),
     section: Section::Read,
@@ -176,8 +171,8 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio task history t-1 --limit 10 --db ./memory.db", None),
-        example("clio task history t-1 --explain -o json", Some("trace")),
+        Example::new("clio task history t-1 --limit 10 --db ./memory.db", None),
+        Example::new("clio task history t-1 --explain -o json", Some("trace")),
     ],
     tool: Some("task_history"),
     section: Section::Read,
@@ -216,11 +211,11 @@ pub(crate) const TASK_UPSERT: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio task upsert t-1 --definition \"Import\" --status in_progress --db ./memory.db",
             None,
         ),
-        example(
+        Example::new(
             "clio task upsert t-1 --definition \"Import\" --status done --dry-run",
             Some("preview"),
         ),
@@ -251,8 +246,8 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio failure list t-1 --limit 10 --db ./memory.db", None),
-        example("clio failure list \"import verb\" --limit 5 -o json", None),
+        Example::new("clio failure list t-1 --limit 10 --db ./memory.db", None),
+        Example::new("clio failure list \"import verb\" --limit 5 -o json", None),
     ],
     tool: Some("failures_for_task"),
     section: Section::Read,
@@ -288,15 +283,15 @@ pub(crate) const FAILURE_RECORD: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio failure record t-1 --attempt-n 1 --what-failed \"timeout\" --lesson \"backoff\"",
             None,
         ),
-        example(
+        Example::new(
             "clio failure record t-1 --attempt-n 1 --what-failed \"timeout\" --lesson \"backoff\" -o json",
             None,
         ),
-        example(
+        Example::new(
             "clio failure record t-1 --attempt-n 2 --what-failed \"timeout\" --lesson \"backoff\" --dry-run",
             Some("preview"),
         ),
@@ -347,11 +342,11 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio memtree query --task-id t-1 --depth 2 --db ./memory.db",
             None,
         ),
-        example("clio memtree query --time-start 2026-02-01", None),
+        Example::new("clio memtree query --time-start 2026-02-01", None),
     ],
     tool: Some("memtree_query"),
     section: Section::Read,
@@ -371,8 +366,8 @@ pub(crate) const MEMTREE_GET: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio memtree get node-1 --db ./memory.db", None),
-        example("clio memtree get node-1 --explain -o json", None),
+        Example::new("clio memtree get node-1 --db ./memory.db", None),
+        Example::new("clio memtree get node-1 --explain -o json", None),
     ],
     tool: Some("memtree_get"),
     section: Section::Read,
@@ -406,12 +401,12 @@ pub(crate) const HISTORY_TEMPORAL: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example(
+        Example::new(
             "clio history temporal triple:Bob:city --as-of 2026-02-01 --db ./memory.db",
             Some("one triple"),
         ),
-        example("clio history temporal preference:reply-style", None),
-        example(
+        Example::new("clio history temporal preference:reply-style", None),
+        Example::new(
             "clio history temporal belief:itm-sample-1 --time-axis transaction -o json",
             None,
         ),

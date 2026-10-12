@@ -27,11 +27,6 @@
 use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
-/// One example line with an optional short comment.
-const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
-    Example { command, comment }
-}
-
 /// The `recall` note: what a score floor is, and which flags conflict.
 const RECALL_NOTE: &str = "a score floor is a relative filter over this query's own scores, not a calibrated threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)";
 
@@ -149,12 +144,12 @@ pub(crate) const RECALL: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio recall \"Bob lives in Canada\" --db ./memory.db", None),
-        example(
+        Example::new("clio recall \"Bob lives in Canada\" --db ./memory.db", None),
+        Example::new(
             "clio recall \"Bob lives in Canada\" -o json --db ./memory.db",
             None,
         ),
-        example(
+        Example::new(
             "clio recall \"Bob lives in Canada\" --as-of 2026-02-01 --db ./memory.db",
             None,
         ),
@@ -176,9 +171,9 @@ pub(crate) const GET: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio get itm-sample-1 --db ./memory.db", None),
-        example("clio get itm-sample-1 --gist -o json", None),
-        example(
+        Example::new("clio get itm-sample-1 --db ./memory.db", None),
+        Example::new("clio get itm-sample-1 --gist -o json", None),
+        Example::new(
             "clio show itm-sample-2 --db ./memory.db",
             Some("the `show` spelling"),
         ),
@@ -200,12 +195,12 @@ pub(crate) const SHOW: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio show itm-sample-1 --db ./memory.db", None),
-        example(
+        Example::new("clio show itm-sample-1 --db ./memory.db", None),
+        Example::new(
             "clio show itm-sample-1 --snapshot",
             Some("the stored snapshot"),
         ),
-        example("clio show itm-sample-1 --gist -o json", None),
+        Example::new("clio show itm-sample-1 --gist -o json", None),
     ],
     tool: Some("get"),
     section: Section::Read,
@@ -277,12 +272,12 @@ pub(crate) const INSPECT: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio inspect --validity active --db ./memory.db", None),
-        example(
+        Example::new("clio inspect --validity active --db ./memory.db", None),
+        Example::new(
             "clio inspect --category persona -o json --db ./memory.db",
             None,
         ),
-        example(
+        Example::new(
             "clio inspect --filter '{\"validity\":\"active\"}' --limit 20 --db ./memory.db",
             Some("the filter JSON takes the same keys as the flags"),
         ),
@@ -304,8 +299,8 @@ pub(crate) const STATS: CommandSpec = CommandSpec {
     usage_override: None,
     usage_alternates: &[],
     examples: &[
-        example("clio stats --db ./memory.db", None),
-        example("clio stats --bank default -o json", None),
+        Example::new("clio stats --db ./memory.db", None),
+        Example::new("clio stats --bank default -o json", None),
     ],
     tool: Some("stats"),
     section: Section::Read,

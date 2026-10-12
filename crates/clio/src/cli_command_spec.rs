@@ -110,6 +110,13 @@ pub(crate) struct Example {
     pub(crate) comment: Option<&'static str>,
 }
 
+impl Example {
+    /// One example line with an optional short comment.
+    pub(crate) const fn new(command: &'static str, comment: Option<&'static str>) -> Self {
+        Self { command, comment }
+    }
+}
+
 /// How a command affects stored data.
 ///
 /// `Read` for read-only verbs, `Write` for verbs that create, modify, or
