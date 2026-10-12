@@ -162,6 +162,17 @@ jobs:
         with:
           tool: nextest
 
+      # The runner cleans profile buffers through `cargo llvm-cov`, and the gate's
+      # self-test carries a check group that reads the installed tool and skips
+      # itself when the tool is absent. This job needs it even though it judges no
+      # coverage: without it a cleaning path failed with `error: no such command:
+      # llvm-cov`, which reads as a defect in the change rather than a missing
+      # tool, and one check group skipped under a green run.
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
       # The test gate. Runs the tests of the changed crate and every crate that
       # depends on it, uninstrumented, and returns nextest's own exit code, so a
       # failing test fails the step and is named by nextest. The instrumented
