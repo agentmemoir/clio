@@ -275,15 +275,19 @@ fn every_captured_surface_matches_the_fixture_in_capture_order() {
 /// Capture mode freezes the fixture only when `CAPTURE_ENV` is exactly "1";
 /// the variable is read here and never written by tests. CI never sets it, so
 /// the unset branch is what every normal run exercises. The capture branch is
-/// a developer action run by hand, in two steps, because the guard refuses a
-/// stale artifact rather than freezing output a rebuild would change:
+/// a developer action run by hand, in two steps:
 ///
 /// 1. `cargo build -p clio --release --locked --message-format=json` warms the
-///    cache the guard requires; its JSON stream must report the clio bin
-///    artifact with `"fresh": true`.
+///    cache the guard requires. On a cold tree the first run reports `"fresh":
+///    false` because it compiles clio, and the JSON stream the step asks for
+///    is the warm run's: run it once more until the clio bin artifact reports
+///    `"fresh": true`.
 /// 2. `CLIO_GOLDEN_CAPTURE=1 cargo nextest run -p clio --test
 ///    golden_repeatability_test capture_mode_writes_the_fixture_only_when_asked`
-///    writes the fixture from that artifact.
+///    writes the fixture from that artifact. The guard retries its own build
+///    once when that build is the one that recompiled clio, so one capture
+///    command succeeds even after a cold warm-up; if both builds recompile,
+///    the refusal prints cargo's stderr instead of asking for another run.
 ///
 /// Take both steps on one commit. A fixture generated from a build of a
 /// different commit is what made the frozen capture stop reproducing, and it is

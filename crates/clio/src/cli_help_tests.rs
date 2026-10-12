@@ -158,21 +158,24 @@ fn the_catalog_lists_the_commands_that_bind_no_mcp_tool() {
     }
 
     // Every command this surface knows is in one of the two arrays, so a
-    // command the CLI accepts can never be missing from the catalog: every
-    // top-level verb, and every leaf command under it, the reserved surfaces'
-    // groups' and `auth token`'s subcommands included. Checking only the
-    // top-level verbs is what let the unbound array omit sixteen registered
-    // subcommands.
+    // command the CLI accepts can never be missing from the catalog. The
+    // record sweep is the independent source: a record the group table failed
+    // to derive still fails here, which is what the sixteen omitted
+    // subcommands needed. The prefix sweep covers what has no record of its
+    // own.
     let listed: BTreeSet<&str> = commands
         .iter()
         .map(|entry| entry["command"].as_str().expect("a command name"))
         .chain(unbound.iter().map(String::as_str))
         .collect();
+    for spec in crate::cli_command_registry::all() {
+        assert!(listed.contains(spec.name), "missing command {}", spec.name);
+    }
     for verb in known_commands() {
         assert!(listed.contains(verb), "missing verb {verb}");
     }
-    for command in all_known_commands() {
-        assert!(listed.contains(command), "missing command {command}");
+    for (prefix, _, _) in all_groups() {
+        assert!(listed.contains(prefix), "missing group prefix {prefix}");
     }
 }
 
