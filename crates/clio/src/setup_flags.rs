@@ -304,6 +304,19 @@ fn accepted_flags() -> &'static [Flag] {
         .documented
 }
 
+/// Whether `token` is a `--flag` the setup grammar accepts with a value. The
+/// token after it is that flag's value, which `setup_cli::is_help` must not read
+/// as a help word.
+pub(crate) fn takes_value(token: &str) -> bool {
+    let Some(name) = token.strip_prefix("--") else {
+        return false;
+    };
+    accepted_flags()
+        .iter()
+        .find(|flag| flag.long == name)
+        .is_some_and(|flag| flag.value.is_some())
+}
+
 /// The `--help` text: every flag, the database choices, and the SSL rule.
 pub(crate) fn print_help(out: &mut impl std::io::Write) {
     // The flag list is the shared registry's, wrapped here rather than written
