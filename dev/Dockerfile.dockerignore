@@ -1,0 +1,22 @@
+# What the image build does not need, which on a working checkout is almost
+# everything. `dev/Dockerfile` reads one file out of the context
+# (`rust-toolchain.toml`), and `target/` alone reaches hundreds of thousands of
+# files and several gigabytes.
+#
+# The name is `<Dockerfile>.dockerignore`, and Docker looks for it beside the
+# Dockerfile it belongs to - here, `dev/Dockerfile`. It is deliberately not the
+# plain `.dockerignore` at the repository root: that would be a new dotfile, and
+# this machine's global Git excludes ignore every new dotfile, so it could only be
+# committed with `git add -f` against the preference the excludes express. Both
+# placements were measured on this host: `dev/Dockerfile.dockerignore` is read,
+# and a root `Dockerfile.dockerignore` is not.
+.git/
+target/
+models/
+coverage/
+backups/
+.agent-tmp/
+.ignored/
+.logs/
+.private/
+private/
