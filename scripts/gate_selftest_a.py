@@ -21,7 +21,8 @@ members = [
 ]
 
 class Tests(unittest.TestCase):
-    def test_fingerprint_stable_and_sensitive(self):
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_fingerprint_stable_and_sensitive(self, _rustup):
         env = {"CLIO_DATABASE_URL": "x"}
         touched = ("crates/a/src/lib.rs",)
         baseline = fingerprint(state("h", changed=touched), env, "test", ["cargo", "test"])
@@ -42,7 +43,8 @@ class Tests(unittest.TestCase):
         # something decided after the lookup.
         self.assertNotEqual(baseline, fingerprint(state("h", changed=touched), env, "coverage", ["cargo", "test"]))
 
-    def test_the_package_list_from_the_environment_separates_entries(self):
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_the_package_list_from_the_environment_separates_entries(self, _rustup):
         # Two `make test` runs that differ only in the package list the
         # environment supplies were one command line, so the second was told
         # the first one's exit code. The scoping code reads both of these,
@@ -91,7 +93,8 @@ class Tests(unittest.TestCase):
         for name, reason in ENV_KEY_EXEMPT.items():
             self.assertNotEqual("", reason.strip(), f"{name} is exempt with no stated reason")
 
-    def test_the_key_scheme_is_hashed_and_tracked(self):
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_the_key_scheme_is_hashed_and_tracked(self, _rustup):
         # Two separate promises. The salt has to reach the digest, or an
         # entry written under an older key would be read back under a newer
         # one; and the salt has to be recorded, or moving it is invisible.
