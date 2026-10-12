@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - The bootstrap-lock regression: a concurrent open waits for the lock
+//! - The release guarantee on the refused-bootstrap path
 //!
 //! ## Does not own
 //! - Shared-Postgres test serialization (`pg_lock`)
@@ -20,9 +21,10 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{PG_BOOTSTRAP_ADVISORY_KEY, PostgresStore};
+use super::{PG_BOOTSTRAP_ADVISORY_KEY, PostgresStore, with_bootstrap_lock};
 use crate::db_url::postgres_url_from_env;
 use crate::erase_test_support::local_kms;
+use clio_types::{AmError, ErrorCode};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -58,10 +60,10 @@ fn an_open_waits_for_the_bootstrap_lock() {
         let _ = tx.send(opened);
     });
 
-    assert!(
-        rx.recv_timeout(Duration::from_secs(1)).is_err(),
-        "open() ran its bootstrap while another session held the lock"
-    );
+    match rx.recv_timeout(Duration::from_secs(1)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        other => panic!("open() did not wait for the bootstrap lock: {other:?}"),
+    }
     drop(probe);
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(60)),
@@ -95,4 +97,40 @@ fn overlapping_opens_all_finish() {
             "an overlapping open failed"
         );
     }
+}
+
+/// A refused bootstrap must not leave the lock held.
+///
+/// A session advisory lock outlives a rolled-back transaction, so if the release
+/// were skipped on the error path nothing would free the key before the
+/// connection ended, and every later open would stall behind it. `open` runs its
+/// bootstrap through this same helper, so this pins the contract it depends on.
+#[test]
+fn a_refused_bootstrap_releases_the_lock() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        eprintln!("skip: shared Postgres unreachable");
+        return;
+    };
+    let mut client = crate::pg_tls::connect(&url).expect("connect");
+    let refused: Result<(), AmError> = with_bootstrap_lock(&mut client, |_| {
+        Err(AmError::new(ErrorCode::Internal, "refused on purpose"))
+    });
+    assert!(refused.is_err(), "the body's error must reach the caller");
+
+    let mut probe = crate::pg_tls::connect(&url).expect("probe connect");
+    let free: bool = probe
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&PG_BOOTSTRAP_ADVISORY_KEY],
+        )
+        .expect("probe try-lock")
+        .get(0);
+    assert!(free, "a refused bootstrap left the bootstrap lock held");
+    probe
+        .query_one(
+            "SELECT pg_advisory_unlock($1)",
+            &[&PG_BOOTSTRAP_ADVISORY_KEY],
+        )
+        .expect("release the probe lock");
 }

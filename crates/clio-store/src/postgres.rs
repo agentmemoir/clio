@@ -47,11 +47,11 @@ pub struct PostgresStore {
 
 /// Advisory-lock key that serializes the Postgres store bootstrap (`"clio_bst"`).
 ///
-/// Every open runs schema and trigger DDL, and two concurrent opens deadlock on
-/// the table locks those statements take. One key held for the whole bootstrap
-/// lets only one open run that DDL at a time. It is distinct from the key
-/// `pg_lock` uses to serialize shared-Postgres tests.
-const PG_BOOTSTRAP_ADVISORY_KEY: i64 = 0x636C_696F_5F62_7374;
+/// One key serves every open, not one key per schema. The bootstrap touches
+/// `public` whatever the connection's `search_path` is, because guards such as
+/// `memtree_schema` name `public.*` explicitly, so a schema-derived key would
+/// let two opens into the same tables at once.
+const PG_BOOTSTRAP_ADVISORY_KEY: i64 = crate::pg_advisory_keys::STORE_BOOTSTRAP;
 
 impl PostgresStore {
     /// Connect, migrate, and verify the `vector` extension.
@@ -65,15 +65,7 @@ impl PostgresStore {
         // the same table locks in different orders and the server aborts one of
         // them with `deadlock detected`, so the whole bootstrap runs under one
         // cross-session advisory lock.
-        lock_bootstrap(&mut client)?;
-        let outcome = bootstrap_schema(&mut client);
-        // Release on both paths. A refused bootstrap must not leave the next
-        // opener waiting here; a release failure is only worth reporting when
-        // the bootstrap itself succeeded, because otherwise the client is
-        // dropped on the error path and the session lock goes with it.
-        let released = unlock_bootstrap(&mut client);
-        let (space, space_was_absent) = outcome?;
-        released?;
+        let (space, space_was_absent) = with_bootstrap_lock(&mut client, bootstrap_schema)?;
         Ok(Self {
             client: Mutex::new(client),
             kms,
@@ -191,6 +183,29 @@ fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, bool), AmErr
     };
     apply_vector_ddl(client, &space)?;
     Ok((space, space_was_absent))
+}
+
+/// Take [`PG_BOOTSTRAP_ADVISORY_KEY`], run `body`, and release the key on both
+/// the success and the error path.
+///
+/// The release is what stops a refused bootstrap from stalling the next opener:
+/// a session advisory lock outlives a rolled-back transaction, so nothing else
+/// frees it before the connection ends. `PostgresStore::open` runs its bootstrap
+/// through this helper, and so does the confirmed space switch, whose DDL takes
+/// the same table locks.
+fn with_bootstrap_lock<T>(
+    client: &mut Client,
+    body: impl FnOnce(&mut Client) -> Result<T, AmError>,
+) -> Result<T, AmError> {
+    lock_bootstrap(client)?;
+    let outcome = body(client);
+    // Released on both paths; a release failure is only worth reporting when the
+    // body succeeded, because otherwise the client is dropped on the error path
+    // and the session lock goes with it.
+    let released = unlock_bootstrap(client);
+    let value = outcome?;
+    released?;
+    Ok(value)
 }
 
 /// Take the bootstrap advisory lock, blocking while another open holds it.
@@ -325,17 +340,23 @@ pub(crate) fn write_space(client: &mut Client, space: &EmbeddingSpace) -> Result
 }
 
 /// Drop and recreate the vector table at `space`'s width; returns purged row count.
+///
+/// Runs under [`PG_BOOTSTRAP_ADVISORY_KEY`] like the bootstrap does: the drop
+/// and the vector DDL take the same table locks an open takes, so an unguarded
+/// switch could deadlock against a concurrent open.
 fn switch_pg(client: &mut Client, space: &EmbeddingSpace) -> Result<u64, AmError> {
-    let purged: i64 = client
-        .query_one("SELECT COUNT(*) FROM item_embeddings", &[])
-        .am("space purge count")?
-        .get(0);
-    client
-        .batch_execute("DROP TABLE IF EXISTS item_embeddings;")
-        .am("space drop")?;
-    apply_vector_ddl(client, space)?;
-    write_space(client, space)?;
-    Ok(u64::try_from(purged.max(0)).unwrap_or(0))
+    with_bootstrap_lock(client, |client| {
+        let purged: i64 = client
+            .query_one("SELECT COUNT(*) FROM item_embeddings", &[])
+            .am("space purge count")?
+            .get(0);
+        client
+            .batch_execute("DROP TABLE IF EXISTS item_embeddings;")
+            .am("space drop")?;
+        apply_vector_ddl(client, space)?;
+        write_space(client, space)?;
+        Ok(u64::try_from(purged.max(0)).unwrap_or(0))
+    })
 }
 
 #[cfg(test)]
