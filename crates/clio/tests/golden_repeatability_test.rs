@@ -187,6 +187,14 @@ fn every_captured_surface_matches_the_fixture_in_capture_order() {
             // still catches a change the key set cannot see.
             let want: Value = serde_json::from_str(&expected.stdout).expect("fixture catalog JSON");
             let got: Value = serde_json::from_str(&actual.stdout).expect("live catalog JSON");
+            // The frozen catalog must be the accepted format version: a
+            // refresh may land only the approved version-2 document, so a
+            // version-1 capture fails here by name before any key compares.
+            assert_eq!(
+                want["format_version"], 2,
+                "command {:?}: the frozen catalog is not the current format version",
+                expected.argv
+            );
             let mut keys: Vec<String> = want
                 .as_object()
                 .expect("fixture catalog JSON object")
