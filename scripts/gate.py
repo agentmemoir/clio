@@ -43,6 +43,9 @@ Environment:
   GATE_RAW=1   bypass the gate entirely (handled by the shim, not here)
   GATE_FORCE=1 same as --force
   GATE_SCOPE=off  never scope a quick command
+  CLIO_GOLDEN_CAPTURE=1  the golden capture runs every time and stores no
+                     verdict; a stored one would replay a refusal after the
+                     cache it asked for was warmed
   CLIO_GATE_LOG_DIR  optional log directory override. By default, logs land
                      under this repository's clio-gate cache folder. Each
                      <kind>.log starts with a fresh-run or replay marker.
@@ -55,7 +58,6 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
-import io
 import json
 import os
 import re
@@ -174,6 +176,15 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         clean_requested = "coverage-clean" in argv[1:] or (
             len(argv) > 2 and argv[1:3] == ["llvm-cov", "clean"]
         )
+        # A golden capture writes the frozen CLI fixture from a guarded release
+        # build, so whether it can proceed depends on the release build cache,
+        # which is not part of the fingerprint: a warm cache changes nothing the
+        # key holds. A stored refusal would therefore replay after the step its
+        # own refusal message asks for -- warming that cache -- which is the
+        # defect #136 records, and a stored success would let a later run report
+        # a capture it never made. The capture is a must-run command, and the
+        # early return below is what keeps this run's verdict out of the cache.
+        capture_requested = os.environ.get("CLIO_GOLDEN_CAPTURE") == "1"
         if Path(argv[0]).name == "cargo" and argv[1:2] == ["nextest"] and not nextest_subcommand(argv):
             # Loud on purpose. A subcommand this file does not recognise is
             # classified as a lookup rather than guessed at, which is the safe
@@ -212,7 +223,12 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         # clean` is the same request to the other tool. `clean` is a lookup kind,
         # not a coverage one, so it is not in COVERAGE_KINDS and does not need the
         # artifact handling that set buys.
-        if clean_requested:
+        #
+        # A golden capture is a must-run command for the same kind of reason: it
+        # may only proceed once the release build cache is warm, which the key
+        # cannot see, so a replayed verdict is always about a different cache
+        # state than the one the run meets.
+        if clean_requested or capture_requested:
             force = True
         scoped_argv, scope = scope_command(kind, argv, root, state.changed)
         ran.update(argv=scoped_argv)
@@ -264,8 +280,13 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
             except OSError as error:
                 print(f"gate: warning: cannot record Cargo work evidence: {error}", file=sys.stderr)
         published = _publish_log(log_path, log_dir, kind, code)
-        if clean_requested:
-            _purge_coverage_cache(root)
+        # Both must-run commands return here, before the verdict is stored: a
+        # clean stores nothing so its removal is never replayed, and a capture
+        # stores nothing so a later run of the same command cannot inherit a
+        # refusal measured against a colder cache.
+        if clean_requested or capture_requested:
+            if clean_requested:
+                _purge_coverage_cache(root)
             print(f"gate: {kind} exit {code} in {round(finished - started, 1)}s; log: {published or log_path}")
             if code != 0:
                 _print_tail(log_path)
@@ -324,68 +345,11 @@ def _cargo_checking_evidence(log_path: Path, kind: str) -> bytes:
     return f"gate: Cargo package work: {len(checking)} checked, {len(compiling)} compiled\n".encode()
 
 
-def _self_test() -> int:
-    import unittest
-
-    import gate_selftest_a
-    import gate_selftest_b
-    import gate_selftest_c
-    import gate_selftest_d
-    import gate_selftest_e
-    import gate_selftest_f
-    import gate_selftest_g
-
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    for mod in (
-        gate_selftest_a,
-        gate_selftest_b,
-        gate_selftest_c,
-        gate_selftest_d,
-        gate_selftest_e,
-        gate_selftest_f,
-        gate_selftest_g,
-    ):
-        suite.addTests(loader.loadTestsFromModule(mod))
-    buffer = io.StringIO()
-    from unittest import mock
-
-    with tempfile.TemporaryDirectory(prefix="gate-self-test-") as scratch:
-        with mock.patch.dict(
-            os.environ,
-            {
-                "XDG_CACHE_HOME": scratch,
-                "CLIO_GATE_LOG_DIR": "",
-                "GATE_ACTIVE": "",
-                "GATE_FORCE": "",
-                "GATE_RAW": "",
-                "GATE_SCOPE": GATE_SCOPE_DEFAULT,
-                "MAKEFLAGS": "",
-                "GNUMAKEFLAGS": "",
-                "BASE": "",
-                "PACKAGES": "",
-            },
-        ):
-            result = unittest.TextTestRunner(stream=buffer, verbosity=1).run(suite)
-    skipped = [f"{test}: {reason}" for test, reason in getattr(result, "skipped", [])]
-    if not result.wasSuccessful():
-        print(buffer.getvalue())
-    for reason in skipped:
-        print(f"self-test skipped: {reason}")
-    clean = result.wasSuccessful()
-    if not clean:
-        summary = "FAILED"
-    elif skipped:
-        summary = f"all passed, {len(skipped)} check group(s) skipped"
-    else:
-        summary = "all passed"
-    print(f"self-test: {summary}")
-    return 0 if clean else 1
-
-
 def main(argv: list[str]) -> int:
     if "--self-test" in argv:
-        return _self_test()
+        from gate_selftest_suite import run_suite
+
+        return run_suite()
     if "-h" in argv or "--help" in argv:
         print(__doc__.strip())
         return 0
