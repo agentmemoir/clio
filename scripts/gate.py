@@ -356,6 +356,7 @@ def _self_test() -> int:
     import gate_selftest_e
     import gate_selftest_f
     import gate_selftest_g
+    import gate_selftest_h
 
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
@@ -367,6 +368,7 @@ def _self_test() -> int:
         gate_selftest_e,
         gate_selftest_f,
         gate_selftest_g,
+        gate_selftest_h,
     ):
         suite.addTests(loader.loadTestsFromModule(mod))
     buffer = io.StringIO()
