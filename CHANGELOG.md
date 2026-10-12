@@ -8,6 +8,10 @@ we made where that specification is silent.
 
 ## [Unreleased]
 
+### Added
+
+- Every command registry record now carries its positional arguments, its working aliases, and two to four worked examples, and per-group checks pin each record's value kinds, allowed values, alias pairs, hygiene entries, and examples to the code that reads them, so a wrong record fails its own test. ([#83](https://github.com/agentmemoir/clio/pull/83))
+
 ### Fixed
 
 - Scoped coverage runs remove old executable objects for selected packages and targets before rebuilding, so stale source maps cannot inflate a changed file's line count. [Issue #47](https://github.com/agentmemoir/clio/issues/47) [PR #141](https://github.com/agentmemoir/clio/pull/141)
