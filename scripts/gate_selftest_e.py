@@ -20,7 +20,8 @@ from exec_tempdir import exec_tempdir
 
 
 class CacheIdentityTests(unittest.TestCase):
-    def test_same_executable_alias_shares_a_key(self):
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_same_executable_alias_shares_a_key(self, _rustup):
         tree = TreeState("head", (), ())
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -39,7 +40,8 @@ class CacheIdentityTests(unittest.TestCase):
         right = fingerprint(tree, {}, "command", ["/two/bin/custom", "--help"])
         self.assertNotEqual(left, right)
 
-    def test_make_base_environment_changes_the_key(self):
+    @mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup")
+    def test_make_base_environment_changes_the_key(self, _rustup):
         tree = TreeState("head", (), ())
         command = ["make", "coverage-fast"]
         left = fingerprint(tree, {"BASE": "master"}, "coverage-fast", command)
