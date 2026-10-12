@@ -287,15 +287,12 @@ fn a_batch_behind_a_full_backlog_is_recallable_by_the_next_command() {
         .iter()
         .zip(shelves)
         .map(|(id, shelf)| {
-            // Each op names its own bank: pre-flight resolves one context per
-            // operation, so the bank an op writes into is the op's own.
             json!({
                 "tool": "store",
                 "params": {
                     "item": {"id": id, "gist": format!("Nadia keeps the amber sail on the {shelf} shelf")},
                     "category": "persona",
-                    "epistemic_kind": "fact",
-                    "bank": bank.as_str()
+                    "epistemic_kind": "fact"
                 }
             })
         })

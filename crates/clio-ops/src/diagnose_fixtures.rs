@@ -19,7 +19,8 @@
 //! Changes to a diagnose fixture should normally require changes here. Changes
 //! to diagnose behavior should not.
 //!
-//! Keep this module free of `#[test]` functions.
+//! Keep this module free of test functions: the owner rule forbids tests in a
+//! shared-helpers file.
 
 use clio_store::SqliteStore;
 use clio_types::{AmError, EpisodicType, EpistemicKind, ErrorCode, ItemKind, MemoryItem};
