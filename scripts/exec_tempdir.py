@@ -24,10 +24,18 @@ One rule, one place. Both suites call `exec_tempdir()` rather than each picking 
 directory, because a second copy is a second chance to get it wrong. A host with
 nowhere that permits execution skips with the reason, rather than reporting a
 handful of failures about permissions that are correct.
+
+Do not merge the two ways a probe can fail. A directory that refuses execution
+and a probe that could not be run at all are different answers, and reading them
+alike is a bug that has come back more than once: issue #60 is exactly that
+merge, where a probe that timed out under load was taken for a mount that refuses
+execution, so a test that should skip failed instead. The three-way result below
+exists to keep the two apart; do not collapse it.
 """
 
 from __future__ import annotations
 
+import enum
 import os
 import shutil
 import subprocess
@@ -88,6 +96,69 @@ class _OwnedDirectory:
         return self.name
 
 
+class _ProbeOutcome(enum.Enum):
+    """What running a probe executable in a directory showed about that directory.
+
+    The three cases must never be collapsed into one false. A probe that could not
+    be run is not a directory that refuses execution, and reading it as one is the
+    defect issue #60 records. `can_execute` may merge them because its callers only
+    need "try the next candidate"; nothing that needs the refusal claim may.
+
+    A three-valued enum, rather than two booleans or loose string flags, so each
+    answer is named once and a caller cannot read an unprobed result as a refusal
+    by accident.
+    """
+
+    #: The filesystem started the probe and it exited cleanly.
+    RUNS = "runs"
+    #: The kernel refused to start the probe. This is a permission refusal, which
+    #: is what a mount with `noexec` gives. It is the only answer that proves the
+    #: directory itself refuses execution.
+    REFUSED = "refused"
+    #: The probe could not be run for another reason: it could not be written, the
+    #: run timed out, or the run reported another error. Nothing is known about
+    #: the directory, so this must never be read as a refusal.
+    UNPROBED = "unprobed"
+
+
+def _run_probe(directory: str) -> _ProbeOutcome:
+    """Write a probe executable into `directory`, run it, and report the outcome.
+
+    The outcome keeps apart two failures that a plain yes or no would merge: a
+    directory the kernel refuses to run a file in, and a probe that could not be
+    run at all. Only the first is proof that the directory refuses execution; the
+    second is a failure to find out, and reading it as a refusal turns a skip into
+    a false answer. That mistake is the bug issue #60 records, so keep the two
+    apart when editing this function.
+    """
+    probe = os.path.join(directory, "_probe.sh")
+    try:
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nexit 0\n")
+        os.chmod(probe, 0o755)
+    except OSError:
+        # A probe that could not be written was never run, so this says nothing
+        # about execution. It is UNPROBED, never REFUSED.
+        return _ProbeOutcome.UNPROBED
+    try:
+        done = subprocess.run([probe], capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
+    except PermissionError:
+        # Only a PermissionError raised while *starting* the probe is a refusal:
+        # the kernel rejected the exec, which is what a `noexec` mount gives. A
+        # timeout (`subprocess.TimeoutExpired`) or any other OSError means the
+        # probe could not be run, which is not a refusal. Collapsing the two is
+        # the defect issue #60 records — do not.
+        return _ProbeOutcome.REFUSED
+    except (OSError, subprocess.SubprocessError):
+        return _ProbeOutcome.UNPROBED
+    finally:
+        try:
+            os.remove(probe)
+        except OSError:
+            pass
+    return _ProbeOutcome.RUNS if done.returncode == 0 else _ProbeOutcome.UNPROBED
+
+
 def can_execute(directory: str) -> bool:
     """Return True when an executable file in `directory` can actually be run.
 
@@ -98,25 +169,30 @@ def can_execute(directory: str) -> bool:
 
     Every failure answers False rather than raising, because the caller's decision
     is to try the next candidate, and a directory it cannot even write a probe
-    into is a directory it cannot vouch for.
+    into is a directory it cannot vouch for. False therefore covers both a
+    directory that refuses execution and a probe that could not be run; a caller
+    that needs the first claim alone asks `refuses_execution` instead.
+
+    Keep this a plain yes or no. Do not make it return True for a probe that could
+    not be run in order to "avoid a skip": an unprobed directory is not known to
+    be usable, and the same False is what stops a `noexec` host from building
+    fixtures that cannot run.
     """
-    probe = os.path.join(directory, "_probe.sh")
-    try:
-        with open(probe, "w", encoding="utf-8") as handle:
-            handle.write("#!/bin/sh\nexit 0\n")
-        os.chmod(probe, 0o755)
-    except OSError:
-        return False
-    try:
-        done = subprocess.run([probe], capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
-    except (OSError, subprocess.SubprocessError):
-        return False
-    finally:
-        try:
-            os.remove(probe)
-        except OSError:
-            pass
-    return done.returncode == 0
+    return _run_probe(directory) is _ProbeOutcome.RUNS
+
+
+def refuses_execution(directory: str) -> bool:
+    """Return True when the filesystem itself refuses to run a file in `directory`.
+
+    `can_execute` answers whether a directory can run a fixture, and a probe that
+    failed for a transient reason — a write it could not make, a run that timed
+    out — answers the same False as a mount that refuses execution. A caller that
+    needs the stronger claim, that the kernel really refused, asks this instead.
+    Only a permission refusal from the kernel counts. A probe that could not be
+    run proves nothing either way, so it answers False. This is the only place a
+    refusal is claimed; do not re-derive it from a bare False elsewhere.
+    """
+    return _run_probe(directory) is _ProbeOutcome.REFUSED
 
 
 def _executable_candidates(
