@@ -12,7 +12,8 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-precommit scripts-check-coverage-surface \
 	scripts-check-coverage-policy scripts-check-gate-boundary \
 	scripts-check-gate-install scripts-check-quick \
-	scripts-check-ci-parity scripts-check-compose-model
+	scripts-check-ci-parity scripts-check-compose-model \
+	scripts-check-changelog
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -73,3 +74,11 @@ scripts-check-ci-parity:
 # nothing to report it. Runs a stand-in engine: no container and no build.
 scripts-check-compose-model:
 	python3 scripts/test_compose_extract_model.py
+
+# Whether every changelog fragment is named and written to the rule, and whether
+# a change to product code carries one. Reads the fragments and, when
+# CHANGELOG_BASE names the diff base (CI sets it from the scoped base), the
+# diff; runs no build.
+scripts-check-changelog:
+	python3 scripts/changelog_fragments.py --self-test
+	python3 scripts/changelog_fragments.py --check
