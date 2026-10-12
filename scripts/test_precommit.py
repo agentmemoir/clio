@@ -47,8 +47,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from exec_tempdir import CANDIDATE_PARENTS, can_execute, exec_tempdir, make_exec_dir  # noqa: E402
-from exec_tempdir import refuses_execution  # noqa: E402
+from exec_tempdir import CANDIDATE_PARENTS, can_execute, exec_tempdir, make_exec_dir, refuses_execution  # noqa: E402
 from precommit_testkit import RUNNER, RepoCase, build_repo, run, write_hook  # noqa: E402
 
 
