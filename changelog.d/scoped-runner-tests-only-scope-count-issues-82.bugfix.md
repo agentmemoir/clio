@@ -1,0 +1,1 @@
+`make test-fast` counts the changed files the run is scoped to, so a change that adds only path-excluded test files reports them as tested instead of printing `0 changed file(s) to test` over the owning package's suite.

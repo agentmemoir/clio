@@ -46,6 +46,8 @@ on:
       - 'hooks.d/**'
       - 'rust-toolchain.toml'
       - '.config/nextest.toml'
+      - 'changelog.d/**'
+      - 'CHANGELOG.md'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [master, main]
@@ -60,6 +62,8 @@ on:
       - 'hooks.d/**'
       - 'rust-toolchain.toml'
       - '.config/nextest.toml'
+      - 'changelog.d/**'
+      - 'CHANGELOG.md'
       - '.github/workflows/ci.yml'
 
 env:
@@ -308,6 +312,16 @@ jobs:
       - name: Compose extract-model guard
         if: always()
         run: make scripts-check-compose-model
+
+      # Whether every changelog fragment is named and written to the rule, and
+      # whether a change to product code carries one. The base is the same
+      # scoped base the tests job resolves above, so the presence check judges
+      # the same diff.
+      - name: Changelog fragments check
+        if: always()
+        env:
+          CHANGELOG_BASE: ${{ env.SCOPED_BASE }}
+        run: make scripts-check-changelog
 
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.

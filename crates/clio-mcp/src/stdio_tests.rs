@@ -277,3 +277,58 @@ fn stdio_store_retrieve_end_to_end() {
         "stored id missing from retrieve response: {retrieved}"
     );
 }
+
+#[test]
+fn stdio_retrieve_rejects_wrongly_typed_optional_arguments() {
+    let state =
+        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    let handler = McpHandler::new(state);
+    let store = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "store", "arguments": {
+            "item": {"gist": "prefers terse answers"},
+            "category": "persona", "epistemic_kind": "fact", "bank": "repro-bank"
+        }}
+    });
+    let bad_limit = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "retrieve", "arguments": {
+            "bank": "repro-bank", "query": "terse", "limit": "1"
+        }}
+    });
+    let bad_anchor = json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "retrieve", "arguments": {
+            "bank": "repro-bank", "query": "terse", "query_anchor": 5
+        }}
+    });
+    let input = Cursor::new(format!("{store}\n{bad_limit}\n{bad_anchor}\n").into_bytes());
+    let mut out = Vec::new();
+    serve(&handler, input, &mut out).expect("rejected calls serve over stdio");
+
+    let text = String::from_utf8(out).expect("utf8");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.len(),
+        3,
+        "expected store and two retrieval responses: {text:?}"
+    );
+    let stored: Value = serde_json::from_str(lines[0]).expect("store response");
+    assert_eq!(stored["result"]["isError"], json!(false));
+    for (line, message) in lines
+        .iter()
+        .skip(1)
+        .zip(["limit must be a number", "query_anchor must be a string"])
+    {
+        let response: Value = serde_json::from_str(line).expect("retrieve response");
+        assert_eq!(response["result"]["isError"], json!(true));
+        assert_eq!(
+            response["result"]["structuredContent"]["code"],
+            json!("invalid_type")
+        );
+        assert_eq!(
+            response["result"]["structuredContent"]["message"],
+            json!(message)
+        );
+    }
+}
