@@ -23,52 +23,13 @@
 //! Keep this module focused on diagnose behavior.
 
 use crate::diagnose::{DiagnoseArgs, diagnose};
+use crate::diagnose_fixtures::{TS, failed, item, sqlite};
 use crate::finding::{Severity, codes};
 use clio_index::Embedder;
 use clio_store::{
-    EMBEDDING_DIMS, IndexCoverage, IndexStore, IntegritySignals, OpsStore, SCHEMA_VERSION,
-    SqliteStore, Store,
+    EMBEDDING_DIMS, IndexCoverage, IndexStore, IntegritySignals, OpsStore, SCHEMA_VERSION, Store,
 };
-use clio_types::{AmError, EpisodicType, EpistemicKind, ErrorCode, ItemKind, MemoryItem};
-use serde_json::json;
-use std::sync::Arc;
-
-const TS: &str = "2026-01-01T00:00:00Z";
-
-fn sqlite() -> SqliteStore {
-    SqliteStore::open_in_memory(Arc::new(clio_store::LocalDevKms::new())).expect("in-memory store")
-}
-
-fn item(id: &str, bank: &str) -> MemoryItem {
-    MemoryItem {
-        id: id.to_owned(),
-        bank_id: bank.to_owned(),
-        subject_id: format!("subj-{bank}"),
-        kind: ItemKind::Episodic,
-        category: None,
-        episodic_type: Some(EpisodicType::Task),
-        epistemic_kind: EpistemicKind::Fact,
-        source_type: None,
-        confidence: Some(0.9),
-        admission_score: Some(0.6),
-        source_ref: Some("turn_1".to_owned()),
-        snapshot: Some(json!({"error_code": "ECONNRESET"})),
-        gist: Some("diagnose fixture".to_owned()),
-        valid_from: TS.to_owned(),
-        valid_until: None,
-        tx_from: TS.to_owned(),
-        tx_until: None,
-        created_at: TS.to_owned(),
-        updated_at: TS.to_owned(),
-        context: None,
-    }
-}
-
-fn failed(what: &str) -> AmError {
-    let mut text = String::from("\n");
-    text.push_str(&what.repeat(60));
-    AmError::new(ErrorCode::Internal, text)
-}
+use clio_types::{AmError, ErrorCode};
 
 #[allow(clippy::struct_excessive_bools)]
 struct FakeOps {
@@ -199,6 +160,15 @@ impl IndexStore for FakeIndex {
         _c: Option<&str>,
         _m: u32,
     ) -> Result<Vec<clio_store::IndexJob>, AmError> {
+        unimplemented!()
+    }
+    fn pending_index_job(
+        &self,
+        _b: &str,
+        _i: &str,
+        _c: Option<&str>,
+        _m: u32,
+    ) -> Result<Option<clio_store::IndexJob>, AmError> {
         unimplemented!()
     }
     fn finish_index_job(&self, _b: &str, _i: &str) -> Result<(), AmError> {

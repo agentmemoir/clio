@@ -200,6 +200,24 @@ impl BatchWrite {
             Self::AppendBeliefConfidence { bank_id, .. } => bank_id,
         }
     }
+
+    /// The item this write creates, when it creates one.
+    ///
+    /// `None` for a write that only closes a row, attaches an edge, or records
+    /// metadata, and for a `ciphertext_backup` opaque row: an opaque row carries
+    /// no dual content, so there is nothing to index.
+    #[must_use]
+    pub fn created_item(&self) -> Option<&MemoryItem> {
+        match self {
+            Self::CreateItem { item, .. }
+            | Self::CanonicalPut { item, .. }
+            | Self::CommitTriple { item, .. }
+            | Self::CommitTaskUpsert { item, .. }
+            | Self::CommitFailureRecord { item, .. }
+            | Self::UpsertMemoryItem { item, .. } => Some(item),
+            _ => None,
+        }
+    }
 }
 
 /// Transactional batch commit contract (both backends).
