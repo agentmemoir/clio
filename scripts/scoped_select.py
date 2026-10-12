@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any, Collection, Iterable, NamedTuple, Sequence
@@ -22,11 +23,13 @@ from scoped_core import ROOT, RunError, offenders
 # remapping is on. The looser form is ours. The rule it mirrors is the tool's.
 #
 # The suffix half is the tool's rule too, and narrower than a suffix list looks:
-# it matches `tests.rs` and `<word characters>[_-]tests.rs`, never a bare
-# `_tests.rs`. Keeping a suffix list here is harmless, because the wider match is
-# a file the tool also hides.
+# it hides a file named `tests.rs`, or one whose name ends in
+# `<word character>[_-]tests.rs`. It does NOT hide a bare `_tests.rs` or
+# `-tests.rs`, nor a name like `mytests.rs` with no separator. A plain
+# `endswith("tests.rs")` hides all three, which drops a file the report still
+# holds from judgement instead of measuring it, so the name rule is mirrored here.
 EXCLUDED_DIRS = ("tests", "examples", "benches")
-EXCLUDED_SUFFIXES = ("_tests.rs", "-tests.rs", "tests.rs")
+EXCLUDED_NAME = re.compile(r"^(?:tests|[0-9A-Za-z_-]+[_-]tests)\.rs$")
 
 
 # --- selecting what to measure -------------------------------------------------
@@ -213,7 +216,7 @@ def is_measureable(rel: str) -> bool:
     reports every measured file above its floor and still exits non-zero, which
     is what blocked every change that added an integration test.
     """
-    if rel.endswith(EXCLUDED_SUFFIXES):
+    if EXCLUDED_NAME.match(PurePosixPath(rel).name):
         return False
     return not set(PurePosixPath(rel).parts[:-1]) & set(EXCLUDED_DIRS)
 
