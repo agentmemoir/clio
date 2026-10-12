@@ -1,0 +1,1 @@
+Running the golden capture again after its refusal no longer replays the stored failure: a capture run always executes and stores no verdict, so the release cache can be warmed between attempts and a stale fixture can be recaptured instead of staying stale.

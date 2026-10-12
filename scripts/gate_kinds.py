@@ -207,6 +207,7 @@ ENV_KEY_EXEMPT = {
     "CLIO_GATE_LOG_DIR": "chooses where logs are published, not what runs",
     "XDG_CACHE_HOME": "chooses where the cache is kept, not what runs",
     "GATE_FORCE": "decides only whether to consult the cache, and setting it skips it",
+    "CLIO_GOLDEN_CAPTURE": "switches on the golden capture, which runs every time and neither reads nor stores a verdict",
 }
 COVERAGE_ARTIFACT = "target/coverage/coverage.json"
 #: The version salt mixed into every cache key. Bump it whenever the key stops
