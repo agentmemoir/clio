@@ -33,11 +33,9 @@
 //! Postgres keeps skipping.
 
 use crate::db_url::postgres_url_or_default;
+use crate::pg_advisory_keys::TEST_SERIALIZATION as PG_TEST_ADVISORY_KEY;
 use postgres::Client;
 use std::sync::{Mutex, MutexGuard, PoisonError};
-
-/// Advisory-lock key for the shared test database (`"clio_tst"` as hex).
-const PG_TEST_ADVISORY_KEY: i64 = 0x636C_696F_5F74_7374;
 
 /// Advisory-lock key used only by this module's own tests (`"clio_tst2"`).
 ///
