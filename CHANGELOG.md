@@ -8,11 +8,6 @@ we made where that specification is silent.
 
 ## [Unreleased]
 
-### Added
-
-- `clio help --markdown --out DIR` renders one deterministic Markdown page per command, with an index and See-also links, through a bounded writer that refuses a `--out` with a symlink component, a page target it did not generate, a directory or non-regular file in a page's place, and a value spelled to look like a flag, and leaves nothing behind when a check refuses. ([#83](https://github.com/agentmemoir/clio/pull/83))
-- Every command registry record now carries its positional arguments, its working aliases, and two to four worked examples, and per-group checks pin each record's value kinds, allowed values, alias pairs, hygiene entries, and examples to the code that reads them, so a wrong record fails its own test. ([#83](https://github.com/agentmemoir/clio/pull/83))
-
 ### Fixed
 
 - The scoped runner's self-test compiles and runs its stale-source-map binary in a scratch directory that permits execution, so `make coverage-fast` no longer dies with `PermissionError` before any check runs on a host whose default temporary directory is mounted `noexec`; where no directory permits execution the scenario skips with the reason instead of failing, and the summary line names that skip. [Issue #143](https://github.com/agentmemoir/clio/issues/143) [PR #145](https://github.com/agentmemoir/clio/pull/145)
@@ -31,7 +26,6 @@ we made where that specification is silent.
 - clio-bench classifies a write by its refusal code instead of its `ok` flag alone, so a configuration failure such as a relative `--data-dir` stops the run with exit 2 and writes no report instead of being counted as an admission rejection. A declined turn, an exact duplicate, a turn the system's own write filter dropped, and a write the harness could not complete are counted and named apart, no probe is scored against a store that is missing a turn or that took none of them, and a suite with nothing scored reports no accuracy. [PR #117](https://github.com/agentmemoir/clio/pull/117)
 - `clio remember`, `admit`, `triple add`, `canonical put`, and `shared store` refuse a `--source-type`/`--epistemic-kind` mismatch, and an unknown `--source-type`, as a usage error (exit 2) that names both flags, the valid values, and the rule; a `--confidence` outside `0.0..=1.0` is now a usage error too, and each affected `--help` states the pairing. [PR #116](https://github.com/agentmemoir/clio/pull/116)
 - Gate logs distinguish fresh runs from cached replays, report Cargo package work when status lines are present, and publish to the per-worktree cache by default; dry runs bypass cache and publication even through direct gate calls, and cache keys include tool contents, the active Rustup toolchain, Cargo configuration, build environment values, and equivalent command spellings. [PR #135](https://github.com/agentmemoir/clio/pull/135)
-- Every command's `--help` now prints its flags' descriptions and real defaults from the command registry, commands that refuse a global flag no longer list it as accepted, and refusal notes agree with the usage lines. ([#83](https://github.com/agentmemoir/clio/pull/83))
 
 ## [0.1.0] - 2026-10-10
 

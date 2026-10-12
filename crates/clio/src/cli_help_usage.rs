@@ -38,6 +38,7 @@
 /// the one place that text lives. The bytes stay the record's own text, which
 /// the record tests pin; the verb help paths that also show flag descriptions
 /// and defaults read [`help_for`].
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn usage_for(verb: &str) -> Option<String> {
     crate::cli_command_registry::find(verb).map(super::cli_command_spec::CommandSpec::full_usage)
 }

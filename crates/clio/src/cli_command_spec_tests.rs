@@ -395,3 +395,15 @@ fn toggle_is_boolean_with_a_description_and_no_value() {
     assert_eq!(flag.description, "Consent.");
     assert!(flag.value.is_none());
 }
+
+/// `Example::new` carries the command and the optional comment verbatim, so a
+/// record's example rows need no per-tranche constructor.
+#[test]
+fn example_new_carries_the_command_and_comment() {
+    let plain = Example::new("clio get itm-1 --db ./memory.db", None);
+    assert_eq!(plain.command, "clio get itm-1 --db ./memory.db");
+    assert_eq!(plain.comment, None);
+    let noted = Example::new("clio show itm-1", Some("the `show` spelling"));
+    assert_eq!(noted.command, "clio show itm-1");
+    assert_eq!(noted.comment, Some("the `show` spelling"));
+}
