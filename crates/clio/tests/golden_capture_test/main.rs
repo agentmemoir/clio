@@ -3,17 +3,21 @@
 //
 //! # Responsibility
 //!
-//! This module proves the golden-capture tooling's own behavior: the freshness
-//! verdict on injected cargo output, the comparator's diffs and its refusal to
-//! touch the baseline file, source-mutation detection, fixture round-trips,
-//! and a bounded real-binary capture and catalog-derived capture plan.
+//! This module proves the golden-capture tooling's own behavior outside the
+//! guarded build: the comparator's diffs and its refusal to touch the baseline
+//! file, fixture round-trips, the catalog-derived capture plan, a bounded
+//! real-binary capture, the workspace walk-up, and the pinned child
+//! environment. The guarded build's own assertions live in `guard_tests`.
 //!
 //! ## Owns
-//! - Every assertion over the golden-capture support module
+//! - Every assertion over the golden-capture support module except the guarded
+//!   build's (`guard_tests`)
 //!
 //! ## Does not own
 //! - The capture tooling itself (`golden_capture_support`, and the scratch
 //!   directory guard it holds)
+//! - The guarded build's verdict, executable, mutation, and retry assertions
+//!   (`guard_tests`)
 //! - The help output the captures freeze (`cli_help`, the binary's `print_help`)
 //!
 //! ## Boundary
@@ -29,21 +33,15 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-#[path = "golden_capture_support/mod.rs"]
+#[path = "../golden_capture_support/mod.rs"]
 mod golden_capture_support;
 
-use golden_capture_support::{
-    CAPTURE_HOME, CaptureEntry, ContentDiff, FIXTURE_VERSION, GoldenFixture, GuardRefusal, Scratch,
-    capture, capture_plan, compare, freshness_verdict, load_fixture, pin_capture_env,
-    require_executable, source_mutated, workspace_root, write_fixture,
-};
+mod guard_tests;
 
-/// Injected `cargo build -p clio --release --locked --message-format=json`
-/// stdout: the clio bin artifact, fresh, with cargo's executable path.
-const FRESH_BUILD_JSON: &str = concat!(
-    "{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"clio\",\"kind\":[\"bin\"]},",
-    "\"fresh\":true,\"executable\":\"/repo/target/release/clio\"}\n",
-);
+use golden_capture_support::{
+    CAPTURE_HOME, CaptureEntry, ContentDiff, FIXTURE_VERSION, GoldenFixture, Scratch, capture,
+    capture_plan, compare, load_fixture, pin_capture_env, workspace_root, write_fixture,
+};
 
 fn entry(argv: &[&str], exit: Option<i32>, stdout: &str, stderr: &str) -> CaptureEntry {
     CaptureEntry {
@@ -59,72 +57,6 @@ fn fixture_with(entries: Vec<CaptureEntry>) -> GoldenFixture {
         version: FIXTURE_VERSION,
         entries,
     }
-}
-
-/// Fresh JSON — cargo reused the prepared cache — returns the artifact's executable.
-#[test]
-fn fresh_clio_json_verdict_returns_the_artifact_executable() {
-    let verdict = freshness_verdict(0, FRESH_BUILD_JSON);
-    assert_eq!(verdict, Ok("/repo/target/release/clio".to_owned()));
-}
-
-/// A `fresh: false` artifact refuses as `StaleArtifact`, naming why in its Display.
-#[test]
-fn rebuilt_clio_json_refuses_as_stale_artifact() {
-    let stale = FRESH_BUILD_JSON.replace("\"fresh\":true", "\"fresh\":false");
-    let refusal = freshness_verdict(0, &stale).expect_err("stale build must refuse");
-    assert_eq!(refusal, GuardRefusal::StaleArtifact);
-    let text = refusal.to_string();
-    assert!(text.contains("re-run the capture"), "{text}");
-}
-
-/// Stdout without a fresh clio bin artifact refuses as `NoFreshnessProof`: empty
-/// output, non-JSON lines, a lib-only artifact, and a null executable.
-#[test]
-fn json_without_a_fresh_bin_artifact_refuses_as_no_freshness_proof() {
-    let no_proof = |label: &str, stdout: &str| {
-        let refusal = freshness_verdict(0, stdout).expect_err("must refuse");
-        assert_eq!(refusal, GuardRefusal::NoFreshnessProof, "{label}");
-        assert!(refusal.to_string().contains("freshness proof"), "{label}");
-    };
-    no_proof("empty stdout", "");
-    no_proof("non-JSON lines", "not json at all\n");
-    let lib_only = FRESH_BUILD_JSON.replace("\"kind\":[\"bin\"]", "\"kind\":[\"lib\"]");
-    no_proof("lib artifact", &lib_only);
-    let null_path = FRESH_BUILD_JSON.replace("\"/repo/target/release/clio\"", "null");
-    no_proof("null executable", &null_path);
-}
-
-/// A non-zero cargo exit refuses as `BuildFailed` with the exit carried through.
-#[test]
-fn failed_cargo_exit_refuses_as_build_failed() {
-    let refusal = freshness_verdict(2, FRESH_BUILD_JSON).expect_err("failed build must refuse");
-    assert_eq!(refusal, GuardRefusal::BuildFailed { exit: 2 });
-    assert!(refusal.to_string().contains("build failed"), "{refusal}");
-}
-
-/// A missing path refuses as `MissingExecutable`; an existing scratch file is accepted.
-#[test]
-fn require_executable_refuses_a_missing_path_and_accepts_an_existing_one() {
-    let scratch = Scratch::new("require-executable");
-    let missing = scratch.0.join("missing").join("clio");
-    let refusal = require_executable(&missing).expect_err("a missing path must refuse");
-    assert_eq!(refusal, GuardRefusal::MissingExecutable);
-    let text = refusal.to_string();
-    assert!(text.contains("release executable is missing"), "{text}");
-    let file = scratch.0.join("clio");
-    fs::write(&file, b"binary").expect("write the scratch file");
-    assert_eq!(require_executable(&file), Ok(()));
-}
-
-/// Identical source identity is not a mutation; any text change is.
-#[test]
-fn source_mutation_is_exactly_a_text_change() {
-    assert!(
-        !source_mutated("abc", "abc"),
-        "identical text is not a mutation"
-    );
-    assert!(source_mutated("abc", "abd"), "changed text is a mutation");
 }
 
 /// An identical capture produces no difference at all.
@@ -251,9 +183,10 @@ fn bounded_help_capture_records_exit_zero_and_streams() {
 }
 
 /// The plan starts with top-level help and the catalog, then holds exactly one
-/// `["<cmd>", "--help"]` per catalog leaf plus the auth-token extras, with no duplicates.
+/// `["<cmd>", "--help"]` per catalog leaf and one `["<group>", "--help"]` per
+/// group prefix, with no duplicates.
 #[test]
-fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
+fn capture_plan_lists_help_catalog_leaves_and_group_prefixes() {
     let binary = Path::new(env!("CARGO_BIN_EXE_clio"));
     let plan = capture_plan(binary);
     assert_eq!(plan[0], vec!["help".to_owned()], "top-level help first");
@@ -276,7 +209,7 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
     for unbound in array("commands_without_tools") {
         names.extend(unbound.as_str().map(str::to_owned));
     }
-    let mut leaves: Vec<Vec<String>> = names
+    let leaves: Vec<Vec<String>> = names
         .iter()
         .filter(|name| {
             !names
@@ -289,23 +222,34 @@ fn capture_plan_lists_help_and_catalog_then_one_help_per_catalog_leaf() {
             argv
         })
         .collect();
-    for name in golden_capture_support::EXTRA_LEAVES {
-        let mut argv: Vec<String> = name.split(' ').map(str::to_owned).collect();
-        argv.push("--help".to_owned());
-        leaves.push(argv);
-    }
+    let prefixes: Vec<Vec<String>> = catalog["groups"]
+        .as_array()
+        .expect("groups is an array")
+        .iter()
+        .map(|group| {
+            let mut argv: Vec<String> = group["prefix"]
+                .as_str()
+                .expect("a group prefix")
+                .split(' ')
+                .map(str::to_owned)
+                .collect();
+            argv.push("--help".to_owned());
+            argv
+        })
+        .collect();
+    let expected: Vec<Vec<String>> = leaves.iter().chain(prefixes.iter()).cloned().collect();
     assert_eq!(
         &plan[2..],
-        leaves.as_slice(),
-        "plan leaves must match the catalog plus the auth token extras"
+        expected.as_slice(),
+        "plan entries must match the catalog's leaves and group prefixes"
     );
-    let mut unique = leaves.clone();
+    let mut unique = expected.clone();
     unique.sort();
     unique.dedup();
     assert_eq!(
         unique.len(),
-        leaves.len(),
-        "no duplicate leaves: {leaves:?}"
+        expected.len(),
+        "no duplicate plan entries: {expected:?}"
     );
 }
 

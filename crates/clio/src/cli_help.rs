@@ -41,9 +41,7 @@ use std::io::{self, Write};
 pub(crate) use self::groups::all_known_commands;
 /// The derived group and prefix lists (see the `groups` submodule). The
 /// completeness list is test-only, because the completeness checks are.
-pub(crate) use self::groups::{
-    all_groups, group_subcommands, known_commands, shared_groups, subcommands_of,
-};
+pub(crate) use self::groups::{all_groups, group_subcommands, known_commands, subcommands_of};
 
 /// The CLI command → MCP tool binding, in whole-catalog order.
 ///
@@ -130,29 +128,38 @@ fn bound_tool(command: &str) -> Option<&'static str> {
 /// rather than serving one request, so they bind no tool and would otherwise be
 /// invisible to anything that reads the catalog.
 ///
-/// A command is listed when it binds no tool, and nothing else is listed. A
-/// group prefix therefore appears whenever the prefix itself binds nothing, and
-/// each of its subcommands appears only when that subcommand binds nothing too:
-/// `backup` and `backup create` are both here, and `scratchpad write` is not.
-/// That is the same rule [`group_help`] applies when it prints "(no MCP tool)"
-/// beside a subcommand with no binding.
+/// A command is listed when it binds no tool, and nothing else is listed. The
+/// records come from the registry itself, not from a walk of the derived
+/// groups, so no group's dispatch flag can hide a record: `mcp stdio`, `ops
+/// repair`, and `auth token revoke` are here beside `backup create`, and
+/// `scratchpad write` is not. The prefixes a reader can type without a record
+/// of their own (`auth token`, and the top-level verbs) are added beside them,
+/// and a group prefix therefore appears whenever the prefix itself binds
+/// nothing. That is the same rule [`group_help`] applies when it prints "(no
+/// MCP tool)" beside a subcommand with no binding.
 pub(crate) fn commands_without_tools() -> Vec<String> {
-    let mut unbound: Vec<String> = known_commands()
-        .into_iter()
-        .filter(|verb| bound_tool(verb).is_none())
-        .map(str::to_owned)
+    let mut unbound: Vec<String> = crate::cli_command_registry::all()
+        .map(|spec| spec.name.to_owned())
+        .filter(|name| bound_tool(name).is_none())
         .collect();
-    for (group, subcommands) in shared_groups() {
-        for sub in subcommands {
-            let key = format!("{group} {sub}");
-            if bound_tool(&key).is_none() {
-                unbound.push(key);
-            }
+    for prefix in accepted_prefixes() {
+        if bound_tool(&prefix).is_none() {
+            unbound.push(prefix);
         }
     }
     unbound.sort();
     unbound.dedup();
     unbound
+}
+
+/// The accepted command prefixes that are not registry records: every
+/// top-level verb and every derived group prefix. A record's own name is
+/// already covered, so this only adds what a reader can type but no record
+/// describes (`auth token` is the case in the records today).
+fn accepted_prefixes() -> Vec<String> {
+    let mut prefixes: Vec<String> = known_commands().into_iter().map(str::to_owned).collect();
+    prefixes.extend(all_groups().map(|(prefix, _, _)| prefix.to_owned()));
+    prefixes
 }
 
 /// Subcommand usage for a command's `--help`, with the MCP tool it binds.
