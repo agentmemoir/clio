@@ -84,6 +84,10 @@ pub struct ImportReport {
     pub would_reject: usize,
     /// Existing entities overwritten under `force`.
     pub would_overwrite: usize,
+    /// Item ids this run created, in staging order. Empty on a dry run or a run
+    /// that created nothing. A caller indexes these so a restored item is
+    /// searchable without waiting on the whole index backlog.
+    pub created_ids: Vec<String>,
     /// Masked rejection reasons (capped at 10).
     pub rejection_samples: Vec<String>,
     /// Whether this run was a dry run.
@@ -156,6 +160,16 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
         would_skip: planner.skip,
         would_reject: planner.reject,
         would_overwrite: planner.overwrite,
+        created_ids: if applied {
+            planner
+                .staged
+                .iter()
+                .filter_map(clio_store::BatchWrite::created_item)
+                .map(|item| item.id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        },
         rejection_samples: planner.samples,
         dry_run: args.dry_run,
         applied,
