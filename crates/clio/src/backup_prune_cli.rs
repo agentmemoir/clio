@@ -8,7 +8,8 @@
 //! left alone. It is also the one implementation `create --keep N` calls.
 //!
 //! ## Owns
-//! - The `prune` flags (`--keep`, `--confirm`, `--dry-run`) and their views
+//! - The `prune` views over its record's flags (`--keep`, `--confirm`,
+//!   `--dry-run`; the accepted set is the `backup prune` registry record's)
 //! - The keep-count parsing and its refusals, shared with `create --keep`
 //! - The JSON field set (`kept`, `deleted`, `already_gone`, `failed`,
 //!   `unreadable`, and the byte totals) and the matching text view
@@ -42,14 +43,6 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// The value flags `prune` adds to the globals: the one count it takes.
-const VALUE_FLAGS: &[&str] = &["keep"];
-
-/// The boolean flags `prune` adds to the globals: the confirmation gate and the
-/// explicit report-only spelling. Neither prompts, so the command behaves the
-/// same on a terminal and in a script.
-const BOOL_FLAGS: &[&str] = &["confirm", "dry-run"];
-
 /// What one prune produced, for the caller that embeds it in a larger report.
 pub(crate) struct KeepOutcome {
     /// The JSON report, under the caller's own key.
@@ -76,8 +69,9 @@ pub(crate) fn run(
         Err(error) => return fail(io, fallback, &error),
     };
     if parsed.has("help") {
-        let usage = cli_help_usage::usage_for("backup prune").unwrap_or("usage: clio backup prune");
-        let _ = cli_output::write_text(&mut io.out, usage);
+        let usage = cli_help_usage::help_for("backup prune")
+            .unwrap_or_else(|| "usage: clio backup prune".to_owned());
+        let _ = cli_output::write_text(&mut io.out, &usage);
         return ExitCode::from(EXIT_OK);
     }
     let mode = match cli_output::resolve_output(parsed.value("output"), io.is_tty) {
@@ -104,9 +98,13 @@ pub(crate) fn run(
     ExitCode::from(exit_code(&report))
 }
 
-/// The flags `backup prune` accepts.
+/// The flags `backup prune` accepts: the `backup prune` record's own flags,
+/// decoded through the registry, plus the globals every parser spec merges.
 fn spec() -> FlagSpec {
-    FlagSpec::new(VALUE_FLAGS, BOOL_FLAGS)
+    match crate::cli_command_registry::find("backup prune") {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
+    }
 }
 
 /// The keep count `prune` requires, refusing a missing or unusable one.

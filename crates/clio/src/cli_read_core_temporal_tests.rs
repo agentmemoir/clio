@@ -12,6 +12,8 @@
 //! - Flag-to-argument assertions for `query_anchor` on `recall` and
 //!   `compose-context`
 //! - The absent-key and unknown-flag behaviors
+//! - That `CoreGroup::spec` answers each core verb with its registry record's
+//!   parser spec
 //!
 //! ## Does not own
 //! - The window rules and anchor validation (`clio-retrieve` `temporal`)
@@ -342,4 +344,94 @@ fn anchored_compose_context_matches_the_mcp_dispatch_payload() {
         mcp,
         "CLI and MCP agree on the whole anchored compose payload"
     );
+}
+
+/// `CoreGroup::spec` answers each core verb with its registry record's parser
+/// spec: the same value and boolean flag names, in the same order.
+#[test]
+fn core_group_specs_match_the_registered_records() {
+    let expected: &[(&str, &[&'static str], &[&'static str])] = &[
+        (
+            "recall",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "limit",
+                "domains",
+                "as-of",
+                "query-anchor",
+                "time-axis",
+                "min-semantic",
+                "min-keyword",
+                "min-reranker",
+                "min-final",
+            ],
+            &["no-input", "yes", "no-entities", "entity-summary"],
+        ),
+        (
+            "get",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes", "snapshot", "gist"],
+        ),
+        (
+            "show",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes", "snapshot", "gist"],
+        ),
+        (
+            "inspect",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "filter",
+                "category",
+                "epistemic-kind",
+                "validity",
+                "time-start",
+                "time-end",
+                "limit",
+                "offset",
+            ],
+            &["no-input", "yes", "include-discarded"],
+        ),
+        (
+            "stats",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes"],
+        ),
+    ];
+    for (verb, values, booleans) in expected {
+        let spec = CoreGroup.spec(verb);
+        assert_eq!(spec.value_flags(), *values, "{verb} value flags");
+        assert_eq!(spec.bool_flags(), *booleans, "{verb} bool flags");
+        let record =
+            crate::cli_command_registry::find(verb).expect("every core verb is registered");
+        assert_eq!(
+            spec.value_flags(),
+            record.parser_spec().value_flags(),
+            "{verb}: the group must answer with the record"
+        );
+        assert_eq!(
+            spec.bool_flags(),
+            record.parser_spec().bool_flags(),
+            "{verb}: the group must answer with the record"
+        );
+    }
+}
+
+/// A verb outside the group still gets the spec that accepts only the globals.
+#[test]
+fn an_unknown_verb_gets_the_empty_spec() {
+    let spec = CoreGroup.spec("not-a-core-verb");
+    assert_eq!(
+        spec.value_flags(),
+        ["db", "backend", "bank", "actor", "output"]
+    );
+    assert_eq!(spec.bool_flags(), ["no-input", "yes"]);
 }

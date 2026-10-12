@@ -7,8 +7,9 @@
 //!
 //! ## Owns
 //! - Argument parsing and dispatch for scaffold commands (`version`, `health`, `help`)
-//! - Dispatch into the `mcp`, `ops`, `retention`, `compose`, read, and write
-//!   command surfaces
+//! - Dispatch into the command surfaces: `backup`, `auth`, `mcp`, `ops`,
+//!   `status`, `retention`, `compose`, `setup`, `config`, `ranking`, `sync`,
+//!   `install`/`uninstall`, and the read and write verb surfaces
 //! - Process exit codes for the top-level commands
 //!
 //! ## Does not own
@@ -57,12 +58,29 @@ pub(crate) mod backup_cli_fixtures;
 pub(crate) mod backup_cli_fixtures_handmade;
 mod cli_args;
 mod cli_args_suggest;
+mod cli_command_bindings;
+mod cli_command_registry;
+mod cli_command_registry_auth_config;
+mod cli_command_registry_backup;
+mod cli_command_registry_core_reads;
+mod cli_command_registry_core_writes;
+mod cli_command_registry_graph_records;
+mod cli_command_registry_persona_local;
+mod cli_command_registry_ranking_retention;
+mod cli_command_registry_shared_workspace;
+mod cli_command_registry_surface;
+mod cli_command_registry_sync;
+mod cli_command_registry_task_history;
+mod cli_command_registry_write_operations;
+mod cli_command_spec;
 mod cli_confirm;
 mod cli_error;
 mod cli_error_names;
 mod cli_help;
+mod cli_help_markdown;
 mod cli_help_surfaces;
 mod cli_help_usage;
+mod cli_manual_write;
 mod cli_output;
 mod cli_read;
 mod cli_read_args;
@@ -79,7 +97,7 @@ mod cli_top_level;
 
 use cli_top_level::{
     help_topic, print_health_help, print_help, print_version_help, report_usage_error,
-    unknown_command, wants_help,
+    unknown_command, wants_help, wants_json_catalog,
 };
 mod cli_write;
 mod cli_write_batch;
@@ -109,6 +127,10 @@ mod http_bind;
 mod install_cli;
 mod mcp_cli;
 mod ops_cli;
+/// The shared Postgres test address, declared once so two test modules share
+/// it through `use` rather than loading the file twice.
+#[cfg(test)]
+mod pg_test_helpers;
 mod port_scan;
 mod ranking_cli;
 mod retention_cli;
@@ -223,20 +245,27 @@ fn dispatch(cmd: &str, trailing: Vec<String>) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        "help" | "--help" | "-h" => {
-            if trailing.iter().any(|arg| arg == "--json") {
-                cli_help::write_catalog(&mut std::io::stdout()).expect("write help catalog");
-                return ExitCode::SUCCESS;
-            }
-            match help_topic(&trailing) {
-                Ok(Some(topic)) => dispatch(&topic.0, topic.1),
-                Ok(None) => {
-                    print_help();
-                    ExitCode::SUCCESS
-                }
+        "help" | "--help" | "-h" => match cli_top_level::markdown_request(&trailing) {
+            Ok(Some(out_dir)) => match cli_manual_write::write_manual(&out_dir) {
+                Ok(()) => ExitCode::SUCCESS,
                 Err(error) => report_usage_error(&error, &trailing),
+            },
+            Ok(None) => {
+                if wants_json_catalog(&trailing) {
+                    cli_help::write_catalog(&mut std::io::stdout()).expect("write help catalog");
+                    return ExitCode::SUCCESS;
+                }
+                match help_topic(&trailing) {
+                    Ok(Some(topic)) => dispatch(&topic.0, topic.1),
+                    Ok(None) => {
+                        print_help();
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => report_usage_error(&error, &trailing),
+                }
             }
-        }
+            Err(error) => report_usage_error(&error, &trailing),
+        },
         "backup" => backup_cli::backup(trailing),
         "auth" => auth_cli::auth(trailing),
         "mcp" => mcp_cli::mcp(trailing),
@@ -278,12 +307,20 @@ mod help_flags_test_support;
 mod tests;
 
 #[cfg(test)]
+#[path = "main_help_topic_tests.rs"]
+mod help_topic_tests;
+
+#[cfg(test)]
 #[path = "main_read_tests.rs"]
 mod read_tests;
 
 #[cfg(test)]
 #[path = "main_write_tests.rs"]
 mod write_tests;
+
+#[cfg(test)]
+#[path = "cli_command_registry_test_support.rs"]
+mod cli_command_registry_test_support;
 
 #[cfg(test)]
 #[path = "cli_read_support_tests.rs"]

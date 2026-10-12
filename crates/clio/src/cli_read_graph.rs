@@ -44,12 +44,12 @@ impl ReadGroup for GraphGroup {
         ]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "graph query" => FlagSpec::new(&["max-hops", "edge-type", "min-weight"], &["explain"]),
-            "associations" => FlagSpec::new(&["min-weight"], &["explain"]),
-            "persona get" => FlagSpec::new(&["budget-tokens"], &["explain"]),
-            _ => FlagSpec::new(&["item-id"], &["explain"]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

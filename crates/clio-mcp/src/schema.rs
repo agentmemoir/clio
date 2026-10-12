@@ -8,6 +8,7 @@
 //!
 //! ## Owns
 //! - Pack document shape (`format`, revision stamp, catalog hash, tools)
+//! - The shared FNV-1a 64-bit hex hash convention
 //! - Catalog-hash drift detection and structural schema validation
 //!
 //! ## Does not own
@@ -68,18 +69,30 @@ pub fn schema_pack() -> Value {
     })
 }
 
-/// FNV-1a hash over the canonical serialization of the tool list.
+/// FNV-1a 64-bit hash over `data`, formatted as `fnv1a64:` plus 16 lowercase
+/// hex digits. This is the shared hash convention for canonical payload
+/// fingerprints; each hashed payload defines its own canonical bytes, so a
+/// digest is meaningful only for the payload it covers.
 #[must_use]
-fn catalog_hash(tools: &[Value]) -> String {
+pub fn fnv1a64_hex(data: &[u8]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for tool in tools {
-        let canonical = serde_json::to_string(tool).unwrap_or_default();
-        for byte in canonical.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100_0000_01b3);
-        }
+    for byte in data {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+/// FNV-1a hash over the canonical serialization of the tool list: the
+/// compact encodings of every tool, concatenated in registry order.
+#[must_use]
+fn catalog_hash(tools: &[Value]) -> String {
+    let mut canonical = Vec::new();
+    for tool in tools {
+        let encoded = serde_json::to_string(tool).unwrap_or_default();
+        canonical.extend_from_slice(encoded.as_bytes());
+    }
+    fnv1a64_hex(&canonical)
 }
 
 /// Structurally validate one tool schema: root object type, properties

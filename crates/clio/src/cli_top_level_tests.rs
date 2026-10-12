@@ -140,6 +140,17 @@ fn the_no_flag_commands_print_help_and_succeed() {
     assert_eq!(super::print_health_help(), ExitCode::SUCCESS);
 }
 
+/// `version` documents no flag of its own, so its record help shows only the
+/// shared globals group: the same options block `full_usage` appends, so every
+/// help path shows the same flag data.
+#[test]
+fn the_version_record_help_shows_only_the_shared_globals_group() {
+    let spec = crate::cli_command_registry::find("version").expect("`version` is registered");
+    let options = spec.options_help();
+    assert!(options.starts_with("Global flags:"), "{options}");
+    assert!(!options.contains("Options:"), "{options}");
+}
+
 /// The database block every surface prints also states the empty-value rule, so a
 /// reader learns it from the help they already read.
 #[test]
@@ -284,4 +295,37 @@ fn a_double_dash_ends_flag_parsing() {
     )
     .expect_err("a token after the delimiter has no operand slot");
     assert_eq!(error.message(), "unexpected argument `stray`");
+}
+
+/// A value flag repeated in separate-token form is refused, the same way the
+/// `--flag=value` spelling is, instead of the last value silently winning.
+#[test]
+fn a_value_flag_repeated_in_separate_tokens_is_a_usage_error() {
+    let error = super::parse_flags(
+        [
+            "--db".to_owned(),
+            "a".to_owned(),
+            "--db".to_owned(),
+            "b".to_owned(),
+        ],
+        &[],
+    )
+    .expect_err("a repeated --db is a usage error in either spelling");
+    assert!(
+        error.message().contains("--db was given more than once"),
+        "{}",
+        error.message()
+    );
+}
+
+/// A flag name that reaches the unknown-flag reporter without its dash is
+/// rendered with the `--` prefix, so the refusal names the flag the way the
+/// reader types it. No production caller hands a bare name over today; the
+/// branch is defensive, and this test calls the reporter with one directly.
+#[test]
+fn a_flag_name_without_a_dash_is_rendered_with_the_double_dash() {
+    let error = super::unknown_surface_flag("confidance", &["confidence"]);
+    assert_eq!(error.code(), "usage");
+    assert_eq!(error.message(), "unknown flag `--confidance`");
+    assert_eq!(error.hint(), Some("did you mean `--confidence`?"));
 }

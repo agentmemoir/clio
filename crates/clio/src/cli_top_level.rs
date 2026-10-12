@@ -10,9 +10,15 @@
 //!
 //! ## Owns
 //! - `parse_flags`, the reserved surfaces' name-to-value flag map
+//! - `record_flag_names`, the flag names a surface's registry record documents
 //! - `wants_help`, `unknown_command` and `help_topic`, the top level's own refusals
+//! - `print_record_help` and the two no-flag commands' help, rendered from
+//!   their registry records
+//! - `wants_json_catalog`, the help record's JSON-catalog request
+//! - `markdown_request`, the help record's whole-manual request, validated
+//!   before any write
 //! - `database_help_block`, the shared precedence-and-environment block
-//! - The two no-flag commands' help, and the catalog's own screen
+//! - The catalog's own screen
 //!
 //! ## Does not own
 //! - Which commands exist and what flags they take (`cli_help` and `cli_help_usage`)
@@ -26,12 +32,15 @@
 //!
 //! It is its own file because the crate root is at its own size limit and this is a
 //! separate concern from running the program.
+//!
+//! Keep this module focused on how the top level reads its own arguments and
+//! answers help.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use crate::cli_error::CliError;
 use crate::cli_help;
-use crate::cli_help_usage;
 use crate::cli_output;
 use crate::command_catalog;
 use crate::port_scan;
@@ -40,6 +49,111 @@ use crate::port_scan;
 pub(crate) fn wants_help(args: &[String]) -> bool {
     args.iter()
         .any(|arg| matches!(arg.as_str(), "help" | "--help" | "-h"))
+}
+
+/// The flag names a surface's registry record documents, in print order: the
+/// names `parse_flags` gates the surface's own flags on.
+pub(crate) fn record_flag_names(name: &str) -> Vec<&'static str> {
+    let spec =
+        crate::cli_command_registry::find(name).unwrap_or_else(|| panic!("`{name}` is registered"));
+    spec.documented.iter().map(|flag| flag.long).collect()
+}
+
+/// Whether the raw arguments select the help record's JSON catalog: the `json`
+/// boolean's spelling is read from the help record, and only `--json` selects
+/// the catalog, so `--markdown` never does.
+pub(crate) fn wants_json_catalog(args: &[String]) -> bool {
+    let spec =
+        crate::cli_command_registry::find("help").unwrap_or_else(|| panic!("`help` is registered"));
+    spec.documented
+        .iter()
+        .find(|flag| flag.value.is_none() && flag.long == "json")
+        .is_some_and(|json| args.iter().any(|arg| arg == &format!("--{}", json.long)))
+}
+
+/// The manual request the raw arguments make, validated before any write.
+///
+/// `Ok(Some(dir))` when `--markdown` names an `--out` directory; `Ok(None)`
+/// when the arguments ask for one of the other help modes. The comparison is
+/// against the literal `--markdown`/`--out`/`--out=` spellings the tests pin,
+/// and the conflicts are refused here rather than at the writer: `--markdown`
+/// excludes `--json` and a `TOPIC`, `--out` is required with `--markdown` and
+/// refused without it, and each of the two flags is refused twice.
+pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliError> {
+    let mut markdown = false;
+    let mut out: Option<String> = None;
+    let mut topic: Option<&str> = None;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        // A lifted global's value is not a TOPIC: `main` appends it after the verb.
+        let name = arg.strip_prefix("--").unwrap_or(arg);
+        let global = arg == "-o"
+            || crate::cli_command_registry::global_value_names().any(|flag| flag == name);
+        if global && args.get(index + 1).is_some_and(|v| !v.starts_with("--")) {
+            index += 2;
+            continue;
+        }
+        if arg == "--markdown" {
+            crate::cli_error::reject_repeated_flag("--markdown", markdown)?;
+            markdown = true;
+        } else if arg == "--out" {
+            crate::cli_error::reject_repeated_flag("--out", out.is_some())?;
+            out = Some(out_value(args, index)?);
+            index += 1;
+        } else if let Some(value) = arg.strip_prefix("--out=") {
+            crate::cli_error::reject_repeated_flag("--out", out.is_some())?;
+            crate::cli_error::reject_blank_value("--out", value)?;
+            out = Some(value.to_owned());
+        } else if !arg.starts_with('-') {
+            topic = topic.or(Some(arg));
+        }
+        index += 1;
+    }
+    if !markdown {
+        if out.is_some() {
+            return Err(CliError::usage_hint(
+                "--out writes the manual, so it needs --markdown",
+                "pass `--markdown --out DIR`, or drop --out",
+            ));
+        }
+        return Ok(None);
+    }
+    if wants_json_catalog(args) {
+        return Err(CliError::usage_hint(
+            "`--json` and `--markdown` select different output modes",
+            "print the catalog with `--json`, or write the manual with `--markdown --out DIR`",
+        ));
+    }
+    if let Some(topic) = topic {
+        return Err(CliError::usage_hint(
+            format!("`--markdown` writes the whole manual and takes no topic (`{topic}`)"),
+            "run `clio help --markdown --out DIR` for every page",
+        ));
+    }
+    let Some(dir) = out else {
+        return Err(CliError::usage_hint(
+            "--markdown writes a manual and needs an output directory",
+            "pass the directory to write into, as `--markdown --out DIR`",
+        ));
+    };
+    Ok(Some(PathBuf::from(dir)))
+}
+
+/// The value token after a bare `--out`: refused when it is absent or starts
+/// with `-`, so `--out -h` is a missing value, never a directory named `-h`;
+/// `--out=DIR` keeps its token as typed. Blank values are refused too.
+fn out_value(args: &[String], index: usize) -> Result<String, CliError> {
+    match args.get(index + 1) {
+        Some(value) if !value.starts_with('-') => {
+            crate::cli_error::reject_blank_value("--out", value)?;
+            Ok(value.clone())
+        }
+        _ => Err(CliError::usage_hint(
+            "--out requires a directory value",
+            "pass the directory after --out, or spell it `--out=DIR`",
+        )),
+    }
 }
 
 /// The unknown-command failure, with a suggestion when one is close.
@@ -85,23 +199,31 @@ pub(crate) fn help_topic(args: &[String]) -> Result<Option<(String, Vec<String>)
     Ok(Some((verb, kept)))
 }
 
-/// `clio version --help`: the usage line plus what the command reports.
-pub(crate) fn print_version_help() -> ExitCode {
-    println!(
-        "{}\n\nPrints the package name and version. Takes no flags.",
-        cli_help_usage::usage_line("version").unwrap_or("clio version")
-    );
+/// One registry record's `--help` screen: its usage line, a blank line, then
+/// its notes, then the same options block `help_for` appends, so the surface's
+/// prose lives on the record beside its flags and every help path shows the
+/// same flag data.
+pub(crate) fn print_record_help(name: &str) -> ExitCode {
+    let spec =
+        crate::cli_command_registry::find(name).unwrap_or_else(|| panic!("`{name}` is registered"));
+    let mut text = format!("{}\n\n{}", spec.usage_line(), spec.notes.join("\n\n"));
+    let options = spec.options_help();
+    if !options.is_empty() {
+        text.push_str("\n\n");
+        text.push_str(&options);
+    }
+    println!("{text}");
     ExitCode::SUCCESS
 }
 
-/// `clio health --help`: the usage line plus what the command reports.
+/// `clio version --help`: the version record's own usage line and notes.
+pub(crate) fn print_version_help() -> ExitCode {
+    print_record_help("version")
+}
+
+/// `clio health --help`: the health record's own usage line and notes.
 pub(crate) fn print_health_help() -> ExitCode {
-    println!(
-        "{}\n\nPrints the machine-readable health JSON: name and version only.\n\
-         It opens no database and checks no service.",
-        cli_help_usage::usage_line("health").unwrap_or("clio health")
-    );
-    ExitCode::SUCCESS
+    print_record_help("health")
 }
 
 /// Read the reserved surfaces' flags: a name-to-value map that fails closed on
@@ -226,16 +348,20 @@ fn insert_known(
 fn accepted_by_surface(name: &str, known: &[&str]) -> bool {
     name == "help"
         || known.contains(&name)
-        || crate::cli_args::GLOBAL_VALUE_FLAGS.contains(&name)
-        || crate::cli_args::GLOBAL_BOOL_FLAGS.contains(&name)
+        || crate::cli_command_registry::global_value_names().any(|flag| flag == name)
+        || crate::cli_command_registry::global_bool_names().any(|flag| flag == name)
 }
 
 /// The flags a suggestion may name: the surface's own, then the globals and
 /// `help`, which it also accepts.
 fn suggestion_candidates<'a>(known: &'a [&'a str]) -> Vec<&'a str> {
     let mut candidates: Vec<&'a str> = known.to_vec();
-    candidates.extend_from_slice(crate::cli_args::GLOBAL_VALUE_FLAGS);
-    candidates.extend_from_slice(crate::cli_args::GLOBAL_BOOL_FLAGS);
+    for name in crate::cli_command_registry::global_value_names() {
+        candidates.push(name);
+    }
+    for name in crate::cli_command_registry::global_bool_names() {
+        candidates.push(name);
+    }
     candidates.push("help");
     candidates
 }
@@ -317,3 +443,7 @@ pub(crate) fn print_help() {
 #[cfg(test)]
 #[path = "cli_top_level_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_top_level_markdown_tests.rs"]
+mod markdown_tests;

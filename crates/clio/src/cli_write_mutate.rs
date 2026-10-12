@@ -43,12 +43,12 @@ impl WriteGroup for MutationWriteGroup {
         &["update", "invalidate", "discard", "correct"]
     }
 
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "update" => FlagSpec::new(&["rule"], &["dry-run"]),
-            "invalidate" => FlagSpec::new(&["replacement"], &["dry-run"]),
-            "correct" => FlagSpec::new(&["reason", "context"], &["confirm", "dry-run"]),
-            _ => FlagSpec::new(&["reason"], &["confirm", "dry-run"]),
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

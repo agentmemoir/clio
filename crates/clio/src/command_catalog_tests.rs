@@ -12,15 +12,20 @@
 //! - Every registered usage line's flags appear in the catalog
 //! - Every catalog command resolves through `cli help <topic>`
 //!
+//! The registry seam — each record's row once, at its spine position, with no
+//! stale authored copy beside it, and each rendered registered block showing
+//! only accepted flags — lives in `command_catalog_seam_tests.rs`.
+//!
 //! ## Does not own
 //! - The wording of any one usage line (`cli_help_usage_tests`)
 //! - The layout of the catalog text (`command_catalog`)
+//! - Each record's own summary and flags (`cli_command_registry_core_reads_tests`)
 //!
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::ENTRIES;
+use super::{ARROW, NOTE_INDENT, NOTE_WIDTH, USAGE_WIDTH, catalog_rows};
 use crate::cli_help_usage;
 use crate::help_flags_test_support::{entry_block, flags_in};
 
@@ -44,9 +49,8 @@ fn catalog_block(command: &str) -> String {
 /// requires and which the catalog never mentioned.
 #[test]
 fn every_catalog_command_has_a_registered_usage_line() {
-    let missing: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let missing: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| cli_help_usage::usage_line(command).is_none())
         .collect();
     assert!(
@@ -63,9 +67,8 @@ fn every_registered_usage_line_is_reachable_from_a_command() {
     // `usage_for` is the MCP-bound half of the registry; the rest is the surface
     // table. Both are covered by the loop below over the catalog, which is the
     // only consumer of the surface half.
-    let unreachable: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let unreachable: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| {
             cli_help_usage::usage_line(command).is_none()
                 && crate::cli_help::verb_help(command).is_some()
@@ -86,7 +89,7 @@ fn every_registered_usage_line_is_reachable_from_a_command() {
 /// from the catalog while every flag check stayed green.
 #[test]
 fn every_command_the_dispatcher_runs_is_in_the_catalog() {
-    let listed: Vec<&str> = ENTRIES.iter().map(|(command, _)| *command).collect();
+    let listed: Vec<&str> = catalog_rows().map(|(command, _)| command).collect();
     let missing: Vec<&str> = crate::cli_help::all_known_commands()
         .into_iter()
         .filter(|command| !listed.contains(command))
@@ -103,9 +106,8 @@ fn every_command_the_dispatcher_runs_is_in_the_catalog() {
 #[test]
 fn every_catalog_command_is_one_the_dispatcher_runs() {
     let known = crate::cli_help::all_known_commands();
-    let unknown: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let unknown: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| !known.contains(command))
         .collect();
     assert!(
@@ -120,12 +122,12 @@ fn every_catalog_command_is_one_the_dispatcher_runs() {
 /// if the renderer ever stops printing the registry's flags.
 #[test]
 fn every_flag_in_a_usage_line_appears_in_that_commands_catalog_line() {
-    for (command, _) in ENTRIES {
+    for (command, _) in catalog_rows() {
         let Some(usage) = cli_help_usage::usage_line(command) else {
             continue;
         };
         let block = catalog_block(command);
-        let missing: Vec<String> = flags_in(usage)
+        let missing: Vec<String> = flags_in(&usage)
             .into_iter()
             .filter(|flag| !block.contains(flag.as_str()))
             .collect();
@@ -145,13 +147,11 @@ fn every_flag_in_a_usage_line_appears_in_that_commands_catalog_line() {
 /// description promising something the reader cannot type.
 #[test]
 fn a_description_names_no_flag_the_cli_does_not_accept() {
-    let accepted: Vec<String> = ENTRIES
-        .iter()
+    let accepted: Vec<String> = catalog_rows()
         .filter_map(|(command, _)| cli_help_usage::usage_line(command))
-        .flat_map(flags_in)
+        .flat_map(|usage| flags_in(&usage))
         .collect();
-    let unknown: Vec<(String, String)> = ENTRIES
-        .iter()
+    let unknown: Vec<(String, String)> = catalog_rows()
         .flat_map(|(command, note)| {
             flags_in(note)
                 .into_iter()
@@ -171,9 +171,8 @@ fn a_description_names_no_flag_the_cli_does_not_accept() {
 /// topic lookup and the catalog cannot drift apart either.
 #[test]
 fn every_catalog_command_is_a_known_command() {
-    let unknown: Vec<&str> = ENTRIES
-        .iter()
-        .map(|(command, _)| *command)
+    let unknown: Vec<&str> = catalog_rows()
+        .map(|(command, _)| command)
         .filter(|command| !crate::cli_help::is_known_command(command))
         .collect();
     assert!(
@@ -192,8 +191,7 @@ fn every_catalog_command_is_a_known_command() {
 #[test]
 fn install_and_uninstall_catalog_notes_name_no_harness_subset() {
     let supported = crate::agent_harness::supported_names();
-    let offenders: Vec<(String, Vec<String>)> = ENTRIES
-        .iter()
+    let offenders: Vec<(String, Vec<String>)> = catalog_rows()
         .filter(|(command, _)| *command == "install" || *command == "uninstall")
         .map(|(command, note)| {
             let named: Vec<String> = supported
@@ -218,10 +216,9 @@ fn install_and_uninstall_catalog_notes_name_no_harness_subset() {
 /// flag that does not exist.
 #[test]
 fn wrapping_never_splits_a_flag_name() {
-    let all: Vec<String> = ENTRIES
-        .iter()
+    let all: Vec<String> = catalog_rows()
         .flat_map(|(command, note)| {
-            flags_in(cli_help_usage::usage_line(command).unwrap_or_default())
+            flags_in(&cli_help_usage::usage_line(command).unwrap_or_default())
                 .into_iter()
                 .chain(flags_in(note))
                 .collect::<Vec<String>>()
@@ -235,4 +232,94 @@ fn wrapping_never_splits_a_flag_name() {
              catalog does not contain it whole, so a flag name was split by wrapping"
         );
     }
+}
+
+/// The catalog's two wrap columns are pinned as literals: 84 for the usage lines
+/// and 92 for the note lines, indent included. Retuning either constant changes
+/// what a reader sees, so it must change this test in the same commit.
+#[test]
+fn the_catalog_widths_are_pinned_to_their_columns() {
+    assert_eq!(USAGE_WIDTH, 84, "usage lines wrap at 84 columns");
+    assert_eq!(NOTE_WIDTH, 92, "note lines wrap at 92 columns");
+}
+
+/// No rendered catalog line runs past the column it was wrapped to.
+///
+/// The bounds are the rendered columns themselves, so this also fails if the
+/// renderer stops applying a width. The renderer appends the tool arrow to a
+/// command's last usage line after wrapping, so that suffix is stripped before
+/// the check: the wrapped text must fit 84, and the arrow is the only part
+/// allowed to pass it. Note lines carry no suffix and must stay within 92.
+#[test]
+fn no_rendered_catalog_line_exceeds_its_width() {
+    let arrows: Vec<String> = crate::cli_help::command_bindings()
+        .iter()
+        .map(|(_, tool)| format!("{ARROW}{tool}"))
+        .collect();
+    let text = catalog_text();
+    let over: Vec<(usize, &str)> = text
+        .lines()
+        .filter_map(|line| {
+            let leading = line.len() - line.trim_start_matches(' ').len();
+            if leading == NOTE_INDENT.len() {
+                return (line.len() > 92).then_some((line.len(), line));
+            }
+            let wrapped = arrows
+                .iter()
+                .find_map(|arrow| line.strip_suffix(arrow.as_str()))
+                .unwrap_or(line);
+            (wrapped.len() > 84).then_some((wrapped.len(), line))
+        })
+        .collect();
+    assert!(
+        over.is_empty(),
+        "these catalog lines' wrapped text runs past the 84-column usage or \
+         92-column note bound: {over:?}"
+    );
+}
+
+// The registry-seam tests — one row per record, the record spans' spine
+// bounds, the authored reference rows, and the rendered registered blocks' —
+// live beside this module in `command_catalog_seam_tests.rs`.
+
+/// Every rendered note reads back as the summary it was wrapped from: nothing
+/// is lost, nothing is split, and the wrap is the split-words-and-rejoin you
+/// can compute by hand.
+///
+/// This is the note-side twin of the flag-wholeness check above: that one
+/// proves no flag is cut in half, this one proves the wrap changes where the
+/// words sit and nothing else.
+///
+/// A note line starts with exactly the seven-space indent; a usage-line
+/// continuation starts deeper (every command's name is at least four letters),
+/// so counting only the shallow indent keeps the usage lines out.
+#[test]
+fn every_rendered_note_rereads_as_the_summary_it_was_wrapped_from() {
+    let text = catalog_text();
+    let mut checked = 0;
+    for (command, summary) in catalog_rows() {
+        if summary.is_empty() {
+            continue;
+        }
+        let note_lines: Vec<String> = entry_block(&text, command)
+            .lines()
+            .filter(|line| {
+                line.starts_with(NOTE_INDENT) && !line[NOTE_INDENT.len()..].starts_with(' ')
+            })
+            .map(|line| line.trim_start_matches(' ').to_owned())
+            .collect();
+        assert!(
+            !note_lines.is_empty(),
+            "`{command}` carries a summary but its block shows no note lines"
+        );
+        let rendered = note_lines.join(" ");
+        assert_eq!(
+            rendered,
+            summary.split_whitespace().collect::<Vec<_>>().join(" "),
+            "`{command}`'s rendered note differs from its summary, so the wrap lost \
+             or changed words"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "the catalog holds summaries to check");
 }

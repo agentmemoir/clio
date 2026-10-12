@@ -298,3 +298,31 @@ fn the_stats_row_names_its_lists_band_unit_and_tier_split() {
     );
     assert!(description.contains("nothing else"), "{description}");
 }
+
+/// The published FNV-1a 64-bit vectors for the empty string, "a", and
+/// "foobar", so the hash convention cannot drift without failing here.
+#[test]
+fn fnv1a64_hex_matches_the_published_reference_vectors() {
+    assert_eq!(fnv1a64_hex(b""), "fnv1a64:cbf29ce484222325");
+    assert_eq!(fnv1a64_hex(b"a"), "fnv1a64:af63dc4c8601ec8c");
+    assert_eq!(fnv1a64_hex(b"foobar"), "fnv1a64:85944171f73967e8");
+}
+
+#[test]
+fn fnv1a64_hex_changes_when_the_input_changes() {
+    assert_ne!(fnv1a64_hex(b"flag-a"), fnv1a64_hex(b"flag-b"));
+}
+
+/// The pack hash is FNV-1a over the concatenation of each tool's compact
+/// encoding in registry order, produced by the one shared implementation.
+#[test]
+fn catalog_hash_is_fnv1a64_over_concatenated_compact_tool_bytes() {
+    let tools: Vec<Value> = catalog_defs().iter().map(ToolDef::to_tool).collect();
+    let mut canonical = Vec::new();
+    for tool in &tools {
+        let encoded = serde_json::to_string(tool).expect("serialize");
+        canonical.extend_from_slice(encoded.as_bytes());
+    }
+    assert_eq!(catalog_hash(&tools), fnv1a64_hex(&canonical));
+    assert_eq!(pack()["catalog_hash"], Value::from(catalog_hash(&tools)));
+}

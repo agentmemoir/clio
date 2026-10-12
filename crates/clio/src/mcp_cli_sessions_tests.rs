@@ -20,7 +20,19 @@
 //! Keep this module focused on the `--sessions` value rule.
 
 use super::refuse_sessions_value;
+use super::tests::args_of;
+use super::*;
 use std::collections::HashMap;
+
+/// The refusal is wired into the `mcp http` entry point itself: a valued switch
+/// is a usage error (exit 2), checked before any store is opened.
+#[test]
+fn the_http_entry_point_refuses_a_valued_sessions_switch() {
+    assert_eq!(
+        mcp(args_of(&["http", "--sessions=false"])),
+        ExitCode::from(2)
+    );
+}
 
 fn flags(sessions: Option<&str>) -> HashMap<String, String> {
     let mut flags = HashMap::new();

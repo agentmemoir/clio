@@ -204,22 +204,57 @@ fn render_variants_cover_missing_fields() {
     );
 }
 
+/// Every verb's spec is its record's, and the accepted set that record carries is
+/// the one the group's own list held: same flags, same order, globals included.
 #[test]
-fn spec_covers_every_verb() {
+fn spec_answers_from_the_registry_with_the_original_accepted_set() {
+    let expected: &[(&str, &[&str], &[&str])] = &[
+        (
+            "graph query",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "max-hops",
+                "edge-type",
+                "min-weight",
+            ],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "associations",
+            &["db", "backend", "bank", "actor", "output", "min-weight"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "persona get",
+            &["db", "backend", "bank", "actor", "output", "budget-tokens"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "maintenance status",
+            &["db", "backend", "bank", "actor", "output", "item-id"],
+            &["no-input", "yes", "explain"],
+        ),
+    ];
     let group = GraphGroup;
-    for verb in group.verbs() {
-        assert!(group.spec(verb).bool_flags().contains(&"explain"), "{verb}");
+    assert_eq!(group.verbs().len(), expected.len(), "every verb is covered");
+    for &(verb, value, boolean) in expected {
+        let spec = group.spec(verb);
+        assert_eq!(spec.value_flags(), value, "{verb} value flags");
+        assert_eq!(spec.bool_flags(), boolean, "{verb} bool flags");
+        let record = crate::cli_command_registry::find(verb).expect("a record");
+        assert_eq!(
+            spec.value_flags(),
+            record.parser_spec().value_flags(),
+            "{verb}: the group must answer with the record"
+        );
+        assert_eq!(
+            spec.bool_flags(),
+            record.parser_spec().bool_flags(),
+            "{verb}: the group must answer with the record"
+        );
     }
-    assert!(
-        group
-            .spec("graph query")
-            .value_flags()
-            .contains(&"max-hops")
-    );
-    assert!(
-        group
-            .spec("persona get")
-            .value_flags()
-            .contains(&"budget-tokens")
-    );
 }

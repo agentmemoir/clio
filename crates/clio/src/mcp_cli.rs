@@ -29,29 +29,6 @@ use super::cli_top_level::database_help_block;
 use super::cli_top_level::parse_flags;
 use std::process::ExitCode;
 
-/// The flags `clio mcp schema-export` accepts. Any other flag is a usage error.
-const MCP_SCHEMA_EXPORT_FLAGS: &[&str] = &["out", "path"];
-
-/// The flags `clio mcp stdio` accepts. Any other flag is a usage error rather
-/// than a silently ignored token. `mcp stdio` parses with this list before it
-/// opens the store, so a typo fails closed with exit 2 instead of the exit-1
-/// open failure the shared builder below would otherwise report.
-const MCP_OPEN_FLAGS: &[&str] = &["db", "backend", "bank", "shared-bank"];
-
-/// The flags `clio mcp http` accepts: the stdio flags plus the transport's own.
-/// `mcp http` parses with this list before it binds, so an unknown flag is a
-/// usage error (exit 2). It is also the set the shared options builder parses,
-/// which is why it is the wider of the two lists.
-const MCP_TRANSPORT_FLAGS: &[&str] = &[
-    "backend",
-    "bank",
-    "bind",
-    "db",
-    "sessions",
-    "shared-bank",
-    "token-file",
-];
-
 /// `clio mcp` subcommands: schema export, stdio server, Streamable HTTP server.
 pub(crate) fn mcp(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut args = args.into_iter();
@@ -79,7 +56,7 @@ fn print_mcp_help() {
     for command in ["mcp schema-export", "mcp stdio", "mcp http"] {
         println!(
             "{}",
-            crate::cli_help_usage::usage_line(command).unwrap_or(command)
+            crate::cli_help_usage::usage_line(command).unwrap_or_else(|| command.to_owned())
         );
     }
     println!("Ask a subcommand for its flags with `clio mcp <subcommand> --help`.");
@@ -89,16 +66,13 @@ pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitC
     let collected: Vec<String> = args.into_iter().collect();
     // `--help` used to fall through and print the whole schema pack, so asking
     // for help produced 70 KB of JSON and never said what the command takes.
+    // The help screen is the record's: its usage line and its notes.
     if wants_help(&collected) {
-        println!(
-            "{}\n\n--out FILE writes the pack to a file; --path is an accepted alias.\n\
-             With neither flag the pack is written to stdout.",
-            crate::cli_help_usage::usage_line("mcp schema-export")
-                .unwrap_or("clio mcp schema-export")
-        );
+        println!("{}", schema_export_help_text());
         return ExitCode::SUCCESS;
     }
-    let flags = match parse_flags(collected.iter().cloned(), MCP_SCHEMA_EXPORT_FLAGS) {
+    let names = crate::cli_command_registry_surface::parse_flag_names("mcp schema-export");
+    let flags = match parse_flags(collected.iter().cloned(), &names) {
         Ok(flags) => flags,
         Err(error) => {
             return crate::cli_top_level::report_surface_usage_error(&error, &collected);
@@ -122,6 +96,16 @@ pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitC
     ExitCode::SUCCESS
 }
 
+/// The `schema-export --help` screen as text, split from the handler so a test
+/// can read it without capturing stdout (the `help_text` split in `install_cli`).
+/// It renders the record's usage line and notes, never the schema pack, so the
+/// handler printing this string is what keeps the old pack fall-through fixed.
+pub(crate) fn schema_export_help_text() -> String {
+    let spec = crate::cli_command_registry::find("mcp schema-export")
+        .expect("`mcp schema-export` is registered");
+    format!("{}\n\n{}", spec.usage_line(), spec.notes.join("\n\n"))
+}
+
 pub(crate) fn mcp_options(
     args: impl IntoIterator<Item = String>,
 ) -> Result<clio_mcp::runtime::McpOpenOptions, String> {
@@ -137,7 +121,14 @@ pub(crate) fn mcp_options_with<F>(
 where
     F: Fn(&str) -> Option<String>,
 {
-    let flags = match parse_flags(args, MCP_TRANSPORT_FLAGS) {
+    // The shared builder parses the http record's name list, the wider of the
+    // two transport sets: `mcp stdio` pre-validates its own narrower record
+    // set before it calls in, so a typo there fails closed with exit 2 while
+    // this builder's refusal is an open failure.
+    let flags = match parse_flags(
+        args,
+        &crate::cli_command_registry_surface::parse_flag_names("mcp http"),
+    ) {
         Ok(flags) => flags,
         Err(error) => return Err(error.message().to_owned()),
     };
@@ -174,7 +165,8 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     if wants_help(&collected) {
         println!(
             "{}\n\n{}",
-            crate::cli_help_usage::usage_line("mcp stdio").unwrap_or("clio mcp stdio"),
+            crate::cli_help_usage::usage_line("mcp stdio")
+                .unwrap_or_else(|| "clio mcp stdio".to_owned()),
             database_help_block(&|key| std::env::var(key).ok())
         );
         return ExitCode::SUCCESS;
@@ -182,9 +174,11 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     // A flag this transport does not take is a usage error (exit 2), checked
     // before the store is opened, so `clio mcp stdio --bogus` fails closed the
     // way every other surface does rather than reporting an exit-1 open
-    // failure. The shared builder below parses the wider transport set and
-    // reports only open failures.
-    if let Err(error) = parse_flags(collected.iter().cloned(), MCP_OPEN_FLAGS) {
+    // failure. The names are the stdio record's own, the narrower of the two
+    // transport sets; the shared builder below parses the http record's wider
+    // one and reports only open failures.
+    let names = crate::cli_command_registry_surface::parse_flag_names("mcp stdio");
+    if let Err(error) = parse_flags(collected.iter().cloned(), &names) {
         return crate::cli_top_level::report_surface_usage_error(&error, &collected);
     }
     let opts = match mcp_options(collected) {
@@ -242,7 +236,8 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
         println!("{}", mcp_http_help());
         return ExitCode::SUCCESS;
     }
-    let flags = match parse_flags(collected.iter().cloned(), MCP_TRANSPORT_FLAGS) {
+    let names = crate::cli_command_registry_surface::parse_flag_names("mcp http");
+    let flags = match parse_flags(collected.iter().cloned(), &names) {
         Ok(flags) => flags,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
     };
@@ -413,7 +408,8 @@ pub(crate) fn mcp_http_help() -> String {
              Omit it (or keep a loopback bind) for the credential-free local default.
 
 {}",
-        crate::cli_help_usage::usage_line("mcp http").unwrap_or("clio mcp http"),
+        crate::cli_help_usage::usage_line("mcp http")
+            .unwrap_or_else(|| "clio mcp http".to_owned()),
         database_help_block(&|key| std::env::var(key).ok())
     )
 }

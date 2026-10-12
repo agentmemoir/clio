@@ -305,3 +305,13 @@ fn probe_compose_states_and_failures() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Overlay values that are not strings render compact, and strings render
+/// unquoted: this is the text the setup view's masked secrets carry.
+#[test]
+fn scalar_renders_strings_unquoted_and_compound_values_compact() {
+    assert_eq!(scalar(&json!("plain")), "plain");
+    assert_eq!(scalar(&json!(7)), "7");
+    assert_eq!(scalar(&json!(true)), "true");
+    assert_eq!(scalar(&json!(["a", "b"])), "[\"a\",\"b\"]");
+}

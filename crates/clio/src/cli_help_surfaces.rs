@@ -3,29 +3,34 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the usage lines of the commands that bind no MCP
-//! tool and own their own `--help`: `mcp`, `ops`, `compose`, `retention`, `status`,
-//! `setup`, `install`, `uninstall`, and the two report-only commands.
+//! This module is responsible for the shared usage-line wrapping and the `ops`
+//! group's usage lines.
 //!
 //! ## Owns
-//! - `SURFACE_USAGE`, the flag list each of those commands accepts
 //! - The wrapping every help surface and the catalog share, so one command's line
 //!   breaks the same way in both places
-//! - `ops_usage_lines`, because `ops` is one verb with five subcommands and each
-//!   has its own flags
+//! - `ops_usage_lines`, which selects the `ops` subcommand's own line or all five
+//!   from the registry records, because `ops` is one verb with five subcommands
+//!   and each has its own flags
+//! - `SURFACE_USAGE`, a test-only fixture of the reserved surfaces' authored
+//!   bytes: the record rows' byte reference the reserved-surface and
+//!   ranking/retention record tests read through the test-only `surface_usage_line`
+//! - `surface_usage_line`, the test-only byte reference into `SURFACE_USAGE`
 //!
 //! ## Does not own
+//! - A registered command's usage line (see `cli_command_registry` and
+//!   `cli_command_spec`)
 //! - The usage lines of the commands that bind an MCP tool (`cli_help_usage`)
 //! - Each surface's own extra prose, which the surface keeps
 //! - The catalog's layout (see `command_catalog`)
 //!
 //! ## Boundary
 //!
-//! Changes to what one of these commands accepts should normally require changes
-//! here and in the surface that parses it. A change to how help is laid out should
-//! not.
+//! Changes to how help is laid out should normally require changes here. Changes
+//! to what one of these commands accepts should not: they require changes to its
+//! registry record.
 //!
-//! Keep this module focused on these commands' flag lists and the shared wrapping.
+//! Keep this module focused on the shared wrapping and the `ops` group's lines.
 
 /// A command's usage line wrapped to `width`, every line carrying `lead` spaces.
 ///
@@ -47,7 +52,7 @@ pub(crate) fn wrapped_usage(command: &str, width: usize, lead: usize) -> Vec<Str
     let indent = " ".repeat(lead + 5 + command.len() + 1);
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
-    for unit in flag_units(usage) {
+    for unit in flag_units(&usage) {
         let candidate = if current.is_empty() {
             unit.to_owned()
         } else {
@@ -126,8 +131,11 @@ fn split_first(text: &str) -> (&str, &str) {
 
 /// One command's registered usage line from the reserved surfaces, if any.
 ///
-/// The shared lookup lives in `cli_help_usage`, so this is the table half of it
-/// rather than a second lookup that could answer differently.
+/// Test-only: no production caller reads the table through here, because
+/// `cli_help_usage` answers every registered command from its record. The
+/// reserved-surface record tests read it as the byte reference their records
+/// are pinned against.
+#[cfg(test)]
 pub(crate) fn surface_usage_line(command: &str) -> Option<&'static str> {
     SURFACE_USAGE
         .iter()
@@ -139,30 +147,32 @@ pub(crate) fn surface_usage_line(command: &str) -> Option<&'static str> {
 ///
 /// `ops` is one verb with five subcommands, and a shared line listing only the
 /// flags they have in common is what let `ops repair --help` hide `--plan` and
-/// `--actions`. Each subcommand has its own line in [`SURFACE_USAGE`], and this
-/// only selects among them.
-pub(crate) fn ops_usage_lines(sub: &str) -> Option<Vec<&'static str>> {
-    let lines: Vec<&'static str> = SURFACE_USAGE
-        .iter()
-        .filter(|(name, _)| match sub {
-            "" => name.starts_with("ops "),
-            sub => *name == format!("ops {sub}"),
+/// `--actions`. Each subcommand's line comes from its registry record, and this
+/// only selects among them in the order those records are declared.
+pub(crate) fn ops_usage_lines(sub: &str) -> Option<Vec<String>> {
+    let lines: Vec<String> = crate::cli_command_registry::all()
+        .filter(|spec| match sub {
+            "" => spec.name.starts_with("ops "),
+            sub => spec.name == format!("ops {sub}"),
         })
-        .map(|(_, line)| *line)
+        .map(crate::cli_command_spec::CommandSpec::usage_line)
         .collect();
     (!lines.is_empty()).then_some(lines)
 }
 
-/// The usage line for a command this surface owns, if any.
-/// Usage lines for the commands that bind no MCP tool and own their own `--help`.
+/// The reserved surfaces' authored bytes, kept only as a test fixture.
 ///
-/// Each of these is printed by the surface named beside it, and by the catalog.
-/// The surface keeps its own extra prose; only the flag list is shared, because
-/// the flag list is the part that drifts.
+/// Every command's usage line lives on its registry record, and `cli_help_usage`
+/// answers the catalog and each verb's `--help` from there. The reserved-surface
+/// and ranking/retention record tests read these bytes through the test-only
+/// `surface_usage_line` as the reference their records are pinned against. The
+/// two `compose` rows are gone: their records' bytes are pinned directly by the
+/// compose record tests.
+#[cfg(test)]
 const SURFACE_USAGE: &[(&str, &str)] = &[
     ("version", "clio version"),
     ("health", "clio health"),
-    ("help", "clio help [--json] [TOPIC]"),
+    ("help", "clio help [--json] [--markdown --out DIR] [TOPIC]"),
     (
         "mcp schema-export",
         "clio mcp schema-export [--out FILE] [--path FILE]",
@@ -201,14 +211,6 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     (
         "status",
         "clio status [--db PATH] [--backend sqlite|postgres] [--dir DIR] [--output json|text]",
-    ),
-    (
-        "compose up",
-        "clio compose up [--dir DIR] [--services LIST]",
-    ),
-    (
-        "compose down",
-        "clio compose down [--dir DIR] [--services LIST]",
     ),
     (
         "setup",

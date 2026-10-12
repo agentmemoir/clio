@@ -15,7 +15,8 @@
 //! - The indefinite article used in a positional's usage hint
 //!
 //! ## Does not own
-//! - Which flags a command group accepts (each group owns its `FlagSpec`)
+//! - Which flags a command group accepts (the command records own the accepted
+//!   set; a group's `spec` answers from the registry)
 //! - Command resolution and dispatch (see `cli_read`)
 //! - Output rendering and error formatting (see `cli_output` / `cli_error`)
 //!
@@ -101,43 +102,33 @@ pub(crate) fn unexpected_extra(
     CliError::usage_hint(format!("unexpected extra argument `{extra}`"), hint)
 }
 
-/// Check that every required flag of one command is present, all at once.
+/// The required flags of every verb whose record has not arrived yet, by the
+/// name a reader would type.
 ///
-/// # Errors
-/// A usage error (exit 2) naming every missing flag in the first run. Reporting
-/// them one at a time made `clio failure record T` fail three times before it
-/// accepted the command, which reads as three separate mistakes rather than one.
-/// Which flags a verb cannot run without, by the name a reader would type.
-///
-/// The usage registry already says which flags are required: a required flag is
-/// written bare and an optional one inside brackets. This table repeats that, so it
-/// could drift from the help a reader sees — which is the same defect the catalog
-/// had, where a verb's own `--help` and `clio help` disagreed. The test beside this
-/// table derives the required set from the usage line and fails when the two differ,
-/// so the drift is caught rather than trusted.
-///
-/// The three entries that differ from a bare reading each carry their reason below.
-pub(crate) const REQUIRED_FLAGS: &[(&str, &[&str])] = &[
-    ("update", &["rule"]),
-    ("discard", &["reason"]),
-    ("correct", &["reason"]),
-    ("triple end", &["valid-until"]),
-    ("belief observe", &["confidence", "evidence", "source"]),
-    ("graph link", &["relationship"]),
-    ("task upsert", &["definition", "status"]),
-    ("failure record", &["attempt-n", "what-failed", "lesson"]),
-    ("export", &["out"]),
-    ("import", &["source"]),
-    ("erase", &["subject", "basis", "request"]),
-    ("canonical put", &["category", "epistemic-kind"]),
-];
+/// A verb whose command record has arrived answers from the record instead (see
+/// [`required_flags`]), so its required set and the usage line that command
+/// prints come from the same data and cannot disagree. Every verb this phase
+/// moved has a record, so the table is empty; an unregistered verb still
+/// enforces its mandated flags in its own build, and a row is added here only
+/// when that verb routes through [`require_flags`]. A new mandated flag on such
+/// a verb must add a row here, and the test beside it derives the row from the
+/// usage line and fails when the two differ.
+pub(crate) const REQUIRED_FLAGS: &[(&str, &[&str])] = &[];
 
-/// A verb's required flags, from the one table.
-pub(crate) fn required_flags(verb: &str) -> &'static [&'static str] {
+/// A verb's required flags: the registry record's when the verb is registered,
+/// else the table row.
+///
+/// A registered record owns its command's flags, so its required set cannot
+/// drift from the usage line that command prints. The table stays the answer for
+/// every verb without a record.
+pub(crate) fn required_flags(verb: &str) -> Vec<&'static str> {
+    if let Some(spec) = crate::cli_command_registry::find(verb) {
+        return spec.required_flags();
+    }
     REQUIRED_FLAGS
         .iter()
         .find(|(name, _)| *name == verb)
-        .map_or(&[], |(_, flags)| *flags)
+        .map_or_else(Vec::new, |(_, flags)| flags.to_vec())
 }
 
 /// A flag in a usage line that is written bare rather than inside brackets, and so
@@ -146,6 +137,14 @@ pub(crate) fn required_flags(verb: &str) -> &'static [&'static str] {
 /// The brackets are followed, not the text: `[--a X|--b Y]` is one optional group
 /// whose members are alternatives, and `[--flag]...` is one optional repeatable. A
 /// flag is required only when no bracket is open around it.
+///
+/// A top-level `|` separates whole command forms (`clio backup restore ID |
+/// clio backup restore --latest`): the scan reads every form rather than
+/// stopping at the alternation, so a flag that only one form writes bare still
+/// reads as bare. Such a flag is not required, because the verb also runs in
+/// the other form; the bare-flag parity test excuses it by name, with a row for
+/// `backup restore` and `backup verify`, so a new alternation fails that test
+/// until the flag has a row instead of being excused silently.
 #[cfg(test)]
 pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
     let mut depth = 0usize;
@@ -153,7 +152,6 @@ pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
     for token in usage.split(' ') {
         for part in token.chars() {
             match part {
-                '[' | '|' if depth == 0 && part == '[' => depth += 1,
                 '[' => depth += 1,
                 ']' => depth = depth.saturating_sub(1),
                 _ => {}
@@ -171,11 +169,18 @@ pub(crate) fn bare_flags(usage: &str) -> Vec<String> {
     bare
 }
 
+/// Check that every required flag of one command is present, all at once.
+///
+/// # Errors
+/// A usage error (exit 2) naming every missing flag in the first run. Reporting
+/// them one at a time made `clio failure record T` fail three times before it
+/// accepted the command, which reads as three separate mistakes rather than one.
 pub(crate) fn require_flags(
     parsed: &ParsedArgs,
     verb: &str,
-    flags: &[&'static str],
+    flags: impl AsRef<[&'static str]>,
 ) -> Result<(), CliError> {
+    let flags = flags.as_ref();
     let missing: Vec<String> = flags
         .iter()
         .copied()
@@ -293,3 +298,7 @@ pub(crate) fn article(label: &str) -> &'static str {
 #[cfg(test)]
 #[path = "cli_read_args_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_read_args_spec_tests.rs"]
+mod spec_tests;

@@ -48,17 +48,39 @@ fn catalog_commands_bind_read_verbs_to_tools() {
     let commands = catalog()["commands"].as_array().expect("commands").clone();
     for (command, tool) in command_bindings() {
         let found = commands.iter().any(|entry| {
-            entry["command"].as_str() == Some(*command) && entry["tool"].as_str() == Some(*tool)
+            entry["command"].as_str() == Some(command) && entry["tool"].as_str() == Some(tool)
         });
         assert!(found, "missing binding {command} -> {tool}");
     }
 }
 
+/// `known_commands` is the set of top-level verbs the registry records spell:
+/// every single-token record names itself, every multi-token record extends
+/// its prefix, and nothing else is listed.
+///
+/// The two directions are the independent inputs: a verb listed with no record
+/// would suggest a command the dispatcher refuses, and a record whose verb is
+/// missing would hide a command the CLI runs from the suggestion lookup.
 #[test]
-fn known_commands_cover_reserved_and_read_verbs() {
-    let known = known_commands();
-    for verb in RESERVED_VERBS.iter().chain(READ_VERBS.iter()) {
-        assert!(known.contains(verb), "missing verb {verb}");
+fn known_commands_are_the_registrys_top_level_verbs() {
+    let verbs = known_commands();
+    for verb in &verbs {
+        let prefixed = format!("{verb} ");
+        assert!(
+            crate::cli_command_registry::find(verb).is_some()
+                || crate::cli_command_registry::all().any(|spec| spec.name.starts_with(&prefixed)),
+            "`{verb}` is a known command with no record"
+        );
+    }
+    for spec in crate::cli_command_registry::all() {
+        let verb = match spec.name.split_once(' ') {
+            Some((prefix, _)) => prefix,
+            None => spec.name,
+        };
+        assert!(
+            verbs.contains(&verb),
+            "`{verb}` has records but is not a known command"
+        );
     }
 }
 
@@ -112,8 +134,8 @@ fn the_catalog_lists_the_commands_that_bind_no_mcp_tool() {
         .clone();
     assert_eq!(commands.len(), command_bindings().len());
     for (entry, (command, tool)) in commands.iter().zip(command_bindings()) {
-        assert_eq!(entry["command"].as_str(), Some(*command));
-        assert_eq!(entry["tool"].as_str(), Some(*tool));
+        assert_eq!(entry["command"].as_str(), Some(command));
+        assert_eq!(entry["tool"].as_str(), Some(tool));
     }
 
     // Every command this surface knows is in one of the two arrays, so a verb
@@ -135,12 +157,52 @@ fn suggest_command_finds_typos_and_exact_matches() {
     assert_eq!(suggest_command("zzzzzz"), None);
 }
 
+/// `suggest` keeps the earlier candidate on a tie, so the hint a reader sees
+/// is a function of the authored `KNOWN_VERB_ORDER` and not of the registry's
+/// contents alone. This pins the ties that order decides, so a mechanical
+/// re-derivation cannot move them silently.
+#[test]
+fn suggest_command_ties_resolve_by_the_authored_order() {
+    // `s` scores `sync` and `show` equally; `sync` is the earlier entry.
+    assert_eq!(suggest_command("s"), Some("sync"));
+    // `st` scores `setup` and `stats` equally; `setup` is the earlier entry.
+    assert_eq!(suggest_command("st"), Some("setup"));
+    // `i` scores `intent` and `import` equally; `intent` is the earlier entry.
+    assert_eq!(suggest_command("i"), Some("intent"));
+    // The other member of the `s` tie is reached by its own input, so the
+    // tie is decided by the order and not by reachability.
+    assert_eq!(suggest_command("sh"), Some("show"));
+
+    // The differential, executable: the registry's first-occurrence verb
+    // order resolves the same `s` tie to `show` instead.
+    let mut registry_order: Vec<&'static str> = Vec::new();
+    for spec in crate::cli_command_registry::all() {
+        let verb = match spec.name.split_once(' ') {
+            Some((prefix, _)) => prefix,
+            None => spec.name,
+        };
+        if !registry_order.contains(&verb) {
+            registry_order.push(verb);
+        }
+    }
+    assert_eq!(suggest("s", &registry_order), Some("show"));
+}
+
+/// `is_known_command` names the three depths `clio help <topic>` may take, and
+/// a fourth token is not one of them: the first three words here name a real
+/// command, so the refusal is about the depth rather than the words.
+#[test]
+fn is_known_command_refuses_more_than_three_tokens() {
+    assert!(is_known_command("auth token add"));
+    assert!(!is_known_command("auth token add extra"));
+}
+
 #[test]
 fn verb_help_names_each_read_verb_and_its_tool() {
     for (verb, tool) in command_bindings() {
         let (usage, bound) = verb_help(verb).unwrap_or_else(|| panic!("{verb}"));
         assert!(usage.starts_with("usage: clio "), "{verb}: {usage}");
-        assert_eq!(bound, *tool, "{verb}");
+        assert_eq!(bound, tool, "{verb}");
     }
     assert!(verb_help("bogus").is_none());
 }
@@ -201,4 +263,47 @@ fn write_catalog_emits_parseable_json() {
 fn canonical_put_usage_documents_context() {
     let (usage, _) = verb_help("canonical put").expect("canonical put usage");
     assert!(usage.contains("[--context C]"), "{usage}");
+}
+
+/// The catalog's two command arrays are one ordered, duplicate-free list.
+///
+/// Set membership alone would pass while a duplicate row changed what a machine
+/// reader sees. Every listed name must be one `clio help <topic>` reaches, no
+/// command may appear twice across the two arrays, and the unbound array must
+/// keep its sorted order.
+#[test]
+fn the_two_catalog_arrays_list_every_command_once_in_order() {
+    let catalog = catalog();
+    let names = |key: &str| -> Vec<String> {
+        catalog[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("{key} must be an array"))
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .or_else(|| entry["command"].as_str())
+                    .expect("a command name")
+                    .to_owned()
+            })
+            .collect()
+    };
+    let bound = names("commands");
+    let unbound = names("commands_without_tools");
+
+    let mut listed: Vec<&str> = Vec::new();
+    for command in bound.iter().chain(unbound.iter()) {
+        assert!(
+            !listed.contains(&command.as_str()),
+            "`{command}` is listed twice across the catalog arrays"
+        );
+        assert!(
+            is_known_command(command),
+            "`{command}` is listed but `clio help <topic>` does not reach it"
+        );
+        listed.push(command);
+    }
+    let mut sorted = unbound.clone();
+    sorted.sort();
+    assert_eq!(unbound, sorted, "the unbound array must stay sorted");
 }

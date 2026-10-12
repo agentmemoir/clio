@@ -235,13 +235,62 @@ fn audit_trail_and_intent_gate_usage_errors() {
     }
 }
 
+/// Every verb's spec is its record's, and the accepted set that record carries is
+/// the one the group's own list held: same flags, same order, globals included.
 #[test]
-fn spec_covers_every_verb() {
+fn spec_answers_from_the_registry_with_the_original_accepted_set() {
+    let expected: &[(&str, &[&str], &[&str])] = &[
+        (
+            "intent gate",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes", "explain"],
+        ),
+        (
+            "compose-context",
+            &[
+                "db",
+                "backend",
+                "bank",
+                "actor",
+                "output",
+                "query",
+                "domains",
+                "budget-tokens",
+                "as-of",
+                "query-anchor",
+                "time-axis",
+                "recall-scope",
+            ],
+            &[
+                "no-input",
+                "yes",
+                "expand-graph",
+                "prefer-consolidated",
+                "explain",
+            ],
+        ),
+        (
+            "audit trail",
+            &["db", "backend", "bank", "actor", "output"],
+            &["no-input", "yes", "explain"],
+        ),
+    ];
     let group = WorkspaceGroup;
-    for verb in group.verbs() {
-        assert!(group.spec(verb).bool_flags().contains(&"explain"), "{verb}");
+    assert_eq!(group.verbs().len(), expected.len(), "every verb is covered");
+    for &(verb, value, boolean) in expected {
+        let spec = group.spec(verb);
+        assert_eq!(spec.value_flags(), value, "{verb} value flags");
+        assert_eq!(spec.bool_flags(), boolean, "{verb} bool flags");
+        let record = crate::cli_command_registry::find(verb).expect("a record");
+        assert_eq!(
+            spec.value_flags(),
+            record.parser_spec().value_flags(),
+            "{verb}: the group must answer with the record"
+        );
+        assert_eq!(
+            spec.bool_flags(),
+            record.parser_spec().bool_flags(),
+            "{verb}: the group must answer with the record"
+        );
     }
-    let spec = group.spec("compose-context");
-    assert!(spec.value_flags().contains(&"budget-tokens"));
-    assert!(spec.bool_flags().contains(&"expand-graph"));
 }

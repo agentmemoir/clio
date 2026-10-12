@@ -41,36 +41,9 @@ impl ReadGroup for CoreGroup {
     }
 
     fn spec(&self, verb: &str) -> FlagSpec {
-        match verb {
-            "recall" => FlagSpec::new(
-                &[
-                    "limit",
-                    "domains",
-                    "as-of",
-                    "query-anchor",
-                    "time-axis",
-                    "min-semantic",
-                    "min-keyword",
-                    "min-reranker",
-                    "min-final",
-                ],
-                &["no-entities", "entity-summary"],
-            ),
-            "get" | "show" => FlagSpec::new(&[], &["snapshot", "gist"]),
-            "inspect" => FlagSpec::new(
-                &[
-                    "filter",
-                    "category",
-                    "epistemic-kind",
-                    "validity",
-                    "time-start",
-                    "time-end",
-                    "limit",
-                    "offset",
-                ],
-                &["include-discarded"],
-            ),
-            _ => FlagSpec::new(&[], &[]),
+        match crate::cli_command_registry::find(verb) {
+            Some(spec) => spec.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
         }
     }
 

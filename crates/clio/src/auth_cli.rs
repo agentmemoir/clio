@@ -7,7 +7,7 @@
 //! listing, and revoking network credentials in the owner-only token store.
 //!
 //! ## Owns
-//! - The `auth token add|list|revoke` verbs, their flags, and their text views
+//! - The `auth token add|list|revoke` verbs and their text views
 //! - The single one-time print of a generated secret on `add`
 //! - Mapping store failures into the shared CLI error contract
 //!
@@ -15,13 +15,15 @@
 //! - The store itself: records, validation, digests, permissions
 //!   (`clio_config::auth_tokens`)
 //! - Any transport behavior; no runtime reads the store in this phase
+//! - The verbs' static records (see `cli_command_registry_auth_config`)
 //! - Output/error contracts (see `cli_read`) or flag parsing (`cli_args`)
 //!
 //! ## Boundary
 //!
-//! Changes to the `auth` CLI flags or views should normally require changes
-//! here. Changes to store validation or record shape should not require
-//! changes here.
+//! Changes to an `auth` verb's flags, usage text, or summary should normally
+//! require changes in `cli_command_registry_auth_config`; changes to its
+//! dispatch, decoding, or views should normally require changes here. Changes
+//! to store validation or record shape should not require changes here.
 //!
 //! Keep this module focused on the `clio auth` surface.
 //!
@@ -42,14 +44,43 @@ use clio_config::auth_tokens::{
 use serde_json::{Value, json};
 use std::process::ExitCode;
 
-/// The `auth` subcommands this surface binds.
-const SUBCOMMANDS: &[&str] = &["token"];
+/// The `auth` subcommands this surface binds: the registered `auth` records'
+/// first token past the prefix, once each, in registry order.
+///
+/// The split is optional: a record with no second token (`auth login`) is its
+/// own subcommand rather than being skipped, and a longer name contributes
+/// only its first token.
+fn auth_subcommands() -> Vec<&'static str> {
+    let mut subs: Vec<&'static str> = Vec::new();
+    for name in crate::cli_command_registry::names() {
+        if let Some(rest) = name.strip_prefix("auth ") {
+            let sub = rest.split_once(' ').map_or(rest, |(token, _)| token);
+            if !subs.contains(&sub) {
+                subs.push(sub);
+            }
+        }
+    }
+    subs
+}
 
-/// The `auth token` verbs this surface binds. None binds an MCP tool: an agent
-/// must not be able to mint, widen, or list credentials.
-const VERBS: &[&str] = &["add", "list", "revoke"];
+/// The `auth token` verbs this surface binds: the registered `auth token`
+/// records' first token past the prefix, in registry order. None binds an MCP
+/// tool: an agent must not be able to mint, widen, or list credentials.
+///
+/// The split is optional, so a verb-shaped suffix is taken whole and a longer
+/// name contributes only its first token.
+fn token_verbs() -> Vec<&'static str> {
+    crate::cli_command_registry::names()
+        .filter_map(|name| name.strip_prefix("auth token "))
+        .map(|rest| rest.split_once(' ').map_or(rest, |(verb, _)| verb))
+        .collect()
+}
 
 /// The token-level help, listing the three verbs and their one-way secret rule.
+///
+/// This screen is authored prose, not a derived list: its verb lines are
+/// display forms the records render differently (`add`'s line omits the
+/// optional `--output`), and the frozen golden capture holds these bytes.
 const TOKEN_HELP: &str = "\
 usage: clio auth token <verb> [flags]
 
@@ -92,7 +123,7 @@ fn run(io: &mut CliIo, args: Vec<String>) -> ExitCode {
         let _ = cli_output::write_text(&mut io.out, &crate::cli_help::group_help("auth", subs));
         return ExitCode::from(EXIT_OK);
     }
-    if !SUBCOMMANDS.contains(&sub.as_str()) {
+    if !auth_subcommands().contains(&sub.as_str()) {
         return fail(io, fallback, &unknown_sub(&sub));
     }
     let Some(verb) = tokens.next() else {
@@ -106,7 +137,7 @@ fn run(io: &mut CliIo, args: Vec<String>) -> ExitCode {
         let _ = cli_output::write_text(&mut io.out, TOKEN_HELP);
         return ExitCode::from(EXIT_OK);
     }
-    if !VERBS.contains(&verb.as_str()) {
+    if !token_verbs().contains(&verb.as_str()) {
         return fail(io, fallback, &unknown_verb(&verb));
     }
     let verb = format!("auth token {verb}");
@@ -141,7 +172,7 @@ fn clio_group_subcommands() -> &'static [&'static str] {
 
 /// The error for an unknown `auth` subcommand or `token` verb.
 fn unknown_sub(sub: &str) -> CliError {
-    let hint = cli_args::suggest(sub, SUBCOMMANDS).map_or_else(
+    let hint = cli_args::suggest(sub, &auth_subcommands()).map_or_else(
         || "try `clio auth token list`".to_owned(),
         |best| format!("did you mean `clio auth {best}`?"),
     );
@@ -149,20 +180,20 @@ fn unknown_sub(sub: &str) -> CliError {
 }
 
 fn unknown_verb(verb: &str) -> CliError {
-    let hint = cli_args::suggest(verb, VERBS).map_or_else(
+    let hint = cli_args::suggest(verb, &token_verbs()).map_or_else(
         || "try `clio auth token list`".to_owned(),
         |best| format!("did you mean `clio auth token {best}`?"),
     );
     CliError::usage(format!("unknown `auth token` verb `{verb}`")).with_hint(hint)
 }
 
-/// The flags an `auth token` verb accepts, globals included. `--bank` may
-/// repeat, one occurrence per bank.
+/// The flags an `auth token` verb accepts: the verb's registry record's parser
+/// spec, globals included. `add`'s `--bank` stays repeatable through the
+/// record, one occurrence per bank.
 fn spec(verb: &str) -> FlagSpec {
-    match verb {
-        "auth token add" => FlagSpec::new(&["label", "actor"], &[]).repeating(&["bank"]),
-        "auth token revoke" => FlagSpec::new(&["label"], &[]),
-        _ => FlagSpec::new(&[], &[]),
+    match crate::cli_command_registry::find(verb) {
+        Some(spec) => spec.parser_spec(),
+        None => FlagSpec::new(&[], &[]),
     }
 }
 
@@ -171,8 +202,8 @@ fn help_if_requested(verb: &str, parsed: &ParsedArgs, io: &mut CliIo) -> Option<
     if !parsed.has("help") {
         return None;
     }
-    let usage = crate::cli_help_usage::usage_for(verb).unwrap_or(TOKEN_HELP);
-    let _ = cli_output::write_text(&mut io.out, usage);
+    let usage = crate::cli_help_usage::help_for(verb).unwrap_or_else(|| TOKEN_HELP.to_owned());
+    let _ = cli_output::write_text(&mut io.out, &usage);
     Some(ExitCode::from(EXIT_OK))
 }
 

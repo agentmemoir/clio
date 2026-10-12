@@ -285,14 +285,14 @@ fn the_restore_subcommand_help_names_the_window_too() {
 /// covers the entry `clio backup restore --help` actually prints.
 #[test]
 fn a_postgres_restore_is_not_told_about_a_write_ahead_log() {
-    let help = crate::cli_help_usage::usage_for("backup restore")
+    let help = crate::cli_help_usage::help_for("backup restore")
         .expect("the `backup restore` help entry the CLI resolves");
     let catalog = catalog_block("clio backup restore");
 
     for (surface, text, sqlite_swap) in [
         (
             "clio backup restore --help",
-            help,
+            help.as_str(),
             "The swap of a SQLite store clears the target's write-ahead log before it renames the new store in",
         ),
         (

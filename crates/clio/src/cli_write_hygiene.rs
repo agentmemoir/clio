@@ -44,11 +44,13 @@ impl WriteGroup for HygieneWriteGroup {
         &["hygiene clean"]
     }
 
-    fn spec(&self, _verb: &str) -> FlagSpec {
-        FlagSpec::new(
-            &["file", "action", "reason", "note"],
-            &["confirm", "dry-run"],
-        )
+    // The registry record owns each verb's accepted set, so the parser and the
+    // usage line cannot disagree; a name with no record accepts only the globals.
+    fn spec(&self, verb: &str) -> FlagSpec {
+        match crate::cli_command_registry::find(verb) {
+            Some(record) => record.parser_spec(),
+            None => FlagSpec::new(&[], &[]),
+        }
     }
 
     fn build(&self, _verb: &str, parsed: &ParsedArgs) -> Result<WriteCall, CliError> {

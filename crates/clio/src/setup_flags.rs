@@ -3,12 +3,13 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the `clio setup` flag grammar: the flag sets,
-//! the parse from tokens to a map, the retirement message for `--type`, and the
-//! `--help` text.
+//! This module is responsible for the `clio setup` flag grammar: the accepted
+//! flag table, the parse from tokens to a map, the retirement message for
+//! `--type`, and the `--help` text.
 //!
 //! ## Owns
-//! - `BOOLEAN_FLAGS`, `VALUE_FLAGS`, and the repeatable flag
+//! - `ACCEPTED`, the flag table the setup record documents and this parser
+//!   reads
 //! - `parse_setup_args`, including the `--type` replacement message
 //! - `print_help`, which documents every accepted flag
 //!
@@ -25,55 +26,192 @@
 //!
 //! Keep this module focused on the command line's shape.
 
+use crate::cli_command_spec::Flag;
 use std::collections::HashMap;
 
-/// Flags that may not be followed by a value.
-pub(crate) const BOOLEAN_FLAGS: &[&str] = &[
-    "yes",
-    "non-interactive",
-    "interactive",
-    "help",
-    "allow-untested",
-];
-/// Flags that take exactly one value.
-pub(crate) const VALUE_FLAGS: &[&str] = &[
-    "config",
-    "compose-dir",
-    "database",
-    "db-path",
-    "database-url",
-    "database-connect",
-    "database-host",
-    "database-port",
-    "database-name",
-    "database-user",
-    "database-password",
-    "database-ssl",
-    "database-ssl-rootcert",
-    "database-option",
-    "embed",
-    "embed-url",
-    "embed-model",
-    "embed-key",
-    "embed-provider",
-    "key-store",
-    "sync-store",
-    "embed-dims",
-    "rerank",
-    "rerank-url",
-    "rerank-model",
-    "rerank-key",
-    "rerank-provider",
-    "extract",
-];
-
-/// The flag whose values accumulate rather than replace.
+/// The flags `clio setup` accepts, in the order its usage line prints them.
 ///
-/// `--database-option` names one of the thirteen advanced settings and may be
-/// given more than once, so the parser appends with a newline rather than
-/// overwriting. The one that appends is named here rather than special-cased in
-/// the loop, so the next repeatable flag is one line.
-const REPEATABLE_FLAG: &str = "database-option";
+/// The setup record documents this table and `parse_setup_args` parses it, so
+/// the wizard's flag set is stated once: a flag the grammar gains lands here
+/// and reaches the record and the parser together. `--help` is not here; it is
+/// the surface's own help spelling, answered before the parser runs, and the
+/// parser accepts it by name the way the shared parser does.
+///
+/// A choice's allowed list names every spelling its validator accepts,
+/// synonyms included, so the record never documents a value the wizard refuses.
+pub(crate) static ACCEPTED: &[Flag] = &[
+    Flag::choice(
+        "database",
+        "managed|docker|sqlite|file|existing|external",
+        "Database route `setup_flows_db::ask_database` takes.",
+        &[
+            "managed", "docker", "sqlite", "file", "existing", "external",
+        ],
+    ),
+    Flag::text(
+        "config",
+        "PATH",
+        "Deployment config path `setup_cli::run` resolves; the XDG config path decides it when absent.",
+    ),
+    Flag::text(
+        "db-path",
+        "PATH",
+        "SQLite file `setup_flows_db::ask_sqlite` opens; the standard data path decides it when absent.",
+    ),
+    Flag::text(
+        "database-url",
+        "ADDRESS",
+        "Postgres address `setup_flows_db_paste::ask_pasted` keeps as given.",
+    ),
+    Flag::choice(
+        "database-connect",
+        "pasted|paste|typed|details",
+        "Existing-Postgres route `setup_flows_db_paste::ask_handover` takes.",
+        &["pasted", "paste", "typed", "details"],
+    ),
+    Flag::text(
+        "database-host",
+        "H",
+        "Host `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-port",
+        "P",
+        "Port, or a comma-separated port list, `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-name",
+        "N",
+        "Database name `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-user",
+        "U",
+        "Username `setup_flows_db_typed` reads and checks.",
+    ),
+    Flag::text(
+        "database-password",
+        "P",
+        "Password `setup_flows_db_typed` reads for the existing route.",
+    ),
+    Flag::choice(
+        "database-ssl",
+        "MODE",
+        "SSL mode `setup_flows_db_fields::ask_ssl` reads; the host decides the default.",
+        &["disable", "prefer", "verify-full", "encrypt-no-verify"],
+    ),
+    Flag::text(
+        "database-ssl-rootcert",
+        "PATH",
+        "Root certificate `setup_flows_db_typed` trusts in a verifying mode.",
+    ),
+    Flag {
+        repeatable: true,
+        ..Flag::text(
+            "database-option",
+            "NAME=VALUE",
+            "Advanced libpq setting `setup_flows_db_typed::flagged_advanced` validates; repeatable.",
+        )
+    },
+    Flag::choice(
+        "embed",
+        "local|online|hosted|remote|skip|none|off",
+        "Embedding role `setup_step_ask::ask_role` takes.",
+        &["local", "online", "hosted", "remote", "skip", "none", "off"],
+    ),
+    Flag::text(
+        "embed-url",
+        "U",
+        "Embedding endpoint `setup_step_ask` checks and records.",
+    ),
+    Flag::text(
+        "embed-model",
+        "M",
+        "Embedding model `setup_step_ask` records for the endpoint.",
+    ),
+    Flag::text(
+        "embed-key",
+        "K",
+        "Embedding API key `setup_step_ask` reads for the endpoint.",
+    ),
+    Flag::choice(
+        "embed-provider",
+        "tei|openai",
+        "Embedding provider `setup_step_ask::service_provider` restricts.",
+        &["tei", "openai"],
+    ),
+    Flag::uint(
+        "embed-dims",
+        "N",
+        "Hosted embedding dimensions `setup_cli::preflight` requires above zero.",
+    ),
+    Flag::choice(
+        "rerank",
+        "local|online|hosted|remote|skip|none|off",
+        "Reranking role `setup_step_ask::ask_role` takes.",
+        &["local", "online", "hosted", "remote", "skip", "none", "off"],
+    ),
+    Flag::text(
+        "rerank-url",
+        "U",
+        "Reranking endpoint `setup_step_ask` checks and records.",
+    ),
+    Flag::text(
+        "rerank-model",
+        "M",
+        "Reranking model `setup_step_ask` records for the endpoint.",
+    ),
+    Flag::text(
+        "rerank-key",
+        "K",
+        "Reranking API key `setup_step_ask` reads for the endpoint.",
+    ),
+    Flag::choice(
+        "rerank-provider",
+        "tei|cohere",
+        "Reranking provider `setup_step_ask::service_provider` restricts.",
+        &["tei", "cohere"],
+    ),
+    Flag::choice(
+        "extract",
+        "local|skip|none|online|hosted",
+        "Extraction role `setup_step_extract::ask_extract` takes.",
+        &["local", "skip", "none", "online", "hosted"],
+    ),
+    Flag::text(
+        "compose-dir",
+        "DIR",
+        "Compose root `setup_verify::start_and_check` uses; the cwd decides it when absent.",
+    ),
+    Flag::choice(
+        "key-store",
+        "file|keystore",
+        "Encryption key store `setup_key_source::ask` takes.",
+        &["file", "keystore"],
+    ),
+    Flag::choice(
+        "sync-store",
+        "file|keystore",
+        "Sync key store `setup_sync_key_source::ask` takes.",
+        &["file", "keystore"],
+    ),
+    Flag::toggle(
+        "allow-untested",
+        "Saves answers after a failed test in `setup_flows_db::finish`.",
+    ),
+    Flag::toggle(
+        "yes",
+        "Forces non-interactive mode in `setup_cli::interactive_mode`.",
+    ),
+    Flag::toggle(
+        "non-interactive",
+        "Forces non-interactive mode in `setup_cli::interactive_mode`.",
+    ),
+    Flag::toggle(
+        "interactive",
+        "Requires a terminal in `setup_cli::interactive_mode`.",
+    ),
+];
 
 /// `--type`'s dedicated usage error.
 ///
@@ -91,13 +229,15 @@ pub(crate) const ROTATE_REMOVED: &str = "--rotate-database-password was removed;
      Clio manages has no password and is published on this machine only, so there is nothing to \
      rotate. Run clio setup --help";
 
-/// Parse `--flag value` / `--boolean` tokens against the known flag sets.
-/// Boolean flags are recognized so a valued flag may follow them.
+/// Parse `--flag value` / `--boolean` tokens against the setup record's
+/// accepted flags. Boolean flags are recognized so a valued flag may follow
+/// them.
 ///
 /// # Errors
 /// An unexpected positional argument, an unknown flag, a missing value, or the
 /// retired `--type` flag with its replacement message.
 pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>, String> {
+    let accepted = accepted_flags();
     let mut flags = HashMap::new();
     let mut it = raw.iter();
     while let Some(token) = it.next() {
@@ -106,49 +246,62 @@ pub(crate) fn parse_setup_args(raw: &[String]) -> Result<HashMap<String, String>
                 "unexpected argument `{token}`; try `clio setup --help`"
             ));
         };
-        if BOOLEAN_FLAGS.contains(&name) {
+        // `--help` is the surface's own help spelling: value-less, never a
+        // record entry, accepted by name the way the shared parser accepts it.
+        if name == "help" {
             flags.insert(name.to_owned(), "true".to_owned());
             continue;
         }
-        if VALUE_FLAGS.contains(&name) {
-            let value = it
-                .next()
-                .ok_or_else(|| format!("--{name} requires a value"))?;
-            if value.starts_with("--") {
-                return Err(format!("--{name} requires a value"));
+        let Some(flag) = accepted.iter().find(|flag| flag.long == name) else {
+            if name == "type" {
+                return Err(TYPE_REMOVED.to_owned());
             }
-            if value.trim().is_empty() {
-                return Err(
-                    crate::cli_error::reject_blank_value(&format!("--{name}"), value)
-                        .expect_err("an empty value is always refused")
-                        .message()
-                        .to_owned(),
-                );
+            if name == "rotate-database-password" {
+                return Err(ROTATE_REMOVED.to_owned());
             }
-            if name == REPEATABLE_FLAG {
-                flags
-                    .entry(name.to_owned())
-                    .and_modify(|kept| {
-                        kept.push('\n');
-                        kept.push_str(value);
-                    })
-                    .or_insert_with(|| value.clone());
-                continue;
-            }
-            crate::cli_error::reject_repeated_flag(&format!("--{name}"), flags.contains_key(name))
-                .map_err(|error| error.message().to_owned())?;
-            flags.insert(name.to_owned(), value.clone());
+            return Err(format!("unknown flag `--{name}`; try `clio setup --help`"));
+        };
+        if flag.value.is_none() {
+            flags.insert(name.to_owned(), "true".to_owned());
             continue;
         }
-        if name == "type" {
-            return Err(TYPE_REMOVED.to_owned());
+        let value = it
+            .next()
+            .ok_or_else(|| format!("--{name} requires a value"))?;
+        if value.starts_with("--") {
+            return Err(format!("--{name} requires a value"));
         }
-        if name == "rotate-database-password" {
-            return Err(ROTATE_REMOVED.to_owned());
+        if value.trim().is_empty() {
+            return Err(
+                crate::cli_error::reject_blank_value(&format!("--{name}"), value)
+                    .expect_err("an empty value is always refused")
+                    .message()
+                    .to_owned(),
+            );
         }
-        return Err(format!("unknown flag `--{name}`; try `clio setup --help`"));
+        if flag.repeatable {
+            flags
+                .entry(name.to_owned())
+                .and_modify(|kept| {
+                    kept.push('\n');
+                    kept.push_str(value);
+                })
+                .or_insert_with(|| value.clone());
+            continue;
+        }
+        crate::cli_error::reject_repeated_flag(&format!("--{name}"), flags.contains_key(name))
+            .map_err(|error| error.message().to_owned())?;
+        flags.insert(name.to_owned(), value.clone());
     }
     Ok(flags)
+}
+
+/// The setup record's accepted flags: the one table the record documents and
+/// this parser reads.
+fn accepted_flags() -> &'static [Flag] {
+    crate::cli_command_registry::find("setup")
+        .unwrap_or_else(|| panic!("`setup` is registered"))
+        .documented
 }
 
 /// The `--help` text: every flag, the database choices, and the SSL rule.

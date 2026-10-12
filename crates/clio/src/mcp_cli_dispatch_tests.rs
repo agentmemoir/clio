@@ -7,7 +7,8 @@
 //! spellings, and the fail-closed flag check on a subcommand.
 //!
 //! ## Owns
-//! - Dispatch and exit-code tests for the `mcp` entry point's own branches
+//! - Dispatch, exit-code, and record-help-bytes tests for the `mcp` entry
+//!   point's own branches
 //!
 //! ## Does not own
 //! - The subcommand handlers and flag decoding (`mcp_cli_tests`)
@@ -39,6 +40,36 @@ fn schema_export_rejects_an_undeclared_flag() {
     assert_eq!(
         mcp(args_of(&["schema-export", "--bogus"])),
         ExitCode::from(2)
+    );
+}
+
+/// Asking `schema-export` for help renders from its record. It used to fall
+/// through and print the whole schema pack, so the answer was 70 KB of JSON
+/// that never said what the command takes.
+#[test]
+fn schema_export_answers_help_from_its_record() {
+    // Both help spellings take the record branch, not the pack fall-through.
+    for spelling in ["--help", "-h"] {
+        assert_eq!(
+            mcp(args_of(&["schema-export", spelling])),
+            ExitCode::SUCCESS,
+            "{spelling}"
+        );
+    }
+    // The bytes the handler prints are the record's usage line and notes, not
+    // the schema pack: the old fall-through printed a pack holding
+    // `am_tool_schema_pack` and none of the markers below.
+    let text = schema_export_help_text();
+    let usage = crate::cli_help_usage::usage_line("mcp schema-export")
+        .expect("the record registers a usage line");
+    assert!(text.contains(&usage), "usage line missing: {text}");
+    assert!(
+        text.contains("--out FILE writes the pack to a file"),
+        "record notes missing: {text}"
+    );
+    assert!(
+        !text.contains("am_tool_schema_pack"),
+        "help must not print the pack: {text}"
     );
 }
 
