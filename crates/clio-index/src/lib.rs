@@ -56,6 +56,7 @@ mod rebuild;
 mod report;
 mod search;
 mod worker;
+mod worker_observe;
 
 #[cfg(test)]
 mod embed_test_support;

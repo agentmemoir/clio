@@ -10,6 +10,7 @@
 //! - A local TEI-compatible HTTP double and the Postgres live-path scenario
 //! - The private schema that scopes this test's store-global drain report
 //! - Retry/backlog setup and `maintenance_status` assertions
+//! - The targeted one-item drain a one-shot write runs after the batch
 //!
 //! ## Does not own
 //! - Index-drain production policy (`index_drain`)
@@ -306,4 +307,40 @@ fn maintenance_status_keeps_failed_backlog_visible_after_wait() {
     assert_eq!(index["coverage_last_error"], json!(error), "{status}");
     drop(state);
     sweeper.join().expect("join backlog sweeper");
+}
+
+/// A one-shot write's targeted drain indexes the one item it stored, so the item
+/// is searchable without waiting on the bounded batch; a second drain for the
+/// same item finds nothing to do.
+#[test]
+fn a_targeted_drain_indexes_the_item_a_write_stored() {
+    let state = sqlite_state();
+    let bank = unique_id("mcp-item-drain-bank");
+    let id = unique_id("mcp-item-drain-item");
+    let stored = call(&state, "store", store_args(&bank, &id));
+    assert_eq!(stored["ok"], json!(true), "{stored}");
+    assert_eq!(stored["id"], json!(id));
+
+    let report = state
+        .drain_index_item(&bank, &id)
+        .expect("drain the stored item");
+    assert_eq!(report.lexical_only, 1, "{report:?}");
+    assert_eq!(report.failed, 0, "{report:?}");
+
+    let retrieved = call(
+        &state,
+        "retrieve",
+        json!({"query": "postgres durable drain retrieval", "bank": bank, "limit": 5}),
+    );
+    assert!(hit_ids(&retrieved).contains(&id), "{retrieved}");
+
+    // The job is gone, so a second targeted drain finds nothing to do.
+    let again = state
+        .drain_index_item(&bank, &id)
+        .expect("drain the stored item again");
+    assert_eq!(
+        again.applied + again.lexical_only + again.skipped + again.failed,
+        0,
+        "{again:?}"
+    );
 }
