@@ -77,8 +77,10 @@ mod cli_confirm;
 mod cli_error;
 mod cli_error_names;
 mod cli_help;
+mod cli_help_markdown;
 mod cli_help_surfaces;
 mod cli_help_usage;
+mod cli_manual_write;
 mod cli_output;
 mod cli_read;
 mod cli_read_args;
@@ -243,20 +245,27 @@ fn dispatch(cmd: &str, trailing: Vec<String>) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        "help" | "--help" | "-h" => {
-            if wants_json_catalog(&trailing) {
-                cli_help::write_catalog(&mut std::io::stdout()).expect("write help catalog");
-                return ExitCode::SUCCESS;
-            }
-            match help_topic(&trailing) {
-                Ok(Some(topic)) => dispatch(&topic.0, topic.1),
-                Ok(None) => {
-                    print_help();
-                    ExitCode::SUCCESS
-                }
+        "help" | "--help" | "-h" => match cli_top_level::markdown_request(&trailing) {
+            Ok(Some(out_dir)) => match cli_manual_write::write_manual(&out_dir) {
+                Ok(()) => ExitCode::SUCCESS,
                 Err(error) => report_usage_error(&error, &trailing),
+            },
+            Ok(None) => {
+                if wants_json_catalog(&trailing) {
+                    cli_help::write_catalog(&mut std::io::stdout()).expect("write help catalog");
+                    return ExitCode::SUCCESS;
+                }
+                match help_topic(&trailing) {
+                    Ok(Some(topic)) => dispatch(&topic.0, topic.1),
+                    Ok(None) => {
+                        print_help();
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => report_usage_error(&error, &trailing),
+                }
             }
-        }
+            Err(error) => report_usage_error(&error, &trailing),
+        },
         "backup" => backup_cli::backup(trailing),
         "auth" => auth_cli::auth(trailing),
         "mcp" => mcp_cli::mcp(trailing),

@@ -46,12 +46,30 @@ const HARNESS_REQUIRED: Flag = Flag {
     ..Flag::text("harness", "<name>", "Harness `install_cli` resolves.")
 };
 
-/// The `--json` flag of `help`, the one boolean flag the help dispatch reads.
+/// The `--json` flag of `help`, one of the two boolean flags the help dispatch
+/// reads.
 const HELP_JSON: Flag = Flag::toggle("json", "Selects the JSON catalog `cli_top_level` prints.");
 
-/// The `help` line: the flag comes before the topic it narrows, which the
+/// The `--markdown` flag of `help`: whole-manual generation instead of a
+/// screen. It combines with no other output mode and takes no `TOPIC`.
+const HELP_MARKDOWN: Flag = Flag::toggle(
+    "markdown",
+    "Writes the whole Markdown manual (one page per leaf command plus an index) into `--out DIR` instead of printing; exclusive with `--json` and with a TOPIC.",
+);
+
+/// The `--out` directory flag of `help`: mandatory with `--markdown`, refused
+/// without it. The record marks no flag `required`, because `clio help` alone
+/// still runs, so the conditional requirement is stated here and enforced by
+/// `cli_top_level::markdown_request`.
+const HELP_OUT: Flag = Flag::text(
+    "out",
+    "DIR",
+    "Names the directory `--markdown` writes the manual into; required with `--markdown`, refused without it.",
+);
+
+/// The `help` line: the flags come before the topic they narrow, which the
 /// assembled order cannot write, so the line is pinned.
-const HELP_USAGE: &str = "clio help [--json] [TOPIC]";
+const HELP_USAGE: &str = "clio help [--json] [--markdown --out DIR] [TOPIC]";
 
 /// The `setup` line: the wizard's flag grammar keeps its own parser, and its
 /// usage text names the whole accepted set, so the line is pinned.
@@ -120,14 +138,14 @@ pub(crate) const HEALTH: CommandSpec = CommandSpec {
 };
 
 /// `clio help`: the catalog screen and its topics; `--json` selects the
-/// machine-readable catalog.
+/// machine-readable catalog and `--markdown --out DIR` the whole manual.
 pub(crate) const HELP: CommandSpec = CommandSpec {
     name: "help",
     aliases: &[],
     summary: "Global flags: --db --backend --bank --actor --output (-o). Output mode: an explicit `--output`/`-o` always wins; otherwise text on a terminal (TTY) and JSON when piped. Forms: `--output json`, `--output=json`, `-o json`, `-o=json`. Empty values: a value flag given an empty value (`--bank ''`) is refused on every command; leave the flag off to take the default. Use -- after the command before positional text that starts with -; keep flags before it. Exit codes: 0 ok, 1 domain or runtime failure, 2 usage error or documented command refusal (ops repair or backup restore), 3 is a command-specific degraded outcome (clio ops reindex, backup prune or backup create --keep, or backup restore). Process stops caused by SIGPIPE, SIGINT, or SIGTERM cannot report a CLI error; shells that use the 128+signal convention show these as 141, 130, or 143, outside the command exit codes",
     notes: &[],
     positionals: &[TOPIC],
-    documented: &[HELP_JSON],
+    documented: &[HELP_JSON, HELP_MARKDOWN, HELP_OUT],
     accepted_extra: &[],
     flag_aliases: &[],
     usage_override: Some(HELP_USAGE),
@@ -144,6 +162,10 @@ pub(crate) const HELP: CommandSpec = CommandSpec {
         Example {
             command: "clio help --json",
             comment: Some("Print the machine-readable catalog."),
+        },
+        Example {
+            command: "clio help --markdown --out ./manual",
+            comment: Some("Write the whole Markdown manual into ./manual."),
         },
     ],
     tool: None,

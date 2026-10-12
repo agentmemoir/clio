@@ -66,7 +66,12 @@ fn the_help_record_describes_its_topic_and_keeps_its_variants() {
         .collect();
     assert_eq!(
         commands,
-        ["clio help", "clio help backup", "clio help --json"],
+        [
+            "clio help",
+            "clio help backup",
+            "clio help --json",
+            "clio help --markdown --out ./manual",
+        ],
         "the help record's examples"
     );
 }
