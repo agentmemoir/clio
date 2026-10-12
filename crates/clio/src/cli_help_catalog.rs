@@ -49,8 +49,8 @@ const CATALOG_FORMAT_VERSION: u32 = 2;
 /// command the CLI accepts that binds no tool is still listed.
 /// `command_specs`, `groups`, and `shared_global` serialize the registry
 /// records and their derived tables, and `cli_hash` fingerprints that
-/// CLI-side metadata — the tools and the pack hash are excluded, because the
-/// pack's own hash covers them.
+/// CLI-side metadata — the tools, the protocol revision, and the pack's own
+/// `catalog_hash` are excluded, because they belong to the pack.
 pub(crate) fn catalog() -> Value {
     validate_names();
     let pack = clio_mcp::schema::schema_pack();
@@ -212,8 +212,9 @@ fn shared_global_json() -> Value {
 /// projections, the groups, and the shared/global flags. `serde_json` sorts
 /// object keys, every array keeps its registry or derived order, and the
 /// metadata holds no floats, so the compact bytes are canonical. The pack's
-/// `catalog_hash` covers the tools and the protocol revision; the distinct
-/// `cli_hash` name keeps the two payloads apart.
+/// `catalog_hash` covers the tools list only; the protocol revision is exposed
+/// verbatim and is covered by neither hash. The distinct `cli_hash` name keeps
+/// the two payloads apart.
 fn metadata_hash(payload: &Value) -> String {
     let bytes = serde_json::to_string(payload).unwrap_or_default();
     clio_mcp::schema::fnv1a64_hex(bytes.as_bytes())

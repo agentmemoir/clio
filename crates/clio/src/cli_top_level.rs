@@ -87,10 +87,9 @@ pub(crate) fn markdown_request(args: &[String]) -> Result<Option<PathBuf>, CliEr
     while index < args.len() {
         let arg = args[index].as_str();
         // A lifted global's value is not a TOPIC: `main` appends it after the verb.
-        let name = arg.strip_prefix("--").unwrap_or(arg);
-        let global = arg == "-o"
-            || crate::cli_command_registry::global_value_names().any(|flag| flag == name);
-        if global && args.get(index + 1).is_some_and(|v| !v.starts_with("--")) {
+        if crate::cli_args::is_global_value_flag(arg)
+            && args.get(index + 1).is_some_and(|v| !v.starts_with("--"))
+        {
             index += 2;
             continue;
         }
@@ -179,15 +178,16 @@ pub(crate) fn report_usage_error(error: &CliError, raw: &[String]) -> ExitCode {
 ///
 /// A two-word topic such as `ops diagnose` becomes the verb plus its own
 /// subcommand, so it reaches the same code `clio ops diagnose --help` reaches.
+/// A global value flag's value is not the topic and not a second topic word.
 pub(crate) fn help_topic(args: &[String]) -> Result<Option<(String, Vec<String>)>, CliError> {
-    let Some(position) = args.iter().position(|arg| !arg.starts_with('-')) else {
+    let words = crate::cli_args::word_positions(args);
+    let Some(&position) = words.first() else {
         return Ok(None);
     };
     let verb = args[position].trim_start_matches("clio ").to_owned();
     if !cli_help::is_known_command(&verb) {
         let mut error = unknown_command(&verb);
-        let has_second_word = args[position + 1..].iter().any(|arg| !arg.starts_with('-'));
-        if has_second_word {
+        if words.len() > 1 {
             error = error.with_hint(format!(
                 "`clio help` takes one topic; try `clio help {verb}`"
             ));
