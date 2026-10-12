@@ -35,7 +35,7 @@
 // surfaces and the frozen golden capture keep their exact output.
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
-use crate::cli_command_spec::{CommandSpec, Flag, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
 /// The declared globals a ranking leaf accepts without printing: the shared
 /// parser admits every declared global, so the leaves that print only their
@@ -53,7 +53,8 @@ const SCHEMA_UNPRINTED: &[&str] = &[
 ];
 
 /// The required `--patch JSON` of `ranking set`: the usage line writes it bare
-/// because the verb refuses to run without one.
+/// because the verb refuses to run without one, and `--patch-file FILE` is the
+/// alternate input the examples may author instead.
 const PATCH: Flag = Flag {
     required: true,
     ..Flag::text(
@@ -64,7 +65,8 @@ const PATCH: Flag = Flag {
 };
 
 /// The required `--profile JSON` of `retention set`: the usage line writes it
-/// bare because the verb refuses to run without one.
+/// bare because the verb refuses to run without one, and `--profile-file FILE`
+/// is the alternate input the examples may author instead.
 const PROFILE: Flag = Flag {
     required: true,
     ..Flag::text(
@@ -109,7 +111,16 @@ pub(crate) const RANKING_GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio ranking get",
+            comment: None,
+        },
+        Example {
+            command: "clio ranking get -o json",
+            comment: None,
+        },
+    ],
     tool: Some("ranking_env_get"),
     section: Section::Read,
 };
@@ -138,7 +149,20 @@ pub(crate) const RANKING_SET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio ranking set --patch '{\"theta_admit\":0.6}'",
+            comment: None,
+        },
+        Example {
+            command: "clio ranking set --patch-file patch.json --dry-run",
+            comment: None,
+        },
+        Example {
+            command: "clio ranking set --patch '{\"theta_admit\":0.6}' -o json",
+            comment: None,
+        },
+    ],
     tool: Some("ranking_env_set"),
     section: Section::Write,
 };
@@ -162,7 +186,16 @@ pub(crate) const RETENTION_GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio retention get --profiles ./retention.json",
+            comment: None,
+        },
+        Example {
+            command: "clio retention get --bank work --profiles ./retention.json",
+            comment: None,
+        },
+    ],
     tool: None,
     section: Section::Read,
 };
@@ -193,7 +226,20 @@ pub(crate) const RETENTION_SET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio retention set --profiles ./retention.json --profile '{\"verbosity\":\"selective\"}'",
+            comment: None,
+        },
+        Example {
+            command: "clio retention set --profiles ./retention.json --scope deployment --profile-file profile.json",
+            comment: None,
+        },
+        Example {
+            command: "clio retention set --bank work --profiles ./retention.json --profile '{\"theta_offsets\":{\"persona\":0.15}}'",
+            comment: None,
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -210,7 +256,16 @@ pub(crate) const RETENTION_SCHEMA: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio retention schema",
+            comment: None,
+        },
+        Example {
+            command: "clio retention schema -o json",
+            comment: None,
+        },
+    ],
     tool: None,
     section: Section::Read,
 };

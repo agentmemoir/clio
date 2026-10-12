@@ -22,8 +22,8 @@
 //!
 //! Keep this module focused on these eight records' data.
 
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
+use crate::cli_command_registry_test_support::{assert_example_count, positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section};
 
 /// The tranche's record names, in head-group order.
 const NAMES: [&str; 8] = [
@@ -62,15 +62,7 @@ fn task_get_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "one task and its current state");
     assert_eq!(spec.tool, Some("task_get"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "TASK_ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("TASK_ID", true)]);
     assert!(spec.required_flags().is_empty(), "task get required flags");
 }
 
@@ -99,15 +91,7 @@ fn task_history_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "a task's recorded transitions");
     assert_eq!(spec.tool, Some("task_history"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "TASK_ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("TASK_ID", true)]);
     assert!(
         spec.required_flags().is_empty(),
         "task history required flags"
@@ -151,15 +135,7 @@ fn task_upsert_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "create or update one task");
     assert_eq!(spec.tool, Some("task_upsert"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "TASK_ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("TASK_ID", true)]);
     assert_eq!(spec.required_flags(), ["definition", "status"]);
 }
 
@@ -188,15 +164,7 @@ fn failure_list_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "failures recorded against one task");
     assert_eq!(spec.tool, Some("failures_for_task"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "TASK_ID_OR_QUERY",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("TASK_ID_OR_QUERY", true)]);
     assert!(
         spec.required_flags().is_empty(),
         "failure list required flags"
@@ -243,15 +211,7 @@ fn failure_record_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(spec.tool, Some("failure_record"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "TASK_ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("TASK_ID", true)]);
     assert_eq!(
         spec.required_flags(),
         ["attempt-n", "what-failed", "lesson"]
@@ -326,15 +286,7 @@ fn memtree_get_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "one memory-tree node and its lineage");
     assert_eq!(spec.tool, Some("memtree_get"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "NODE_ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("NODE_ID", true)]);
     assert!(
         spec.required_flags().is_empty(),
         "memtree get required flags"
@@ -378,15 +330,7 @@ fn history_temporal_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(spec.tool, Some("temporal_history"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "TARGET",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("TARGET", true)]);
     assert!(
         spec.required_flags().is_empty(),
         "history temporal required flags"
@@ -425,8 +369,9 @@ fn the_write_subcommands_carry_their_required_bits() {
     );
 }
 
-/// These records carry no aliases, flag aliases, overrides, alternates, prose,
-/// or examples. This pins that none of them grew quietly.
+/// These records carry no aliases, flag aliases, overrides, alternates, or
+/// prose; each carries two to four examples. This pins that none of them grew
+/// quietly.
 #[test]
 fn the_eight_records_carry_no_extra_surfaces() {
     for name in NAMES {
@@ -435,7 +380,7 @@ fn the_eight_records_carry_no_extra_surfaces() {
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_override.is_none(), "{name} override");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
+        assert_example_count(name, spec);
         assert!(spec.notes.is_empty(), "{name} notes");
     }
 }

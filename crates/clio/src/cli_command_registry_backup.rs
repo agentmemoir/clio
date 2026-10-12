@@ -34,7 +34,7 @@
 // the frozen golden capture keep their exact output.
 
 use crate::cli_command_registry::{GLOBAL_BACKEND, GLOBAL_DB, GLOBAL_OUTPUT};
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
 /// The globals a backup leaf accepts without printing: the shared parser
 /// merges every declared global, so the leaves that print only their own flags
@@ -53,7 +53,8 @@ const RESTORE_UNPRINTED: &[&str] = &["db", "backend", "bank", "actor"];
 const ID: Positional = Positional {
     label: "ID",
     required: true,
-    description: "",
+    description: "Snapshot id from the backup directory's listing; `restore` restores that \
+                  archive and `verify` re-checks it.",
 };
 
 /// The `--keep` count: `prune` requires it and refuses a missing one, so the
@@ -134,7 +135,20 @@ pub(crate) const BACKUP_CREATE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio backup create --db ./memory.db --label nightly",
+            comment: Some("Snapshot the SQLite store under a manifest label."),
+        },
+        Example {
+            command: "clio backup create --db ./memory.db --dry-run",
+            comment: Some("Report the plan and write nothing."),
+        },
+        Example {
+            command: "clio backup create --db ./memory.db --keep 3 --confirm",
+            comment: Some("Snapshot, then prune to the newest three."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -151,7 +165,16 @@ pub(crate) const BACKUP_DIR: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio backup dir",
+            comment: Some("Show and create the backup directory."),
+        },
+        Example {
+            command: "clio backup dir -o json",
+            comment: Some("Print the directory path as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Read,
 };
@@ -175,7 +198,20 @@ pub(crate) const BACKUP_LIST: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio backup list",
+            comment: Some("List every snapshot, newest first."),
+        },
+        Example {
+            command: "clio backup list --limit 5",
+            comment: Some("Cap the listing at five snapshots."),
+        },
+        Example {
+            command: "clio backup list -o json",
+            comment: Some("Emit the rows as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Read,
 };
@@ -203,7 +239,20 @@ pub(crate) const BACKUP_PRUNE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio backup prune --keep 3",
+            comment: Some("Report which snapshots a prune would delete."),
+        },
+        Example {
+            command: "clio backup prune --keep 3 --confirm",
+            comment: Some("Delete all but the newest three."),
+        },
+        Example {
+            command: "clio backup prune --keep 3 --dry-run -o json",
+            comment: Some("Report as JSON and remove nothing."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -246,7 +295,20 @@ pub(crate) const BACKUP_RESTORE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(RESTORE_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio backup restore clio-20260910T002640Z-0a1b2c3d --dry-run",
+            comment: Some("Print the restore plan for one snapshot."),
+        },
+        Example {
+            command: "clio backup restore clio-20260910T002640Z-0a1b2c3d --yes",
+            comment: Some("Restore one snapshot without a typed confirmation."),
+        },
+        Example {
+            command: "clio backup restore clio-20260910T002700Z-1b2c3d4e --yes",
+            comment: Some("Restore a second listed snapshot."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -269,7 +331,20 @@ pub(crate) const BACKUP_VERIFY: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(VERIFY_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio backup verify clio-20260910T002640Z-0a1b2c3d",
+            comment: Some("Re-check one snapshot's digests and payload."),
+        },
+        Example {
+            command: "clio backup verify clio-20260910T002700Z-1b2c3d4e",
+            comment: Some("Verify a second listed snapshot."),
+        },
+        Example {
+            command: "clio backup verify clio-20260910T002640Z-0a1b2c3d -o json",
+            comment: Some("Verify one snapshot and print the verdict as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Read,
 };

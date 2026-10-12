@@ -9,13 +9,13 @@
 //! ## Owns
 //! - `all`, `names`, `find`, `resolve`, and `aliases` over the real registry
 //! - `validate` accepted against the catalog inventory, and every rejected
-//!   bad state over pure records
+//!   bad state over pure records: names, command aliases with the cycle walk,
+//!   and flag aliases
 //! - The global flag names, order, and short spelling
-//! - The flag-metadata contract: `check_metadata` over the real registry, its
-//!   rejection cases, and the enum lists the global consumers parse
 //!
 //! ## Does not own
 //! - The per-record bytes and parser sets (the tranche test modules)
+//! - The metadata, completeness, and example tests (`cli_command_registry_examples_tests`)
 //! - The renderer's shapes over pure records (`cli_command_spec_tests`)
 //!
 //! ## Boundary
@@ -27,10 +27,10 @@
 use std::collections::BTreeSet;
 
 use super::{
-    aliases, all, check_metadata, find, global_bool_names, global_flag, global_value_names, names,
-    resolve, resolve_in, validate,
+    aliases, all, find, global_bool_names, global_flag, global_value_names, names, resolve,
+    resolve_in, validate,
 };
-use crate::cli_command_spec::{CommandSpec, Flag, Section, ValueKind};
+use crate::cli_command_spec::{CommandSpec, Flag, Section};
 
 /// A pure record with only the name, aliases, and tool these tests vary.
 const fn record(
@@ -169,8 +169,7 @@ fn the_registry_registers_the_core_reads_then_the_group_and_write_tranches() {
 /// `find` resolves each name it lists while reporting an unregistered miss.
 ///
 /// `names` maps `all` one to one, so the tranche-spanning pin below is the
-/// independent input: a lookup that stopped walking a tranche would drop its
-/// names here.
+/// independent input: a lookup that stopped walking a tranche would drop its names here.
 #[test]
 fn names_and_find_expose_every_registered_record() {
     let names: Vec<&str> = names().collect();
@@ -215,10 +214,16 @@ fn resolve_in_answers_aliases_and_prefers_a_visible_name() {
     assert_eq!(resolve_in(specs.iter().copied(), "missing"), None);
 }
 
-/// No registered record declares an alias yet, so `aliases` is empty.
+/// `aliases` reports exactly the one declared alias pair; an emptied relation fails here.
 #[test]
 fn aliases_reports_the_declared_aliases() {
-    assert_eq!(aliases().count(), 0);
+    assert_eq!(aliases().collect::<Vec<_>>(), [("show", "get")]);
+    for (alias, name) in aliases() {
+        assert!(
+            find(name).is_some_and(|spec| spec.aliases.contains(&alias)),
+            "alias `{alias}` belongs to `{name}`"
+        );
+    }
 }
 
 /// The real registry satisfies `validate` against the catalog inventory.
@@ -361,69 +366,85 @@ fn validate_accepts_a_flag_documented_twice_by_one_record() {
     assert_eq!(validate(&[&spec], &["auth token add"]), Ok(()));
 }
 
-/// Every documented flag in the real registry and every declared global carries
-/// complete metadata: a description, and for a value flag a placeholder and a
-/// non-empty kind. This is expected to fail until the record tranches fill
-/// their own flag records.
+/// A three-record alias cycle, which no pairwise check sees, is rejected.
 #[test]
-fn validate_accepts_the_registry_flag_metadata() {
-    let specs: Vec<&CommandSpec> = all().collect();
-    assert_eq!(check_metadata(&specs), Ok(()));
-}
-
-/// A documented flag with a blank description fails the metadata check, and the
-/// error names the owning record.
-#[test]
-fn check_metadata_rejects_a_flag_with_a_blank_description() {
-    const DOCUMENTED: &[Flag] = &[Flag::value("limit", "N")];
-    let spec = CommandSpec {
-        documented: DOCUMENTED,
-        ..record("get", &[], None)
-    };
-    let error = check_metadata(&[&spec]).expect_err("a blank description is rejected");
-    assert!(error.contains("--limit"), "{error}");
-    assert!(error.contains("get"), "{error}");
-}
-
-/// A value flag with a blank placeholder fails the metadata check.
-#[test]
-fn check_metadata_rejects_a_value_flag_with_a_blank_placeholder() {
-    const DOCUMENTED: &[Flag] = &[Flag::text("limit", "", "Page size.")];
-    let spec = CommandSpec {
-        documented: DOCUMENTED,
-        ..record("get", &[], None)
-    };
-    let error = check_metadata(&[&spec]).expect_err("a blank placeholder is rejected");
-    assert!(error.contains("--limit"), "{error}");
-}
-
-/// An `Enum` value kind with an empty allowed-value list fails the check.
-#[test]
-fn check_metadata_rejects_an_enum_with_an_empty_allowed_list() {
-    const DOCUMENTED: &[Flag] = &[Flag::choice("scope", "SCOPE", "Scope.", &[])];
-    let spec = CommandSpec {
-        documented: DOCUMENTED,
-        ..record("get", &[], None)
-    };
-    let error = check_metadata(&[&spec]).expect_err("an empty allowed list is rejected");
-    assert!(error.contains("--scope"), "{error}");
-}
-
-/// The declared globals carry the enum lists their consumers parse:
-/// `clio_store`'s backend parser accepts the two store backends, and
-/// `cli_output::resolve_output` accepts the two output modes.
-#[test]
-fn the_global_enums_name_the_values_their_consumers_parse() {
-    let backend = global_flag("backend").expect("backend is declared");
-    let output = global_flag("output").expect("output is declared");
-    assert_eq!(
-        backend.value.expect("backend takes a value").kind,
-        ValueKind::Enum(&["sqlite", "postgres"]),
-        "global --backend"
+fn validate_rejects_a_three_record_alias_cycle() {
+    let get = record("get", &["show"], Some("team"));
+    let show = record("show", &["stats"], Some("team"));
+    let stats = record("stats", &["get"], Some("team"));
+    let error = validate(&[&get, &show, &stats], &["get", "show", "stats"])
+        .expect_err("a three-record alias cycle is rejected");
+    assert!(
+        error.contains("cycle") && error.contains("stats"),
+        "{error}"
     );
-    assert_eq!(
-        output.value.expect("output takes a value").kind,
-        ValueKind::Enum(&["json", "text"]),
-        "global --output"
-    );
+}
+
+/// A record named `get` documenting `--path`, `--out`, `--alpha`, and `--beta`.
+fn aliased_record(pairs: &'static [(&'static str, &'static str)]) -> CommandSpec {
+    const DOCUMENTED: &[Flag] = &[
+        Flag::text("path", "PATH", "The path."),
+        Flag::text("out", "OUT", "The out."),
+        Flag::text("alpha", "A", "The alpha."),
+        Flag::text("beta", "B", "The beta."),
+    ];
+    CommandSpec {
+        documented: DOCUMENTED,
+        flag_aliases: pairs,
+        ..record("get", &[], None)
+    }
+}
+
+/// A flag-alias spelling nothing can type is rejected.
+#[test]
+fn validate_rejects_a_blank_flag_alias_spelling() {
+    let spec = aliased_record(&[("", "out")]);
+    let error = validate(&[&spec], &["get"]).expect_err("a blank spelling is rejected");
+    assert!(error.contains("blank") && error.contains("get"), "{error}");
+}
+
+/// A flag-alias pair whose two spellings are equal aliases nothing.
+#[test]
+fn validate_rejects_a_flag_alias_of_itself() {
+    let spec = aliased_record(&[("path", "path")]);
+    let error = validate(&[&spec], &["get"]).expect_err("a self alias is rejected");
+    assert!(error.contains("path"), "{error}");
+}
+
+/// A flag-alias spelling the record does not accept is rejected.
+#[test]
+fn validate_rejects_a_flag_alias_the_record_does_not_accept() {
+    let spec = aliased_record(&[("missing", "path")]);
+    let error = validate(&[&spec], &["get"]).expect_err("an unaccepted spelling is rejected");
+    assert!(error.contains("missing"), "{error}");
+}
+
+/// Two records may not claim the same flag-alias spelling.
+#[test]
+fn validate_rejects_a_flag_alias_spelling_claimed_by_two_records() {
+    let first = aliased_record(&[("path", "out")]);
+    let second = CommandSpec {
+        name: "show",
+        ..aliased_record(&[("path", "out")])
+    };
+    let error =
+        validate(&[&first, &second], &["get", "show"]).expect_err("a duplicate is rejected");
+    assert!(error.contains("path") && error.contains("show"), "{error}");
+}
+
+/// A flag-alias cycle is rejected, short or long, even behind a benign pair.
+#[test]
+fn validate_rejects_a_flag_alias_cycle() {
+    const PAIRS: &[(&str, &str)] = &[("alpha", "beta"), ("path", "out"), ("out", "path")];
+    let spec = aliased_record(PAIRS);
+    let error = validate(&[&spec], &["get"]).expect_err("a flag-alias cycle is rejected");
+    assert!(error.contains("cycle"), "{error}");
+    assert!(error.contains("path"), "{error}");
+}
+
+/// The intended pair shape `("path", "out")` passes when both are accepted.
+#[test]
+fn validate_accepts_a_flag_alias_between_accepted_spellings() {
+    let spec = aliased_record(&[("path", "out")]);
+    assert_eq!(validate(&[&spec], &["get"]), Ok(()));
 }

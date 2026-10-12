@@ -11,6 +11,8 @@
 //! - The eight `CommandSpec` records and the `CORE_WRITES` tranche that lists
 //!   them in whole-catalog order
 //! - The description, value kind, and default of each documented flag
+//! - The shared `TEXT`, `ID`, and `VALUE` positional records and each
+//!   command's example rows
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -29,8 +31,13 @@
 // binding row, so both rendered surfaces keep their exact output.
 
 use crate::cli_command_registry::{GLOBAL_ACTOR, GLOBAL_BANK, GLOBAL_OUTPUT};
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::{SemanticCategory, SourceType};
+
+/// One example line with an optional short comment.
+const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
+    Example { command, comment }
+}
 
 /// These records print `--bank`/`--actor`, so only these ride along.
 const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
@@ -45,21 +52,21 @@ const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input"
 const TEXT: Positional = Positional {
     label: "TEXT",
     required: true,
-    description: "",
+    description: "The memory text that becomes the item's gist: `remember` stores it, and `admit` only scores it.",
 };
 
-/// The required `ID` positional of `update`, `invalidate`, and `discard`.
+/// The required `ID` positional of `update`, `invalidate`, `discard`, and `correct`.
 const ID: Positional = Positional {
     label: "ID",
     required: true,
-    description: "",
+    description: "The id of the target item: `update` rewrites it, `invalidate` closes its validity, `discard` removes it from active use, and `correct` replaces its value.",
 };
 
 /// The required `VALUE` positional of `update` and `correct`.
 const VALUE: Positional = Positional {
     label: "VALUE",
     required: true,
-    description: "",
+    description: "The replacement value: `update` applies it under the selected rule, and `correct` records it as an attributable revision.",
 };
 
 /// `remember` and `admit` cannot run without a category.
@@ -182,7 +189,20 @@ pub(crate) const REMEMBER: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio remember \"Bob lives in Canada\" --category persona --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio remember \"Prefers tea\" --category persona --epistemic-kind belief --source-type user_stated",
+            Some("belief carries its source type"),
+        ),
+        example(
+            "clio remember \"Reports are due Fridays\" --category task_spec -o json",
+            None,
+        ),
+    ],
     tool: Some("store"),
     section: Section::Write,
 };
@@ -211,7 +231,20 @@ pub(crate) const ADMIT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(ADMIT_USAGE),
     usage_alternates: &[ADMIT_FILE_ALTERNATE],
-    examples: &[],
+    examples: &[
+        example(
+            "clio admit \"Bob lives in Canada\" --category persona",
+            None,
+        ),
+        example(
+            "clio admit \"Prefers tea\" --category persona --epistemic-kind belief --source-type user_stated",
+            Some("belief carries its source type"),
+        ),
+        example(
+            "clio admit \"Bob lives in Canada\" --category persona -o json",
+            None,
+        ),
+    ],
     tool: Some("admit_preview"),
     section: Section::Read,
 };
@@ -228,7 +261,10 @@ pub(crate) const SUMMARIZE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio summarize --scope bank --dry-run", None),
+        example("clio summarize --scope itm-sample-1 --dry-run", None),
+    ],
     tool: Some("summarize"),
     section: Section::Write,
 };
@@ -250,7 +286,13 @@ pub(crate) const CONSOLIDATE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio consolidate --bank default --force --db ./memory.db",
+            None,
+        ),
+        example("clio consolidate --bank default --dry-run -o json", None),
+    ],
     tool: Some("consolidate"),
     section: Section::Write,
 };
@@ -273,7 +315,20 @@ pub(crate) const UPDATE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio update itm-sample-1 \"lives in Toronto\" --rule discrete --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio update itm-sample-1 \"lives in Toronto\" --rule discrete --dry-run",
+            Some("preview"),
+        ),
+        example(
+            "clio update itm-sample-1 \"lives in Toronto\" --rule discrete -o json",
+            None,
+        ),
+    ],
     tool: Some("update"),
     section: Section::Write,
 };
@@ -300,7 +355,13 @@ pub(crate) const INVALIDATE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio invalidate itm-sample-1 --replacement itm-sample-2 --db ./memory.db",
+            None,
+        ),
+        example("clio invalidate itm-sample-1 --dry-run -o json", None),
+    ],
     tool: Some("invalidate"),
     section: Section::Write,
 };
@@ -324,7 +385,16 @@ pub(crate) const DISCARD: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(DISCARD_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio discard itm-sample-1 --reason duplicate --confirm --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio discard itm-sample-1 --reason duplicate --dry-run",
+            Some("preview"),
+        ),
+    ],
     tool: Some("discard"),
     section: Section::Write,
 };
@@ -349,7 +419,16 @@ pub(crate) const CORRECT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(CORRECT_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio correct itm-sample-1 \"lives in Toronto\" --reason \"user correction\" --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio correct itm-sample-1 \"lives in Toronto\" --reason \"user correction\" --context \"chat 42\"",
+            Some("replaces the bounded context"),
+        ),
+    ],
     tool: Some("correct"),
     section: Section::Write,
 };

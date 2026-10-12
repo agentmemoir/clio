@@ -241,9 +241,9 @@ fn the_ranking_group_dispatches_the_registrys_verb_list() {
 }
 
 /// The five records' summaries are the catalog rows they replaced, and none
-/// carries an alias, flag alias, alternate, or example.
+/// carries an alias, flag alias, or alternate.
 #[test]
-fn the_five_records_carry_the_catalog_rows_and_no_extra_surfaces() {
+fn the_five_records_carry_the_catalog_rows_and_no_alias_surfaces() {
     for (name, summary) in [
         ("ranking get", "read the ranking environment"),
         ("ranking set", "patch the ranking environment"),
@@ -265,7 +265,21 @@ fn the_five_records_carry_the_catalog_rows_and_no_extra_surfaces() {
         assert!(spec.aliases.is_empty(), "{name} aliases");
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
+    }
+}
+
+/// The five records carry the authored example counts, pinned here so an empty
+/// or shrunken list fails the tranche tests, not only the metadata check.
+#[test]
+fn the_five_records_carry_their_examples() {
+    for (name, count) in [
+        ("ranking get", 2),
+        ("ranking set", 3),
+        ("retention get", 2),
+        ("retention set", 3),
+        ("retention schema", 2),
+    ] {
+        assert_eq!(record(name).examples.len(), count, "{name} examples");
     }
 }
 

@@ -10,6 +10,8 @@
 //! - The five `CommandSpec` records and the `WRITE_OPERATIONS` tranche that
 //!   lists them in whole-catalog order
 //! - The description, value kind, and default of each documented flag
+//! - The `ITEM_ID` positional record `validate` documents
+//! - The usage examples of each of the five commands
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -29,7 +31,12 @@
 // binding row, so both rendered surfaces keep their exact output.
 
 use crate::cli_command_registry::{GLOBAL_ACTOR, GLOBAL_BANK, GLOBAL_OUTPUT};
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
+
+/// One example line with an optional short comment.
+const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
+    Example { command, comment }
+}
 
 /// These records print `--bank`/`--actor`, so only these ride along.
 const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
@@ -41,7 +48,7 @@ const IMPLICIT_GLOBALS_OUTSIDE_BANK: &[&str] = &["db", "backend", "actor", "no-i
 const ITEM_ID: Positional = Positional {
     label: "ITEM_ID",
     required: true,
-    description: "",
+    description: "The id of the item under review; `validate` sends it to the `validate` tool as `item_id`.",
 };
 
 /// `validate` cannot run without its action choice.
@@ -168,7 +175,20 @@ pub(crate) const VALIDATE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio validate itm-sample-1 --action attest --note \"reviewed\" --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio validate itm-sample-1 --action update --new-content \"Toronto\" --note \"user fix\"",
+            Some("update carries the replacement"),
+        ),
+        example(
+            "clio validate itm-sample-1 --action attest -o json --db ./memory.db",
+            None,
+        ),
+    ],
     tool: Some("validate"),
     section: Section::Write,
 };
@@ -203,7 +223,13 @@ pub(crate) const BATCH: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[BATCH_STDIN_ALTERNATE],
-    examples: &[],
+    examples: &[
+        example("clio batch --file ops.json --db ./memory.db", None),
+        example(
+            "clio batch --file ops.json --dry-run -o json",
+            Some("preview"),
+        ),
+    ],
     tool: Some("batch"),
     section: Section::Write,
 };
@@ -268,7 +294,20 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio export --out bundle.json --actor harness --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio export --out bundle.json --content-mode ciphertext_backup --actor system",
+            Some("backup bundle"),
+        ),
+        example(
+            "clio export --out bundle.json --category persona --actor harness -o json",
+            None,
+        ),
+    ],
     tool: Some("export"),
     section: Section::Write,
 };
@@ -302,7 +341,17 @@ pub(crate) const IMPORT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio import --source bundle.json --db ./memory.db", None),
+        example(
+            "clio import --source bundle.json --dry-run -o json",
+            Some("preview"),
+        ),
+        example(
+            "clio import --source bundle.json --force --reason \"restore\"",
+            Some("overwrite with a reason"),
+        ),
+    ],
     tool: Some("import"),
     section: Section::Write,
 };
@@ -343,7 +392,20 @@ pub(crate) const ERASE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(ERASE_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio erase --subject subj-1 --basis \"DSAR\" --request req-1 --confirm --actor system --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio erase --subject subj-1 --basis \"DSAR\" --request req-2 --dry-run",
+            Some("preview, zero writes"),
+        ),
+        example(
+            "clio erase --subject subj-2 --basis \"GDPR\" --request req-3 --reason-code AUDITED_SHRED --confirm --actor harness --bank bank-2",
+            Some("other basis, actor, and reason code"),
+        ),
+    ],
     tool: Some("erase_request"),
     section: Section::Write,
 };

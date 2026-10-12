@@ -29,7 +29,9 @@
 //!
 //! Keep this module focused on the seven auth and config records' data.
 
-use crate::cli_command_registry_test_support::record;
+use crate::cli_command_registry_test_support::{
+    assert_example_count, assert_examples_name_their_record, record,
+};
 use crate::cli_command_spec::{CommandSpec, Positional, Section};
 
 /// `auth token add` renders today's pinned line and note, and its parser keeps
@@ -176,7 +178,7 @@ fn config_get_matches_the_registered_usage_and_parser() {
         [Positional {
             label: "PATH",
             required: false,
-            description: ""
+            description: "Dotted configuration path `config get` reads; with no path the whole effective configuration prints."
         }]
         .as_slice()
     );
@@ -205,12 +207,12 @@ fn config_set_matches_the_registered_usage_and_parser() {
             Positional {
                 label: "PATH",
                 required: true,
-                description: ""
+                description: "Dotted configuration path `config set` writes; the `config_set` tool validates it before applying."
             },
             Positional {
                 label: "VALUE",
                 required: true,
-                description: ""
+                description: "Value `config set` stores at the path; decoded as JSON when it parses, otherwise stored as text."
             },
         ]
         .as_slice()
@@ -256,7 +258,7 @@ fn config_profiles_and_use_match_the_registered_usage_and_parser() {
         [Positional {
             label: "NAME",
             required: true,
-            description: ""
+            description: "Profile name `config use` applies for later commands."
         }]
         .as_slice()
     );
@@ -312,8 +314,9 @@ fn the_config_group_dispatches_the_registrys_verb_list() {
 }
 
 /// The seven records' summaries are the catalog rows they replaced, and none
-/// carries an alias, flag alias, alternate, or example; the three auth records
-/// each hold one note and the four config records none.
+/// carries an alias, flag alias, or alternate; each carries two to four
+/// examples naming its own command, the three auth records each hold one note,
+/// and the four config records none.
 #[test]
 fn the_seven_records_carry_the_catalog_rows_and_no_extra_surfaces() {
     for (name, summary) in [
@@ -343,7 +346,8 @@ fn the_seven_records_carry_the_catalog_rows_and_no_extra_surfaces() {
         assert!(spec.aliases.is_empty(), "{name} aliases");
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
+        assert_example_count(name, spec);
+        assert_examples_name_their_record(name, spec);
     }
     for name in ["auth token add", "auth token list", "auth token revoke"] {
         assert_eq!(record(name).notes.len(), 1, "{name} notes");

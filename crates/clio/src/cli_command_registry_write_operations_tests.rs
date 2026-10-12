@@ -26,8 +26,8 @@
 //!
 //! Keep this module focused on the operation-write records' data.
 
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+use crate::cli_command_registry_test_support::{positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section, ValueKind};
 
 /// One record's documented flag, as the metadata tests read it.
 fn documented_flag(name: &str, flag: &str) -> &'static crate::cli_command_spec::Flag {
@@ -41,15 +41,6 @@ fn documented_flag(name: &str, flag: &str) -> &'static crate::cli_command_spec::
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
     super::WRITE_OPERATIONS.iter().collect()
-}
-
-/// A positional literal: these records carry no positional description.
-const fn positional(label: &'static str, required: bool) -> Positional {
-    Positional {
-        label,
-        required,
-        description: "",
-    }
 }
 
 /// The tranche's records pass `validate` against the catalog inventory.
@@ -128,7 +119,7 @@ fn validate_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(spec.tool, Some("validate"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("ITEM_ID", true)].as_slice());
+    assert_eq!(positionals(spec), [("ITEM_ID", true)]);
 }
 
 /// `batch` renders the stdin alternate and builds today's parser sets.

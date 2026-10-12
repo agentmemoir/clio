@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The five `CommandSpec` records and the tranche that lists them in
 //!   whole-catalog order
+//! - The positionals and examples of those records
 //! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
@@ -24,7 +25,12 @@
 //! Keep this module focused on the five core read records.
 
 use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
+
+/// One example line with an optional short comment.
+const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
+    Example { command, comment }
+}
 
 /// The `recall` note: what a score floor is, and which flags conflict.
 const RECALL_NOTE: &str = "a score floor is a relative filter over this query's own scores, not a calibrated relevance threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)";
@@ -33,14 +39,14 @@ const RECALL_NOTE: &str = "a score floor is a relative filter over this query's 
 const QUERY: Positional = Positional {
     label: "QUERY",
     required: true,
-    description: "",
+    description: "The query text `recall` sends to `retrieve`; it is required, and the result header echoes it back.",
 };
 
 /// The required `ID` positional.
 const ID: Positional = Positional {
     label: "ID",
     required: true,
-    description: "",
+    description: "The memory id whose record is fetched; `get`/`show` pass it to the active tool as `item_id`.",
 };
 
 /// `--snapshot`, one arm of the snapshot/gist choice.
@@ -142,7 +148,17 @@ pub(crate) const RECALL: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio recall \"Bob lives in Canada\" --db ./memory.db", None),
+        example(
+            "clio recall \"Bob lives in Canada\" -o json --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio recall \"Bob lives in Canada\" --as-of 2026-02-01 --db ./memory.db",
+            None,
+        ),
+    ],
     tool: Some("retrieve"),
     section: Section::Read,
 };
@@ -150,7 +166,7 @@ pub(crate) const RECALL: CommandSpec = CommandSpec {
 /// `clio get`: fetch one memory by id, over the `get` tool.
 pub(crate) const GET: CommandSpec = CommandSpec {
     name: "get",
-    aliases: &[],
+    aliases: &["show"],
     summary: "fetch one memory by id",
     notes: &[],
     positionals: &[ID],
@@ -159,7 +175,14 @@ pub(crate) const GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio get itm-sample-1 --db ./memory.db", None),
+        example("clio get itm-sample-1 --gist -o json", None),
+        example(
+            "clio show itm-sample-2 --db ./memory.db",
+            Some("the `show` spelling"),
+        ),
+    ],
     tool: Some("get"),
     section: Section::Read,
 };
@@ -176,7 +199,14 @@ pub(crate) const SHOW: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio show itm-sample-1 --db ./memory.db", None),
+        example(
+            "clio show itm-sample-1 --snapshot",
+            Some("the stored snapshot"),
+        ),
+        example("clio show itm-sample-1 --gist -o json", None),
+    ],
     tool: Some("get"),
     section: Section::Read,
 };
@@ -246,7 +276,17 @@ pub(crate) const INSPECT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio inspect --validity active --db ./memory.db", None),
+        example(
+            "clio inspect --category persona -o json --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio inspect --filter '{\"validity\":\"active\"}' --limit 20 --db ./memory.db",
+            Some("the filter JSON takes the same keys as the flags"),
+        ),
+    ],
     tool: Some("inspect"),
     section: Section::Read,
 };
@@ -263,7 +303,10 @@ pub(crate) const STATS: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio stats --db ./memory.db", None),
+        example("clio stats --bank default -o json", None),
+    ],
     tool: Some("stats"),
     section: Section::Read,
 };

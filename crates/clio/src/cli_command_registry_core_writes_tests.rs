@@ -27,21 +27,12 @@
 //! Keep this module focused on the memory-write records' data.
 
 use crate::cli_command_registry::check_metadata;
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+use crate::cli_command_registry_test_support::{positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section, ValueKind};
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
     super::CORE_WRITES.iter().collect()
-}
-
-/// A positional literal: these records carry no positional description.
-const fn positional(label: &'static str, required: bool) -> Positional {
-    Positional {
-        label,
-        required,
-        description: "",
-    }
 }
 
 /// The tranche's records pass `validate` against the catalog inventory.
@@ -143,7 +134,7 @@ fn remember_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "", "the catalog row rendered no description");
     assert_eq!(spec.tool, Some("store"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("TEXT", true)].as_slice());
+    assert_eq!(positionals(spec), [("TEXT", true)]);
 }
 
 /// `admit` pins its printed line, shows the `--file` alternate, and carries
@@ -200,7 +191,7 @@ fn admit_renders_the_file_alternate_and_hides_the_file_flag() {
     );
     assert_eq!(spec.tool, Some("admit_preview"));
     assert_eq!(spec.section, Section::Read, "admit stores nothing");
-    assert_eq!(spec.positionals, [positional("TEXT", true)].as_slice());
+    assert_eq!(positionals(spec), [("TEXT", true)]);
 }
 
 /// `summarize` renders today's usage text and builds today's parser sets.
@@ -281,10 +272,7 @@ fn update_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "set an item's value under a named rule");
     assert_eq!(spec.tool, Some("update"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(
-        spec.positionals,
-        [positional("ID", true), positional("VALUE", true)].as_slice()
-    );
+    assert_eq!(positionals(spec), [("ID", true), ("VALUE", true)]);
 }
 
 /// `invalidate` renders today's usage text and builds today's parser sets.
@@ -312,7 +300,7 @@ fn invalidate_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "close an item's validity; never deletes");
     assert_eq!(spec.tool, Some("invalidate"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("ID", true)].as_slice());
+    assert_eq!(positionals(spec), [("ID", true)]);
 }
 
 /// `discard` renders today's usage text and builds today's parser sets.
@@ -343,7 +331,7 @@ fn discard_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(spec.tool, Some("discard"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("ID", true)].as_slice());
+    assert_eq!(positionals(spec), [("ID", true)]);
 }
 
 /// `correct` pins its printed line and prints the `--confirm` flag that gates
@@ -380,10 +368,7 @@ fn correct_pins_the_line_and_prints_the_confirm_flag() {
     assert_eq!(spec.summary, "replace an item's value with a stated reason");
     assert_eq!(spec.tool, Some("correct"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(
-        spec.positionals,
-        [positional("ID", true), positional("VALUE", true)].as_slice()
-    );
+    assert_eq!(positionals(spec), [("ID", true), ("VALUE", true)]);
 }
 
 /// Every documented flag in this tranche carries a description and, when it

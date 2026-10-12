@@ -25,8 +25,8 @@
 //! Keep this module focused on the five core read records' data.
 
 use crate::cli_command_registry::check_metadata;
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+use crate::cli_command_registry_test_support::{positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section, ValueKind};
 
 /// `recall` renders today's usage text and builds today's parser sets.
 #[test]
@@ -71,15 +71,7 @@ fn recall_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(spec.tool, Some("retrieve"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "QUERY",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("QUERY", true)]);
 }
 
 /// `get` renders today's usage text and builds today's parser sets.
@@ -107,15 +99,8 @@ fn get_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "fetch one memory by id");
     assert_eq!(spec.tool, Some("get"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(spec.aliases, ["show"], "get declares its visible alias");
+    assert_eq!(positionals(spec), [("ID", true)]);
 }
 
 /// `show` is its own visible record over the same tool, with the same usage
@@ -144,15 +129,7 @@ fn show_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "alias of `get`");
     assert_eq!(spec.tool, Some("get"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [Positional {
-            label: "ID",
-            required: true,
-            description: ""
-        }]
-        .as_slice()
-    );
+    assert_eq!(positionals(spec), [("ID", true)]);
 }
 
 /// `inspect` renders today's usage text and builds today's parser sets.
@@ -225,22 +202,42 @@ fn stats_matches_the_registered_usage_and_parser() {
     assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
 }
 
-/// The five records carry no aliases, overrides, alternates, or examples yet;
-/// only `recall` carries prose. This pins that none of them grew quietly.
+/// The records carry no flag aliases, overrides, alternates, or required
+/// flags; `get` alone declares the `show` alias, every record carries staged
+/// examples, and only `recall` carries prose. This pins that none of them
+/// grew quietly.
 #[test]
 fn the_five_records_carry_no_extra_surfaces() {
     for name in ["recall", "get", "show", "inspect", "stats"] {
         let spec = record(name);
-        assert!(spec.aliases.is_empty(), "{name} aliases");
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_override.is_none(), "{name} override");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
+        assert!(!spec.examples.is_empty(), "{name} examples");
         assert!(spec.required_flags().is_empty(), "{name} required flags");
+    }
+    assert_eq!(record("get").aliases, ["show"], "get aliases");
+    for name in ["recall", "show", "inspect", "stats"] {
+        assert!(record(name).aliases.is_empty(), "{name} aliases");
     }
     assert_eq!(record("recall").notes.len(), 1, "recall notes");
     for name in ["get", "show", "inspect", "stats"] {
         assert!(record(name).notes.is_empty(), "{name} notes");
+    }
+}
+
+/// The staged example counts: every record carries the authored list, pinned
+/// so a dropped example fails here as well as in the central contract.
+#[test]
+fn the_five_records_stage_their_examples() {
+    for (name, count) in [
+        ("recall", 3),
+        ("get", 3),
+        ("show", 3),
+        ("inspect", 3),
+        ("stats", 2),
+    ] {
+        assert_eq!(record(name).examples.len(), count, "{name} examples");
     }
 }
 

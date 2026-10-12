@@ -36,7 +36,7 @@
 // the frozen golden capture keep their exact output.
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
-use crate::cli_command_spec::{CommandSpec, Flag, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
 /// The globals a sync leaf accepts without printing: the shared parser merges
 /// every declared global, so the leaves that print only their own flags and
@@ -103,7 +103,20 @@ pub(crate) const SYNC_STATUS: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync status",
+            comment: Some("Explain what sync would do."),
+        },
+        Example {
+            command: "clio sync status --banks default",
+            comment: Some("Report one bank."),
+        },
+        Example {
+            command: "clio sync status -o json",
+            comment: Some("Emit the status report as JSON."),
+        },
+    ],
     tool: Some("sync_status"),
     section: Section::Read,
 };
@@ -142,7 +155,20 @@ pub(crate) const SYNC_PUSH: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync push --remote 127.0.0.1:8788",
+            comment: Some("Push local changes to a peer."),
+        },
+        Example {
+            command: "clio sync push --remote 127.0.0.1:8788 --banks default",
+            comment: Some("Push one bank."),
+        },
+        Example {
+            command: "clio sync push --remote 127.0.0.1:8788 --mode bidirectional",
+            comment: Some("Push and pull in one transfer."),
+        },
+    ],
     tool: Some("sync_push"),
     section: Section::Write,
 };
@@ -181,7 +207,20 @@ pub(crate) const SYNC_PULL: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync pull --remote 127.0.0.1:8788",
+            comment: Some("Take remote changes from a peer."),
+        },
+        Example {
+            command: "clio sync pull --remote 127.0.0.1:8788 --banks default",
+            comment: Some("Pull one bank."),
+        },
+        Example {
+            command: "clio sync pull --remote 127.0.0.1:8788 -o json",
+            comment: Some("Print the transfer report as JSON."),
+        },
+    ],
     tool: Some("sync_pull"),
     section: Section::Read,
 };
@@ -230,7 +269,20 @@ pub(crate) const SYNC_SERVE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync serve --token-file ./tokens.json",
+            comment: Some("Serve on an ephemeral loopback port with the shared credential store."),
+        },
+        Example {
+            command: "clio sync serve --bind 127.0.0.1:8788 --token-file ./tokens.json",
+            comment: Some("Serve on a fixed loopback port with the shared credential store."),
+        },
+        Example {
+            command: "clio sync serve --bind 127.0.0.1:8788 --dev",
+            comment: Some("Allow a token-less bind for local development."),
+        },
+    ],
     tool: Some("sync_serve"),
     section: Section::Write,
 };
@@ -255,7 +307,20 @@ pub(crate) const SYNC_KEYGEN: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync keygen",
+            comment: Some("Create the key and print it exactly once."),
+        },
+        Example {
+            command: "clio sync keygen --store file",
+            comment: Some("Create the key in the file store."),
+        },
+        Example {
+            command: "clio sync keygen --store file -o json",
+            comment: Some("Create the key in the file store and report it as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -272,7 +337,16 @@ pub(crate) const SYNC_KEY_EXPORT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync key export",
+            comment: Some("Print the stored key for a controlled copy."),
+        },
+        Example {
+            command: "clio sync key export -o json",
+            comment: Some("Print the key as JSON for the same controlled copy."),
+        },
+    ],
     tool: None,
     section: Section::Read,
 };
@@ -289,7 +363,16 @@ pub(crate) const SYNC_KEY_STATUS: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio sync key status",
+            comment: Some("Show the store, fingerprint, creation time, and count."),
+        },
+        Example {
+            command: "clio sync key status -o json",
+            comment: Some("Emit the same facts as JSON."),
+        },
+    ],
     tool: Some("sync_key_status"),
     section: Section::Read,
 };

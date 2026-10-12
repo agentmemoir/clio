@@ -24,7 +24,9 @@
 //!
 //! Keep this module focused on the seven sync records' data.
 
-use crate::cli_command_registry_test_support::record;
+use crate::cli_command_registry_test_support::{
+    assert_example_count, assert_examples_name_their_record, record,
+};
 use crate::cli_command_spec::{Section, ValueKind};
 
 /// `sync status` renders today's usage text and builds today's parser sets.
@@ -288,7 +290,8 @@ fn the_summaries_are_the_authored_catalog_rows() {
 
 /// The seven records bind exactly the tools the transfer and status verbs call,
 /// accept exactly the six unprinted globals, and declare no aliases, flag
-/// aliases, alternates, or examples.
+/// aliases, or alternates; each carries two to four examples naming its own
+/// command.
 #[test]
 fn the_seven_records_carry_no_extra_surfaces() {
     for (name, tool) in [
@@ -304,7 +307,8 @@ fn the_seven_records_carry_no_extra_surfaces() {
         assert!(spec.aliases.is_empty(), "{name} aliases");
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
+        assert_example_count(name, spec);
+        assert_examples_name_their_record(name, spec);
         assert_eq!(spec.tool, tool, "{name} tool");
         assert_eq!(spec.usage_override, None, "{name} derives its line");
         assert_eq!(

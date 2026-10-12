@@ -3,16 +3,23 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for testing the triple, belief, graph, and
-//! associations records against today's usage table and parser flag sets.
+//! This module is responsible for testing the triple records against today's
+//! usage table and parser flag sets, and for the tranche-level checks over all
+//! eight `GRAPH_RECORDS`. The belief, graph, and associations per-record tests
+//! live in the `belief_graph` sibling's test module.
 //!
 //! ## Owns
-//! - Byte equality of each record's `full_usage` and `usage_line` with the
-//!   registered usage text
-//! - The exact `parser_spec` value and boolean flag sequences per command
-//! - Each record's summary, tool, section, positional values, and required bits
+//! - Byte equality of each triple record's `full_usage` and `usage_line` with
+//!   the registered usage text
+//! - The exact `parser_spec` value and boolean flag sequences per triple record
+//! - Each triple record's summary, tool, section, positional shape, required
+//!   bits, and authored example count
+//! - The tranche list order, the `validate` contract, and the records' alias,
+//!   alternate, note, and override surfaces
 //!
 //! ## Does not own
+//! - The belief, graph, and associations usage and parser pins (see the
+//!   `belief_graph` sibling's `tests` module)
 //! - The registry lookups and validation (`cli_command_registry_tests`)
 //! - The renderer's hardest shapes over pure records (`cli_command_spec_tests`)
 //!
@@ -20,10 +27,10 @@
 //!
 //! Test-only. Never compiled into production builds.
 //!
-//! Keep this module focused on these eight records' data.
+//! Keep this module focused on the triple and tranche-level registry data.
 
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section};
+use crate::cli_command_registry_test_support::{positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section};
 
 /// The tranche's record names, in head-group order.
 const NAMES: [&str; 8] = [
@@ -36,24 +43,6 @@ const NAMES: [&str; 8] = [
     "graph link",
     "associations",
 ];
-
-/// A required positional with this label, as these records carry them.
-const fn required(label: &'static str) -> Positional {
-    Positional {
-        label,
-        required: true,
-        description: "",
-    }
-}
-
-/// An optional positional with this label, as `triple query` carries them.
-const fn optional(label: &'static str) -> Positional {
-    Positional {
-        label,
-        required: false,
-        description: "",
-    }
-}
 
 /// `triple query` renders today's usage text and builds today's parser sets;
 /// its nested optional positionals make it the one record with an override.
@@ -93,13 +82,9 @@ fn triple_query_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("triple_query"));
     assert_eq!(spec.section, Section::Read);
     assert_eq!(
-        spec.positionals,
-        [
-            optional("SUBJECT"),
-            optional("PREDICATE"),
-            optional("OBJECT")
-        ]
-        .as_slice()
+        positionals(spec),
+        [("SUBJECT", false), ("PREDICATE", false), ("OBJECT", false)],
+        "triple query positionals"
     );
     assert!(
         spec.required_flags().is_empty(),
@@ -149,8 +134,9 @@ fn triple_add_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("triple_add"));
     assert_eq!(spec.section, Section::Write);
     assert_eq!(
-        spec.positionals,
-        [required("S"), required("P"), required("O")].as_slice()
+        positionals(spec),
+        [("S", true), ("P", true), ("O", true)],
+        "triple add positionals"
     );
     assert!(
         spec.required_flags().is_empty(),
@@ -193,196 +179,12 @@ fn triple_end_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "close an open fact without a replacement");
     assert_eq!(spec.tool, Some("triple_end"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [required("S"), required("P")].as_slice());
+    assert_eq!(
+        positionals(spec),
+        [("S", true), ("P", true)],
+        "triple end positionals"
+    );
     assert_eq!(spec.required_flags(), ["valid-until"]);
-}
-
-/// `belief history` renders today's usage text and builds today's parser sets.
-#[test]
-fn belief_history_matches_the_registered_usage_and_parser() {
-    let spec = record("belief history");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--output json|text]",
-        "belief history full usage"
-    );
-    assert_eq!(
-        spec.usage_line(),
-        "clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--output json|text]",
-        "belief history usage line"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        ["db", "backend", "bank", "actor", "output"]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
-    assert_eq!(spec.summary, "one belief's confidence history");
-    assert_eq!(spec.tool, Some("belief_history"));
-    assert_eq!(spec.section, Section::Read);
-    assert_eq!(
-        spec.positionals,
-        [required("BELIEF_ID_OR_PROPOSITION")].as_slice()
-    );
-    assert!(
-        spec.required_flags().is_empty(),
-        "belief history required flags"
-    );
-}
-
-/// `belief observe` renders today's usage text and builds today's parser sets,
-/// including the three required bits its refusal message is built from.
-#[test]
-fn belief_observe_matches_the_registered_usage_and_parser() {
-    let spec = record("belief observe");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
-        "belief observe full usage"
-    );
-    assert_eq!(
-        spec.usage_line(),
-        "clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
-        "belief observe usage line"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db",
-            "backend",
-            "bank",
-            "actor",
-            "output",
-            "confidence",
-            "evidence",
-            "source",
-            "as-of",
-            "subject-id",
-            "context"
-        ]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "dry-run"]
-    );
-    assert_eq!(spec.summary, "record evidence and a new confidence");
-    assert_eq!(spec.tool, Some("belief_observe"));
-    assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [required("PROP")].as_slice());
-    assert_eq!(spec.required_flags(), ["confidence", "evidence", "source"]);
-}
-
-/// `graph query` renders today's usage text and builds today's parser sets.
-#[test]
-fn graph_query_matches_the_registered_usage_and_parser() {
-    let spec = record("graph query");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--output json|text]",
-        "graph query full usage"
-    );
-    assert_eq!(
-        spec.usage_line(),
-        "clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--output json|text]",
-        "graph query usage line"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db",
-            "backend",
-            "bank",
-            "actor",
-            "output",
-            "max-hops",
-            "edge-type",
-            "min-weight"
-        ]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
-    assert_eq!(spec.summary, "neighbours of one item, by edge type");
-    assert_eq!(spec.tool, Some("graph_query"));
-    assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [required("SEED_ID")].as_slice());
-    assert!(
-        spec.required_flags().is_empty(),
-        "graph query required flags"
-    );
-}
-
-/// `graph link` renders today's usage text and builds today's parser sets,
-/// including the required bit its refusal message is built from.
-#[test]
-fn graph_link_matches_the_registered_usage_and_parser() {
-    let spec = record("graph link");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
-        "graph link full usage"
-    );
-    assert_eq!(
-        spec.usage_line(),
-        "clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
-        "graph link usage line"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db",
-            "backend",
-            "bank",
-            "actor",
-            "output",
-            "relationship",
-            "weight"
-        ]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "dry-run"]
-    );
-    assert_eq!(spec.summary, "add an explicit edge between two items");
-    assert_eq!(spec.tool, Some("graph_link"));
-    assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [required("A"), required("B")].as_slice());
-    assert_eq!(spec.required_flags(), ["relationship"]);
-}
-
-/// `associations` renders today's usage text and builds today's parser sets.
-#[test]
-fn associations_matches_the_registered_usage_and_parser() {
-    let spec = record("associations");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio associations ITEM_ID [--min-weight W] [--explain] [--output json|text]",
-        "associations full usage"
-    );
-    assert_eq!(
-        spec.usage_line(),
-        "clio associations ITEM_ID [--min-weight W] [--explain] [--output json|text]",
-        "associations usage line"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        ["db", "backend", "bank", "actor", "output", "min-weight"]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
-    assert_eq!(spec.summary, "co-activation links for one item");
-    assert_eq!(spec.tool, Some("associations"));
-    assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [required("ITEM_ID")].as_slice());
-    assert!(
-        spec.required_flags().is_empty(),
-        "associations required flags"
-    );
 }
 
 /// The tranche lists these eight records once each, in head-group order.
@@ -421,17 +223,16 @@ fn the_write_subcommands_carry_their_required_bits() {
     );
 }
 
-/// These records carry no aliases, flag aliases, alternates, prose, or
-/// examples; only `triple query` carries a usage override. This pins that none
-/// of them grew quietly.
+/// These records carry no aliases, flag aliases, or alternates; only
+/// `triple add` carries a note and only `triple query` carries a usage
+/// override. This pins that none of them grew quietly.
 #[test]
-fn the_eight_records_carry_no_extra_surfaces() {
+fn the_eight_records_carry_no_alias_or_alternate_surfaces() {
     for name in NAMES {
         let spec = record(name);
         assert!(spec.aliases.is_empty(), "{name} aliases");
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
         if name == "triple add" {
             assert_eq!(
                 spec.notes,
@@ -446,5 +247,16 @@ fn the_eight_records_carry_no_extra_surfaces() {
             name == "triple query",
             "{name} override"
         );
+    }
+}
+
+/// The triple records carry the authored example counts, pinned here so an
+/// empty or shrunken list fails the tranche tests, not only the metadata
+/// check. The belief, graph, and associations counts are pinned by the
+/// sibling's test module.
+#[test]
+fn the_triple_records_carry_their_examples() {
+    for (name, count) in [("triple query", 3), ("triple add", 3), ("triple end", 3)] {
+        assert_eq!(record(name).examples.len(), count, "{name} examples");
     }
 }
