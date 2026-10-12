@@ -1,0 +1,1 @@
+Concurrent Clio commands that open the same Postgres database no longer fail with `tuple concurrently updated` or `pg_type` unique-constraint violations: each open runs its schema and trigger setup under one advisory lock, so two commands starting at the same time cannot race on the same catalog rows.
