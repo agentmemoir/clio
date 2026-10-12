@@ -279,6 +279,29 @@ def run(check) -> tuple:
         ),
         (True, True),
     )
+    # The tool hides `tests.rs` and `<word char>[_-]tests.rs`, and nothing whose
+    # name lacks that separator. An `endswith("tests.rs")` test also hid a bare
+    # `_tests.rs`/`-tests.rs` and `mytests.rs`, which the report still holds, so a
+    # changed one was dropped from judgement instead of measured.
+    check(
+        "a name the tool hides by suffix is not measured",
+        (
+            is_measureable("crates/clio/src/tests.rs"),
+            is_measureable("crates/clio/src/word_tests.rs"),
+            is_measureable("crates/clio/src/word-tests.rs"),
+            is_measureable("crates/clio/src/a_tests.rs"),
+        ),
+        (False, False, False, False),
+    )
+    check(
+        "a name the tool keeps despite its tests suffix is measured",
+        (
+            is_measureable("crates/clio/src/_tests.rs"),
+            is_measureable("crates/clio/src/-tests.rs"),
+            is_measureable("crates/clio/src/mytests.rs"),
+        ),
+        (True, True, True),
+    )
 
     # Untracked files are read with `ls-files`, not `status`, and the reason is
     # the one case `status` cannot express. A wholly untracked directory collapses
