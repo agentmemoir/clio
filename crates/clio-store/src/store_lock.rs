@@ -38,9 +38,11 @@
 //! that would contend waits a bounded time and then refuses, naming the
 //! contending process where the platform reports it — Linux lists flock
 //! holders with their pid in `/proc/locks`; elsewhere the refusal names the
-//! lock file. The exclusive hold records its own pid in the lock file, so a
-//! store open refused during a restore names the restoring process
-//! everywhere. The lock is advisory: it guards a restore's swap, it does not
+//! lock file alone. Naming a *shared* holder is best effort even on Linux:
+//! the pid list comes from `/proc/locks`, and the refusal is complete and
+//! correct when it names none. The exclusive hold records its own pid in the
+//! lock file, so a store open refused during a restore names the restoring
+//! process everywhere. The lock is advisory: it guards a restore's swap, it does not
 //! make the store multi-process safe for concurrent writes, and a process
 //! that opens the database without going through a store open path is not
 //! covered.
@@ -283,6 +285,9 @@ impl Mode {
     /// exclusive hold refused by shared holders does not use that record: a
     /// restore that died mid-swap leaves its pid line behind, and naming it
     /// would point the operator at a process that no longer holds the store.
+    /// The shared holders it names come from the platform's flock listing and
+    /// are best effort: the refusal is complete and correct when the list is
+    /// empty, which Linux may report even while the store is held.
     fn refused(self, store: &Path, lock_path: &Path) -> AmError {
         let (held, holders) = match self {
             Mode::Shared => ("held exclusively", holder_pids(lock_path, "WRITE", true)),
