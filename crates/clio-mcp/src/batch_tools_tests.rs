@@ -325,7 +325,7 @@ fn batch_preflight_admission_rejection_and_validation_edges() {
 
     // The unreachable pre-flight routing arms are internal invariants; call
     // them directly to pin the fail-closed behavior.
-    let Err(ctx_err) = crate::batch_preflight::preflight(&s, "no_such_tool", &json!({}), &[])
+    let Err(ctx_err) = crate::batch_preflight::preflight(&s, "no_such_tool", &json!({}), &[], &[])
     else {
         panic!("unknown tool must fail closed");
     };
@@ -336,6 +336,7 @@ fn batch_preflight_admission_rejection_and_validation_edges() {
         &clio_types::OpContext::new(clio_types::Bank::new("b"), clio_types::Actor::Agent),
         "t",
         &json!({}),
+        &crate::runtime::NoSignals,
     ) else {
         panic!("unknown tool must fail closed");
     };

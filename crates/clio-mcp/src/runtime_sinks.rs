@@ -10,6 +10,7 @@
 //!
 //! ## Owns
 //! - `StoreSignals` (store-backed `SignalSource` / `BeliefSignalSource`)
+//! - `BatchSignals` (stored neighbors plus the items staged earlier in a batch)
 //! - `NoSignals` (neutral source for paths that must not re-score)
 //! - `StderrSinks` implementing every domain `*Sink` trait
 //!
@@ -257,6 +258,49 @@ impl BeliefSignalSource for StoreSignals {
             .iter()
             .map(candidate_text)
             .collect())
+    }
+}
+
+/// Store-backed neighbor signals plus the items already staged earlier in the
+/// same `batch`, so a later operation's duplicate gate sees the operations in
+/// front of it before the batch transaction commits them.
+///
+/// Pre-flight scores each operation against committed rows only. Without the
+/// staged texts, an operation that repeats an earlier operation's item text
+/// slips past the exact-duplicate gate and both rows commit. Staged items are
+/// matched by bank: a duplicate in another bank is not a duplicate for this
+/// item, and `batch` may span several banks.
+#[derive(Debug)]
+pub struct BatchSignals<'a> {
+    inner: StoreSignals,
+    staged: &'a [MemoryItem],
+}
+
+impl<'a> BatchSignals<'a> {
+    /// Bind the store-backed signals and the batch's already-staged items.
+    #[must_use]
+    pub fn new(
+        store: Arc<dyn Store>,
+        index: Arc<dyn IndexStore>,
+        staged: &'a [MemoryItem],
+    ) -> Self {
+        Self {
+            inner: StoreSignals::new(store, index),
+            staged,
+        }
+    }
+}
+
+impl SignalSource for BatchSignals<'_> {
+    fn neighbor_texts(&self, item: &MemoryItem) -> Result<Vec<String>, AmError> {
+        let mut texts = SignalSource::neighbor_texts(&self.inner, item)?;
+        texts.extend(
+            self.staged
+                .iter()
+                .filter(|staged| staged.bank_id == item.bank_id)
+                .map(candidate_text),
+        );
+        Ok(texts)
     }
 }
 

@@ -1,0 +1,1 @@
+The `batch` command now applies its command-level `--bank` and `--actor` to every operation that does not name its own, and it rejects an operation that repeats an earlier operation's stored text in the same batch, rolling the whole batch back unless that operation sets `allow_duplicate`.
