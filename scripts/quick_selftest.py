@@ -232,8 +232,47 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(any("within the 180 s budget" in line for line in small))
         big = quick.closure_lines(["p", "q"], self.history(1000.0))
         self.assertTrue(any("leave the coverage verdict to CI" in line for line in big))
-        self.assertTrue(any("likely reads low" in line for line in big))
         self.assertTrue(any("unknown" in line for line in quick.closure_lines(["p"], [])))
+
+    def test_the_closure_estimate_counts_the_build_and_coverage_cost(self) -> None:
+        # Two tests of 90 s fit the budget as test time alone; times the factor they do not.
+        lines = quick.closure_lines(["p", "q"], self.history(90.0))
+        counted = 2 * 90.0 / quick.THREADS * quick.DONE_FACTOR
+        self.assertTrue(any(f"{counted:.1f} s with the build and coverage (times 3)" in line for line in lines))
+        self.assertTrue(any("over the 180 s budget" in line for line in lines))
+        self.assertTrue(any("leave the coverage verdict to CI" in line for line in lines))
+
+    def test_the_closure_json_says_within_over_or_unknown(self) -> None:
+        import json
+
+        def doc(packages: list[str], history: list[est.Case]) -> dict:
+            return json.loads(quick.closure_json(packages, history))
+
+        each = quick.DONE_BUDGET_S * quick.THREADS / (2 * quick.DONE_FACTOR)  # two tests that just fit
+        edge = doc(["p", "q"], self.history(each))
+        self.assertEqual((edge["done_seconds"], edge["within"], edge["tests"], edge["budget_seconds"]), (180.0, True, 2, 180.0))
+        self.assertFalse(doc(["p", "q"], self.history(each + 1))["within"])
+        unknown = doc(["p"], [])
+        self.assertEqual((unknown["done_seconds"], unknown["within"]), (None, None))
+        nothing_to_run = doc([], [])
+        self.assertEqual((nothing_to_run["done_seconds"], nothing_to_run["within"]), (0.0, True))
+
+    def test_a_linked_worktree_also_reads_the_main_checkouts_times(self) -> None:
+        main = Path("/main")
+        own = [runner.ROOT / relative for relative in quick.HISTORY]
+        with mock.patch.object(quick, "main_checkout", return_value=main):
+            self.assertEqual(quick.history_files(), [*own, *(main / relative for relative in quick.HISTORY)])
+        with mock.patch.object(quick, "main_checkout", return_value=None):
+            self.assertEqual(quick.history_files(), own)
+
+    def test_a_new_worktree_estimates_from_the_main_checkouts_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            main, fresh = Path(raw) / "main", Path(raw) / "fresh"
+            junit(main / "target/nextest/ci/junit.xml", [("p", "a::x", 4.0, False)])
+            with mock.patch.object(quick, "main_checkout", return_value=main), mock.patch.object(runner, "ROOT", fresh):
+                history = est.newest_history(quick.history_files())
+        self.assertEqual([(c.binary_id, c.seconds) for c in history], [("p", 4.0)])
+        self.assertEqual(est.newest_history([fresh / relative for relative in quick.HISTORY]), [])
 
     def test_the_json_plan_carries_package_kind_and_pattern_per_term(self) -> None:
         import json
@@ -282,9 +321,11 @@ class RunTests(unittest.TestCase):
         self.assertTrue(env["CLIO_DEPLOYMENT_CONFIG"].endswith("no-deployment-overlay.json"))
 
     def test_options_that_need_a_plan_are_refused_without_one(self) -> None:
-        for flags in (["--json"], ["--closure"], ["--plan", "--json", "--closure"]):
+        for flags in (["--json"], ["--closure"], ["--json", "--closure"]):
             with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):
                 quick.parse(["--base", "b", *flags])
+        args = quick.parse(["--base", "b", "--plan", "--json", "--closure"])
+        self.assertTrue(args.json and args.closure)
         with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):
             quick.parse([])
 

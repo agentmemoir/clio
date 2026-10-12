@@ -28,6 +28,8 @@ coverage cov:
 #  make coverage-fast PLAN=1       # print the selection, run nothing
 #  make coverage-fast BASE=<ref>   # measure against a ref other than master
 #
+# Through the gate shim, a run with no terminal attached exits 3 and runs nothing when this worktree already ran it on this branch, or when `python3 scripts/quick.py --base <ref> --plan --closure` shows it will not fit in 180 s or cannot be made. CI runs this target without the shim.
+#
 # Scoped by package, because that is the only unit cargo-llvm-cov supports, and by dependency closure, because the tests that cover a changed crate live in the crates that depend on it. What it does not establish is in the script's own docstring: it is not a workspace verdict, and a green run is "no problem in the files you touched".
 COVERAGE_FAST_FLAGS := $(if $(PLAN),--plan )
 coverage-fast:
