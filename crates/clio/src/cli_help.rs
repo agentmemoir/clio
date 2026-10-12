@@ -41,9 +41,7 @@ use std::io::{self, Write};
 pub(crate) use self::groups::all_known_commands;
 /// The derived group and prefix lists (see the `groups` submodule). The
 /// completeness list is test-only, because the completeness checks are.
-pub(crate) use self::groups::{
-    all_groups, group_subcommands, known_commands, shared_groups, subcommands_of,
-};
+pub(crate) use self::groups::{all_groups, group_subcommands, known_commands, subcommands_of};
 
 /// The CLI command → MCP tool binding, in whole-catalog order.
 ///
@@ -132,17 +130,20 @@ fn bound_tool(command: &str) -> Option<&'static str> {
 ///
 /// A command is listed when it binds no tool, and nothing else is listed. A
 /// group prefix therefore appears whenever the prefix itself binds nothing, and
-/// each of its subcommands appears only when that subcommand binds nothing too:
-/// `backup` and `backup create` are both here, and `scratchpad write` is not.
-/// That is the same rule [`group_help`] applies when it prints "(no MCP tool)"
-/// beside a subcommand with no binding.
+/// each of its subcommands appears only when that subcommand binds nothing too.
+/// Every derived group is walked, the reserved surfaces' groups (`mcp`, `ops`,
+/// `compose`, `retention`) and the intermediate `auth token` group included, so
+/// the list does not stop at the groups the shared dispatch answers: `backup
+/// create`, `ops repair`, and `auth token revoke` are all here, and `scratchpad
+/// write` is not. That is the same rule [`group_help`] applies when it prints
+/// "(no MCP tool)" beside a subcommand with no binding.
 pub(crate) fn commands_without_tools() -> Vec<String> {
     let mut unbound: Vec<String> = known_commands()
         .into_iter()
         .filter(|verb| bound_tool(verb).is_none())
         .map(str::to_owned)
         .collect();
-    for (group, subcommands) in shared_groups() {
+    for (group, subcommands, _) in all_groups() {
         for sub in subcommands {
             let key = format!("{group} {sub}");
             if bound_tool(&key).is_none() {
