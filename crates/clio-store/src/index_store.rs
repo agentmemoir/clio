@@ -115,6 +115,23 @@ pub trait IndexStore: Send + Sync {
         max_attempts: u32,
     ) -> Result<Vec<IndexJob>, AmError>;
 
+    /// The pending job for one `(bank, item)`, if it is still queued and due.
+    ///
+    /// The same due rules as [`Self::pending_index_jobs`]: a row retried after
+    /// `backoff_cutoff_ms` and a row whose `attempts` reached `max_attempts` are
+    /// never returned. A one-shot write uses this to index the item it just
+    /// stored even when an older backlog fills the bounded batch.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn pending_index_job(
+        &self,
+        bank_id: &str,
+        item_id: &str,
+        backoff_cutoff_ms: Option<&str>,
+        max_attempts: u32,
+    ) -> Result<Option<IndexJob>, AmError>;
+
     /// Remove a completed (or skipped) queue row.
     ///
     /// # Errors

@@ -195,6 +195,26 @@ impl IndexCoordinator {
         self.drain(max_jobs, None)
     }
 
+    /// Drain the one pending job for `(bank_id, item_id)`, if it is still queued.
+    ///
+    /// A one-shot write calls this so the item it just stored is searchable even
+    /// when an older backlog fills the bounded [`Self::process_pending`] batch.
+    /// The same due rules apply: a row retried inside the backoff window and one
+    /// at `max_attempts` are skipped. An item with no queued job is a no-op.
+    ///
+    /// # Errors
+    /// Queue read/write failures (per-job failures land on the job row).
+    pub fn process_item(&self, bank_id: &str, item_id: &str) -> Result<ProcessReport, AmError> {
+        let cutoff = epoch_millis().saturating_sub(RETRY_BACKOFF_MS).to_string();
+        let Some(job) =
+            self.index
+                .pending_index_job(bank_id, item_id, Some(&cutoff), self.max_attempts)?
+        else {
+            return Ok(ProcessReport::default());
+        };
+        self.process_jobs(vec![job])
+    }
+
     fn drain(&self, max_jobs: usize, cutoff: Option<&str>) -> Result<ProcessReport, AmError> {
         // The due query never returns rows at `max_attempts`: the worker does not
         // retry them, so they must not hold batch slots ahead of newer jobs (the
@@ -204,6 +224,11 @@ impl IndexCoordinator {
         let jobs = self
             .index
             .pending_index_jobs(max_jobs, cutoff, self.max_attempts)?;
+        self.process_jobs(jobs)
+    }
+
+    /// Process one already-selected set of due jobs.
+    fn process_jobs(&self, jobs: Vec<IndexJob>) -> Result<ProcessReport, AmError> {
         let mut report = ProcessReport::default();
         for job in jobs {
             match self.process_one(&job) {

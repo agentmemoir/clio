@@ -88,6 +88,17 @@ impl IndexDrain {
         self.coordinator.process_pending(self.batch)
     }
 
+    /// Process the pending job for one `(bank, item)`, if it is still queued.
+    ///
+    /// A one-shot write uses this so the item it just stored is searchable before
+    /// the process exits, even when an older backlog fills the bounded batch drain.
+    ///
+    /// # Errors
+    /// Queue read/write failures (per-job failures land on the job row).
+    pub fn drain_item(&self, bank_id: &str, item_id: &str) -> Result<ProcessReport, AmError> {
+        self.coordinator.process_item(bank_id, item_id)
+    }
+
     /// PII-safe pipeline snapshot for the requested scope.
     ///
     /// # Errors

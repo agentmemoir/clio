@@ -1,0 +1,1 @@
+`clio remember` leaves the item it just stored searchable by the next command: the one-shot drain now indexes the new item itself, so an older index backlog larger than one drain batch can no longer hide it from `clio recall` until an operator rebuilds the index.

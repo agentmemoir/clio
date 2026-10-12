@@ -36,6 +36,7 @@ use crate::cli_output::{self, OutputMode};
 use crate::cli_read::{CliIo, call_tool, emit, fail};
 use crate::cli_write_group::{WriteCall, WriteGroup};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
+use serde_json::Value;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -192,7 +193,7 @@ fn run_parsed(
                     )),
                 );
                 emit(io, mode, &payload, &text);
-                drain_after_write(group, verb, state);
+                drain_after_write(group, verb, state, &args, &payload);
                 match group.failure_exit(verb, &payload) {
                     Some(code) => ExitCode::from(code),
                     None => ExitCode::from(EXIT_OK),
@@ -232,15 +233,43 @@ fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(
     ))
 }
 
-/// Drain one bounded batch of due index jobs so a one-shot write process leaves
-/// the item searchable for the next command. The response is already emitted;
-/// a drain failure never fails the write (it stays on the durable job row).
-fn drain_after_write(group: &dyn WriteGroup, verb: &str, state: &Arc<McpState>) {
+/// Drain the index work a one-shot write just enqueued so the item is
+/// searchable for the next command. The general backlog drain stays bounded;
+/// the item this write stored is drained on its own, so a full batch of older
+/// jobs cannot leave it unindexed. The response is already emitted; a drain
+/// failure never fails the write (it stays on the durable job row).
+fn drain_after_write(
+    group: &dyn WriteGroup,
+    verb: &str,
+    state: &Arc<McpState>,
+    args: &Value,
+    payload: &Value,
+) {
     if !group.mutates(verb) {
         return;
     }
     if let Err(error) = state.drain_index() {
         clio_config::log::warn("index_drain_failed", &[("error", error.message.as_str())]);
+    }
+    drain_written_item(state, args, payload);
+}
+
+/// Index the item this write stored, even when an older backlog filled the
+/// bounded batch drain. Best-effort: a failure stays on the durable job row for
+/// the next drain.
+fn drain_written_item(state: &Arc<McpState>, args: &Value, payload: &Value) {
+    // Resolve the bank the way the tool did, so the targeted job matches.
+    let (Some(item_id), Ok(ctx)) = (
+        payload.get("id").and_then(Value::as_str),
+        state.resolve_ctx(args),
+    ) else {
+        return;
+    };
+    if let Err(error) = state.drain_index_item(ctx.bank.as_str(), item_id) {
+        clio_config::log::warn(
+            "index_item_drain_failed",
+            &[("error", error.message.as_str())],
+        );
     }
 }
 
