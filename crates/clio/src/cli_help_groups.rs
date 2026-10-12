@@ -47,7 +47,8 @@ struct Group {
     subs: &'static [&'static str],
     /// `false` for the reserved surfaces' groups and for an intermediate
     /// group that is itself a prefix (`auth token`): the shared group
-    /// machinery and the catalog's unbound-command list never iterate them.
+    /// dispatch resolves only the shared ones, and the catalog document
+    /// reports the flag as it stands.
     shared: bool,
 }
 
@@ -151,15 +152,6 @@ pub(crate) fn subcommands_of(verb: &str) -> Option<&'static [&'static str]> {
         .iter()
         .find(|group| group.prefix == verb)
         .map(|group| group.subs)
-}
-
-/// The shared groups, in registry first-occurrence order: what the catalog's
-/// unbound-command list walks.
-pub(crate) fn shared_groups() -> impl Iterator<Item = (&'static str, &'static [&'static str])> {
-    GROUPS
-        .iter()
-        .filter(|group| group.shared)
-        .map(|group| (group.prefix, group.subs))
 }
 
 /// Every top-level verb the CLI accepts, in the suggestion order the ties

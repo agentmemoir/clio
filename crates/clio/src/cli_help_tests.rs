@@ -107,6 +107,25 @@ fn the_catalog_lists_the_commands_that_bind_no_mcp_tool() {
         "backup verify",
         "install",
         "uninstall",
+        // The reserved surfaces' groups and the intermediate `auth token`
+        // group bind no tool either, and their subcommands are the rows the
+        // unbound array used to omit.
+        "mcp schema-export",
+        "mcp stdio",
+        "mcp http",
+        "ops diagnose",
+        "ops verify",
+        "ops doctor",
+        "ops repair",
+        "ops reindex",
+        "compose up",
+        "compose down",
+        "retention schema",
+        "retention get",
+        "retention set",
+        "auth token add",
+        "auth token list",
+        "auth token revoke",
     ] {
         assert!(
             unbound.contains(&verb.to_owned()),
@@ -138,15 +157,25 @@ fn the_catalog_lists_the_commands_that_bind_no_mcp_tool() {
         assert_eq!(entry["tool"].as_str(), Some(tool));
     }
 
-    // Every command this surface knows is in one of the two arrays, so a verb
-    // the CLI accepts can never be missing from the catalog.
+    // Every command this surface knows is in one of the two arrays, so a
+    // command the CLI accepts can never be missing from the catalog. The
+    // record sweep is the independent source: a record the group table failed
+    // to derive still fails here, which is what the sixteen omitted
+    // subcommands needed. The prefix sweep covers what has no record of its
+    // own.
     let listed: BTreeSet<&str> = commands
         .iter()
         .map(|entry| entry["command"].as_str().expect("a command name"))
         .chain(unbound.iter().map(String::as_str))
         .collect();
+    for spec in crate::cli_command_registry::all() {
+        assert!(listed.contains(spec.name), "missing command {}", spec.name);
+    }
     for verb in known_commands() {
         assert!(listed.contains(verb), "missing verb {verb}");
+    }
+    for (prefix, _, _) in all_groups() {
+        assert!(listed.contains(prefix), "missing group prefix {prefix}");
     }
 }
 

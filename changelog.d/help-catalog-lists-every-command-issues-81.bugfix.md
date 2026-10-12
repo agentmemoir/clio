@@ -1,0 +1,1 @@
+`clio help --json` now lists the `mcp`, `ops`, `compose`, `retention`, and `auth token` subcommands in `commands_without_tools`, so the machine-readable catalog names every command the CLI accepts and matches `clio help` and the generated manual.
