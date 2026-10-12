@@ -160,6 +160,36 @@ fn a_global_value_flags_value_is_not_a_help_topic() {
     );
 }
 
+/// Every declared global value flag, and the short `-o`, drops its value from
+/// the topic scan, whatever the flag is spelled, and a two-word topic after the
+/// value still resolves. This is the invariant the fix exists to hold: no
+/// global value flag's value is ever read as a topic.
+#[test]
+fn no_global_value_flags_value_is_read_as_a_topic() {
+    let mut flags: Vec<String> = crate::cli_command_registry::global_value_names()
+        .map(str::to_owned)
+        .collect();
+    flags.push("-o".to_owned());
+    for flag in flags {
+        assert_eq!(
+            super::help_topic(&[flag.clone(), "backup".to_owned()])
+                .expect("a flag is not an error"),
+            None,
+            "`{flag} VALUE` names no topic"
+        );
+        let (verb, kept) = super::help_topic(&[
+            flag.clone(),
+            "backup".to_owned(),
+            "ops".to_owned(),
+            "diagnose".to_owned(),
+        ])
+        .expect("a topic after a global resolves")
+        .expect("a topic was named");
+        assert_eq!(verb, "ops", "`{flag} VALUE` then a two-word topic");
+        assert_eq!(kept, vec!["diagnose".to_owned(), "--help".to_owned()]);
+    }
+}
+
 /// A usage failure is reported in the mode the raw arguments select, and exits 2.
 #[test]
 fn a_usage_failure_is_reported_in_the_selected_mode_and_exits_two() {

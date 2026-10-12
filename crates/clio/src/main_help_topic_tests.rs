@@ -68,3 +68,29 @@ fn help_reaches_the_catalog_with_a_global_value_flag() {
         assert_eq!(run(argv.clone()), ExitCode::SUCCESS, "{argv:?}");
     }
 }
+
+#[test]
+fn the_json_catalog_is_selected_when_a_global_value_flag_is_present() {
+    // `--json` is chosen before the topic, so a global value flag cannot turn
+    // the catalog request into an unknown topic. The two units below are the
+    // pair the help branch runs in that order.
+    let argv = [
+        "--db".to_owned(),
+        "/tmp/led.db".to_owned(),
+        "--json".to_owned(),
+    ];
+    assert!(crate::cli_top_level::wants_json_catalog(&argv));
+    assert_eq!(
+        crate::cli_top_level::help_topic(&argv).expect("no error"),
+        None
+    );
+    assert_eq!(
+        run(vec![
+            "help".into(),
+            "--db".into(),
+            "/tmp/led.db".into(),
+            "--json".into(),
+        ]),
+        ExitCode::SUCCESS
+    );
+}
