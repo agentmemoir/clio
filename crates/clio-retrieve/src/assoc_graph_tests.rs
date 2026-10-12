@@ -308,3 +308,26 @@ fn expand_caps_and_skips_decayed_edges() {
     let expanded = far_future.expand_ids("bank", &seeds, 1).unwrap();
     assert!(!expanded.contains(&"old".to_owned()));
 }
+
+#[test]
+fn t12_discarded_endpoint_is_rejected_like_a_missing_one() {
+    let store = fx::store();
+    for id in ["A", "B"] {
+        store
+            .create_memory_item(&fx::item(id, "bank", id), "agent")
+            .unwrap();
+    }
+    store
+        .discard_item("bank", "B", "ops cleanup", "2026-01-01T00:00:00Z", "agent")
+        .unwrap();
+    let eng = fx::assoc_engine_at(&store, 0);
+    // Discard removes an item from active use, so a link to it is refused with
+    // the same code a link to an item the bank does not hold gets. The batch
+    // pre-flight reads the same identity columns, so both routes refuse it.
+    let err = eng
+        .graph_link("bank", "A", "B", "caused_by", None, "agent")
+        .expect_err("discarded endpoint must be rejected");
+    assert_eq!(err.code, clio_types::ErrorCode::ItemNotFound);
+    let edges = eng.associations("bank", "A", None).unwrap();
+    assert!(edges.is_empty(), "refused link left an edge: {edges:?}");
+}

@@ -75,6 +75,11 @@ pub enum ErrorCode {
     /// A read target does not exist (or is not visible in the caller's scope).
     NotFound,
     /// An item id target does not exist or is not visible in the caller's bank.
+    ///
+    /// A discarded item is not visible: discard is removal from active use, and
+    /// the row stays stored. Naming one therefore reports this code exactly as a
+    /// missing one does, which is why a `graph_link` endpoint is refused on
+    /// every route.
     ItemNotFound,
     /// Co-activation reinforcement could not be durably handed off.
     CoactivationHandoffFailed,
