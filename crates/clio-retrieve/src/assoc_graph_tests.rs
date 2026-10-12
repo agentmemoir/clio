@@ -180,7 +180,7 @@ fn t11_cross_bank_link_rejected() {
     let err = eng
         .graph_link("bank-a", "A", "B", "caused_by", None, "agent")
         .expect_err("cross-bank endpoint must be rejected");
-    assert_eq!(err.code, clio_types::ErrorCode::UnknownPath);
+    assert_eq!(err.code, clio_types::ErrorCode::ItemNotFound);
     // Self links and empty relationships are rejected too.
     assert!(
         eng.graph_link("bank-a", "A", "A", "x", None, "agent")

@@ -320,6 +320,8 @@ fn batch_preflight_admission_rejection_and_validation_edges() {
             .contains("not found"),
         "{missing}"
     );
+    // The code matches the retrieve-side route for the same condition.
+    assert_eq!(missing["code"], json!("item_not_found"), "{missing}");
 
     // The unreachable pre-flight routing arms are internal invariants; call
     // them directly to pin the fail-closed behavior.

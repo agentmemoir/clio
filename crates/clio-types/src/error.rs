@@ -57,12 +57,11 @@ use std::fmt;
 /// - a task id, and a triple addressed by subject and predicate, are
 ///   [`ErrorCode::NotFound`];
 /// - a memtree node is [`ErrorCode::UnknownPath`];
-/// - a `graph_link` endpoint is [`ErrorCode::ItemNotFound`] through the batch
-///   pre-flight and [`ErrorCode::UnknownPath`] on the retrieve-side route.
+/// - a `graph_link` endpoint is [`ErrorCode::ItemNotFound`], on both the
+///   retrieve-side route and the batch pre-flight.
 ///
-/// Two of those depart from the item-row rule and are recorded here rather than
-/// silently relied on: the distilled-unit record, and the retrieve-side
-/// `graph_link` endpoint check.
+/// One of those departs from the item-row rule and is recorded here rather than
+/// silently relied on: the distilled-unit record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
