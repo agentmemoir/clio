@@ -22,6 +22,7 @@
 
 use crate::index_store::{
     IndexStore, domain_predicate, encode_lexical_document, encode_lexical_query, fts5_query,
+    require_bank,
 };
 use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{IndexCoverage, IndexJob, KnnHit, SearchHit};
@@ -264,6 +265,43 @@ impl IndexStore for SqliteStore {
         })
     }
 
+    fn pending_index_job(
+        &self,
+        bank_id: &str,
+        item_id: &str,
+        backoff_cutoff_ms: Option<&str>,
+        max_attempts: u32,
+    ) -> Result<Option<IndexJob>, AmError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT bank_id, item_id, attempts, last_error
+                     FROM index_pending
+                     WHERE bank_id = ?1 AND item_id = ?2
+                       AND (?3 IS NULL OR last_attempt_at IS NULL OR last_attempt_at < ?3)
+                       AND attempts < ?4",
+                )
+                .am("pending job prepare")?;
+            let mut rows = stmt
+                .query_map(
+                    params![bank_id, item_id, backoff_cutoff_ms, i64::from(max_attempts)],
+                    |r| {
+                        Ok(IndexJob {
+                            bank_id: r.get(0)?,
+                            item_id: r.get(1)?,
+                            attempts: u32::try_from(r.get::<_, i64>(2)?.max(0)).unwrap_or(0),
+                            last_error: r.get(3)?,
+                        })
+                    },
+                )
+                .am("pending job rows")?;
+            match rows.next() {
+                Some(row) => Ok(Some(row.am("pending job row")?)),
+                None => Ok(None),
+            }
+        })
+    }
+
     fn finish_index_job(&self, bank_id: &str, item_id: &str) -> Result<(), AmError> {
         self.with_conn(|conn| {
             conn.execute(
@@ -404,11 +442,4 @@ impl SqliteStore {
         })?;
         Ok(n > 0)
     }
-}
-
-fn require_bank(bank_id: &str) -> Result<(), AmError> {
-    if bank_id.is_empty() {
-        return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
-    }
-    Ok(())
 }
