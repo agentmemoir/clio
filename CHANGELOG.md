@@ -10,6 +10,7 @@ we made where that specification is silent.
 
 ### Fixed
 
+- The phase-timer test suite tells a temporary directory that refuses to run a file apart from a probe that could not run, so a loaded host skips the check instead of failing it. [Issue #60](https://github.com/agentmemoir/clio/issues/60) [PR #146](https://github.com/agentmemoir/clio/pull/146)
 - Correct the `clio auth token add --help` note so it lists only `--db` and `--backend` as refused while the required `--bank` flag stays in the usage line. [Issue #142](https://github.com/agentmemoir/clio/issues/142) [PR #144](https://github.com/agentmemoir/clio/pull/144)
 - Scoped coverage runs remove old executable objects for selected packages and targets before rebuilding, so stale source maps cannot inflate a changed file's line count. [Issue #47](https://github.com/agentmemoir/clio/issues/47) [PR #141](https://github.com/agentmemoir/clio/pull/141)
 - The admission gate-boundary tripwires scan the whole workspace but were tests in `clio-store`, so a scoped run skipped them for a change that did not reach that crate; they are now a `scripts/` check that runs on every change. [Issue #40](https://github.com/agentmemoir/clio/issues/40) [PR #140](https://github.com/agentmemoir/clio/pull/140)
