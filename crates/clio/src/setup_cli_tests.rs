@@ -166,3 +166,24 @@ fn help_says_the_type_flag_is_gone() {
         "{out}"
     );
 }
+
+/// A setup value flag's value is not a help request: `--config help` names a
+/// config file called `help`, so the wizard runs instead of printing help.
+#[test]
+fn a_setup_value_flags_value_is_not_a_help_request() {
+    for argv in [
+        vec!["--config".to_owned(), "help".to_owned()],
+        vec!["--database-name".to_owned(), "help".to_owned()],
+        vec!["--database-url".to_owned(), "-h".to_owned()],
+    ] {
+        assert!(!is_help(&argv), "{argv:?} must not ask for help");
+    }
+    for spelling in ["help", "--help", "-h"] {
+        assert!(is_help(&[spelling.to_owned()]));
+    }
+    assert!(is_help(&[
+        "--config".to_owned(),
+        "x".to_owned(),
+        "--help".to_owned()
+    ]));
+}

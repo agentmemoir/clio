@@ -1,0 +1,1 @@
+`clio version`, `clio health`, and `clio setup` no longer print their help screen when a value flag's value spells `help`: `clio version --db help` prints the version line, `clio health --db help` prints its health JSON, and `clio setup --config help` uses the config file named `help`.
