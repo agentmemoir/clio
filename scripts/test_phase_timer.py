@@ -437,14 +437,22 @@ def a_parent_that_refuses_execution() -> str | None:
     skips rather than asserting something it cannot set up.
 
     A mount that refuses execution has to be found, not invented: writing a probe
-    and finding it still runs proves nothing. Each candidate is tested by asking
-    whether a directory inside it refuses.
+    and finding it still runs proves nothing. Each candidate is tested with
+    `refuses_execution`, which answers True only for a permission refusal from the
+    kernel. A probe that could not be run — a transient failure under load —
+    answers False, so that candidate is passed over and the test skips rather than
+    being handed a directory that in fact permits execution.
+
+    Do not go back to `not can_execute(probe_dir)`. That reads a probe that failed
+    for a transient reason as a directory that refuses execution, which is the
+    defect issue #60 records: the test then fails instead of skipping. Only
+    `refuses_execution` answers the question this helper asks.
     """
     for parent in exec_tempdir.CANDIDATE_PARENTS:
         base = os.path.expanduser(parent) if parent is not None else tempfile.gettempdir()
         try:
             with tempfile.TemporaryDirectory(dir=base) as probe_dir:
-                if not exec_tempdir.can_execute(probe_dir):
+                if exec_tempdir.refuses_execution(probe_dir):
                     return base
         except OSError:
             continue
