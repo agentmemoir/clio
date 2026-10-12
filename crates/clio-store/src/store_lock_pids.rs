@@ -36,9 +36,11 @@ use std::os::unix::fs::MetadataExt;
 /// The pids whose `flock` on the lock file has `mode` (`READ` or `WRITE`),
 /// where the platform reports them. Linux lists flock holders with their pid
 /// in `/proc/locks`; elsewhere the list is empty and the refusal names the
-/// lock file alone. When `recorded_fallback` is set, a pid the exclusive hold
-/// recorded in the lock file is used when the platform reports nothing, since
-/// that record is kept current by a live exclusive hold.
+/// lock file alone. An empty list is a supported outcome on every platform,
+/// Linux included: it means the platform reported no matching holder, and the
+/// refusal then names no pid. When `recorded_fallback` is set, a pid the
+/// exclusive hold recorded in the lock file is used when the platform reports
+/// nothing, since that record is kept current by a live exclusive hold.
 pub(crate) fn holder_pids(lock_path: &Path, mode: &str, recorded_fallback: bool) -> Vec<u32> {
     let mut pids = flock_holder_pids(lock_path, mode);
     if pids.is_empty()

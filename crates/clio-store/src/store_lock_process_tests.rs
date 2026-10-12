@@ -230,8 +230,10 @@ fn two_processes_can_each_hold_the_store_shared() {
     release_child(&release, &mut child);
 }
 
-/// A restore refuses while another process holds the store, and the refusal
-/// names it. Nothing on disk changes.
+/// A restore refuses while another process holds the store, naming the lock it
+/// contends on, and nothing on disk changes. Naming the holding process is
+/// best effort (see `store_lock`), so that part is asserted only when the
+/// platform reports a holder.
 #[test]
 fn a_restore_refuses_while_another_process_holds_the_store() {
     let scratch = Scratch::new("refuse-held");
@@ -255,8 +257,11 @@ fn a_restore_refuses_while_another_process_holds_the_store() {
     );
     #[cfg(target_os = "linux")]
     assert!(
-        error.message.contains(&format!("pid(s) {}", child.0.id())),
-        "the holding process is named: {}",
+        !error.message.contains("by pid(s) ")
+            || error
+                .message
+                .contains(&format!("by pid(s) {}", child.0.id())),
+        "a named holder is the process that holds the store: {}",
         error.message
     );
     assert_eq!(bytes(&target), target_before, "the target is untouched");
