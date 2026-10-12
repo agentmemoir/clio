@@ -22,12 +22,12 @@
 //! Keep this module focused on record-shaped batch pre-flights.
 
 use crate::batch_tools::Staged;
-use crate::runtime::{McpState, StderrSinks, StoreSignals};
+use crate::runtime::{McpState, StderrSinks};
 use crate::write_tools::{gated_write_policy, opt_context, opt_num, opt_str, req_str};
+use clio_admission::gated::SignalSource;
 use clio_store::BatchWrite;
 use clio_types::{AmError, ErrorCode, OpContext};
 use serde_json::Value;
-use std::sync::Arc;
 
 pub(crate) fn rejection(decision: &clio_admission::decision::Decision) -> AmError {
     AmError::new(
@@ -49,11 +49,12 @@ pub(crate) fn records_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
     match tool {
-        "persona_put_stable" => persona_preflight(state, ctx, ts, params),
-        "task_upsert" => task_preflight(state, ctx, ts, params),
-        "failure_record" => failure_preflight(state, ctx, ts, params),
+        "persona_put_stable" => persona_preflight(state, ctx, ts, params, source),
+        "task_upsert" => task_preflight(state, ctx, ts, params, source),
+        "failure_record" => failure_preflight(state, ctx, ts, params, source),
         _ => Err(AmError::new(
             ErrorCode::Internal,
             format!("unreachable batch tool `{tool}`"),
@@ -66,8 +67,8 @@ fn persona_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let context = opt_context(params, "context")?;
     let p_args = clio_persona::PersonaPutStableArgs {
         store: &*state.persona,
@@ -80,7 +81,7 @@ fn persona_preflight(
         source: opt_str(params, "source"),
         evidence_ref: opt_str(params, "evidence_ref"),
         policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
-        signal_source: &signals,
+        signal_source: source,
         admission_sink: &StderrSinks,
         persona_sink: &StderrSinks,
         budget_tokens: state.budget_tokens,
@@ -109,6 +110,7 @@ fn task_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
     let task_id = req_str(params, "task_id")?;
     let steps: Vec<String> = params
@@ -121,7 +123,6 @@ fn task_preflight(
                 .collect()
         })
         .unwrap_or_default();
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let context = opt_context(params, "context")?;
     let t_args = clio_history::TaskUpsertArgs {
         store: &*state.history,
@@ -134,7 +135,7 @@ fn task_preflight(
         context: context.as_deref(),
         evidence_ref: opt_str(params, "evidence_ref"),
         policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
-        signal_source: &signals,
+        signal_source: source,
         admission_sink: &StderrSinks,
         sink: &StderrSinks,
         timestamp: ts,
@@ -170,9 +171,9 @@ fn failure_preflight(
     ctx: &OpContext,
     ts: &str,
     params: &Value,
+    source: &dyn SignalSource,
 ) -> Result<Staged, AmError> {
     let task_id = req_str(params, "task_id")?;
-    let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let context = opt_context(params, "context")?;
     let f_args = clio_history::FailureRecordArgs {
         store: &*state.history,
@@ -189,7 +190,7 @@ fn failure_preflight(
         evidence_ref: opt_str(params, "evidence_ref"),
         policy: gated_write_policy(state, ctx.bank.as_str(), params)?,
         history_policy: &state.history_policy,
-        signal_source: &signals,
+        signal_source: source,
         admission_sink: &StderrSinks,
         sink: &StderrSinks,
         timestamp: ts,
