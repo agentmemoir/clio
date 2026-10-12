@@ -58,7 +58,6 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
-import io
 import json
 import os
 import re
@@ -346,70 +345,11 @@ def _cargo_checking_evidence(log_path: Path, kind: str) -> bytes:
     return f"gate: Cargo package work: {len(checking)} checked, {len(compiling)} compiled\n".encode()
 
 
-def _self_test() -> int:
-    import unittest
-
-    import gate_selftest_a
-    import gate_selftest_b
-    import gate_selftest_c
-    import gate_selftest_d
-    import gate_selftest_e
-    import gate_selftest_f
-    import gate_selftest_g
-    import gate_selftest_h
-
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    for mod in (
-        gate_selftest_a,
-        gate_selftest_b,
-        gate_selftest_c,
-        gate_selftest_d,
-        gate_selftest_e,
-        gate_selftest_f,
-        gate_selftest_g,
-        gate_selftest_h,
-    ):
-        suite.addTests(loader.loadTestsFromModule(mod))
-    buffer = io.StringIO()
-    from unittest import mock
-
-    with tempfile.TemporaryDirectory(prefix="gate-self-test-") as scratch:
-        with mock.patch.dict(
-            os.environ,
-            {
-                "XDG_CACHE_HOME": scratch,
-                "CLIO_GATE_LOG_DIR": "",
-                "GATE_ACTIVE": "",
-                "GATE_FORCE": "",
-                "GATE_RAW": "",
-                "GATE_SCOPE": GATE_SCOPE_DEFAULT,
-                "MAKEFLAGS": "",
-                "GNUMAKEFLAGS": "",
-                "BASE": "",
-                "PACKAGES": "",
-            },
-        ):
-            result = unittest.TextTestRunner(stream=buffer, verbosity=1).run(suite)
-    skipped = [f"{test}: {reason}" for test, reason in getattr(result, "skipped", [])]
-    if not result.wasSuccessful():
-        print(buffer.getvalue())
-    for reason in skipped:
-        print(f"self-test skipped: {reason}")
-    clean = result.wasSuccessful()
-    if not clean:
-        summary = "FAILED"
-    elif skipped:
-        summary = f"all passed, {len(skipped)} check group(s) skipped"
-    else:
-        summary = "all passed"
-    print(f"self-test: {summary}")
-    return 0 if clean else 1
-
-
 def main(argv: list[str]) -> int:
     if "--self-test" in argv:
-        return _self_test()
+        from gate_selftest_suite import run_suite
+
+        return run_suite()
     if "-h" in argv or "--help" in argv:
         print(__doc__.strip())
         return 0
