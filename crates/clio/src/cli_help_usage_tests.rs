@@ -64,9 +64,12 @@ fn every_registered_command_resolves_through_the_lookup() {
 }
 
 /// The consolidate selector was renamed to `bank` with no alias, so the usage
-/// line must keep advertising `--bank` and must never advertise `scope` again:
-/// a caller reading stale help would send a flag the parser rejects with a
-/// usage error, and a dropped selector would fall back to the session's bank.
+/// line must keep advertising `--bank` and must never advertise the removed
+/// `scope` spelling again: a caller reading stale help would send a flag the
+/// parser rejects with a usage error, and a dropped selector would fall back
+/// to the session's bank. The spelling is checked bare because `usage_for`
+/// carries only the usage line, alternates, and notes with no flag
+/// descriptions, so any `scope` here is the removed selector returning.
 #[test]
 fn the_consolidate_usage_line_advertises_bank_and_never_scope() {
     let usage = usage_for("consolidate").expect("consolidate has a usage line");
@@ -220,7 +223,14 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
             }
         }
         for flag in &accepted {
-            if !named.contains(&flag.trim_start_matches("--")) {
+            let short = flag.trim_start_matches("--");
+            // The group parser unions the globals into every
+            // spec, so it accepts flags the leaf refuses at runtime (exit 2)
+            // and the record carries no flag entry for by design. Each
+            // record's own note is the authority for its refused set, so
+            // only those flags are exempt here; any other unnamed flag
+            // still fails.
+            if !named.contains(&short) && !refused_but_parsed(spec.name).contains(&short) {
                 wrong.push(format!(
                     "`clio {}` parser accepts {flag}, which the record does not name",
                     spec.name
@@ -289,6 +299,21 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
         "a verb without a record gained an authored row, so the fallback branch decides \
          it now: re-pin this count only when that row is intended"
     );
+}
+
+/// Flags the group parser accepts but the leaf refuses at runtime (exit 2),
+/// so the record carries no flag entry for them by design (the record's own
+/// refusal note requires it: help must not advertise refused flags). The authority is each record's
+/// own note: `backup list` and `backup verify` refuse `--db`/`--backend`
+/// (archive-only reads), `auth token add` refuses `--db`/`--backend` (its
+/// own `--actor`/`--bank` stay named and parsed), and `auth token list` and
+/// `auth token revoke` refuse all four (one credential file, never a store).
+fn refused_but_parsed(verb: &str) -> &'static [&'static str] {
+    match verb {
+        "backup list" | "backup verify" | "auth token add" => &["db", "backend"],
+        "auth token list" | "auth token revoke" => &["db", "backend", "actor", "bank"],
+        _ => &[],
+    }
 }
 
 /// The `--flag` names the dispatcher actually parses `verb` with, sorted and

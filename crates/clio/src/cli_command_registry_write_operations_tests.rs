@@ -95,7 +95,7 @@ fn validate_matches_the_registered_usage_and_parser() {
     let spec = record("validate");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio validate ITEM_ID --action attest|update|invalidate|delete [--note N] [--new-content C] [--bank B] [--actor A] [--output json|text]",
+        "usage: clio validate ITEM_ID --action attest|update|invalidate|delete [--note N] [--new-content C] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "validate full usage"
     );
     assert_eq!(
@@ -128,12 +128,12 @@ fn batch_renders_the_stdin_alternate_and_the_parser_sets() {
     let spec = record("batch");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio batch --file ops.json [--dry-run] [--bank B] [--actor A] [--output json|text]\n       or: clio batch --file - (reads operations JSON from stdin)",
+        "usage: clio batch --file ops.json [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]\n       or: clio batch --file - (reads operations JSON from stdin)",
         "batch full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio batch --file ops.json [--dry-run] [--bank B] [--actor A] [--output json|text]",
+        "clio batch --file ops.json [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "batch usage line"
     );
     assert_eq!(

@@ -194,6 +194,100 @@ fn a_flag_and_its_placeholder_are_one_unit() {
     assert_eq!(rejoined, "clio backup restore ID [--yes] [--out FILE]");
 }
 
+/// An enum value label is glued to its flag, so wrapping cannot separate them.
+///
+/// `sqlite|postgres` and `json|text` are the labels a reader must type beside
+/// their flag; a break between them reads as a flag with no value.
+#[test]
+fn an_enum_value_label_stays_glued_to_its_flag() {
+    let lines = wrapped_usage("status", 74, 0);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("--backend sqlite|postgres")),
+        "the enum label stays beside its flag: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("[--output json|text]")),
+        "the second enum label stays beside its flag: {lines:?}"
+    );
+    for line in &lines {
+        let first = line.trim_start().split(' ').next().unwrap_or_default();
+        assert!(
+            !first.starts_with("sqlite|") && !first.starts_with("json|"),
+            "an enum label opened a line bare, read as a value nobody can type: {line:?}"
+        );
+    }
+}
+
+/// An optional value's brackets stay glued to their flag.
+///
+/// `[--bind [ADDR]]` is three bracket groups deep; wrapping between `--bind` and
+/// `[ADDR]` leaves a continuation that reads as a bare placeholder.
+#[test]
+fn an_optional_value_stays_glued_to_its_flag() {
+    let lines = wrapped_usage("mcp http", 74, 0);
+    assert!(
+        lines.iter().any(|line| line.contains("[--bind [ADDR]]")),
+        "the optional value stays beside its flag: {lines:?}"
+    );
+}
+
+/// A repeatable flag's `...` suffix stays glued to its value token.
+///
+/// `[--database-option NAME=VALUE]...` is the one surface line with a repeat
+/// marker; a break before `...` reads as one value that cannot repeat.
+#[test]
+fn a_repeatable_flag_stays_glued_to_its_dots() {
+    let lines = wrapped_usage("setup", 84, 2);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("--database-option NAME=VALUE]...")),
+        "the repeat marker stays beside its flag: {lines:?}"
+    );
+}
+
+/// At the catalog's usage column, a continuation always opens with a flag, so a
+/// value placeholder never opens a line.
+///
+/// The width is the catalog's usage column, pinned as a literal in
+/// `command_catalog_tests`; every surface line must hold the invariant there,
+/// not only the one long line a single test reaches.
+#[test]
+fn a_continuation_line_always_opens_with_a_flag() {
+    for (command, _) in SURFACE_USAGE {
+        for line in wrapped_usage(command, 84, 2).into_iter().skip(1) {
+            let first = line.trim_start().split(' ').next().unwrap_or_default();
+            assert!(
+                first.starts_with("--") || first.starts_with('['),
+                "a continuation of `clio {command}` opened with `{first}`, which is a \
+                 value or a bare placeholder, not a flag: {line:?}"
+            );
+        }
+    }
+}
+
+/// A multi-byte token passes through the grouping whole: the grouping slices at
+/// spaces only, so no character of a Unicode word can be cut.
+///
+/// No rendered help line carries multi-byte text through the wrapping today —
+/// the registry's usage lines and summaries are ASCII — so the unit grouping is
+/// the layer where Unicode support is proven.
+#[test]
+fn a_unicode_token_passes_through_the_grouping_whole() {
+    let usage = "clio notice QUERY [--tag «café»]";
+    let units = super::flag_units(usage);
+    assert_eq!(
+        units,
+        vec!["clio", "notice", "QUERY", "[--tag «café»]"],
+        "the multi-byte token arrives as one unit beside its flag"
+    );
+    assert_eq!(units.join(" "), usage, "nothing is lost or reordered");
+}
+
 /// Irregular spacing must not shift a unit's byte offset and slice a flag in half.
 ///
 /// The grouping walks the string with byte offsets, so it assumes one space between

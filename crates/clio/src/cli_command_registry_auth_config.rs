@@ -44,9 +44,11 @@ use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 /// flags and `--output` list the other six here.
 const UNPRINTED: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
 
-/// The globals `auth token add` accepts without printing: its line already
-/// documents `--actor` and `--bank` (its own), so the other four are listed.
-const ADD_UNPRINTED: &[&str] = &["db", "backend", "no-input", "yes"];
+/// The globals the three `auth token` leaves accept without printing: `add`
+/// documents `--actor` and `--bank` itself while `list` and `revoke` refuse
+/// the store and scope flags at runtime, so only `--no-input` and `--yes`
+/// print here.
+const TOKEN_UNPRINTED: &[&str] = &["no-input", "yes"];
 
 /// The required `--label LABEL` of `add` and `revoke`: the usage lines write it
 /// bare because the verbs refuse to run without one.
@@ -122,7 +124,7 @@ const NAME: Positional = Positional {
 
 /// The `add` note: the one-time secret print, the store lock, and the refused
 /// flags, exactly as the command's own `--help` prints them.
-const ADD_NOTE: &str = "generates a credential, prints its secret exactly once, and stores only the digest in the owner-only token store; the secret cannot be recovered — save it when you see it; the store file is held under a lock for the whole write, so a run that cannot take the lock refuses without printing a secret, and --db, --backend, and --bank are refused because they cannot change what is written";
+const ADD_NOTE: &str = "generates a credential, prints its secret exactly once, and stores only the digest in the owner-only token store; the secret cannot be recovered — save it when you see it; the store file is held under a lock for the whole write, so a run that cannot take the lock refuses without printing a secret, and --db and --backend are refused because they cannot change what is written";
 
 /// The `list` note: what the listing shows and the refused flags.
 const LIST_NOTE: &str = "prints labels, actors, banks, and creation times; never a secret and never a digest; --db, --backend, --actor, and --bank are refused because they cannot change the listing";
@@ -157,7 +159,7 @@ pub(crate) const AUTH_TOKEN_ADD: CommandSpec = CommandSpec {
     notes: &[ADD_NOTE],
     positionals: &[],
     documented: &[LABEL, ACTOR, BANK_REQUIRED, BANK_OPTIONAL, GLOBAL_OUTPUT],
-    accepted_extra: ADD_UNPRINTED,
+    accepted_extra: TOKEN_UNPRINTED,
     flag_aliases: &[],
     usage_override: Some(ADD_USAGE),
     usage_alternates: &[],
@@ -187,7 +189,7 @@ pub(crate) const AUTH_TOKEN_LIST: CommandSpec = CommandSpec {
     notes: &[LIST_NOTE],
     positionals: &[],
     documented: &[GLOBAL_OUTPUT],
-    accepted_extra: UNPRINTED,
+    accepted_extra: TOKEN_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -213,7 +215,7 @@ pub(crate) const AUTH_TOKEN_REVOKE: CommandSpec = CommandSpec {
     notes: &[REVOKE_NOTE],
     positionals: &[],
     documented: &[LABEL, GLOBAL_OUTPUT],
-    accepted_extra: UNPRINTED,
+    accepted_extra: TOKEN_UNPRINTED,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],

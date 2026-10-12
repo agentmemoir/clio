@@ -99,10 +99,11 @@ const AUDIT_ITEM_ID: Positional = Positional {
 /// The `--explain` trace flag the read commands here document.
 const EXPLAIN: Flag = Flag::toggle("explain", "`read_args` requests the trace.");
 
-/// The shared-bank lines print `--actor A` bare and cannot run without it.
+/// The shared-bank lines print the global `--actor ACTOR` placeholder and
+/// cannot run without it.
 const SHARED_ACTOR_REQUIRED: Flag = Flag {
     required: true,
-    ..Flag::text("actor", "A", "`base_args` forwards the identity.")
+    ..Flag::text("actor", "ACTOR", "`base_args` forwards the identity.")
 };
 
 /// The `--shared-bank` opt-in is written bare on every shared record.
@@ -134,7 +135,7 @@ const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a
 
 /// The `shared store` printed line: the parser's accepted set keeps the
 /// `category`-first order the dispatcher already merges, so the line is pinned.
-const SHARED_STORE_USAGE: &str = "clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor A --shared-bank [--output json|text]";
+const SHARED_STORE_USAGE: &str = "clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor ACTOR --shared-bank [--output json|text]";
 
 /// `compose-context` accepts `--query` without printing it and prints
 /// `--budget-tokens` as a mandated flag, so its line is pinned too.

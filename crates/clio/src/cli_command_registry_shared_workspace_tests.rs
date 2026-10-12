@@ -98,7 +98,7 @@ fn shared_store_matches_the_registered_usage_and_parser() {
     let spec = record("shared store");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor A --shared-bank [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
+        "usage: clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor ACTOR --shared-bank [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -140,7 +140,7 @@ fn shared_retrieve_matches_the_registered_usage_and_parser() {
     let spec = record("shared retrieve");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio shared retrieve QUERY --actor A --shared-bank [--output json|text]"
+        "usage: clio shared retrieve QUERY --actor ACTOR --shared-bank [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -167,7 +167,7 @@ fn shared_discard_matches_the_registered_usage_and_parser() {
     let spec = record("shared discard");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio shared discard ITEM_ID --reason R [--confirm] --actor A --shared-bank [--output json|text]"
+        "usage: clio shared discard ITEM_ID --reason R [--confirm] --actor ACTOR --shared-bank [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),

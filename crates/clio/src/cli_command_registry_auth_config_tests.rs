@@ -46,8 +46,7 @@ fn auth_token_add_matches_the_registered_usage_and_parser() {
          and stores only the digest in the owner-only token store; the secret cannot be \
          recovered — save it when you see it; the store file is held under a lock for the \
          whole write, so a run that cannot take the lock refuses without printing a secret, \
-         and --db, --backend, and --bank are refused because they cannot change what is \
-         written",
+         and --db and --backend are refused because they cannot change what is written",
         "auth token add full usage"
     );
     assert_eq!(

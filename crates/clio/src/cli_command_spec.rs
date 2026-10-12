@@ -10,6 +10,8 @@
 //! - `CommandSpec` and its parts: `Positional`, `Flag`, `ValueSpec`,
 //!   `ValueKind`, `Example`, and `Section`
 //! - `usage_line`, `full_usage`, `parser_spec`, and `required_flags`
+//! - The options block every help path appends, rendered from the records by
+//!   the `options` submodule beside this one
 //!
 //! ## Does not own
 //! - The command records themselves (see `cli_command_registry_core_reads`)
@@ -372,3 +374,6 @@ impl CommandSpec {
 #[cfg(test)]
 #[path = "cli_command_spec_tests.rs"]
 mod tests;
+
+#[path = "cli_command_spec_options.rs"]
+mod options;

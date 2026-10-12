@@ -10,6 +10,9 @@
 //! ## Owns
 //! - `usage_for` and `usage_line`, the one usage lookup every command's
 //!   `--help` and the catalog read
+//! - `help_for`, the rendered help the verb help paths read: the record's own
+//!   text, then the options block with the flag descriptions, defaults, and
+//!   shared globals
 //!
 //! The registry records in `cli_command_registry` carry every command's usage
 //! text; a command with no record has no usage line here, and `usage_line`
@@ -32,9 +35,27 @@
 /// The full usage text for a verb: its registry record's `full_usage`.
 ///
 /// Every registered command's `--help` renders through here, so the record is
-/// the one place that text lives.
+/// the one place that text lives. The bytes stay the record's own text, which
+/// the record tests pin; the verb help paths that also show flag descriptions
+/// and defaults read [`help_for`].
 pub(crate) fn usage_for(verb: &str) -> Option<String> {
     crate::cli_command_registry::find(verb).map(super::cli_command_spec::CommandSpec::full_usage)
+}
+
+/// The rendered help for a verb: the record's `full_usage`, then the record's
+/// options block, so every help path that shows flag data shows the same data:
+/// each documented flag's description and default, then the accepted globals
+/// from their shared definitions.
+pub(crate) fn help_for(verb: &str) -> Option<String> {
+    crate::cli_command_registry::find(verb).map(|spec| {
+        let mut text = spec.full_usage();
+        let options = spec.options_help();
+        if !options.is_empty() {
+            text.push_str("\n\n");
+            text.push_str(&options);
+        }
+        text
+    })
 }
 
 /// The canonical usage line for any command, with no prose and no `usage: `
@@ -55,3 +76,7 @@ pub(crate) fn usage_line(command: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "cli_help_usage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_help_usage_render_tests.rs"]
+mod render_tests;

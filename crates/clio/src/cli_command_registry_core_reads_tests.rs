@@ -34,7 +34,7 @@ fn recall_matches_the_registered_usage_and_parser() {
     let spec = record("recall");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio recall QUERY [--bank BANK] [--limit N] [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--min-semantic N] [--min-keyword N] [--min-reranker N] [--min-final N] [--no-entities] [--entity-summary] [--output json|text]\n       a score floor is a relative filter over this query's own scores, not a calibrated relevance threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)",
+        "usage: clio recall QUERY [--bank BANK] [--limit N] [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--min-semantic N] [--min-keyword N] [--min-reranker N] [--min-final N] [--no-entities] [--entity-summary] [--output json|text]\n       a score floor is a relative filter over this query's own scores, not a calibrated threshold; --min-semantic and --min-keyword prune one retrieval arm each, and --no-entities cannot be combined with --entity-summary; --query-anchor must be RFC 3339 with an explicit UTC offset, and a relative phrase without an anchor contributes nothing (no server-time fallback)",
         "recall full usage"
     );
     assert_eq!(

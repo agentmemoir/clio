@@ -161,12 +161,12 @@ pub(crate) const VALIDATE: CommandSpec = CommandSpec {
         ),
         Flag::text(
             "bank",
-            "B",
+            "BANK",
             "Scopes the review to one bank; `cli_read_args::base_args` passes it to the `validate` tool.",
         ),
         Flag::text(
             "actor",
-            "A",
+            "ACTOR",
             "Names the acting identity; `cli_read_args::base_args` passes it to the `validate` tool.",
         ),
         GLOBAL_OUTPUT,
@@ -209,12 +209,12 @@ pub(crate) const BATCH: CommandSpec = CommandSpec {
         ),
         Flag::text(
             "bank",
-            "B",
+            "BANK",
             "Scopes the batch to one bank; `cli_read_args::base_args` passes it to the `batch` tool, not to individual operations.",
         ),
         Flag::text(
             "actor",
-            "A",
+            "ACTOR",
             "Names the acting identity; `cli_read_args::base_args` passes it to the `batch` tool.",
         ),
         GLOBAL_OUTPUT,

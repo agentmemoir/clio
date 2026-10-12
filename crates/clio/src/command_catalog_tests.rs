@@ -281,3 +281,45 @@ fn no_rendered_catalog_line_exceeds_its_width() {
 // The registry-seam tests — one row per record, the record spans' spine
 // bounds, the authored reference rows, and the rendered registered blocks' —
 // live beside this module in `command_catalog_seam_tests.rs`.
+
+/// Every rendered note reads back as the summary it was wrapped from: nothing
+/// is lost, nothing is split, and the wrap is the split-words-and-rejoin you
+/// can compute by hand.
+///
+/// This is the note-side twin of the flag-wholeness check above: that one
+/// proves no flag is cut in half, this one proves the wrap changes where the
+/// words sit and nothing else.
+///
+/// A note line starts with exactly the seven-space indent; a usage-line
+/// continuation starts deeper (every command's name is at least four letters),
+/// so counting only the shallow indent keeps the usage lines out.
+#[test]
+fn every_rendered_note_rereads_as_the_summary_it_was_wrapped_from() {
+    let text = catalog_text();
+    let mut checked = 0;
+    for (command, summary) in catalog_rows() {
+        if summary.is_empty() {
+            continue;
+        }
+        let note_lines: Vec<String> = entry_block(&text, command)
+            .lines()
+            .filter(|line| {
+                line.starts_with(NOTE_INDENT) && !line[NOTE_INDENT.len()..].starts_with(' ')
+            })
+            .map(|line| line.trim_start_matches(' ').to_owned())
+            .collect();
+        assert!(
+            !note_lines.is_empty(),
+            "`{command}` carries a summary but its block shows no note lines"
+        );
+        let rendered = note_lines.join(" ");
+        assert_eq!(
+            rendered,
+            summary.split_whitespace().collect::<Vec<_>>().join(" "),
+            "`{command}`'s rendered note differs from its summary, so the wrap lost \
+             or changed words"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "the catalog holds summaries to check");
+}

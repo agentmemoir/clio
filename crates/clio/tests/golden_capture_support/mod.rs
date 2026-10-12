@@ -254,9 +254,14 @@ pub fn compare(fixture: &GoldenFixture, captured: &[CaptureEntry]) -> Vec<Conten
     diffs
 }
 
+/// The catalog never lists the `auth token` verbs, so the capture plan
+/// appends them after the catalog leaves, in registry order.
+pub(crate) static EXTRA_LEAVES: &[&str] =
+    &["auth token add", "auth token list", "auth token revoke"];
+
 /// The capture plan from the running binary itself: top-level help and the
 /// JSON catalog first, then one `["<cmd>", "--help"]` per leaf command in
-/// catalog order. No duplicates.
+/// catalog order plus the auth-token extras. No duplicates.
 pub fn capture_plan(binary: &Path) -> Vec<Vec<String>> {
     let help = capture(binary, &["help".to_owned()], None).expect("top-level help capture");
     let catalog =
@@ -267,6 +272,13 @@ pub fn capture_plan(binary: &Path) -> Vec<Vec<String>> {
         let mut argv: Vec<String> = name.split(' ').map(str::to_owned).collect();
         argv.push("--help".to_owned());
         plan.push(argv);
+    }
+    for name in EXTRA_LEAVES {
+        let mut argv: Vec<String> = name.split(' ').map(str::to_owned).collect();
+        argv.push("--help".to_owned());
+        if !plan.contains(&argv) {
+            plan.push(argv);
+        }
     }
     plan
 }

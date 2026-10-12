@@ -102,7 +102,7 @@ fn remember_matches_the_registered_usage_and_parser() {
     let spec = record("remember");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--allow-duplicate] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
+        "usage: clio remember TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--allow-duplicate] [--dry-run] [--output json|text]\n       --context records where the memory came from, such as a conversation type or workflow stage; it is not searchable and recall does not match on it, so put anything you want to find later in TEXT. It is at most 4096 UTF-8 bytes, rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
         "remember full usage"
     );
     assert_eq!(
@@ -144,7 +144,7 @@ fn admit_renders_the_file_alternate_and_hides_the_file_flag() {
     let spec = record("admit");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio admit TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--output json|text]\n       or: clio admit --file ops.json [--bank BANK] [--actor ACTOR]\n       --context records where the memory came from, such as a conversation type or workflow stage. It is not searchable and recall does not match on it, so put anything you want to find later in TEXT; it is at most 4096 UTF-8 bytes and is rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
+        "usage: clio admit TEXT --category C [--bank BANK] [--actor ACTOR] [--epistemic-kind fact|belief] [--confidence N] [--source-type T] [--evidence-ref E] [--context TEXT] [--output json|text]\n       or: clio admit --file ops.json [--bank BANK] [--actor ACTOR]\n       --context records where the memory came from, such as a conversation type or workflow stage; it is not searchable and recall does not match on it, so put anything you want to find later in TEXT. It is at most 4096 UTF-8 bytes, rejected when empty or oversized, never truncated\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
         "admit full usage"
     );
     assert_eq!(
