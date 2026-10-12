@@ -1,4 +1,13 @@
-"""Self-test cases for unreadable profile buffers and the instrumented objects."""
+"""Self-test cases for unreadable profile buffers and the instrumented objects.
+
+ONE RULE GOVERNS THE SCRATCH DIRECTORIES IN THIS FILE, and breaking it hurts the
+host rather than the test: a directory that holds a file this self-test then RUNS
+must come from `exec_tempdir()`, never `tempfile.TemporaryDirectory`. The default
+temporary directory is mounted `noexec` on hardened Linux, where a staged binary
+carries a correct 0755 mode and the kernel refuses to run it anyway. The one
+scenario here that executes what it writes is `_stale_mapping_regression`, and it
+says so at its own scratch directory.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +17,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import unittest
 from pathlib import Path, PurePosixPath
+
+from exec_tempdir import exec_tempdir
 
 from scoped_profiles import drop_selected_objects, prune_foreign_objects
 
@@ -56,7 +68,8 @@ def _report_lines(
     return matches[0]["summary"]["lines"]
 
 
-def _stale_mapping_regression(check) -> None:
+def _stale_mapping_regression(check) -> bool:
+    """The stale source map, reproduced. False when this host skipped the scenario."""
     llvm_profdata, llvm_cov = _llvm_tools()
     if not llvm_profdata.is_file() or not llvm_cov.is_file():
         raise RuntimeError("the pinned Rust toolchain must include llvm-tools-preview")
@@ -68,7 +81,39 @@ def _stale_mapping_regression(check) -> None:
     current_source = "fn measured() {\n    let value = 1;\n" + (
         "    std::hint::black_box(value);\n}\nfn main() { measured(); }\n"
     )
-    with tempfile.TemporaryDirectory(prefix="scoped-runner-stale-map-") as scratch:
+    # THE SCRATCH DIRECTORY BELOW MUST COME FROM `exec_tempdir()` AND MUST NEVER
+    # GO BACK TO `tempfile.TemporaryDirectory`. This scenario compiles a program
+    # into its scratch directory and then RUNS that program (the `_run_checked`
+    # call further down that executes `current_object`), so the directory has to
+    # be one this host permits execution in. On a host whose default temporary
+    # directory is mounted `noexec` -- hardening guides mount `/tmp` that way --
+    # the compiled object is mode 0755 and the kernel refuses it regardless of
+    # that mode. The run then dies with `PermissionError: [Errno 13]` before one
+    # of these checks executes, `make coverage-fast` exits 2 having measured
+    # nothing at all, and the traceback blames a file permission that is in fact
+    # correct. That is how this repository came to have `scripts/exec_tempdir.py`,
+    # which is its one place for this rule: it hands back a directory that really
+    # runs a file, or raises the skip printed below.
+    #
+    # The other scenarios in this file keep `tempfile.TemporaryDirectory` on
+    # purpose, so do not "fix" them: they only write fixture files and let
+    # `prune_foreign_objects` or `drop_selected_objects` delete them by name, and
+    # none of them executes anything. The exec bit of the mount is irrelevant to
+    # them, and moving them would make this self-test skip on hosts where it can
+    # still do its work.
+    try:
+        scratch_directory = exec_tempdir(
+            purpose="the stale-map scenario's compiled object"
+        )
+    except unittest.SkipTest as reason:
+        # A skip is not a pass: nothing below ran, so the stale source map this
+        # scenario exists to catch was never reproduced on this host. The caller
+        # says so in the summary line too, because a green "all passed" over a
+        # scenario that never ran is the same claim this helper's own docstring
+        # warns about.
+        print(f"self-test skipped: {reason}")
+        return False
+    with scratch_directory as scratch:
         root = Path(scratch)
         source = root / "audit.rs"
         object_dir = root / "instrumented" / "debug" / "deps"
@@ -129,6 +174,7 @@ def _stale_mapping_regression(check) -> None:
             ),
             (True, True),
         )
+    return True
 
 
 def run(check, raises) -> tuple:
@@ -275,8 +321,10 @@ def run(check, raises) -> tuple:
             check("the selected object count is printed", "deleted 3" in selected_log.getvalue(), True)
             check("the number of selected objects deleted is returned", selected_count, 3)
 
-        # Reproduce the line-map union that made a doc-comment-only edit fail.
-        _stale_mapping_regression(check)
+        # Reproduce the line-map union that made a doc-comment-only edit fail. Its
+        # result says whether it ran: a host with nowhere to run the compiled object
+        # skips it, and the summary has to carry that rather than a bare pass.
+        stale_map_ran = _stale_mapping_regression(check)
 
         # An empty selection is a mass deletion, not an empty deletion. With no
         # names the keep pattern matches only the empty stem, so every object it
@@ -301,4 +349,4 @@ def run(check, raises) -> tuple:
             check("the pre-run refusal leaves the object in place", doomed.exists(), True)
     finally:
         globals()["workspace_packages"] = original_packages_for_prune
-    return name, prune_packages, scratch
+    return name, prune_packages, scratch, stale_map_ran
