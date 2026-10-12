@@ -62,9 +62,11 @@ impl PostgresStore {
         let mut client = crate::pg_tls::connect(database_url).am("postgres connect")?;
         crate::postgres_ext::require_extension(&mut client, "vector")?;
         // Every open runs schema and trigger DDL. Two opens that overlap take
-        // the same table locks in different orders and the server aborts one of
-        // them with `deadlock detected`, so the whole bootstrap runs under one
-        // cross-session advisory lock.
+        // the same table locks in different orders and write the same catalog
+        // rows, so the server aborts one of them with `deadlock detected`,
+        // `tuple concurrently updated`, or a `pg_type` unique-constraint
+        // violation. The whole bootstrap runs under one cross-session
+        // advisory lock.
         let (space, space_was_absent) = with_bootstrap_lock(&mut client, bootstrap_schema)?;
         Ok(Self {
             client: Mutex::new(client),
