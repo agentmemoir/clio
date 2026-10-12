@@ -15,6 +15,8 @@
 //!   `health` declare
 //! - The tranche's `validate` contract against the catalog inventory
 //! - The tranche's flag metadata: the enum list the reindex consumer accepts
+//! - The tranche's example and flag-alias metadata: every record's two to four
+//!   examples, and the schema-export's one `path -> out` alias pair
 //!
 //! ## Does not own
 //! - The parser and helper cases and the dispatch's trailing-argument and
@@ -29,7 +31,9 @@
 //!
 //! Keep this module focused on the reserved-surface records' data.
 
-use crate::cli_command_registry_test_support::record;
+use crate::cli_command_registry_test_support::{
+    assert_example_count, assert_examples_name_their_record, record,
+};
 use crate::cli_command_spec::{CommandSpec, ValueKind};
 
 /// The tranche's records, as the validation contract consumes them.
@@ -164,6 +168,38 @@ fn version_and_health_carry_their_help_prose_and_no_own_flags() {
                 crate::cli_command_registry::global_flag(extra).is_some(),
                 "{name} names --{extra}, which is not a declared global"
             );
+        }
+    }
+}
+
+/// Every record in the tranche carries two to four examples, and each example
+/// names its own command with its own arguments, so the examples the help will
+/// render never point at a sibling's command.
+#[test]
+fn every_record_carries_two_to_four_examples_naming_its_own_command() {
+    for spec in &tranche() {
+        assert_example_count(spec.name, spec);
+        assert_examples_name_their_record(spec.name, spec);
+    }
+}
+
+/// The tranche declares exactly one flag alias, the `mcp schema-export`
+/// `path -> out` pair, and every other record declares none: the pair's two
+/// spellings are the record's two documented flags, so neither the accepted
+/// spellings nor the printed leaf inventory changes.
+#[test]
+fn the_tranche_declares_only_the_schema_export_flag_alias() {
+    for spec in &tranche() {
+        if spec.name == "mcp schema-export" {
+            assert_eq!(spec.flag_aliases, [("path", "out")], "the alias pair");
+            for spelling in ["out", "path"] {
+                assert!(
+                    spec.documented.iter().any(|flag| flag.long == spelling),
+                    "--{spelling} stays documented"
+                );
+            }
+        } else {
+            assert!(spec.flag_aliases.is_empty(), "{} flag aliases", spec.name);
         }
     }
 }

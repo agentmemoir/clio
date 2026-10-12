@@ -3,20 +3,23 @@
 //
 //! # Responsibility
 //!
-//! This module tests the persona and local-state tranche: each record's bytes
-//! against the registered usage text and the catalog row, and its exact
-//! parser-visible flag sets.
+//! This module tests the persona and maintenance records, and the tranche-level
+//! contract over all nine `PERSONA_LOCAL` records: byte equality against the
+//! registered usage text, the exact parser-visible flag sets, the tranche's
+//! `validate` contract, and the flag metadata. The scratchpad and canonical
+//! per-record tests live in the `workspace` sibling's test module.
 //!
 //! ## Owns
-//! - Byte equality of each record's `full_usage` and `usage_line` with the
-//!   usage text the shared lookup resolves
-//! - The exact `parser_spec` value and boolean flag sequences per command
-//! - Each record's summary, tool, section, positional values, and required bits
-//! - The tranche's `validate` contract against the catalog inventory
-//! - The tranche's flag metadata: the enum lists the consumers accept, the
-//!   value kinds their parsers use, and the budget default
+//! - Byte equality of each persona and maintenance record's `full_usage` and
+//!   `usage_line`, and its exact `parser_spec` flag sets
+//! - The tranche list order, the `validate` contract, the alias and flag-alias
+//!   emptiness, and the flag metadata over the whole tranche
+//! - Each persona and maintenance record's summary, tool, section, positional
+//!   shape, and authored example count
 //!
 //! ## Does not own
+//! - The scratchpad and canonical usage and parser pins (see the `workspace`
+//!   sibling's `tests` module)
 //! - The registry lookups and `validate` itself (`cli_command_registry_tests`)
 //! - The renderer's shapes over pure records (`cli_command_spec_tests`)
 //!
@@ -24,10 +27,11 @@
 //!
 //! Test-only. Never compiled into production builds.
 //!
-//! Keep this module focused on the persona and local-state records' data.
+//! Keep this module focused on the persona and maintenance records and the
+//! tranche-level checks.
 
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+use crate::cli_command_registry_test_support::{positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section, ValueKind};
 
 /// One record's documented flag, as the metadata tests read it.
 fn documented_flag(name: &str, flag: &str) -> &'static crate::cli_command_spec::Flag {
@@ -41,15 +45,6 @@ fn documented_flag(name: &str, flag: &str) -> &'static crate::cli_command_spec::
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
     super::PERSONA_LOCAL.iter().collect()
-}
-
-/// A positional literal: these records carry no positional description.
-const fn positional(label: &'static str, required: bool) -> Positional {
-    Positional {
-        label,
-        required,
-        description: "",
-    }
 }
 
 /// The tranche's records pass `validate` against the catalog inventory.
@@ -158,8 +153,9 @@ fn persona_stable_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("persona_put_stable"));
     assert_eq!(spec.section, Section::Write);
     assert_eq!(
-        spec.positionals,
-        [positional("KEY", true), positional("VALUE", true)].as_slice()
+        positionals(spec),
+        [("KEY", true), ("VALUE", true)],
+        "persona stable positionals"
     );
 }
 
@@ -203,135 +199,10 @@ fn persona_observe_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("persona_observe_preference"));
     assert_eq!(spec.section, Section::Write);
     assert_eq!(
-        spec.positionals,
-        [positional("KEY", true), positional("NUMBER", true)].as_slice()
+        positionals(spec),
+        [("KEY", true), ("NUMBER", true)],
+        "persona observe positionals"
     );
-}
-
-/// `scratchpad write` renders today's usage text and builds today's parser sets.
-#[test]
-fn scratchpad_write_matches_the_registered_usage_and_parser() {
-    let spec = record("scratchpad write");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio scratchpad write KEY CONTENT [--session S] [--bank B] [--actor A] [--output json|text]"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        ["db", "backend", "bank", "actor", "output", "session"]
-    );
-    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
-    assert_eq!(spec.summary, "store an ephemeral key for this session");
-    assert_eq!(spec.tool, Some("scratchpad_write"));
-    assert_eq!(spec.section, Section::Write);
-    assert_eq!(
-        spec.positionals,
-        [positional("KEY", true), positional("CONTENT", true)].as_slice()
-    );
-}
-
-/// `scratchpad read` renders today's usage text and builds today's parser sets.
-#[test]
-fn scratchpad_read_matches_the_registered_usage_and_parser() {
-    let spec = record("scratchpad read");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio scratchpad read [KEY] [--session S] [--bank B] [--actor A] [--output json|text]"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        ["db", "backend", "bank", "actor", "output", "session"]
-    );
-    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
-    assert_eq!(spec.summary, "read one key, or the whole pad");
-    assert_eq!(spec.tool, Some("scratchpad_read"));
-    assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [positional("KEY", false)].as_slice());
-}
-
-/// `scratchpad clear` renders today's usage text and builds today's parser sets.
-#[test]
-fn scratchpad_clear_matches_the_registered_usage_and_parser() {
-    let spec = record("scratchpad clear");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio scratchpad clear [KEY] [--session S] [--bank B] [--actor A] [--output json|text]"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        ["db", "backend", "bank", "actor", "output", "session"]
-    );
-    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
-    assert_eq!(spec.summary, "drop one key, or the whole pad");
-    assert_eq!(spec.tool, Some("scratchpad_clear"));
-    assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("KEY", false)].as_slice());
-}
-
-/// `canonical put` renders today's usage text and carries the required bits
-/// its refusal path already reads by verb name.
-#[test]
-fn canonical_put_matches_the_registered_usage_and_parser() {
-    let spec = record("canonical put");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio canonical put KEY VALUE --category C --epistemic-kind K [--source-type T] [--confidence N] [--source-text TEXT] [--evidence-ref E] [--context C] [--dry-run] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
-    );
-    assert_eq!(
-        spec.required_flags(),
-        ["category", "epistemic-kind"],
-        "the refusal path reads these from the record now"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db",
-            "backend",
-            "bank",
-            "actor",
-            "output",
-            "category",
-            "epistemic-kind",
-            "source-type",
-            "confidence",
-            "source-text",
-            "evidence-ref",
-            "context"
-        ]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "dry-run"]
-    );
-    assert_eq!(
-        spec.summary,
-        "gated single-slot upsert with bi-temporal supersession"
-    );
-    assert_eq!(spec.tool, Some("canonical_put"));
-    assert_eq!(spec.section, Section::Write);
-    assert_eq!(
-        spec.positionals,
-        [positional("KEY", true), positional("VALUE", true)].as_slice()
-    );
-}
-
-/// `canonical get` renders today's usage text and builds today's parser sets.
-#[test]
-fn canonical_get_matches_the_registered_usage_and_parser() {
-    let spec = record("canonical get");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio canonical get KEY [--as-of TS] [--output json|text]"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        ["db", "backend", "bank", "actor", "output", "as-of"]
-    );
-    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
-    assert_eq!(spec.summary, "read one canonical key");
-    assert_eq!(spec.tool, Some("canonical_get"));
-    assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [positional("KEY", true)].as_slice());
 }
 
 /// `maintenance status` renders today's usage text and builds today's parser sets.
@@ -354,6 +225,32 @@ fn maintenance_status_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("maintenance_status"));
     assert_eq!(spec.section, Section::Read);
     assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
+}
+
+/// The persona and maintenance records carry the authored example counts,
+/// pinned here so an empty or shrunken list fails the tranche tests, not only
+/// the metadata check. The scratchpad and canonical counts are pinned by the
+/// sibling's test module.
+#[test]
+fn the_persona_and_maintenance_records_carry_their_examples() {
+    for (name, count) in [
+        ("persona get", 3),
+        ("persona stable", 3),
+        ("persona observe", 3),
+        ("maintenance status", 2),
+    ] {
+        assert_eq!(record(name).examples.len(), count, "{name} examples");
+    }
+}
+
+/// Every `PERSONA_LOCAL` record declares no aliases and no flag aliases, as
+/// the sibling tranches pin: an alias added here fails this sweep.
+#[test]
+fn the_persona_local_records_declare_no_aliases() {
+    for spec in super::PERSONA_LOCAL {
+        assert!(spec.aliases.is_empty(), "{} aliases", spec.name);
+        assert!(spec.flag_aliases.is_empty(), "{} flag aliases", spec.name);
+    }
 }
 
 /// Every documented flag in this tranche carries a description and, for a value

@@ -27,7 +27,9 @@
 //!
 //! Keep this module focused on the six backup records' data.
 
-use crate::cli_command_registry_test_support::record;
+use crate::cli_command_registry_test_support::{
+    assert_example_count, assert_examples_name_their_record, record,
+};
 use crate::cli_command_spec::{Positional, Section, ValueKind};
 
 /// `backup create` renders today's usage text and builds today's parser sets.
@@ -207,7 +209,7 @@ fn backup_restore_matches_the_registered_usage_and_parser() {
         [Positional {
             label: "ID",
             required: true,
-            description: ""
+            description: "Snapshot id from the backup directory's listing; `restore` restores that archive and `verify` re-checks it."
         }]
         .as_slice()
     );
@@ -249,7 +251,7 @@ fn backup_verify_matches_the_registered_usage_and_parser() {
         [Positional {
             label: "ID",
             required: true,
-            description: ""
+            description: "Snapshot id from the backup directory's listing; `restore` restores that archive and `verify` re-checks it."
         }]
         .as_slice()
     );
@@ -358,7 +360,8 @@ fn the_registry_holds_exactly_three_or_alternates_and_they_render() {
 }
 
 /// The six records bind no MCP tool and declare no aliases, flag aliases, or
-/// examples; `dir` is the one leaf with no note.
+/// alternates; each carries two to four examples naming its own command, and
+/// `dir` is the one leaf with no note.
 #[test]
 fn the_six_records_carry_no_extra_surfaces() {
     for name in [
@@ -373,7 +376,8 @@ fn the_six_records_carry_no_extra_surfaces() {
         assert!(spec.aliases.is_empty(), "{name} aliases");
         assert!(spec.flag_aliases.is_empty(), "{name} flag aliases");
         assert!(spec.usage_alternates.is_empty(), "{name} alternates");
-        assert!(spec.examples.is_empty(), "{name} examples");
+        assert_example_count(name, spec);
+        assert_examples_name_their_record(name, spec);
         assert_eq!(spec.tool, None, "{name} tool");
     }
     assert_eq!(record("backup dir").notes.len(), 0, "backup dir notes");

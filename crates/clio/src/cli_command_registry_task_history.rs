@@ -15,6 +15,7 @@
 //! ## Owns
 //! - The eight `CommandSpec` records and `TASK_HISTORY`, the tranche that
 //!   lists them in head-group order
+//! - The positionals and examples of those records
 //! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
@@ -31,35 +32,40 @@
 //! Keep this module focused on the task, failure, memtree, and history records.
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
+
+/// One example line with an optional short comment.
+const fn example(command: &'static str, comment: Option<&'static str>) -> Example {
+    Example { command, comment }
+}
 
 /// The required `TASK_ID` positional of `task get`, `task history`,
 /// `task upsert`, and `failure record`.
 const TASK_ID: Positional = Positional {
     label: "TASK_ID",
     required: true,
-    description: "",
+    description: "The task record the command reads or writes: `task upsert` writes it and the others read or file against it.",
 };
 
 /// The required `TASK_ID_OR_QUERY` positional of `failure list`.
 const TASK_ID_OR_QUERY: Positional = Positional {
     label: "TASK_ID_OR_QUERY",
     required: true,
-    description: "",
+    description: "A task id or free text; `failures_for_task` tries the exact id first, then a similar search over task definitions.",
 };
 
 /// The required `NODE_ID` positional of `memtree get`.
 const NODE_ID: Positional = Positional {
     label: "NODE_ID",
     required: true,
-    description: "",
+    description: "The memory-tree node whose record and lineage are returned; `memtree_get` receives it as `node_id`.",
 };
 
 /// The required `TARGET` positional of `history temporal`.
 const TARGET: Positional = Positional {
     label: "TARGET",
     required: true,
-    description: "",
+    description: "The trajectory target: `triple:subject:predicate`, `preference:key`, or `belief:id-or-proposition`.",
 };
 
 /// The `--explain` trace flag the read commands here document.
@@ -140,7 +146,10 @@ pub(crate) const TASK_GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio task get t-1 --db ./memory.db", None),
+        example("clio task get t-1 --explain -o json", Some("trace")),
+    ],
     tool: Some("task_get"),
     section: Section::Read,
 };
@@ -166,7 +175,10 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio task history t-1 --limit 10 --db ./memory.db", None),
+        example("clio task history t-1 --explain -o json", Some("trace")),
+    ],
     tool: Some("task_history"),
     section: Section::Read,
 };
@@ -203,7 +215,16 @@ pub(crate) const TASK_UPSERT: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio task upsert t-1 --definition \"Import\" --status in_progress --db ./memory.db",
+            None,
+        ),
+        example(
+            "clio task upsert t-1 --definition \"Import\" --status done --dry-run",
+            Some("preview"),
+        ),
+    ],
     tool: Some("task_upsert"),
     section: Section::Write,
 };
@@ -229,7 +250,10 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio failure list t-1 --limit 10 --db ./memory.db", None),
+        example("clio failure list \"import verb\" --limit 5 -o json", None),
+    ],
     tool: Some("failures_for_task"),
     section: Section::Read,
 };
@@ -263,7 +287,20 @@ pub(crate) const FAILURE_RECORD: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio failure record t-1 --attempt-n 1 --what-failed \"timeout\" --lesson \"backoff\"",
+            None,
+        ),
+        example(
+            "clio failure record t-1 --attempt-n 1 --what-failed \"timeout\" --lesson \"backoff\" -o json",
+            None,
+        ),
+        example(
+            "clio failure record t-1 --attempt-n 2 --what-failed \"timeout\" --lesson \"backoff\" --dry-run",
+            Some("preview"),
+        ),
+    ],
     tool: Some("failure_record"),
     section: Section::Write,
 };
@@ -309,7 +346,13 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio memtree query --task-id t-1 --depth 2 --db ./memory.db",
+            None,
+        ),
+        example("clio memtree query --time-start 2026-02-01", None),
+    ],
     tool: Some("memtree_query"),
     section: Section::Read,
 };
@@ -327,7 +370,10 @@ pub(crate) const MEMTREE_GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example("clio memtree get node-1 --db ./memory.db", None),
+        example("clio memtree get node-1 --explain -o json", None),
+    ],
     tool: Some("memtree_get"),
     section: Section::Read,
 };
@@ -359,7 +405,17 @@ pub(crate) const HISTORY_TEMPORAL: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        example(
+            "clio history temporal triple:Bob:city --as-of 2026-02-01 --db ./memory.db",
+            Some("one triple"),
+        ),
+        example("clio history temporal preference:reply-style", None),
+        example(
+            "clio history temporal belief:itm-sample-1 --time-axis transaction -o json",
+            None,
+        ),
+    ],
     tool: Some("temporal_history"),
     section: Section::Read,
 };

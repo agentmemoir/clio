@@ -3,20 +3,23 @@
 //
 //! # Responsibility
 //!
-//! This module tests the shared-workspace tranche: each record's bytes against
-//! the registered usage text and the catalog row, and its exact parser-visible
-//! flag sets, the `hygiene clean` alternate and note included.
+//! This module tests the shared-bank, intent, compose, and audit records, and
+//! the tranche-level contract over all nine `SHARED_WORKSPACE` records: byte
+//! equality against the registered usage text, the exact parser-visible flag
+//! sets, the `validate` contract, and the flag metadata. The hygiene
+//! per-record tests live in the `hygiene` sibling's test module.
 //!
 //! ## Owns
-//! - Byte equality of each record's `full_usage` and `usage_line` with the
-//!   usage text the shared lookup resolves
-//! - The exact `parser_spec` value and boolean flag sequences per command
-//! - Each record's summary, tool, section, positional values, and required bits
-//! - The tranche's `validate` contract against the catalog inventory
-//! - The tranche's flag metadata: the enum lists the consumers accept and the
-//!   value kinds their parsers use
+//! - Byte equality of each shared, intent, compose, and audit record's
+//!   `full_usage` and `usage_line`, and its exact `parser_spec` flag sets
+//! - The tranche list order, the `validate` contract, and the flag metadata
+//!   over the whole tranche
+//! - Each of these records' summary, tool, section, positional shape, and
+//!   authored example count
 //!
 //! ## Does not own
+//! - The hygiene usage and parser pins (see the `hygiene` sibling's `tests`
+//!   module)
 //! - The registry lookups and `validate` itself (`cli_command_registry_tests`)
 //! - The renderer's shapes over pure records (`cli_command_spec_tests`)
 //!
@@ -24,24 +27,16 @@
 //!
 //! Test-only. Never compiled into production builds.
 //!
-//! Keep this module focused on the shared-workspace records' data.
+//! Keep this module focused on the shared-bank, intent, compose, and audit
+//! records and the tranche-level checks.
 
 use crate::cli_command_registry::check_metadata;
-use crate::cli_command_registry_test_support::record;
-use crate::cli_command_spec::{CommandSpec, Positional, Section, ValueKind};
+use crate::cli_command_registry_test_support::{positionals, record};
+use crate::cli_command_spec::{CommandSpec, Section, ValueKind};
 
 /// The tranche's records, as the validation contract consumes them.
 fn tranche() -> Vec<&'static CommandSpec> {
     super::SHARED_WORKSPACE.iter().collect()
-}
-
-/// A positional literal: these records carry no positional description.
-const fn positional(label: &'static str, required: bool) -> Positional {
-    Positional {
-        label,
-        required,
-        description: "",
-    }
 }
 
 /// The tranche's records pass `validate` against the catalog inventory.
@@ -132,7 +127,11 @@ fn shared_store_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "write into a shared bank");
     assert_eq!(spec.tool, Some("shared_store"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("TEXT", true)].as_slice());
+    assert_eq!(
+        positionals(spec),
+        [("TEXT", true)],
+        "shared store positionals"
+    );
 }
 
 /// `shared retrieve` renders today's usage text and builds today's parser sets.
@@ -155,7 +154,11 @@ fn shared_retrieve_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "read from a shared bank");
     assert_eq!(spec.tool, Some("shared_retrieve"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [positional("QUERY", true)].as_slice());
+    assert_eq!(
+        positionals(spec),
+        [("QUERY", true)],
+        "shared retrieve positionals"
+    );
 }
 
 /// `shared discard` renders today's usage text and builds today's parser sets.
@@ -178,108 +181,11 @@ fn shared_discard_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "remove one item from a shared bank");
     assert_eq!(spec.tool, Some("shared_discard"));
     assert_eq!(spec.section, Section::Write);
-    assert_eq!(spec.positionals, [positional("ITEM_ID", true)].as_slice());
-}
-
-/// `hygiene audit` renders today's usage text and builds today's parser sets.
-#[test]
-fn hygiene_audit_matches_the_registered_usage_and_parser() {
-    let spec = record("hygiene audit");
     assert_eq!(
-        spec.full_usage(),
-        "usage: clio hygiene audit [--min-score N] [--limit N] [--offset N] [--bank BANK] [--output json|text]"
+        positionals(spec),
+        [("ITEM_ID", true)],
+        "shared discard positionals"
     );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db",
-            "backend",
-            "bank",
-            "actor",
-            "output",
-            "min-score",
-            "limit",
-            "offset"
-        ]
-    );
-    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
-    assert_eq!(spec.summary, "score stored items and list the weakest");
-    assert_eq!(spec.tool, Some("hygiene_audit"));
-    assert_eq!(spec.section, Section::Read);
-    assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
-}
-
-/// `hygiene clean` is the one record with an alternate form: its printed text
-/// is `usage:`, then `or:`, then the note, byte-for-byte.
-#[test]
-fn hygiene_clean_renders_the_or_alternate_and_the_trailing_note() {
-    let spec = record("hygiene clean");
-    let text = spec.full_usage();
-    assert_eq!(
-        text,
-        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only\n       --action keep applies each candidate's suggested action, including archive or discard"
-    );
-    assert_eq!(
-        spec.usage_line(),
-        "clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]"
-    );
-    assert_eq!(
-        spec.usage_alternates,
-        ["clio hygiene clean --file - (reads the candidates JSON from stdin)"]
-    );
-    assert_eq!(
-        spec.notes,
-        [
-            "without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only",
-            "--action keep applies each candidate's suggested action, including archive or discard"
-        ]
-    );
-    let or_at = text.find("\n       or: ").expect("the alternate prints");
-    let note_at = text.find("\n       without").expect("the note prints");
-    assert!(or_at < note_at, "or before note: {text}");
-    assert_eq!(
-        spec.required_flags(),
-        ["file"],
-        "the file flag is the one the line writes bare"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db", "backend", "bank", "actor", "output", "file", "action", "reason", "note"
-        ]
-    );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "confirm", "dry-run"]
-    );
-    assert_eq!(
-        spec.summary,
-        "(or --file - for stdin; without --confirm, or with --dry-run: zero-write dry-run only)"
-    );
-    assert_eq!(spec.tool, Some("hygiene_clean"));
-    assert_eq!(spec.section, Section::Write);
-    assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
-}
-
-/// `hygiene log` renders today's usage text and builds today's parser sets.
-#[test]
-fn hygiene_log_matches_the_registered_usage_and_parser() {
-    let spec = record("hygiene log");
-    assert_eq!(
-        spec.full_usage(),
-        "usage: clio hygiene log [--limit N] [--offset N] [--bank BANK] [--output json|text]"
-    );
-    assert_eq!(
-        spec.parser_spec().value_flags(),
-        [
-            "db", "backend", "bank", "actor", "output", "limit", "offset"
-        ]
-    );
-    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
-    assert_eq!(spec.summary, "what hygiene has already done");
-    assert_eq!(spec.tool, Some("hygiene_log_list"));
-    assert_eq!(spec.section, Section::Read);
-    assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
 }
 
 /// `intent gate` renders today's usage text and builds today's parser sets.
@@ -301,7 +207,11 @@ fn intent_gate_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "decide whether a turn should reach memory");
     assert_eq!(spec.tool, Some("intent_gate"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [positional("TURN_TEXT", true)].as_slice());
+    assert_eq!(
+        positionals(spec),
+        [("TURN_TEXT", true)],
+        "intent gate positionals"
+    );
 }
 
 /// `compose-context` accepts a `--query` its printed line never shows and
@@ -354,7 +264,11 @@ fn compose_context_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "assemble a budgeted context block for a turn");
     assert_eq!(spec.tool, Some("compose_context"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [positional("QUERY", false)].as_slice());
+    assert_eq!(
+        positionals(spec),
+        [("QUERY", false)],
+        "compose-context positionals"
+    );
 }
 
 /// `audit trail` renders today's usage text and builds today's parser sets.
@@ -376,7 +290,29 @@ fn audit_trail_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "masked lifecycle reconstruction for one item");
     assert_eq!(spec.tool, Some("audit_trail"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(spec.positionals, [positional("ITEM_ID", true)].as_slice());
+    assert_eq!(
+        positionals(spec),
+        [("ITEM_ID", true)],
+        "audit trail positionals"
+    );
+}
+
+/// The shared, intent, compose, and audit records carry the authored example
+/// counts, pinned here so an empty or shrunken list fails the tranche tests,
+/// not only the metadata check. The hygiene counts are pinned by the sibling's
+/// test module.
+#[test]
+fn the_shared_workspace_records_carry_their_examples() {
+    for (name, count) in [
+        ("shared store", 3),
+        ("shared retrieve", 2),
+        ("shared discard", 2),
+        ("intent gate", 2),
+        ("compose-context", 3),
+        ("audit trail", 2),
+    ] {
+        assert_eq!(record(name).examples.len(), count, "{name} examples");
+    }
 }
 
 /// Every documented flag in this tranche carries a description and, when it
@@ -385,27 +321,6 @@ fn audit_trail_matches_the_registered_usage_and_parser() {
 fn the_shared_workspace_tranche_passes_the_metadata_check() {
     let specs: Vec<&CommandSpec> = super::SHARED_WORKSPACE.iter().collect();
     assert_eq!(check_metadata(&specs), Ok(()));
-}
-
-/// The tranche's defaults record what the consumers apply when the flag is
-/// omitted: `cli_write_hygiene` keeps, and `clio_hygiene` scores at 0.40.
-#[test]
-fn the_hygiene_defaults_record_the_values_the_consumers_apply() {
-    let find = |name: &str, flag: &str| {
-        record(name)
-            .documented
-            .iter()
-            .find(|candidate| candidate.long == flag)
-            .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
-    };
-    assert_eq!(find("hygiene clean", "action").default, Some("keep"));
-    let min_score = find("hygiene audit", "min-score");
-    assert_eq!(min_score.default, Some("0.40"), "the recorded default");
-    assert_eq!(
-        min_score.default.expect("a default").parse::<f64>(),
-        Ok(clio_hygiene::DEFAULT_MIN_SCORE),
-        "min-score ties to the constant"
-    );
 }
 
 /// Every documented flag carries the kind its consumer parses: the enum

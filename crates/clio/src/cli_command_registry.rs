@@ -10,8 +10,10 @@
 //! - `GLOBAL_VALUE_FLAGS` and `GLOBAL_BOOL_FLAGS` and their name lookups
 //! - `TRANCHES`, the tranche order, and `all` / `find` / `resolve` /
 //!   `resolve_in` / `names` / `aliases`
-//! - `validate`, the static-data contract over one set of records
-//! - `check_flag_metadata` / `check_metadata`, the flag-documentation contract
+//! - `validate`, the static-data contract over one set of records: names,
+//!   command aliases with their cycle walk, and flag aliases
+//! - `check_flag_metadata` / `check_metadata`, the flag and completeness
+//!   contract over the records and the declared globals
 //!
 //! ## Does not own
 //! - The command records themselves (see the `cli_command_registry_*` record
@@ -192,9 +194,12 @@ pub(crate) fn aliases() -> impl Iterator<Item = (&'static str, &'static str)> {
 ///
 /// Rejects, naming the offender: a duplicate visible name, a visible name
 /// absent from `inventory`, an empty or self-referential alias, an alias two
-/// records claim, an alias that shadows a different-tool visible record, two
-/// records that alias each other, and an `accepted_extra` name that is not a
-/// declared global flag or that the same record also documents.
+/// records claim, an alias that shadows a different-tool visible record, an
+/// alias cycle of any length, a blank or self-referential flag alias, a
+/// flag-alias spelling two records claim, a flag-alias spelling the record
+/// does not accept, a flag-alias cycle of any length, and an `accepted_extra`
+/// name that is not a declared global flag or that the same record also
+/// documents.
 ///
 /// A flag documented twice by one record is accepted, because a real command
 /// prints a required and an optional occurrence of the same flag. An alias
@@ -247,22 +252,125 @@ pub(crate) fn validate(specs: &[&CommandSpec], inventory: &[&str]) -> Result<(),
         }
     }
     for (alias, spec) in &claimed {
-        if let Some(target) = specs.iter().find(|candidate| candidate.name == *alias) {
-            if target.tool != spec.tool {
-                return Err(format!(
-                    "`{}` shadows `{}` with alias `{alias}`",
-                    spec.name, target.name
-                ));
-            }
-            if target.aliases.contains(&spec.name) {
-                return Err(format!(
-                    "`{}` and `{}` alias each other in a cycle",
-                    spec.name, target.name
-                ));
+        if let Some(target) = specs.iter().find(|candidate| candidate.name == *alias)
+            && target.tool != spec.tool
+        {
+            return Err(format!(
+                "`{}` shadows `{}` with alias `{alias}`",
+                spec.name, target.name
+            ));
+        }
+    }
+    let mut command_edges: Vec<(&str, &str)> = Vec::new();
+    for spec in specs {
+        for alias in spec.aliases {
+            if specs.iter().any(|candidate| candidate.name == *alias) {
+                command_edges.push((spec.name, *alias));
             }
         }
     }
+    if let Some(cycle) = cycle_in(&command_edges) {
+        return Err(cycle_error("alias cycle", &cycle));
+    }
+    check_flag_aliases(specs)
+}
+
+/// Check the flag-alias contract over one set of records, naming the offender.
+///
+/// Each pair is `(alias, canonical)`: the first spelling is the hidden
+/// alternate, the second the flag spelling it behaves as. Rejects a blank or
+/// self-referential pair, a spelling two records claim, a spelling the record
+/// does not accept, and a cycle of any length.
+fn check_flag_aliases(specs: &[&CommandSpec]) -> Result<(), String> {
+    let mut flag_claims: Vec<(&str, &CommandSpec)> = Vec::new();
+    let mut flag_edges: Vec<(&str, &str)> = Vec::new();
+    for spec in specs {
+        for (alias, canonical) in spec.flag_aliases {
+            if alias.trim().is_empty() || canonical.trim().is_empty() {
+                return Err(format!(
+                    "`{}` declares a blank flag-alias spelling",
+                    spec.name
+                ));
+            }
+            if alias == canonical {
+                return Err(format!("`{}` aliases flag `{alias}` to itself", spec.name));
+            }
+            for spelling in [*alias, *canonical] {
+                if let Some((_, owner)) = flag_claims
+                    .iter()
+                    .find(|(name, owner)| *name == spelling && owner.name != spec.name)
+                {
+                    return Err(format!(
+                        "flag alias `{spelling}` is claimed by both `{}` and `{}`",
+                        owner.name, spec.name
+                    ));
+                }
+            }
+            for spelling in [*alias, *canonical] {
+                if !accepts_flag(spec, spelling) {
+                    return Err(format!(
+                        "`{}` flag alias `{alias} -> {canonical}` names `{spelling}`, which the record does not accept",
+                        spec.name
+                    ));
+                }
+            }
+            flag_claims.push((*alias, spec));
+            flag_claims.push((*canonical, spec));
+            flag_edges.push((*alias, *canonical));
+        }
+    }
+    if let Some(cycle) = cycle_in(&flag_edges) {
+        return Err(cycle_error("flag-alias cycle", &cycle));
+    }
     Ok(())
+}
+
+/// Render one cycle report: the repeating run, closed by its first name.
+fn cycle_error(label: &str, cycle: &[&str]) -> String {
+    format!("{label}: {} -> {}", cycle.join(" -> "), cycle[0])
+}
+
+/// Whether a record accepts a long flag spelling: it documents it, lists it in
+/// `accepted_extra`, or it is a declared global flag.
+fn accepts_flag(spec: &CommandSpec, name: &str) -> bool {
+    spec.documented.iter().any(|flag| flag.long == name)
+        || spec.accepted_extra.contains(&name)
+        || global_flag(name).is_some()
+}
+
+/// Follow the `(from, to)` edges from every start until a name repeats, and
+/// return the repeating run: a command-alias chain or a flag-alias chain. Edge
+/// order is the record order, so the report is stable.
+fn cycle_in<'a>(edges: &[(&'a str, &'a str)]) -> Option<Vec<&'a str>> {
+    for (from, _) in edges {
+        let mut path: Vec<&'a str> = Vec::new();
+        if let Some(cycle) = walk(edges, from, &mut path) {
+            return Some(cycle);
+        }
+    }
+    None
+}
+
+/// One depth-first step: when `node` is already on `path`, return the run that
+/// repeats; otherwise extend `path` through every outgoing edge.
+fn walk<'a>(
+    edges: &[(&'a str, &'a str)],
+    node: &'a str,
+    path: &mut Vec<&'a str>,
+) -> Option<Vec<&'a str>> {
+    if let Some(start) = path.iter().position(|name| *name == node) {
+        return Some(path[start..].to_vec());
+    }
+    path.push(node);
+    for (from, to) in edges {
+        if *from == node
+            && let Some(cycle) = walk(edges, to, path)
+        {
+            return Some(cycle);
+        }
+    }
+    path.pop();
+    None
 }
 
 /// Check one flag's documentation metadata is complete.
@@ -292,20 +400,47 @@ pub(crate) fn check_flag_metadata(flag: &Flag) -> Result<(), String> {
     Ok(())
 }
 
-/// Check the flag metadata of every spec's documented flags and the declared
-/// globals, naming the record that owns the bad flag.
+/// Check every spec's flag metadata and completeness contract, naming the
+/// record that owns the bad flag, positional, or example, and then the flag
+/// metadata of the declared globals.
+///
+/// The completeness contract is the positional rules plus
+/// `cli_command_registry_examples::check_examples`, so every caller of this
+/// function gains it: the per-tranche metadata tests must stay green as the
+/// record tranches land their data.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn check_metadata(specs: &[&CommandSpec]) -> Result<(), String> {
     for spec in specs {
         for flag in spec.documented {
             check_flag_metadata(flag).map_err(|error| format!("`{}`: {error}", spec.name))?;
         }
+        for (index, positional) in spec.positionals.iter().enumerate() {
+            if positional.label.trim().is_empty() {
+                return Err(format!(
+                    "`{}` positional {index} has a blank label",
+                    spec.name
+                ));
+            }
+            if positional.description.trim().is_empty() {
+                return Err(format!(
+                    "`{}` positional `{}` has no description",
+                    spec.name, positional.label
+                ));
+            }
+        }
+        examples::check_examples(spec)?;
     }
     for flag in GLOBAL_VALUE_FLAGS.iter().chain(GLOBAL_BOOL_FLAGS.iter()) {
         check_flag_metadata(flag).map_err(|error| format!("global {error}"))?;
     }
     Ok(())
 }
+
+#[path = "cli_command_registry_examples.rs"]
+mod examples;
+
+#[path = "cli_command_registry_help_topics.rs"]
+mod help_topics;
 
 #[cfg(test)]
 #[path = "cli_command_registry_tests.rs"]

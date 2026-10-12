@@ -4,18 +4,25 @@
 //! # Responsibility
 //!
 //! This module is responsible for the static records of the persona and
-//! local-state commands and for the tranche that lists them.
+//! maintenance commands — `persona get`, `persona stable`, `persona observe`,
+//! and `maintenance status` — and for the `PERSONA_LOCAL` tranche that lists
+//! all nine persona and local-state records in the registry's declared order.
+//!
+//! The scratchpad and canonical records live in the `workspace` sibling this
+//! module declares and re-exports.
 //!
 //! ## Owns
-//! - The nine `CommandSpec` records and `PERSONA_LOCAL`, the tranche that
-//!   lists them in the registry's declared order
+//! - The four `CommandSpec` records here, the `PERSONA_LOCAL` tranche list,
+//!   and the shared flag consts the sibling also uses
 //! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
+//! - The scratchpad and canonical records (see the `workspace` sibling module)
 //! - The record model or its rendering (see `cli_command_spec`)
 //! - The registry lookups and the global order of the rendered surfaces (see
 //!   `cli_command_registry` and `cli_command_bindings`)
-//! - The command semantics (see the persona and local-state command surfaces)
+//! - The command semantics (see the persona, maintenance, and workspace
+//!   command surfaces)
 //!
 //! ## Boundary
 //!
@@ -23,55 +30,59 @@
 //! normally require changes here. Changes to the command implementations
 //! should not.
 //!
-//! Keep this module focused on the persona and local-state records.
+//! Keep this module focused on the persona and maintenance records and the
+//! tranche list.
 //
 // Each record carries the bytes its authored rows held: the summary is the
 // catalog row, the usage line is the registered usage text, and the tool is the
 // binding row, so both rendered surfaces keep their exact output.
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
-use clio_types::{SemanticCategory, SourceType};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
-/// The required `KEY` positional of the persona and scratchpad writes.
+/// The scratchpad and canonical records: a sibling file so both halves of the
+/// tranche stay within the size cap. The records are re-exported below so
+/// `PERSONA_LOCAL` and the tranche tests read them by name.
+#[path = "cli_command_registry_persona_local_workspace.rs"]
+mod workspace;
+
+pub(crate) use workspace::{
+    CANONICAL_GET, CANONICAL_PUT, SCRATCHPAD_CLEAR, SCRATCHPAD_READ, SCRATCHPAD_WRITE,
+};
+
+/// The required `KEY` positional of `persona stable`.
 const KEY: Positional = Positional {
     label: "KEY",
     required: true,
-    description: "",
+    description: "The persona key to set.",
 };
 
-/// The required `VALUE` positional of `persona stable` and `canonical put`.
+/// The required `KEY` positional of `persona observe`.
+const OBSERVE_KEY: Positional = Positional {
+    label: "KEY",
+    required: true,
+    description: "The persona key the observation updates.",
+};
+
+/// The required `VALUE` positional of `persona stable`.
 const VALUE: Positional = Positional {
     label: "VALUE",
     required: true,
-    description: "",
+    description: "The persona value stored under the key.",
 };
 
 /// The required `NUMBER` positional of `persona observe`.
 const NUMBER: Positional = Positional {
     label: "NUMBER",
     required: true,
-    description: "",
-};
-
-/// The required `CONTENT` positional of `scratchpad write`.
-const CONTENT: Positional = Positional {
-    label: "CONTENT",
-    required: true,
-    description: "",
-};
-
-/// The optional `KEY` positional of the scratchpad reads.
-const OPTIONAL_KEY: Positional = Positional {
-    label: "KEY",
-    required: false,
-    description: "",
+    description: "The numeric observation fed into the preference's exponential moving average.",
 };
 
 /// The `--explain` trace flag this tranche's read commands document.
 const EXPLAIN: Flag = Flag::toggle("explain", "Asks `read_args` for the trace detail.");
 
-/// The `--dry-run` preview flag this tranche's write commands document.
+/// The `--dry-run` preview flag this tranche's write commands document; the
+/// `workspace` sibling's `canonical put` also uses it.
 const DRY_RUN: Flag = Flag::toggle("dry-run", "Previews with no durable change.");
 
 /// The `--source explicit|inferred` of `persona stable`, which the tool
@@ -98,27 +109,20 @@ const SOURCE_OBSERVE: Flag = Flag {
     )
 };
 
-/// The `--confidence N` of `persona stable`, `persona observe`, and `canonical put`.
+/// The `--confidence N` of `persona stable`, `persona observe`, and the
+/// `workspace` sibling's `canonical put`.
 const CONFIDENCE: Flag = Flag::float(
     "confidence",
     "N",
     "`parse_unit_f64` bounds it to `0.0..=1.0`.",
 );
 
-/// The `--evidence-ref E` of the persona and canonical writes.
+/// The `--evidence-ref E` of the persona writes and the `workspace` sibling's
+/// `canonical put`.
 const EVIDENCE_REF: Flag = Flag::text("evidence-ref", "E", "Sets the entry's `evidence_ref`.");
 
 /// The `--context TEXT` of `persona stable` and `persona observe`.
 const PERSONA_CONTEXT: Flag = Flag::text("context", "TEXT", "Sets the entry's `context`.");
-
-/// The `--session S` of the scratchpad commands.
-const SESSION: Flag = Flag::text("session", "S", "`insert_session` sets the session id.");
-
-/// The scratchpad lines print `--bank B`; the global's own placeholder is longer.
-const SCRATCHPAD_BANK: Flag = Flag::text("bank", "B", "`base_args` scopes the call to one bank.");
-
-/// The scratchpad and persona write lines print `--actor A`.
-const SCRATCHPAD_ACTOR: Flag = Flag::text("actor", "A", "`base_args` names the acting identity.");
 
 /// The `--budget-tokens N` of `persona get`, which `clio_persona` defaults to
 /// `DEFAULT_PERSONA_TOKEN_BUDGET`.
@@ -131,57 +135,6 @@ const BUDGET_TOKENS: Flag = Flag {
     )
 };
 
-/// `canonical put` cannot run without its selector flags.
-const CATEGORY_REQUIRED: Flag = Flag {
-    required: true,
-    ..Flag::choice(
-        "category",
-        "C",
-        "`canonical_put_call` requires the slot category from `task_spec|schema|tool_config|output_constraint|persona`.",
-        SemanticCategory::WIRE,
-    )
-};
-
-/// The second `canonical put` selector.
-const EPISTEMIC_KIND_REQUIRED: Flag = Flag {
-    required: true,
-    ..Flag::choice(
-        "epistemic-kind",
-        "K",
-        "`canonical_put_call` requires and validates `fact` or `belief`.",
-        &["fact", "belief"],
-    )
-};
-
-/// The `--source-type T` of `canonical put`.
-const SOURCE_TYPE: Flag = Flag::choice(
-    "source-type",
-    "T",
-    "`source_type_arg` requires it with `belief`: `user_stated|agent_inferred|third_party`.",
-    SourceType::WIRE,
-);
-
-/// The `--source-text TEXT` of `canonical put`.
-const SOURCE_TEXT: Flag = Flag::text(
-    "source-text",
-    "TEXT",
-    "`canonical_put_call` sets the `source_text`.",
-);
-
-/// The `--context C` of `canonical put`.
-const CANONICAL_CONTEXT: Flag = Flag::text(
-    "context",
-    "C",
-    "`context_arg` bounds the context to 4096 bytes.",
-);
-
-/// The `--as-of TS` of `canonical get`.
-const AS_OF: Flag = Flag::text(
-    "as-of",
-    "TS",
-    "`canonical_get_call` sets the point-in-time `as_of`.",
-);
-
 /// The `--item-id ID` of `maintenance status`.
 const ITEM_ID: Flag = Flag::text(
     "item-id",
@@ -189,19 +142,12 @@ const ITEM_ID: Flag = Flag::text(
     "`maintenance_status_call` sets the `item_id` filter.",
 );
 
-/// The `--epistemic-kind`/`--source-type` pairing `canonical put` prints under
-/// its usage line.
-const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
+/// The global flags these records accept without printing.
+const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
 
 /// `persona observe` accepts `--context` without printing it, so its printed
 /// line is pinned here while `documented` keeps the parser's accepted set.
 const PERSONA_OBSERVE_USAGE: &str = "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]";
-
-/// The global flags these records accept without printing.
-const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
-
-/// The scratchpad records print `--bank`/`--actor`, so only these ride along.
-const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
 
 /// `clio persona get`: the persona document, within a token budget.
 pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
@@ -215,7 +161,20 @@ pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio persona get --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio persona get --budget-tokens 800",
+            comment: Some("larger budget"),
+        },
+        Example {
+            command: "clio persona get -o json --db ./memory.db",
+            comment: None,
+        },
+    ],
     tool: Some("persona_get"),
     section: Section::Read,
 };
@@ -239,7 +198,20 @@ pub(crate) const PERSONA_STABLE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio persona stable response_style concise --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio persona stable response_style concise --confidence 0.9 --source explicit",
+            comment: None,
+        },
+        Example {
+            command: "clio persona stable response_style concise -o json",
+            comment: None,
+        },
+    ],
     tool: Some("persona_put_stable"),
     section: Section::Write,
 };
@@ -251,7 +223,7 @@ pub(crate) const PERSONA_OBSERVE: CommandSpec = CommandSpec {
     aliases: &[],
     summary: "feed one numeric observation into the EMA",
     notes: &[],
-    positionals: &[KEY, NUMBER],
+    positionals: &[OBSERVE_KEY, NUMBER],
     documented: &[
         CONFIDENCE,
         SOURCE_OBSERVE,
@@ -263,104 +235,22 @@ pub(crate) const PERSONA_OBSERVE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(PERSONA_OBSERVE_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio persona observe response_style 0.8 --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio persona observe response_style 0.8 --source inferred --evidence-ref run-42",
+            comment: None,
+        },
+        Example {
+            command: "clio persona observe response_style 0.8 -o json",
+            comment: None,
+        },
+    ],
     tool: Some("persona_observe_preference"),
     section: Section::Write,
-};
-
-/// `clio scratchpad write`: store one ephemeral session key.
-pub(crate) const SCRATCHPAD_WRITE: CommandSpec = CommandSpec {
-    name: "scratchpad write",
-    aliases: &[],
-    summary: "store an ephemeral key for this session",
-    notes: &[],
-    positionals: &[KEY, CONTENT],
-    documented: &[SESSION, SCRATCHPAD_BANK, SCRATCHPAD_ACTOR, GLOBAL_OUTPUT],
-    accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("scratchpad_write"),
-    section: Section::Write,
-};
-
-/// `clio scratchpad read`: one key, or the whole session pad.
-pub(crate) const SCRATCHPAD_READ: CommandSpec = CommandSpec {
-    name: "scratchpad read",
-    aliases: &[],
-    summary: "read one key, or the whole pad",
-    notes: &[],
-    positionals: &[OPTIONAL_KEY],
-    documented: &[SESSION, SCRATCHPAD_BANK, SCRATCHPAD_ACTOR, GLOBAL_OUTPUT],
-    accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("scratchpad_read"),
-    section: Section::Read,
-};
-
-/// `clio scratchpad clear`: drop one key, or the whole session pad.
-pub(crate) const SCRATCHPAD_CLEAR: CommandSpec = CommandSpec {
-    name: "scratchpad clear",
-    aliases: &[],
-    summary: "drop one key, or the whole pad",
-    notes: &[],
-    positionals: &[OPTIONAL_KEY],
-    documented: &[SESSION, SCRATCHPAD_BANK, SCRATCHPAD_ACTOR, GLOBAL_OUTPUT],
-    accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("scratchpad_clear"),
-    section: Section::Write,
-};
-
-/// `clio canonical put`: gated single-slot upsert over `canonical_put`.
-pub(crate) const CANONICAL_PUT: CommandSpec = CommandSpec {
-    name: "canonical put",
-    aliases: &[],
-    summary: "gated single-slot upsert with bi-temporal supersession",
-    notes: &[SOURCE_TYPE_PAIRING_NOTE],
-    positionals: &[KEY, VALUE],
-    documented: &[
-        CATEGORY_REQUIRED,
-        EPISTEMIC_KIND_REQUIRED,
-        SOURCE_TYPE,
-        CONFIDENCE,
-        SOURCE_TEXT,
-        EVIDENCE_REF,
-        CANONICAL_CONTEXT,
-        DRY_RUN,
-        GLOBAL_OUTPUT,
-    ],
-    accepted_extra: IMPLICIT_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("canonical_put"),
-    section: Section::Write,
-};
-
-/// `clio canonical get`: the active or point-in-time canonical slot.
-pub(crate) const CANONICAL_GET: CommandSpec = CommandSpec {
-    name: "canonical get",
-    aliases: &[],
-    summary: "read one canonical key",
-    notes: &[],
-    positionals: &[KEY],
-    documented: &[AS_OF, GLOBAL_OUTPUT],
-    accepted_extra: IMPLICIT_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("canonical_get"),
-    section: Section::Read,
 };
 
 /// `clio maintenance status`: queue depth, failures, and drain progress.
@@ -375,12 +265,22 @@ pub(crate) const MAINTENANCE_STATUS: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio maintenance status --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio maintenance status --item-id itm-sample-1 --explain",
+            comment: None,
+        },
+    ],
     tool: Some("maintenance_status"),
     section: Section::Read,
 };
 
-/// This module's nine records, in the registry's declared tranche order.
+/// This module's nine records, in the registry's declared tranche order. The
+/// scratchpad and canonical records come from the `workspace` sibling.
 pub(crate) static PERSONA_LOCAL: &[CommandSpec] = &[
     PERSONA_GET,
     PERSONA_STABLE,

@@ -24,7 +24,7 @@
 //! Keep this module focused on the compose records.
 
 use super::RESERVED_GLOBALS;
-use crate::cli_command_spec::{CommandSpec, Flag, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
 /// The compose root override.
 const DIR: Flag = Flag::text("dir", "DIR", "Compose root `compose_cli` resolves.");
@@ -43,7 +43,20 @@ pub(crate) const COMPOSE_UP: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio compose up --services postgres",
+            comment: Some("Start only the Postgres service."),
+        },
+        Example {
+            command: "clio compose up --services postgres,embed,rerank",
+            comment: Some("Start the local-retrieval stack."),
+        },
+        Example {
+            command: "clio compose up --dir ./deploy/compose --services postgres,embed,rerank",
+            comment: Some("Materialize under an explicit compose root."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -60,7 +73,20 @@ pub(crate) const COMPOSE_DOWN: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio compose down --services postgres",
+            comment: Some("Stop an explicit service selection."),
+        },
+        Example {
+            command: "clio compose down",
+            comment: Some("Stop the selection the last up recorded."),
+        },
+        Example {
+            command: "clio compose down --dir ./deploy/compose --services postgres,embed,rerank",
+            comment: Some("Stop the stack under an explicit compose root."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };

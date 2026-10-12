@@ -4,20 +4,24 @@
 //! # Responsibility
 //!
 //! This module is responsible for the static records of the commands headed by
-//! `triple`, `belief`, `graph`, and the single `associations` command:
-//! `triple query`, `triple add`, `triple end`, `belief history`,
-//! `belief observe`, `graph query`, `graph link`, and `associations`.
+//! `triple` — `triple query`, `triple add`, and `triple end` — and for
+//! `GRAPH_RECORDS`, the tranche that lists the triple, belief, graph, and
+//! associations records in head-group order.
 //!
-//! A read head can hold a write subcommand: `triple add`, `triple end`,
-//! `belief observe`, and `graph link` write, but they are classified under
-//! their read head like every other record here.
+//! A read head can hold a write subcommand: `triple add` and `triple end`
+//! write, but they are classified under their read head like every other
+//! record here. The belief, graph, and associations records live in the
+//! `belief_graph` sibling this module declares and re-exports.
 //!
 //! ## Owns
-//! - The eight `CommandSpec` records and `GRAPH_RECORDS`, the tranche that
-//!   lists them in head-group order
+//! - The three `CommandSpec` records here, the `GRAPH_RECORDS` tranche list,
+//!   and the shared flag consts the sibling also uses
+//! - The positionals and examples of the records here
 //! - The description, value kind, and default of each documented flag
 //!
 //! ## Does not own
+//! - The belief, graph, and associations records (see the `belief_graph`
+//!   sibling module)
 //! - The record model or its rendering (see `cli_command_spec`)
 //! - The registry lookups and the global order of the rendered surfaces (see
 //!   `cli_command_registry` and `cli_command_bindings`)
@@ -28,104 +32,71 @@
 //! Changes to one of these commands' flags or summary text should normally
 //! require changes here. Changes to the command implementations should not.
 //!
-//! Keep this module focused on the triple, belief, graph, and associations
-//! records.
+//! Keep this module focused on the triple records and the tranche list.
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::SourceType;
+
+/// The belief, graph, and associations records: a sibling file so both halves
+/// of the tranche stay within the size cap. The records are re-exported below
+/// so `GRAPH_RECORDS` and the tranche tests read them by name.
+#[path = "cli_command_registry_graph_records_belief_graph.rs"]
+mod belief_graph;
+
+pub(crate) use belief_graph::{
+    ASSOCIATIONS, BELIEF_HISTORY, BELIEF_OBSERVE, GRAPH_LINK, GRAPH_QUERY,
+};
 
 /// The optional `SUBJECT` positional of `triple query`.
 const QUERY_SUBJECT: Positional = Positional {
     label: "SUBJECT",
     required: false,
-    description: "",
+    description: "Subject pattern to match; omit it to match any subject.",
 };
 
 /// The optional `PREDICATE` positional of `triple query`.
 const QUERY_PREDICATE: Positional = Positional {
     label: "PREDICATE",
     required: false,
-    description: "",
+    description: "Predicate pattern to match; omit it to match any predicate.",
 };
 
 /// The optional `OBJECT` positional of `triple query`.
 const QUERY_OBJECT: Positional = Positional {
     label: "OBJECT",
     required: false,
-    description: "",
+    description: "Object pattern to match; omit it to match any object.",
 };
 
 /// The required `S` positional of `triple add` and `triple end`.
 const FACT_SUBJECT: Positional = Positional {
     label: "S",
     required: true,
-    description: "",
+    description: "Subject term of the fact to write or expire.",
 };
 
 /// The required `P` positional of `triple add` and `triple end`.
 const FACT_PREDICATE: Positional = Positional {
     label: "P",
     required: true,
-    description: "",
+    description: "Predicate term of the fact to write or expire.",
 };
 
 /// The required `O` positional of `triple add`.
 const FACT_OBJECT: Positional = Positional {
     label: "O",
     required: true,
-    description: "",
-};
-
-/// The required positional of `belief history`.
-const BELIEF_ID: Positional = Positional {
-    label: "BELIEF_ID_OR_PROPOSITION",
-    required: true,
-    description: "",
-};
-
-/// The required positional of `belief observe`.
-const PROP: Positional = Positional {
-    label: "PROP",
-    required: true,
-    description: "",
-};
-
-/// The required positional of `graph query`.
-const SEED_ID: Positional = Positional {
-    label: "SEED_ID",
-    required: true,
-    description: "",
-};
-
-/// The first required positional of `graph link`.
-const LINK_A: Positional = Positional {
-    label: "A",
-    required: true,
-    description: "",
-};
-
-/// The second required positional of `graph link`.
-const LINK_B: Positional = Positional {
-    label: "B",
-    required: true,
-    description: "",
-};
-
-/// The required positional of `associations`.
-const ITEM_ID: Positional = Positional {
-    label: "ITEM_ID",
-    required: true,
-    description: "",
+    description: "Object term of the fact to write.",
 };
 
 /// The `--as-of TS` timestamp of `triple query` and `belief observe`.
 const AS_OF: Flag = Flag::text("as-of", "TS", "Sets the reference `as_of` timestamp.");
 
-/// The `--explain` trace flag the read commands here document.
+/// The `--explain` trace flag the read commands document.
 const EXPLAIN: Flag = Flag::toggle("explain", "Asks `read_args` for the trace detail.");
 
-/// The `--dry-run` preview flag the write commands here document.
+/// The `--dry-run` preview flag the write commands document.
 const DRY_RUN: Flag = Flag::toggle("dry-run", "Previews with no durable change.");
 
 /// The `--context TEXT` of `triple add` and `belief observe`.
@@ -141,9 +112,6 @@ const UPDATE_RULE: Flag = Flag::choice(
     "`cli_write_graph` forwards `update_rule`; this verb accepts only `discrete`.",
     &["discrete"],
 );
-
-/// The `--min-weight W` of `graph query` and `associations`.
-const MIN_WEIGHT: Flag = Flag::float("min-weight", "W", "Sets the minimum edge weight.");
 
 /// The declared globals these commands accept without printing: every global
 /// but `--output`, which each usage line documents.
@@ -186,7 +154,20 @@ pub(crate) const TRIPLE_QUERY: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(TRIPLE_QUERY_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio triple query itm-sample-1 related itm-sample-2 --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio triple query itm-sample-1 --explain",
+            comment: Some("one subject term"),
+        },
+        Example {
+            command: "clio triple query --as-of 2026-01-01 -o json",
+            comment: None,
+        },
+    ],
     tool: Some("triple_query"),
     section: Section::Read,
 };
@@ -241,7 +222,20 @@ pub(crate) const TRIPLE_ADD: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio triple add itm-sample-1 related itm-sample-2 --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio triple add itm-sample-1 related itm-sample-2 --confidence 0.9",
+            comment: Some("weighted fact"),
+        },
+        Example {
+            command: "clio triple add itm-sample-1 related itm-sample-2 --epistemic-kind belief --source-type user_stated",
+            comment: None,
+        },
+    ],
     tool: Some("triple_add"),
     section: Section::Write,
 };
@@ -272,164 +266,27 @@ pub(crate) const TRIPLE_END: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio triple end itm-sample-1 related --valid-until 2026-01-01 --db ./memory.db",
+            comment: None,
+        },
+        Example {
+            command: "clio triple end itm-sample-1 related --valid-until 2026-01-01 --object itm-sample-2",
+            comment: Some("match by object too"),
+        },
+        Example {
+            command: "clio triple end itm-sample-1 related --valid-until 2026-01-01 --dry-run",
+            comment: None,
+        },
+    ],
     tool: Some("triple_end"),
     section: Section::Write,
 };
 
-/// `clio belief history`: one belief's confidence history, over the
-/// `belief_history` tool.
-pub(crate) const BELIEF_HISTORY: CommandSpec = CommandSpec {
-    name: "belief history",
-    aliases: &[],
-    summary: "one belief's confidence history",
-    notes: &[],
-    positionals: &[BELIEF_ID],
-    documented: &[EXPLAIN, GLOBAL_OUTPUT],
-    accepted_extra: UNPRINTED_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("belief_history"),
-    section: Section::Read,
-};
-
-/// `clio belief observe`: record evidence and a new confidence, over the
-/// `belief_observe` tool.
-pub(crate) const BELIEF_OBSERVE: CommandSpec = CommandSpec {
-    name: "belief observe",
-    aliases: &[],
-    summary: "record evidence and a new confidence",
-    notes: &[],
-    positionals: &[PROP],
-    documented: &[
-        Flag {
-            required: true,
-            ..Flag::float(
-                "confidence",
-                "C",
-                "`belief_observe_call` requires the `0.0..=1.0` confidence.",
-            )
-        },
-        Flag {
-            required: true,
-            ..Flag::text(
-                "evidence",
-                "E",
-                "`belief_observe_call` requires the `evidence_ref`.",
-            )
-        },
-        Flag {
-            required: true,
-            ..Flag::choice(
-                "source",
-                "S",
-                "`belief_observe_call` requires a `source_type`: `user_stated|agent_inferred|third_party`.",
-                SourceType::WIRE,
-            )
-        },
-        AS_OF,
-        SUBJECT_ID,
-        CONTEXT,
-        DRY_RUN,
-        GLOBAL_OUTPUT,
-    ],
-    accepted_extra: UNPRINTED_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("belief_observe"),
-    section: Section::Write,
-};
-
-/// `clio graph query`: neighbours of one item, by edge type, over the
-/// `graph_query` tool.
-pub(crate) const GRAPH_QUERY: CommandSpec = CommandSpec {
-    name: "graph query",
-    aliases: &[],
-    summary: "neighbours of one item, by edge type",
-    notes: &[],
-    positionals: &[SEED_ID],
-    documented: &[
-        Flag::uint("max-hops", "N", "`graph_query_call` sets the hop count."),
-        Flag::choice(
-            "edge-type",
-            "coactivation|explicit",
-            "`graph_query_call` validates `coactivation` or `explicit`.",
-            &["coactivation", "explicit"],
-        ),
-        MIN_WEIGHT,
-        EXPLAIN,
-        GLOBAL_OUTPUT,
-    ],
-    accepted_extra: UNPRINTED_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("graph_query"),
-    section: Section::Read,
-};
-
-/// `clio graph link`: add an explicit edge between two items, over the
-/// `graph_link` tool.
-pub(crate) const GRAPH_LINK: CommandSpec = CommandSpec {
-    name: "graph link",
-    aliases: &[],
-    summary: "add an explicit edge between two items",
-    notes: &[],
-    positionals: &[LINK_A, LINK_B],
-    documented: &[
-        Flag {
-            required: true,
-            ..Flag::text(
-                "relationship",
-                "R",
-                "`graph_link_call` requires the association label.",
-            )
-        },
-        Flag {
-            default: Some("1.0"),
-            ..Flag::float(
-                "weight",
-                "W",
-                "`graph_link_call` sets the edge weight, and the tool defaults it to `1.0`.",
-            )
-        },
-        DRY_RUN,
-        GLOBAL_OUTPUT,
-    ],
-    accepted_extra: UNPRINTED_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("graph_link"),
-    section: Section::Write,
-};
-
-/// `clio associations`: co-activation links for one item, over the
-/// `associations` tool.
-pub(crate) const ASSOCIATIONS: CommandSpec = CommandSpec {
-    name: "associations",
-    aliases: &[],
-    summary: "co-activation links for one item",
-    notes: &[],
-    positionals: &[ITEM_ID],
-    documented: &[MIN_WEIGHT, EXPLAIN, GLOBAL_OUTPUT],
-    accepted_extra: UNPRINTED_GLOBALS,
-    flag_aliases: &[],
-    usage_override: None,
-    usage_alternates: &[],
-    examples: &[],
-    tool: Some("associations"),
-    section: Section::Read,
-};
-
 /// The eight records, in head-group order: `triple`, `belief`, `graph`, then
-/// `associations`.
+/// `associations`. The belief, graph, and associations records come from the
+/// `belief_graph` sibling.
 pub(crate) static GRAPH_RECORDS: &[CommandSpec] = &[
     TRIPLE_QUERY,
     TRIPLE_ADD,

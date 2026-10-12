@@ -37,7 +37,7 @@
 // the frozen golden capture keep their exact output.
 
 use crate::cli_command_registry::GLOBAL_OUTPUT;
-use crate::cli_command_spec::{CommandSpec, Flag, Positional, Section};
+use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
 /// The globals an auth or config leaf accepts without printing: the shared
 /// parser merges every declared global, so the leaves that print only their own
@@ -93,28 +93,31 @@ const BANK_OPTIONAL: Flag = Flag::text(
 const PATH_OPTIONAL: Positional = Positional {
     label: "PATH",
     required: false,
-    description: "",
+    description: "Dotted configuration path `config get` reads; with no path the whole \
+                  effective configuration prints.",
 };
 
 /// The required `PATH` positional of `config set`.
 const PATH: Positional = Positional {
     label: "PATH",
     required: true,
-    description: "",
+    description: "Dotted configuration path `config set` writes; the `config_set` tool \
+                  validates it before applying.",
 };
 
 /// The required `VALUE` positional of `config set`.
 const VALUE: Positional = Positional {
     label: "VALUE",
     required: true,
-    description: "",
+    description: "Value `config set` stores at the path; decoded as JSON when it parses, \
+                  otherwise stored as text.",
 };
 
 /// The required `NAME` positional of `config use`.
 const NAME: Positional = Positional {
     label: "NAME",
     required: true,
-    description: "",
+    description: "Profile name `config use` applies for later commands.",
 };
 
 /// The `add` note: the one-time secret print, the store lock, and the refused
@@ -158,7 +161,20 @@ pub(crate) const AUTH_TOKEN_ADD: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: Some(ADD_USAGE),
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio auth token add --label laptop --actor user --bank default",
+            comment: Some("Mint a credential and save the secret when it prints."),
+        },
+        Example {
+            command: "clio auth token add --label ci --actor harness --bank default --bank work",
+            comment: Some("Scope one credential to two banks."),
+        },
+        Example {
+            command: "clio auth token add --label agent-01 --actor agent --bank default -o json",
+            comment: Some("Print the one-time secret and its record as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -175,7 +191,16 @@ pub(crate) const AUTH_TOKEN_LIST: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio auth token list",
+            comment: Some("List labels, actors, banks, and creation times."),
+        },
+        Example {
+            command: "clio auth token list -o json",
+            comment: Some("Emit the listing as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Read,
 };
@@ -192,7 +217,16 @@ pub(crate) const AUTH_TOKEN_REVOKE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio auth token revoke --label laptop",
+            comment: Some("Remove one credential record."),
+        },
+        Example {
+            command: "clio auth token revoke --label laptop -o json",
+            comment: Some("Remove one record and report as JSON."),
+        },
+    ],
     tool: None,
     section: Section::Write,
 };
@@ -209,7 +243,20 @@ pub(crate) const CONFIG_GET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio config get",
+            comment: Some("Print the effective configuration (secrets masked)."),
+        },
+        Example {
+            command: "clio config get sync.omit",
+            comment: Some("Read one dotted path."),
+        },
+        Example {
+            command: "clio config get sync.omit -o json",
+            comment: Some("Read one dotted path as JSON."),
+        },
+    ],
     tool: Some("config_get"),
     section: Section::Read,
 };
@@ -226,7 +273,20 @@ pub(crate) const CONFIG_SET: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio config set sync.omit true",
+            comment: Some("Write one path at the session scope."),
+        },
+        Example {
+            command: "clio config set sync.omit true --scope session -o json",
+            comment: Some("Write the same path at the session scope and report as JSON."),
+        },
+        Example {
+            command: "clio config set sync.omit false --scope deployment -o json",
+            comment: Some("Write at the deployment scope and report as JSON."),
+        },
+    ],
     tool: Some("config_set"),
     section: Section::Write,
 };
@@ -243,7 +303,16 @@ pub(crate) const CONFIG_PROFILES: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio config profiles",
+            comment: Some("List the available profiles."),
+        },
+        Example {
+            command: "clio config profiles -o json",
+            comment: Some("Emit the profiles as JSON."),
+        },
+    ],
     tool: Some("config_profiles"),
     section: Section::Read,
 };
@@ -260,7 +329,16 @@ pub(crate) const CONFIG_USE: CommandSpec = CommandSpec {
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
-    examples: &[],
+    examples: &[
+        Example {
+            command: "clio config use coding_local",
+            comment: Some("Activate the local coding profile."),
+        },
+        Example {
+            command: "clio config use coding_ci -o json",
+            comment: Some("Activate the CI coding profile and report as JSON."),
+        },
+    ],
     tool: Some("config_profile_apply"),
     section: Section::Write,
 };

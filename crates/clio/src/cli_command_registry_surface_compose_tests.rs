@@ -12,6 +12,7 @@
 //! - The records' usage-line and summary bytes
 //! - The shared accepted set and the record-derived parse names
 //! - The `check_metadata` result over the two compose records
+//! - The records' examples: the real subcommand form on every line
 //!
 //! ## Does not own
 //! - The registry's tranche registration (see `cli_command_registry_tests`)
@@ -22,6 +23,10 @@
 //! Test-only. Never compiled into production builds.
 //!
 //! Keep this module focused on the compose records' data.
+
+use crate::cli_command_registry_test_support::{
+    assert_example_count, assert_examples_name_their_record,
+};
 
 /// The compose records' documented flags carry complete metadata.
 #[test]
@@ -115,4 +120,15 @@ fn the_compose_records_share_one_accepted_set() {
         parse(&["--frobnicate"]).is_err(),
         "an unknown flag is refused"
     );
+}
+
+/// Both records carry two to four examples, and every example shows the real
+/// subcommand form (`clio compose up` / `clio compose down`), so the pair never
+/// documents a different spelling.
+#[test]
+fn the_compose_records_carry_examples_in_the_subcommand_form() {
+    for spec in [&super::COMPOSE_UP, &super::COMPOSE_DOWN] {
+        assert_example_count(spec.name, spec);
+        assert_examples_name_their_record(spec.name, spec);
+    }
 }
