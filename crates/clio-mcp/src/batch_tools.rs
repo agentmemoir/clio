@@ -172,15 +172,11 @@ fn run_batch(state: &McpState, args: &Value) -> Result<Value, AmError> {
 /// per-operation argument, and pre-flight resolves each operation's context
 /// separately.
 fn staged_bank(staged: &Staged) -> Option<&str> {
-    staged.writes.iter().find_map(|write| match write {
-        BatchWrite::CreateItem { item, .. }
-        | BatchWrite::CanonicalPut { item, .. }
-        | BatchWrite::CommitTriple { item, .. }
-        | BatchWrite::CommitTaskUpsert { item, .. }
-        | BatchWrite::CommitFailureRecord { item, .. }
-        | BatchWrite::UpsertMemoryItem { item, .. } => Some(item.bank_id.as_str()),
-        _ => None,
-    })
+    staged
+        .writes
+        .iter()
+        .find_map(BatchWrite::created_item)
+        .map(|item| item.bank_id.as_str())
 }
 
 /// Apply the batch call's `bank`/`actor` to one operation as defaults.
