@@ -1,0 +1,1 @@
+The gate self-test passes on a host whose temporary directory is mounted `noexec`, so a change to the gate can show its required no-execution pass there; cache-key checks stand in for the Rustup toolchain instead of running it, and an aliased executable is fingerprinted from its bytes.

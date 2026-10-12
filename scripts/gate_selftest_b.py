@@ -49,7 +49,8 @@ def git_repo(root: Path) -> None:
 
 def key(root: Path) -> str:
     """The gate fingerprint of the real git tree at `root`."""
-    return fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
+    with mock.patch("gate_tree._rustup_toolchain_identity", return_value="rustup"):
+        return fingerprint(read_tree_state(str(root)), {}, "test", ["cargo", "test"])
 
 class Tests(unittest.TestCase):
     def test_a_clean_never_replays(self):
