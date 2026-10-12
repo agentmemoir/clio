@@ -255,13 +255,15 @@ fn a_restore_refuses_while_another_process_holds_the_store() {
         "the refusal names the contention: {}",
         error.message
     );
-    #[cfg(target_os = "linux")]
+    // Naming a contending shared holder is best effort: the pid list comes
+    // from `/proc/locks`, and the refusal is complete when it names none. A
+    // named list is the child, the only process holding the store.
     assert!(
         !error.message.contains("by pid(s) ")
             || error
                 .message
-                .contains(&format!("by pid(s) {}", child.0.id())),
-        "a named holder is the process that holds the store: {}",
+                .contains(&format!("by pid(s) {};", child.0.id())),
+        "a named holder list is exactly the process that holds the store: {}",
         error.message
     );
     assert_eq!(bytes(&target), target_before, "the target is untouched");
