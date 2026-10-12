@@ -1,4 +1,13 @@
-"""Self-test cases for unreadable profile buffers and the instrumented objects."""
+"""Self-test cases for unreadable profile buffers and the instrumented objects.
+
+ONE RULE GOVERNS THE SCRATCH DIRECTORIES IN THIS FILE, and breaking it hurts the
+host rather than the test: a directory that holds a file this self-test then RUNS
+must come from `exec_tempdir()`, never `tempfile.TemporaryDirectory`. The default
+temporary directory is mounted `noexec` on hardened Linux, where a staged binary
+carries a correct 0755 mode and the kernel refuses to run it anyway. The one
+scenario here that executes what it writes is `_stale_mapping_regression`, and it
+says so at its own scratch directory.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +17,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import unittest
 from pathlib import Path, PurePosixPath
+
+from exec_tempdir import exec_tempdir
 
 from scoped_profiles import drop_selected_objects, prune_foreign_objects
 
@@ -68,7 +80,36 @@ def _stale_mapping_regression(check) -> None:
     current_source = "fn measured() {\n    let value = 1;\n" + (
         "    std::hint::black_box(value);\n}\nfn main() { measured(); }\n"
     )
-    with tempfile.TemporaryDirectory(prefix="scoped-runner-stale-map-") as scratch:
+    # THE SCRATCH DIRECTORY BELOW MUST COME FROM `exec_tempdir()` AND MUST NEVER
+    # GO BACK TO `tempfile.TemporaryDirectory`. This scenario compiles a program
+    # into its scratch directory and then RUNS that program (the `_run_checked`
+    # call further down that executes `current_object`), so the directory has to
+    # be one this host permits execution in. On a host whose default temporary
+    # directory is mounted `noexec` -- hardening guides mount `/tmp` that way --
+    # the compiled object is mode 0755 and the kernel refuses it regardless of
+    # that mode. The run then dies with `PermissionError: [Errno 13]` before one
+    # of these checks executes, `make coverage-fast` exits 2 having measured
+    # nothing at all, and the traceback blames a file permission that is in fact
+    # correct. That is how this repository came to have `scripts/exec_tempdir.py`,
+    # which is its one place for this rule: it hands back a directory that really
+    # runs a file, or raises the skip printed below.
+    #
+    # The other scenarios in this file keep `tempfile.TemporaryDirectory` on
+    # purpose, so do not "fix" them: they only write fixture files and let
+    # `prune_foreign_objects` or `drop_selected_objects` delete them by name, and
+    # none of them executes anything. The exec bit of the mount is irrelevant to
+    # them, and moving them would make this self-test skip on hosts where it can
+    # still do its work.
+    try:
+        scratch_directory = exec_tempdir(
+            purpose="the stale-map scenario's compiled object"
+        )
+    except unittest.SkipTest as reason:
+        # A skip is not a pass: nothing below ran, so the stale source map this
+        # scenario exists to catch was never reproduced on this host.
+        print(f"self-test skipped: {reason}")
+        return
+    with scratch_directory as scratch:
         root = Path(scratch)
         source = root / "audit.rs"
         object_dir = root / "instrumented" / "debug" / "deps"
