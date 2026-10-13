@@ -52,6 +52,8 @@ mod import;
 mod inventory;
 #[cfg(test)]
 mod local_action_probe;
+mod local_review;
+mod local_review_export;
 mod scratchpad;
 mod stats;
 mod subject_request;
@@ -80,6 +82,10 @@ pub use import::{ImportArgs, ImportReport, import};
 pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,
     Readability, RetentionAction, ScopeInventory, scope_inventory,
+};
+pub use local_review::{
+    DEFAULT_REVIEW_LIMIT, LocalReviewPage, LocalReviewQuery, MAX_REVIEW_LIMIT, ReviewOutputRoute,
+    record_review_output_custody, review_local_events, review_output_routes,
 };
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
