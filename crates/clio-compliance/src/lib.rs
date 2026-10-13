@@ -40,6 +40,7 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::module_name_repetitions)]
 
+mod action_event_log;
 mod audit;
 mod bundle;
 mod canonical;
@@ -49,6 +50,10 @@ mod export;
 mod export_mask;
 mod import;
 mod inventory;
+#[cfg(test)]
+mod local_action_probe;
+mod local_review;
+mod local_review_export;
 mod scratchpad;
 mod stats;
 mod subject_request;
@@ -56,6 +61,7 @@ mod subject_request_events;
 mod subject_request_manifest;
 mod validate;
 
+pub use action_event_log::{ActionEventLog, RecordOutcome};
 pub use audit::{AuditTrailView, audit_trail};
 pub use bundle::{
     BUNDLE_FORMAT, BUNDLE_FORMAT_VERSION, BundleEnvelope, CompletenessManifest, ExportContentMode,
@@ -77,6 +83,10 @@ pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,
     Readability, RetentionAction, ScopeInventory, scope_inventory,
 };
+pub use local_review::{
+    DEFAULT_REVIEW_LIMIT, LocalReviewPage, LocalReviewQuery, MAX_REVIEW_LIMIT, ReviewOutputRoute,
+    record_review_output_custody, review_local_events, review_output_routes,
+};
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
 pub use subject_request::{
@@ -84,10 +94,10 @@ pub use subject_request::{
     SubjectRequestLedger, SubjectRequestRecord, transition,
 };
 pub use subject_request_events::{
-    ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventLog, ActionIntent, ActionOutcome,
+    ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventKind, ActionIntent, ActionOutcome,
     ActionPayload, BindingControls, BindingRefusal, ClosureBlock, ClosureInputs, PendingResult,
-    ProtectedAction, RecordOutcome, RestoreInputs, RestoreRefusal, SubjectActionEvent,
-    accept_closure, check_binding, check_restore,
+    ProtectedAction, RestoreInputs, RestoreRefusal, SubjectActionEvent, accept_closure,
+    check_binding, check_restore,
 };
 pub use subject_request_manifest::{
     CopyCustodyManifest, DIGEST_ALGORITHM_PREFIX, KEY_COPY_DIGEST, KEY_PRODUCED_AT, KEY_PRODUCER,

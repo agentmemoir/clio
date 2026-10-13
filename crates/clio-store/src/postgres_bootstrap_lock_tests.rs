@@ -24,7 +24,7 @@
 //! Test-only. Never compiled into production builds.
 
 use super::{PG_BOOTSTRAP_ADVISORY_KEY, PostgresStore, with_bootstrap_lock};
-use crate::db_url::postgres_url_from_env;
+use crate::db_url::{postgres_url_from_env, with_database};
 use crate::erase_test_support::local_kms;
 use clio_types::{AmError, ErrorCode};
 use std::sync::mpsc;
@@ -183,9 +183,7 @@ impl Drop for ScratchDatabase {
 
 /// The shared URL pointed at a different database on the same server.
 fn url_for_database(name: &str) -> String {
-    let base = postgres_url_from_env();
-    let server = base.rsplit_once('/').map_or(base.as_str(), |(s, _)| s);
-    format!("{server}/{name}")
+    with_database(&postgres_url_from_env(), name)
 }
 
 /// A refused bootstrap must not leave the lock held.

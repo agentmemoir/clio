@@ -82,6 +82,7 @@ mod keyed_digest;
 mod kms_migrate;
 mod lexical_digest;
 mod lexical_porter;
+mod local_events;
 mod local_kms_db;
 mod local_kms_migrate;
 mod local_kms_schema;
@@ -234,6 +235,7 @@ pub use history_store::HistoryStore;
 pub use hygiene_store::{HygieneLogEntry, HygieneStore};
 pub use index_store::IndexStore;
 pub use keyed_digest::{keyed_digest, keyed_digest_hex};
+pub use local_events::{LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView};
 pub use memtree_model::{MemTreeNodeRecord, MemTreeQuery};
 pub use migrate::{SCHEMA_VERSION, sqlite_vec_missing};
 pub use model::{

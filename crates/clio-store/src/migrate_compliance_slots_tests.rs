@@ -28,7 +28,7 @@
 
 use crate::PostgresStore;
 use crate::SqliteStore;
-use crate::db_url::postgres_url_from_env;
+use crate::db_url::{postgres_url_from_env, with_database};
 use crate::erase_test_support::local_kms;
 use crate::migrate::IntoAmError;
 
@@ -42,6 +42,31 @@ const SLOT_TABLES: [&str; 8] = [
     "local_events",
     "restore_guards",
     "subject_family_links",
+];
+
+/// The slot tables that still hold only the placeholder key: every reserved
+/// table except `local_events`, whose real event schema the G6 owner group
+/// filled in (pinned by `the_local_events_slot_holds_the_event_columns`).
+const PLACEHOLDER_SLOTS: [&str; 7] = [
+    "archive_experiments",
+    "copy_inventory",
+    "durable_requests",
+    "erasure_adapters",
+    "local_erasure_journal",
+    "restore_guards",
+    "subject_family_links",
+];
+
+/// The `local_events` column set, in DDL order.
+const LOCAL_EVENT_COLUMNS: [&str; 8] = [
+    "action_id",
+    "seq",
+    "actor",
+    "scope",
+    "kind",
+    "event_time",
+    "outcome_state",
+    "result",
 ];
 
 /// Every slot table the static asset declares matches the pinned list.
@@ -179,53 +204,9 @@ impl Drop for ScratchDatabase {
     }
 }
 
-/// Point a Postgres URL at a different database on the same server, keeping
-/// any `?options` suffix. No shared helper exists (`db_url` only resolves the
-/// shared URL; `pg_url` only reads SSL options), so the surgery stays here.
-fn with_database(base: &str, name: &str) -> String {
-    let (path, query) = base
-        .split_once('?')
-        .map_or((base, None), |(p, q)| (p, Some(q)));
-    let server = path.rsplit_once('/').map_or(path, |(s, _)| s);
-    match query {
-        Some(q) => format!("{server}/{name}?{q}"),
-        None => format!("{server}/{name}"),
-    }
-}
-
 /// The shared URL pointed at a different database on the same server.
 fn url_for_database(name: &str) -> String {
     with_database(&postgres_url_from_env(), name)
-}
-
-/// A query string on the shared URL must survive the scratch-database swap.
-#[test]
-fn scratch_url_keeps_a_query_string() {
-    assert_eq!(
-        with_database("postgres://u:p@h:5432/clio?sslmode=disable", "scratch"),
-        "postgres://u:p@h:5432/scratch?sslmode=disable"
-    );
-}
-
-/// A plain URL with no options keeps its existing shape.
-#[test]
-fn scratch_url_without_options_is_unchanged_in_shape() {
-    assert_eq!(
-        with_database("postgres://u:p@h:5432/clio", "scratch"),
-        "postgres://u:p@h:5432/scratch"
-    );
-}
-
-/// Several options survive together, in order.
-#[test]
-fn scratch_url_keeps_several_options() {
-    assert_eq!(
-        with_database(
-            "postgres://u:p@h:5432/clio?sslmode=require&connect_timeout=10",
-            "scratch"
-        ),
-        "postgres://u:p@h:5432/scratch?sslmode=require&connect_timeout=10"
-    );
 }
 
 /// The base-table inventory of a Postgres store's public schema, sorted in
@@ -329,14 +310,14 @@ fn postgres_columns(store: &PostgresStore, table: &str) -> Vec<String> {
         .expect("read the postgres column set")
 }
 
-/// Every slot table still holds only the placeholder key: a later phase that
-/// adds a feature column must update this pin, not slip past it.
+/// The still-placeholder slot tables hold only the placeholder key: a later
+/// phase that adds a feature column must update this pin, not slip past it.
 #[test]
 fn slot_tables_hold_only_the_placeholder_key() {
     let scratch = Scratch::new();
     let store = SqliteStore::open(&scratch.0.join("store.db"), local_kms())
         .expect("open a fresh sqlite store");
-    for slot in SLOT_TABLES {
+    for slot in PLACEHOLDER_SLOTS {
         assert_eq!(
             sqlite_columns(&store, slot),
             vec!["id".to_owned()],
@@ -345,7 +326,8 @@ fn slot_tables_hold_only_the_placeholder_key() {
     }
 }
 
-/// The Postgres slot tables hold the same placeholder-only column set.
+/// The Postgres still-placeholder slot tables hold the same placeholder-only
+/// column set.
 #[test]
 fn postgres_slot_tables_hold_only_the_placeholder_key() {
     let _shared = crate::lock_pg_test();
@@ -358,11 +340,45 @@ fn postgres_slot_tables_hold_only_the_placeholder_key() {
     drop(admin);
     let store = PostgresStore::open(&url_for_database(&db.name), local_kms())
         .expect("open a fresh postgres store");
-    for slot in SLOT_TABLES {
+    for slot in PLACEHOLDER_SLOTS {
         assert_eq!(
             postgres_columns(&store, slot),
             vec!["id".to_owned()],
             "slot table {slot} gained a column"
         );
     }
+}
+
+/// The `local_events` slot holds the real event schema, in DDL order: a column
+/// rename, drop, or reorder must update this pin, not slip past it.
+#[test]
+fn the_local_events_slot_holds_the_event_columns() {
+    let scratch = Scratch::new();
+    let store = SqliteStore::open(&scratch.0.join("store.db"), local_kms())
+        .expect("open a fresh sqlite store");
+    assert_eq!(
+        sqlite_columns(&store, "local_events"),
+        LOCAL_EVENT_COLUMNS.map(str::to_owned).to_vec(),
+        "local_events column set changed"
+    );
+}
+
+/// The Postgres `local_events` slot holds the same event column set.
+#[test]
+fn postgres_local_events_slot_holds_the_event_columns() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        eprintln!("skip: shared Postgres unreachable");
+        return;
+    };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let db = ScratchDatabase::create(&mut admin, "eventcolumns");
+    drop(admin);
+    let store = PostgresStore::open(&url_for_database(&db.name), local_kms())
+        .expect("open a fresh postgres store");
+    assert_eq!(
+        postgres_columns(&store, "local_events"),
+        LOCAL_EVENT_COLUMNS.map(str::to_owned).to_vec(),
+        "local_events column set changed"
+    );
 }

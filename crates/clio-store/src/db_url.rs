@@ -44,6 +44,20 @@ pub(crate) fn postgres_url_from_env() -> String {
     postgres_url_or_default(clio_config::db_url_env::database_url_from_process_env())
 }
 
+/// Point a test database URL at a different database on the same server,
+/// keeping any `?options` suffix.
+#[cfg(test)]
+pub(crate) fn with_database(base: &str, name: &str) -> String {
+    let (path, query) = base
+        .split_once('?')
+        .map_or((base, None), |(p, q)| (p, Some(q)));
+    let server = path.rsplit_once('/').map_or(path, |(s, _)| s);
+    match query {
+        Some(q) => format!("{server}/{name}?{q}"),
+        None => format!("{server}/{name}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +111,35 @@ mod tests {
     fn the_test_helper_agrees_with_a_direct_read_of_the_owned_name() {
         let direct = postgres_url_or_default(std::env::var(DATABASE_URL_ENV));
         assert_eq!(postgres_url_from_env(), direct);
+    }
+
+    /// A query string on the base URL must survive the scratch-database swap.
+    #[test]
+    fn scratch_url_keeps_a_query_string() {
+        assert_eq!(
+            with_database("postgres://u:p@h:5432/clio?sslmode=disable", "scratch"),
+            "postgres://u:p@h:5432/scratch?sslmode=disable"
+        );
+    }
+
+    /// A plain URL with no options keeps its existing shape.
+    #[test]
+    fn scratch_url_without_options_is_unchanged_in_shape() {
+        assert_eq!(
+            with_database("postgres://u:p@h:5432/clio", "scratch"),
+            "postgres://u:p@h:5432/scratch"
+        );
+    }
+
+    /// Several options survive together, in order.
+    #[test]
+    fn scratch_url_keeps_several_options() {
+        assert_eq!(
+            with_database(
+                "postgres://u:p@h:5432/clio?sslmode=require&connect_timeout=10",
+                "scratch"
+            ),
+            "postgres://u:p@h:5432/scratch?sslmode=require&connect_timeout=10"
+        );
     }
 }

@@ -8,6 +8,10 @@ we made where that specification is silent.
 
 ## [Unreleased]
 
+### Added
+
+- A durable local compliance event layer: content-free intent and outcome events persist on SQLite and Postgres with action id, sequence, actor, scope, kind, and a redacted result; a failed intent write refuses the protected effect with no side effects, a failed outcome write leaves one pending row that reconciles by action id after reopen, and pruning removes only completed rows; a privileged local review queries and exports the ordered events and gaps, records custody for each captured copy, and every returned row omits the outcome result text. ([#194](https://github.com/agentmemoir/clio/pull/194))
+
 ### Fixed
 
 - The scoped runner's self-test compiles and runs its stale-source-map binary in a scratch directory that permits execution, so `make coverage-fast` no longer dies with `PermissionError` before any check runs on a host whose default temporary directory is mounted `noexec`; where no directory permits execution the scenario skips with the reason instead of failing, and the summary line names that skip. [Issue #143](https://github.com/agentmemoir/clio/issues/143) [PR #145](https://github.com/agentmemoir/clio/pull/145)

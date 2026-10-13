@@ -4,57 +4,61 @@
 //! # Responsibility
 //!
 //! This module is responsible for unit coverage of the subject-request
-//! action-event contract: envelope validation, record idempotency and
-//! immutability, open-copy counting, the public-binding gate, the restore
-//! gate, and closure acceptance.
+//! action-event log: envelope validation, record idempotency and
+//! immutability, restart replay, open-copy counting, and sequence and
+//! actor fidelity.
 //!
 //! ## Owns
 //! - Envelope and idempotency assertions for `ActionEventLog`
-//! - Gate and closure acceptance assertions for the pure check functions
+//! - Open-copy counting assertions for `ActionEventLog`
 //!
 //! ## Does not own
-//! - The action-event contract itself (see `subject_request_events.rs`)
+//! - The log itself (see `action_event_log.rs`)
+//! - Binding, restore, and closure gate coverage (see
+//!   `subject_request_events_gates_tests.rs`)
 //! - Any store, fixture, or I/O: every test here is pure
 //!
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
 
+use crate::action_event_log::{ActionEventLog, RecordOutcome};
 use crate::subject_request::RequestScope;
 use crate::subject_request_events::{
-    ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventLog, ActionIntent, ActionOutcome,
-    BindingControls, BindingRefusal, ClosureBlock, ClosureInputs, PendingResult, ProtectedAction,
-    RestoreInputs, RestoreRefusal, SubjectActionEvent, accept_closure, check_binding,
-    check_restore,
+    ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventKind, ActionIntent, ActionOutcome,
+    ActionPayload, PendingResult, ProtectedAction, SubjectActionEvent,
 };
 use crate::subject_request_manifest::CopyCustodyManifest;
-use clio_types::ErrorCode;
+use clio_types::{Actor, ErrorCode};
 
 const TIME: &str = "2026-01-01T00:00:00Z";
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-fn subject_scope() -> RequestScope {
+/// A subject scope for the request tests.
+pub(crate) fn subject_scope() -> RequestScope {
     RequestScope::Subject {
         bank_id: "bank-a".into(),
         subject_id: "subject-1".into(),
     }
 }
 
-fn bank_scope() -> RequestScope {
-    RequestScope::Bank {
-        bank_id: "bank-a".into(),
-    }
-}
-
-fn event(event_id: &str, producer: ProtectedAction, request_id: &str) -> SubjectActionEvent {
+/// A valid intent event; tests mutate it to build other cases.
+pub(crate) fn event(
+    event_id: &str,
+    producer: ProtectedAction,
+    request_id: &str,
+) -> SubjectActionEvent {
     SubjectActionEvent {
         event_type: ACTION_EVENT_TYPE.into(),
         event_id: event_id.into(),
         time: TIME.into(),
         version: ACTION_EVENT_VERSION,
         correlation_id: request_id.into(),
-        payload: crate::subject_request_events::ActionPayload {
+        sequence: 1,
+        actor: Actor::System,
+        payload: ActionPayload {
             producer,
+            kind: ActionEventKind::Intent,
             intent: ActionIntent {
                 action_id: format!("action-{event_id}"),
                 scope: subject_scope(),
@@ -65,6 +69,24 @@ fn event(event_id: &str, producer: ProtectedAction, request_id: &str) -> Subject
     }
 }
 
+/// A terminal event for an action: its outcome, with any result still owed.
+/// The action id comes from the event id's part before the last `-`.
+pub(crate) fn terminal(
+    event_id: &str,
+    producer: ProtectedAction,
+    request_id: &str,
+    outcome: ActionOutcome,
+    pending: Option<PendingResult>,
+) -> SubjectActionEvent {
+    let base = event_id.rsplit_once('-').map_or(event_id, |(base, _)| base);
+    let mut recorded = event(base, producer, request_id);
+    recorded.event_id = event_id.into();
+    recorded.payload.kind = ActionEventKind::Outcome;
+    recorded.payload.outcome = Some(outcome);
+    recorded.payload.pending = pending;
+    recorded
+}
+
 #[test]
 fn producer_ids_are_stable_strings() {
     assert_eq!(ProtectedAction::CopyExport.producer_id(), "copy_export");
@@ -72,51 +94,54 @@ fn producer_ids_are_stable_strings() {
     assert_eq!(ProtectedAction::Restore.producer_id(), "restore");
 }
 
+/// A malformed-envelope case: a mutation of a valid event and the refused code.
+type MalformedCase = (fn(&mut SubjectActionEvent), ErrorCode);
+
 #[test]
 fn record_refuses_a_malformed_envelope_and_stores_nothing() {
-    let mut log = ActionEventLog::new();
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.event_type = "other".into();
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.version = 99;
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.time = "2026-01-01 00:00:00Z".into();
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.payload.intent.action_id = "  ".into();
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.payload.intent.scope = RequestScope::Bank {
-        bank_id: "  ".into(),
-    };
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::MissingBank);
-
-    assert_eq!(log.events(), [] as [SubjectActionEvent; 0]);
-}
-
-#[test]
-fn record_refuses_blank_event_and_correlation_ids() {
-    let mut log = ActionEventLog::new();
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.event_id = " ".into();
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-
-    let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
-    bad.correlation_id = String::new();
-    let err = log.record(bad).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    let cases: Vec<MalformedCase> = vec![
+        (
+            |e| e.event_type = "other".into(),
+            ErrorCode::InvalidArgument,
+        ),
+        (|e| e.version = 99, ErrorCode::InvalidArgument),
+        (
+            |e| e.time = "2026-01-01 00:00:00Z".into(),
+            ErrorCode::InvalidArgument,
+        ),
+        (|e| e.event_id = " ".into(), ErrorCode::InvalidArgument),
+        (
+            |e| e.correlation_id = String::new(),
+            ErrorCode::InvalidArgument,
+        ),
+        (
+            |e| e.payload.intent.action_id = "  ".into(),
+            ErrorCode::InvalidArgument,
+        ),
+        (
+            |e| {
+                e.payload.intent.scope = RequestScope::Bank {
+                    bank_id: "  ".into(),
+                }
+            },
+            ErrorCode::MissingBank,
+        ),
+        (
+            |e| e.payload.outcome = Some(ActionOutcome::Done),
+            ErrorCode::InvalidArgument,
+        ),
+        (
+            |e| e.payload.kind = ActionEventKind::Outcome,
+            ErrorCode::InvalidArgument,
+        ),
+    ];
+    for (mutate, code) in cases {
+        let mut log = ActionEventLog::new();
+        let mut bad = event("e1", ProtectedAction::CopyExport, "r1");
+        mutate(&mut bad);
+        assert_eq!(log.record(bad).unwrap_err().code, code);
+        assert_eq!(log.events(), [] as [SubjectActionEvent; 0]);
+    }
 }
 
 #[test]
@@ -125,12 +150,12 @@ fn the_same_event_id_with_the_same_content_replays_and_applies_nothing() {
     assert_eq!(
         log.record(event("e1", ProtectedAction::CopyExport, "r1"))
             .unwrap(),
-        crate::subject_request_events::RecordOutcome::Recorded
+        RecordOutcome::Recorded
     );
     assert_eq!(
         log.record(event("e1", ProtectedAction::CopyExport, "r1"))
             .unwrap(),
-        crate::subject_request_events::RecordOutcome::Replayed
+        RecordOutcome::Replayed
     );
     assert_eq!(log.events().len(), 1);
 }
@@ -140,8 +165,13 @@ fn the_same_event_id_with_changed_content_is_refused_as_immutable() {
     let mut log = ActionEventLog::new();
     log.record(event("e1", ProtectedAction::CopyExport, "r1"))
         .unwrap();
-    let mut changed = event("e1", ProtectedAction::CopyExport, "r1");
-    changed.payload.outcome = Some(ActionOutcome::Done);
+    let changed = terminal(
+        "e1",
+        ProtectedAction::CopyExport,
+        "r1",
+        ActionOutcome::Done,
+        None,
+    );
     let err = log.record(changed).unwrap_err();
     assert_eq!(err.code, ErrorCode::Forbidden);
     assert_eq!(log.events().len(), 1);
@@ -160,7 +190,7 @@ fn reloaded_events_replay_after_a_modeled_restart() {
         restarted
             .record(event("e1", ProtectedAction::CopyExport, "r1"))
             .unwrap(),
-        crate::subject_request_events::RecordOutcome::Replayed
+        RecordOutcome::Replayed
     );
 }
 
@@ -179,9 +209,13 @@ fn open_copy_actions_counts_only_open_copy_actions_of_the_request() {
 
     // The latest event per action wins: c1 finished, c2 still owes its
     // manifest.
-    let mut done = event("c1", ProtectedAction::CopyExport, "r1");
-    done.event_id = "c1-done".into();
-    done.payload.outcome = Some(ActionOutcome::Done);
+    let done = terminal(
+        "c1-done",
+        ProtectedAction::CopyExport,
+        "r1",
+        ActionOutcome::Done,
+        None,
+    );
     log.record(done).unwrap();
     assert_eq!(log.open_copy_actions("r1"), 1);
 }
@@ -193,182 +227,25 @@ fn an_open_copy_action_is_one_that_still_owes_a_durable_result() {
         .unwrap();
     assert_eq!(log.open_copy_actions("r1"), 1);
 
-    let mut pending = event("c1", ProtectedAction::CopyExport, "r1");
-    pending.event_id = "c1-pending".into();
-    pending.payload.outcome = Some(ActionOutcome::Done);
-    pending.payload.pending = Some(PendingResult::CopyManifestPending);
+    let pending = terminal(
+        "c1-pending",
+        ProtectedAction::CopyExport,
+        "r1",
+        ActionOutcome::Done,
+        Some(PendingResult::CopyManifestPending),
+    );
     log.record(pending).unwrap();
     assert_eq!(log.open_copy_actions("r1"), 1);
 
-    let mut closed = event("c1", ProtectedAction::CopyExport, "r1");
-    closed.event_id = "c1-closed".into();
-    closed.payload.outcome = Some(ActionOutcome::Done);
+    let closed = terminal(
+        "c1-closed",
+        ProtectedAction::CopyExport,
+        "r1",
+        ActionOutcome::Done,
+        None,
+    );
     log.record(closed).unwrap();
     assert_eq!(log.open_copy_actions("r1"), 0);
-}
-
-#[test]
-fn subject_export_waits_for_the_copy_controls() {
-    let controls = BindingControls::default();
-    assert_eq!(
-        check_binding(&subject_scope(), ProtectedAction::CopyExport, &controls),
-        Err(BindingRefusal::CopyControlsNotAccepted)
-    );
-    let accepted = BindingControls {
-        copy_controls_accepted: true,
-        ..BindingControls::default()
-    };
-    assert!(check_binding(&subject_scope(), ProtectedAction::CopyExport, &accepted).is_ok());
-}
-
-#[test]
-fn request_bound_erasure_waits_for_the_guarded_restore_and_the_erasure_commands() {
-    assert_eq!(
-        check_binding(
-            &subject_scope(),
-            ProtectedAction::Erasure,
-            &BindingControls::default()
-        ),
-        Err(BindingRefusal::GuardedRestoreNotReady)
-    );
-    let restored_only = BindingControls {
-        guarded_restore_ready: true,
-        ..BindingControls::default()
-    };
-    assert_eq!(
-        check_binding(&subject_scope(), ProtectedAction::Erasure, &restored_only),
-        Err(BindingRefusal::ErasureCommandsNotReady)
-    );
-    let ready = BindingControls {
-        guarded_restore_ready: true,
-        erasure_commands_ready: true,
-        ..BindingControls::default()
-    };
-    assert!(check_binding(&subject_scope(), ProtectedAction::Erasure, &ready).is_ok());
-}
-
-#[test]
-fn subject_scope_restore_is_gated_by_the_restore_check_not_the_binding_gate() {
-    let controls = BindingControls::default();
-    assert!(check_binding(&subject_scope(), ProtectedAction::Restore, &controls).is_ok());
-}
-
-#[test]
-fn bank_scope_actions_are_not_gated() {
-    let controls = BindingControls::default();
-    for action in [
-        ProtectedAction::CopyExport,
-        ProtectedAction::Erasure,
-        ProtectedAction::Restore,
-    ] {
-        assert!(check_binding(&bank_scope(), action, &controls).is_ok());
-    }
-}
-
-#[test]
-fn restore_refusals_are_typed_and_ordered() {
-    let inputs = RestoreInputs {
-        manifest_present: false,
-        digest_verified: false,
-        receiver_matches: false,
-    };
-    assert_eq!(
-        check_restore(&inputs),
-        Err(RestoreRefusal::CopyManifestMissing)
-    );
-    let inputs = RestoreInputs {
-        manifest_present: true,
-        ..inputs
-    };
-    assert_eq!(
-        check_restore(&inputs),
-        Err(RestoreRefusal::CopyDigestMismatch)
-    );
-    let inputs = RestoreInputs {
-        digest_verified: true,
-        ..inputs
-    };
-    assert_eq!(
-        check_restore(&inputs),
-        Err(RestoreRefusal::ReceiverMismatch)
-    );
-    let inputs = RestoreInputs {
-        receiver_matches: true,
-        ..inputs
-    };
-    assert!(check_restore(&inputs).is_ok());
-}
-
-#[test]
-fn closure_acceptance_composes_with_the_open_copy_count_from_the_log() {
-    let mut log = ActionEventLog::new();
-    log.record(event("c1", ProtectedAction::CopyExport, "r1"))
-        .unwrap();
-    let blocked = ClosureInputs {
-        product_path_known: true,
-        open_copy_actions: log.open_copy_actions("r1"),
-        retention_exception_approved: false,
-    };
-    assert_eq!(accept_closure(&blocked), Err(ClosureBlock::OpenCopyAction));
-    let mut done = event("c1", ProtectedAction::CopyExport, "r1");
-    done.event_id = "c1-done".into();
-    done.payload.outcome = Some(ActionOutcome::Done);
-    log.record(done).unwrap();
-    let clear = ClosureInputs {
-        open_copy_actions: log.open_copy_actions("r1"),
-        ..blocked
-    };
-    assert_eq!(clear.open_copy_actions, 0);
-    assert!(accept_closure(&clear).is_ok());
-}
-
-#[test]
-fn an_unknown_product_path_blocks_technical_completion() {
-    // The unknown path is checked before open copies: it wins even when
-    // copies are still open.
-    for open in [0, 2] {
-        let inputs = ClosureInputs {
-            product_path_known: false,
-            open_copy_actions: open,
-            retention_exception_approved: false,
-        };
-        assert_eq!(
-            accept_closure(&inputs),
-            Err(ClosureBlock::UnknownProductPath),
-            "{open} open copies"
-        );
-    }
-}
-
-#[test]
-fn an_open_copy_action_blocks_closure() {
-    let inputs = ClosureInputs {
-        product_path_known: true,
-        open_copy_actions: 1,
-        retention_exception_approved: false,
-    };
-    assert_eq!(accept_closure(&inputs), Err(ClosureBlock::OpenCopyAction));
-}
-
-#[test]
-fn an_approved_retention_exception_yields_a_partial_result() {
-    let inputs = ClosureInputs {
-        product_path_known: true,
-        open_copy_actions: 0,
-        retention_exception_approved: true,
-    };
-    assert_eq!(
-        accept_closure(&inputs).unwrap(),
-        crate::subject_request::FinalOutcome::PartiallyCompleted
-    );
-    let without = ClosureInputs {
-        retention_exception_approved: false,
-        ..inputs
-    };
-    assert_eq!(
-        accept_closure(&without).unwrap(),
-        crate::subject_request::FinalOutcome::Completed
-    );
 }
 
 #[test]
@@ -382,15 +259,22 @@ fn a_pending_copy_manifest_is_discharged_by_a_terminal_event() {
     // obligation; the terminal event then closes the copy.
     CopyCustodyManifest::write("producer-a", "receiver-b", DIGEST, TIME, TIME)
         .expect("manifest writes");
-    let mut owed = event("c1", ProtectedAction::CopyExport, "r1");
-    owed.event_id = "c1-owed".into();
-    owed.payload.outcome = Some(ActionOutcome::Done);
-    owed.payload.pending = Some(PendingResult::OutcomePending);
+    let owed = terminal(
+        "c1-owed",
+        ProtectedAction::CopyExport,
+        "r1",
+        ActionOutcome::Done,
+        Some(PendingResult::OutcomePending),
+    );
     log.record(owed).unwrap();
     assert_eq!(log.open_copy_actions("r1"), 1);
-    let mut closed = event("c1", ProtectedAction::CopyExport, "r1");
-    closed.event_id = "c1-closed".into();
-    closed.payload.outcome = Some(ActionOutcome::Done);
+    let closed = terminal(
+        "c1-closed",
+        ProtectedAction::CopyExport,
+        "r1",
+        ActionOutcome::Done,
+        None,
+    );
     log.record(closed).unwrap();
     assert_eq!(log.open_copy_actions("r1"), 0);
 }
@@ -437,11 +321,30 @@ fn only_a_done_copy_with_nothing_owed_counts_as_closed() {
     ];
     for (index, (outcome, pending, open)) in rows.into_iter().enumerate() {
         let mut log = ActionEventLog::new();
-        let mut terminal = event("c1", ProtectedAction::CopyExport, "r1");
-        terminal.event_id = format!("c1-{index}");
-        terminal.payload.outcome = Some(outcome);
-        terminal.payload.pending = pending;
-        log.record(terminal).unwrap();
+        let recorded = terminal(
+            &format!("c1-{index}"),
+            ProtectedAction::CopyExport,
+            "r1",
+            outcome,
+            pending,
+        );
+        log.record(recorded).unwrap();
         assert_eq!(log.open_copy_actions("r1"), open);
     }
+}
+
+#[test]
+fn the_writer_assigned_sequence_and_actor_are_kept_verbatim() {
+    let mut log = ActionEventLog::new();
+    let mut first = event("e1", ProtectedAction::CopyExport, "r1");
+    first.sequence = 7;
+    first.actor = Actor::Harness;
+    assert_eq!(log.record(first.clone()).unwrap(), RecordOutcome::Recorded);
+    assert_eq!(log.record(first).unwrap(), RecordOutcome::Replayed);
+    let mut changed = event("e1", ProtectedAction::CopyExport, "r1");
+    changed.sequence = 8;
+    assert_eq!(log.record(changed).unwrap_err().code, ErrorCode::Forbidden);
+    let stored = &log.events()[0];
+    assert_eq!(stored.sequence, 7);
+    assert_eq!(stored.actor, Actor::Harness);
 }
