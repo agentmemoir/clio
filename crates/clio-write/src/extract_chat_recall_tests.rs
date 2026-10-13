@@ -154,8 +154,8 @@ fn abstract_version_label_is_sent_with_its_source_fact() {
         context: None,
     };
     let message = build_user_message(&request);
-    assert!(message.contains("\"rust_version\""), "{message}");
-    assert!(message.contains("Rust 1.75.0"), "{message}");
+    assert!(message.contains("\"rust_version\""));
+    assert!(message.contains("Rust 1.75.0"));
     assert!(
         SYSTEM_PROMPT.contains("Populate every schema field"),
         "{SYSTEM_PROMPT}"

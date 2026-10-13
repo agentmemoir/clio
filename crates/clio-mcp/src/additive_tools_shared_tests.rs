@@ -84,7 +84,7 @@ fn shared_store_routes_and_requires_actor_attribution() {
             "query": "shared convention", "actor": "agent"
         }),
     );
-    assert!(hits.is_ok(), "{hits:?}");
+    assert!(hits.is_ok());
 
     // Discard dry-run then confirm.
     let preview = call(
@@ -137,7 +137,7 @@ fn shared_bank_is_unreachable_through_generic_tools_when_disabled() {
     let s = state();
     // A read on the shared bank is denied by the routing gate.
     let stats = call_read(&s, "stats", json!({"bank": "shared", "actor": "agent"}));
-    assert!(stats.is_err(), "{stats:?}");
+    assert!(stats.is_err());
     assert_eq!(stats.unwrap_err().code, ErrorCode::Forbidden);
     // A generic `store` targeting the shared bank is denied too.
     let out = call(

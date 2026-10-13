@@ -202,7 +202,7 @@ fn load_all_is_empty_for_a_node_that_never_held_a_key() {
     )]);
 
     let keys = load_all_base64(&get).expect("load");
-    assert!(keys.is_empty(), "{keys:?}");
+    assert!(keys.is_empty(), "a node that never held a key has no keys");
 }
 
 // ---------------------------------------------------------------- generate
@@ -317,7 +317,7 @@ fn keystore_rotation_refuses_a_shadowing_file_instead_of_guessing() {
     let err = rotate_existing(&store, KeySource::Keystore, Some(&dir.key()))
         .expect_err("a second copy of the same secret is ambiguous");
 
-    assert!(err.message.contains("already exists"), "{}", err.message);
+    assert!(err.message.contains("already exists"));
     assert!(dir.key().exists(), "a refused rotation touches nothing");
 }
 
@@ -344,7 +344,7 @@ fn keystore_rotation_refuses_a_wrong_length_entry() {
         .expect_err("a damaged entry is not rotated");
 
     assert_eq!(err.code, clio_types::ErrorCode::ConfigCorrupt);
-    assert!(err.message.contains("expected"), "{}", err.message);
+    assert!(err.message.contains("expected"));
 }
 
 #[test]

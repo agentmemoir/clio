@@ -87,14 +87,11 @@ fn the_written_file_holds_no_readable_secret() {
 
     let text = file_text(&path);
     for secret in [API_KEY, RERANK_KEY, DATABASE_URL] {
-        assert!(!text.contains(secret), "the file leaked {secret}");
-        assert!(
-            !text.contains(&secret[..10]),
-            "the file leaked the head of {secret}"
-        );
+        assert!(!text.contains(secret), "the file leaked");
+        assert!(!text.contains(&secret[..10]), "the file leaked the head");
         assert!(
             !text.contains(&secret[secret.len() - 10..]),
-            "the file leaked the tail of {secret}"
+            "the file leaked the tail"
         );
     }
     // The value that is not a secret is still readable, which is what makes the

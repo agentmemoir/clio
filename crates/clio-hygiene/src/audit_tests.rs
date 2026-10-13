@@ -190,7 +190,7 @@ fn t21_01_secret_candidate_ranks_top_with_redacted_preview() {
         .iter()
         .find(|c| c.item_id == "itm-c")
         .expect("secret candidate present");
-    assert!(secret.noise_score >= 0.90, "{}", secret.noise_score);
+    assert!(secret.noise_score >= 0.90);
     assert!(
         secret
             .noise_reasons

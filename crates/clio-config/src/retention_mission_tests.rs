@@ -61,7 +61,7 @@ fn vague_missions_are_rejected_with_guidance() {
     let err = mission("keep things", vec![], vec![])
         .validate()
         .expect_err("no drop");
-    assert!(err.message.contains("drop example"), "{}", err.message);
+    assert!(err.message.contains("drop example"));
 
     let all_short = mission(
         "keep things",
@@ -69,11 +69,7 @@ fn vague_missions_are_rejected_with_guidance() {
         vec![entry("cd"), entry("ef")],
     );
     let err = all_short.validate().expect_err("all short");
-    assert!(
-        err.message.contains("e.g. drop `tests passed`"),
-        "{}",
-        err.message
-    );
+    assert!(err.message.contains("e.g. drop `tests passed`"));
 
     let all_stopwords = mission(
         "keep things",
@@ -274,7 +270,7 @@ fn secret_bearing_entries_are_rejected_with_hygiene_guidance() {
     m.drop_examples[0] = entry(&format!("api_key: {secret}"));
     let err = m.validate().expect_err("secret-bearing entry rejected");
     assert_eq!(err.code, ErrorCode::InvalidArgument);
-    assert!(err.message.contains("hygiene"), "{}", err.message);
+    assert!(err.message.contains("hygiene"));
     assert!(
         !err.message.contains(secret),
         "the error must not echo the secret back: {}",

@@ -69,9 +69,9 @@ fn sync_status_summary_names_the_store_only_when_custody_holds_a_key() {
     let args = json!({ "sync_key": ["k1"] });
     let none = crate::sync_tools::sync_status_with(&st, &args, &|_| None).expect("status");
     let none_summary = &none["encryption_summary"];
-    assert_eq!(none_summary["key_count"], 1, "{none}");
-    assert!(none_summary["store"].is_null(), "{none}");
-    assert!(none_summary["current_fingerprint"].is_null(), "{none}");
+    assert_eq!(none_summary["key_count"], 1);
+    assert!(none_summary["store"].is_null());
+    assert!(none_summary["current_fingerprint"].is_null());
 
     let dir = TempDir::new("mcp-status-custody");
     let path = dir.key().display().to_string();
@@ -79,12 +79,12 @@ fn sync_status_summary_names_the_store_only_when_custody_holds_a_key() {
     clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("generate");
     let custody = crate::sync_tools::sync_status_with(&st, &args, &get).expect("status");
     let custody_summary = &custody["encryption_summary"];
-    assert_eq!(custody_summary["store"], json!("file"), "{custody}");
+    assert_eq!(custody_summary["store"], json!("file"));
     let fingerprint = custody_summary["current_fingerprint"]
         .as_str()
         .expect("a fingerprint from custody");
-    assert_eq!(fingerprint.len(), 16, "{custody}");
-    assert!(!custody.to_string().contains("key_b64"), "{custody}");
+    assert_eq!(fingerprint.len(), 16);
+    assert!(!custody.to_string().contains("key_b64"));
 }
 
 /// Status is the first place an operator looks, so with no keys supplied the
@@ -101,15 +101,15 @@ fn sync_status_reports_the_node_s_own_keys_when_none_are_supplied() {
 
     let report = crate::sync_tools::sync_status_with(&st, &json!({}), &get).expect("status");
 
-    assert_eq!(report["encryption"], Value::Bool(true), "{report}");
+    assert_eq!(report["encryption"], Value::Bool(true));
     let summary = &report["encryption_summary"];
-    assert_eq!(summary["key_count"], 2, "{report}");
-    assert_eq!(summary["store"], json!("file"), "{report}");
+    assert_eq!(summary["key_count"], 2);
+    assert_eq!(summary["store"], json!("file"));
     let fingerprint = summary["current_fingerprint"]
         .as_str()
         .expect("fingerprint");
-    assert_eq!(fingerprint.len(), 16, "{report}");
-    assert!(!report.to_string().contains("key_b64"), "{report}");
+    assert_eq!(fingerprint.len(), 16);
+    assert!(!report.to_string().contains("key_b64"));
 }
 
 /// Transfer and status answer from one source: for the same arguments and the
@@ -131,11 +131,8 @@ fn sync_transfer_and_sync_status_agree_on_encryption_for_the_same_arguments() {
         crate::sync_tools::sync_transfer_with(&st, &json!({ "remote": addr }), "push", &none)
             .expect("push");
     let status = crate::sync_tools::sync_status_with(&st, &json!({}), &none).expect("status");
-    assert_eq!(pushed["encryption"], Value::Bool(false), "{pushed}");
-    assert_eq!(
-        pushed["encryption"], status["encryption"],
-        "{pushed} vs {status}"
-    );
+    assert_eq!(pushed["encryption"], Value::Bool(false));
+    assert_eq!(pushed["encryption"], status["encryption"]);
 
     // The node holds keys and the caller supplies none: both surfaces report
     // encryption on, from the same custody set. Generating twice leaves a
@@ -149,12 +146,9 @@ fn sync_transfer_and_sync_status_agree_on_encryption_for_the_same_arguments() {
         crate::sync_tools::sync_transfer_with(&st, &json!({ "remote": addr }), "push", &get)
             .expect("push");
     let status = crate::sync_tools::sync_status_with(&st, &json!({}), &get).expect("status");
-    assert_eq!(pushed["encryption"], Value::Bool(true), "{pushed}");
-    assert_eq!(
-        pushed["encryption"], status["encryption"],
-        "{pushed} vs {status}"
-    );
-    assert_eq!(status["encryption_summary"]["key_count"], 2, "{status}");
+    assert_eq!(pushed["encryption"], Value::Bool(true));
+    assert_eq!(pushed["encryption"], status["encryption"]);
+    assert_eq!(status["encryption_summary"]["key_count"], 2);
 }
 
 /// The transfer path's custody read is ordered: the newest key first, then
@@ -189,7 +183,7 @@ fn sync_transfer_without_a_key_reads_newest_and_archived_keys_from_custody() {
     let pushed =
         crate::sync_tools::sync_transfer_with(&st, &json!({ "remote": addr }), "push", &get)
             .expect("push");
-    assert_eq!(pushed["encryption"], Value::Bool(true), "{pushed}");
+    assert_eq!(pushed["encryption"], Value::Bool(true));
 }
 
 /// The explicit `CLIO_SYNC_KEY_FILE` outranks a recorded store marker on the
@@ -242,10 +236,7 @@ fn sync_transfer_errors_when_the_custody_store_cannot_be_read() {
         &get,
     );
 
-    assert!(
-        result.is_err(),
-        "a damaged custody store is an error: {result:?}"
-    );
+    assert!(result.is_err(), "a damaged custody store is an error");
 }
 
 /// The accepted custody divergence, pinned with a store the tests can reach.
@@ -274,12 +265,12 @@ fn transfer_refuses_a_missing_named_file_while_status_answers_from_the_archive()
     );
     assert!(
         transfer.is_err(),
-        "a named key file that is missing is an error on the transfer path: {transfer:?}"
+        "a named key file that is missing is an error on the transfer path"
     );
 
     let status = crate::sync_tools::sync_status_with(&st, &json!({}), &get).expect("status");
-    assert_eq!(status["encryption"], Value::Bool(true), "{status}");
-    assert_eq!(status["encryption_summary"]["key_count"], 1, "{status}");
+    assert_eq!(status["encryption"], Value::Bool(true));
+    assert_eq!(status["encryption_summary"]["key_count"], 1);
 }
 
 /// The transfer read and the status custody read follow different masters when
@@ -333,23 +324,19 @@ fn sync_key_status_reports_store_fingerprint_time_and_count_without_a_key() {
     assert_eq!(
         result["keys"].as_array().map(Vec::len),
         Some(0),
-        "an empty report lists no keys: {result}"
+        "an empty report lists no keys"
     );
     assert!(
         result["timestamp"]
             .as_str()
-            .is_some_and(|stamp| stamp.ends_with('Z')),
-        "{result}"
+            .is_some_and(|stamp| stamp.ends_with('Z'))
     );
     // The empty report carries no key, so the field-name scan is all there is to
     // assert here; the stored-key case below is what makes the rule real.
     let rendered = result.to_string();
-    assert!(!rendered.contains("\"key\""), "{rendered}");
+    assert!(!rendered.contains("\"key\""));
     for name in ["key_b64", "secret", "key_bytes", "sync_key"] {
-        assert!(
-            !rendered.contains(name),
-            "a leaked field {name}: {rendered}"
-        );
+        assert!(!rendered.contains(name), "a leaked field");
     }
 }
 
@@ -373,11 +360,11 @@ fn sync_key_status_over_a_stored_key_carries_no_key_byte_and_no_prefix() {
 
     let result = crate::sync_tools::sync_key_status_with(&get).expect("report");
 
-    assert_eq!(result["count"], 1, "the premise: a key is stored: {result}");
+    assert_eq!(result["count"], 1, "the premise: a key is stored");
     let fingerprint = result["fingerprint"]
         .as_str()
         .expect("a fingerprint for the stored key");
-    assert_eq!(fingerprint.len(), 16, "{result}");
+    assert_eq!(fingerprint.len(), 16);
     assert!(
         fingerprint
             .chars()
@@ -385,9 +372,9 @@ fn sync_key_status_over_a_stored_key_carries_no_key_byte_and_no_prefix() {
         "lowercase hex only: {fingerprint}"
     );
     let keys = result["keys"].as_array().expect("the keys list");
-    assert_eq!(keys.len(), 1, "{result}");
-    assert_eq!(keys[0]["fingerprint"], fingerprint, "{result}");
-    assert_eq!(keys[0]["current"], json!(true), "{result}");
-    assert_eq!(keys[0]["store"], json!("file"), "{result}");
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0]["fingerprint"], fingerprint);
+    assert_eq!(keys[0]["current"], json!(true));
+    assert_eq!(keys[0]["store"], json!("file"));
     assert_no_key_material(&result, fingerprint, &generated.base64());
 }

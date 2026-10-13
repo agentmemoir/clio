@@ -237,9 +237,6 @@ fn no_key_byte_or_subject_identifier_escapes_the_reported_facts() {
     let rendered = format!("{member:?}");
 
     for secret in ["subject-a", "subject-b", "key-material-0", "key-material-1"] {
-        assert!(
-            !rendered.contains(secret),
-            "the reported facts leaked {secret}: {rendered}"
-        );
+        assert!(!rendered.contains(secret), "the reported facts leaked");
     }
 }
