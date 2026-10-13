@@ -107,7 +107,7 @@ fn a_sealed_task_row_applies_under_its_real_identifier() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("resolve-task-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("resolve-task-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     seed_task(&a, "br");
@@ -154,7 +154,7 @@ fn a_redelivered_sealed_row_stays_a_duplicate() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("resolve-idem-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("resolve-idem-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     seed_task(&a, "br");
@@ -194,7 +194,8 @@ fn a_conflict_sample_shows_the_real_identifier_not_a_handle() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("resolve-conflict-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("resolve-conflict-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     seed_task(&a, "br");
@@ -253,7 +254,7 @@ fn a_row_whose_payload_lacks_its_identifier_is_refused() {
     let (server, srv, _kms) = serve(&["br"]);
     let addr = server.addr().to_owned();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("resolve-refuse-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("resolve-refuse-key"));
     let cfg_b = cfg("dev-b", &b, &addr, vec![key.clone()]);
 
     // Hand-push a sealed task row whose payload has no task record, so the
@@ -277,7 +278,10 @@ fn a_row_whose_payload_lacks_its_identifier_is_refused() {
             key_id: Some(key.key_id()),
             ..sealed
         }),
-        content_hash: clio_store::sha256_hex(b"am-sync-hash", "anything"),
+        content_hash: clio_store::sha256_hex(
+            crate::keyed_roles::published_digest_salt(),
+            "anything",
+        ),
         admission_receipt: None,
     };
     let ack: PushAck = post_json(
@@ -338,7 +342,8 @@ fn a_sealed_persona_row_applies_under_its_real_attribute_key() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("resolve-persona-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("resolve-persona-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     a.put_stable_entry(
@@ -382,7 +387,7 @@ fn a_sealed_explicit_edge_row_resolves_to_the_edge_id() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("resolve-edge-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("resolve-edge-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     for id in ["i-1", "i-2"] {

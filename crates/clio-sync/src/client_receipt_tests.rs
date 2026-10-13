@@ -81,7 +81,7 @@ fn sealed_without_receipt(
         device_id: device.into(),
         content: SyncContent::Cipher(cipher),
         content_hash: clio_store::sha256_hex(
-            b"am-sync-hash",
+            crate::keyed_roles::published_digest_salt(),
             &String::from_utf8(bytes).unwrap_or_default(),
         ),
         admission_receipt: None,
@@ -121,7 +121,8 @@ fn sealed_with_receipt(
 #[test]
 fn an_opened_document_restores_the_receipt_before_apply() {
     let store = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-restore-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-restore-key"));
     let cfg = cfg("dev-a", &store, "127.0.0.1:1", vec![key.clone()]);
     let record = item(BANK, "i-1", "s1", STAMP, "restored");
     let mutation = sealed_with_receipt(
@@ -147,7 +148,8 @@ fn an_opened_document_restores_the_receipt_before_apply() {
 #[test]
 fn an_absent_or_malformed_receipt_degrades_to_the_documented_fallback() {
     let store = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-fallback-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-fallback-key"));
     let cfg = cfg("dev-a", &store, "127.0.0.1:1", vec![key.clone()]);
     let record = item(BANK, "i-1", "s1", STAMP, "fallback");
     let cases: [(&str, Value); 2] = [
@@ -197,7 +199,7 @@ fn an_encrypted_same_timestamp_conflict_resolves_by_the_restored_score() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-tie-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-tie-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-z", &b, &addr, vec![key]);
     let mut incoming = item(BANK, "i-1", "s1", STAMP, "incoming");
@@ -235,7 +237,7 @@ fn the_same_conflict_without_the_score_falls_back_to_the_device_id() {
     let (server, _srv, _kms) = serve(&[BANK]);
     let addr = server.addr().to_owned();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-tie-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-tie-key"));
     let cfg_b = cfg("dev-z", &b, &addr, vec![key]);
     let mut local = item(BANK, "i-1", "s1", STAMP, "local");
     local.admission_score = Some(0.0);
@@ -307,7 +309,9 @@ fn a_row_sealed_without_a_receipt_still_applies_on_a_fresh_peer() {
     let (server, _srv, _kms) = serve(&[BANK]);
     let addr = server.addr().to_owned();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-old-writer-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "receipt-old-writer-key",
+    ));
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     let incoming = item(BANK, "i-1", "s1", STAMP, "from an old writer");
     hand_push(
@@ -337,7 +341,8 @@ fn an_erased_subject_still_dead_letters_with_the_cipher_on() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-erasure-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-erasure-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     b.upsert_subject_key_ref("s-victim", "shredded", "shredded")
@@ -370,7 +375,8 @@ fn a_sealed_persona_tie_is_decided_by_the_restored_score() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-persona-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-persona-key"));
     let packager = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-z", &b, &addr, vec![key]);
     let local = PersonaStableEntry {

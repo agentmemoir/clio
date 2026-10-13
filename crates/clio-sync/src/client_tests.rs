@@ -252,7 +252,7 @@ fn t24_07_client_encryption_server_blind_keyless_dead_letters() {
     let a = sqlite();
     let b = sqlite();
     let c = sqlite();
-    let key = SyncCipherKey::from_secret("t24-07-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("t24-07-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     let cfg_b = cfg("dev-b", &b, &addr, vec![key]);
     let cfg_c = cfg("dev-c", &c, &addr, Vec::new());

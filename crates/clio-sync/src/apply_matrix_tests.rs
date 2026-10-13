@@ -286,7 +286,7 @@ fn triple_invalidate_closes_local_edge_and_reclose_is_noop() {
 #[test]
 fn cipher_and_keyless_journal_paths() {
     let (store, kms) = fixture();
-    let key = SyncCipherKey::from_secret("t24-cipher");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("t24-cipher"));
     let sealed = SyncContent::Cipher(key.seal(br"{}").expect("seal"));
     let mut m = upsert("m-c1", "b-cipher", "2026-01-01T00:00:00Z", "dev-a", "g");
     m.content = sealed.clone();

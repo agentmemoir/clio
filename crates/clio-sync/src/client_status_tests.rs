@@ -64,7 +64,14 @@ fn sync_status_reports_cursors_and_never_the_token() {
     let text = serde_json::to_string(&report).expect("serialize report");
     assert!(!text.contains(TOKEN));
     // The encryption flag reflects the configured cipher key only.
-    let cfg_e = cfg("dev-e", &b, &addr, vec![SyncCipherKey::from_secret("k")]);
+    let cfg_e = cfg(
+        "dev-e",
+        &b,
+        &addr,
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("k"),
+        )],
+    );
     assert!(
         sync_status(&cfg_e, &["b1".to_owned()])
             .expect("status")
@@ -159,8 +166,8 @@ fn the_encryption_summary_counts_held_keys_and_leaves_provenance_to_custody() {
     // fingerprint stay unset because they are the custody layer's facts,
     // filled by the caller that assembled the client from a store-backed key.
     let keys = vec![
-        SyncCipherKey::from_secret("summary-key-one"),
-        SyncCipherKey::from_secret("summary-key-two"),
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("summary-key-one")),
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("summary-key-two")),
     ];
     let cfg_two = cfg("dev-two", &sqlite(), &addr, keys);
     let report = sync_status(&cfg_two, &["bz".to_owned()]).expect("status");
@@ -226,13 +233,17 @@ fn wrong_cipher_key_quarantines_then_ack_skip_unfreezes() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("key-one")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("key-one"),
+        )],
     );
     let cfg_b = cfg(
         "dev-b",
         &b,
         &addr,
-        vec![SyncCipherKey::from_secret("key-two")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("key-two"),
+        )],
     );
     a.create_memory_item(
         &item("bk", "i-1", "s1", "2026-01-01T00:00:00Z", "secret"),

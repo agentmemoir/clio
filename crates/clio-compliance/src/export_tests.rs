@@ -282,6 +282,8 @@ pub(crate) fn seed(store: &SqliteStore, bank: &str) {
             "tester",
         )
         .unwrap();
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     store
         .erase_subject(&SubjectEraseSpec {
             bank_id: bank,
@@ -290,7 +292,7 @@ pub(crate) fn seed(store: &SqliteStore, bank: &str) {
             legal_basis: "GDPR_ART_17",
             reason_code: "COMPLIANCE_CRYPTO_SHRED",
             deleted_at: T,
-            salt: b"salt",
+            salt: &salt,
         })
         .unwrap();
 }

@@ -423,17 +423,18 @@ fn non_owning_role_is_refused_before_any_truncation() {
     let url = source.url();
     let before = postgres_target_state(url).expect("target state before");
     let role = unique("restore_probe_role");
+    let probe = format!("probe-{:016x}", rand::random::<u64>());
     let s = quote_ident(&schema);
     let r = quote_ident(&role);
     let mut admin = crate::pg_tls::connect(&base_url()).expect("admin connect");
     admin
         .batch_execute(&format!(
-            "CREATE ROLE {r} LOGIN PASSWORD 'probe';
+            "CREATE ROLE {r} LOGIN PASSWORD '{probe}';
              GRANT USAGE ON SCHEMA {s} TO {r};
              GRANT SELECT ON ALL TABLES IN SCHEMA {s} TO {r};"
         ))
         .expect("create the probe role");
-    let probe_url = with_credentials(url, &role, "probe");
+    let probe_url = with_credentials(url, &role, &probe);
     let tables = restore_tables(&facts, &paths);
     let error = restore_err(&probe_url, &schema, tables);
     assert_eq!(error.code, ErrorCode::Forbidden);

@@ -29,7 +29,9 @@
 
 #[test]
 fn seal_open_roundtrip() {
-    let key = crate::crypto::SyncCipherKey::from_secret("shared-secret");
+    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "shared-secret",
+    ));
     let plaintext = br#"{"snapshot":{"k":"v"},"gist":"g"}"#;
     let cipher = key.seal(plaintext).expect("seal");
     assert_eq!(cipher.alg, "xchacha20poly1305");
@@ -39,8 +41,10 @@ fn seal_open_roundtrip() {
 
 #[test]
 fn wrong_key_and_tampering_fail_closed() {
-    let key = crate::crypto::SyncCipherKey::from_secret("right");
-    let wrong = crate::crypto::SyncCipherKey::from_secret("wrong");
+    let key =
+        crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("right"));
+    let wrong =
+        crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("wrong"));
     let cipher = key.seal(b"payload").expect("seal");
     assert!(wrong.open(&cipher).is_err());
     let mut tampered = cipher.clone();
@@ -65,7 +69,7 @@ fn wrong_key_and_tampering_fail_closed() {
 
 #[test]
 fn key_debug_is_masked_and_nonces_differ() {
-    let key = crate::crypto::SyncCipherKey::from_secret("k");
+    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("k"));
     assert_eq!(format!("{key:?}"), "SyncCipherKey(<masked>)");
     let a = key.seal(b"same input").expect("seal a");
     let b = key.seal(b"same input").expect("seal b");
@@ -76,8 +80,12 @@ fn key_debug_is_masked_and_nonces_differ() {
 /// another, and never equal to another derivation's value for the same key.
 #[test]
 fn key_id_is_fixed_width_and_distinguishes_keys() {
-    let a = crate::crypto::SyncCipherKey::from_secret("rotation-key-one");
-    let b = crate::crypto::SyncCipherKey::from_secret("rotation-key-two");
+    let a = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "rotation-key-one",
+    ));
+    let b = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "rotation-key-two",
+    ));
     assert_eq!(a.key_id().len(), 16, "a fixed-width identifier");
     assert_eq!(
         a.key_id(),
@@ -109,7 +117,9 @@ fn key_id_is_fixed_width_and_distinguishes_keys() {
 /// which of its keys to try without trying them all.
 #[test]
 fn seal_stamps_the_sealing_keys_identifier() {
-    let key = crate::crypto::SyncCipherKey::from_secret("shared-secret");
+    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "shared-secret",
+    ));
     let cipher = key.seal(b"payload").expect("seal");
     assert_eq!(cipher.key_id.as_deref(), Some(key.key_id().as_str()));
 }
@@ -120,7 +130,9 @@ fn seal_stamps_the_sealing_keys_identifier() {
 /// directions.
 #[test]
 fn an_identifier_less_ciphertext_serializes_without_the_field() {
-    let key = crate::crypto::SyncCipherKey::from_secret("shared-secret");
+    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "shared-secret",
+    ));
     let cipher = key.seal(b"payload").expect("seal");
     let stripped = crate::crypto::SyncCipher {
         key_id: None,
@@ -145,7 +157,8 @@ fn an_identifier_less_ciphertext_serializes_without_the_field() {
 /// the key that protects content.
 #[test]
 fn the_aead_never_seals_under_the_sync_key_itself() {
-    let key = crate::crypto::SyncCipherKey::from_secret("seal-role-key");
+    let role_secret = crate::credential_fixtures::secret("seal-role-key");
+    let key = crate::crypto::SyncCipherKey::from_secret(&role_secret);
     let seal_key = key.seal_key();
     assert_ne!(
         seal_key,
@@ -155,7 +168,7 @@ fn the_aead_never_seals_under_the_sync_key_itself() {
     assert_eq!(seal_key.len(), 32, "a full SHA-256 output");
     // A peer holding the same sync key derives the same sealing key, so
     // ciphertext written by one opens on the other.
-    let peer = crate::crypto::SyncCipherKey::from_secret("seal-role-key");
+    let peer = crate::crypto::SyncCipherKey::from_secret(&role_secret);
     assert_eq!(
         seal_key,
         peer.seal_key(),
@@ -174,10 +187,11 @@ fn content_sealed_under_the_raw_sync_key_is_refused() {
         XChaCha20Poly1305, XNonce,
         aead::{Aead, KeyInit, Payload},
     };
-    let key = crate::crypto::SyncCipherKey::from_secret("legacy-raw-key");
+    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "legacy-raw-key",
+    ));
     // Seal exactly the way the earlier build did: the sync key itself.
-    let mut nonce = [0u8; 24];
-    nonce[0] = 1;
+    let nonce: [u8; 24] = rand::random();
     let aead = XChaCha20Poly1305::new(key.key_bytes().to_vec().as_slice().into());
     let sealed = aead
         .encrypt(

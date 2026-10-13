@@ -169,6 +169,8 @@ fn erased_subject_context_never_reappears_in_plaintext_export() {
     let request = unique("req");
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(f.bank.clone()), Actor::Harness);
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     let outcome = erase_request(&EraseArgs {
         store: &f.store,
         maint: None,
@@ -178,7 +180,7 @@ fn erased_subject_context_never_reappears_in_plaintext_export() {
         request_id: &request,
         reason_code: None,
         confirm: true,
-        salt: b"deploy-salt",
+        salt: &salt,
         timestamp: T,
         sink: &sink,
     })

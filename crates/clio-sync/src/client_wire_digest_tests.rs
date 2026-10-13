@@ -45,7 +45,9 @@ fn the_stored_content_digest_confirms_no_guessed_plaintext() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-digest-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-digest-key"),
+        )],
     );
     a.create_memory_item(
         &item("bp", "i-1", "s1", "2026-01-01T00:00:00Z", GIST),
@@ -63,7 +65,7 @@ fn the_stored_content_digest_confirms_no_guessed_plaintext() {
         format!("{{\"gist\":\"{GIST}\"}}"),
     ];
     for guess in guesses {
-        let attack = clio_store::sha256_hex(b"am-sync-hash", &guess);
+        let attack = clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), &guess);
         assert_ne!(
             stored.as_str(),
             attack.as_str(),

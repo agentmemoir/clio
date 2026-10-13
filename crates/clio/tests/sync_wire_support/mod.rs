@@ -47,9 +47,10 @@ use std::time::Duration;
 pub const BANK: &str = "bp";
 /// The bearer token the relay requires. Synthetic, not a real credential.
 pub const TOKEN: &str = "sync-harness-token";
-/// The cipher secret both nodes hold. Synthetic: a real key in a test file would
-/// put key material in the repository.
-pub const SYNC_KEY: &str = "sync-harness-secret";
+/// The cipher secret both nodes hold: a fresh synthetic value per process. A
+/// real key in a test file would put key material in the repository.
+pub static SYNC_KEY: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| format!("sync-harness-{:x}", rand::random::<u128>()));
 
 /// One relay row as the relay's own database holds it: every stored column.
 pub struct JournalRow {
