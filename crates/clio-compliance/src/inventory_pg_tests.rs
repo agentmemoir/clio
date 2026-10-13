@@ -152,7 +152,7 @@ fn inventory_pg_ledger_names_the_same_families_as_sqlite() {
         postgres_names, sqlite_names,
         "the two backends name the same families"
     );
-    assert_eq!(postgres_names.len(), 26, "the pinned family set is 26 rows");
+    assert_eq!(postgres_names.len(), 34, "the pinned family set is 34 rows");
     for family in [
         "items",
         "triples",

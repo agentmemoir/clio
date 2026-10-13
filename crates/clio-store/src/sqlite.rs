@@ -31,7 +31,7 @@ use crate::embedding_space::{
     EmbeddingSpace, SETTING_EMBEDDING_DIM, SETTING_EMBEDDING_MODEL, SpaceSwitchReport, log_switch,
     refused_switch,
 };
-use crate::migrate::{IntoAmError, SQL_CORE, SQL_VECTORS_SQLITE, now_iso};
+use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, SQL_VECTORS_SQLITE, now_iso};
 use crate::sqlite_path::ensure_parent;
 use crate::vec_register::ensure_sqlite_vec_registered;
 use crate::vector_ddl::sqlite_vector_ddl;
@@ -121,7 +121,7 @@ impl SqliteStore {
         // Duplicate-open-triple guard must run BEFORE the unique index build:
         // a legacy duplicate fails CREATE UNIQUE INDEX with a raw driver error.
         crate::triple_invariant::ensure_no_duplicate_open_triples_sqlite(&conn)?;
-        let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}");
+        let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;
         conn.execute_batch(SQL_VECTORS_SQLITE)

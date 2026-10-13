@@ -29,7 +29,7 @@ use crate::embedding_space::{
     EmbeddingSpace, IndexMode, SETTING_EMBEDDING_DIM, SETTING_EMBEDDING_MODEL, SpaceSwitchReport,
     log_switch, refused_switch,
 };
-use crate::migrate::{IntoAmError, SQL_CORE, SQL_VECTORS_POSTGRES, now_iso};
+use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, SQL_VECTORS_POSTGRES, now_iso};
 use crate::vector_ddl::{HALFVEC_MIN_VERSION, pgvector_supports_halfvec, postgres_vector_ddl};
 use clio_types::{AmError, ErrorCode};
 use postgres::Client;
@@ -169,7 +169,7 @@ fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, bool), AmErr
     // Duplicate-open-triple guard must run BEFORE the unique index build:
     // a legacy duplicate fails CREATE UNIQUE INDEX with a raw driver error.
     crate::triple_invariant::ensure_no_duplicate_open_triples_pg(client)?;
-    let migrate = format!("{SQL_CORE}\n{SQL_VECTORS_POSTGRES}");
+    let migrate = format!("{SQL_CORE}\n{SQL_VECTORS_POSTGRES}\n{SQL_COMPLIANCE_SLOTS}");
     client.batch_execute(&migrate).am("migrate postgres")?;
     crate::bank_registration::install_postgres_triggers(client)?;
     crate::schema_reshape::bump_schema_version_pg(client)?;

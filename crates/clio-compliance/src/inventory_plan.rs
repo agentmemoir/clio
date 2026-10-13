@@ -25,11 +25,19 @@
 use super::RowPlan;
 use crate::inventory::{Custody, Owner, Readability, RetentionAction, RowSource};
 
+#[path = "inventory_plan_slots.rs"]
+mod inventory_plan_slots;
+
+use self::inventory_plan_slots::{
+    ARCHIVE_EXPERIMENTS, COPY_INVENTORY, DURABLE_REQUESTS, ERASURE_ADAPTERS, LOCAL_ERASURE_JOURNAL,
+    LOCAL_EVENTS, RESTORE_GUARDS, SUBJECT_FAMILY_LINKS,
+};
+
 /// Every row the ledger reports, in report order: the nine export families
 /// (named exactly as the completeness manifest names them), then the derived
 /// and bank structures, telemetry, sync state, key and tombstone records, the
-/// legacy tables no code path uses, the file and peer facts, and the source
-/// records stored nowhere. A `gap` is present exactly when the row has no
+/// legacy tables no code path uses, the local compliance slot tables, the file
+/// and peer facts, and the source records stored nowhere. A `gap` is present exactly when the row has no
 /// direct, resolvable subject link.
 pub(crate) static ROW_PLAN: &[RowPlan] = &[
     RowPlan {
@@ -288,6 +296,14 @@ pub(crate) static ROW_PLAN: &[RowPlan] = &[
         action: RetentionAction::Prune,
         proof: "sql/001_core.sql",
     },
+    ARCHIVE_EXPERIMENTS,
+    COPY_INVENTORY,
+    DURABLE_REQUESTS,
+    ERASURE_ADAPTERS,
+    LOCAL_ERASURE_JOURNAL,
+    LOCAL_EVENTS,
+    RESTORE_GUARDS,
+    SUBJECT_FAMILY_LINKS,
     RowPlan {
         family: "store_file",
         tables: &[],

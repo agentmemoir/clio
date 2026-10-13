@@ -39,6 +39,8 @@ pub(crate) const OVERLAY_AMD64: &str = include_str!("../../../compose.amd64.yml"
 pub(crate) const SQL_CORE: &str = include_str!("../../../sql/001_core.sql");
 /// Postgres bind-mount init script (vectors).
 pub(crate) const SQL_VECTORS: &str = include_str!("../../../sql/002_vectors_postgres.sql");
+/// Postgres bind-mount init script (local compliance slots).
+pub(crate) const SQL_SLOTS: &str = include_str!("../../../sql/003_local_compliance_slots.sql");
 
 /// Guidance materialized into `models/`. The GGUF itself is large and MUST
 /// NOT be embedded; the operator places it here (known limits).
@@ -82,6 +84,10 @@ fn assets(target: ComposeTarget) -> Vec<Asset> {
             contents: SQL_VECTORS,
         },
         Asset {
+            path: "sql/003_local_compliance_slots.sql",
+            contents: SQL_SLOTS,
+        },
+        Asset {
             path: "models/README.md",
             contents: MODELS_README,
         },
@@ -94,8 +100,11 @@ fn assets(target: ComposeTarget) -> Vec<Asset> {
 /// required only when that service is selected, and it is checked through the
 /// `extract` service's own model file rather than as a directory (see
 /// `compose_model`).
-pub(crate) const BIND_MOUNT_SOURCES: &[&str] =
-    &["sql/001_core.sql", "sql/002_vectors_postgres.sql"];
+pub(crate) const BIND_MOUNT_SOURCES: &[&str] = &[
+    "sql/001_core.sql",
+    "sql/002_vectors_postgres.sql",
+    "sql/003_local_compliance_slots.sql",
+];
 
 /// Materialize the asset set into `root`, refusing to silently overwrite a
 /// user-edited file: when an existing file differs from the embedded content
