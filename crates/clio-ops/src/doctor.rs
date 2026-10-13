@@ -174,7 +174,7 @@ pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
     })?;
     let (actions, mut notes) = compose(&report);
     if args.bank.is_some() {
-        notes.extend(store_wide_note(args, &report));
+        notes.extend(store_wide_note(args));
     }
     let plan = DoctorPlan {
         plan_id: args.plans.allocate_id(),
@@ -192,27 +192,37 @@ pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
     Ok(plan)
 }
 
-/// A bank-scoped plan sees only that bank's findings. Re-verify the whole store
-/// and name any error finding the scoped pass did not report, so a reader of a
-/// bank-scoped `doctor` does not read a clean plan as a clean store. A store
-/// whose whole-scope pass cannot be read adds no claim.
-fn store_wide_note(args: &DoctorArgs<'_>, scoped: &VerifyReport) -> Option<String> {
-    let store_report = crate::verify::verify(&VerifyArgs {
-        store: args.store,
-        index: args.index,
-        bank: None,
-        timestamp: args.timestamp,
-    })
-    .ok()?;
-    let scoped_errors = error_codes(&scoped.findings);
-    let outside: Vec<String> = error_codes(&store_report.findings)
-        .into_iter()
-        .filter(|code| !scoped_errors.contains(code))
-        .collect();
+/// A bank-scoped plan sees only that bank's findings. Verify every other known
+/// bank and name any error code they carry, so a reader of a bank-scoped
+/// `doctor` does not read a clean plan as a clean store. Comparing codes across
+/// banks (not against the whole-store aggregate) catches a gap in another bank
+/// even when the scoped bank carries the same code. A store whose bank list
+/// cannot be read adds no claim.
+fn store_wide_note(args: &DoctorArgs<'_>) -> Option<String> {
     let bank = args.bank?;
+    let mut outside: Vec<String> = Vec::new();
+    for other in args.store.bank_ids().ok()? {
+        if other == bank {
+            continue;
+        }
+        let Ok(report) = crate::verify::verify(&VerifyArgs {
+            store: args.store,
+            index: args.index,
+            bank: Some(other.as_str()),
+            timestamp: args.timestamp,
+        }) else {
+            continue;
+        };
+        for code in error_codes(&report.findings) {
+            if !outside.contains(&code) {
+                outside.push(code);
+            }
+        }
+    }
     if outside.is_empty() {
         return None;
     }
+    outside.sort();
     Some(format!(
         "store-wide findings outside bank `{bank}`: {}; run `clio ops verify` without --bank",
         outside.join(", ")

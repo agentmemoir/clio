@@ -86,7 +86,7 @@ pub struct DiagnoseReport {
     pub findings: Vec<OpsFinding>,
     /// Deeper index-coverage and referential-integrity checks live here rather
     /// than in this snapshot, so an `ok` verdict names what it does not cover.
-    pub verify_pointer: String,
+    pub verify_pointer: &'static str,
 }
 
 /// Run the read-only health snapshot. Never fails: probe errors become findings.
@@ -195,7 +195,7 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
         retry_jobs: retry,
         embedding_ready,
         findings: findings.into_vec(),
-        verify_pointer: VERIFY_POINTER.to_owned(),
+        verify_pointer: VERIFY_POINTER,
     }
 }
 

@@ -265,6 +265,48 @@ fn pg_correct_duplicate_new_id_rejected() {
     assert!(prior.tx_until.is_none(), "failed insert must roll back");
 }
 
+/// A non-unique Postgres refusal on the correct path must keep the server's own
+/// words, not the bare `db error`. `map_pg_item_insert` is the mapping the
+/// correction insert uses; this pins its non-unique branch against a real server
+/// refusal. A statement against a missing table gives one without touching a
+/// row, so it cannot disturb another test on the shared database.
+#[test]
+fn pg_correct_insert_error_keeps_the_servers_reason() {
+    let _guard = lock_pg_test();
+    let url = postgres_url_from_env();
+    let mut client = match crate::pg_tls::connect(&url) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!(
+                "{}",
+                crate::pg_skip::pg_skip_note("correct insert error reason", &error)
+            );
+            return;
+        }
+    };
+    let driver_error = client
+        .execute("SELECT 1 FROM a_table_that_does_not_exist", &[])
+        .expect_err("a missing table must be refused");
+    let mapped = crate::postgres_memory::map_pg_item_insert(Err(driver_error))
+        .expect_err("the mapping returns an error");
+    assert_eq!(
+        mapped.code,
+        clio_types::ErrorCode::Internal,
+        "{}",
+        mapped.message
+    );
+    assert!(
+        mapped.message.contains("a_table_that_does_not_exist"),
+        "the server names the object it refused: {}",
+        mapped.message
+    );
+    assert!(
+        !mapped.message.ends_with("db error"),
+        "the placeholder is the whole message again: {}",
+        mapped.message
+    );
+}
+
 #[test]
 fn t18_06_pg_discard_telemetry_same_transaction() {
     let _guard = lock_pg_test();

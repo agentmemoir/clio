@@ -194,7 +194,7 @@ fn intent_gate_matches_the_registered_usage_and_parser() {
     let spec = record("intent gate");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio intent gate TURN_TEXT [--explain] [--output json|text]"
+        "usage: clio intent gate TURN_TEXT [--explain] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -222,7 +222,7 @@ fn compose_context_matches_the_registered_usage_and_parser() {
     let spec = record("compose-context");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio compose-context [QUERY] --budget-tokens N [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--recall-scope full|consolidated_only] [--expand-graph] [--prefer-consolidated] [--explain] [--output json|text]"
+        "usage: clio compose-context [QUERY] --budget-tokens N [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--recall-scope full|consolidated_only] [--expand-graph] [--prefer-consolidated] [--explain] [--bank BANK] [--output json|text]"
     );
     assert!(
         !spec.full_usage().contains("[--query Q]"),
@@ -277,7 +277,7 @@ fn audit_trail_matches_the_registered_usage_and_parser() {
     let spec = record("audit trail");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio audit trail ITEM_ID [--explain] [--output json|text]"
+        "usage: clio audit trail ITEM_ID [--explain] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),

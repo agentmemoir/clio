@@ -103,11 +103,11 @@ fn persona_get_matches_the_registered_usage_and_parser() {
     let spec = record("persona get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio persona get [--budget-tokens N] [--explain] [--output json|text]"
+        "usage: clio persona get [--budget-tokens N] [--explain] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio persona get [--budget-tokens N] [--explain] [--output json|text]"
+        "clio persona get [--budget-tokens N] [--explain] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -129,7 +129,7 @@ fn persona_stable_matches_the_registered_usage_and_parser() {
     let spec = record("persona stable");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio persona stable KEY VALUE [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]"
+        "usage: clio persona stable KEY VALUE [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -166,12 +166,12 @@ fn persona_observe_matches_the_registered_usage_and_parser() {
     let spec = record("persona observe");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]"
+        "usage: clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.usage_override,
         Some(
-            "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]"
+            "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--bank BANK] [--output json|text]"
         ),
         "the override is what keeps --context out of the printed line"
     );
@@ -211,7 +211,7 @@ fn maintenance_status_matches_the_registered_usage_and_parser() {
     let spec = record("maintenance status");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio maintenance status [--item-id ID] [--explain] [--output json|text]"
+        "usage: clio maintenance status [--item-id ID] [--explain] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),

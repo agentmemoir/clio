@@ -104,7 +104,7 @@ fn canonical_put_matches_the_registered_usage_and_parser() {
     let spec = record("canonical put");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio canonical put KEY VALUE --category C --epistemic-kind K [--source-type T] [--confidence N] [--source-text TEXT] [--evidence-ref E] [--context C] [--dry-run] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
+        "usage: clio canonical put KEY VALUE --category C --epistemic-kind K [--source-type T] [--confidence N] [--source-text TEXT] [--evidence-ref E] [--context C] [--dry-run] [--bank BANK] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact"
     );
     assert_eq!(
         spec.required_flags(),
@@ -151,7 +151,7 @@ fn canonical_get_matches_the_registered_usage_and_parser() {
     let spec = record("canonical get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio canonical get KEY [--as-of TS] [--output json|text]"
+        "usage: clio canonical get KEY [--as-of TS] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),

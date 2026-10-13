@@ -63,12 +63,10 @@ const GIST: Flag = Flag {
 };
 
 /// The flags `get` and `show` document.
-const GET_DOCUMENTED: &[Flag] = &[SNAPSHOT, GIST, GLOBAL_OUTPUT];
+const GET_DOCUMENTED: &[Flag] = &[SNAPSHOT, GIST, GLOBAL_BANK, GLOBAL_OUTPUT];
 
-/// The global flags `get`, `show`, and `inspect` accept without printing.
-const READS_EXCEPT_BANK_UNPRINTED: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
-
-/// The global flags `recall` and `stats` accept without printing.
+/// The global flags the core reads accept without printing: `--bank` is
+/// documented on each usage line, so it is left out here.
 const READS_EXCEPT_BANK_PRINTED: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// `clio recall`: one query, score floors, and temporal anchors over `retrieve`.
@@ -166,7 +164,7 @@ pub(crate) const GET: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[ID],
     documented: GET_DOCUMENTED,
-    accepted_extra: READS_EXCEPT_BANK_UNPRINTED,
+    accepted_extra: READS_EXCEPT_BANK_PRINTED,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -190,7 +188,7 @@ pub(crate) const SHOW: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[ID],
     documented: GET_DOCUMENTED,
-    accepted_extra: READS_EXCEPT_BANK_UNPRINTED,
+    accepted_extra: READS_EXCEPT_BANK_PRINTED,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -265,9 +263,10 @@ pub(crate) const INSPECT: CommandSpec = CommandSpec {
             "include-discarded",
             "Includes discarded memories in the listing; `cli_read_core::inspect_call` adds `include_discarded` as true to the filter.",
         ),
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: READS_EXCEPT_BANK_UNPRINTED,
+    accepted_extra: READS_EXCEPT_BANK_PRINTED,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
