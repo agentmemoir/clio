@@ -168,12 +168,13 @@ fn the_rendered_help_shows_the_pairing_line() {
 /// `install`, `uninstall`, the two `compose` leaves, and the `mcp` and `ops`
 /// subcommands) through the record-derived names its real parser gates on
 /// plus the globals that rule admits, the record-backed leaf surfaces
-/// (`backup`, `sync`, `auth token`, `config`, `ranking`, `retention`) through
-/// their record's `parser_spec`, and `help` and `setup` through their record's
-/// documented entries — and no top-level verb is decided through an authored
-/// row. A command that loses its record or its parser moves the first count; a
-/// verb that gains an authored row without a record moves the second. Either
-/// change fails here instead of hiding inside a total that still adds up.
+/// (`backup`, `sync`, `auth token`, `config`, `ranking`, `retention`,
+/// `compliance`) through their record's `parser_spec`, and `help` and `setup`
+/// through their record's documented entries — and no top-level verb is
+/// decided through an authored row. A command that loses its record or its
+/// parser moves the first count; a verb that gains an authored row without a
+/// record moves the second. Either change fails here instead of hiding inside
+/// a total that still adds up.
 ///
 /// The undecidable list must be empty and is printed even so, separately from
 /// the literal-read scan's bounded flag-read exemption list: the transports'
@@ -290,7 +291,7 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
          derivation their dispatcher really parses with: {remaining:?}"
     );
     assert_eq!(
-        registered_checked, 94,
+        registered_checked, 95,
         "the registered commands this check decides changed, so it is covering less or more \
          than it was: undecidable were {undecidable:?}"
     );

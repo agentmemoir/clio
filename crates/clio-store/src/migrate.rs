@@ -12,6 +12,8 @@ pub const SQL_CORE: &str = include_str!("../../../sql/001_core.sql");
 pub const SQL_VECTORS_POSTGRES: &str = include_str!("../../../sql/002_vectors_postgres.sql");
 /// SQLite + sqlite-vec dialect.
 pub const SQL_VECTORS_SQLITE: &str = include_str!("../../../sql/002_vectors_sqlite.sql");
+/// Local-compliance ownership slots (portable).
+pub const SQL_COMPLIANCE_SLOTS: &str = include_str!("../../../sql/003_local_compliance_slots.sql");
 
 /// Map a driver error into `AmError`.
 ///
@@ -100,6 +102,10 @@ pub fn now_iso8601() -> String {
 #[cfg(test)]
 #[path = "migrate_reason_tests.rs"]
 mod reason_tests;
+
+#[cfg(test)]
+#[path = "migrate_compliance_slots_tests.rs"]
+mod migrate_compliance_slots_tests;
 
 #[cfg(test)]
 mod tests {

@@ -15,6 +15,8 @@
 //!
 //! ## Does not own
 //! - The per-record bytes and parser sets (the tranche test modules)
+//! - The tranche order and the reserved-surfaces group
+//!   (`cli_command_registry_tranche_tests`)
 //! - The metadata, completeness, and example tests (`cli_command_registry_examples_tests`)
 //! - The renderer's shapes over pure records (`cli_command_spec_tests`)
 //!
@@ -67,102 +69,6 @@ fn all_lists_the_core_reads_first_and_every_name_exactly_once() {
     );
     let unique: BTreeSet<&str> = listed.iter().copied().collect();
     assert_eq!(unique.len(), listed.len(), "no command is registered twice");
-}
-
-/// The registry registers the core reads first, then the group tranches, then
-/// the two write tranches, then the reserved surfaces with their compose tail,
-/// then the leaf surfaces' own four record tranches: backup, sync, auth/config,
-/// and ranking/retention, in that order, thirteen tranches in all.
-#[test]
-fn the_registry_registers_the_core_reads_then_the_group_and_write_tranches() {
-    assert_eq!(
-        super::TRANCHES[0],
-        super::core_reads::CORE_READS,
-        "the core reads are the first tranche"
-    );
-    assert_eq!(
-        super::TRANCHES[1],
-        super::task_history::TASK_HISTORY,
-        "the task/history tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[2],
-        super::graph_records::GRAPH_RECORDS,
-        "the graph/records tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[3],
-        super::persona_local::PERSONA_LOCAL,
-        "the persona/local tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[4],
-        super::shared_workspace::SHARED_WORKSPACE,
-        "the shared/workspace tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[5],
-        super::core_writes::CORE_WRITES,
-        "the memory-write tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[6],
-        super::write_operations::WRITE_OPERATIONS,
-        "the operation-write tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[7],
-        super::surface::SURFACE,
-        "the reserved surfaces' tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[8],
-        super::COMPOSE_LEAVES,
-        "the compose records close the reserved surfaces' group"
-    );
-    assert_eq!(
-        super::TRANCHES[9],
-        super::backup_leaves::BACKUP_LEAVES,
-        "the backup tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[10],
-        super::sync_leaves::SYNC_LEAVES,
-        "the sync tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[11],
-        super::auth_config::AUTH_CONFIG_LEAVES,
-        "the auth/config tranche follows"
-    );
-    assert_eq!(
-        super::TRANCHES[12],
-        super::ranking_retention::RANKING_RETENTION_LEAVES,
-        "the ranking/retention tranche closes the registry"
-    );
-    assert_eq!(
-        super::TRANCHES.len(),
-        13,
-        "thirteen tranches are registered"
-    );
-    // The surface tranche and its compose tail together cover all 17 reserved
-    // leaves, once each: the 15 surface records and `compose up`/`down`. The
-    // four record tranches that follow are the leaf surfaces' own.
-    let reserved: Vec<&str> = super::TRANCHES[7..9]
-        .iter()
-        .flat_map(|tranche| tranche.iter().map(|spec| spec.name))
-        .collect();
-    assert_eq!(
-        reserved.len(),
-        17,
-        "the reserved surfaces' group covers all 17 leaves"
-    );
-    let mut unique = reserved.clone();
-    unique.sort_unstable();
-    unique.dedup();
-    assert_eq!(unique.len(), 17, "no reserved leaf is registered twice");
-    let compose: Vec<&str> = super::COMPOSE_LEAVES.iter().map(|spec| spec.name).collect();
-    assert_eq!(compose, ["compose up", "compose down"]);
 }
 
 /// `names` answers every registered record: it spans all tranches, and

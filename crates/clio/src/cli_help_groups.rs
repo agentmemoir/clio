@@ -36,10 +36,11 @@
 use std::sync::LazyLock;
 
 /// The group prefixes the reserved surfaces resolve through their own
-/// dispatch: `clio mcp`, `clio ops`, `clio compose`, and `clio retention`
-/// answer their subcommands from their surface modules, so they are not
-/// shared groups. Their subcommand labels still derive from the records.
-const SURFACE_OWNED_GROUPS: &[&str] = &["mcp", "ops", "compose", "retention"];
+/// dispatch: `clio mcp`, `clio ops`, `clio compose`, `clio retention`, and
+/// `clio compliance` answer their subcommands from their surface modules, so
+/// they are not shared groups. Their subcommand labels still derive from the
+/// records.
+const SURFACE_OWNED_GROUPS: &[&str] = &["mcp", "ops", "compose", "retention", "compliance"];
 
 /// One derived group: its prefix, its subcommand labels, and what resolves it.
 struct Group {
@@ -173,6 +174,7 @@ static KNOWN_VERB_ORDER: &[&str] = &[
     "mcp",
     "ops",
     "retention",
+    "compliance",
     "compose",
     "setup",
     "status",

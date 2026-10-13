@@ -35,19 +35,23 @@ use crate::pg_scoped_schema::ScopedSchema;
 /// Parsed from the DDL text itself, so the expectation moves with the schema
 /// instead of rotting into a second hardcoded list.
 fn core_table_names() -> Vec<String> {
-    let mut names: Vec<String> = crate::migrate::SQL_CORE
-        .lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("CREATE TABLE IF NOT EXISTS ")
-                .map(|rest| {
-                    rest.split_whitespace()
-                        .next()
-                        .unwrap_or_default()
-                        .to_owned()
-                })
-        })
-        .collect();
+    let mut names: Vec<String> = [
+        crate::migrate::SQL_CORE,
+        crate::migrate::SQL_COMPLIANCE_SLOTS,
+    ]
+    .iter()
+    .flat_map(|sql| sql.lines())
+    .filter_map(|line| {
+        line.trim()
+            .strip_prefix("CREATE TABLE IF NOT EXISTS ")
+            .map(|rest| {
+                rest.split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+    })
+    .collect();
     names.sort();
     names
 }

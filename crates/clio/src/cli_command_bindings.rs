@@ -128,6 +128,7 @@ pub(crate) static CATALOG_ORDER: &[&str] = &[
     "retention schema",
     "retention get",
     "retention set",
+    "compliance inventory",
     "recall",
     "get",
     "show",

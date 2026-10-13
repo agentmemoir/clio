@@ -81,8 +81,8 @@ fn the_text_plan_and_report_are_pinned_byte_for_byte() {
         concat!(
             "restore plan: snapshot clio-20260927T000000Z-golden01 (created 2026-09-27T00:00:00Z)\n",
             "  target <scratch>/clio.db (sqlite, clio.db)\n",
-            "  current store: 3 items, 0 triples, 42 tables, banks: demo\n",
-            "  incoming archive: 3 items, 0 triples, 42 tables, banks: demo\n",
+            "  current store: 3 items, 0 triples, 50 tables, banks: demo\n",
+            "  incoming archive: 3 items, 0 triples, 50 tables, banks: demo\n",
             "  schema: archive 1 vs build 1 - none\n",
             "  the store is replaced, not merged\n",
             "  the key store at <scratch>/clio.db.kms.json is replaced too\n",
@@ -95,8 +95,8 @@ fn the_text_plan_and_report_are_pinned_byte_for_byte() {
         concat!(
             "restore clio-20260927T000000Z-golden01 over <scratch>/clio.db (sqlite, clio.db)\n",
             "  schema: archive 1 vs build 1 - none\n",
-            "  counts before: 3 items, 0 triples, 42 tables, banks: demo\n",
-            "  counts after: 3 items, 0 triples, 42 tables, banks: demo\n",
+            "  counts before: 3 items, 0 triples, 50 tables, banks: demo\n",
+            "  counts after: 3 items, 0 triples, 50 tables, banks: demo\n",
             "  the store is replaced, not merged\n",
             "  key store: <scratch>/clio.db.kms.json was replaced\n",
             "  pre-restore snapshot: skipped (--no-pre-backup was given)\n",
@@ -127,8 +127,8 @@ fn the_json_payload_is_pinned_field_for_field() {
                 "reason": "--no-pre-backup was given",
             },
             "counts": {
-                "before": {"items": 3, "triples": 0, "tables": 42, "banks": ["demo"]},
-                "after": {"items": 3, "triples": 0, "tables": 42, "banks": ["demo"]},
+                "before": {"items": 3, "triples": 0, "tables": 50, "banks": ["demo"]},
+                "after": {"items": 3, "triples": 0, "tables": 50, "banks": ["demo"]},
                 "incoming": null,
             },
             "schema": {"archive": "1", "build": clio_store::SCHEMA_VERSION, "action": "none"},
@@ -176,11 +176,11 @@ fn a_one_item_store_prints_singular_counts() {
     let out = out.replace(&token, "<scratch>");
     let err = err.replace(&token, "<scratch>");
     assert!(
-        err.contains("current store: 1 item, 0 triples, 42 tables, banks: demo"),
+        err.contains("current store: 1 item, 0 triples, 50 tables, banks: demo"),
         "the plan's counts line: {err}"
     );
     assert!(
-        out.contains("counts before: 1 item, 0 triples, 42 tables, banks: demo"),
+        out.contains("counts before: 1 item, 0 triples, 50 tables, banks: demo"),
         "the report's counts line: {out}"
     );
 }
