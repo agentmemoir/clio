@@ -42,7 +42,7 @@ fn hand_pushed(addr: &str, cipher: SyncCipher, bank: &str, fixture: &clio_types:
     let plain = serde_json::to_value(fixture).expect("serialize the item fixture");
     let mutation = SyncMutation {
         sync_mutation_id: sha256_hex(
-            "am-sync-mut".as_bytes(),
+            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
             &format!("{}|{}|{OP_UPSERT}", fixture.id, fixture.tx_from),
         ),
         bank: bank.to_owned(),
@@ -53,7 +53,7 @@ fn hand_pushed(addr: &str, cipher: SyncCipher, bank: &str, fixture: &clio_types:
         device_id: "dev-hand".into(),
         content: SyncContent::Cipher(cipher),
         content_hash: sha256_hex(
-            "am-sync-hash".as_bytes(),
+            crate::keyed_roles::PLAINTEXT_DIGEST_SALT,
             &serde_json::to_string(&plain).expect("plain text"),
         ),
         admission_receipt: None,
@@ -80,8 +80,8 @@ fn seal_stamps_the_newest_key_and_both_list_orders_open() {
     let a: Store = sqlite();
     let b: Store = sqlite();
     let c: Store = sqlite();
-    let k1 = SyncCipherKey::from_secret("rotation-key-one");
-    let k2 = SyncCipherKey::from_secret("rotation-key-two");
+    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-one"));
+    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-two"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![k2.clone()]);
     a.create_memory_item(
         &item("br", "i-1", "s1", "2026-01-01T00:00:00Z", "rotation secret"),
@@ -120,8 +120,8 @@ fn content_sealed_under_a_superseded_key_stays_readable() {
     let addr = server.addr().to_owned();
     let a: Store = sqlite();
     let b: Store = sqlite();
-    let k1 = SyncCipherKey::from_secret("rotation-key-one");
-    let k2 = SyncCipherKey::from_secret("rotation-key-two");
+    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-one"));
+    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-two"));
     // The writer sealed under key one before the rotation happened.
     let cfg_a = cfg("dev-a", &a, &addr, vec![k1.clone()]);
     a.create_memory_item(
@@ -148,8 +148,8 @@ fn a_key_id_less_row_is_refused_and_the_cursor_freezes() {
     let (server, srv, _kms) = serve(&["bt"]);
     let addr = server.addr().to_owned();
     let b: Store = sqlite();
-    let k1 = SyncCipherKey::from_secret("rotation-key-one");
-    let k2 = SyncCipherKey::from_secret("rotation-key-two");
+    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-one"));
+    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-two"));
     // A row written before identifiers existed: valid ciphertext under key
     // one, no identifier on the wire.
     let fixture = item(
@@ -225,9 +225,11 @@ fn a_row_sealed_under_an_absent_key_is_refused_and_the_cursor_freezes() {
     let addr = server.addr().to_owned();
     let a: Store = sqlite();
     let b: Store = sqlite();
-    let kx = SyncCipherKey::from_secret("a-key-this-node-never-held");
-    let k1 = SyncCipherKey::from_secret("rotation-key-one");
-    let k2 = SyncCipherKey::from_secret("rotation-key-two");
+    let kx = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "a-key-this-node-never-held",
+    ));
+    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-one"));
+    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-two"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![kx.clone()]);
     a.create_memory_item(
         &item(
@@ -302,8 +304,8 @@ fn a_row_sealed_by_a_held_key_that_no_longer_opens_is_refused_and_the_cursor_fre
     let (server, _srv, _kms) = serve(&["bw"]);
     let addr = server.addr().to_owned();
     let b: Store = sqlite();
-    let k1 = SyncCipherKey::from_secret("rotation-key-one");
-    let k2 = SyncCipherKey::from_secret("rotation-key-two");
+    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-one"));
+    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-two"));
     let fixture = item("bw", "i-bad", "s1", "2026-01-01T00:00:00Z", "tampered");
     // Stamped with an identifier the reader holds, but the ciphertext bytes
     // are corrupted: the identifier matches, the open does not.
@@ -354,8 +356,8 @@ fn a_wider_key_list_opens_every_writer() {
     let addr = server.addr().to_owned();
     let a: Store = sqlite();
     let b: Store = sqlite();
-    let k1 = SyncCipherKey::from_secret("rotation-key-one");
-    let k2 = SyncCipherKey::from_secret("rotation-key-two");
+    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-one"));
+    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("rotation-key-two"));
     // Two writers on two generations; the reader holds both and reads both.
     let cfg_a1 = cfg("dev-a1", &a, &addr, vec![k1.clone()]);
     a.create_memory_item(

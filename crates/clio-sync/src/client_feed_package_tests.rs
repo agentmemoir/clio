@@ -51,8 +51,8 @@ fn an_empty_list_leaves_content_plain() {
 #[test]
 fn content_seals_with_the_first_entry_of_the_list() {
     let store = sqlite();
-    let newest = SyncCipherKey::from_secret("feed-key-newest");
-    let older = SyncCipherKey::from_secret("feed-key-older");
+    let newest = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("feed-key-newest"));
+    let older = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("feed-key-older"));
     let cfg = cfg(
         "feed-sealed",
         &store,

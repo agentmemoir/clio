@@ -49,7 +49,7 @@ fn opened_document(cfg: &crate::client::SyncClientConfig, content: &SyncContent)
 /// wire field is absent.
 #[test]
 fn a_sealed_item_carries_its_receipt_inside_the_document() {
-    let cfg = sealed_cfg("pkg-receipt-item");
+    let cfg = sealed_cfg(&crate::credential_fixtures::secret("pkg-receipt-item"));
     let mutation = item_mutation(&cfg, &item("itm-1-2-3"), "upsert").expect("item");
     assert!(
         mutation.admission_receipt.is_none(),
@@ -91,7 +91,7 @@ fn plaintext_mode_keeps_the_receipt_on_the_wire() {
 /// Every score-bearing kind seals its receipt and leaves the wire field absent.
 #[test]
 fn a_sealed_task_failure_and_persona_each_seal_their_receipt() {
-    let cfg = sealed_cfg("pkg-receipt-kinds");
+    let cfg = sealed_cfg(&crate::credential_fixtures::secret("pkg-receipt-kinds"));
     let task = task_mutation(
         &cfg,
         BANK,
@@ -138,7 +138,7 @@ fn a_sealed_task_failure_and_persona_each_seal_their_receipt() {
 /// wire and no receipt key in its sealed document.
 #[test]
 fn a_sealed_edge_carries_no_receipt_anywhere() {
-    let cfg = sealed_cfg("pkg-receipt-edge");
+    let cfg = sealed_cfg(&crate::credential_fixtures::secret("pkg-receipt-edge"));
     let edge_id = clio_store::explicit_id(BANK, "i-1", "i-2", "rel");
     let mutation = assoc_mutation(&cfg, BANK, &edge(&edge_id, "rel")).expect("edge");
     assert!(mutation.admission_receipt.is_none());

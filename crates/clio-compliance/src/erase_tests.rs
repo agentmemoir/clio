@@ -98,6 +98,8 @@ fn args<'a>(
     request: &'a str,
     maint: Option<&'a Arc<MemTreeMaint>>,
 ) -> EraseArgs<'a> {
+    // A fresh salt per process: no test asserts the tombstone hash value.
+    static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);
     EraseArgs {
         store: &f.store,
         maint,
@@ -107,7 +109,7 @@ fn args<'a>(
         request_id: request,
         reason_code: None,
         confirm,
-        salt: b"deploy-salt",
+        salt: &SALT[..],
         timestamp: "2026-09-17T11:00:00Z",
         sink,
     }
@@ -313,6 +315,8 @@ fn partial_shred_reports_processing_and_plain_error_propagates() {
         destroy: true,
         destroyed: Mutex::new(false),
     };
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     let e = EraseArgs {
         store: &destroyed,
         maint: None,
@@ -322,7 +326,7 @@ fn partial_shred_reports_processing_and_plain_error_propagates() {
         request_id: "req-partial",
         reason_code: Some("CUSTOM_REASON"),
         confirm: true,
-        salt: b"salt",
+        salt: &salt,
         timestamp: "2026-09-17T11:00:00Z",
         sink: &sink,
     };
@@ -345,7 +349,7 @@ fn partial_shred_reports_processing_and_plain_error_propagates() {
         request_id: "req-fail",
         reason_code: None,
         confirm: true,
-        salt: b"salt",
+        salt: &salt,
         timestamp: "2026-09-17T11:00:00Z",
         sink: &sink,
     };
@@ -425,6 +429,8 @@ fn a_partial_erasure_event_also_names_the_credential() {
         destroy: true,
         destroyed: Mutex::new(false),
     };
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     let out = erase_request(&EraseArgs {
         store: &destroyed,
         maint: None,
@@ -434,7 +440,7 @@ fn a_partial_erasure_event_also_names_the_credential() {
         request_id: "req-partial",
         reason_code: None,
         confirm: true,
-        salt: b"salt",
+        salt: &salt,
         timestamp: "2026-09-17T11:00:00Z",
         sink: &sink,
     })

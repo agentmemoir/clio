@@ -69,7 +69,7 @@ pub(crate) fn item_value(bank: &str, id: &str, subject: &str, stamp: &str, gist:
 
 pub(crate) fn hash_of(content: &Value) -> String {
     let text = serde_json::to_string(content).unwrap_or_default();
-    clio_store::sha256_hex("am-sync-hash".as_bytes(), &text)
+    clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, &text)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -40,7 +40,7 @@ use crate::client_feed_package_fixtures::{
 /// reads is not any of the caller-chosen strings.
 #[test]
 fn each_handled_kind_puts_a_handle_on_the_wire() {
-    let c = sealed_cfg("pkg-handle-key");
+    let c = sealed_cfg(&crate::credential_fixtures::secret("pkg-handle-key"));
     let persona =
         persona_stable_mutation(&c, BANK, STAMP, &stable_entry(ATTR_NAME)).expect("persona stable");
     assert_ne!(persona.entity_id, ATTR_NAME, "the attr key is hidden");
@@ -87,7 +87,7 @@ fn each_handled_kind_puts_a_handle_on_the_wire() {
 /// nothing from a value it could not have guessed a use for.
 #[test]
 fn machine_generated_identifiers_are_left_alone() {
-    let c = sealed_cfg("pkg-machine-key");
+    let c = sealed_cfg(&crate::credential_fixtures::secret("pkg-machine-key"));
     let item_m = item_mutation(
         &c,
         &crate::client_feed_package_fixtures::item("itm-1-2-3"),
@@ -141,7 +141,7 @@ fn plaintext_mode_keeps_the_real_identifier() {
 /// same handle, which is what makes idempotency work across peers.
 #[test]
 fn handles_differ_along_the_identifier_bank_and_kind_axes() {
-    let c = sealed_cfg("pkg-axes-key");
+    let c = sealed_cfg(&crate::credential_fixtures::secret("pkg-axes-key"));
     let first = task_mutation(
         &c,
         BANK,
@@ -197,7 +197,7 @@ fn handles_differ_along_the_identifier_bank_and_kind_axes() {
 /// and two distinct handles, so the records cannot merge.
 #[test]
 fn two_relationship_labels_on_one_pair_do_not_merge() {
-    let c = sealed_cfg("pkg-rel-key");
+    let c = sealed_cfg(&crate::credential_fixtures::secret("pkg-rel-key"));
     let id_a = clio_store::explicit_id(BANK, "i-1", "i-2", "rel_a");
     let id_b = clio_store::explicit_id(BANK, "i-1", "i-2", "rel_b");
     assert_ne!(id_a, id_b, "two labels give two edge ids");
@@ -248,8 +248,9 @@ fn plaintext_mode_keeps_the_plain_mutation_id() {
 /// against the stored row.
 #[test]
 fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
+    let mutid_key = crate::credential_fixtures::secret("pkg-mutid-blind");
     let sealed = task_mutation(
-        &sealed_cfg("pkg-mutid-blind"),
+        &sealed_cfg(&mutid_key),
         BANK,
         STAMP,
         &task_record(TASK_ID, "task-row-1"),
@@ -257,7 +258,7 @@ fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
     )
     .expect("sealed task");
     let guess = clio_store::sha256_hex(
-        b"am-sync-mut",
+        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
         &format!("{TASK_ID}|{}|upsert", task_record(TASK_ID, "task-row-1").id),
     );
     assert_ne!(
@@ -265,7 +266,7 @@ fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
         "the stored key is not the published unkeyed hash of the identifier"
     );
     let persona = persona_stable_mutation(
-        &sealed_cfg("pkg-mutid-blind"),
+        &sealed_cfg(&mutid_key),
         BANK,
         STAMP,
         &stable_entry(ATTR_NAME),
@@ -273,7 +274,10 @@ fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
     .expect("sealed persona");
     assert_ne!(
         persona.sync_mutation_id,
-        clio_store::sha256_hex(b"am-sync-mut", &format!("{ATTR_NAME}|{STAMP}|upsert")),
+        clio_store::sha256_hex(
+            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+            &format!("{ATTR_NAME}|{STAMP}|upsert"),
+        ),
         "nor is the shared helper's key the hash of the attribute name"
     );
 }
@@ -284,9 +288,9 @@ fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
 /// nothing. That is what keeps a handle collision from becoming a merged record.
 #[test]
 fn the_keyed_mutation_id_still_follows_the_real_identifier() {
-    let key = "pkg-mutid-follow";
+    let key = crate::credential_fixtures::secret("pkg-mutid-follow");
     let first = task_mutation(
-        &sealed_cfg(key),
+        &sealed_cfg(&key),
         BANK,
         STAMP,
         &task_record(TASK_ID, "task-row-1"),
@@ -294,7 +298,7 @@ fn the_keyed_mutation_id_still_follows_the_real_identifier() {
     )
     .expect("first");
     let again = task_mutation(
-        &sealed_cfg(key),
+        &sealed_cfg(&key),
         BANK,
         STAMP,
         &task_record(TASK_ID, "task-row-1"),
@@ -302,7 +306,7 @@ fn the_keyed_mutation_id_still_follows_the_real_identifier() {
     )
     .expect("again");
     let other_id = task_mutation(
-        &sealed_cfg(key),
+        &sealed_cfg(&key),
         BANK,
         STAMP,
         &task_record("synthetic-task-id-43", "task-row-1"),
@@ -310,7 +314,7 @@ fn the_keyed_mutation_id_still_follows_the_real_identifier() {
     )
     .expect("other id");
     let stranger = task_mutation(
-        &sealed_cfg("pkg-mutid-other-key"),
+        &sealed_cfg(&crate::credential_fixtures::secret("pkg-mutid-other-key")),
         BANK,
         STAMP,
         &task_record(TASK_ID, "task-row-1"),
@@ -340,7 +344,7 @@ fn the_keyed_mutation_id_still_follows_the_real_identifier() {
 #[test]
 fn a_handle_has_the_fixed_width_and_format_the_wire_expects() {
     let m = task_mutation(
-        &sealed_cfg("pkg-format-key"),
+        &sealed_cfg(&crate::credential_fixtures::secret("pkg-format-key")),
         BANK,
         STAMP,
         &task_record(TASK_ID, "task-row-1"),
@@ -362,8 +366,9 @@ fn a_handle_has_the_fixed_width_and_format_the_wire_expects() {
 #[test]
 fn two_peers_sharing_a_key_derive_the_same_handle() {
     let record = task_record(TASK_ID, "task-row-1");
+    let peer_key = crate::credential_fixtures::secret("pkg-peer-key");
     let mine = task_mutation(
-        &sealed_cfg("pkg-peer-key"),
+        &sealed_cfg(&peer_key),
         BANK,
         STAMP,
         &record,
@@ -371,7 +376,7 @@ fn two_peers_sharing_a_key_derive_the_same_handle() {
     )
     .expect("mine");
     let theirs = task_mutation(
-        &sealed_cfg("pkg-peer-key"),
+        &sealed_cfg(&peer_key),
         BANK,
         STAMP,
         &record,
@@ -379,7 +384,7 @@ fn two_peers_sharing_a_key_derive_the_same_handle() {
     )
     .expect("theirs");
     let stranger = task_mutation(
-        &sealed_cfg("pkg-stranger-key"),
+        &sealed_cfg(&crate::credential_fixtures::secret("pkg-stranger-key")),
         BANK,
         STAMP,
         &record,

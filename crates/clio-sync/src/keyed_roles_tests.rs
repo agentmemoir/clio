@@ -43,9 +43,11 @@ use crate::protocol::{
 /// key derive the same value and a peer that lacks it derive nothing.
 #[test]
 fn the_four_roles_derive_distinct_reproducible_subkeys() {
-    let key = SyncCipherKey::from_secret("roles-key");
-    let same_key = SyncCipherKey::from_secret("roles-key");
-    let other_key = SyncCipherKey::from_secret("roles-other-key");
+    let roles_secret = crate::credential_fixtures::secret("roles-key");
+    let key = SyncCipherKey::from_secret(&roles_secret);
+    let same_key = SyncCipherKey::from_secret(&roles_secret);
+    let other_key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("roles-other-key"));
     let subkeys = [
         (ROLE_SEAL, role_subkey(&key, ROLE_SEAL)),
         (ROLE_DIGEST, role_subkey(&key, ROLE_DIGEST)),
@@ -98,9 +100,11 @@ fn the_content_digest_without_a_cipher_is_the_plain_hash() {
 /// candidate plaintext and confirm it.
 #[test]
 fn the_content_digest_with_a_cipher_is_keyed_and_peer_stable() {
-    let key = SyncCipherKey::from_secret("digest-key");
-    let peer = SyncCipherKey::from_secret("digest-key");
-    let stranger = SyncCipherKey::from_secret("digest-other-key");
+    let digest_secret = crate::credential_fixtures::secret("digest-key");
+    let key = SyncCipherKey::from_secret(&digest_secret);
+    let peer = SyncCipherKey::from_secret(&digest_secret);
+    let stranger =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("digest-other-key"));
     let content = r#"{"gist":"candidate plaintext"}"#;
     let mine = content_digest(Some(&key), content);
     assert_eq!(mine, content_digest(Some(&peer), content), "peers agree");
@@ -112,7 +116,7 @@ fn the_content_digest_with_a_cipher_is_keyed_and_peer_stable() {
     assert_ne!(mine, content_digest(None, content), "keyed is not plain");
     assert_ne!(
         mine,
-        clio_store::sha256_hex(b"am-sync-hash", content),
+        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, content),
         "a candidate-plaintext dictionary must not confirm"
     );
 }
@@ -136,9 +140,11 @@ fn the_mutation_id_without_a_cipher_is_the_plain_hash() {
 /// against the stored key.
 #[test]
 fn the_mutation_id_with_a_cipher_is_keyed_and_peer_stable() {
-    let key = SyncCipherKey::from_secret("mutid-key");
-    let peer = SyncCipherKey::from_secret("mutid-key");
-    let stranger = SyncCipherKey::from_secret("mutid-other-key");
+    let mutid_secret = crate::credential_fixtures::secret("mutid-key");
+    let key = SyncCipherKey::from_secret(&mutid_secret);
+    let peer = SyncCipherKey::from_secret(&mutid_secret);
+    let stranger =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("mutid-other-key"));
     let mine = mutation_id(Some(&key), "task-42", "2026-01-01", "upsert");
     assert_eq!(
         mine,
@@ -152,7 +158,10 @@ fn the_mutation_id_with_a_cipher_is_keyed_and_peer_stable() {
     );
     assert_ne!(
         mine,
-        clio_store::sha256_hex(b"am-sync-mut", "task-42|2026-01-01|upsert"),
+        clio_store::sha256_hex(
+            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+            "task-42|2026-01-01|upsert",
+        ),
         "a guessed identifier must not confirm against the stored key"
     );
     assert_ne!(
@@ -171,7 +180,7 @@ fn the_mutation_id_with_a_cipher_is_keyed_and_peer_stable() {
 /// same value for the same (kind, bank, identifier) every time.
 #[test]
 fn a_handle_is_fixed_width_lowercase_hex_and_stable() {
-    let key = SyncCipherKey::from_secret("handle-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("handle-key"));
     let handle = identifier_handle(Some(&key), ENTITY_KIND_TASK, "b1", "task-42");
     assert_eq!(
         handle.len(),
@@ -196,7 +205,7 @@ fn a_handle_is_fixed_width_lowercase_hex_and_stable() {
 /// still get different handles, because a shared handle would merge them.
 #[test]
 fn handles_differ_along_each_of_the_three_axes() {
-    let key = SyncCipherKey::from_secret("collision-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("collision-key"));
     let base = identifier_handle(Some(&key), ENTITY_KIND_TASK, "b1", "task-42");
     assert_ne!(
         base,

@@ -52,7 +52,9 @@ fn a_sealed_persona_push_reaches_the_relay_with_no_attribute_name() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-persona-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-persona-key"),
+        )],
     );
     seed_persona(&a, "bp");
     push(&cfg_a, &["bp".to_owned()]).expect("push");
@@ -89,7 +91,9 @@ fn a_sealed_task_push_reaches_the_relay_with_no_task_id() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-task-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-task-key"),
+        )],
     );
     seed_task_and_failure(&a, "bp");
     push(&cfg_a, &["bp".to_owned()]).expect("push");
@@ -119,7 +123,9 @@ fn a_sealed_failure_push_reaches_the_relay_with_no_failure_or_task_id() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-failure-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-failure-key"),
+        )],
     );
     seed_task_and_failure(&a, "bp");
     push(&cfg_a, &["bp".to_owned()]).expect("push");
@@ -154,7 +160,9 @@ fn a_sealed_explicit_edge_push_reaches_the_relay_with_no_relationship_label() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-edge-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-edge-key"),
+        )],
     );
     seed_explicit_edge(&a, "bp", RELATIONSHIP);
     push(&cfg_a, &["bp".to_owned()]).expect("push");
@@ -196,7 +204,9 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-oracle-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-oracle-key"),
+        )],
     );
     seed_persona(&a, "bp");
     seed_explicit_edge(&a, "bp", RELATIONSHIP);
@@ -216,7 +226,7 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     for row in rows.iter().filter(|r| r.entity_kind == "persona") {
         for guess in [ATTR_NAME, PREF_NAME] {
             let oracle = clio_store::sha256_hex(
-                b"am-sync-mut",
+                crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
                 &format!("{guess}|{}|upsert", row.transaction_time),
             );
             assert_ne!(
@@ -231,7 +241,7 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     let edge = row_of("assoc_edge");
     let edge_id = clio_store::explicit_id("bp", "i-1", "i-2", RELATIONSHIP);
     let oracle = clio_store::sha256_hex(
-        b"am-sync-mut",
+        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
         &format!("{edge_id}|{}|assoc", edge.transaction_time),
     );
     assert_ne!(
@@ -244,7 +254,7 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     let persona = row_of("persona");
     assert_ne!(
         persona.content_hash,
-        clio_store::sha256_hex(b"am-sync-hash", ATTR_NAME),
+        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, ATTR_NAME),
         "and the stored digest is not the hash of a guessed value either"
     );
     server.stop();
@@ -295,7 +305,9 @@ fn a_sealed_belief_push_keeps_its_identifier() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("blind-belief-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("blind-belief-key"),
+        )],
     );
     a.create_belief(&belief("bel-machine-1", "bp"), "seed")
         .expect("belief");
@@ -324,7 +336,8 @@ fn an_encrypted_push_leaves_no_score_anywhere_on_the_relay() {
     let (server, srv, _kms) = serve(&["br"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let key = SyncCipherKey::from_secret("receipt-journal-key");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-journal-key"));
     let cfg_a = cfg("dev-a", &a, &addr, vec![key.clone()]);
     seed_task_and_failure(&a, "br");
     seed_explicit_edge(&a, "br", RELATIONSHIP);

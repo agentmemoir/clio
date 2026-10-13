@@ -59,7 +59,7 @@ fn cipher_m(mid: &str, kind: &str, entity: &str) -> SyncMutation {
             nonce_b64: "AA==".into(),
             ciphertext_b64: "AA==".into(),
         }),
-        content_hash: clio_store::sha256_hex("am-sync-hash".as_bytes(), "{}"),
+        content_hash: clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, "{}"),
         admission_receipt: None,
     }
 }
@@ -239,6 +239,8 @@ fn persona_preference_erased_bank_dead_letters() {
     // the bank-level tombstone (a bank with nothing purged stays writable).
     let seed = pref("brevity", 0.4, "2026-01-01");
     store.put_preference_state(&seed, "seed").expect("seed");
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     store
         .erase_subject(&SubjectEraseSpec {
             bank_id: "b-rec",
@@ -247,7 +249,7 @@ fn persona_preference_erased_bank_dead_letters() {
             legal_basis: "GDPR_ART_17",
             reason_code: "COMPLIANCE_CRYPTO_SHRED",
             deleted_at: "2026-01-02T00:00:00Z",
-            salt: b"salt",
+            salt: &salt,
         })
         .expect("erase");
     let m = mut_for(

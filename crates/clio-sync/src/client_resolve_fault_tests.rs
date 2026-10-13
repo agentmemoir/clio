@@ -56,7 +56,10 @@ fn hand_push(addr: &str, mutation: SyncMutation) {
 }
 
 fn mutation_id(kind_id: &str, stamp: &str, op: &str) -> String {
-    clio_store::sha256_hex(b"am-sync-mut", &format!("{kind_id}|{stamp}|{op}"))
+    clio_store::sha256_hex(
+        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+        &format!("{kind_id}|{stamp}|{op}"),
+    )
 }
 
 /// A sealed row for a subject that was shredded still dead-letters with the
@@ -67,7 +70,7 @@ fn a_sealed_row_for_a_shredded_subject_still_dead_letters() {
     let (server, _srv, _kms) = serve(&["bs"]);
     let addr = server.addr().to_owned();
     let b: TestStore = sqlite();
-    let key = SyncCipherKey::from_secret("shred-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("shred-key"));
     let cfg_b = cfg("dev-b", &b, &addr, vec![key.clone()]);
     b.upsert_subject_key_ref("subj-gone", "shredded", "shredded")
         .expect("shred marker");
@@ -94,7 +97,10 @@ fn a_sealed_row_for_a_shredded_subject_still_dead_letters() {
             transaction_time: fixture.tx_from.clone(),
             device_id: "dev-hand".into(),
             content: SyncContent::Cipher(sealed),
-            content_hash: clio_store::sha256_hex(b"am-sync-hash", "anything"),
+            content_hash: clio_store::sha256_hex(
+                crate::keyed_roles::PLAINTEXT_DIGEST_SALT,
+                "anything",
+            ),
             admission_receipt: None,
         },
     );
@@ -121,7 +127,7 @@ fn an_unknown_algorithm_on_an_encrypted_row_is_still_refused() {
     let (server, _srv, _kms) = serve(&["bs"]);
     let addr = server.addr().to_owned();
     let b: TestStore = sqlite();
-    let key = SyncCipherKey::from_secret("alg-key");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret("alg-key"));
     let cfg_b = cfg("dev-b", &b, &addr, vec![key.clone()]);
 
     let payload = json!({"task": {"task_id": TASK_ID, "id": "row-1"}});
@@ -143,7 +149,10 @@ fn an_unknown_algorithm_on_an_encrypted_row_is_still_refused() {
                 key_id: Some(key.key_id()),
                 ..sealed
             }),
-            content_hash: clio_store::sha256_hex(b"am-sync-hash", "anything"),
+            content_hash: clio_store::sha256_hex(
+                crate::keyed_roles::PLAINTEXT_DIGEST_SALT,
+                "anything",
+            ),
             admission_receipt: None,
         },
     );

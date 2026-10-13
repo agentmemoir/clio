@@ -72,13 +72,13 @@ const MUTATION_ID_LABEL: &[u8] = b"mutation-id";
 /// unkeyed hash over a published domain string. A relay holding the journal can
 /// confirm a guessed plaintext against it, which is exactly what the keyed form
 /// below removes and exactly why a deployment with no cipher keeps it.
-const PLAINTEXT_DIGEST_SALT: &[u8] = b"am-sync-hash";
+pub(crate) const PLAINTEXT_DIGEST_SALT: &[u8] = b"am-sync-hash";
 
 /// Plaintext-mode idempotency key, unchanged from the pre-keyed build, over the
 /// same published domain string and the same preimage. With no cipher there is
 /// no key to derive it under, and nothing to hide: the row already carries the
 /// real identifier in the clear.
-const PLAINTEXT_MUTATION_ID_SALT: &[u8] = b"am-sync-mut";
+pub(crate) const PLAINTEXT_MUTATION_ID_SALT: &[u8] = b"am-sync-mut";
 
 /// Bytes of handle kept per record. Half of the hash output, which is the
 /// floor the construction's own specification recommends, and the width this

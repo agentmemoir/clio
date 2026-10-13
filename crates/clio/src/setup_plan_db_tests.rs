@@ -240,12 +240,13 @@ fn a_typed_password_is_percent_encoded() {
 
 #[test]
 fn a_typed_advanced_value_is_percent_encoded() {
+    let password = format!("{:016x}", rand::random::<u64>());
     let address = typed_address(
         "h",
         "5432",
         "clio",
         "clio",
-        "pw",
+        &password,
         SslChoice::Prefer,
         None,
         &[Extra {
@@ -259,12 +260,13 @@ fn a_typed_advanced_value_is_percent_encoded() {
 
 #[test]
 fn an_empty_advanced_value_adds_nothing() {
+    let password = format!("{:016x}", rand::random::<u64>());
     let address = typed_address(
         "h",
         "5432",
         "clio",
         "clio",
-        "pw",
+        &password,
         SslChoice::Prefer,
         None,
         &[Extra {
@@ -278,12 +280,13 @@ fn an_empty_advanced_value_adds_nothing() {
 
 #[test]
 fn the_ssl_mode_is_the_first_query_parameter() {
+    let password = format!("{:016x}", rand::random::<u64>());
     let address = typed_address(
         "h",
         "5432",
         "clio",
         "clio",
-        "pw",
+        &password,
         SslChoice::Disable,
         None,
         &[],
@@ -294,12 +297,13 @@ fn the_ssl_mode_is_the_first_query_parameter() {
 
 #[test]
 fn a_typed_root_certificate_is_percent_encoded_into_the_address() {
+    let password = format!("{:016x}", rand::random::<u64>());
     let address = typed_address(
         "h",
         "5432",
         "clio",
         "clio",
-        "pw",
+        &password,
         SslChoice::VerifyFull,
         Some("/etc/my ca.pem"),
         &[],
@@ -313,12 +317,13 @@ fn a_typed_root_certificate_is_percent_encoded_into_the_address() {
 
 #[test]
 fn an_empty_root_certificate_adds_nothing() {
+    let password = format!("{:016x}", rand::random::<u64>());
     let address = typed_address(
         "h",
         "5432",
         "clio",
         "clio",
-        "pw",
+        &password,
         SslChoice::VerifyFull,
         Some("  "),
         &[],
@@ -332,12 +337,13 @@ fn a_root_certificate_is_not_added_for_a_mode_that_does_not_check_it() {
     // A root in an address whose mode never checks the certificate would be a
     // value that reaches the store and is never used. It is left out.
     for mode in [SslChoice::Disable, SslChoice::EncryptNoVerify] {
+        let password = format!("{:016x}", rand::random::<u64>());
         let address = typed_address(
             "h",
             "5432",
             "clio",
             "clio",
-            "pw",
+            &password,
             mode,
             Some("/etc/ca.pem"),
             &[],

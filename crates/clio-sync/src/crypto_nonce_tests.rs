@@ -52,7 +52,9 @@ const SEALS_PER_THREAD: usize = 30_000;
 /// sampling window.
 #[test]
 fn concurrent_seals_never_reuse_a_nonce() {
-    let key = SyncCipherKey::from_secret("nonce-uniqueness-fixture");
+    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
+        "nonce-uniqueness-fixture",
+    ));
     let payloads: [&[u8]; 2] = [b"payload-alpha-0123456789", b"payload-beta-0123456789"];
     let per_thread: Vec<Vec<[u8; 24]>> = std::thread::scope(|scope| {
         // Spawn all threads before joining any of them: the concurrency is the
@@ -117,7 +119,8 @@ fn concurrent_seals_never_reuse_a_nonce() {
 /// practice.
 #[test]
 fn sealed_nonce_is_24_raw_bytes_not_hex_text() {
-    let key = SyncCipherKey::from_secret("nonce-shape-fixture");
+    let key =
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("nonce-shape-fixture"));
     for _ in 0..16 {
         let sealed = key.seal(b"shape probe").expect("seal");
         let decoded = base64::engine::general_purpose::STANDARD

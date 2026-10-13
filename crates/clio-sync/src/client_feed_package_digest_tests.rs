@@ -78,7 +78,7 @@ fn plaintext_mode_keeps_the_plain_digest() {
 #[test]
 fn a_cipher_makes_the_digest_unconfirmable_by_a_guess() {
     let payload = task_mutation(
-        &sealed_cfg("pkg-digest-blind"),
+        &sealed_cfg(&crate::credential_fixtures::secret("pkg-digest-blind")),
         crate::client_feed_package_fixtures::BANK,
         STAMP,
         &task_record(TASK_ID, "task-row-1"),
@@ -89,7 +89,7 @@ fn a_cipher_makes_the_digest_unconfirmable_by_a_guess() {
         serde_json::to_string(&json!({"guess": "a candidate plaintext"})).expect("text");
     assert_ne!(
         payload.content_hash,
-        clio_store::sha256_hex(b"am-sync-hash", &candidate),
+        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, &candidate),
         "the stored digest is not the unkeyed hash of a candidate"
     );
     assert!(
@@ -103,7 +103,7 @@ fn a_cipher_makes_the_digest_unconfirmable_by_a_guess() {
 /// and the identifier string never enters it.
 #[test]
 fn the_digest_follows_the_content_not_the_identifier() {
-    let cfg = sealed_cfg("pkg-digest-content");
+    let cfg = sealed_cfg(&crate::credential_fixtures::secret("pkg-digest-content"));
     let base = digest_for(&cfg);
     assert_eq!(base, digest_for(&cfg), "the same content, the same digest");
     let other_record = task_mutation(
@@ -130,9 +130,12 @@ fn the_digest_follows_the_content_not_the_identifier() {
 /// sides; a node without the key derives something else.
 #[test]
 fn two_peers_sharing_a_key_derive_the_same_digest() {
-    let mine = digest_for(&sealed_cfg("pkg-digest-peer"));
-    let theirs = digest_for(&sealed_cfg("pkg-digest-peer"));
-    let stranger = digest_for(&sealed_cfg("pkg-digest-stranger"));
+    let peer_key = crate::credential_fixtures::secret("pkg-digest-peer");
+    let mine = digest_for(&sealed_cfg(&peer_key));
+    let theirs = digest_for(&sealed_cfg(&peer_key));
+    let stranger = digest_for(&sealed_cfg(&crate::credential_fixtures::secret(
+        "pkg-digest-stranger",
+    )));
     assert_eq!(mine, theirs, "peers sharing a key agree");
     assert_ne!(
         mine, stranger,
