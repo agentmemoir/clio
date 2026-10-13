@@ -227,11 +227,13 @@ pub(crate) fn render_text(report: &StatusReport) -> String {
             finding.severity, finding.code, finding.scope, finding.message
         );
     }
-    let _ = writeln!(
-        out,
-        "  verify:   deeper index-coverage and referential-integrity checks: `{}`",
-        report.verify_pointer
-    );
+    if report.ok {
+        let _ = writeln!(
+            out,
+            "  verify:   deeper index-coverage and referential-integrity checks: `{}`",
+            report.verify_pointer
+        );
+    }
     out
 }
 

@@ -113,13 +113,8 @@ const UPDATE_RULE: Flag = Flag::choice(
     &["discrete"],
 );
 
-/// The declared globals these commands accept without printing: every global
-/// but `--output`, which each usage line documents.
-const UNPRINTED_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
-
-/// The globals the bank-scoped writes accept without printing. `--bank` is
-/// documented, so a reader sees it in the usage line rather than only under
-/// `Global flags`.
+/// The globals the bank-scoped graph records accept without printing. `--bank`
+/// is documented on each usage line, so it is left out here.
 const UNPRINTED_GLOBALS_OUTSIDE_BANK: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// The `--epistemic-kind`/`--source-type` pairing `triple add` prints under
@@ -128,7 +123,7 @@ const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a
 
 /// `triple query`'s usage line: its three positionals are nested optionals, a
 /// shape the assembled form cannot print.
-const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--output json|text]";
+const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]";
 
 /// `clio triple query`: match subject/predicate/object patterns, over the
 /// `triple_query` tool.
@@ -153,9 +148,10 @@ pub(crate) const TRIPLE_QUERY: CommandSpec = CommandSpec {
             )
         },
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: UNPRINTED_GLOBALS,
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: Some(TRIPLE_QUERY_USAGE),
     usage_alternates: &[],

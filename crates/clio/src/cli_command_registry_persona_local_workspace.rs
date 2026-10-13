@@ -29,7 +29,7 @@
 //! Keep this module focused on the scratchpad and canonical records.
 
 use super::{CONFIDENCE, DRY_RUN, EVIDENCE_REF};
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::{SemanticCategory, SourceType};
 
@@ -134,8 +134,9 @@ const AS_OF: Flag = Flag::text(
 /// its usage line.
 const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
 
-/// The global flags the canonical records accept without printing.
-const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+/// The global flags the canonical records accept without printing: `--bank` is
+/// documented on each usage line, so it is left out here.
+const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// The scratchpad records print `--bank`/`--actor`, so only these ride along.
 const IMPLICIT_GLOBALS_OUTSIDE_BANK_ACTOR: &[&str] = &["db", "backend", "no-input", "yes"];
@@ -242,6 +243,7 @@ pub(crate) const CANONICAL_PUT: CommandSpec = CommandSpec {
         EVIDENCE_REF,
         CANONICAL_CONTEXT,
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -273,7 +275,7 @@ pub(crate) const CANONICAL_GET: CommandSpec = CommandSpec {
     summary: "read one canonical key",
     notes: &[],
     positionals: &[CANONICAL_KEY],
-    documented: &[AS_OF, GLOBAL_OUTPUT],
+    documented: &[AS_OF, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,

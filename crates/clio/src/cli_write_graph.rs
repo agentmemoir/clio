@@ -61,13 +61,12 @@ impl WriteGroup for GraphWriteGroup {
     }
 
     fn render(&self, verb: &str, payload: &Value, _palette: crate::cli_style::Palette) -> String {
-        let text = match verb {
+        match verb {
             "triple add" => render_triple_add(payload),
             "triple end" => render_triple_end(payload),
             "belief observe" => render_belief(payload),
             _ => render_graph_link(payload),
-        };
-        with_bank(text, payload)
+        }
     }
 
     fn mutates(&self, _verb: &str) -> bool {
@@ -273,15 +272,6 @@ fn dry_run_preview(args: &Map<String, Value>, would: &str) -> WriteCall {
     });
     let text = format!("dry-run: would {would}");
     WriteCall::Preview { payload, text }
-}
-
-/// Append the target bank to a write receipt when the tool echoed it, so a
-/// reader sees which bank the write landed in even when `--bank` was omitted.
-fn with_bank(text: String, payload: &Value) -> String {
-    match payload.get("bank").and_then(Value::as_str) {
-        Some(bank) => format!("{text} in bank `{bank}`"),
-        None => text,
-    }
 }
 
 fn render_triple_add(payload: &Value) -> String {

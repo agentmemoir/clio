@@ -36,7 +36,7 @@
 // catalog row, the usage line is the registered usage text, and the tool is the
 // binding row, so both rendered surfaces keep their exact output.
 
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::SourceType;
 
@@ -48,8 +48,9 @@ mod hygiene;
 
 pub(crate) use hygiene::{HYGIENE_AUDIT, HYGIENE_CLEAN, HYGIENE_LOG};
 
-/// The global flags these records accept without printing.
-const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+/// The global flags these records accept without printing: `--bank` is
+/// documented on each usage line, so it is left out here.
+const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// The shared-bank records print `--actor`, so `--bank` alone rides along.
 const IMPLICIT_GLOBALS_OUTSIDE_ACTOR: &[&str] = &["db", "backend", "bank", "no-input", "yes"];
@@ -139,7 +140,7 @@ const SHARED_STORE_USAGE: &str = "clio shared store TEXT --epistemic-kind K [--c
 
 /// `compose-context` accepts `--query` without printing it and prints
 /// `--budget-tokens` as a mandated flag, so its line is pinned too.
-const COMPOSE_CONTEXT_USAGE: &str = "clio compose-context [QUERY] --budget-tokens N [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--recall-scope full|consolidated_only] [--expand-graph] [--prefer-consolidated] [--explain] [--output json|text]";
+const COMPOSE_CONTEXT_USAGE: &str = "clio compose-context [QUERY] --budget-tokens N [--domains a,b] [--as-of TS] [--query-anchor TS] [--time-axis valid|transaction] [--recall-scope full|consolidated_only] [--expand-graph] [--prefer-consolidated] [--explain] [--bank BANK] [--output json|text]";
 
 /// `clio shared store`: write one item into the shared bank.
 pub(crate) const SHARED_STORE: CommandSpec = CommandSpec {
@@ -251,7 +252,7 @@ pub(crate) const INTENT_GATE: CommandSpec = CommandSpec {
     summary: "decide whether a turn should reach memory",
     notes: &[],
     positionals: &[TURN_TEXT],
-    documented: &[EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -298,6 +299,7 @@ pub(crate) const COMPOSE_CONTEXT: CommandSpec = CommandSpec {
         Flag::toggle("expand-graph", "`compose_context` expands the graph."),
         Flag::toggle("prefer-consolidated", "`compose_context` prefers units."),
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -329,7 +331,7 @@ pub(crate) const AUDIT_TRAIL: CommandSpec = CommandSpec {
     summary: "masked lifecycle reconstruction for one item",
     notes: &[],
     positionals: &[AUDIT_ITEM_ID],
-    documented: &[EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,

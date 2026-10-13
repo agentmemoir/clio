@@ -37,7 +37,7 @@
 // catalog row, the usage line is the registered usage text, and the tool is the
 // binding row, so both rendered surfaces keep their exact output.
 
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
 /// The scratchpad and canonical records: a sibling file so both halves of the
@@ -142,12 +142,13 @@ const ITEM_ID: Flag = Flag::text(
     "`maintenance_status_call` sets the `item_id` filter.",
 );
 
-/// The global flags these records accept without printing.
-const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+/// The global flags these records accept without printing: `--bank` is
+/// documented on each usage line, so it is left out here.
+const IMPLICIT_GLOBALS: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// `persona observe` accepts `--context` without printing it, so its printed
 /// line is pinned here while `documented` keeps the parser's accepted set.
-const PERSONA_OBSERVE_USAGE: &str = "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--output json|text]";
+const PERSONA_OBSERVE_USAGE: &str = "clio persona observe KEY NUMBER [--confidence N] [--source explicit|inferred] [--evidence-ref E] [--bank BANK] [--output json|text]";
 
 /// `clio persona get`: the persona document, within a token budget.
 pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
@@ -156,7 +157,7 @@ pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
     summary: "the persona model, within a token budget",
     notes: &[],
     positionals: &[],
-    documented: &[BUDGET_TOKENS, EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[BUDGET_TOKENS, EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -192,6 +193,7 @@ pub(crate) const PERSONA_STABLE: CommandSpec = CommandSpec {
         EVIDENCE_REF,
         PERSONA_CONTEXT,
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -229,6 +231,7 @@ pub(crate) const PERSONA_OBSERVE: CommandSpec = CommandSpec {
         SOURCE_OBSERVE,
         EVIDENCE_REF,
         PERSONA_CONTEXT,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS,
@@ -260,7 +263,7 @@ pub(crate) const MAINTENANCE_STATUS: CommandSpec = CommandSpec {
     summary: "queue depth, failures, and drain progress",
     notes: &[],
     positionals: &[],
-    documented: &[ITEM_ID, EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[ITEM_ID, EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,

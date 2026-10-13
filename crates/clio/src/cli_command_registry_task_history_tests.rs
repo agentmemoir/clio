@@ -43,12 +43,12 @@ fn task_get_matches_the_registered_usage_and_parser() {
     let spec = record("task get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio task get TASK_ID [--explain] [--output json|text]",
+        "usage: clio task get TASK_ID [--explain] [--bank BANK] [--output json|text]",
         "task get full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio task get TASK_ID [--explain] [--output json|text]",
+        "clio task get TASK_ID [--explain] [--bank BANK] [--output json|text]",
         "task get usage line"
     );
     assert_eq!(
@@ -72,12 +72,12 @@ fn task_history_matches_the_registered_usage_and_parser() {
     let spec = record("task history");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio task history TASK_ID [--limit N] [--explain] [--output json|text]",
+        "usage: clio task history TASK_ID [--limit N] [--explain] [--bank BANK] [--output json|text]",
         "task history full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio task history TASK_ID [--limit N] [--explain] [--output json|text]",
+        "clio task history TASK_ID [--limit N] [--explain] [--bank BANK] [--output json|text]",
         "task history usage line"
     );
     assert_eq!(
@@ -105,12 +105,12 @@ fn task_upsert_matches_the_registered_usage_and_parser() {
     let spec = record("task upsert");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio task upsert TASK_ID --definition D --status S [--steps a,b] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
+        "usage: clio task upsert TASK_ID --definition D --status S [--steps a,b] [--evidence-ref E] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "task upsert full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio task upsert TASK_ID --definition D --status S [--steps a,b] [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
+        "clio task upsert TASK_ID --definition D --status S [--steps a,b] [--evidence-ref E] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "task upsert usage line"
     );
     assert_eq!(
@@ -145,12 +145,12 @@ fn failure_list_matches_the_registered_usage_and_parser() {
     let spec = record("failure list");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio failure list TASK_ID_OR_QUERY [--limit N] [--explain] [--output json|text]",
+        "usage: clio failure list TASK_ID_OR_QUERY [--limit N] [--explain] [--bank BANK] [--output json|text]",
         "failure list full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio failure list TASK_ID_OR_QUERY [--limit N] [--explain] [--output json|text]",
+        "clio failure list TASK_ID_OR_QUERY [--limit N] [--explain] [--bank BANK] [--output json|text]",
         "failure list usage line"
     );
     assert_eq!(
@@ -178,12 +178,12 @@ fn failure_record_matches_the_registered_usage_and_parser() {
     let spec = record("failure record");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio failure record TASK_ID --attempt-n N --what-failed W --lesson L [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
+        "usage: clio failure record TASK_ID --attempt-n N --what-failed W --lesson L [--evidence-ref E] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "failure record full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio failure record TASK_ID --attempt-n N --what-failed W --lesson L [--evidence-ref E] [--context TEXT] [--dry-run] [--output json|text]",
+        "clio failure record TASK_ID --attempt-n N --what-failed W --lesson L [--evidence-ref E] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "failure record usage line"
     );
     assert_eq!(
@@ -224,12 +224,12 @@ fn memtree_query_matches_the_registered_usage_and_parser() {
     let spec = record("memtree query");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--output json|text]",
+        "usage: clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--bank BANK] [--output json|text]",
         "memtree query full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--output json|text]",
+        "clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--bank BANK] [--output json|text]",
         "memtree query usage line"
     );
     assert_eq!(
@@ -267,12 +267,12 @@ fn memtree_get_matches_the_registered_usage_and_parser() {
     let spec = record("memtree get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio memtree get NODE_ID [--explain] [--output json|text]",
+        "usage: clio memtree get NODE_ID [--explain] [--bank BANK] [--output json|text]",
         "memtree get full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio memtree get NODE_ID [--explain] [--output json|text]",
+        "clio memtree get NODE_ID [--explain] [--bank BANK] [--output json|text]",
         "memtree get usage line"
     );
     assert_eq!(
@@ -300,12 +300,12 @@ fn history_temporal_matches_the_registered_usage_and_parser() {
     let spec = record("history temporal");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--output json|text]",
+        "usage: clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]",
         "history temporal full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--output json|text]",
+        "clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]",
         "history temporal usage line"
     );
     assert_eq!(
