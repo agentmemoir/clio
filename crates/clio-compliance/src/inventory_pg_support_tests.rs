@@ -397,6 +397,8 @@ fn write_hashed_link_class(store: &PostgresStore, bank: &str) {
     let request_id = fixture_id(UNKNOWN, "request");
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(bank.to_owned()), Actor::Harness);
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     let args = EraseArgs {
         store,
         maint: None,
@@ -406,7 +408,7 @@ fn write_hashed_link_class(store: &PostgresStore, bank: &str) {
         request_id: &request_id,
         reason_code: None,
         confirm: true,
-        salt: b"inv-pg-fixture-salt",
+        salt: &salt,
         timestamp: TS,
         sink: &sink,
     };

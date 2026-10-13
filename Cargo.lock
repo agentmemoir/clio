@@ -245,6 +245,7 @@ dependencies = [
  "clio-store",
  "clio-types",
  "clio-write",
+ "rand 0.9.5",
  "serde",
  "serde_json",
  "sha2",
