@@ -191,14 +191,18 @@ pub fn role_subkey(key: &SyncCipherKey, role: &[u8]) -> Vec<u8> {
     clio_store::keyed_digest(key.key_bytes(), role, &[], 32)
 }
 
-/// The published plaintext-mode domain labels, exposed for the tests across the
-/// crate that pin the wire format. The labels themselves stay private.
+/// The published plaintext-mode domain label, exposed for the tests across the
+/// crate that pin the wire format. The label itself stays private.
 #[cfg(test)]
-pub(crate) const PUBLISHED_DIGEST_SALT: &[u8] = PLAINTEXT_DIGEST_SALT;
+pub(crate) fn published_digest_salt() -> &'static [u8] {
+    PLAINTEXT_DIGEST_SALT
+}
 
 /// The published plaintext-mode idempotency label, exposed for the same tests.
 #[cfg(test)]
-pub(crate) const PUBLISHED_MUTATION_ID_SALT: &[u8] = PLAINTEXT_MUTATION_ID_SALT;
+pub(crate) fn published_mutation_id_salt() -> &'static [u8] {
+    PLAINTEXT_MUTATION_ID_SALT
+}
 
 #[cfg(test)]
 #[path = "keyed_roles_tests.rs"]

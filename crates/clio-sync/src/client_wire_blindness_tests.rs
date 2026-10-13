@@ -226,7 +226,7 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     for row in rows.iter().filter(|r| r.entity_kind == "persona") {
         for guess in [ATTR_NAME, PREF_NAME] {
             let oracle = clio_store::sha256_hex(
-                crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
+                crate::keyed_roles::published_mutation_id_salt(),
                 &format!("{guess}|{}|upsert", row.transaction_time),
             );
             assert_ne!(
@@ -241,7 +241,7 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     let edge = row_of("assoc_edge");
     let edge_id = clio_store::explicit_id("bp", "i-1", "i-2", RELATIONSHIP);
     let oracle = clio_store::sha256_hex(
-        crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
+        crate::keyed_roles::published_mutation_id_salt(),
         &format!("{edge_id}|{}|assoc", edge.transaction_time),
     );
     assert_ne!(
@@ -254,7 +254,7 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     let persona = row_of("persona");
     assert_ne!(
         persona.content_hash,
-        clio_store::sha256_hex(crate::keyed_roles::PUBLISHED_DIGEST_SALT, ATTR_NAME),
+        clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), ATTR_NAME),
         "and the stored digest is not the hash of a guessed value either"
     );
     server.stop();

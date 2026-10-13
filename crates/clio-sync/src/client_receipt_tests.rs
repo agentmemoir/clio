@@ -81,7 +81,7 @@ fn sealed_without_receipt(
         device_id: device.into(),
         content: SyncContent::Cipher(cipher),
         content_hash: clio_store::sha256_hex(
-            crate::keyed_roles::PUBLISHED_DIGEST_SALT,
+            crate::keyed_roles::published_digest_salt(),
             &String::from_utf8(bytes).unwrap_or_default(),
         ),
         admission_receipt: None,

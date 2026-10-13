@@ -278,7 +278,10 @@ fn a_row_whose_payload_lacks_its_identifier_is_refused() {
             key_id: Some(key.key_id()),
             ..sealed
         }),
-        content_hash: clio_store::sha256_hex(crate::keyed_roles::PUBLISHED_DIGEST_SALT, "anything"),
+        content_hash: clio_store::sha256_hex(
+            crate::keyed_roles::published_digest_salt(),
+            "anything",
+        ),
         admission_receipt: None,
     };
     let ack: PushAck = post_json(

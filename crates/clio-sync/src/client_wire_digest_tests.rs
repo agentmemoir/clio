@@ -65,7 +65,7 @@ fn the_stored_content_digest_confirms_no_guessed_plaintext() {
         format!("{{\"gist\":\"{GIST}\"}}"),
     ];
     for guess in guesses {
-        let attack = clio_store::sha256_hex(crate::keyed_roles::PUBLISHED_DIGEST_SALT, &guess);
+        let attack = clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), &guess);
         assert_ne!(
             stored.as_str(),
             attack.as_str(),

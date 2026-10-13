@@ -89,7 +89,7 @@ fn a_cipher_makes_the_digest_unconfirmable_by_a_guess() {
         serde_json::to_string(&json!({"guess": "a candidate plaintext"})).expect("text");
     assert_ne!(
         payload.content_hash,
-        clio_store::sha256_hex(crate::keyed_roles::PUBLISHED_DIGEST_SALT, &candidate),
+        clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), &candidate),
         "the stored digest is not the unkeyed hash of a candidate"
     );
     assert!(

@@ -57,7 +57,7 @@ fn hand_push(addr: &str, mutation: SyncMutation) {
 
 fn mutation_id(kind_id: &str, stamp: &str, op: &str) -> String {
     clio_store::sha256_hex(
-        crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
+        crate::keyed_roles::published_mutation_id_salt(),
         &format!("{kind_id}|{stamp}|{op}"),
     )
 }
@@ -98,7 +98,7 @@ fn a_sealed_row_for_a_shredded_subject_still_dead_letters() {
             device_id: "dev-hand".into(),
             content: SyncContent::Cipher(sealed),
             content_hash: clio_store::sha256_hex(
-                crate::keyed_roles::PUBLISHED_DIGEST_SALT,
+                crate::keyed_roles::published_digest_salt(),
                 "anything",
             ),
             admission_receipt: None,
@@ -150,7 +150,7 @@ fn an_unknown_algorithm_on_an_encrypted_row_is_still_refused() {
                 ..sealed
             }),
             content_hash: clio_store::sha256_hex(
-                crate::keyed_roles::PUBLISHED_DIGEST_SALT,
+                crate::keyed_roles::published_digest_salt(),
                 "anything",
             ),
             admission_receipt: None,
