@@ -86,6 +86,7 @@ pub(crate) fn triple_add(state: &McpState, args: &Value) -> Result<Value, AmErro
             serde_json::to_value(&o.prior_edge_ids).expect("serialize tool payload"),
         );
     }
+    out.insert("bank".into(), Value::from(ctx.bank.as_str()));
     Ok(Value::Object(out))
 }
 
@@ -109,7 +110,7 @@ pub(crate) fn triple_end(state: &McpState, args: &Value) -> Result<Value, AmErro
         update_rule,
         &StderrSinks,
     )?;
-    Ok(end_outcome_json(&outcome))
+    Ok(with_bank(end_outcome_json(&outcome), ctx.bank.as_str()))
 }
 
 /// `belief_observe`: gated create / validated append.
@@ -136,7 +137,10 @@ pub(crate) fn belief_observe(state: &McpState, args: &Value) -> Result<Value, Am
         timestamp: &ts,
     };
     let outcome = clio_belief::belief_observe(&*state.belief, &signals, &b_args)?;
-    Ok(serde_json::to_value(&outcome).expect("serialize tool payload"))
+    Ok(with_bank(
+        serde_json::to_value(&outcome).expect("serialize tool payload"),
+        ctx.bank.as_str(),
+    ))
 }
 
 /// Explicit association edge declaration (assoc engine).
@@ -154,5 +158,17 @@ pub(crate) fn graph_link(state: &McpState, args: &Value) -> Result<Value, AmErro
         opt_num(args, "weight"),
         ctx.actor.as_str(),
     )?;
-    Ok(serde_json::to_value(&view).expect("serialize tool payload"))
+    Ok(with_bank(
+        serde_json::to_value(&view).expect("serialize tool payload"),
+        ctx.bank.as_str(),
+    ))
+}
+
+/// Attach the resolved bank to a write result so the caller's receipt names the
+/// bank the write landed in, whether the caller named one or took the default.
+fn with_bank(mut value: Value, bank: &str) -> Value {
+    if let Some(object) = value.as_object_mut() {
+        object.insert("bank".into(), Value::from(bank));
+    }
+    value
 }

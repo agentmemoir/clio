@@ -1,0 +1,1 @@
+`clio correct --confirm` now stores each correction under a fresh revision id and reports the real cause of a failed insert, so a second correction of the same item no longer fails with `items insert: db error`.

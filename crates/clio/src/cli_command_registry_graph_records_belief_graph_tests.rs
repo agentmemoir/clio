@@ -71,12 +71,12 @@ fn belief_observe_matches_the_registered_usage_and_parser() {
     let spec = record("belief observe");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
+        "usage: clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "belief observe full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
+        "clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "belief observe usage line"
     );
     assert_eq!(
@@ -162,12 +162,12 @@ fn graph_link_matches_the_registered_usage_and_parser() {
     let spec = record("graph link");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
+        "usage: clio graph link A B --relationship R [--weight W] [--dry-run] [--bank BANK] [--output json|text]",
         "graph link full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
+        "clio graph link A B --relationship R [--weight W] [--dry-run] [--bank BANK] [--output json|text]",
         "graph link usage line"
     );
     assert_eq!(

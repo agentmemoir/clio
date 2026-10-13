@@ -1,0 +1,1 @@
+`clio triple add`, `clio triple end`, `clio belief observe`, and `clio graph link` now list `--bank BANK` in their usage lines and print the bank each write landed in, so a write that took the default bank is no longer mistaken for lost data.

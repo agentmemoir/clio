@@ -389,7 +389,8 @@ fn print_help() {
     println!(
         "{}\n Read-only stack health: setup/deployment config, resolved database\n \
          (redacted URL), 34300-34309 listeners, Compose service state, and\n \
-         the `ops diagnose` verdict. Never writes.\n \
+         the `ops diagnose` verdict. Never writes. Deeper index-coverage and\n \
+         referential-integrity checks are outside this scope: run `clio ops verify`.\n \
          Exit codes: 0 healthy, 1 degraded, 2 usage.",
         crate::cli_help_usage::usage_line("status").unwrap_or_else(|| "clio status".to_owned())
     );

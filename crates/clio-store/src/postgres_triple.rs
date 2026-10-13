@@ -16,9 +16,7 @@
 //!
 //! Changes to Postgres supersession write SQL should normally require changes here.
 
-use crate::item_persist::{
-    kind_columns, map_item_insert, require_actor, seal_dual, source_type_sql,
-};
+use crate::item_persist::{kind_columns, require_actor, seal_dual, source_type_sql};
 use crate::migrate::{IntoAmError, now_iso};
 use crate::postgres::PostgresStore;
 use crate::triple_cipher::TripleSeal;
@@ -115,9 +113,8 @@ pub(crate) fn commit_triple_add_tx(
         )
         .am("subject_keys upsert")?;
     crate::item_persist::check_subject_reactivation(sk_rows, &item.subject_id)?;
-    map_item_insert(
-        tx.execute(
-            "INSERT INTO items (
+    crate::postgres_memory::map_pg_item_insert(tx.execute(
+        "INSERT INTO items (
                 id, bank_id, kind, category, episodic_type, epistemic_kind, source_type,
                 confidence, admission_score, source_ref, content_ciphertext, subject_id,
                 valid_from, valid_until, tx_from, tx_until, created_at, updated_at
@@ -126,29 +123,27 @@ pub(crate) fn commit_triple_add_tx(
                 $8::float8, $9::float8, $10, $11, $12,
                 $13, $14, $15, $16, $17, $18
              )",
-            &[
-                &item.id,
-                &item.bank_id,
-                &kind,
-                &cat,
-                &epi,
-                &epistemic,
-                &src,
-                &item.confidence,
-                &item.admission_score,
-                &item.source_ref,
-                &seal.carrier,
-                &item.subject_id,
-                &item.valid_from,
-                &item.valid_until,
-                &item.tx_from,
-                &item.tx_until,
-                &item.created_at,
-                &item.updated_at,
-            ],
-        )
-        .map_err(|e| e.to_string()),
-    )?;
+        &[
+            &item.id,
+            &item.bank_id,
+            &kind,
+            &cat,
+            &epi,
+            &epistemic,
+            &src,
+            &item.confidence,
+            &item.admission_score,
+            &item.source_ref,
+            &seal.carrier,
+            &item.subject_id,
+            &item.valid_from,
+            &item.valid_until,
+            &item.tx_from,
+            &item.tx_until,
+            &item.created_at,
+            &item.updated_at,
+        ],
+    ))?;
     tx.execute(
         "INSERT INTO triples (
             id, bank_id, item_id, subject, predicate, object_ciphertext, epistemic_kind,

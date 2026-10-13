@@ -40,7 +40,7 @@ use serde_json::Value;
 /// the same `items insert: db error` with nothing to act on. `map_db_err` walks
 /// the driver's source chain, so the constraint name, `DETAIL` and `HINT`
 /// survive, and the duplicate case keeps its own deliberate wording above.
-fn map_pg_item_insert(result: Result<u64, postgres::Error>) -> Result<(), AmError> {
+pub(crate) fn map_pg_item_insert(result: Result<u64, postgres::Error>) -> Result<(), AmError> {
     match result {
         Ok(_) => Ok(()),
         Err(e) if e.code() == Some(&SqlState::UNIQUE_VIOLATION) => Err(AmError::new(
