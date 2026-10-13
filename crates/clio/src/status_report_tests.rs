@@ -79,6 +79,21 @@ fn healthy_when_diagnose_ok_and_reachable() {
     assert!(report.ok);
 }
 
+/// The report names the deeper check it does not run, in both the model and the
+/// rendered text, so a healthy line is not read as a clean bill of health.
+#[test]
+fn report_points_at_the_verify_pass() {
+    let report = assemble(
+        setup(),
+        database(),
+        vec![],
+        ComposeView::NotMaterialized,
+        diagnose(true, true),
+    );
+    assert_eq!(report.verify_pointer, clio_ops::VERIFY_POINTER);
+    assert!(render_text(&report).contains("clio ops verify"));
+}
+
 #[test]
 fn degraded_when_diagnose_not_ok() {
     let report = assemble(

@@ -1,0 +1,1 @@
+`clio status` and `clio ops diagnose` now name `clio ops verify` as the deeper index-coverage and referential-integrity check they do not run, and a bank-scoped `clio ops doctor` warns when the store has findings outside that bank.

@@ -32,10 +32,18 @@ use std::sync::Arc;
 
 impl McpState {
     /// Generate a unique item id for caller-omitted ids.
+    ///
+    /// Unique across processes, not only within one: a per-process counter
+    /// alone restarts at 1 in every fresh CLI one-shot, so a bare `itm-mcp-{n}`
+    /// repeats `itm-mcp-1` on every later invocation and collides on the items
+    /// primary key. Mix the process id, a nanosecond clock, and the in-process
+    /// counter, the same shape [`Self::next_clean_batch_id`] uses.
     #[must_use]
     pub fn next_item_id(&self) -> String {
         format!(
-            "itm-mcp-{}",
+            "itm-mcp-{}-{}-{}",
+            std::process::id(),
+            unix_nanos(),
             self.id_counter
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )
@@ -50,13 +58,10 @@ impl McpState {
     /// in-process counter.
     #[must_use]
     pub fn next_clean_batch_id(&self) -> String {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
         format!(
-            "hclean-{}-{nanos}-{}",
+            "hclean-{}-{}-{}",
             std::process::id(),
+            unix_nanos(),
             self.id_counter
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )
@@ -166,6 +171,18 @@ impl McpState {
             dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
         }
     }
+}
+
+/// Nanoseconds since the Unix epoch, or `0` when the clock predates it.
+///
+/// One source for the process-unique id minting above: a caller-omitted item
+/// id and a `hygiene_clean` batch id both need a clock reading that differs
+/// between two fresh processes.
+fn unix_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }
 
 /// UTC `YYYY-MM-DDThh:mm:ssZ` for a Unix second count. Split out from

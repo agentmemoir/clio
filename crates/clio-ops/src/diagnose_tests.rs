@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on diagnose behavior.
 
-use crate::diagnose::{DiagnoseArgs, diagnose};
+use crate::diagnose::{DiagnoseArgs, VERIFY_POINTER, diagnose};
 use crate::diagnose_fixtures::{TS, failed, item, sqlite};
 use crate::finding::{Severity, codes};
 use clio_index::Embedder;
@@ -263,6 +263,20 @@ fn healthy_store_snapshot_has_expected_fields() {
     assert_eq!(report.indexable_items, 1);
     assert_eq!(report.embedding_ready, None);
     assert!(report.findings.is_empty(), "{:?}", report.findings);
+}
+
+/// The healthy snapshot names the deeper check it does not run, so an `ok`
+/// verdict is not read as a clean bill of health.
+#[test]
+fn snapshot_points_at_the_verify_pass() {
+    let store = sqlite();
+    let report = diagnose(&DiagnoseArgs {
+        store: &store,
+        index: &store,
+        embedder: None,
+        timestamp: TS,
+    });
+    assert_eq!(report.verify_pointer, VERIFY_POINTER);
 }
 
 #[test]

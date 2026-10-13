@@ -34,7 +34,7 @@
 //!
 //! Keep this module focused on the triple records and the tranche list.
 
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::SourceType;
 
@@ -116,6 +116,11 @@ const UPDATE_RULE: Flag = Flag::choice(
 /// The declared globals these commands accept without printing: every global
 /// but `--output`, which each usage line documents.
 const UNPRINTED_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+
+/// The globals the bank-scoped writes accept without printing. `--bank` is
+/// documented, so a reader sees it in the usage line rather than only under
+/// `Global flags`.
+const UNPRINTED_GLOBALS_OUTSIDE_BANK: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// The `--epistemic-kind`/`--source-type` pairing `triple add` prints under
 /// its usage line.
@@ -216,9 +221,10 @@ pub(crate) const TRIPLE_ADD: CommandSpec = CommandSpec {
         SUBJECT_ID,
         UPDATE_RULE,
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: UNPRINTED_GLOBALS,
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -260,9 +266,10 @@ pub(crate) const TRIPLE_END: CommandSpec = CommandSpec {
         },
         UPDATE_RULE,
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: UNPRINTED_GLOBALS,
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],

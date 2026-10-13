@@ -99,12 +99,12 @@ fn triple_add_matches_the_registered_usage_and_parser() {
     let spec = record("triple add");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
+        "usage: clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--bank BANK] [--output json|text]\n       --epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact",
         "triple add full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--output json|text]",
+        "clio triple add S P O [--epistemic-kind fact|belief] [--source-type T] [--confidence N] [--context TEXT] [--valid-from TS] [--valid-until TS] [--supersede true|false] [--subject-id ID] [--update-rule discrete] [--dry-run] [--bank BANK] [--output json|text]",
         "triple add usage line"
     );
     assert_eq!(
@@ -151,12 +151,12 @@ fn triple_end_matches_the_registered_usage_and_parser() {
     let spec = record("triple end");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio triple end S P [--object O] --valid-until TS [--update-rule discrete] [--dry-run] [--output json|text]",
+        "usage: clio triple end S P [--object O] --valid-until TS [--update-rule discrete] [--dry-run] [--bank BANK] [--output json|text]",
         "triple end full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio triple end S P [--object O] --valid-until TS [--update-rule discrete] [--dry-run] [--output json|text]",
+        "clio triple end S P [--object O] --valid-until TS [--update-rule discrete] [--dry-run] [--bank BANK] [--output json|text]",
         "triple end usage line"
     );
     assert_eq!(
