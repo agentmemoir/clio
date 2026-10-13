@@ -1,0 +1,975 @@
+[
+ {
+  "file": "crates/clio-sync/src/apply_matrix_tests.rs",
+  "test": "cipher_and_keyless_journal_paths",
+  "old": "SyncCipherKey::from_secret(\"t24-cipher\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"t24-cipher\"))",
+  "alert": 137
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_documentation_tests.rs",
+  "test": "a_sealed_push_writes_every_documented_cleartext_column",
+  "old": "SyncCipherKey::from_secret(\"feed-doc-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"feed-doc-key\"))",
+  "alert": 143
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_digest_tests.rs",
+  "test": "a_cipher_makes_the_digest_unconfirmable_by_a_guess",
+  "old": "sealed_cfg(\"pkg-digest-blind\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-digest-blind\"))",
+  "alert": 145
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_digest_tests.rs",
+  "test": "the_digest_follows_the_content_not_the_identifier",
+  "old": "sealed_cfg(\"pkg-digest-content\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-digest-content\"))",
+  "alert": 147
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_digest_tests.rs",
+  "test": "two_peers_sharing_a_key_derive_the_same_digest",
+  "old": "    let mine = digest_for(&sealed_cfg(\"pkg-digest-peer\"));",
+  "new": "    let peer_key = crate::credential_fixtures::secret(\"pkg-digest-peer\");\n    let mine = digest_for(&sealed_cfg(&peer_key));",
+  "alert": 149
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_digest_tests.rs",
+  "test": "two_peers_sharing_a_key_derive_the_same_digest",
+  "old": "    let theirs = digest_for(&sealed_cfg(\"pkg-digest-peer\"));",
+  "new": "    let theirs = digest_for(&sealed_cfg(&peer_key));",
+  "alert": 150
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_digest_tests.rs",
+  "test": "two_peers_sharing_a_key_derive_the_same_digest",
+  "old": "sealed_cfg(\"pkg-digest-stranger\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-digest-stranger\"))",
+  "alert": 151
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "each_handled_kind_puts_a_handle_on_the_wire",
+  "old": "sealed_cfg(\"pkg-handle-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-handle-key\"))",
+  "alert": 148
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "machine_generated_identifiers_are_left_alone",
+  "old": "sealed_cfg(\"pkg-machine-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-machine-key\"))",
+  "alert": 152
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "handles_differ_along_the_identifier_bank_and_kind_axes",
+  "old": "sealed_cfg(\"pkg-axes-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-axes-key\"))",
+  "alert": 156
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "two_relationship_labels_on_one_pair_do_not_merge",
+  "old": "sealed_cfg(\"pkg-rel-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-rel-key\"))",
+  "alert": 158
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess",
+  "old": "    let sealed = task_mutation(\n        &sealed_cfg(\"pkg-mutid-blind\"),",
+  "new": "    let mutid_key = crate::credential_fixtures::secret(\"pkg-mutid-blind\");\n    let sealed = task_mutation(\n        &sealed_cfg(&mutid_key),",
+  "alert": 162
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess",
+  "old": "    let persona = persona_stable_mutation(\n        &sealed_cfg(\"pkg-mutid-blind\"),",
+  "new": "    let persona = persona_stable_mutation(\n        &sealed_cfg(&mutid_key),",
+  "alert": 164
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "the_keyed_mutation_id_still_follows_the_real_identifier",
+  "old": "sealed_cfg(\"pkg-mutid-other-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-mutid-other-key\"))",
+  "alert": 167
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "a_handle_has_the_fixed_width_and_format_the_wire_expects",
+  "old": "sealed_cfg(\"pkg-format-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-format-key\"))",
+  "alert": 168
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "two_peers_sharing_a_key_derive_the_same_handle",
+  "old": "    let mine = task_mutation(\n        &sealed_cfg(\"pkg-peer-key\"),",
+  "new": "    let peer_key = crate::credential_fixtures::secret(\"pkg-peer-key\");\n    let mine = task_mutation(\n        &sealed_cfg(&peer_key),",
+  "alert": 170
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "two_peers_sharing_a_key_derive_the_same_handle",
+  "old": "    let theirs = task_mutation(\n        &sealed_cfg(\"pkg-peer-key\"),",
+  "new": "    let theirs = task_mutation(\n        &sealed_cfg(&peer_key),",
+  "alert": 171
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "two_peers_sharing_a_key_derive_the_same_handle",
+  "old": "sealed_cfg(\"pkg-stranger-key\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-stranger-key\"))",
+  "alert": 172
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_receipt_tests.rs",
+  "test": "a_sealed_item_carries_its_receipt_inside_the_document",
+  "old": "sealed_cfg(\"pkg-receipt-item\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-receipt-item\"))",
+  "alert": 153
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_receipt_tests.rs",
+  "test": "a_sealed_task_failure_and_persona_each_seal_their_receipt",
+  "old": "sealed_cfg(\"pkg-receipt-kinds\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-receipt-kinds\"))",
+  "alert": 157
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_receipt_tests.rs",
+  "test": "a_sealed_edge_carries_no_receipt_anywhere",
+  "old": "sealed_cfg(\"pkg-receipt-edge\")",
+  "new": "sealed_cfg(&crate::credential_fixtures::secret(\"pkg-receipt-edge\"))",
+  "alert": 159
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_tests.rs",
+  "test": "content_seals_with_the_first_entry_of_the_list",
+  "old": "SyncCipherKey::from_secret(\"feed-key-newest\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"feed-key-newest\"))",
+  "alert": 154
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_tests.rs",
+  "test": "content_seals_with_the_first_entry_of_the_list",
+  "old": "SyncCipherKey::from_secret(\"feed-key-older\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"feed-key-older\"))",
+  "alert": 155
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "an_opened_document_restores_the_receipt_before_apply",
+  "old": "SyncCipherKey::from_secret(\"receipt-restore-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-restore-key\"))",
+  "alert": 173
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "an_absent_or_malformed_receipt_degrades_to_the_documented_fallback",
+  "old": "SyncCipherKey::from_secret(\"receipt-fallback-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-fallback-key\"))",
+  "alert": 174
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "an_encrypted_same_timestamp_conflict_resolves_by_the_restored_score",
+  "old": "    let a = sqlite();\n    let b = sqlite();\n    let key = SyncCipherKey::from_secret(\"receipt-tie-key\");",
+  "new": "    let a = sqlite();\n    let b = sqlite();\n    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-tie-key\"));",
+  "alert": 177
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "the_same_conflict_without_the_score_falls_back_to_the_device_id",
+  "old": "    let addr = server.addr().to_owned();\n    let b = sqlite();\n    let key = SyncCipherKey::from_secret(\"receipt-tie-key\");",
+  "new": "    let addr = server.addr().to_owned();\n    let b = sqlite();\n    let key = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-tie-key\"));",
+  "alert": 180
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "a_row_sealed_without_a_receipt_still_applies_on_a_fresh_peer",
+  "old": "SyncCipherKey::from_secret(\"receipt-old-writer-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-old-writer-key\"))",
+  "alert": 182
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "an_erased_subject_still_dead_letters_with_the_cipher_on",
+  "old": "SyncCipherKey::from_secret(\"receipt-erasure-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-erasure-key\"))",
+  "alert": 185
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "a_sealed_persona_tie_is_decided_by_the_restored_score",
+  "old": "SyncCipherKey::from_secret(\"receipt-persona-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-persona-key\"))",
+  "alert": 189
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_fault_tests.rs",
+  "test": "a_sealed_row_for_a_shredded_subject_still_dead_letters",
+  "old": "SyncCipherKey::from_secret(\"shred-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"shred-key\"))",
+  "alert": 176
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_fault_tests.rs",
+  "test": "an_unknown_algorithm_on_an_encrypted_row_is_still_refused",
+  "old": "SyncCipherKey::from_secret(\"alg-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"alg-key\"))",
+  "alert": 179
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_sealed_task_row_applies_under_its_real_identifier",
+  "old": "SyncCipherKey::from_secret(\"resolve-task-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"resolve-task-key\"))",
+  "alert": 183
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_redelivered_sealed_row_stays_a_duplicate",
+  "old": "SyncCipherKey::from_secret(\"resolve-idem-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"resolve-idem-key\"))",
+  "alert": 190
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_conflict_sample_shows_the_real_identifier_not_a_handle",
+  "old": "SyncCipherKey::from_secret(\"resolve-conflict-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"resolve-conflict-key\"))",
+  "alert": 194
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_row_whose_payload_lacks_its_identifier_is_refused",
+  "old": "SyncCipherKey::from_secret(\"resolve-refuse-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"resolve-refuse-key\"))",
+  "alert": 197
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_sealed_persona_row_applies_under_its_real_attribute_key",
+  "old": "SyncCipherKey::from_secret(\"resolve-persona-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"resolve-persona-key\"))",
+  "alert": 206
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_sealed_explicit_edge_row_resolves_to_the_edge_id",
+  "old": "SyncCipherKey::from_secret(\"resolve-edge-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"resolve-edge-key\"))",
+  "alert": 209
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "seal_stamps_the_newest_key_and_both_list_orders_open",
+  "old": "    let c: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(\"rotation-key-one\");",
+  "new": "    let c: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"));",
+  "alert": 187
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "seal_stamps_the_newest_key_and_both_list_orders_open",
+  "old": "    let k2 = SyncCipherKey::from_secret(\"rotation-key-two\");\n    let cfg_a = cfg(\"dev-a\", &a, &addr, vec![k2.clone()]);",
+  "new": "    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"));\n    let cfg_a = cfg(\"dev-a\", &a, &addr, vec![k2.clone()]);",
+  "alert": 188
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "content_sealed_under_a_superseded_key_stays_readable",
+  "old": "    let (server, _srv, _kms) = serve(&[\"bs\"]);\n    let addr = server.addr().to_owned();\n    let a: Store = sqlite();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(\"rotation-key-one\");",
+  "new": "    let (server, _srv, _kms) = serve(&[\"bs\"]);\n    let addr = server.addr().to_owned();\n    let a: Store = sqlite();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"));",
+  "alert": 191
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "content_sealed_under_a_superseded_key_stays_readable",
+  "old": "    let k2 = SyncCipherKey::from_secret(\"rotation-key-two\");\n    // The writer sealed under key one before the rotation happened.",
+  "new": "    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"));\n    // The writer sealed under key one before the rotation happened.",
+  "alert": 192
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_key_id_less_row_is_refused_and_the_cursor_freezes",
+  "old": "    let (server, srv, _kms) = serve(&[\"bt\"]);\n    let addr = server.addr().to_owned();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(\"rotation-key-one\");",
+  "new": "    let (server, srv, _kms) = serve(&[\"bt\"]);\n    let addr = server.addr().to_owned();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"));",
+  "alert": 195
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_key_id_less_row_is_refused_and_the_cursor_freezes",
+  "old": "    let k2 = SyncCipherKey::from_secret(\"rotation-key-two\");\n    // A row written before identifiers existed: valid ciphertext under key\n    // one, no identifier on the wire.",
+  "new": "    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"));\n    // A row written before identifiers existed: valid ciphertext under key\n    // one, no identifier on the wire.",
+  "alert": 196
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_row_sealed_under_an_absent_key_is_refused_and_the_cursor_freezes",
+  "old": "SyncCipherKey::from_secret(\"a-key-this-node-never-held\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"a-key-this-node-never-held\"))",
+  "alert": 198
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_row_sealed_under_an_absent_key_is_refused_and_the_cursor_freezes",
+  "old": "    let k1 = SyncCipherKey::from_secret(\"rotation-key-one\");",
+  "new": "    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"));",
+  "alert": 199
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_row_sealed_under_an_absent_key_is_refused_and_the_cursor_freezes",
+  "old": "    let k2 = SyncCipherKey::from_secret(\"rotation-key-two\");\n    let cfg_a = cfg(\"dev-a\", &a, &addr, vec![kx.clone()]);\n    a.create_memory_item(",
+  "new": "    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"));\n    let cfg_a = cfg(\"dev-a\", &a, &addr, vec![kx.clone()]);\n    a.create_memory_item(",
+  "alert": 200
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_row_sealed_by_a_held_key_that_no_longer_opens_is_refused_and_the_cursor_freezes",
+  "old": "    let (server, _srv, _kms) = serve(&[\"bw\"]);\n    let addr = server.addr().to_owned();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(\"rotation-key-one\");",
+  "new": "    let (server, _srv, _kms) = serve(&[\"bw\"]);\n    let addr = server.addr().to_owned();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"));",
+  "alert": 204
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_row_sealed_by_a_held_key_that_no_longer_opens_is_refused_and_the_cursor_freezes",
+  "old": "    let k2 = SyncCipherKey::from_secret(\"rotation-key-two\");\n    let fixture = item(\"bw\", \"i-bad\", \"s1\", \"2026-01-01T00:00:00Z\", \"tampered\");",
+  "new": "    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"));\n    let fixture = item(\"bw\", \"i-bad\", \"s1\", \"2026-01-01T00:00:00Z\", \"tampered\");",
+  "alert": 205
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_wider_key_list_opens_every_writer",
+  "old": "    let (server, _srv, _kms) = serve(&[\"bv\"]);\n    let addr = server.addr().to_owned();\n    let a: Store = sqlite();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(\"rotation-key-one\");",
+  "new": "    let (server, _srv, _kms) = serve(&[\"bv\"]);\n    let addr = server.addr().to_owned();\n    let a: Store = sqlite();\n    let b: Store = sqlite();\n    let k1 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"));",
+  "alert": 210
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "a_wider_key_list_opens_every_writer",
+  "old": "    let k2 = SyncCipherKey::from_secret(\"rotation-key-two\");\n    // Two writers on two generations; the reader holds both and reads both.",
+  "new": "    let k2 = SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"));\n    // Two writers on two generations; the reader holds both and reads both.",
+  "alert": 211
+ },
+ {
+  "file": "crates/clio-sync/src/client_status_tests.rs",
+  "test": "sync_status_reports_cursors_and_never_the_token",
+  "old": "SyncCipherKey::from_secret(\"k\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"k\"))",
+  "alert": 193
+ },
+ {
+  "file": "crates/clio-sync/src/client_status_tests.rs",
+  "test": "the_encryption_summary_counts_held_keys_and_leaves_provenance_to_custody",
+  "old": "SyncCipherKey::from_secret(\"summary-key-one\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"summary-key-one\"))",
+  "alert": 202
+ },
+ {
+  "file": "crates/clio-sync/src/client_status_tests.rs",
+  "test": "the_encryption_summary_counts_held_keys_and_leaves_provenance_to_custody",
+  "old": "SyncCipherKey::from_secret(\"summary-key-two\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"summary-key-two\"))",
+  "alert": 203
+ },
+ {
+  "file": "crates/clio-sync/src/client_status_tests.rs",
+  "test": "wrong_cipher_key_quarantines_then_ack_skip_unfreezes",
+  "old": "SyncCipherKey::from_secret(\"key-one\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"key-one\"))",
+  "alert": 207
+ },
+ {
+  "file": "crates/clio-sync/src/client_status_tests.rs",
+  "test": "wrong_cipher_key_quarantines_then_ack_skip_unfreezes",
+  "old": "SyncCipherKey::from_secret(\"key-two\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"key-two\"))",
+  "alert": 208
+ },
+ {
+  "file": "crates/clio-sync/src/client_tests.rs",
+  "test": "t24_07_client_encryption_server_blind_keyless_dead_letters",
+  "old": "SyncCipherKey::from_secret(\"t24-07-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"t24-07-key\"))",
+  "alert": 220
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_sealed_persona_push_reaches_the_relay_with_no_attribute_name",
+  "old": "SyncCipherKey::from_secret(\"blind-persona-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-persona-key\"))",
+  "alert": 213
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_sealed_task_push_reaches_the_relay_with_no_task_id",
+  "old": "SyncCipherKey::from_secret(\"blind-task-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-task-key\"))",
+  "alert": 215
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_sealed_failure_push_reaches_the_relay_with_no_failure_or_task_id",
+  "old": "SyncCipherKey::from_secret(\"blind-failure-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-failure-key\"))",
+  "alert": 216
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_sealed_explicit_edge_push_reaches_the_relay_with_no_relationship_label",
+  "old": "SyncCipherKey::from_secret(\"blind-edge-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-edge-key\"))",
+  "alert": 217
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key",
+  "old": "SyncCipherKey::from_secret(\"blind-oracle-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-oracle-key\"))",
+  "alert": 218
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_sealed_belief_push_keeps_its_identifier",
+  "old": "SyncCipherKey::from_secret(\"blind-belief-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-belief-key\"))",
+  "alert": 225
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "an_encrypted_push_leaves_no_score_anywhere_on_the_relay",
+  "old": "SyncCipherKey::from_secret(\"receipt-journal-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"receipt-journal-key\"))",
+  "alert": 226
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_digest_tests.rs",
+  "test": "the_stored_content_digest_confirms_no_guessed_plaintext",
+  "old": "SyncCipherKey::from_secret(\"blind-digest-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"blind-digest-key\"))",
+  "alert": 212
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_nonce_tests.rs",
+  "test": "concurrent_seals_never_reuse_a_nonce",
+  "old": "SyncCipherKey::from_secret(\"nonce-uniqueness-fixture\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"nonce-uniqueness-fixture\"))",
+  "alert": 227
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_nonce_tests.rs",
+  "test": "sealed_nonce_is_24_raw_bytes_not_hex_text",
+  "old": "SyncCipherKey::from_secret(\"nonce-shape-fixture\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"nonce-shape-fixture\"))",
+  "alert": 229
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "seal_open_roundtrip",
+  "old": "    let key = crate::crypto::SyncCipherKey::from_secret(\"shared-secret\");\n    let plaintext = br#\"{\"snapshot\":{\"k\":\"v\"},\"gist\":\"g\"}\"#;",
+  "new": "    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"shared-secret\"));\n    let plaintext = br#\"{\"snapshot\":{\"k\":\"v\"},\"gist\":\"g\"}\"#;",
+  "alert": 228
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "wrong_key_and_tampering_fail_closed",
+  "old": "SyncCipherKey::from_secret(\"right\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"right\"))",
+  "alert": 230
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "wrong_key_and_tampering_fail_closed",
+  "old": "SyncCipherKey::from_secret(\"wrong\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"wrong\"))",
+  "alert": 231
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "key_debug_is_masked_and_nonces_differ",
+  "old": "SyncCipherKey::from_secret(\"k\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"k\"))",
+  "alert": 233
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "key_id_is_fixed_width_and_distinguishes_keys",
+  "old": "SyncCipherKey::from_secret(\"rotation-key-one\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-one\"))",
+  "alert": 234
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "key_id_is_fixed_width_and_distinguishes_keys",
+  "old": "SyncCipherKey::from_secret(\"rotation-key-two\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"rotation-key-two\"))",
+  "alert": 235
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "seal_stamps_the_sealing_keys_identifier",
+  "old": "    let key = crate::crypto::SyncCipherKey::from_secret(\"shared-secret\");\n    let cipher = key.seal(b\"payload\").expect(\"seal\");\n    assert_eq!(cipher.key_id.as_deref(), Some(key.key_id().as_str()));",
+  "new": "    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"shared-secret\"));\n    let cipher = key.seal(b\"payload\").expect(\"seal\");\n    assert_eq!(cipher.key_id.as_deref(), Some(key.key_id().as_str()));",
+  "alert": 236
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "an_identifier_less_ciphertext_serializes_without_the_field",
+  "old": "    let key = crate::crypto::SyncCipherKey::from_secret(\"shared-secret\");\n    let cipher = key.seal(b\"payload\").expect(\"seal\");\n    let stripped = crate::crypto::SyncCipher {",
+  "new": "    let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"shared-secret\"));\n    let cipher = key.seal(b\"payload\").expect(\"seal\");\n    let stripped = crate::crypto::SyncCipher {",
+  "alert": 237
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "the_aead_never_seals_under_the_sync_key_itself",
+  "old": "    let key = crate::crypto::SyncCipherKey::from_secret(\"seal-role-key\");",
+  "new": "    let role_secret = crate::credential_fixtures::secret(\"seal-role-key\");\n    let key = crate::crypto::SyncCipherKey::from_secret(&role_secret);",
+  "alert": 238
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "the_aead_never_seals_under_the_sync_key_itself",
+  "old": "    let peer = crate::crypto::SyncCipherKey::from_secret(\"seal-role-key\");",
+  "new": "    let peer = crate::crypto::SyncCipherKey::from_secret(&role_secret);",
+  "alert": 239
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "content_sealed_under_the_raw_sync_key_is_refused",
+  "old": "SyncCipherKey::from_secret(\"legacy-raw-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"legacy-raw-key\"))",
+  "alert": 240
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_four_roles_derive_distinct_reproducible_subkeys",
+  "old": "    let key = SyncCipherKey::from_secret(\"roles-key\");",
+  "new": "    let roles_secret = crate::credential_fixtures::secret(\"roles-key\");\n    let key = SyncCipherKey::from_secret(&roles_secret);",
+  "alert": 244
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_four_roles_derive_distinct_reproducible_subkeys",
+  "old": "    let same_key = SyncCipherKey::from_secret(\"roles-key\");",
+  "new": "    let same_key = SyncCipherKey::from_secret(&roles_secret);",
+  "alert": 245
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_four_roles_derive_distinct_reproducible_subkeys",
+  "old": "SyncCipherKey::from_secret(\"roles-other-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"roles-other-key\"))",
+  "alert": 246
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_content_digest_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "    let key = SyncCipherKey::from_secret(\"digest-key\");",
+  "new": "    let digest_secret = crate::credential_fixtures::secret(\"digest-key\");\n    let key = SyncCipherKey::from_secret(&digest_secret);",
+  "alert": 248
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_content_digest_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "    let peer = SyncCipherKey::from_secret(\"digest-key\");",
+  "new": "    let peer = SyncCipherKey::from_secret(&digest_secret);",
+  "alert": 249
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_content_digest_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "SyncCipherKey::from_secret(\"digest-other-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"digest-other-key\"))",
+  "alert": 250
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_mutation_id_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "    let key = SyncCipherKey::from_secret(\"mutid-key\");",
+  "new": "    let mutid_secret = crate::credential_fixtures::secret(\"mutid-key\");\n    let key = SyncCipherKey::from_secret(&mutid_secret);",
+  "alert": 253
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_mutation_id_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "    let peer = SyncCipherKey::from_secret(\"mutid-key\");",
+  "new": "    let peer = SyncCipherKey::from_secret(&mutid_secret);",
+  "alert": 254
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_mutation_id_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "SyncCipherKey::from_secret(\"mutid-other-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"mutid-other-key\"))",
+  "alert": 255
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "a_handle_is_fixed_width_lowercase_hex_and_stable",
+  "old": "SyncCipherKey::from_secret(\"handle-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"handle-key\"))",
+  "alert": 257
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "handles_differ_along_each_of_the_three_axes",
+  "old": "SyncCipherKey::from_secret(\"collision-key\")",
+  "new": "SyncCipherKey::from_secret(&crate::credential_fixtures::secret(\"collision-key\"))",
+  "alert": 258
+ },
+ {
+  "file": "crates/clio-compliance/src/erase_tests.rs",
+  "test": "args",
+  "old": "    EraseArgs {\n        store: &f.store,\n        maint,\n        ctx,\n        subject_id: &f.subject,\n        legal_basis: \"GDPR_ART_17\",\n        request_id: request,\n        reason_code: None,\n        confirm,\n        salt: b\"deploy-salt\",",
+  "new": "    // A fresh salt per process: no test asserts the tombstone hash value.\n    static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);\n    EraseArgs {\n        store: &f.store,\n        maint,\n        ctx,\n        subject_id: &f.subject,\n        legal_basis: \"GDPR_ART_17\",\n        request_id: request,\n        reason_code: None,\n        confirm,\n        salt: &SALT[..],",
+  "alert": 107
+ },
+ {
+  "file": "crates/clio-compliance/src/erase_tests.rs",
+  "test": "partial_shred_reports_processing_and_plain_error_propagates",
+  "old": "    let e = EraseArgs {\n        store: &destroyed,\n        maint: None,\n        ctx: &ctx,\n        subject_id: \"subject-1\",\n        legal_basis: \"CCPA_DELETION\",\n        request_id: \"req-partial\",\n        reason_code: Some(\"CUSTOM_REASON\"),\n        confirm: true,\n        salt: b\"salt\",",
+  "new": "    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    let e = EraseArgs {\n        store: &destroyed,\n        maint: None,\n        ctx: &ctx,\n        subject_id: \"subject-1\",\n        legal_basis: \"CCPA_DELETION\",\n        request_id: \"req-partial\",\n        reason_code: Some(\"CUSTOM_REASON\"),\n        confirm: true,\n        salt: &salt,",
+  "alert": 109
+ },
+ {
+  "file": "crates/clio-compliance/src/erase_tests.rs",
+  "test": "partial_shred_reports_processing_and_plain_error_propagates",
+  "old": "    let e = EraseArgs {\n        store: &failed,\n        maint: None,\n        ctx: &ctx,\n        subject_id: \"subject-1\",\n        legal_basis: \"CCPA_DELETION\",\n        request_id: \"req-fail\",\n        reason_code: None,\n        confirm: true,\n        salt: b\"salt\",",
+  "new": "    let e = EraseArgs {\n        store: &failed,\n        maint: None,\n        ctx: &ctx,\n        subject_id: \"subject-1\",\n        legal_basis: \"CCPA_DELETION\",\n        request_id: \"req-fail\",\n        reason_code: None,\n        confirm: true,\n        salt: &salt,",
+  "alert": 110
+ },
+ {
+  "file": "crates/clio-compliance/src/erase_tests.rs",
+  "test": "a_partial_erasure_event_also_names_the_credential",
+  "old": "    let out = erase_request(&EraseArgs {\n        store: &destroyed,\n        maint: None,\n        ctx: &ctx,\n        subject_id: \"subject-1\",\n        legal_basis: \"CCPA_DELETION\",\n        request_id: \"req-partial\",\n        reason_code: None,\n        confirm: true,\n        salt: b\"salt\",",
+  "new": "    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    let out = erase_request(&EraseArgs {\n        store: &destroyed,\n        maint: None,\n        ctx: &ctx,\n        subject_id: \"subject-1\",\n        legal_basis: \"CCPA_DELETION\",\n        request_id: \"req-partial\",\n        reason_code: None,\n        confirm: true,\n        salt: &salt,",
+  "alert": 112
+ },
+ {
+  "file": "crates/clio-compliance/src/export_context_tests.rs",
+  "test": "erased_subject_context_never_reappears_in_plaintext_export",
+  "old": "    let outcome = erase_request(&EraseArgs {\n        store: &f.store,\n        maint: None,\n        ctx: &ctx,\n        subject_id: &subject,\n        legal_basis: \"GDPR_ART_17\",\n        request_id: &request,\n        reason_code: None,\n        confirm: true,\n        salt: b\"deploy-salt\",",
+  "new": "    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    let outcome = erase_request(&EraseArgs {\n        store: &f.store,\n        maint: None,\n        ctx: &ctx,\n        subject_id: &subject,\n        legal_basis: \"GDPR_ART_17\",\n        request_id: &request,\n        reason_code: None,\n        confirm: true,\n        salt: &salt,",
+  "alert": 108
+ },
+ {
+  "file": "crates/clio-compliance/src/export_security_tests.rs",
+  "test": "compliance_purged_content_fails_export_closed",
+  "old": "    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: &bank,\n            subject_id: \"sub-gone\",\n            request_id: \"req-2\",\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: T,\n            salt: b\"salt\",",
+  "new": "    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: &bank,\n            subject_id: \"sub-gone\",\n            request_id: \"req-2\",\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: T,\n            salt: &salt,",
+  "alert": 111
+ },
+ {
+  "file": "crates/clio-compliance/src/export_tests.rs",
+  "test": "seed",
+  "old": "    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: bank,\n            subject_id: \"sub-gone\",\n            request_id: \"req-1\",\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: T,\n            salt: b\"salt\",",
+  "new": "    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: bank,\n            subject_id: \"sub-gone\",\n            request_id: \"req-1\",\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: T,\n            salt: &salt,",
+  "alert": 113
+ },
+ {
+  "file": "crates/clio-store/src/compliance_store_pg_export_read_tests.rs",
+  "test": "postgres_list_tombstones_returns_rows_for_the_bank",
+  "old": "    let request = unique(\"req\");\n    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: &bank,\n            subject_id: &subject,\n            request_id: &request,\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: \"2026-06-01T00:00:00Z\",\n            salt: b\"salt\",",
+  "new": "    let request = unique(\"req\");\n    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: &bank,\n            subject_id: &subject,\n            request_id: &request,\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: \"2026-06-01T00:00:00Z\",\n            salt: &salt,",
+  "alert": 120
+ },
+ {
+  "file": "crates/clio-store/src/compliance_store_pg_export_read_tests.rs",
+  "test": "postgres_list_tombstones_returns_rows_for_the_bank",
+  "old": "    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: &bank,\n            subject_id: &key_only,\n            request_id: &key_request,\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: \"2026-06-01T00:00:00Z\",\n            salt: b\"salt\",",
+  "new": "    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: &bank,\n            subject_id: &key_only,\n            request_id: &key_request,\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: \"2026-06-01T00:00:00Z\",\n            salt: &salt,",
+  "alert": 121
+ },
+ {
+  "file": "crates/clio-store/src/postgres_triple_seal_erase_tests.rs",
+  "test": "erase_spec",
+  "old": "    SubjectEraseSpec {\n        bank_id: bank,\n        subject_id: subject,\n        request_id: request,\n        legal_basis: \"GDPR_ART_17\",\n        reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n        deleted_at: \"2026-09-17T11:00:00Z\",\n        salt: b\"test-salt\",",
+  "new": "    // A fresh salt per process: no test asserts the tombstone hash value.\n    static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);\n    SubjectEraseSpec {\n        bank_id: bank,\n        subject_id: subject,\n        request_id: request,\n        legal_basis: \"GDPR_ART_17\",\n        reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n        deleted_at: \"2026-09-17T11:00:00Z\",\n        salt: &SALT[..],",
+  "alert": 133
+ },
+ {
+  "file": "crates/clio-sync/src/apply_records_tests_edge_tests.rs",
+  "test": "persona_preference_erased_bank_dead_letters",
+  "old": "    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: \"b-rec\",\n            subject_id: \"persona-erase-subject\",\n            request_id: \"req-erased\",\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: \"2026-01-02T00:00:00Z\",\n            salt: b\"salt\",",
+  "new": "    // A fresh salt per run: no test asserts the tombstone hash value.\n    let salt = rand::random::<[u8; 16]>();\n    store\n        .erase_subject(&SubjectEraseSpec {\n            bank_id: \"b-rec\",\n            subject_id: \"persona-erase-subject\",\n            request_id: \"req-erased\",\n            legal_basis: \"GDPR_ART_17\",\n            reason_code: \"COMPLIANCE_CRYPTO_SHRED\",\n            deleted_at: \"2026-01-02T00:00:00Z\",\n            salt: &salt,",
+  "alert": 142
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "content_sealed_under_the_raw_sync_key_is_refused",
+  "old": "    let mut nonce = [0u8; 24];",
+  "new": "    let nonce: [u8; 24] = rand::random();",
+  "alert": 276
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_tests.rs",
+  "test": "content_sealed_under_the_raw_sync_key_is_refused",
+  "old": "    nonce[0] = 1;\n",
+  "new": "",
+  "alert": 241
+ },
+ {
+  "file": "crates/clio-sync/src/crypto_nonce_tests.rs",
+  "test": "ciphertext_sealed_before_the_nonce_change_is_refused",
+  "old": "    let key = SyncCipherKey::from_secret(PRE_CHANGE_SECRET);",
+  "new": "    let key = SyncCipherKey::from_secret(&pre_change_secret);",
+  "alert": 0
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "the_keyed_mutation_id_still_follows_the_real_identifier",
+  "old": "    let key = \"pkg-mutid-follow\";",
+  "new": "    let key = crate::credential_fixtures::secret(\"pkg-mutid-follow\");",
+  "alert": 166
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "the_keyed_mutation_id_still_follows_the_real_identifier",
+  "old": "    let first = task_mutation(\n        &sealed_cfg(key),",
+  "new": "    let first = task_mutation(\n        &sealed_cfg(&key),",
+  "alert": 0
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "the_keyed_mutation_id_still_follows_the_real_identifier",
+  "old": "    let again = task_mutation(\n        &sealed_cfg(key),",
+  "new": "    let again = task_mutation(\n        &sealed_cfg(&key),",
+  "alert": 0
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "the_keyed_mutation_id_still_follows_the_real_identifier",
+  "old": "    let other_id = task_mutation(\n        &sealed_cfg(key),",
+  "new": "    let other_id = task_mutation(\n        &sealed_cfg(&key),",
+  "alert": 0
+ },
+ {
+  "file": "crates/clio-store/src/postgres_restore_tests.rs",
+  "test": "non_owning_role_is_refused_before_any_truncation",
+  "old": "    let role = unique(\"restore_probe_role\");\n    let s = quote_ident(&schema);",
+  "new": "    let role = unique(\"restore_probe_role\");\n    let probe = format!(\"probe-{:016x}\", rand::random::<u64>());\n    let s = quote_ident(&schema);",
+  "alert": 132
+ },
+ {
+  "file": "crates/clio-store/src/postgres_restore_tests.rs",
+  "test": "non_owning_role_is_refused_before_any_truncation",
+  "old": "PASSWORD 'probe';",
+  "new": "PASSWORD '{probe}';",
+  "alert": 0
+ },
+ {
+  "file": "crates/clio-store/src/postgres_restore_tests.rs",
+  "test": "non_owning_role_is_refused_before_any_truncation",
+  "old": "    let probe_url = with_credentials(url, &role, \"probe\");",
+  "new": "    let probe_url = with_credentials(url, &role, &probe);",
+  "alert": 0
+ },
+ {
+  "file": "crates/clio/src/setup_plan_db_tests.rs",
+  "test": "a_typed_advanced_value_is_percent_encoded",
+  "old": "    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        \"pw\",\n        SslChoice::Prefer,\n        None,\n        &[Extra {\n            name: \"options\",\n            value: \"a b&c=d\".to_owned(),",
+  "new": "    let password = format!(\"{:016x}\", rand::random::<u64>());\n    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        &password,\n        SslChoice::Prefer,\n        None,\n        &[Extra {\n            name: \"options\",\n            value: \"a b&c=d\".to_owned(),",
+  "alert": 262
+ },
+ {
+  "file": "crates/clio/src/setup_plan_db_tests.rs",
+  "test": "an_empty_advanced_value_adds_nothing",
+  "old": "    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        \"pw\",\n        SslChoice::Prefer,\n        None,\n        &[Extra {\n            name: \"options\",\n            value: \"  \".to_owned(),",
+  "new": "    let password = format!(\"{:016x}\", rand::random::<u64>());\n    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        &password,\n        SslChoice::Prefer,\n        None,\n        &[Extra {\n            name: \"options\",\n            value: \"  \".to_owned(),",
+  "alert": 263
+ },
+ {
+  "file": "crates/clio/src/setup_plan_db_tests.rs",
+  "test": "the_ssl_mode_is_the_first_query_parameter",
+  "old": "    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        \"pw\",\n        SslChoice::Disable,\n        None,\n        &[],",
+  "new": "    let password = format!(\"{:016x}\", rand::random::<u64>());\n    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        &password,\n        SslChoice::Disable,\n        None,\n        &[],",
+  "alert": 264
+ },
+ {
+  "file": "crates/clio/src/setup_plan_db_tests.rs",
+  "test": "a_typed_root_certificate_is_percent_encoded_into_the_address",
+  "old": "    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        \"pw\",\n        SslChoice::VerifyFull,\n        Some(\"/etc/my ca.pem\"),\n        &[],",
+  "new": "    let password = format!(\"{:016x}\", rand::random::<u64>());\n    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        &password,\n        SslChoice::VerifyFull,\n        Some(\"/etc/my ca.pem\"),\n        &[],",
+  "alert": 265
+ },
+ {
+  "file": "crates/clio/src/setup_plan_db_tests.rs",
+  "test": "an_empty_root_certificate_adds_nothing",
+  "old": "    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        \"pw\",\n        SslChoice::VerifyFull,\n        Some(\"  \"),\n        &[],",
+  "new": "    let password = format!(\"{:016x}\", rand::random::<u64>());\n    let address = typed_address(\n        \"h\",\n        \"5432\",\n        \"clio\",\n        \"clio\",\n        &password,\n        SslChoice::VerifyFull,\n        Some(\"  \"),\n        &[],",
+  "alert": 266
+ },
+ {
+  "file": "crates/clio/src/setup_plan_db_tests.rs",
+  "test": "a_root_certificate_is_not_added_for_a_mode_that_does_not_check_it",
+  "old": "        let address = typed_address(\n            \"h\",\n            \"5432\",\n            \"clio\",\n            \"clio\",\n            \"pw\",\n            mode,",
+  "new": "        let password = format!(\"{:016x}\", rand::random::<u64>());\n        let address = typed_address(\n            \"h\",\n            \"5432\",\n            \"clio\",\n            \"clio\",\n            &password,\n            mode,",
+  "alert": 267
+ },
+ {
+  "file": "crates/clio-sync/src/apply_history_edge_tests.rs",
+  "test": "mut_for",
+  "old": "        \"am-sync-hash\".as_bytes(),",
+  "new": "        crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 134
+ },
+ {
+  "file": "crates/clio-sync/src/apply_history_selfheal_tests.rs",
+  "test": "mut_for",
+  "old": "        \"am-sync-hash\".as_bytes(),",
+  "new": "        crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 135
+ },
+ {
+  "file": "crates/clio-sync/src/apply_history_tests.rs",
+  "test": "mut_for",
+  "old": "        \"am-sync-hash\".as_bytes(),",
+  "new": "        crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 136
+ },
+ {
+  "file": "crates/clio-sync/src/apply_records_selfheal_tests.rs",
+  "test": "mut_for",
+  "old": "        \"am-sync-hash\".as_bytes(),",
+  "new": "        crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 138
+ },
+ {
+  "file": "crates/clio-sync/src/apply_records_tests.rs",
+  "test": "mut_for",
+  "old": "        \"am-sync-hash\".as_bytes(),",
+  "new": "        crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 139
+ },
+ {
+  "file": "crates/clio-sync/src/apply_records_tests_edge_tests.rs",
+  "test": "cipher_m",
+  "old": "        content_hash: clio_store::sha256_hex(\"am-sync-hash\".as_bytes(), \"{}\"),",
+  "new": "        content_hash: clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, \"{}\"),",
+  "alert": 140
+ },
+ {
+  "file": "crates/clio-sync/src/apply_tests.rs",
+  "test": "hash_of",
+  "old": "    clio_store::sha256_hex(\"am-sync-hash\".as_bytes(), &text)",
+  "new": "    clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, &text)",
+  "alert": 141
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_digest_tests.rs",
+  "test": "a_cipher_makes_the_digest_unconfirmable_by_a_guess",
+  "old": "        clio_store::sha256_hex(b\"am-sync-hash\", &candidate),",
+  "new": "        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, &candidate),",
+  "alert": 146
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess",
+  "old": "    let guess = clio_store::sha256_hex(\n        b\"am-sync-mut\",",
+  "new": "    let guess = clio_store::sha256_hex(\n        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,",
+  "alert": 163
+ },
+ {
+  "file": "crates/clio-sync/src/client_feed_package_handle_tests.rs",
+  "test": "a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess",
+  "old": "    assert_ne!(\n        persona.sync_mutation_id,\n        clio_store::sha256_hex(b\"am-sync-mut\", &format!(\"{ATTR_NAME}|{STAMP}|upsert\")),",
+  "new": "    assert_ne!(\n        persona.sync_mutation_id,\n        clio_store::sha256_hex(\n            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,\n            &format!(\"{ATTR_NAME}|{STAMP}|upsert\"),\n        ),",
+  "alert": 165
+ },
+ {
+  "file": "crates/clio-sync/src/client_receipt_tests.rs",
+  "test": "sealed_without_receipt",
+  "old": "        content_hash: clio_store::sha256_hex(\n            b\"am-sync-hash\",",
+  "new": "        content_hash: clio_store::sha256_hex(\n            crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 169
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_fault_tests.rs",
+  "test": "mutation_id",
+  "old": "    clio_store::sha256_hex(b\"am-sync-mut\", &format!(\"{kind_id}|{stamp}|{op}\"))",
+  "new": "    clio_store::sha256_hex(\n        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,\n        &format!(\"{kind_id}|{stamp}|{op}\"),\n    )",
+  "alert": 175
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_fault_tests.rs",
+  "test": "a_sealed_row_for_a_shredded_subject_still_dead_letters",
+  "old": "            content: SyncContent::Cipher(sealed),\n            content_hash: clio_store::sha256_hex(b\"am-sync-hash\", \"anything\"),",
+  "new": "            content: SyncContent::Cipher(sealed),\n            content_hash: clio_store::sha256_hex(\n                crate::keyed_roles::PLAINTEXT_DIGEST_SALT,\n                \"anything\",\n            ),",
+  "alert": 178
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_fault_tests.rs",
+  "test": "an_unknown_algorithm_on_an_encrypted_row_is_still_refused",
+  "old": "            content: SyncContent::Cipher(SyncCipher {\n                key_id: Some(key.key_id()),\n                ..sealed\n            }),\n            content_hash: clio_store::sha256_hex(b\"am-sync-hash\", \"anything\"),",
+  "new": "            content: SyncContent::Cipher(SyncCipher {\n                key_id: Some(key.key_id()),\n                ..sealed\n            }),\n            content_hash: clio_store::sha256_hex(\n                crate::keyed_roles::PLAINTEXT_DIGEST_SALT,\n                \"anything\",\n            ),",
+  "alert": 181
+ },
+ {
+  "file": "crates/clio-sync/src/client_resolve_tests.rs",
+  "test": "a_row_whose_payload_lacks_its_identifier_is_refused",
+  "old": "        content_hash: clio_store::sha256_hex(b\"am-sync-hash\", \"anything\"),",
+  "new": "        content_hash: clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, \"anything\"),",
+  "alert": 201
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "hand_pushed",
+  "old": "            \"am-sync-mut\".as_bytes(),",
+  "new": "            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,",
+  "alert": 184
+ },
+ {
+  "file": "crates/clio-sync/src/client_rotation_tests.rs",
+  "test": "hand_pushed",
+  "old": "            \"am-sync-hash\".as_bytes(),",
+  "new": "            crate::keyed_roles::PLAINTEXT_DIGEST_SALT,",
+  "alert": 186
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key",
+  "old": "            let oracle = clio_store::sha256_hex(\n                b\"am-sync-mut\",\n                &format!(\"{guess}|{}|upsert\", row.transaction_time),",
+  "new": "            let oracle = clio_store::sha256_hex(\n                crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,\n                &format!(\"{guess}|{}|upsert\", row.transaction_time),",
+  "alert": 219
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key",
+  "old": "    let oracle = clio_store::sha256_hex(\n        b\"am-sync-mut\",\n        &format!(\"{edge_id}|{}|assoc\", edge.transaction_time),",
+  "new": "    let oracle = clio_store::sha256_hex(\n        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,\n        &format!(\"{edge_id}|{}|assoc\", edge.transaction_time),",
+  "alert": 221
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_blindness_tests.rs",
+  "test": "a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key",
+  "old": "        clio_store::sha256_hex(b\"am-sync-hash\", ATTR_NAME),",
+  "new": "        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, ATTR_NAME),",
+  "alert": 222
+ },
+ {
+  "file": "crates/clio-sync/src/client_wire_digest_tests.rs",
+  "test": "the_stored_content_digest_confirms_no_guessed_plaintext",
+  "old": "        let attack = clio_store::sha256_hex(b\"am-sync-hash\", &guess);",
+  "new": "        let attack = clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, &guess);",
+  "alert": 214
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_content_digest_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "    assert_ne!(\n        mine,\n        clio_store::sha256_hex(b\"am-sync-hash\", content),\n        \"a candidate-plaintext dictionary must not confirm\"",
+  "new": "    assert_ne!(\n        mine,\n        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, content),\n        \"a candidate-plaintext dictionary must not confirm\"",
+  "alert": 251
+ },
+ {
+  "file": "crates/clio-sync/src/keyed_roles_tests.rs",
+  "test": "the_mutation_id_with_a_cipher_is_keyed_and_peer_stable",
+  "old": "    assert_ne!(\n        mine,\n        clio_store::sha256_hex(b\"am-sync-mut\", \"task-42|2026-01-01|upsert\"),\n        \"a guessed identifier must not confirm against the stored key\"",
+  "new": "    assert_ne!(\n        mine,\n        clio_store::sha256_hex(\n            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,\n            \"task-42|2026-01-01|upsert\",\n        ),\n        \"a guessed identifier must not confirm against the stored key\"",
+  "alert": 256
+ }
+]

@@ -314,7 +314,9 @@ fn a_sealed_push_writes_every_documented_cleartext_column() {
         "dev-a",
         &a,
         &addr,
-        vec![SyncCipherKey::from_secret("feed-doc-key")],
+        vec![SyncCipherKey::from_secret(
+            &crate::credential_fixtures::secret("feed-doc-key"),
+        )],
     );
     seed_persona(&a, "bp");
     push(&cfg_a, &["bp".to_owned()]).expect("push");

@@ -27,11 +27,11 @@
 use super::{AAD, KEY_LEN, SEALED_PREFIX, is_sealed, is_sealed_path, open, seal};
 use clio_types::ErrorCode;
 
-/// The key most tests seal under. Any distinct 32 bytes work.
-const KEY: [u8; KEY_LEN] = [0x11; KEY_LEN];
+/// The key most tests seal under: one random value drawn once per process.
+static KEY: std::sync::LazyLock<[u8; KEY_LEN]> = std::sync::LazyLock::new(rand::random);
 
-/// A second key, for the wrong-key case.
-const OTHER_KEY: [u8; KEY_LEN] = [0x22; KEY_LEN];
+/// A second key, for the wrong-key case: one random value drawn once per process.
+static OTHER_KEY: std::sync::LazyLock<[u8; KEY_LEN]> = std::sync::LazyLock::new(rand::random);
 
 /// Values that must survive a round trip byte for byte.
 fn round_trip_cases() -> Vec<(&'static str, String)> {
@@ -275,7 +275,7 @@ fn the_authenticated_context_is_a_constant() {
 #[test]
 fn the_process_key_is_used_when_no_explicit_key_is_given() {
     use super::test_key;
-    test_key::use_key(KEY);
+    test_key::use_key(*KEY);
     let sealed = seal("sk-process-key-check").expect("seal with the process key");
     assert_eq!(
         open(&sealed),

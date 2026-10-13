@@ -198,6 +198,8 @@ fn postgres_list_tombstones_returns_rows_for_the_bank() {
     };
     store.create_memory_item(&carrier, "tester").unwrap();
     let request = unique("req");
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     store
         .erase_subject(&SubjectEraseSpec {
             bank_id: &bank,
@@ -206,7 +208,7 @@ fn postgres_list_tombstones_returns_rows_for_the_bank() {
             legal_basis: "GDPR_ART_17",
             reason_code: "COMPLIANCE_CRYPTO_SHRED",
             deleted_at: "2026-06-01T00:00:00Z",
-            salt: b"salt",
+            salt: &salt,
         })
         .unwrap();
     // A subject with a key but no items writes a subject-level (null hash) row.
@@ -223,7 +225,7 @@ fn postgres_list_tombstones_returns_rows_for_the_bank() {
             legal_basis: "GDPR_ART_17",
             reason_code: "COMPLIANCE_CRYPTO_SHRED",
             deleted_at: "2026-06-01T00:00:00Z",
-            salt: b"salt",
+            salt: &salt,
         })
         .unwrap();
 

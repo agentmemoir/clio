@@ -125,6 +125,8 @@ pub(crate) fn edge(bank: &str, ids: &Ids) -> TripleRecord {
 }
 
 fn erase_spec<'a>(bank: &'a str, subject: &'a str, request: &'a str) -> SubjectEraseSpec<'a> {
+    // A fresh salt per process: no test asserts the tombstone hash value.
+    static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);
     SubjectEraseSpec {
         bank_id: bank,
         subject_id: subject,
@@ -132,7 +134,7 @@ fn erase_spec<'a>(bank: &'a str, subject: &'a str, request: &'a str) -> SubjectE
         legal_basis: "GDPR_ART_17",
         reason_code: "COMPLIANCE_CRYPTO_SHRED",
         deleted_at: "2026-09-17T11:00:00Z",
-        salt: b"test-salt",
+        salt: &SALT[..],
     }
 }
 

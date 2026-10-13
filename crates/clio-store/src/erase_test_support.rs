@@ -79,7 +79,7 @@ pub(crate) fn restore_legacy_format_row(
         .expect("legacy-format row restore");
 }
 
-pub(crate) const SALT: &[u8] = b"test-salt";
+pub(crate) static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);
 
 pub(crate) use crate::test_unique::unique;
 
@@ -198,7 +198,7 @@ pub(crate) fn spec<'a>(bank: &'a str, subject: &'a str, request: &'a str) -> Sub
         legal_basis: "GDPR_ART_17",
         reason_code: "COMPLIANCE_CRYPTO_SHRED",
         deleted_at: "2026-09-17T11:00:00Z",
-        salt: SALT,
+        salt: &SALT[..],
     }
 }
 
