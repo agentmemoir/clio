@@ -116,7 +116,7 @@ fn the_content_digest_with_a_cipher_is_keyed_and_peer_stable() {
     assert_ne!(mine, content_digest(None, content), "keyed is not plain");
     assert_ne!(
         mine,
-        clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, content),
+        clio_store::sha256_hex(crate::keyed_roles::PUBLISHED_DIGEST_SALT, content),
         "a candidate-plaintext dictionary must not confirm"
     );
 }
@@ -159,7 +159,7 @@ fn the_mutation_id_with_a_cipher_is_keyed_and_peer_stable() {
     assert_ne!(
         mine,
         clio_store::sha256_hex(
-            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+            crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
             "task-42|2026-01-01|upsert",
         ),
         "a guessed identifier must not confirm against the stored key"

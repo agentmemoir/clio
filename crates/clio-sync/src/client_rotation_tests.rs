@@ -42,7 +42,7 @@ fn hand_pushed(addr: &str, cipher: SyncCipher, bank: &str, fixture: &clio_types:
     let plain = serde_json::to_value(fixture).expect("serialize the item fixture");
     let mutation = SyncMutation {
         sync_mutation_id: sha256_hex(
-            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+            crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
             &format!("{}|{}|{OP_UPSERT}", fixture.id, fixture.tx_from),
         ),
         bank: bank.to_owned(),
@@ -53,7 +53,7 @@ fn hand_pushed(addr: &str, cipher: SyncCipher, bank: &str, fixture: &clio_types:
         device_id: "dev-hand".into(),
         content: SyncContent::Cipher(cipher),
         content_hash: sha256_hex(
-            crate::keyed_roles::PLAINTEXT_DIGEST_SALT,
+            crate::keyed_roles::PUBLISHED_DIGEST_SALT,
             &serde_json::to_string(&plain).expect("plain text"),
         ),
         admission_receipt: None,

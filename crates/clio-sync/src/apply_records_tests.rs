@@ -55,7 +55,7 @@ fn payload(record: &str, entry: &impl serde::Serialize) -> Value {
 
 fn mut_for(mid: &str, kind: &str, entity: &str, stamp: &str, content: Value) -> SyncMutation {
     let content_hash = clio_store::sha256_hex(
-        crate::keyed_roles::PLAINTEXT_DIGEST_SALT,
+        crate::keyed_roles::PUBLISHED_DIGEST_SALT,
         &serde_json::to_string(&content).unwrap_or_default(),
     );
     SyncMutation {

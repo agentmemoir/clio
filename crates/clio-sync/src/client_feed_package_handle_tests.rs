@@ -258,7 +258,7 @@ fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
     )
     .expect("sealed task");
     let guess = clio_store::sha256_hex(
-        crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+        crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
         &format!("{TASK_ID}|{}|upsert", task_record(TASK_ID, "task-row-1").id),
     );
     assert_ne!(
@@ -275,7 +275,7 @@ fn a_cipher_makes_the_mutation_id_unconfirmable_by_a_guess() {
     assert_ne!(
         persona.sync_mutation_id,
         clio_store::sha256_hex(
-            crate::keyed_roles::PLAINTEXT_MUTATION_ID_SALT,
+            crate::keyed_roles::PUBLISHED_MUTATION_ID_SALT,
             &format!("{ATTR_NAME}|{STAMP}|upsert"),
         ),
         "nor is the shared helper's key the hash of the attribute name"

@@ -59,7 +59,7 @@ fn cipher_m(mid: &str, kind: &str, entity: &str) -> SyncMutation {
             nonce_b64: "AA==".into(),
             ciphertext_b64: "AA==".into(),
         }),
-        content_hash: clio_store::sha256_hex(crate::keyed_roles::PLAINTEXT_DIGEST_SALT, "{}"),
+        content_hash: clio_store::sha256_hex(crate::keyed_roles::PUBLISHED_DIGEST_SALT, "{}"),
         admission_receipt: None,
     }
 }

@@ -72,13 +72,13 @@ const MUTATION_ID_LABEL: &[u8] = b"mutation-id";
 /// unkeyed hash over a published domain string. A relay holding the journal can
 /// confirm a guessed plaintext against it, which is exactly what the keyed form
 /// below removes and exactly why a deployment with no cipher keeps it.
-pub(crate) const PLAINTEXT_DIGEST_SALT: &[u8] = b"am-sync-hash";
+const PLAINTEXT_DIGEST_SALT: &[u8] = b"am-sync-hash";
 
 /// Plaintext-mode idempotency key, unchanged from the pre-keyed build, over the
 /// same published domain string and the same preimage. With no cipher there is
 /// no key to derive it under, and nothing to hide: the row already carries the
 /// real identifier in the clear.
-pub(crate) const PLAINTEXT_MUTATION_ID_SALT: &[u8] = b"am-sync-mut";
+const PLAINTEXT_MUTATION_ID_SALT: &[u8] = b"am-sync-mut";
 
 /// Bytes of handle kept per record. Half of the hash output, which is the
 /// floor the construction's own specification recommends, and the width this
@@ -190,6 +190,15 @@ pub fn mutation_id(
 pub fn role_subkey(key: &SyncCipherKey, role: &[u8]) -> Vec<u8> {
     clio_store::keyed_digest(key.key_bytes(), role, &[], 32)
 }
+
+/// The published plaintext-mode domain labels, exposed for the tests across the
+/// crate that pin the wire format. The labels themselves stay private.
+#[cfg(test)]
+pub(crate) const PUBLISHED_DIGEST_SALT: &[u8] = PLAINTEXT_DIGEST_SALT;
+
+/// The published plaintext-mode idempotency label, exposed for the same tests.
+#[cfg(test)]
+pub(crate) const PUBLISHED_MUTATION_ID_SALT: &[u8] = PLAINTEXT_MUTATION_ID_SALT;
 
 #[cfg(test)]
 #[path = "keyed_roles_tests.rs"]
