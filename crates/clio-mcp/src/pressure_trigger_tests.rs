@@ -181,8 +181,7 @@ fn maintenance_status_carries_the_trigger_from_the_trigger_record() {
         json!({
             "evaluated": false,
             "unavailable": "trigger has not evaluated this bank",
-        }),
-        "{out}"
+        })
     );
     // One declined evaluation in the shared record: the block renders that
     // record, so it can never disagree with the decision that was made.
@@ -201,13 +200,9 @@ fn maintenance_status_carries_the_trigger_from_the_trigger_record() {
         "{decision:?}"
     );
     let out = dispatch(&s, "maintenance_status", &json!({"bank": BANK})).expect("dispatch");
-    assert_eq!(out["trigger"]["evaluated"], json!(true), "{out}");
-    assert_eq!(out["trigger"]["fired"], json!(false), "{out}");
-    assert_eq!(
-        out["trigger"]["last_decline"],
-        json!("no pressure"),
-        "{out}"
-    );
+    assert_eq!(out["trigger"]["evaluated"], json!(true));
+    assert_eq!(out["trigger"]["fired"], json!(false));
+    assert_eq!(out["trigger"]["last_decline"], json!("no pressure"));
 }
 
 /// An evaluation whose pressure read was declined (lock held) records no

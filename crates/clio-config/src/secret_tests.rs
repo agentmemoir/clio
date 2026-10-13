@@ -146,8 +146,8 @@ fn scrub_still_masks_a_fresh_secret_after_an_already_masked_one() {
     // Skipping an existing mask must not abort the scan: a real secret later
     // in the same string is still masked.
     let scrubbed = scrub_inline_secrets("token: [REDACTED] and api_key: sk-LIVEKEY42");
-    assert!(scrubbed.contains("token: [REDACTED]"), "{scrubbed}");
-    assert!(!scrubbed.contains("sk-LIVEKEY42"), "{scrubbed}");
+    assert!(scrubbed.contains("token: [REDACTED]"));
+    assert!(!scrubbed.contains("sk-LIVEKEY42"));
 }
 
 #[test]

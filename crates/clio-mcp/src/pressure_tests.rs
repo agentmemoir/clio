@@ -325,16 +325,8 @@ fn archive_band_counts_band_items_and_excludes_discard_band_items() {
         .iter()
         .find(|c| c.item_id == "band-secret")
         .expect("secret candidate");
-    assert_eq!(
-        secret.suggested_action.as_deref(),
-        Some("discard"),
-        "{secret:?}"
-    );
-    assert!(
-        secret.noise_score >= super::DISCARD_BAND_MIN_SCORE,
-        "{}",
-        secret.noise_score
-    );
+    assert_eq!(secret.suggested_action.as_deref(), Some("discard"));
+    assert!(secret.noise_score >= super::DISCARD_BAND_MIN_SCORE);
     // Only the archive band counts; the discard-band secret hit does not.
     let count = super::archive_candidates(&scoped, BANK, NOW, super::ARCHIVE_SCAN_BUDGET);
     assert_eq!(count, json!({"count": 1, "incomplete": false}), "{count}");
@@ -372,21 +364,17 @@ fn maintenance_status_merges_pressure_without_touching_existing_fields() {
     )
     .expect("dispatch");
     // The pre-existing fields keep their real values on this fixture.
-    assert_eq!(out["leaf_queryable"], json!(true), "{out}");
-    assert!(out["structural_maintenance_ms"].is_u64(), "{out}");
-    assert!(out["time_to_queryable_ms"].is_u64(), "{out}");
-    assert_eq!(out["dirty_ancestors"], json!([]), "{out}");
-    assert_eq!(out["refreshing"], json!([]), "{out}");
+    assert_eq!(out["leaf_queryable"], json!(true));
+    assert!(out["structural_maintenance_ms"].is_u64());
+    assert!(out["time_to_queryable_ms"].is_u64());
+    assert_eq!(out["dirty_ancestors"], json!([]));
+    assert_eq!(out["refreshing"], json!([]));
     // None-valued fields are skipped by the serializer, so absent is correct.
-    assert!(out.get("last_error").is_none(), "{out}");
-    assert!(out.get("item_id").is_none(), "{out}");
+    assert!(out.get("last_error").is_none());
+    assert!(out.get("item_id").is_none());
     // The index block is the unchanged payload, byte for byte.
-    assert_eq!(
-        out["index"],
-        s.index_status_json(BANK).expect("json"),
-        "{out}"
-    );
-    assert!(out["index"]["pending_jobs"].is_u64(), "{out}");
+    assert_eq!(out["index"], s.index_status_json(BANK).expect("json"));
+    assert!(out["index"]["pending_jobs"].is_u64());
     let pressure = out["pressure"].as_object().expect("pressure object");
     let mut keys: Vec<&str> = pressure.keys().map(String::as_str).collect();
     keys.sort_unstable();
@@ -415,8 +403,7 @@ fn maintenance_status_merges_pressure_without_touching_existing_fields() {
         json!({
             "evaluated": false,
             "unavailable": "trigger has not evaluated this bank",
-        }),
-        "{out}"
+        })
     );
 }
 

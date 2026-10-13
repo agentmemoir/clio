@@ -98,7 +98,7 @@ fn every_variable_reaches_the_path_it_owns() {
     ];
     for (path, value) in expected {
         let found = text(&rt, path);
-        assert_eq!(found.as_deref(), Some(value), "{path} got the wrong value");
+        assert_eq!(found.as_deref(), Some(value), "got the wrong value");
     }
 
     let secrets = [
@@ -108,7 +108,7 @@ fn every_variable_reaches_the_path_it_owns() {
     ];
     for (path, value) in secrets {
         let found = text(&rt, path);
-        assert_eq!(found.as_deref(), Some(value), "{path} got the wrong value");
+        assert_eq!(found.as_deref(), Some(value), "got the wrong value");
     }
 
     assert_eq!(rt.repo_root.as_deref(), Some("/tmp/from-env"));

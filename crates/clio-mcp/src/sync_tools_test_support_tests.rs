@@ -74,23 +74,17 @@ impl Drop for TempDir {
 pub(crate) fn assert_no_key_material(result: &serde_json::Value, fingerprint: &str, key: &str) {
     let rendered = result.to_string();
 
-    assert!(!rendered.contains("\"key\""), "{rendered}");
+    assert!(!rendered.contains("\"key\""));
     for name in ["key_b64", "secret", "key_bytes", "sync_key"] {
-        assert!(
-            !rendered.contains(name),
-            "a leaked field {name}: {rendered}"
-        );
+        assert!(!rendered.contains(name), "a leaked field");
     }
     assert!(!key.is_empty(), "the premise: a key is stored");
-    assert!(!rendered.contains(key), "the whole key leaked: {rendered}");
+    assert!(!rendered.contains(key), "the whole key leaked");
     for len in [4_usize, 8, 12, 16, 20, 24] {
         let prefix = &key[..len];
         if prefix == fingerprint {
             continue;
         }
-        assert!(
-            !rendered.contains(prefix),
-            "a {len}-character prefix of the key leaked: {prefix} in {rendered}"
-        );
+        assert!(!rendered.contains(prefix), "a key prefix leaked");
     }
 }

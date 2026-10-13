@@ -84,7 +84,7 @@ fn digest_is_the_sha256_hex_of_the_secret_bytes() {
 #[test]
 fn generated_secret_has_the_recorded_shape_and_entropy() {
     let secret = generate_secret();
-    assert_eq!(secret.len(), 43, "{secret}");
+    assert_eq!(secret.len(), 43);
     assert!(
         secret
             .chars()
