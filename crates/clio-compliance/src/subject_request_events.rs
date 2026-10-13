@@ -11,17 +11,17 @@
 //! ## Owns
 //! - `SubjectActionEvent` stable envelope and `ActionPayload`
 //! - `ProtectedAction` (the export, erasure, and restore event producers),
-//!   `ActionIntent`, `ActionOutcome`, and `PendingResult`
+//!   `ActionIntent`, `ActionOutcome`, `ActionEventKind`, and `PendingResult`
 //! - `check_binding` public-binding gate and `BindingRefusal`
 //! - `check_restore` restore gate and `RestoreRefusal`
 //! - `accept_closure` closure acceptance and `ClosureBlock`
-//! - `ActionEventLog` in-memory append-only event writer
 //!
 //! ## Does not own
 //! - The request state table and ledger (see `subject_request.rs`)
 //! - Copy-custody manifest fields (see `subject_request_manifest.rs`)
-//! - Any storage adapter, SQL, I/O, or protected action performed: the log is
-//!   in-memory only, and the gates are pure functions
+//! - The in-memory event writer (see `action_event_log.rs`)
+//! - Any storage adapter, SQL, I/O, or protected action performed: the gates
+//!   are pure functions and nothing here is stateful
 //! - Subject content, identity proof, key material, or tokens: no field here
 //!   holds them, and free-text reasons must stay generic
 //!
@@ -29,15 +29,13 @@
 //!
 //! Changes to event shape, producer ids, gate rules, or refusal reasons should
 //! normally require changes here. Changes to request state semantics or to how
-//! events are stored should not require changes here.
+//! events are recorded or stored should not require changes here.
 //!
 //! Keep this module focused on the pure action-event contract.
 
 use crate::subject_request::{FinalOutcome, RequestScope};
-use crate::subject_request_manifest::is_rfc3339_utc;
-use clio_types::{AmError, ErrorCode};
+use clio_types::Actor;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// The stable event type string carried by every action event envelope.
 pub const ACTION_EVENT_TYPE: &str = "compliance.subject_request.action";
@@ -103,6 +101,16 @@ pub enum ActionOutcome {
     },
 }
 
+/// Which stage of an action an event records; the set is closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionEventKind {
+    /// The pre-effect intent.
+    Intent,
+    /// The post-effect outcome.
+    Outcome,
+}
+
 /// Durable pending result: what a protected action still owes before it is
 /// done.
 ///
@@ -118,10 +126,9 @@ pub enum PendingResult {
 
 /// One protected-action event for a subject request.
 ///
-/// The envelope is stable: type, id, time, version, and correlation id never
-/// change meaning. The payload carries the action's producer, its action id,
-/// its pre-effect intent, its post-effect outcome, and its durable pending
-/// result.
+/// The envelope is stable: type, id, time, version, sequence, actor, and
+/// correlation id never change meaning. The payload carries the producer,
+/// the event kind, the intent, the outcome, and the pending result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubjectActionEvent {
     /// Envelope event type; always [`ACTION_EVENT_TYPE`].
@@ -134,6 +141,10 @@ pub struct SubjectActionEvent {
     pub version: u32,
     /// Correlation id: the durable request id the event belongs to.
     pub correlation_id: String,
+    /// The writer-assigned sequence position; gap-free per durable store.
+    pub sequence: u64,
+    /// The actor that performed the action.
+    pub actor: Actor,
     /// The event payload.
     pub payload: ActionPayload,
 }
@@ -143,6 +154,8 @@ pub struct SubjectActionEvent {
 pub struct ActionPayload {
     /// The protected action that produced the event.
     pub producer: ProtectedAction,
+    /// Which stage of the action this event records.
+    pub kind: ActionEventKind,
     /// The pre-effect intent.
     pub intent: ActionIntent,
     /// The post-effect outcome; absent while the action is still running.
@@ -151,143 +164,6 @@ pub struct ActionPayload {
     /// The durable pending result; absent once the action owes nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<PendingResult>,
-}
-
-/// What [`ActionEventLog::record`] did with an event id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecordOutcome {
-    /// The event was new and was appended.
-    Recorded,
-    /// The id and content matched a stored event: nothing was applied.
-    Replayed,
-}
-
-/// In-memory append-only log of subject-request action events: the event
-/// writer interface of this contract.
-///
-/// The log owns no persistence: a caller reloads [`SubjectActionEvent`]s from
-/// its store and calls [`Self::load`] to model a restart. Events are immutable
-/// once written: the same id with the same content replays, and the same id
-/// with changed content is refused.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct ActionEventLog {
-    events: Vec<SubjectActionEvent>,
-}
-
-impl ActionEventLog {
-    /// An empty log.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Rebuild a log from events reloaded after a restart.
-    ///
-    /// Stored events were validated when they were recorded, so they are
-    /// trusted here. Callers must not reload duplicate event ids: load keeps
-    /// entries as given with no deduplication, so a duplicated id is counted
-    /// once per entry it appears in.
-    #[must_use]
-    pub fn load(events: Vec<SubjectActionEvent>) -> Self {
-        Self { events }
-    }
-
-    /// Every stored event, in record order.
-    #[must_use]
-    pub fn events(&self) -> Vec<SubjectActionEvent> {
-        self.events.clone()
-    }
-
-    /// Append an event, or replay its stored result.
-    ///
-    /// A malformed event is refused and changes nothing. The same event id
-    /// with the same content replays and applies nothing; the same event id
-    /// with changed content is refused, because a written event is immutable.
-    pub fn record(&mut self, event: SubjectActionEvent) -> Result<RecordOutcome, AmError> {
-        validate(&event)?;
-        if let Some(stored) = self
-            .events
-            .iter()
-            .find(|stored| stored.event_id == event.event_id)
-        {
-            if *stored == event {
-                return Ok(RecordOutcome::Replayed);
-            }
-            return Err(AmError::new(
-                ErrorCode::Forbidden,
-                "event id is already bound to a different event",
-            ));
-        }
-        self.events.push(event);
-        Ok(RecordOutcome::Recorded)
-    }
-
-    /// How many copy actions of a request are still open.
-    ///
-    /// A copy action is open when its latest event does not record a finished
-    /// action with nothing still owed: no outcome yet, a pending result still
-    /// owed, or an outcome other than done. A failed or refused copy that
-    /// still owes disposition must therefore carry a pending result, or it
-    /// stays open and keeps blocking closure.
-    #[must_use]
-    pub fn open_copy_actions(&self, request_id: &str) -> usize {
-        let mut latest: BTreeMap<&str, &SubjectActionEvent> = BTreeMap::new();
-        for event in &self.events {
-            if event.payload.producer == ProtectedAction::CopyExport
-                && event.correlation_id == request_id
-            {
-                latest.insert(event.payload.intent.action_id.as_str(), event);
-            }
-        }
-        latest
-            .values()
-            .filter(|event| {
-                !matches!(event.payload.outcome, Some(ActionOutcome::Done))
-                    || event.payload.pending.is_some()
-            })
-            .count()
-    }
-}
-
-fn validate(event: &SubjectActionEvent) -> Result<(), AmError> {
-    if event.event_type != ACTION_EVENT_TYPE {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "event type must be the stable action-event type",
-        ));
-    }
-    if event.version != ACTION_EVENT_VERSION {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "event version must be the stable envelope version",
-        ));
-    }
-    if event.event_id.trim().is_empty() {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "event id must not be blank",
-        ));
-    }
-    if event.correlation_id.trim().is_empty() {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "event correlation id must not be blank",
-        ));
-    }
-    if !is_rfc3339_utc(&event.time) {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "event time must be an RFC 3339 UTC timestamp",
-        ));
-    }
-    if event.payload.intent.action_id.trim().is_empty() {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "action id must not be blank",
-        ));
-    }
-    event.payload.intent.scope.validate()?;
-    Ok(())
 }
 
 /// The controls a public binding must hold before its gated actions run.
@@ -430,3 +306,11 @@ pub fn accept_closure(inputs: &ClosureInputs) -> Result<FinalOutcome, ClosureBlo
         Ok(FinalOutcome::Completed)
     }
 }
+
+#[cfg(test)]
+#[path = "subject_request_events_gates_tests.rs"]
+mod subject_request_events_gates_tests;
+
+#[cfg(test)]
+#[path = "subject_request_events_store_tests.rs"]
+mod subject_request_events_store_tests;

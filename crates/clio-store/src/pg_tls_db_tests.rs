@@ -31,7 +31,7 @@
 //! Changes to the connector decision or the probe should normally require
 //! changes here. Changes to the parse should not require changes here.
 
-use crate::db_url::postgres_url_from_env;
+use crate::db_url::{postgres_url_from_env, with_database};
 use crate::pg_lock::lock_pg_test;
 use crate::pg_probe::{
     PROBE_ATTEMPTS, PROBE_RETRY_DELAY, probe, probe_once, probe_within, retry_until_ready,
@@ -39,23 +39,18 @@ use crate::pg_probe::{
 use crate::pg_tls::connect;
 use std::time::Duration;
 
-/// The shared URL with a query string appended, so the database path is not
-/// doubled.
+/// The shared URL's server, port, and credentials with `query` as the whole
+/// query string, so the database path is not doubled.
 fn url_with_query(query: &str) -> String {
-    format!("{}?{query}", server_url())
+    let base = postgres_url_from_env();
+    let path = base.split_once('?').map_or(base.as_str(), |(p, _)| p);
+    let server = path.rsplit_once('/').map_or(path, |(s, _)| s);
+    format!("{server}?{query}")
 }
 
 /// The shared URL pointed at a different database on the same server.
 fn url_for_database(name: &str) -> String {
-    format!("{}/{name}", server_url())
-}
-
-/// The shared URL with its database name removed: server, port, and credentials.
-fn server_url() -> String {
-    let base = postgres_url_from_env();
-    base.rsplit_once('/')
-        .map_or(base.as_str(), |(server, _)| server)
-        .to_owned()
+    with_database(&postgres_url_from_env(), name)
 }
 
 #[test]

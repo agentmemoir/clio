@@ -6,9 +6,10 @@
 --   2. SQLite: this file, then 002_vectors_sqlite.sql
 --      Postgres: 002_vectors_postgres.sql, then this file
 --
--- These slots reserve storage ownership only. Each table is a minimal text-key
--- placeholder that a named owner group will build on later; no feature columns,
--- rows, or triggers live here yet. Owner groups:
+-- These slots reserve storage ownership. G6's local_events table carries the
+-- real local event schema; every other table is a minimal text-key placeholder
+-- that its owner group will build on later (no feature columns or rows yet).
+-- Owner groups:
 --   G6    local_events           local event store (content-free local events)
 --   G7    subject_family_links   subject-family mapping (stored subject links)
 --   G8A   durable_requests       durable request state (request schema slot)
@@ -24,10 +25,23 @@
 -- ---------------------------------------------------------------------------
 -- Slots (one per owner group)
 -- ---------------------------------------------------------------------------
--- G6: local event store (content-free local events).
+-- G6: local event store. One row per protected local action: the intent is the
+-- outcome-pending record written before the protected effect, and the outcome
+-- write completes it. `seq` is the store-assigned order position (MAX+1 inside
+-- the insert transaction, UNIQUE-backed), `scope` is opaque, and `result` is
+-- the caller-redacted outcome text (NULL while pending). Pruning removes only
+-- completed allowed rows: request (pending) and denial rows always stay.
 CREATE TABLE IF NOT EXISTS local_events
 (
-  id                                                                                           text PRIMARY KEY
+  action_id                                                                                    text PRIMARY KEY,
+  seq                                                                                          bigint NOT NULL UNIQUE CHECK (seq >= 1),
+  actor                                                                                        text NOT NULL,
+  scope                                                                                        text NOT NULL,
+  kind                                                                                         text NOT NULL,
+  event_time                                                                                   text NOT NULL,
+  outcome_state                                                                                text NOT NULL CHECK (outcome_state IN ('pending', 'allowed', 'denied')),
+  result                                                                                       text
+  CHECK ((outcome_state = 'pending') = (result IS NULL))
 );
 
 -- G7: subject-family mapping (stored subject links).
