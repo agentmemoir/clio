@@ -78,6 +78,9 @@ env:
   # between runs, so only changed crates are recompiled.
   CARGO_BUILD_JOBS: "1"
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: fmt · clippy · scoped tests · script suites
