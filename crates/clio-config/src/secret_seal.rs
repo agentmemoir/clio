@@ -60,7 +60,6 @@ use crate::secret_key::{KEY_LEN, load_or_create};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use clio_types::{AmError, ErrorCode};
-use rand::RngCore;
 use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroizing;
 
@@ -161,8 +160,7 @@ pub fn seal_with_key(plain: &str, key: &[u8; KEY_LEN]) -> Result<String, AmError
     if is_sealed(plain) {
         return Ok(plain.to_owned());
     }
-    let mut nonce = [0_u8; NONCE_LEN];
-    rand::rng().fill_bytes(&mut nonce);
+    let nonce: [u8; NONCE_LEN] = rand::random();
     let cipher = ChaCha20Poly1305::new(key.into());
     let ciphertext = cipher
         .encrypt(
