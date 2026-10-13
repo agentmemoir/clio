@@ -51,6 +51,9 @@ mod import;
 mod inventory;
 mod scratchpad;
 mod stats;
+mod subject_request;
+mod subject_request_events;
+mod subject_request_manifest;
 mod validate;
 
 pub use audit::{AuditTrailView, audit_trail};
@@ -76,6 +79,20 @@ pub use inventory::{
 };
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
+pub use subject_request::{
+    FinalOutcome, RegisterOutcome, RequestCommand, RequestScope, RequestState, StateCategory,
+    SubjectRequestLedger, SubjectRequestRecord, transition,
+};
+pub use subject_request_events::{
+    ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventLog, ActionIntent, ActionOutcome,
+    ActionPayload, BindingControls, BindingRefusal, ClosureBlock, ClosureInputs, PendingResult,
+    ProtectedAction, RecordOutcome, RestoreInputs, RestoreRefusal, SubjectActionEvent,
+    accept_closure, check_binding, check_restore,
+};
+pub use subject_request_manifest::{
+    CopyCustodyManifest, DIGEST_ALGORITHM_PREFIX, KEY_COPY_DIGEST, KEY_PRODUCED_AT, KEY_PRODUCER,
+    KEY_RECEIVED_AT, KEY_RECEIVER,
+};
 pub use validate::{ValidateAction, ValidateArgs, ValidateOutcome, validate};
 
 #[cfg(test)]
@@ -95,5 +112,9 @@ mod inventory_pg_support_tests;
 #[cfg(test)]
 #[path = "inventory_pg_tests.rs"]
 mod inventory_pg_tests;
+#[cfg(test)]
+mod subject_request_events_tests;
+#[cfg(test)]
+mod subject_request_tests;
 #[cfg(test)]
 mod test_unique;
