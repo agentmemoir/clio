@@ -181,6 +181,7 @@ dependencies = [
  "clio-admission",
  "clio-backup",
  "clio-belief",
+ "clio-compliance",
  "clio-config",
  "clio-history",
  "clio-hygiene",

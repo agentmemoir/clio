@@ -183,6 +183,7 @@ const GROUP_ARM_SOURCES: &[(&str, &str)] = &[
     ("belief", "src/cli_read_belief.rs"),
     ("belief", "src/cli_write_graph.rs"),
     ("canonical", "src/cli_write_workspace.rs"),
+    ("compliance", "src/compliance_cli.rs"),
     ("compose", "src/compose_cli.rs"),
     ("config", "src/config_cli.rs"),
     ("failure", "src/cli_read_history.rs"),

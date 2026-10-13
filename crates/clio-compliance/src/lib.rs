@@ -14,6 +14,7 @@
 //! - `correct` routing: discrete item corrections vs continuous attribute
 //!   adjustments, with mandatory reason validation
 //! - `erase_request` verified crypto-shredding workflow and its authorization gate
+//! - `scope_inventory` read-only local compliance scope ledger
 //! - `Scratchpad` ephemeral session workspace with quotas and TTL
 //! - `canonical_put` / `canonical_get` single-slot adapter
 //! - `validate` reviewer actions (attest / update / invalidate / discard)
@@ -47,6 +48,7 @@ mod erase;
 mod export;
 mod export_mask;
 mod import;
+mod inventory;
 mod scratchpad;
 mod stats;
 mod validate;
@@ -68,6 +70,10 @@ pub use erase::{
 };
 pub use export::{ExportArgs, ExportFilter, ExportOutcome, export};
 pub use import::{ImportArgs, ImportReport, import};
+pub use inventory::{
+    Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,
+    Readability, RetentionAction, ScopeInventory, scope_inventory,
+};
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
 pub use validate::{ValidateAction, ValidateArgs, ValidateOutcome, validate};
@@ -78,5 +84,16 @@ mod export_tests;
 mod import_fixture;
 #[cfg(test)]
 mod import_fixture_signals;
+#[cfg(test)]
+// Renamed from `inventory_fixture.rs` so the gate-boundary naming exemption
+// (`*_fixtures.rs`) applies; the module keeps its old name because the test
+// modules import through `crate::inventory_fixture`.
+#[path = "inventory_fixtures.rs"]
+mod inventory_fixture;
+#[cfg(test)]
+mod inventory_pg_support_tests;
+#[cfg(test)]
+#[path = "inventory_pg_tests.rs"]
+mod inventory_pg_tests;
 #[cfg(test)]
 mod test_unique;

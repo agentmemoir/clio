@@ -8,8 +8,9 @@
 //! ## Owns
 //! - Argument parsing and dispatch for scaffold commands (`version`, `health`, `help`)
 //! - Dispatch into the command surfaces: `backup`, `auth`, `mcp`, `ops`,
-//!   `status`, `retention`, `compose`, `setup`, `config`, `ranking`, `sync`,
-//!   `install`/`uninstall`, and the read and write verb surfaces
+//!   `status`, `retention`, `compliance`, `compose`, `setup`, `config`,
+//!   `ranking`, `sync`, `install`/`uninstall`, and the read and write verb
+//!   surfaces
 //! - Process exit codes for the top-level commands
 //!
 //! ## Does not own
@@ -62,6 +63,8 @@ mod cli_command_bindings;
 mod cli_command_registry;
 mod cli_command_registry_auth_config;
 mod cli_command_registry_backup;
+mod cli_command_registry_compliance;
+mod cli_command_registry_contract;
 mod cli_command_registry_core_reads;
 mod cli_command_registry_core_writes;
 mod cli_command_registry_graph_records;
@@ -114,6 +117,7 @@ mod cli_write_shared;
 mod cli_write_source_type;
 mod cli_write_workspace;
 mod command_catalog;
+mod compliance_cli;
 mod compose_assets;
 mod compose_cli;
 mod compose_docker;
@@ -273,6 +277,7 @@ fn dispatch(cmd: &str, trailing: Vec<String>) -> ExitCode {
         "ops" => ops_cli::ops(trailing),
         "status" => status_cli::status(trailing),
         "retention" => retention_cli::retention(trailing),
+        "compliance" => compliance_cli::compliance(trailing),
         "compose" => compose_cli::compose(trailing),
         "setup" => setup_cli::setup(trailing),
         "config" => config_cli::config(trailing),

@@ -15,6 +15,7 @@ path = "src/main.rs"
 clio-types = { workspace = true }
 clio-config = { workspace = true }
 clio-backup = { workspace = true }
+clio-compliance = { workspace = true }
 clio-store = { workspace = true }
 clio-admission = { workspace = true }
 clio-write = { workspace = true }
