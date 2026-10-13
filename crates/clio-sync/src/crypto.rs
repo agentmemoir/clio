@@ -33,7 +33,6 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
 };
 use clio_types::{AmError, ErrorCode};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use zeroize::Zeroizing;
@@ -147,8 +146,7 @@ impl SyncCipherKey {
         // on every call: reusing a nonce under one key is the failure this
         // prevents. `open` reads the nonce back from the wire, so nothing
         // else depends on where it came from.
-        let mut nonce_bytes = [0u8; 24];
-        rand::rng().fill_bytes(&mut nonce_bytes);
+        let nonce_bytes: [u8; 24] = rand::random();
         let cipher = XChaCha20Poly1305::new(self.seal_key().as_slice().into());
         // XChaCha20-Poly1305 encryption cannot fail for a valid key and nonce;
         // the only documented failure is a plaintext over 256 GiB.

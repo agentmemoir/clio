@@ -29,7 +29,6 @@ use crate::dek_slots::{KeySlot, SlotStore};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use clio_types::{AmError, ErrorCode};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -262,8 +261,7 @@ impl DekProvider for LocalDevKms {
         let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
         let (version, key_bytes) = store.ensure(subject_id)?;
         let cipher = ChaCha20Poly1305::new((&key_bytes).into());
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::rng().fill_bytes(&mut nonce_bytes);
+        let nonce_bytes: [u8; NONCE_LEN] = rand::random();
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
             .encrypt(nonce, plaintext)

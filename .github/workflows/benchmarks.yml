@@ -18,6 +18,9 @@ on:
       - 'benchmarks/**'
       - '.github/workflows/benchmarks.yml'
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     name: clio-bench suite (unittest)

@@ -33,6 +33,9 @@ env:
   # runner either.
   CARGO_BUILD_JOBS: "1"
 
+permissions:
+  contents: read
+
 jobs:
   mcp-conformance-2025-11-25:
     name: MCP conformance (2025-11-25 pin)
