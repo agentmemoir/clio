@@ -1,0 +1,15 @@
+[
+ {"file": "crates/clio-config/src/retention_mission_tests.rs", "test": "vague_missions_are_rejected_with_guidance", "old": ", \"{}\", err.message", "new": "", "alert": 54},
+ {"file": "crates/clio-config/src/retention_mission_tests.rs", "test": "vague_missions_are_rejected_with_guidance", "old": ",\n        \"{}\",\n        err.message", "new": "", "alert": 56},
+ {"file": "crates/clio-config/src/retention_mission_tests.rs", "test": "secret_bearing_entries_are_rejected_with_hygiene_guidance", "old": ", \"{}\", err.message", "new": "", "alert": 55},
+ {"file": "crates/clio-config/src/sync_key_rotation_gen_tests.rs", "test": "keystore_rotation_refuses_a_shadowing_file_instead_of_guessing", "old": ", \"{}\", err.message", "new": "", "alert": 57},
+ {"file": "crates/clio-config/src/sync_key_rotation_gen_tests.rs", "test": "keystore_rotation_refuses_a_wrong_length_entry", "old": ", \"{}\", err.message", "new": "", "alert": 58},
+ {"file": "crates/clio-hygiene/src/audit_scale_tests.rs", "test": "t02_near_duplicate_lookup_at_scale_matches_brute_force", "old": ",\n            \"item {item_id} noise score mismatch: got {} vs expected {}\",\n            candidate.noise_score,\n            expected_score.score", "new": "", "alert": 12},
+ {"file": "crates/clio-hygiene/src/audit_tests.rs", "test": "t21_01_secret_candidate_ranks_top_with_redacted_preview", "old": ", \"{}\", secret.noise_score", "new": "", "alert": 59},
+ {"file": "crates/clio-hygiene/src/scoring_tests.rs", "test": "defaults_compose_appendix_weights", "old": ", \"{}\", scored.score", "new": "", "alert": 60},
+ {"file": "crates/clio-hygiene/src/scoring_tests.rs", "test": "secret_hit_floors_score_at_ninety", "old": ", \"{}\", scored.score", "new": "", "alert": 61},
+ {"file": "crates/clio-hygiene/src/scoring_tests.rs", "test": "utility_gap_and_staleness_raise_score", "old": ", \"{}\", scored.score", "new": "", "alert": 62},
+ {"file": "crates/clio-store/src/tls_trust_tests.rs", "test": "a_missing_root_file_names_the_path", "old": ", \"{}\", err.message", "new": "", "alert": 64},
+ {"file": "crates/clio-store/src/tls_trust_tests.rs", "test": "a_file_that_is_not_a_certificate_is_refused", "old": ",\n        \"{}\",\n        err.message", "new": "", "alert": 65},
+ {"file": "crates/clio-mcp/src/pressure_tests.rs", "test": "archive_band_counts_band_items_and_excludes_discard_band_items", "old": ",\n        \"{}\",\n        secret.noise_score", "new": "", "alert": 0}
+]

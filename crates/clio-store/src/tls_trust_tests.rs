@@ -99,7 +99,7 @@ fn a_supplied_root_is_added_alongside_the_bundled_ones() {
 fn a_missing_root_file_names_the_path() {
     let missing = fixture("no_such_ca.pem");
     let err = trust_roots(Some(&missing)).expect_err("a missing file is refused");
-    assert!(err.message.contains(&missing), "{}", err.message);
+    assert!(err.message.contains(&missing));
 }
 
 #[test]
@@ -108,11 +108,7 @@ fn a_file_that_is_not_a_certificate_is_refused() {
     std::fs::write(&path, b"this is not a certificate\n").expect("write the scratch file");
     let err = trust_roots(Some(&path.to_string_lossy())).expect_err("junk is refused");
     let _ = std::fs::remove_file(&path);
-    assert!(
-        err.message.contains("no usable certificate"),
-        "{}",
-        err.message
-    );
+    assert!(err.message.contains("no usable certificate"));
 }
 
 #[test]
@@ -125,10 +121,7 @@ fn a_certificate_signed_by_the_supplied_root_verifies() {
         &[],
         now(),
     );
-    assert!(
-        outcome.is_ok(),
-        "the leaf chains to the supplied root: {outcome:?}"
-    );
+    assert!(outcome.is_ok(), "the leaf chains to the supplied root");
 }
 
 #[test]

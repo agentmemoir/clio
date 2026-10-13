@@ -38,7 +38,7 @@ fn defaults_compose_appendix_weights() {
     let mut i = input();
     i.near_duplicate = true;
     let scored = score_noise(&i, &HygieneWeights::default());
-    assert!((scored.score - 0.15).abs() < 1e-9, "{}", scored.score);
+    assert!((scored.score - 0.15).abs() < 1e-9);
     assert_eq!(scored.reasons, vec!["near_duplicate"]);
     assert_eq!(scored.suggested_action, None);
 }
@@ -59,7 +59,7 @@ fn secret_hit_floors_score_at_ninety() {
     let mut i = input();
     i.secret_hit = true;
     let scored = score_noise(&i, &HygieneWeights::default());
-    assert!(scored.score >= 0.90, "{}", scored.score);
+    assert!(scored.score >= 0.90);
     assert_eq!(scored.reasons[0], "secret_credential");
     assert_eq!(scored.suggested_action, Some("discard"));
 }
@@ -102,7 +102,7 @@ fn utility_gap_and_staleness_raise_score() {
     i.utility_proxy = 0.0;
     i.staleness = 1.0;
     let scored = score_noise(&i, &HygieneWeights::default());
-    assert!((scored.score - 0.25).abs() < 1e-9, "{}", scored.score);
+    assert!((scored.score - 0.25).abs() < 1e-9);
     assert!(scored.reasons.contains(&"low_utility"));
     assert!(scored.reasons.contains(&"stale"));
 }

@@ -285,12 +285,7 @@ fn t02_near_duplicate_lookup_at_scale_matches_brute_force() {
             has_dup_reason, expected_dup,
             "item {item_id} duplicate status mismatch"
         );
-        assert!(
-            (candidate.noise_score - expected_score.score).abs() < 1e-6,
-            "item {item_id} noise score mismatch: got {} vs expected {}",
-            candidate.noise_score,
-            expected_score.score
-        );
+        assert!((candidate.noise_score - expected_score.score).abs() < 1e-6);
     }
 }
 

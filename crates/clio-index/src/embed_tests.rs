@@ -62,9 +62,9 @@ fn source_context_is_excluded_from_dense_and_lexical_text() {
     );
     it.context = Some("classified rollout room".to_owned());
     let dense = embed_text(&it).expect("dense text");
-    assert!(!dense.contains("classified rollout room"), "{dense}");
+    assert!(!dense.contains("classified rollout room"));
     let lexical = lexical_text(&it).expect("lexical text");
-    assert!(!lexical.contains("classified rollout room"), "{lexical}");
+    assert!(!lexical.contains("classified rollout room"));
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn scrub_redacts_marker_adjacent_secrets() {
     let scrubbed = scrub_embed_text(text);
     assert!(
         scrubbed.contains("api_key=****"),
-        "marker-adjacent value must be masked: {scrubbed}"
+        "marker-adjacent value must be masked"
     );
     assert_eq!(scrub_embed_text("nothing here"), "nothing here");
 }
