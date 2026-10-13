@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on the status report model and rendering.
 
-use clio_ops::OpsFinding;
+use clio_ops::{OpsFinding, VERIFY_POINTER};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -44,6 +44,9 @@ pub(crate) struct StatusReport {
     pub compose: ComposeView,
     /// Embedded diagnose verdict and findings.
     pub diagnose: DiagnoseView,
+    /// The deeper check this report does not run: its `ok` covers setup,
+    /// database, listeners, Compose, and diagnose only.
+    pub verify_pointer: &'static str,
 }
 
 /// Setup / deployment-config view.
@@ -146,6 +149,7 @@ pub(crate) fn assemble(
         ports,
         compose,
         diagnose,
+        verify_pointer: VERIFY_POINTER,
     }
 }
 
@@ -221,6 +225,13 @@ pub(crate) fn render_text(report: &StatusReport) -> String {
             out,
             "            [{:?}] {} {}: {}",
             finding.severity, finding.code, finding.scope, finding.message
+        );
+    }
+    if report.ok {
+        let _ = writeln!(
+            out,
+            "  verify:   deeper index-coverage and referential-integrity checks: `{}`",
+            report.verify_pointer
         );
     }
     out

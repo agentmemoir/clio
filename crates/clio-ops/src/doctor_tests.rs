@@ -147,6 +147,39 @@ fn coverage_gap_plan_includes_rebuild_actions() {
     assert!(ids.contains(&ACTION_REBUILD_LEXICAL_INDEX));
 }
 
+/// A bank-scoped plan sees only that bank. A gap in another bank must surface
+/// as a note, so a clean plan is not read as a clean store.
+#[test]
+fn scoped_plan_notes_store_wide_findings_outside_the_bank() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    let (_registry, plan) = plan_for(&store, Some("b"), true);
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("store-wide findings outside bank `b`")),
+        "{:?}",
+        plan.notes
+    );
+}
+
+/// The note must fire even when the scoped bank carries the same error code as
+/// another bank: the outside finding is real regardless.
+#[test]
+fn scoped_plan_notes_an_outside_bank_with_the_same_code() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    store.create_memory_item(&item("i2", "b"), "actor").unwrap();
+    let (_registry, plan) = plan_for(&store, Some("b"), true);
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("store-wide findings outside bank `b`")),
+        "{:?}",
+        plan.notes
+    );
+}
+
 #[test]
 fn allowlist_recognizes_exactly_the_known_actions() {
     assert_eq!(

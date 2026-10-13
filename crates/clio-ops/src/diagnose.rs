@@ -30,6 +30,11 @@ use clio_index::Embedder;
 use clio_store::{IndexStore, OpsStore};
 use serde::Serialize;
 
+/// The command that checks the index-coverage and referential-integrity
+/// questions `diagnose` deliberately leaves out, so a healthy snapshot points a
+/// reader at the deeper pass instead of standing in for it.
+pub const VERIFY_POINTER: &str = "clio ops verify";
+
 /// Inputs for [`diagnose`].
 pub struct DiagnoseArgs<'a> {
     /// Operator health repository.
@@ -79,6 +84,9 @@ pub struct DiagnoseReport {
     pub embedding_ready: Option<bool>,
     /// Findings in deterministic order.
     pub findings: Vec<OpsFinding>,
+    /// Deeper index-coverage and referential-integrity checks live here rather
+    /// than in this snapshot, so an `ok` verdict names what it does not cover.
+    pub verify_pointer: &'static str,
 }
 
 /// Run the read-only health snapshot. Never fails: probe errors become findings.
@@ -187,6 +195,7 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
         retry_jobs: retry,
         embedding_ready,
         findings: findings.into_vec(),
+        verify_pointer: VERIFY_POINTER,
     }
 }
 

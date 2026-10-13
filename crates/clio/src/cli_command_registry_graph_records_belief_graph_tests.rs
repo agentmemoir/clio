@@ -34,12 +34,12 @@ fn belief_history_matches_the_registered_usage_and_parser() {
     let spec = record("belief history");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--output json|text]",
+        "usage: clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--bank BANK] [--output json|text]",
         "belief history full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--output json|text]",
+        "clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--bank BANK] [--output json|text]",
         "belief history usage line"
     );
     assert_eq!(
@@ -71,12 +71,12 @@ fn belief_observe_matches_the_registered_usage_and_parser() {
     let spec = record("belief observe");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
+        "usage: clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "belief observe full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--output json|text]",
+        "clio belief observe PROP --confidence C --evidence E --source S [--as-of TS] [--subject-id ID] [--context TEXT] [--dry-run] [--bank BANK] [--output json|text]",
         "belief observe usage line"
     );
     assert_eq!(
@@ -116,12 +116,12 @@ fn graph_query_matches_the_registered_usage_and_parser() {
     let spec = record("graph query");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--output json|text]",
+        "usage: clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
         "graph query full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--output json|text]",
+        "clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
         "graph query usage line"
     );
     assert_eq!(
@@ -162,12 +162,12 @@ fn graph_link_matches_the_registered_usage_and_parser() {
     let spec = record("graph link");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
+        "usage: clio graph link A B --relationship R [--weight W] [--dry-run] [--bank BANK] [--output json|text]",
         "graph link full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio graph link A B --relationship R [--weight W] [--dry-run] [--output json|text]",
+        "clio graph link A B --relationship R [--weight W] [--dry-run] [--bank BANK] [--output json|text]",
         "graph link usage line"
     );
     assert_eq!(
@@ -203,12 +203,12 @@ fn associations_matches_the_registered_usage_and_parser() {
     let spec = record("associations");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio associations ITEM_ID [--min-weight W] [--explain] [--output json|text]",
+        "usage: clio associations ITEM_ID [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
         "associations full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio associations ITEM_ID [--min-weight W] [--explain] [--output json|text]",
+        "clio associations ITEM_ID [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
         "associations usage line"
     );
     assert_eq!(

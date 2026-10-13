@@ -80,12 +80,12 @@ fn get_matches_the_registered_usage_and_parser() {
     let spec = record("get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio get ID [--snapshot|--gist] [--output json|text]",
+        "usage: clio get ID [--snapshot|--gist] [--bank BANK] [--output json|text]",
         "get full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio get ID [--snapshot|--gist] [--output json|text]",
+        "clio get ID [--snapshot|--gist] [--bank BANK] [--output json|text]",
         "get usage line"
     );
     assert_eq!(
@@ -110,12 +110,12 @@ fn show_matches_the_registered_usage_and_parser() {
     let spec = record("show");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio show ID [--snapshot|--gist] [--output json|text]",
+        "usage: clio show ID [--snapshot|--gist] [--bank BANK] [--output json|text]",
         "show full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio show ID [--snapshot|--gist] [--output json|text]",
+        "clio show ID [--snapshot|--gist] [--bank BANK] [--output json|text]",
         "show usage line"
     );
     assert_eq!(
@@ -138,12 +138,12 @@ fn inspect_matches_the_registered_usage_and_parser() {
     let spec = record("inspect");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio inspect [--filter JSON] [--category C] [--epistemic-kind K] [--validity V] [--time-start TS] [--time-end TS] [--limit N] [--offset N] [--include-discarded] [--output json|text]",
+        "usage: clio inspect [--filter JSON] [--category C] [--epistemic-kind K] [--validity V] [--time-start TS] [--time-end TS] [--limit N] [--offset N] [--include-discarded] [--bank BANK] [--output json|text]",
         "inspect full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio inspect [--filter JSON] [--category C] [--epistemic-kind K] [--validity V] [--time-start TS] [--time-end TS] [--limit N] [--offset N] [--include-discarded] [--output json|text]",
+        "clio inspect [--filter JSON] [--category C] [--epistemic-kind K] [--validity V] [--time-start TS] [--time-end TS] [--limit N] [--offset N] [--include-discarded] [--bank BANK] [--output json|text]",
         "inspect usage line"
     );
     assert_eq!(

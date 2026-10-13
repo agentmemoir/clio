@@ -28,8 +28,8 @@
 //!
 //! Keep this module focused on the belief, graph, and associations records.
 
-use super::{AS_OF, CONTEXT, DRY_RUN, EXPLAIN, SUBJECT_ID, UNPRINTED_GLOBALS};
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use super::{AS_OF, CONTEXT, DRY_RUN, EXPLAIN, SUBJECT_ID, UNPRINTED_GLOBALS_OUTSIDE_BANK};
+use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::SourceType;
 
@@ -86,8 +86,8 @@ pub(crate) const BELIEF_HISTORY: CommandSpec = CommandSpec {
     summary: "one belief's confidence history",
     notes: &[],
     positionals: &[BELIEF_ID],
-    documented: &[EXPLAIN, GLOBAL_OUTPUT],
-    accepted_extra: UNPRINTED_GLOBALS,
+    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -147,9 +147,10 @@ pub(crate) const BELIEF_OBSERVE: CommandSpec = CommandSpec {
         SUBJECT_ID,
         CONTEXT,
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: UNPRINTED_GLOBALS,
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -189,9 +190,10 @@ pub(crate) const GRAPH_QUERY: CommandSpec = CommandSpec {
         ),
         MIN_WEIGHT,
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: UNPRINTED_GLOBALS,
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -239,9 +241,10 @@ pub(crate) const GRAPH_LINK: CommandSpec = CommandSpec {
             )
         },
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
-    accepted_extra: UNPRINTED_GLOBALS,
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -271,8 +274,8 @@ pub(crate) const ASSOCIATIONS: CommandSpec = CommandSpec {
     summary: "co-activation links for one item",
     notes: &[],
     positionals: &[ITEM_ID],
-    documented: &[MIN_WEIGHT, EXPLAIN, GLOBAL_OUTPUT],
-    accepted_extra: UNPRINTED_GLOBALS,
+    documented: &[MIN_WEIGHT, EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],

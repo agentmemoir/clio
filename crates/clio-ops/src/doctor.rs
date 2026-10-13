@@ -26,7 +26,7 @@
 //! (when `dry_run=false`) records the plan in the in-memory registry only.
 
 use crate::finding::{Findings, OpsFinding, Severity, codes};
-use crate::verify::{VerifyArgs, VerifyReport};
+use crate::verify::{VerifyArgs, VerifyReport, error_codes};
 use clio_store::{IndexStore, OpsStore};
 use clio_types::AmError;
 use serde::{Deserialize, Serialize};
@@ -172,7 +172,10 @@ pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
         bank: args.bank,
         timestamp: args.timestamp,
     })?;
-    let (actions, notes) = compose(&report);
+    let (actions, mut notes) = compose(&report);
+    if args.bank.is_some() {
+        notes.extend(store_wide_note(args));
+    }
     let plan = DoctorPlan {
         plan_id: args.plans.allocate_id(),
         generated_at: args.timestamp.to_owned(),
@@ -187,6 +190,43 @@ pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
         args.plans.insert(plan.clone());
     }
     Ok(plan)
+}
+
+/// A bank-scoped plan sees only that bank's findings. Verify every other known
+/// bank and name any error code they carry, so a reader of a bank-scoped
+/// `doctor` does not read a clean plan as a clean store. Comparing codes across
+/// banks (not against the whole-store aggregate) catches a gap in another bank
+/// even when the scoped bank carries the same code. A store whose bank list
+/// cannot be read adds no claim.
+fn store_wide_note(args: &DoctorArgs<'_>) -> Option<String> {
+    let bank = args.bank?;
+    let mut outside: Vec<String> = Vec::new();
+    for other in args.store.bank_ids().ok()? {
+        if other == bank {
+            continue;
+        }
+        let Ok(report) = crate::verify::verify(&VerifyArgs {
+            store: args.store,
+            index: args.index,
+            bank: Some(other.as_str()),
+            timestamp: args.timestamp,
+        }) else {
+            continue;
+        };
+        for code in error_codes(&report.findings) {
+            if !outside.contains(&code) {
+                outside.push(code);
+            }
+        }
+    }
+    if outside.is_empty() {
+        return None;
+    }
+    outside.sort();
+    Some(format!(
+        "store-wide findings outside bank `{bank}`: {}; run `clio ops verify` without --bank",
+        outside.join(", ")
+    ))
 }
 
 /// Map verify findings to ordered actions plus manual-repair notes.

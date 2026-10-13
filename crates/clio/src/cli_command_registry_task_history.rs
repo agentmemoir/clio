@@ -31,7 +31,7 @@
 //!
 //! Keep this module focused on the task, failure, memtree, and history records.
 
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
 /// The required `TASK_ID` positional of `task get`, `task history`,
@@ -125,9 +125,9 @@ const LESSON: Flag = Flag {
     )
 };
 
-/// The declared globals these commands accept without printing: every global
-/// but `--output`, which each usage line documents.
-const UNPRINTED_GLOBALS: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+/// The declared globals these commands accept without printing: `--bank` is
+/// documented on each usage line, so it is left out here.
+const UNPRINTED_GLOBALS: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// `clio task get`: one task and its current state, over the `task_get` tool.
 pub(crate) const TASK_GET: CommandSpec = CommandSpec {
@@ -136,7 +136,7 @@ pub(crate) const TASK_GET: CommandSpec = CommandSpec {
     summary: "one task and its current state",
     notes: &[],
     positionals: &[TASK_ID],
-    documented: &[EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: UNPRINTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -164,6 +164,7 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
             "Caps the recorded transitions; `cli_read_history::task_history_call` parses it with `parse_u64` for `task_history`.",
         ),
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED_GLOBALS,
@@ -204,6 +205,7 @@ pub(crate) const TASK_UPSERT: CommandSpec = CommandSpec {
             "Adds freeform context; `cli_write_persona::task_upsert_call` sends it as `context`.",
         ),
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED_GLOBALS,
@@ -239,6 +241,7 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
             "Caps the failures returned; `cli_read_history::failure_list_call` parses it with `parse_u64` for `failures_for_task`.",
         ),
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED_GLOBALS,
@@ -276,6 +279,7 @@ pub(crate) const FAILURE_RECORD: CommandSpec = CommandSpec {
             "Adds freeform context; `cli_write_persona::failure_record_call` sends it as `context`.",
         ),
         DRY_RUN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED_GLOBALS,
@@ -335,6 +339,7 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
             "Caps the nodes returned; `cli_read_history::memtree_query_call` parses it with `parse_u64` for `memtree_query`.",
         ),
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED_GLOBALS,
@@ -360,7 +365,7 @@ pub(crate) const MEMTREE_GET: CommandSpec = CommandSpec {
     summary: "one memory-tree node and its lineage",
     notes: &[],
     positionals: &[NODE_ID],
-    documented: &[EXPLAIN, GLOBAL_OUTPUT],
+    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: UNPRINTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -394,6 +399,7 @@ pub(crate) const HISTORY_TEMPORAL: CommandSpec = CommandSpec {
             &["valid", "transaction"],
         ),
         EXPLAIN,
+        GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: UNPRINTED_GLOBALS,

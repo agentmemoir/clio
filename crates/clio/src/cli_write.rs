@@ -184,7 +184,7 @@ fn run_parsed(
                         &CliError::operational(refusal.code, refusal.message),
                     );
                 }
-                let text = group.render(
+                let mut text = group.render(
                     verb,
                     &payload,
                     crate::cli_style::Palette::new(cli_output::supports_color(
@@ -192,6 +192,12 @@ fn run_parsed(
                         io.no_color,
                     )),
                 );
+                if group.mutates(verb)
+                    && let Some(bank) = receipt_bank(verb, &args, state)
+                {
+                    use std::fmt::Write as _;
+                    let _ = write!(text, " in bank `{bank}`");
+                }
                 emit(io, mode, &payload, &text);
                 drain_after_write(group, verb, state, &payload);
                 match group.failure_exit(verb, &payload) {
@@ -202,6 +208,24 @@ fn run_parsed(
             Err(error) => fail(io, mode, &error),
         },
     }
+}
+
+/// The bank a write receipt names: the caller's `--bank`, or the CLI default.
+///
+/// Only a command whose help documents `--bank` gets the suffix, so a command
+/// that selects its bank another way (`--scope` for `summarize`, `--shared-bank`
+/// for the shared surface) returns `None` and keeps its receipt unchanged.
+fn receipt_bank<'a>(verb: &str, args: &'a Value, state: &'a McpState) -> Option<&'a str> {
+    let advertises_bank = crate::cli_command_registry::find(verb)
+        .is_some_and(|spec| spec.usage_line().contains("--bank"));
+    if !advertises_bank {
+        return None;
+    }
+    Some(
+        args.get("bank")
+            .and_then(Value::as_str)
+            .unwrap_or(&state.default_bank),
+    )
 }
 
 fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(), CliError> {

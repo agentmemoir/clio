@@ -445,3 +445,7 @@ mod help_topics;
 #[cfg(test)]
 #[path = "cli_command_registry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_command_registry_bank_tests.rs"]
+mod bank_tests;

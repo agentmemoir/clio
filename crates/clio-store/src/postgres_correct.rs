@@ -23,7 +23,7 @@
 //! Keep this module focused on the Postgres discrete correction.
 
 use crate::audit_model::{CorrectionOutcome, CorrectionSpec};
-use crate::item_persist::{map_item_insert, require_actor, seal_dual};
+use crate::item_persist::{require_actor, seal_dual};
 use crate::migrate::IntoAmError;
 
 use crate::postgres::PostgresStore;
@@ -123,9 +123,8 @@ impl PostgresStore {
                 // Lost a concurrent supersession race; nothing was written.
                 return Ok(already_superseded(spec));
             }
-            map_item_insert(
-                tx.execute(
-                    "INSERT INTO items (
+            crate::postgres_memory::map_pg_item_insert(tx.execute(
+                "INSERT INTO items (
                         id, bank_id, kind, category, episodic_type, epistemic_kind, source_type,
                         confidence, admission_score, source_ref, content_ciphertext, subject_id,
                         valid_from, valid_until, tx_from, tx_until, corrects_item_id,
@@ -135,30 +134,28 @@ impl PostgresStore {
                         $8::float8, $9::float8, $10, $11, $12,
                         $13, $14, $15, $16, $17, $18, $19
                      )",
-                    &[
-                        &spec.new_item.id,
-                        &spec.new_item.bank_id,
-                        &kind,
-                        &category,
-                        &episodic_type,
-                        &epistemic,
-                        &source_type,
-                        &spec.new_item.confidence,
-                        &spec.new_item.admission_score,
-                        &spec.new_item.source_ref,
-                        &cipher,
-                        &spec.new_item.subject_id,
-                        &spec.new_item.valid_from,
-                        &spec.new_item.valid_until,
-                        &spec.new_item.tx_from,
-                        &spec.new_item.tx_until,
-                        &spec.prior_item_id,
-                        &spec.new_item.created_at,
-                        &spec.new_item.updated_at,
-                    ],
-                )
-                .map_err(|e| e.to_string()),
-            )?;
+                &[
+                    &spec.new_item.id,
+                    &spec.new_item.bank_id,
+                    &kind,
+                    &category,
+                    &episodic_type,
+                    &epistemic,
+                    &source_type,
+                    &spec.new_item.confidence,
+                    &spec.new_item.admission_score,
+                    &spec.new_item.source_ref,
+                    &cipher,
+                    &spec.new_item.subject_id,
+                    &spec.new_item.valid_from,
+                    &spec.new_item.valid_until,
+                    &spec.new_item.tx_from,
+                    &spec.new_item.tx_until,
+                    &spec.prior_item_id,
+                    &spec.new_item.created_at,
+                    &spec.new_item.updated_at,
+                ],
+            ))?;
             let sk_rows = tx
                 .execute(
                     "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)

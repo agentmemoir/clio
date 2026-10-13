@@ -1,0 +1,1 @@
+Every bank-scoped command now lists `--bank BANK` in its usage line, and every bank-scoped write prints the bank it landed in, so a write that took the default bank is no longer mistaken for lost data.
