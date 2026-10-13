@@ -1,1 +1,1 @@
-`clio compliance inventory` prints a read-only report naming every local subject-data family, its subject link or open gap, and caller-declared copies, exiting 0 while any row stays open.
+`clio compliance inventory` prints a read-only report naming every local subject-data family, its subject link or open gap, and caller-declared copies, exiting 0 while any row stays open. ([#187](https://github.com/agentmemoir/clio/pull/187))
