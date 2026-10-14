@@ -19,6 +19,18 @@ from gate_kinds import EXECUTED_LOG_MARKER
 from gate_selftest_c import state
 
 
+def _competing_publisher(log_dir: str, scratch: str, letter: str, code: int, barrier) -> None:
+    """Write one run's body, wait for the others, then publish it.
+
+    The barrier is what makes the check exercise the lock: without it the publishers
+    drift apart, and two of them are unlikely to be inside a publish at once.
+    """
+    source = Path(scratch) / f"log-{letter}"
+    source.write_bytes((letter * 63 + "\n").encode() * 16)
+    barrier.wait()
+    _publish_log(source, log_dir, "command", code)
+
+
 class PublishPairTests(unittest.TestCase):
     """The newest published pair describes one run, and it names that run."""
 
@@ -72,11 +84,72 @@ class PublishPairTests(unittest.TestCase):
             self.assertFalse((log_dir / "command.prev").exists(), "an identical repeat invented an earlier run")
             self.assertIn(b"2026-01-02T00:00:00Z", (log_dir / "command.log").read_bytes())
 
-    def test_an_older_record_without_a_run_line_compares_by_its_body(self) -> None:
-        body = EXECUTED_LOG_MARKER + b"cargo output\n"
-        named = EXECUTED_LOG_MARKER + b"gate: run worktree=/w tree=aaa finished=?\n" + b"cargo output\n"
-        self.assertEqual(body, _body_only(body))
-        self.assertEqual(body, _body_only(named))
+    def test_a_failed_log_write_puts_the_verdict_back(self) -> None:
+        # The pair is two renames, and the verdict goes first so a failing run
+        # always publishes its own code. When the log cannot follow, leaving the new
+        # code in place would publish two runs, so the verdict must go back.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            log_dir.mkdir()
+            previous = EXECUTED_LOG_MARKER + b"OLD RUN\n"
+            (log_dir / "command.log").write_bytes(previous)
+            (log_dir / "command.exit").write_bytes(b"0\ngate: run worktree=/old tree=000 finished=?\n")
+            newer = Path(tmp) / "log"
+            newer.write_bytes(b"NEW FAILING RUN\n")
+            # A directory stands where the log goes, so replacing the log fails.
+            (log_dir / "command.log").unlink()
+            (log_dir / "command.log").mkdir()
+            quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
+            run_line = b"gate: run worktree=/w tree=abc finished=?\n"
+            with quiet[0], quiet[1]:
+                result = _publish_log(newer, str(log_dir), "command", 2, run_line=run_line)
+
+            self.assertIsNone(result)
+            self.assertEqual(
+                b"0\ngate: run worktree=/old tree=000 finished=?\n",
+                (log_dir / "command.exit").read_bytes(),
+                "the new verdict was left beside the previous run's log",
+            )
+
+    def test_a_failed_kept_run_write_leaves_the_newest_pair(self) -> None:
+        # Keeping the replaced run is the last write and the least important one.
+        # Its failure must not stop the newest log, or the publish would hold two runs.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            log_dir.mkdir()
+            (log_dir / "command.log").write_bytes(EXECUTED_LOG_MARKER + b"OLD RUN\n")
+            (log_dir / "command.exit").write_text("0\n")
+            newer = Path(tmp) / "log"
+            newer.write_bytes(b"NEW FAILING RUN\n")
+            # A directory stands where the kept run goes, so that write fails.
+            (log_dir / "command.prev").mkdir()
+            quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
+            run_line = b"gate: run worktree=/w tree=abc finished=?\n"
+            with quiet[0], quiet[1]:
+                result = _publish_log(newer, str(log_dir), "command", 2, run_line=run_line)
+
+            self.assertIsNotNone(result, "a failed kept-run write cost the newest publish")
+            self.assertEqual("2", (log_dir / "command.exit").read_text().split("\n")[0].strip())
+            self.assertTrue((log_dir / "command.log").read_text().endswith("NEW FAILING RUN\n"))
+
+    def test_a_command_line_that_merely_starts_like_a_run_line_is_kept(self) -> None:
+        # The run line has a shape, not just a prefix. A command whose own output
+        # opens with the prefix must not have that line dropped, because an
+        # identical re-run would then invent an earlier run.
+        body = b"gate: run this is my own output\nrest\n"
+        old_format = EXECUTED_LOG_MARKER + body
+        self.assertEqual(old_format, _body_only(old_format))
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            log_dir.mkdir()
+            (log_dir / "command.log").write_bytes(old_format)
+            source = Path(tmp) / "log"
+            source.write_bytes(body)
+            quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
+            with quiet[0], quiet[1]:
+                _publish_log(source, str(log_dir), "command", 0, run_line=b"gate: run worktree=/w tree=abc finished=?\n")
+
+            self.assertFalse((log_dir / "command.prev").exists(), "an identical body invented an earlier run")
 
     def test_the_published_record_names_the_run_and_its_tree(self) -> None:
         # One published directory can serve every worktree of a checkout, so a
@@ -91,10 +164,13 @@ class PublishPairTests(unittest.TestCase):
                 self.assertEqual(0, run_gate(["/bin/sh", "-c", "printf hello"], log_dir=str(log_dir)))
 
             lines = (log_dir / "command.log").read_text().splitlines()
+            exit_lines = (log_dir / "command.exit").read_text().splitlines()
         self.assertEqual(EXECUTED_LOG_MARKER.decode().strip(), lines[0])
         self.assertTrue(lines[1].startswith("gate: run worktree=/worktree-one tree="), lines[1])
         self.assertIn(" finished=", lines[1])
         self.assertEqual("hello", lines[2])
+        self.assertEqual("0", exit_lines[0], "the exit file's first line is not the exit code")
+        self.assertEqual(lines[1], exit_lines[1], "the exit file does not name the run the log names")
 
     def test_two_publishers_of_one_directory_wait_for_each_other(self) -> None:
         # The gate's own lock is per worktree. A published directory is not, so it
@@ -122,3 +198,71 @@ class PublishPairTests(unittest.TestCase):
 
             self.assertTrue((log_dir / PUBLISH_LOCK_NAME).is_file(), "the lock is not in the published directory")
             self.assertGreaterEqual(waited, 0.2, "a second publisher did not wait for the first")
+
+    def test_a_replay_names_the_run_whose_verdict_it_is(self) -> None:
+        # The first observation in issue #186 is a published replay. A reader has to
+        # be able to see that the verdict belongs to a different run, so the replay
+        # must name the run it replays, not the replay itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            tree = state("h1", changed=("crates/a/src/lib.rs",))
+            quiet = (contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()))
+            with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(Path(tmp) / "cache")}), mock.patch(
+                "gate.repo_root", return_value="/worktree-one"
+            ), mock.patch("gate.read_tree_state", return_value=tree), quiet[0], quiet[1]:
+                self.assertEqual(0, run_gate(["/bin/sh", "-c", "printf hello"], log_dir=str(log_dir)))
+                first = (log_dir / "command.exit").read_text().splitlines()
+                self.assertEqual(0, run_gate(["/bin/sh", "-c", "printf hello"], log_dir=str(log_dir)))
+                replayed = (log_dir / "command.exit").read_text().splitlines()
+
+            self.assertIn("cached verdict replay", (log_dir / "command.log").read_text().splitlines()[0])
+        self.assertEqual(2, len(first), "the first run's exit file does not name its run")
+        self.assertTrue(first[1].startswith("gate: run worktree=/worktree-one tree="), first[1])
+        self.assertEqual(first, replayed, "the replay did not name the run whose verdict it published")
+
+    def test_competing_publishers_leave_one_run_and_no_staging_files(self) -> None:
+        # Serialization is the whole fix, and a check that only ever published one
+        # run could not exercise it. Four processes publish at once, and afterwards
+        # the directory must hold one run's pair and none of their staging files.
+        import multiprocessing as mp
+
+        if "fork" not in mp.get_all_start_methods():
+            self.skipTest(f"no fork start method in {mp.get_all_start_methods()}")
+        codes = {"A": 2, "B": 0}
+        letters = "ABAB"
+        with tempfile.TemporaryDirectory() as tmp:
+            for round_index in range(3):
+                log_dir = Path(tmp) / f"logs-{round_index}"
+                log_dir.mkdir()
+                scratch = Path(tmp) / f"scratch-{round_index}"
+                scratch.mkdir()
+                context = mp.get_context("fork")
+                barrier = context.Barrier(len(letters))
+                workers = [
+                    context.Process(
+                        target=_competing_publisher,
+                        args=(str(log_dir), str(scratch), letter, codes[letter], barrier),
+                    )
+                    for letter in letters
+                ]
+                for worker in workers:
+                    worker.start()
+                for worker in workers:
+                    worker.join(timeout=30)
+                    self.assertFalse(worker.is_alive(), "a publisher did not finish")
+
+                published = [line for line in (log_dir / "command.log").read_text().splitlines() if line]
+                body = published[-1][:1] if published else ""
+                code = (log_dir / "command.exit").read_text().splitlines()[0].strip()
+
+                self.assertIn(body, codes, f"round {round_index}: the log holds no run's body")
+                self.assertEqual(
+                    str(codes[body]),
+                    code,
+                    f"round {round_index}: the exit code and the log describe different runs",
+                )
+                self.assertEqual(
+                    [],
+                    list(log_dir.glob(".*.staged")),
+                    f"round {round_index}: a staging file was left in the published directory",
+                )

@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -28,6 +29,12 @@ PUBLISH_LOCK_NAME = ".gate-publish.lock"
 #: Makes each staging name unique inside its own process, so two publishers
 #: cannot pick the same one.
 _STAGING = itertools.count()
+#: The run line an existing published record carries, matched only at the start of
+#: the body. `_body_only` needs the shape, not the prefix alone: a command whose own
+#: output opens with `gate: run ` is otherwise mistaken for a run line and dropped,
+#: and an identical re-run then invents an earlier run. The worktree group allows
+#: spaces because a checkout path may contain them.
+_RUN_LINE = re.compile(re.escape(RUN_RECORD_PREFIX) + rb"worktree=[^\n]* tree=\S+ finished=\S+\n")
 
 
 def acquire_lock(root: str) -> int:
@@ -147,6 +154,32 @@ def _print_tail(log_path: Path) -> None:
         print(f"gate| {line}")
 
 
+def _read_bytes(path: Path) -> bytes | None:
+    """The file's bytes, or None when it cannot be read as a file.
+
+    A published name can hold a directory, an unreadable file, or nothing at all,
+    and all three mean the same thing here: there is no earlier record to compare
+    against or to put back.
+    """
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _exit_code_of(published: bytes | None) -> str:
+    """The exit code an existing published exit file records: its first non-empty line.
+
+    The code stays the first line, so a reader that wants only the code keeps
+    working, and the lines after it name the run that wrote it.
+    """
+    for line in (published or b"").splitlines():
+        text = line.decode(errors="replace").strip()
+        if text:
+            return text
+    return "unknown"
+
+
 def _replace_bytes(path: Path, data: bytes) -> None:
     """Put ``data`` at ``path`` in one step, so a reader sees one run's file or the other's.
 
@@ -176,15 +209,46 @@ def _body_only(published: bytes) -> bytes:
     The store already holds one rule about identical output: identical bytes are
     not a new run, because inventing a false earlier run is the worse error for an
     evidence store. Comparing the body alone keeps that rule while the record names
-    the run that produced it.
+    the run that produced it. Only a leading line of the exact run-line shape is
+    removed, so a command whose own output opens with the prefix is left alone.
     """
     marker = REPLAYED_LOG_MARKER if published.startswith(REPLAYED_LOG_MARKER) else EXECUTED_LOG_MARKER
     rest = published[len(marker) :]
-    if rest.startswith(RUN_RECORD_PREFIX):
-        _line, separator, tail = rest.partition(b"\n")
-        if separator:
-            rest = tail
+    run = _RUN_LINE.match(rest)
+    if run:
+        rest = rest[run.end() :]
     return marker + rest
+
+
+def _sweep_staging(dest_dir: Path) -> None:
+    """Remove staging files an earlier publish left in the published directory.
+
+    A publish that is killed between writing its staging file and renaming it leaves
+    the file behind, and nothing else removes it, so the directory a reader looks at
+    slowly fills with names that look like corruption. The sweep runs inside the
+    publish lock, so no publisher is mid-write and nothing live can be removed.
+    """
+    for stale in dest_dir.glob(".*.staged"):
+        try:
+            stale.unlink()
+        except OSError:
+            continue
+
+
+def _restore_or_remove(path: Path, previous: bytes | None) -> None:
+    """Put a published file back, or take it away, so a half-published pair cannot survive.
+
+    The pair is two files and two renames are not one step. When the second write
+    fails, this undoes the first, so a reader finds the run that was already
+    published rather than one run's verdict beside another run's log.
+    """
+    try:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            _replace_bytes(path, previous)
+    except OSError as error:
+        print(f"gate: warning: cannot put {path.name} back: {error}", file=sys.stderr)
 
 
 @contextlib.contextmanager
@@ -201,6 +265,9 @@ def _publish_lock(dest_dir: Path):
     `flock(2)` gives the exclusion: "Only one process may hold an exclusive lock
     for a given file at a given time". It is an advisory lock, which is enough
     because every writer here takes it. It is released when the descriptor closes.
+    Every publisher here is a single-threaded process, which is what lets the
+    per-descriptor and per-process readings of `flock` be treated as one: a form
+    that scopes the lock to the process would not separate two threads inside it.
     """
     lock_path = dest_dir / PUBLISH_LOCK_NAME
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
@@ -219,7 +286,9 @@ def _publish_log(
     Three files, and only the first two existed before:
 
     * ``<kind>.log`` and ``<kind>.exit`` -- the newest run, under the names every
-      reader and every recorded citation already uses.
+      reader and every recorded citation already uses. The exit file's first line
+      is the exit code and the line after it names the run, so the one file a
+      reader is told to read answers both "what was the code" and "whose run".
     * ``<kind>.prev`` -- the run before it, as **one** file: a header line naming
       the exit code that run exited with, then its log.
 
@@ -241,13 +310,18 @@ def _publish_log(
 
     The whole publish holds one lock on the directory, and each file is replaced in
     a single step. The pair needs both, because two worktrees can publish into one
-    directory and the gate's own lock is per worktree. The exit code is written
-    first, and it is the verdict every reader trusts: a run that cannot write it
-    publishes nothing, so an older exit code is never left beside a newer log.
-    That mismatch is what issue #186 records -- a published exit file still
-    describing an earlier run after a failing run and again after a later green
-    one. A reader can still catch a new exit code beside the previous log in the
-    moment between the two renames; the verdict is never the stale half.
+    directory and the gate's own lock is per worktree, which is issue #186: one
+    run's log published beside another run's exit code. The exit code is written
+    first, because it is the verdict every reader trusts, so a run that cannot
+    write it publishes nothing. The log is written second, and if that write fails
+    the exit file is put back, so the pair is either the new run's or the run that
+    was already published. The kept run is written last and its failure costs only
+    the kept run.
+
+    Two renames are still not one step. A reader can catch the new verdict beside
+    the previous log in the moment between them, and a process killed between them
+    leaves that pair; the verdict is never the stale half, and every failure the
+    process survives leaves the pair on one run.
     """
     if not log_dir:
         return None
@@ -261,20 +335,25 @@ def _publish_log(
         body = marker + log_body
         record = marker + run_line + log_body
         with _publish_lock(dest_dir):
-            existing = b""
-            if dest.is_file():
-                try:
-                    existing = dest.read_bytes()
-                except OSError:
-                    existing = b""
+            _sweep_staging(dest_dir)
+            existing = _read_bytes(dest) or b""
+            previous_exit = _read_bytes(exit_file)
+            carried = _exit_code_of(previous_exit)
+            # The verdict first: a run that cannot write it publishes nothing.
+            _replace_bytes(exit_file, f"{code}\n".encode() + run_line)
+            # The log second, and the verdict is put back when the log cannot be
+            # written, so the pair never ends up holding two runs.
             try:
-                carried = exit_file.read_text().strip() or "unknown"
+                _replace_bytes(dest, record)
             except OSError:
-                carried = "unknown"
-            _replace_bytes(exit_file, f"{code}\n".encode())
+                _restore_or_remove(exit_file, previous_exit)
+                raise
+            # The kept run last: its failure costs the kept run and nothing else.
             if existing and _body_only(existing) != body and not replayed:
-                _replace_bytes(dest_dir / f"{kind}.prev", f"exit: {carried}\n".encode() + existing)
-            _replace_bytes(dest, record)
+                try:
+                    _replace_bytes(dest_dir / f"{kind}.prev", f"exit: {carried}\n".encode() + existing)
+                except OSError as error:
+                    print(f"gate: warning: cannot keep the replaced {kind} run: {error}", file=sys.stderr)
         return dest
     except OSError as e:
         print(f"gate: warning: cannot publish log to {log_dir}: {e}", file=sys.stderr)

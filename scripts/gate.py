@@ -7,7 +7,7 @@ The cache holds up to 50 entries per worktree and removes lookup entries first. 
 
 Each published log names the command kind and starts with a fresh-run or replay marker. Cargo check, clippy, lint, and ritual logs report package work Cargo showed, or say when its status was absent. Nextest and llvm-cov lookups publish to separate log names without using cache verdict slots; nextest benchmarks have their own cached kind.
 
-A published log also carries a `gate: run ...` line, naming the worktree, the tree, and the finish time of the run the record describes. The publish holds one lock on the published directory and replaces the exit file and the log in single steps, so the pair can never hold one run's log beside another run's exit code. Both are needed because a published directory can be shared by every worktree of a checkout.
+A published log also carries a `gate: run ...` line, naming the worktree, the tree, and the finish time of the run the record describes, and the published exit file carries that same line after its exit code. The publish holds one lock on the published directory, writes the exit code first, and puts the verdict back when the log cannot be written, so a reader never finds one run's verdict beside another run's log. All of it is needed because a published directory can be shared by every worktree of a checkout.
 
 Quick scoping: `cargo test`, `cargo nextest run`, `cargo clippy`, and the
 `make test`, `make check`, `make lint` targets are scoped to the changed
@@ -50,8 +50,10 @@ Environment:
                      cache it asked for was warmed
   CLIO_GATE_LOG_DIR  optional log directory override. By default, logs land
                      under this repository's clio-gate cache folder. Each
-                     <kind>.log starts with a fresh-run or replay marker.
-                     The previous log is kept beside it as <kind>.prev.
+                     <kind>.log starts with a fresh-run or replay marker and
+                     names the run it records; each <kind>.exit holds the exit
+                     code followed by that same run line. The previous log is
+                     kept beside them as <kind>.prev.
   XDG_CACHE_HOME  cache root; defaults to ~/.cache
 """
 
