@@ -101,6 +101,13 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       # Full history, not the default shallow clone. The scoped runner works out
       # what a change touched by asking git for the merge base with the base
       # branch, and a depth-1 clone has no base branch to find: the query fails,
@@ -361,6 +368,13 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

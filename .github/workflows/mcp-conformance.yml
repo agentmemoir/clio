@@ -56,6 +56,13 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       # No diff is asked for here any more, so the default shallow clone is enough.
       - uses: actions/checkout@v4
 
