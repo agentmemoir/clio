@@ -164,6 +164,7 @@ fn erase_args<'a>(
     sink: &'a EraseVecSink,
     request_id: &'a str,
     subject_id: &'a str,
+    salt: &'a [u8],
 ) -> EraseArgs<'a> {
     EraseArgs {
         store,
@@ -174,7 +175,7 @@ fn erase_args<'a>(
         request_id,
         reason_code: None,
         confirm: true,
-        salt: b"test-salt",
+        salt,
         timestamp: "2026-01-01T00:00:00Z",
         sink,
     }
@@ -186,7 +187,9 @@ fn refused_erase(record: &SubjectRequestRecord, live_banks: &[String]) -> (AmErr
     let store = CountingStore::with_banks(live_banks.to_vec());
     let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT);
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT, &salt);
     let live = store.effect_bank_set();
     let err =
         coordinated_erase_request(&args, record, &live).expect_err("the coordination must refuse");
@@ -223,7 +226,9 @@ fn all_banks_confirmed_erasure_proceeds() {
     let store = CountingStore::with_banks(shared_banks(&[BANK_A, BANK_B]));
     let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT);
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT, &salt);
     let live = store.effect_bank_set();
     let outcome = coordinated_erase_request(&args, &record, &live)
         .expect("every coordinating bank confirmed");
@@ -298,7 +303,8 @@ fn foreign_request_id_refuses() {
     let store = CountingStore::with_banks(shared_banks(&[BANK_A, BANK_B]));
     let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
     let sink = EraseVecSink::default();
-    let mut args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT);
+    let salt = rand::random::<[u8; 16]>();
+    let mut args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT, &salt);
     let foreign_id = unique("erasure-req");
     args.request_id = foreign_id.as_str();
     let live = store.effect_bank_set();

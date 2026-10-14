@@ -195,6 +195,7 @@ pub(super) fn erase_args<'a>(
     sink: &'a EraseVecSink,
     request_id: &'a str,
     subject_id: &'a str,
+    salt: &'a [u8],
 ) -> EraseArgs<'a> {
     EraseArgs {
         store,
@@ -205,7 +206,7 @@ pub(super) fn erase_args<'a>(
         request_id,
         reason_code: None,
         confirm: true,
-        salt: b"test-salt",
+        salt,
         timestamp: "2026-01-01T00:00:00Z",
         sink,
     }
