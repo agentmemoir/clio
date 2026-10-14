@@ -27,10 +27,6 @@
 //!
 //! Keep this module focused on the subject-family mapping.
 
-// The mapping is internal and nothing in production calls it yet: the
-// inventory-map tests and the sibling Postgres twin are its only consumers.
-#![allow(dead_code)]
-
 use super::{ROW_PLAN, RowPlan, missing_tables, pattern_matches};
 use crate::export::{HISTORY_LIMIT, hit_history_limit};
 use crate::inventory::{InventoryBackend, InventoryFacts, Readability, RowSource, ScopeInventory};
@@ -82,7 +78,12 @@ pub(crate) struct FamilySelection {
     pub(crate) omitted: u64,
     /// The named reason this family is incomplete, when one applies.
     pub(crate) omission: Option<String>,
-    /// True iff this family carries no named omission.
+    /// True iff this family carries no named omission: every store-wide
+    /// measured row is selected and no cap or missing table applies. This is
+    /// an internal store-wide accounting flag, not an export verdict: the
+    /// fixed plan always includes families with no per-subject read, so a
+    /// full mapping stays incomplete and a subject filter alone never decides
+    /// an export.
     pub(crate) complete: bool,
 }
 
@@ -113,7 +114,10 @@ pub(crate) struct SubjectFamilyMapping {
     pub(crate) selected_total: u64,
     /// The store-wide measured rows no family selected for the subject.
     pub(crate) omitted_total: u64,
-    /// True iff every family is complete.
+    /// True iff every family is complete. Internal only: with the fixed plan
+    /// this stays false, because shared, hashed-link, and not-stored families
+    /// always name an omission. Export completeness is decided separately by
+    /// the export path from its own link, cap, and filter conditions.
     pub(crate) complete: bool,
     /// Every named omission, prefixed with its family.
     pub(crate) omissions: Vec<String>,
