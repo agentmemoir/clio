@@ -63,7 +63,9 @@ fn sqlite_an_incomplete_confirmation_refuses_before_any_erasure_effect() {
     double.banks = vec![bank.clone(), peer_bank];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
     let err = erase_from_durable_store(&store, &request_id, &args, &live)
         .expect_err("an unacknowledged peer must refuse");
@@ -110,7 +112,9 @@ fn sqlite_a_bank_set_changed_after_confirmation_refuses() {
     double.banks = vec![bank.clone(), peer_bank, unique("joined-bank")];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
     let err = erase_from_durable_store(&store, &request_id, &args, &live)
         .expect_err("a changed bank set must refuse");
@@ -153,7 +157,9 @@ fn sqlite_a_partial_erasure_retry_never_reports_completion_early() {
     double.banks = vec![bank.clone()];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
     let first = erase_from_durable_store(&store, &request_id, &args, &live)
         .expect("a partial failure reports PROCESSING");
@@ -297,4 +303,42 @@ fn sqlite_the_store_reports_the_erasure_fan_out_bank_set() {
         expected,
         "the live set must cover every bank sharing the key"
     );
+}
+
+/// Malformed stored JSON fails closed instead of restoring a partial record.
+#[test]
+fn a_row_with_invalid_record_json_fails_closed() {
+    let record = started_record("req", &subject_scope());
+    let mut row = record_to_row(&record).expect("encode record");
+    row.record = "{".into();
+    let err = row_to_record(&row).expect_err("invalid JSON must refuse");
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert!(err.message.contains("durable request record decode"));
+}
+
+/// A row cannot restore a record saved under another request id.
+#[test]
+fn a_row_with_another_request_id_fails_closed() {
+    let record = started_record("req", &subject_scope());
+    let mut row = record_to_row(&record).expect("encode record");
+    row.request_id = "other-req".into();
+    let err = row_to_record(&row).expect_err("mismatched request id must refuse");
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert!(err.message.contains("holds the record of"));
+}
+
+/// A missing durable confirmation refuses before any erasure effect.
+#[test]
+fn sqlite_a_missing_request_refuses_before_any_erasure_effect() {
+    let scratch = Scratch::new();
+    let store = open_sqlite(&scratch.0.join("store.db"));
+    let double = RetryStore::failing();
+    let ctx = OpContext::new(Bank::new("bank"), Actor::Harness);
+    let sink = EraseVecSink::default();
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, "missing", "subject", &salt);
+    let err = erase_from_durable_store(&store, "missing", &args, &[])
+        .expect_err("missing confirmation must refuse");
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert_eq!(double.erase_calls(), 0, "no confirmation permits no effect");
 }
