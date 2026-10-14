@@ -47,14 +47,13 @@ use clio_types::{AmError, ErrorCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-/// Encode one field of the durable record; a failure is a storage defect.
-fn encode<T: Serialize>(value: &T, what: &str) -> Result<String, AmError> {
-    serde_json::to_string(value).map_err(|err| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("durable request {what} encode: {err}"),
-        )
-    })
+/// Encode one field of the durable record.
+///
+/// Every field is a closed struct, so serialization cannot fail; a failure
+/// would be a code defect, not a storage state.
+fn encode<T: Serialize>(value: &T, what: &str) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_else(|err| panic!("durable request {what} encode: {err}"))
 }
 
 /// Decode one field of the durable record; a failure is a storage defect.
@@ -73,18 +72,16 @@ fn decode<T: DeserializeOwned>(text: &str, what: &str) -> Result<T, AmError> {
 /// into the `record` column, its scope into `scope`, and its kind and state
 /// into the query columns. The row round-trips through [`row_to_record`]
 /// unchanged.
-///
-/// # Errors
-/// A serialization failure, which is a storage defect.
-pub fn record_to_row(record: &SubjectRequestRecord) -> Result<DurableRequestRow, AmError> {
-    Ok(DurableRequestRow {
+#[must_use]
+pub fn record_to_row(record: &SubjectRequestRecord) -> DurableRequestRow {
+    DurableRequestRow {
         request_id: record.request_id.clone(),
-        kind: encode(&record.kind, "kind")?,
-        state: encode(&record.state, "state")?,
-        scope: encode(&record.scope, "scope")?,
+        kind: encode(&record.kind, "kind"),
+        state: encode(&record.state, "state"),
+        scope: encode(&record.scope, "scope"),
         deadline: record.deadline.clone(),
-        record: encode(record, "record")?,
-    })
+        record: encode(record, "record"),
+    }
 }
 
 /// Decode a stored row back into its record.

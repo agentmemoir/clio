@@ -198,15 +198,40 @@ fn sqlite_a_partial_erasure_retry_never_reports_completion_early() {
 fn sqlite_a_row_with_a_drifted_kind_or_scope_column_fails_closed() {
     let scope = subject_scope();
     let record = started_record(&unique("req"), &scope);
-    let mut row = record_to_row(&record).expect("the record encodes");
+    let mut row = record_to_row(&record);
     row.kind = serde_json::to_string(&RequestKind::Copy).expect("encode kind");
     assert_eq!(row_to_record(&row).unwrap_err().code, ErrorCode::Internal);
-    let mut row = record_to_row(&record).expect("the record encodes");
+    let mut row = record_to_row(&record);
     row.scope = serde_json::to_string(&RequestScope::Bank {
         bank_id: unique("wiring-bank"),
     })
     .expect("encode scope");
     assert_eq!(row_to_record(&row).unwrap_err().code, ErrorCode::Internal);
+}
+
+/// An erasure for a request the durable store does not hold refuses before
+/// any erasure effect.
+#[test]
+fn sqlite_an_erasure_for_a_request_the_store_does_not_hold_refuses() {
+    let scratch = Scratch::new();
+    let store = open_sqlite(&scratch.0.join("store.db"));
+    let request_id = unique("req");
+    let scope = subject_scope();
+    let (bank, subject) = scope_parts(&scope);
+    let mut double = RetryStore::failing();
+    double.banks = vec![bank.clone()];
+    let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
+    let sink = EraseVecSink::default();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    let live = double.effect_bank_set();
+    let err = erase_from_durable_store(&store, &request_id, &args, &live)
+        .expect_err("a missing durable row must refuse");
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert_eq!(
+        double.erase_calls(),
+        0,
+        "the refusal must precede any effect"
+    );
 }
 
 /// The store reports the fan-out set: the requesting bank plus every bank

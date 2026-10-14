@@ -109,9 +109,7 @@ pub(super) fn started_record(request_id: &str, scope: &RequestScope) -> SubjectR
 
 /// Persist `record`'s current state to the durable store.
 pub(super) fn persist(durable: &dyn DurableRequestStore, record: &SubjectRequestRecord) {
-    durable
-        .save(&record_to_row(record).expect("the record encodes"))
-        .expect("the row saves");
+    durable.save(&record_to_row(record)).expect("the row saves");
 }
 
 /// Compliance-store double: `erase_subject` fails while `fail` is set, marking
@@ -253,7 +251,7 @@ fn a_record_round_trips_through_the_row_shape() {
             },
         },
     );
-    let row = record_to_row(&record).expect("the record encodes");
+    let row = record_to_row(&record);
     assert_eq!(row_to_record(&row).expect("the row decodes"), record);
 }
 
@@ -343,7 +341,7 @@ fn sqlite_a_reused_id_with_a_changed_scope_refuses_without_mutation() {
     let request_id = unique("req");
     let scope = subject_scope();
     let record = started_record(&request_id, &scope);
-    let stored_row = record_to_row(&record).expect("the record encodes");
+    let stored_row = record_to_row(&record);
     {
         let store = open_sqlite(&path);
         persist(&store, &record);
@@ -423,4 +421,24 @@ fn sqlite_an_open_copy_action_blocks_closure_after_a_restart() {
         matches!(accept_closure(&inputs), Err(ClosureBlock::OpenCopyAction)),
         "an open copy action must block closure"
     );
+}
+
+/// A record column the mapping can no longer decode fails closed.
+#[test]
+fn a_corrupted_record_column_fails_closed() {
+    let scope = subject_scope();
+    let record = started_record(&unique("req"), &scope);
+    let mut row = record_to_row(&record);
+    row.record = "{not json".into();
+    assert_eq!(row_to_record(&row).unwrap_err().code, ErrorCode::Internal);
+}
+
+/// A row whose id names a different request than its record fails closed.
+#[test]
+fn a_row_whose_id_disagrees_with_its_record_fails_closed() {
+    let scope = subject_scope();
+    let record = started_record(&unique("req"), &scope);
+    let mut row = record_to_row(&record);
+    row.request_id = unique("other-req");
+    assert_eq!(row_to_record(&row).unwrap_err().code, ErrorCode::Internal);
 }

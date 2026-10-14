@@ -145,7 +145,7 @@ fn postgres_a_reused_id_with_a_changed_scope_refuses_without_mutation() {
     let request_id = unique("pg-req");
     let scope = subject_scope();
     let record = started_record(&request_id, &scope);
-    let stored_row = record_to_row(&record).expect("the record encodes");
+    let stored_row = record_to_row(&record);
     persist(&fixture.store, &record);
     fixture.restart();
     let mut ledger = reload_ledger(&fixture.store).expect("the ledger reloads");
