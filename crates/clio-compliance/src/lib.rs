@@ -118,6 +118,8 @@ mod import_fixture_signals;
 #[path = "inventory_fixtures.rs"]
 mod inventory_fixture;
 #[cfg(test)]
+mod inventory_map_fixtures;
+#[cfg(test)]
 mod inventory_pg_support_tests;
 #[cfg(test)]
 #[path = "inventory_pg_tests.rs"]

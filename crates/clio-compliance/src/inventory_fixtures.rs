@@ -51,9 +51,9 @@ pub(crate) const SHARED: &str = "inv-fx-shared";
 pub(crate) const UNKNOWN: &str = "inv-fx-unknown";
 
 /// The actor label every fixture write is stamped with.
-const ACTOR: &str = "harness";
+pub(crate) const ACTOR: &str = "harness";
 /// Timestamp every fixture row is written with.
-const TS: &str = "2026-06-01T00:00:00Z";
+pub(crate) const TS: &str = "2026-06-01T00:00:00Z";
 
 /// One fixture id inside a class, e.g. `inv-fx-selected-item`.
 pub(crate) fn fixture_id(class: &str, role: &str) -> String {
@@ -61,18 +61,18 @@ pub(crate) fn fixture_id(class: &str, role: &str) -> String {
 }
 
 /// A test-owned directory removed when the fixture drops.
-struct FixtureDir(PathBuf);
+pub(crate) struct FixtureDir(PathBuf);
 
 impl FixtureDir {
     /// Create the directory under the system temporary root.
-    fn create(name: &str) -> Self {
+    pub(crate) fn create(name: &str) -> Self {
         let path = std::env::temp_dir().join(name);
         std::fs::create_dir_all(&path).expect("create the fixture directory");
         Self(path)
     }
 
     /// The directory path.
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -171,7 +171,7 @@ impl LedgerFixture {
 }
 
 /// One semantic fixture item for a subject.
-fn semantic_item(id: &str, bank: &str, subject: &str) -> MemoryItem {
+pub(crate) fn semantic_item(id: &str, bank: &str, subject: &str) -> MemoryItem {
     MemoryItem {
         id: id.into(),
         bank_id: bank.into(),
@@ -197,7 +197,7 @@ fn semantic_item(id: &str, bank: &str, subject: &str) -> MemoryItem {
 }
 
 /// One episodic carrier item for a subject.
-fn carrier(id: &str, bank: &str, subject: &str, tag: EpisodicType) -> MemoryItem {
+pub(crate) fn carrier(id: &str, bank: &str, subject: &str, tag: EpisodicType) -> MemoryItem {
     let mut item = semantic_item(id, bank, subject);
     item.kind = ItemKind::Episodic;
     item.category = None;
@@ -251,7 +251,7 @@ fn write_fixture_triple(
 
 /// An item, a task record, a failure record, and a belief that all carry one
 /// data subject in a direct, non-null `subject_id` column.
-fn write_direct_link_class(store: &SqliteStore, bank: &str, subject: &str) {
+pub(crate) fn write_direct_link_class(store: &SqliteStore, bank: &str, subject: &str) {
     let mut direct = semantic_item(&fixture_id(subject, "item"), bank, subject);
     direct.admission_score = Some(0.9);
     store
@@ -332,7 +332,7 @@ fn write_direct_link_class(store: &SqliteStore, bank: &str, subject: &str) {
 
 /// An association edge between the two subjects' items plus a bank-scoped
 /// persona entry and preference: rows that name no data subject at all.
-fn write_shared_class(store: &SqliteStore, bank: &str) {
+pub(crate) fn write_shared_class(store: &SqliteStore, bank: &str) {
     store
         .put_assoc_edge(&AssocEdgeRecord {
             id: fixture_id(SHARED, "edge"),
@@ -394,7 +394,7 @@ fn write_shared_class(store: &SqliteStore, bank: &str) {
 
 /// A subject erased through the verified erasure path, so the only row that
 /// still names it is a compliance tombstone carrying a one-way hash.
-fn write_hashed_link_class(store: &SqliteStore, bank: &str) {
+pub(crate) fn write_hashed_link_class(store: &SqliteStore, bank: &str) {
     store
         .create_memory_item(
             &semantic_item(&fixture_id(UNKNOWN, "item"), bank, UNKNOWN),
