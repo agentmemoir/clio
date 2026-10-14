@@ -253,3 +253,30 @@ impl ComplianceStore for PostgresStore {
         crate::postgres_erase_read::tombstones_where(self, "bank_id = $1", &[&bank_id])
     }
 }
+
+impl PostgresStore {
+    /// The bank set the erasure effect fans out to for one subject: the
+    /// requesting bank plus every bank holding the subject's items, sorted.
+    /// This is the same `SELECT DISTINCT` the erasure transaction reads, so
+    /// the coordination seam takes its live set from here and never from a
+    /// separately configured list.
+    ///
+    /// # Errors
+    /// Storage failures.
+    pub fn erase_bank_set(&self, bank_id: &str, subject_id: &str) -> Result<Vec<String>, AmError> {
+        self.with_client(|client| {
+            let rows = client
+                .query(
+                    "SELECT DISTINCT bank_id FROM items WHERE subject_id = $1 ORDER BY bank_id",
+                    &[&subject_id],
+                )
+                .am("erase bank set")?;
+            let mut banks: Vec<String> = rows.iter().map(|r| r.get(0)).collect();
+            if !banks.iter().any(|bank| bank == bank_id) {
+                banks.push(bank_id.to_owned());
+                banks.sort();
+            }
+            Ok(banks)
+        })
+    }
+}

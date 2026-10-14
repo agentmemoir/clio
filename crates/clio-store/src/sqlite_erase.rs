@@ -148,6 +148,38 @@ impl ComplianceStore for SqliteStore {
     }
 }
 
+impl SqliteStore {
+    /// The bank set the erasure effect fans out to for one subject: the
+    /// requesting bank plus every bank holding the subject's items, sorted.
+    /// This is the same `SELECT DISTINCT` the erasure transaction reads, so
+    /// the coordination seam takes its live set from here and never from a
+    /// separately configured list.
+    ///
+    /// # Errors
+    /// Storage failures.
+    pub fn erase_bank_set(&self, bank_id: &str, subject_id: &str) -> Result<Vec<String>, AmError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT DISTINCT bank_id FROM items
+                     WHERE subject_id = ?1 ORDER BY bank_id",
+                )
+                .am("erase bank set prepare")?;
+            let rows = stmt
+                .query_map(params![subject_id], |r| r.get(0))
+                .am("erase bank set query")?;
+            let mut banks = rows
+                .collect::<Result<Vec<String>, _>>()
+                .am("erase bank set rows")?;
+            if !banks.iter().any(|bank| bank == bank_id) {
+                banks.push(bank_id.to_owned());
+                banks.sort();
+            }
+            Ok(banks)
+        })
+    }
+}
+
 /// Read the connection's current `secure_delete` setting.
 fn read_secure_delete(conn: &Connection) -> Result<bool, AmError> {
     let raw: i64 = conn

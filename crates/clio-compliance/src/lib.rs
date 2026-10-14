@@ -56,9 +56,12 @@ mod local_review;
 mod local_review_export;
 mod scratchpad;
 mod stats;
+pub mod subject_bank_coordination;
 mod subject_request;
 mod subject_request_events;
+mod subject_request_frozen;
 mod subject_request_manifest;
+pub mod subject_request_store_wiring;
 mod validate;
 
 pub use action_event_log::{ActionEventLog, RecordOutcome};
@@ -90,8 +93,9 @@ pub use local_review::{
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
 pub use subject_request::{
-    FinalOutcome, RegisterOutcome, RequestCommand, RequestScope, RequestState, StateCategory,
-    SubjectRequestLedger, SubjectRequestRecord, transition,
+    FinalOutcome, PathOwner, PathSlot, PathState, PeerState, RegisterOutcome, RequestAction,
+    RequestActionKind, RequestActionState, RequestCommand, RequestKind, RequestScope, RequestState,
+    StateCategory, SubjectRequestLedger, SubjectRequestRecord, VerificationResult, transition,
 };
 pub use subject_request_events::{
     ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventKind, ActionIntent, ActionOutcome,
@@ -126,7 +130,5 @@ mod inventory_pg_support_tests;
 mod inventory_pg_tests;
 #[cfg(test)]
 mod subject_request_events_tests;
-#[cfg(test)]
-mod subject_request_tests;
 #[cfg(test)]
 mod test_unique;

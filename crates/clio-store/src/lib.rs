@@ -69,6 +69,7 @@ mod distilled_revision;
 mod distilled_unit;
 mod distilled_unit_codec;
 mod distilled_unit_store;
+mod durable_requests;
 mod embedding_space;
 mod erase_hash;
 mod history_store;
@@ -226,6 +227,7 @@ pub use distilled_unit::{
     STALE_REVISION_REJECTED, STALE_SOURCE_CHANGED, STALE_SOURCE_REMOVED,
 };
 pub use distilled_unit_store::DistilledUnitStore;
+pub use durable_requests::{DurableRequestRow, DurableRequestStore};
 pub use embedding_space::{
     ANN_HALFVEC_MAX_DIMS, ANN_VECTOR_MAX_DIMS, DEFAULT_EMBEDDING_MODEL, EmbeddingSpace, IndexMode,
     MAX_VECTOR_DIMS, SETTING_EMBEDDING_DIM, SETTING_EMBEDDING_MODEL,

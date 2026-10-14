@@ -11,10 +11,12 @@
 //! - `RequestScope` bank and subject scope definitions
 //! - `RequestState`, `FinalOutcome`, `StateCategory`, and the state table
 //! - `RequestCommand` and the total, idempotent `transition` function
-//! - `SubjectRequestRecord` and the `SubjectRequestLedger` register/apply
-//!   contracts
+//! - The `SubjectRequestLedger` register/apply contracts, including the
+//!   id-kind-scope binding
 //!
 //! ## Does not own
+//! - The durable record and its frozen field vocabulary
+//!   (`subject_request_frozen.rs`)
 //! - Any storage adapter, SQL, or database access: the ledger is in-memory
 //!   only, and reloading records models a restart
 //! - Any CLI or I/O: commands are data applied by functions
@@ -32,6 +34,11 @@
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+pub use crate::subject_request_frozen::{
+    PathOwner, PathSlot, PathState, PeerState, RequestAction, RequestActionKind,
+    RequestActionState, RequestKind, SubjectRequestRecord, VerificationResult,
+};
 
 /// Where a request applies, fixed when the request is opened.
 ///
@@ -54,8 +61,8 @@ pub enum RequestScope {
 }
 
 impl RequestScope {
-    /// The contract scope check, shared with the action-event validator so an
-    /// event cannot carry a scope the request contract would refuse.
+    /// The contract scope check, shared with the action-event validator so no
+    /// event carries a scope the contract would refuse.
     pub(crate) fn validate(&self) -> Result<(), AmError> {
         match self {
             Self::Bank { bank_id } => Self::validate_bank(bank_id),
@@ -228,12 +235,8 @@ impl RequestCommand {
     }
 }
 
-/// The total transition table: one next state or one refusal for every state
-/// and command input.
-///
-/// The function is pure and idempotent: the same input always yields the same
-/// result, and a command applied to its own result state is refused, so a
-/// repeated input never produces a second transition.
+/// The total transition table: pure and idempotent, so a repeated input
+/// never produces a second transition.
 pub fn transition(state: &RequestState, command: &RequestCommand) -> Result<RequestState, AmError> {
     fn refuse(state_kind: &str) -> Result<RequestState, AmError> {
         Err(AmError::new(
@@ -282,17 +285,6 @@ pub fn transition(state: &RequestState, command: &RequestCommand) -> Result<Requ
     }
 }
 
-/// One durable request: its id, its immutable scope, and its current state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SubjectRequestRecord {
-    /// The durable request id.
-    pub request_id: String,
-    /// The scope the id is bound to; never changes.
-    pub scope: RequestScope,
-    /// The current state.
-    pub state: RequestState,
-}
-
 /// What [`SubjectRequestLedger::register`] did with a request id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegisterOutcome {
@@ -323,12 +315,9 @@ impl SubjectRequestLedger {
         Self::default()
     }
 
-    /// Rebuild a ledger from records reloaded after a restart.
-    ///
-    /// Stored records were validated when they were registered, so they are
-    /// trusted here. Callers must not reload duplicate request ids: the last
-    /// record for an id wins, so a duplicated id silently drops the earlier
-    /// record.
+    /// Rebuild a ledger from records reloaded after a restart. Stored records
+    /// are trusted here; a duplicated id keeps the last record, silently
+    /// dropping the earlier one.
     #[must_use]
     pub fn load(records: Vec<SubjectRequestRecord>) -> Self {
         Self {
@@ -353,13 +342,17 @@ impl SubjectRequestLedger {
 
     /// Open a request, or replay its stored result.
     ///
-    /// The request id is durable and its scope is immutable: the same id with
-    /// the same scope replays the stored record and applies nothing; the same
-    /// id with a changed scope is refused and no state changes.
+    /// The request id is durable and its kind and scope are immutable: the
+    /// same id with the same kind and scope replays the stored record and
+    /// applies nothing, ignoring the incoming peer list entirely; the same id
+    /// with a changed kind or scope is refused and no state changes. The peer
+    /// snapshot is captured once, at open; a replay keeps the stored snapshot.
     pub fn register(
         &mut self,
         request_id: &str,
+        kind: RequestKind,
         scope: &RequestScope,
+        peers: &[&str],
     ) -> Result<RegisterOutcome, AmError> {
         if request_id.trim().is_empty() {
             return Err(AmError::new(
@@ -369,20 +362,30 @@ impl SubjectRequestLedger {
         }
         scope.validate()?;
         match self.requests.get(request_id) {
-            Some(stored) if stored.scope == *scope => Ok(RegisterOutcome::Replayed {
-                state: stored.state.clone(),
-            }),
+            Some(stored) if stored.kind == kind && stored.scope == *scope => {
+                Ok(RegisterOutcome::Replayed {
+                    state: stored.state.clone(),
+                })
+            }
             Some(_) => Err(AmError::new(
                 ErrorCode::Forbidden,
-                "request id is already bound to a different scope",
+                "request id is already bound to a different kind or scope",
             )),
             None => {
+                let peer_slots = peer_snapshot(peers)?;
                 self.requests.insert(
                     request_id.to_owned(),
                     SubjectRequestRecord {
                         request_id: request_id.to_owned(),
+                        kind,
                         scope: scope.clone(),
                         state: RequestState::Received,
+                        verification: None,
+                        deadline: None,
+                        actions: BTreeMap::new(),
+                        paths: BTreeMap::new(),
+                        peers: peer_slots,
+                        exception: None,
                     },
                 );
                 Ok(RegisterOutcome::Opened)
@@ -392,7 +395,9 @@ impl SubjectRequestLedger {
 
     /// Apply a command to the stored request and record the next state.
     ///
-    /// A refused command changes nothing.
+    /// Marking technical completion refuses while a copy action is still
+    /// open; product-path and retention-exception gating stays in the closure
+    /// seam. A refused command changes nothing.
     pub fn apply(
         &mut self,
         request_id: &str,
@@ -404,8 +409,42 @@ impl SubjectRequestLedger {
                 format!("no request {request_id}"),
             ));
         };
+        if matches!(command, RequestCommand::MarkTechnicalComplete)
+            && record.actions.values().any(|action| {
+                action.kind == RequestActionKind::Copy && action.state == RequestActionState::Open
+            })
+        {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                "an open copy action blocks technical completion",
+            ));
+        }
         let next = transition(&record.state, command)?;
         record.state = next.clone();
         Ok(next)
     }
 }
+
+/// One pending slot per peer of a new request; duplicates collapse, and a
+/// blank id is refused.
+fn peer_snapshot(peers: &[&str]) -> Result<BTreeMap<String, PeerState>, AmError> {
+    let mut slots = BTreeMap::new();
+    for peer_id in peers {
+        if peer_id.trim().is_empty() {
+            return Err(AmError::new(
+                ErrorCode::InvalidArgument,
+                "peer snapshot needs a peer id",
+            ));
+        }
+        slots.insert((*peer_id).to_owned(), PeerState::Pending);
+    }
+    Ok(slots)
+}
+
+#[cfg(test)]
+#[path = "subject_request_register_tests.rs"]
+mod subject_request_register_tests;
+
+#[cfg(test)]
+#[path = "subject_request_tests.rs"]
+mod subject_request_tests;

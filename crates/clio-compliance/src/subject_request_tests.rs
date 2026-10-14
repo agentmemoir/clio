@@ -3,15 +3,16 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for unit coverage of the subject-request
-//! contract: scope binding, the total transition table, and the ledger
-//! register/apply commands.
+//! This module is responsible for unit coverage of the subject-request state
+//! contract: the total transition table and the ledger apply commands.
 //!
 //! ## Owns
-//! - Scope replay and conflict assertions for `SubjectRequestLedger`
 //! - Totality, idempotency, and category assertions for `transition`
+//! - Apply-command assertions for `SubjectRequestLedger`
 //!
 //! ## Does not own
+//! - Register binding and replay assertions
+//!   (`subject_request_register_tests.rs`)
 //! - The subject-request contract itself (see `subject_request.rs`)
 //! - Any store, fixture, or I/O: every test here is pure
 //!
@@ -20,8 +21,8 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::subject_request::{
-    FinalOutcome, RegisterOutcome, RequestCommand, RequestScope, RequestState, StateCategory,
-    SubjectRequestLedger, SubjectRequestRecord, transition,
+    FinalOutcome, RequestCommand, RequestKind, RequestScope, RequestState, StateCategory,
+    SubjectRequestLedger, transition,
 };
 use clio_types::ErrorCode;
 
@@ -29,19 +30,6 @@ fn subject_scope() -> RequestScope {
     RequestScope::Subject {
         bank_id: "bank-a".into(),
         subject_id: "subject-1".into(),
-    }
-}
-
-fn bank_scope() -> RequestScope {
-    RequestScope::Bank {
-        bank_id: "bank-a".into(),
-    }
-}
-
-fn subject_in(bank_id: &str, subject_id: &str) -> RequestScope {
-    RequestScope::Subject {
-        bank_id: bank_id.into(),
-        subject_id: subject_id.into(),
     }
 }
 
@@ -63,7 +51,9 @@ fn refused_state(rationale: &str) -> RequestState {
 
 fn ledger_in(setup: &str) -> SubjectRequestLedger {
     let mut ledger = SubjectRequestLedger::new();
-    ledger.register("r1", &subject_scope()).unwrap();
+    ledger
+        .register("r1", RequestKind::Erasure, &subject_scope(), &[])
+        .unwrap();
     if setup == "received" {
         return ledger;
     }
@@ -83,103 +73,6 @@ fn ledger_in(setup: &str) -> SubjectRequestLedger {
     }
     ledger.apply("r1", &RequestCommand::AwaitOperator).unwrap();
     ledger
-}
-
-#[test]
-fn register_opens_a_received_record_with_the_given_scope() {
-    let mut ledger = SubjectRequestLedger::new();
-    let outcome = ledger.register("r1", &subject_scope()).unwrap();
-    assert_eq!(outcome, RegisterOutcome::Opened);
-    let record = ledger.record("r1").expect("record stored");
-    assert_eq!(record.scope, subject_scope());
-    assert_eq!(record.state, RequestState::Received);
-}
-
-#[test]
-fn same_id_same_scope_replays_the_stored_result_and_applies_nothing() {
-    let mut ledger = SubjectRequestLedger::new();
-    ledger.register("r1", &subject_scope()).unwrap();
-    ledger.apply("r1", &RequestCommand::Begin).unwrap();
-    ledger
-        .apply("r1", &RequestCommand::MarkTechnicalComplete)
-        .unwrap();
-    let outcome = ledger.register("r1", &subject_scope()).unwrap();
-    let replayed = RegisterOutcome::Replayed {
-        state: RequestState::TechnicalComplete,
-    };
-    assert_eq!(outcome, replayed);
-    assert_eq!(
-        ledger.record("r1").map(|r| r.state.clone()),
-        Some(RequestState::TechnicalComplete)
-    );
-}
-
-#[test]
-fn same_id_changed_scope_is_refused_without_state_change() {
-    let mut ledger = SubjectRequestLedger::new();
-    ledger.register("r1", &bank_scope()).unwrap();
-    ledger.apply("r1", &RequestCommand::Begin).unwrap();
-    let err = ledger.register("r1", &subject_scope()).unwrap_err();
-    assert_eq!(err.code, ErrorCode::Forbidden);
-    assert_eq!(
-        ledger.record("r1").map(|r| r.state.clone()),
-        Some(RequestState::InProgress)
-    );
-}
-
-#[test]
-fn subjects_and_banks_are_isolated_and_changed_scopes_are_refused() {
-    let others = [
-        subject_in("bank-a", "subject-2"),
-        subject_in("bank-b", "subject-1"),
-    ];
-    for other in others {
-        let mut ledger = SubjectRequestLedger::new();
-        ledger.register("r1", &subject_scope()).unwrap();
-        ledger.register("r2", &other).unwrap();
-        ledger.apply("r1", &RequestCommand::Begin).unwrap();
-        assert_eq!(
-            ledger.record("r2").map(|r| r.state.clone()),
-            Some(RequestState::Received),
-            "{other:?}"
-        );
-        let err = ledger.register("r1", &other).unwrap_err();
-        assert_eq!(err.code, ErrorCode::Forbidden, "{other:?}");
-        assert_eq!(
-            ledger
-                .record("r1")
-                .map(|r| (r.scope.clone(), r.state.clone())),
-            Some((subject_scope(), RequestState::InProgress)),
-            "{other:?}"
-        );
-    }
-}
-
-#[test]
-fn reloaded_records_replay_after_a_modeled_restart() {
-    let mut ledger = SubjectRequestLedger::new();
-    ledger.register("r1", &subject_scope()).unwrap();
-    ledger.apply("r1", &RequestCommand::Begin).unwrap();
-    let bytes = serde_json::to_string(&ledger.records()).expect("serialize records");
-    let reloaded: Vec<SubjectRequestRecord> =
-        serde_json::from_str(&bytes).expect("deserialize records");
-    let mut restarted = SubjectRequestLedger::load(reloaded);
-    let outcome = restarted.register("r1", &subject_scope()).unwrap();
-    let replayed = RegisterOutcome::Replayed {
-        state: RequestState::InProgress,
-    };
-    assert_eq!(outcome, replayed);
-    let other = subject_in("bank-a", "subject-2");
-    let err = restarted.register("r1", &other).unwrap_err();
-    assert_eq!(err.code, ErrorCode::Forbidden);
-    assert_eq!(
-        restarted.record("r1").map(|r| r.scope.clone()),
-        Some(subject_scope())
-    );
-    assert_eq!(
-        restarted.record("r1").map(|r| r.state.clone()),
-        Some(RequestState::InProgress)
-    );
 }
 
 fn expected_next(state: &RequestState, command: &RequestCommand) -> Option<RequestState> {
@@ -286,7 +179,9 @@ fn a_refused_outcome_records_its_rationale() {
 #[test]
 fn a_request_reaches_a_final_outcome_through_the_operator_gate() {
     let mut ledger = SubjectRequestLedger::new();
-    ledger.register("r1", &subject_scope()).unwrap();
+    ledger
+        .register("r1", RequestKind::Erasure, &subject_scope(), &[])
+        .unwrap();
     assert_eq!(
         ledger.apply("r1", &RequestCommand::Begin).unwrap(),
         RequestState::InProgress
@@ -385,7 +280,9 @@ fn an_allowed_command_applies_once_and_the_repeat_is_refused() {
 #[test]
 fn a_refused_command_leaves_the_stored_state_unchanged() {
     let mut ledger = SubjectRequestLedger::new();
-    ledger.register("r1", &subject_scope()).unwrap();
+    ledger
+        .register("r1", RequestKind::Erasure, &subject_scope(), &[])
+        .unwrap();
     ledger
         .apply(
             "r1",
@@ -409,31 +306,4 @@ fn apply_reports_an_unknown_request_id() {
     let mut ledger = SubjectRequestLedger::new();
     let err = ledger.apply("missing", &RequestCommand::Begin).unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound);
-}
-
-#[test]
-fn register_validates_the_id_and_the_scope() {
-    let mut ledger = SubjectRequestLedger::new();
-    let err = ledger.register("  ", &subject_scope()).unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-    let err = ledger
-        .register(
-            "r1",
-            &RequestScope::Bank {
-                bank_id: String::new(),
-            },
-        )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::MissingBank);
-    let err = ledger
-        .register(
-            "r1",
-            &RequestScope::Subject {
-                bank_id: "bank-a".into(),
-                subject_id: "   ".into(),
-            },
-        )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidArgument);
-    assert!(ledger.record("r1").is_none());
 }

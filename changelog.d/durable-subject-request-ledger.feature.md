@@ -1,0 +1,1 @@
+One local subject request now persists as a durable record with its immutable scope and request kind, per-path states, peer snapshot, and separate export and erasure outcomes; replaying a request id returns the stored record instead of re-running the effect, and a reused id bound to a different scope or kind is refused without mutation.
