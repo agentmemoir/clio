@@ -11,6 +11,7 @@ we made where that specification is silent.
 ### Added
 
 - A durable local compliance event layer: content-free intent and outcome events persist on SQLite and Postgres with action id, sequence, actor, scope, kind, and a redacted result; a failed intent write refuses the protected effect with no side effects, a failed outcome write leaves one pending row that reconciles by action id after reopen, and pruning removes only completed rows; a privileged local review queries and exports the ordered events and gaps, records custody for each captured copy, and every returned row omits the outcome result text. ([#194](https://github.com/agentmemoir/clio/pull/194))
+- A durable subject-request ledger: one local request persists on SQLite and Postgres with its immutable scope and request kind, per-path states, peer snapshot, and separate export and erasure outcomes; replaying a request id returns the stored record instead of re-running the effect, a reused id bound to a different scope or kind is refused without mutation, an erasure compares the banks sharing the subject key against the coordination set recorded when the request opened before any effect, and a known open operator action prevents request closure. ([#197](https://github.com/agentmemoir/clio/pull/197))
 
 ### Fixed
 
