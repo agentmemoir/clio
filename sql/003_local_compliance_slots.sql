@@ -7,9 +7,10 @@
 --      Postgres: 002_vectors_postgres.sql, then this file
 --
 -- These slots reserve storage ownership. The local_events table carries the
--- real local event schema and durable_requests the real request schema;
--- every other table is a minimal text-key placeholder that its owner group
--- will build on later (no feature columns or rows yet).
+-- real local event schema, durable_requests the real request schema, and
+-- copy_inventory the real copy-inventory schema; every other table is a
+-- minimal text-key placeholder that its owner group will build on later
+-- (no feature columns or rows yet).
 -- Owner groups:
 --   G6    local_events           local event store (content-free local events)
 --   G7    subject_family_links   subject-family mapping (stored subject links)
@@ -64,10 +65,21 @@ CREATE TABLE IF NOT EXISTS durable_requests
   record                                                                                       text NOT NULL
 );
 
--- G19: copy inventory, staging, custody, product copy result.
+-- G19: copy inventory, staging, custody, product copy result. One row per
+-- inventoried copy. The row carries custody and operator-action metadata
+-- only: no copy content, no digest of subject data. `request_id` and
+-- `custody` are fixed when the copy is inventoried; `exception_reason`
+-- names an open gap while the copy has no request result yet.
 CREATE TABLE IF NOT EXISTS copy_inventory
 (
-  id                                                                                           text PRIMARY KEY
+  copy_id                                                                                      text PRIMARY KEY,
+  request_id                                                                                   text NOT NULL,
+  custody                                                                                      text NOT NULL,
+  owner                                                                                        text NOT NULL,
+  required_action                                                                              text NOT NULL,
+  state                                                                                        text NOT NULL,
+  exception_reason                                                                             text,
+  updated_at                                                                                   text NOT NULL
 );
 
 -- G14D: old-archive experiment and restore/journal design.

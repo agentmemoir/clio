@@ -273,16 +273,18 @@ pub enum ClosureBlock {
     /// The product path the closure names is unknown to this build; this
     /// blocks marking the request technically complete.
     UnknownProductPath,
-    /// A copy action of the request is still open; this blocks closure.
+    /// A required action of the request — a copy, notice, or delivery — is
+    /// still open; this blocks closure.
     OpenCopyAction,
 }
 
 /// The facts closure acceptance is checked against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClosureInputs {
-    /// The requested product path is known to this build.
+    /// The requested product path is known and its recorded state is done.
     pub product_path_known: bool,
-    /// Copy actions of the request that still owe a durable result.
+    /// The request's required operator actions — copy, notice, or delivery —
+    /// that still owe a durable result.
     pub open_copy_actions: usize,
     /// An approved retention exception applies to the request.
     pub retention_exception_approved: bool,
@@ -291,8 +293,9 @@ pub struct ClosureInputs {
 /// The closure acceptance check.
 ///
 /// An unknown product path blocks marking the request technically complete;
-/// an open copy action blocks closure; an approved retention exception yields
-/// a partial final outcome instead of a complete one.
+/// an open required action — a copy, notice, or delivery — blocks closure;
+/// an approved retention exception yields a partial final outcome instead of
+/// a complete one.
 pub fn accept_closure(inputs: &ClosureInputs) -> Result<FinalOutcome, ClosureBlock> {
     if !inputs.product_path_known {
         return Err(ClosureBlock::UnknownProductPath);

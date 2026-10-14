@@ -44,7 +44,10 @@ pub(crate) const COPY_INVENTORY: RowPlan = RowPlan {
     tables: &["copy_inventory"],
     source: RowSource::Tables,
     link: None,
-    gap: Some("no subject column: the copy inventory slot carries an id only"),
+    gap: Some(
+        "no subject column: the copy inventory slot carries custody, owner, \
+         required action, and state per copy",
+    ),
     owner: Owner::Clio,
     custody: Custody::Clio,
     readability: Readability::Plaintext,

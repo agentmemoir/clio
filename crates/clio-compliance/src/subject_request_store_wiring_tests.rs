@@ -388,7 +388,7 @@ fn sqlite_an_unknown_path_blocks_technical_completion_after_a_restart() {
     );
 }
 
-/// A copy action still open on the reloaded record blocks closure.
+/// An open copy action blocks closure even when the product path is done.
 #[test]
 fn sqlite_an_open_copy_action_blocks_closure_after_a_restart() {
     use crate::subject_request::{RequestAction, RequestActionKind, RequestActionState};
@@ -403,7 +403,7 @@ fn sqlite_an_open_copy_action_blocks_closure_after_a_restart() {
             "p1".into(),
             PathSlot {
                 owner: PathOwner::Clio,
-                state: PathState::Pending,
+                state: PathState::Done,
             },
         );
         record.actions.insert(

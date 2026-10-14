@@ -44,6 +44,7 @@ mod action_event_log;
 mod audit;
 mod bundle;
 mod canonical;
+mod copy_disposition;
 mod correct;
 mod erase;
 mod export;
@@ -72,6 +73,10 @@ pub use bundle::{
     entities_checksum, parse_bundle, sha256_hex_bytes, validate_envelope,
 };
 pub use canonical::{CanonicalValue, canonical_get, canonical_subject};
+pub use copy_disposition::{
+    CopyAction, CopyClosureFacts, CopyCustodyClass, CopyDisposition, CopyDispositionOutcome,
+    CopyOwner, CopyRequiredAction, CopyState, copy_closure_facts,
+};
 pub use correct::{
     BeliefContextCorrectArgs, BeliefContextCorrector, CorrectArgs, CorrectOutcome, CorrectResult,
     correct, correct_belief_context,
