@@ -165,6 +165,8 @@ fn erase_args<'a>(
     request_id: &'a str,
     subject_id: &'a str,
 ) -> EraseArgs<'a> {
+    // A fresh salt per process: no test asserts the tombstone hash value.
+    static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);
     EraseArgs {
         store,
         maint: None,
@@ -174,7 +176,7 @@ fn erase_args<'a>(
         request_id,
         reason_code: None,
         confirm: true,
-        salt: b"test-salt",
+        salt: &SALT[..],
         timestamp: "2026-01-01T00:00:00Z",
         sink,
     }
