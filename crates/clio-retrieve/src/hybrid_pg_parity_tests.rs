@@ -22,7 +22,7 @@
 use crate::fixtures_tests as fx;
 use crate::hybrid::HybridRetriever;
 use crate::types::RetrieveRequest;
-use clio_store::{DekProvider, IndexStore, LocalDevKms, PostgresStore, Store};
+use clio_store::{DekProvider, IndexStore, LocalDevKms, PostgresStore, Store, lock_pg_test};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -64,6 +64,7 @@ fn postgres_and_sqlite_hit_id_parity() {
         eprintln!("skip postgres retrieve parity: set CLIO_PG_RETRIEVE_PARITY=1 to run");
         return;
     }
+    let _guard = lock_pg_test();
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     let Ok(pg) = PostgresStore::open(&url, kms) else {
         eprintln!("skip postgres retrieve parity: cannot open {url}");

@@ -25,8 +25,8 @@ use crate::{
 };
 use clio_admission::{AdmissionPolicy, RankingEnv, VecSink};
 use clio_store::{
-    ContinuousStore, DekProvider, HistoryStore, LocalDevKms, PersonaStore, PostgresStore, Store,
-    lock_pg_test,
+    ContinuousStore, DekProvider, HistoryStore, LocalDevKms, PersonaStore, PgTestGuard,
+    PostgresStore, Store, lock_pg_test,
 };
 use clio_types::{
     Actor, AttributeSchema, Bank, EpisodicType, EpistemicKind, HistoryPolicy, ItemKind, MemoryItem,
@@ -34,19 +34,22 @@ use clio_types::{
 };
 use std::sync::Arc;
 
-fn open_pg() -> Option<PostgresStore> {
+fn open_pg() -> Option<(PgTestGuard, PostgresStore)> {
     if std::env::var("CLIO_PG_HISTORY_PARITY").as_deref() != Ok("1") {
         return None;
     }
     let url = std::env::var("CLIO_DATABASE_URL").ok()?;
+    let guard = lock_pg_test();
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
-    PostgresStore::open(&url, kms).ok()
+    PostgresStore::open(&url, kms)
+        .ok()
+        .map(|store| (guard, store))
 }
 
 #[test]
 #[allow(clippy::too_many_lines)]
 fn t14_postgres_task_and_failure_parity() {
-    let Some(pg) = open_pg() else {
+    let Some((_guard, pg)) = open_pg() else {
         eprintln!(
             "skip postgres history parity: set CLIO_PG_HISTORY_PARITY=1 and CLIO_DATABASE_URL"
         );
@@ -172,14 +175,13 @@ fn temporal_preference_context_postgres_parity() {
     // context through `temporal_history`, with as_of filtering unchanged.
     // Updated from the previously-leaking behavior: the context now rides only
     // the points at or after the write that introduced it.
-    let Some(pg) = open_pg() else {
+    let Some((_guard, pg)) = open_pg() else {
         eprintln!(
             "skip postgres temporal context parity: \
              set CLIO_PG_HISTORY_PARITY=1 and CLIO_DATABASE_URL"
         );
         return;
     };
-    let _guard = lock_pg_test();
     let bank = unique("temporal-context-parity");
     let policy = HistoryPolicy::default();
     let sink = crate::HistoryVecSink::default();
