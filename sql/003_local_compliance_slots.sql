@@ -6,13 +6,14 @@
 --   2. SQLite: this file, then 002_vectors_sqlite.sql
 --      Postgres: 002_vectors_postgres.sql, then this file
 --
--- These slots reserve storage ownership. G6's local_events table carries the
--- real local event schema; every other table is a minimal text-key placeholder
--- that its owner group will build on later (no feature columns or rows yet).
+-- These slots reserve storage ownership. The local_events table carries the
+-- real local event schema and durable_requests the real request schema;
+-- every other table is a minimal text-key placeholder that its owner group
+-- will build on later (no feature columns or rows yet).
 -- Owner groups:
 --   G6    local_events           local event store (content-free local events)
 --   G7    subject_family_links   subject-family mapping (stored subject links)
---   G8A   durable_requests       durable request state (request schema slot)
+--         durable_requests       durable request state (request schema slot)
 --   G19   copy_inventory         copy inventory, staging, custody, product copy result
 --   G14D  archive_experiments    old-archive experiment and restore/journal design
 --   G14A  local_erasure_journal  durable local erasure journal and deny marker
@@ -50,10 +51,17 @@ CREATE TABLE IF NOT EXISTS subject_family_links
   id                                                                                           text PRIMARY KEY
 );
 
--- G8A: durable request state (request schema slot).
+-- Durable subject-request state. One row per request. `scope` and `record`
+-- are the consumer's canonical serializations, stored and compared verbatim;
+-- the normalized columns travel with the row so a restart reads them back.
 CREATE TABLE IF NOT EXISTS durable_requests
 (
-  id                                                                                           text PRIMARY KEY
+  request_id                                                                                   text PRIMARY KEY,
+  kind                                                                                         text NOT NULL,
+  state                                                                                        text NOT NULL,
+  scope                                                                                        text NOT NULL,
+  deadline                                                                                     text,
+  record                                                                                       text NOT NULL
 );
 
 -- G19: copy inventory, staging, custody, product copy result.

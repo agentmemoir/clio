@@ -45,12 +45,12 @@ const SLOT_TABLES: [&str; 8] = [
 ];
 
 /// The slot tables that still hold only the placeholder key: every reserved
-/// table except `local_events`, whose real event schema the G6 owner group
-/// filled in (pinned by `the_local_events_slot_holds_the_event_columns`).
-const PLACEHOLDER_SLOTS: [&str; 7] = [
+/// table except `local_events` and `durable_requests`, whose fuller schemas
+/// are pinned by `the_local_events_slot_holds_the_event_columns` and
+/// `the_durable_requests_slot_holds_the_request_columns`.
+const PLACEHOLDER_SLOTS: [&str; 6] = [
     "archive_experiments",
     "copy_inventory",
-    "durable_requests",
     "erasure_adapters",
     "local_erasure_journal",
     "restore_guards",
@@ -68,6 +68,10 @@ const LOCAL_EVENT_COLUMNS: [&str; 8] = [
     "outcome_state",
     "result",
 ];
+
+/// The `durable_requests` column set, in DDL order.
+const DURABLE_REQUEST_COLUMNS: [&str; 6] =
+    ["request_id", "kind", "state", "scope", "deadline", "record"];
 
 /// Every slot table the static asset declares matches the pinned list.
 #[test]
@@ -380,5 +384,39 @@ fn postgres_local_events_slot_holds_the_event_columns() {
         postgres_columns(&store, "local_events"),
         LOCAL_EVENT_COLUMNS.map(str::to_owned).to_vec(),
         "local_events column set changed"
+    );
+}
+
+/// The `durable_requests` slot holds the real request schema, in DDL order: a
+/// column rename, drop, or reorder must update this pin, not slip past it.
+#[test]
+fn the_durable_requests_slot_holds_the_request_columns() {
+    let scratch = Scratch::new();
+    let store = SqliteStore::open(&scratch.0.join("store.db"), local_kms())
+        .expect("open a fresh sqlite store");
+    assert_eq!(
+        sqlite_columns(&store, "durable_requests"),
+        DURABLE_REQUEST_COLUMNS.map(str::to_owned).to_vec(),
+        "durable_requests column set changed"
+    );
+}
+
+/// The Postgres `durable_requests` slot holds the same request column set.
+#[test]
+fn postgres_durable_requests_slot_holds_the_request_columns() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        eprintln!("skip: shared Postgres unreachable");
+        return;
+    };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let db = ScratchDatabase::create(&mut admin, "requestcolumns");
+    drop(admin);
+    let store = PostgresStore::open(&url_for_database(&db.name), local_kms())
+        .expect("open a fresh postgres store");
+    assert_eq!(
+        postgres_columns(&store, "durable_requests"),
+        DURABLE_REQUEST_COLUMNS.map(str::to_owned).to_vec(),
+        "durable_requests column set changed"
     );
 }
