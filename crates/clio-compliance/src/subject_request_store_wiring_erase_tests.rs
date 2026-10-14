@@ -228,7 +228,8 @@ fn sqlite_an_erasure_for_a_request_the_store_does_not_hold_refuses() {
     double.banks = vec![bank.clone()];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
     let err = erase_from_durable_store(&store, &request_id, &args, &live)
         .expect_err("a missing durable row must refuse");
@@ -266,7 +267,8 @@ fn sqlite_an_erasure_with_a_corrupted_durable_row_fails_closed() {
     double.banks = vec![bank.clone()];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
-    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
     let err = erase_from_durable_store(&store, &request_id, &args, &live)
         .expect_err("a corrupted durable row must refuse");
@@ -309,7 +311,7 @@ fn sqlite_the_store_reports_the_erasure_fan_out_bank_set() {
 #[test]
 fn a_row_with_invalid_record_json_fails_closed() {
     let record = started_record("req", &subject_scope());
-    let mut row = record_to_row(&record).expect("encode record");
+    let mut row = record_to_row(&record);
     row.record = "{".into();
     let err = row_to_record(&row).expect_err("invalid JSON must refuse");
     assert_eq!(err.code, ErrorCode::Internal);
@@ -320,7 +322,7 @@ fn a_row_with_invalid_record_json_fails_closed() {
 #[test]
 fn a_row_with_another_request_id_fails_closed() {
     let record = started_record("req", &subject_scope());
-    let mut row = record_to_row(&record).expect("encode record");
+    let mut row = record_to_row(&record);
     row.request_id = "other-req".into();
     let err = row_to_record(&row).expect_err("mismatched request id must refuse");
     assert_eq!(err.code, ErrorCode::Internal);
