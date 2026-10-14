@@ -39,6 +39,13 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: Read the workspace version
@@ -86,6 +93,14 @@ jobs:
             runner: ubuntu-24.04-arm
             asset: clio-aarch64-unknown-linux-musl
     steps:
+      - name: Mount temporary storage
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       # Same pin as CI. A release should be built by the compiler the tree was
@@ -196,6 +211,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: Download every archive

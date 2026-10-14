@@ -27,6 +27,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: Run the benchmark suite
