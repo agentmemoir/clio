@@ -14,6 +14,7 @@
 //!   resolve
 //! - Table-pattern matching between the plan and the measured store tables
 //! - `REQUIRED_SOURCE_AREAS` and `uncovered_required_areas`
+//! - The internal `inventory_map` and `inventory_plan` submodule declarations
 //!
 //! ## Does not own
 //! - The fixed `ROW_PLAN` table itself (`inventory_plan`)
@@ -27,6 +28,8 @@
 //!
 //! Keep this module focused on the row schema and plan reconciliation.
 
+#[path = "inventory_map.rs"]
+mod inventory_map;
 #[path = "inventory_plan.rs"]
 mod inventory_plan;
 

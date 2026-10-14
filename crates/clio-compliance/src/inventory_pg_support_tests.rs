@@ -11,7 +11,7 @@
 //! ## Owns
 //! - `open_pg_ledger_fixture`: the shared-Postgres lock, the scoped schema, the
 //!   store, and the selected, other, shared, and hashed link-class writes
-//! - `pg_base_url`, the local `pg_skip_note`, and the credential readers
+//! - `pg_base_url`, `pg_checked_url`, the local `pg_skip_note`, and the credential readers
 //!
 //! ## Does not own
 //! - The ledger and its row plan (`inventory.rs`, `inventory_rows.rs`)
@@ -23,6 +23,8 @@
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
+//!
+//! Keep this module focused on the shared Postgres test fixtures.
 
 use crate::erase::{EraseArgs, EraseVecSink, erase_request};
 use crate::inventory::InventoryPaths;
@@ -57,6 +59,17 @@ pub(crate) fn pg_base_url() -> String {
     database_url_from_process_env().unwrap_or_else(|_| COMPOSE_URL.to_owned())
 }
 
+/// The shared-Postgres URL re-parsed: a bad URL is a harness fault, not a skip.
+pub(crate) fn pg_checked_url() -> String {
+    let url = pg_base_url();
+    let ok = clio_store::parse_connection(&url).is_ok() && url_password(&url).is_some();
+    assert!(
+        ok,
+        "CLIO_DATABASE_URL is misconfigured (bad URL or no password; a harness fault)"
+    );
+    url
+}
+
 /// The line a Postgres test prints when it cannot open the store.
 ///
 /// The same shape and guarantee as the store's own skip note: it takes the
@@ -77,12 +90,10 @@ pub(crate) fn url_userinfo(url: &str) -> Option<String> {
     (!userinfo.is_empty()).then(|| userinfo.to_owned())
 }
 
-/// The password half of a connection URL's userinfo, read in memory and never
-/// printed.
+/// The password half of a connection URL's userinfo, read in memory and never printed.
 #[must_use]
 pub(crate) fn url_password(url: &str) -> Option<String> {
-    let userinfo = url_userinfo(url)?;
-    userinfo
+    url_userinfo(url)?
         .split_once(':')
         .map(|(_, password)| password.to_owned())
 }
@@ -115,7 +126,7 @@ impl Drop for FixtureDir {
 /// `db_path` is a placeholder, because Postgres holds no store file; the key
 /// file is a placeholder too, because the fixture's `LocalDevKms` is in memory,
 /// the same shape the SQLite fixture's paths have.
-fn ledger_paths(dir: &Path) -> InventoryPaths {
+pub(crate) fn ledger_paths(dir: &Path) -> InventoryPaths {
     let db_path = dir.join("store").join("store.db");
     let kms_path = PathBuf::from(format!("{}{KMS_SIBLING_SUFFIX}", db_path.display()));
     InventoryPaths {
@@ -229,7 +240,7 @@ pub(crate) fn open_pg_ledger_fixture() -> Result<(PgTestGuard, PgLedgerFixture),
 }
 
 /// One semantic fixture item for a subject.
-fn semantic_item(id: &str, bank: &str, subject: &str) -> MemoryItem {
+pub(crate) fn semantic_item(id: &str, bank: &str, subject: &str) -> MemoryItem {
     MemoryItem {
         id: id.into(),
         bank_id: bank.into(),
@@ -266,7 +277,7 @@ pub(crate) fn carrier(id: &str, bank: &str, subject: &str, tag: EpisodicType) ->
 
 /// An item, a task record, a failure record, and a belief that all carry one
 /// data subject in a direct, non-null `subject_id` column.
-fn write_direct_link_class(store: &PostgresStore, bank: &str, subject: &str) {
+pub(crate) fn write_direct_link_class(store: &PostgresStore, bank: &str, subject: &str) {
     let mut direct = semantic_item(&fixture_id(subject, "item"), bank, subject);
     direct.admission_score = Some(0.9);
     store
@@ -336,7 +347,7 @@ fn write_direct_link_class(store: &PostgresStore, bank: &str, subject: &str) {
 
 /// An association edge between the two subjects' items plus a bank-scoped
 /// persona entry and preference: rows that name no data subject at all.
-fn write_shared_class(store: &PostgresStore, bank: &str) {
+pub(crate) fn write_shared_class(store: &PostgresStore, bank: &str) {
     store
         .put_assoc_edge(&AssocEdgeRecord {
             id: fixture_id(SHARED, "edge"),
@@ -387,7 +398,7 @@ fn write_shared_class(store: &PostgresStore, bank: &str) {
 
 /// A subject erased through the verified erasure path, so the only row that
 /// still names it is a compliance tombstone carrying a one-way hash.
-fn write_hashed_link_class(store: &PostgresStore, bank: &str) {
+pub(crate) fn write_hashed_link_class(store: &PostgresStore, bank: &str) {
     store
         .create_memory_item(
             &semantic_item(&fixture_id(UNKNOWN, "item"), bank, UNKNOWN),
