@@ -185,6 +185,12 @@ pub struct McpState {
     /// what the local transports use, because a local process has no credential
     /// edge — the process owner already holds the store.
     pub(crate) principal: Option<Arc<Principal>>,
+    /// A pinned clock for the read handlers, set by tests that compare the
+    /// protocol handler with direct dispatch. `None` (every production build,
+    /// because the field is `cfg(test)`) keeps the engine's system-clock
+    /// fallback. Test-only.
+    #[cfg(test)]
+    pub(crate) test_now: Option<String>,
 }
 
 impl std::fmt::Debug for McpState {

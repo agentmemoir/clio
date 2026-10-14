@@ -25,6 +25,7 @@
 
 mod common;
 
+use clio::store::lock_pg_test;
 use common::seed_key;
 use serde_json::Value;
 use std::fs;
@@ -226,6 +227,7 @@ fn live_correct_mints_a_fresh_revision_id_each_process_on_postgres() {
         eprintln!("no Postgres at {url}: skipping the Postgres correction scenario");
         return;
     }
+    let _guard = lock_pg_test();
     let kms_dir = temp_dir("pg-kms");
     let kms = kms_dir.join("clio.kms.json");
     let bank = unique("bank");

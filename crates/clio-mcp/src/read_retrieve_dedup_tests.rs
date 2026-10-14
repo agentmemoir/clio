@@ -406,11 +406,14 @@ fn compose_scope_keeps_the_persona_partition_and_budget() {
     assert_eq!(out["dedup"]["scope_applied"], json!("consolidated_only"));
 }
 
+/// Both transports read the state clock, so they differ only in latency counters.
 #[test]
 fn protocol_handler_matches_direct_dispatch_for_scoped_retrieve() {
-    let direct_state = state();
+    let mut direct_state = state();
+    direct_state.set_test_now("2026-10-14T00:00:00Z");
     duplicate_bank(&direct_state, "bank-a");
-    let handler_state = state();
+    let mut handler_state = state();
+    handler_state.set_test_now("2026-10-14T00:00:00Z");
     duplicate_bank(&handler_state, "bank-a");
     let args = json!({
         "bank": "bank-a",
@@ -428,14 +431,14 @@ fn protocol_handler_matches_direct_dispatch_for_scoped_retrieve() {
         }))
         .expect("handler response");
     assert_eq!(
-        strip_timings(response["result"]["structuredContent"].clone()),
-        strip_timings(direct),
+        strip_latency(response["result"]["structuredContent"].clone()),
+        strip_latency(direct),
         "protocol layer is the shared seam for both transports"
     );
 }
 
 /// Drop latency counters (they vary between two live calls).
-fn strip_timings(mut value: Value) -> Value {
+fn strip_latency(mut value: Value) -> Value {
     if let Some(obj) = value.as_object_mut() {
         obj.remove("metrics");
         if let Some(explanation) = obj.get_mut("explanation").and_then(Value::as_object_mut) {

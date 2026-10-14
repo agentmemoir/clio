@@ -56,6 +56,13 @@ LOOKUP_KINDS = frozenset({NEXTEST_LOOKUP_KIND, LLVM_COV_LOOKUP_KIND})
 #: Published logs start with these markers; replays keep the previous <kind>.prev entry.
 EXECUTED_LOG_MARKER = b"gate: command ran for this verdict\n"
 REPLAYED_LOG_MARKER = b"gate: cached verdict replay; command did not run for this invocation\n"
+#: The line a published log carries after its marker, naming the run the record
+#: came from. A published directory can be shared by every worktree of one
+#: checkout, because `CLIO_GATE_LOG_DIR` sends them all to one directory so a
+#: reader can find the newest verdict. Without this line the record cannot say
+#: whose run it describes, so a verdict published by another worktree reads as
+#: the reader's own. Issue #186 is that pair of reports.
+RUN_RECORD_PREFIX = b"gate: run "
 #: The flags that ask the tool to describe itself rather than measure anything.
 #: They stand in for a subcommand, because `cargo llvm-cov --version` carries
 #: none, and a bare `cargo llvm-cov` is `cargo llvm-cov test` in every way the
