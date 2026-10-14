@@ -28,7 +28,7 @@
 
 mod common;
 
-use clio::store::{DekProvider, LocalDevKms, SqliteStore, Store};
+use clio::store::{DekProvider, LocalDevKms, SqliteStore, Store, lock_pg_test};
 use clio::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -197,6 +197,7 @@ fn t31_03_xdg_data_home_override() {
 
 #[test]
 fn t31_04_database_url_infers_postgres_backend() {
+    let _guard = lock_pg_test();
     let home = temp_dir("t31-04-home");
     let pg = pg_url();
     let out = clio_cmd(&[
