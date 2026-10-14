@@ -112,9 +112,17 @@ fn intent_gate(state: &McpState, args: &Value) -> Result<Value, AmError> {
 ///
 /// Co-activation handoff failures surface as `coactivation_handoff_failed`,
 /// which the protocol layer maps to JSON-RPC `-32001`.
+///
+/// Under `cfg(test)` the engine clock comes from `McpState::test_now` when a
+/// test set it, so a parity test can pin both transports to the same instant;
+/// in production the field does not exist and the system clock is used.
 #[inline(never)]
 fn retrieve(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    retrieve_at(state, args, None)
+    #[cfg(test)]
+    let now = state.test_now.clone();
+    #[cfg(not(test))]
+    let now: Option<String> = None;
+    retrieve_at(state, args, now)
 }
 
 /// The `retrieve` binding with the engine clock supplied by the caller: `now`

@@ -3,10 +3,9 @@
 //
 //! # Responsibility
 //!
-//! This module holds the state and payload helpers shared by the
-//! `read_scores` test modules and the `read_retrieve` dispatch-parity test:
-//! the hermetic store fixture, the dispatcher call, the seeded item, the
-//! lexical write, and the payload accessors.
+//! This module holds the state and payload helpers shared by the three
+//! `read_scores` test modules: the hermetic store fixture, the dispatcher
+//! call, the seeded item, the lexical write, and the payload accessors.
 //!
 //! ## Owns
 //! - `state`, the hermetic empty-effective-config store fixture whose
@@ -17,8 +16,6 @@
 //! - `put`, the direct store and lexical-index write
 //! - `hits`, the `retrieve` payload hit accessor
 //! - `scores_of`, the documented-key-set accessor used for value assertions
-//! - `strip_volatile`, the normalizer that drops latency counters and snaps
-//!   clock-derived scores so two live payloads compare exactly
 //!
 //! ## Does not own
 //! - Any test
@@ -121,50 +118,4 @@ pub(super) fn scores_of(hit: &Value) -> &Map<String, Value> {
         "{hit}"
     );
     scores
-}
-
-/// Drop latency counters and normalize clock-derived scores, so two live
-/// `retrieve` payloads compare exactly.
-///
-/// `metrics` holds latency counters that differ between calls. The retention
-/// curve reads the system clock in whole seconds, so two calls that straddle a
-/// second boundary can land on an `age_factor` one ULP apart; `score` and
-/// `scores.final` inherit that. Snapping every clock-derived hit score to a
-/// 1e-12 grid erases the ULP noise while a real scoring disagreement fails.
-pub(super) fn strip_volatile(mut value: Value) -> Value {
-    let Some(object) = value.as_object_mut() else {
-        return value;
-    };
-    object.remove("metrics");
-    snap_hit_scores(object, "hits");
-    if let Some(explanation) = object.get_mut("explanation").and_then(Value::as_object_mut) {
-        explanation.remove("metrics");
-        snap_hit_scores(explanation, "hits");
-    }
-    value
-}
-
-/// Snap each hit's clock-derived scores to a 1e-12 grid; a missing or
-/// non-array `hits` field is left untouched.
-fn snap_hit_scores(object: &mut Map<String, Value>, key: &str) {
-    let Some(Value::Array(hits)) = object.get_mut(key) else {
-        return;
-    };
-    for hit in hits {
-        let Some(hit) = hit.as_object_mut() else {
-            continue;
-        };
-        snap_score(hit, "score");
-        if let Some(scores) = hit.get_mut("scores").and_then(Value::as_object_mut) {
-            snap_score(scores, "final");
-            snap_score(scores, "age_factor");
-        }
-    }
-}
-
-/// Round one numeric field to a 1e-12 grid, leaving a non-number untouched.
-fn snap_score(object: &mut Map<String, Value>, key: &str) {
-    if let Some(f) = object.get(key).and_then(Value::as_f64) {
-        object.insert(key.to_owned(), ((f * 1e12).round() / 1e12).into());
-    }
 }

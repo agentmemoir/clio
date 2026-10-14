@@ -285,6 +285,8 @@ impl McpState {
             // Unbound at construction: only a credential-bearing transport ever
             // attaches a principal, and it does so per request.
             principal: None,
+            #[cfg(test)]
+            test_now: None,
         }))
     }
 }
