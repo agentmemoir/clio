@@ -234,6 +234,44 @@ fn sqlite_an_erasure_for_a_request_the_store_does_not_hold_refuses() {
     );
 }
 
+/// An erasure whose durable row no longer decodes fails closed before any
+/// erasure effect.
+#[test]
+fn sqlite_an_erasure_with_a_corrupted_durable_row_fails_closed() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("store.db");
+    let request_id = unique("req");
+    let scope = subject_scope();
+    let (bank, subject) = scope_parts(&scope);
+    {
+        let store = open_sqlite(&path);
+        persist(&store, &started_record(&request_id, &scope));
+    }
+    let store = open_sqlite(&path);
+    let mut corrupted = store
+        .load(&request_id)
+        .expect("load the row")
+        .expect("row exists");
+    corrupted.record = "{not json".into();
+    store
+        .save(&corrupted)
+        .expect("overwrite with the corrupted record");
+    let mut double = RetryStore::failing();
+    double.banks = vec![bank.clone()];
+    let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
+    let sink = EraseVecSink::default();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject);
+    let live = double.effect_bank_set();
+    let err = erase_from_durable_store(&store, &request_id, &args, &live)
+        .expect_err("a corrupted durable row must refuse");
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert_eq!(
+        double.erase_calls(),
+        0,
+        "the refusal must precede any effect"
+    );
+}
+
 /// The store reports the fan-out set: the requesting bank plus every bank
 /// holding the subject's items.
 #[test]
