@@ -19,6 +19,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::read_scores_test_support::strip_volatile;
 use crate::protocol::McpHandler;
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::runtime_retention::retention_test_support::RetentionStoreFixture;
@@ -428,19 +429,8 @@ fn protocol_handler_matches_direct_dispatch_for_scoped_retrieve() {
         }))
         .expect("handler response");
     assert_eq!(
-        strip_timings(response["result"]["structuredContent"].clone()),
-        strip_timings(direct),
+        strip_volatile(response["result"]["structuredContent"].clone()),
+        strip_volatile(direct),
         "protocol layer is the shared seam for both transports"
     );
-}
-
-/// Drop latency counters (they vary between two live calls).
-fn strip_timings(mut value: Value) -> Value {
-    if let Some(obj) = value.as_object_mut() {
-        obj.remove("metrics");
-        if let Some(explanation) = obj.get_mut("explanation").and_then(Value::as_object_mut) {
-            explanation.remove("metrics");
-        }
-    }
-    value
 }
