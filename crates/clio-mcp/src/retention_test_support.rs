@@ -59,6 +59,15 @@ impl RetentionStoreFixture {
         Arc::clone(&self.state)
     }
 
+    /// Pin the read handlers' clock on this fixture's state, so a test that
+    /// compares the protocol handler with direct dispatch compares two payloads
+    /// that differ in nothing but latency counters. Test-only.
+    pub(crate) fn set_test_now(&mut self, now: &str) {
+        Arc::get_mut(&mut self.state)
+            .expect("the fixture state is uniquely owned")
+            .test_now = Some(now.to_owned());
+    }
+
     fn adopt(mut state: Arc<McpState>) -> Self {
         let path = temp_store_path();
         // A stale file from a crashed run must not seed this fixture's store.

@@ -338,3 +338,49 @@ fn memory_section(pack: &Value) -> &Value {
         .find(|s| s["name"] == json!("memory"))
         .unwrap_or_else(|| panic!("memory section present: {pack}"))
 }
+
+/// The published read binding honours the state's pinned clock: two different
+/// pins report different `scores.age_factor` at this item's age. If the binding
+/// stops reading the state clock, both calls fall back to one system reading and
+/// the factors are equal, so this test fails.
+#[test]
+fn the_pinned_state_clock_moves_the_reported_age_factor() {
+    let mut earlier = state();
+    earlier.set_test_now("2026-09-14T00:00:00Z");
+    put(
+        &earlier,
+        &base_item(
+            "old",
+            "bank-a",
+            "alpha bravo charlie",
+            "2024-01-01T00:00:00Z",
+        ),
+        "alpha bravo charlie",
+    );
+    let mut later = state();
+    later.set_test_now("2026-10-14T00:00:00Z");
+    put(
+        &later,
+        &base_item(
+            "old",
+            "bank-a",
+            "alpha bravo charlie",
+            "2024-01-01T00:00:00Z",
+        ),
+        "alpha bravo charlie",
+    );
+    let args = json!({"bank": "bank-a", "query": "alpha bravo charlie"});
+    let first = call(&earlier, "retrieve", args.clone());
+    let second = call(&later, "retrieve", args);
+    let first_factor = first["hits"][0]["scores"]["age_factor"]
+        .as_f64()
+        .expect("age factor");
+    let second_factor = second["hits"][0]["scores"]["age_factor"]
+        .as_f64()
+        .expect("age factor");
+    assert_ne!(
+        first_factor.to_bits(),
+        second_factor.to_bits(),
+        "{first} vs {second}"
+    );
+}
