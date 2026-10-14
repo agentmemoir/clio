@@ -33,6 +33,14 @@ def published(name: str, log_dir: Path) -> str:
     except OSError:
         return ""
 
+def exit_code(name: str, log_dir: Path) -> str:
+    """The exit code a published exit file records: its first line, "" when there is none.
+
+    The lines after the first name the run that wrote the file, so a check that
+    wants only the code must not read the whole file.
+    """
+    return published(name, log_dir).split("\n")[0].strip()
+
 PUBLISHED_NAME = re.compile(r"<kind>\.log|CLIO_GATE_LOG_DIR")
 KEPT_NAME = re.compile(r"<kind>\.prev")
 TEXT_SUFFIXES = (".md", ".py", ".sh", ".yml", ".yaml", ".toml", ".txt", ".json")
@@ -163,8 +171,8 @@ class StandInTests(unittest.TestCase):
             checks.append(
                 (
                     "each publishes its own exit code",
-                    published(f"{NEXTEST_LOOKUP_KIND}.exit", log_dir).strip() == "7"
-                    and published("test.exit", log_dir).strip() == "7",
+                    exit_code(f"{NEXTEST_LOOKUP_KIND}.exit", log_dir) == "7"
+                    and exit_code("test.exit", log_dir) == "7",
                 )
             )
 
@@ -260,7 +268,7 @@ class StandInTests(unittest.TestCase):
                 # last state the directory happened to reach.
                 kept = published("command.prev", log_dir)
                 newest = published("command.log", log_dir)
-                newest_code = published("command.exit", log_dir)
+                newest_code = exit_code("command.exit", log_dir)
                 replay = run_gate(cmd, log_dir=str(log_dir))
                 replay_log = published("command.log", log_dir)
                 kept_after_replay = published("command.prev", log_dir)
@@ -283,7 +291,7 @@ class StandInTests(unittest.TestCase):
             checks.append(
                 (
                     "the kept run names the exit code it exited with",
-                    kept.startswith("exit: 101\n") and newest_code.strip() == "0",
+                    kept.startswith("exit: 101\n") and newest_code == "0",
                 )
             )
             checks.append(

@@ -7,6 +7,8 @@ The cache holds up to 50 entries per worktree and removes lookup entries first. 
 
 Each published log names the command kind and starts with a fresh-run or replay marker. Cargo check, clippy, lint, and ritual logs report package work Cargo showed, or say when its status was absent. Nextest and llvm-cov lookups publish to separate log names without using cache verdict slots; nextest benchmarks have their own cached kind.
 
+A published log also carries a `gate: run ...` line, naming the worktree, the tree, and the finish time of the run the record describes, and the published exit file carries that same line after its exit code. The publish holds one lock on the published directory, writes the exit code first, and puts the verdict back when the log cannot be written, so a reader never finds one run's verdict beside another run's log. All of it is needed because a published directory can be shared by every worktree of a checkout.
+
 Quick scoping: `cargo test`, `cargo nextest run`, `cargo clippy`, and the
 `make test`, `make check`, `make lint` targets are scoped to the changed
 workspace crates and their reverse dependencies (make targets through
@@ -48,8 +50,10 @@ Environment:
                      cache it asked for was warmed
   CLIO_GATE_LOG_DIR  optional log directory override. By default, logs land
                      under this repository's clio-gate cache folder. Each
-                     <kind>.log starts with a fresh-run or replay marker.
-                     The previous log is kept beside it as <kind>.prev.
+                     <kind>.log starts with a fresh-run or replay marker and
+                     names the run it records; each <kind>.exit holds the exit
+                     code followed by that same run line. The previous log is
+                     kept beside them as <kind>.prev.
   XDG_CACHE_HOME  cache root; defaults to ~/.cache
 """
 
@@ -68,6 +72,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 # The shared rule for a temporary directory whose files the host will run lives
@@ -101,6 +106,7 @@ from gate_kinds import (
     NEXTEST_EXECUTING_SUBCOMMANDS,
     NEXTEST_KNOWN_SUBCOMMANDS,
     NEXTEST_LOOKUP_KIND,
+    RUN_RECORD_PREFIX,
     SCOPED_KINDS,
     USAGE,
 )
@@ -209,7 +215,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
                     code = subprocess.call(argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
                 finished = time.time()
                 ran.update(started=started, finished=finished, exit=code)
-                published = _publish_log(log_path, log_dir, kind, code)
+                published = _publish_log(log_path, log_dir, kind, code, run_line=_run_line(root, "", finished))
                 if clean_requested:
                     _purge_coverage_cache(root)
                 print(f"gate: {kind} exit {code}; log: {published or log_path}")
@@ -245,7 +251,8 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
                 if fresh_env:
                     replay_started = time.time()
                     _restore_artifacts(entry, root, meta)
-                    code = _reuse(entry, meta, log_dir)
+                    run_line = _run_line(root, str(meta.get("tree", "")), meta.get("finished"))
+                    code = _reuse(entry, meta, log_dir, run_line=run_line)
                     ran.update(replayed=True, started=replay_started, finished=time.time(), exit=code)
                     return code
                 print("gate: stored failure came from a different PATH; re-running", file=sys.stderr)
@@ -279,7 +286,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
                     output.write(b"\n" + evidence)
             except OSError as error:
                 print(f"gate: warning: cannot record Cargo work evidence: {error}", file=sys.stderr)
-        published = _publish_log(log_path, log_dir, kind, code)
+        published = _publish_log(log_path, log_dir, kind, code, run_line=_run_line(root, fp, finished))
         # Both must-run commands return here, before the verdict is stored: a
         # clean stores nothing so its removal is never replayed, and a capture
         # stores nothing so a later run of the same command cannot inherit a
@@ -321,6 +328,23 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         if "exit" in ran:
             append_run(root, ran)
         os.close(lock_fd)
+
+
+def _run_line(root: str, tree: str, finished: float | None) -> bytes:
+    """One line naming the run a published record came from.
+
+    A published directory can be shared by every worktree of one checkout, because
+    `CLIO_GATE_LOG_DIR` sends them all to one directory so a reader can find the
+    newest verdict. The record alone then cannot say whose run it describes, which
+    is the first half of issue #186: a verdict published by another worktree's
+    zero-work replay read as the reader's own. The line names the worktree, the
+    tree the verdict was measured from, and when that run finished, so a reader can
+    tell a foreign or older verdict from their own without reading the cache.
+    """
+    when = "?"
+    if finished:
+        when = datetime.fromtimestamp(finished, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return f"{RUN_RECORD_PREFIX.decode()}worktree={root} tree={tree[:12] or '-'} finished={when}\n".encode()
 
 
 def _cargo_checking_evidence(log_path: Path, kind: str) -> bytes:
