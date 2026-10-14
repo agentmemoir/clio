@@ -19,12 +19,16 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::bundle::{BundleEnvelope, ExportContentMode};
-use crate::export::export;
+use crate::export::{ExportArgs, ExportDelivery, export};
 use crate::export_tests::{
-    Fixture, T, args, ctx, dest_path, export_at, fixture, item, read, store,
+    Fixture, Scratch, T, args, ctx, dest_path, export_at, fixture, item, read, staging_entries,
+    store,
 };
+use crate::subject_request_events::BindingControls;
 use crate::test_unique::unique;
-use clio_store::{AssocEdgeRecord, AssocKind, ComplianceStore, Store, SubjectEraseSpec};
+use clio_store::{
+    AssocEdgeRecord, AssocKind, ComplianceStore, DestinationCustodyStore, Store, SubjectEraseSpec,
+};
 use clio_types::{Actor, Bank, OpContext, SemanticCategory};
 
 #[test]
@@ -184,4 +188,54 @@ fn t22_09_ciphertext_backup_exports_opaque_items() {
         assert!(opaque.subject_id.starts_with("sub-"));
     }
     assert!(outcome.manifest.complete);
+}
+
+/// A directory destination must refuse the delivery before any write: the
+/// export maps the refusal to `InvalidArgument`, the directory survives, the
+/// staging directory stays empty, and the custody row settles as failed.
+#[test]
+fn a_directory_destination_refuses_the_export_with_invalid_argument() {
+    let store = store();
+    let scratch = Scratch::new();
+    let dest = scratch.root.join("dest-dir");
+    std::fs::create_dir_all(&dest).unwrap();
+    let controls = BindingControls {
+        copy_controls_accepted: true,
+        ..BindingControls::default()
+    };
+    let ctx = OpContext::new(Bank::new(unique("bank")), Actor::Harness);
+    let dest_str = dest.to_string_lossy().into_owned();
+    let action_id = "act-dir";
+    let staging = scratch.staging_dir();
+    let export_args = ExportArgs {
+        store: &store,
+        compliance: &store,
+        persona: &store,
+        history: &store,
+        belief: &store,
+        ctx: &ctx,
+        destination: &dest_str,
+        filter: crate::export::ExportFilter::default(),
+        content_mode: ExportContentMode::DsarPlaintext,
+        timestamp: "2026-09-20T00:00:00Z",
+        subject_id: None,
+        facts: None,
+        backend: None,
+        delivery: Some(ExportDelivery {
+            events: &store,
+            custody: &store,
+            controls: &controls,
+            action_id,
+            staging_dir: &staging,
+            custody_owner: "clio",
+            required_action: "delivery",
+        }),
+    };
+    let err = export(&export_args).unwrap_err();
+    assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+    assert_eq!(err.message, "export destination is not a regular file");
+    assert!(dest.is_dir());
+    assert_eq!(staging_entries(&staging), [] as [std::path::PathBuf; 0]);
+    let row = store.load(action_id).unwrap().expect("custody row");
+    assert_eq!(row.state, "failed");
 }

@@ -291,7 +291,7 @@ fn help_text_and_parser_flags_agree_in_both_directions() {
          derivation their dispatcher really parses with: {remaining:?}"
     );
     assert_eq!(
-        registered_checked, 95,
+        registered_checked, 96,
         "the registered commands this check decides changed, so it is covering less or more \
          than it was: undecidable were {undecidable:?}"
     );

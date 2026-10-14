@@ -41,12 +41,12 @@ pub(crate) const ARCHIVE_EXPERIMENTS: RowPlan = RowPlan {
 
 pub(crate) const COPY_INVENTORY: RowPlan = RowPlan {
     family: "copy_inventory",
-    tables: &["copy_inventory"],
+    tables: &["copy_inventory", "export_destinations"],
     source: RowSource::Tables,
     link: None,
     gap: Some(
         "no subject column: the copy inventory slot carries custody, owner, \
-         required action, and state per copy",
+         required action, and state per copy and per export destination",
     ),
     owner: Owner::Clio,
     custody: Custody::Clio,

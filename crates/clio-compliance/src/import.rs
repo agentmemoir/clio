@@ -221,6 +221,10 @@ mod import_atomicity_tests;
 mod import_context_tests;
 
 #[cfg(test)]
+#[path = "import_context_persona_tests.rs"]
+mod import_context_persona_tests;
+
+#[cfg(test)]
 #[path = "import_restore_tests.rs"]
 mod import_restore_tests;
 

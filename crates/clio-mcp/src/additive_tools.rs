@@ -50,7 +50,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         "sync_push" | "sync_pull" | "sync_serve" | "sync_ack_skip" => {
             crate::sync_tools::dispatch_inner(state, name, args)
         }
-        "export" | "import" | "import_provider" => {
+        "export" | "import" | "import_provider" | "review_export" => {
             crate::portability_tools::dispatch_inner(state, name, args)
         }
         other => crate::mutator_tools::dispatch_inner(state, other, args),

@@ -4,7 +4,8 @@
 //! # Responsibility
 //!
 //! This module is responsible for the `clio compliance` CLI surface: the local
-//! read-only scope ledger that `clio compliance inventory` renders.
+//! read-only scope ledger that `clio compliance inventory` renders, and the
+//! routing of `clio compliance review-export` to the portability binding.
 //!
 //! ## Owns
 //! - `clio compliance inventory` argument decoding, store-fact measurement,
@@ -15,7 +16,8 @@
 //!
 //! ## Does not own
 //! - The ledger's rows and semantics (see `clio_compliance`)
-//! - The subcommand's static record (see `cli_command_registry_compliance`)
+//! - The subcommands' static records (see `cli_command_registry_compliance`)
+//! - The `review-export` writer binding (see `cli_write_portability`)
 //! - Store measurement (`clio-store`), path resolution (`clio-config`), the
 //!   output/error contracts (see `cli_output` / `cli_error`), or the argument
 //!   grammar (see `cli_args`)
@@ -107,6 +109,7 @@ pub(crate) fn run(
     }
     match sub.as_str() {
         "inventory" => run_inventory(io, fallback, collected, current_dir),
+        "review-export" => crate::cli_write_portability::run_review_export(io, fallback, collected),
         // The derived list above already refused every other spelling; the
         // fallback keeps the arm-free case a refusal rather than a silent run.
         other => fail(io, fallback, &unknown_subcommand(other)),
@@ -377,3 +380,7 @@ fn action_label(action: RetentionAction) -> &'static str {
 #[cfg(test)]
 #[path = "compliance_cli_tests.rs"]
 mod compliance_cli_tests;
+
+#[cfg(test)]
+#[path = "compliance_cli_review_export_tests.rs"]
+mod compliance_cli_review_export_tests;

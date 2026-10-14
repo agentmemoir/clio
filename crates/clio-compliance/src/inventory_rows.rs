@@ -37,6 +37,10 @@ mod inventory_plan;
 mod subject_bundle;
 
 pub(crate) use self::inventory_plan::ROW_PLAN;
+// The export path builds a subject bundle from its own split repository views;
+// these re-exports keep that reachable without widening the private submodules.
+pub(crate) use self::inventory_map::{FamilyLinkRead, SubjectFamilyInput};
+pub(crate) use self::subject_bundle::{SubjectBundle, build_subject_bundle};
 
 use crate::inventory::{Custody, Owner, Readability, RetentionAction, RowSource};
 

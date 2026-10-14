@@ -9,10 +9,12 @@
 //! and the actor refusal.
 //!
 //! ## Owns
-//! - The in-memory store fixture, the query helper, and the scratch export path
+//! - The in-memory store fixture, the query helper, the delivery-spec builder,
+//!   and the scratch export and staging paths
 //!
 //! ## Does not own
 //! - The file-export writer under test and the review module
+//! - The shared scratch fixture (`export_tests.rs`, reused)
 //! - The privileged review page (see `local_review_tests.rs`)
 //!
 //! ## Boundary
@@ -23,14 +25,20 @@
 //! Test-only. Never compiled into production builds.
 
 use super::write_review_export;
+use crate::export_custody::DeliverySpec;
+use crate::export_tests::Scratch;
 use crate::local_review::LocalReviewQuery;
 use crate::subject_request_events::BindingControls;
-use clio_store::{DekProvider, LocalDevKms, LocalEventIntent, LocalEventStore, SqliteStore};
+use crate::test_unique::unique;
+use clio_store::{
+    DekProvider, DestinationCustodyStore, LocalDevKms, LocalEventIntent, LocalEventStore,
+    SqliteStore,
+};
 use clio_types::{Actor, Bank, ErrorCode, OpContext};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-/// Event time the tests pass to every intent.
+/// Event time the tests pass to every intent and delivery.
 const EVENT_TIME: &str = "2026-01-01T00:00:00Z";
 
 /// In-memory SQLite store (the `local_events_tests` fixture shape).
@@ -78,39 +86,15 @@ fn accepted_controls() -> BindingControls {
     }
 }
 
-/// A unique export path under the system temp directory, removed on drop.
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new() -> Self {
-        let name = crate::test_unique::unique("clio-compliance-local-review-export");
-        Self {
-            path: std::env::temp_dir().join(name),
-        }
-    }
-
-    /// A scratch path whose parent directory does not exist, so the write
-    /// cannot succeed.
-    fn with_missing_parent() -> Self {
-        let name = crate::test_unique::unique("clio-compliance-local-review-export-missing");
-        Self {
-            path: std::env::temp_dir()
-                .join(name)
-                .join("absent")
-                .join("export.tsv"),
-        }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+/// A delivery spec over one export action, destination, and staging directory.
+fn spec<'a>(action_id: &'a str, destination: &'a Path, staging_dir: &'a Path) -> DeliverySpec<'a> {
+    DeliverySpec {
+        action_id,
+        destination,
+        staging_dir,
+        custody_owner: "clio",
+        required_action: "delivery",
+        now: EVENT_TIME,
     }
 }
 
@@ -121,19 +105,23 @@ fn the_file_export_is_refused_with_default_controls() {
     let store = store();
     want_intent(&store, "act-1");
     let scratch = Scratch::new();
+    let staging = scratch.staging_dir();
+    let destination = scratch.destination();
     let err = write_review_export(
         &ctx(Actor::Harness),
         &store,
+        &store,
         &query(10),
-        BindingControls::default(),
-        scratch.path(),
+        &BindingControls::default(),
+        &spec(&unique("review-export"), &destination, &staging),
     )
     .expect_err("default controls must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
-    assert!(!scratch.path().exists(), "a refused export creates no file");
+    assert!(!destination.exists(), "a refused export creates no file");
 }
 
-/// With the copy controls accepted the export writes the ordered rows.
+/// With the copy controls accepted the export writes the ordered rows under
+/// durable custody.
 #[test]
 fn the_file_export_writes_the_ordered_rows_when_accepted() {
     let store = store();
@@ -143,16 +131,28 @@ fn the_file_export_writes_the_ordered_rows_when_accepted() {
         .record_outcome("act-1", false, "allowed action")
         .expect("outcome");
     let scratch = Scratch::new();
+    let staging = scratch.staging_dir();
+    let destination = scratch.destination();
+    let action_id = unique("review-export");
     write_review_export(
         &ctx(Actor::Harness),
         &store,
+        &store,
         &query(10),
-        accepted_controls(),
-        scratch.path(),
+        &accepted_controls(),
+        &spec(&action_id, &destination, &staging),
     )
     .expect("accepted export writes");
-    let text = std::fs::read_to_string(scratch.path()).expect("read export");
+    let text = std::fs::read_to_string(&destination).expect("read export");
     assert_eq!(text, "1\tact-1\tallowed\n2\tact-2\tpending\n");
+    assert_eq!(
+        store
+            .load(&action_id)
+            .expect("load")
+            .expect("custody row")
+            .state,
+        "delivered"
+    );
 }
 
 /// The export omits the outcome result text, so no content marker leaks.
@@ -165,15 +165,18 @@ fn the_file_export_omits_the_outcome_result_text() {
         .record_outcome("act-1", true, MARKER)
         .expect("outcome");
     let scratch = Scratch::new();
+    let staging = scratch.staging_dir();
+    let destination = scratch.destination();
     write_review_export(
         &ctx(Actor::Harness),
         &store,
+        &store,
         &query(10),
-        accepted_controls(),
-        scratch.path(),
+        &accepted_controls(),
+        &spec(&unique("review-export"), &destination, &staging),
     )
     .expect("accepted export writes");
-    let text = std::fs::read_to_string(scratch.path()).expect("read export");
+    let text = std::fs::read_to_string(&destination).expect("read export");
     assert!(
         !text.contains(MARKER),
         "the export must omit the outcome result text: {text}"
@@ -181,22 +184,29 @@ fn the_file_export_omits_the_outcome_result_text() {
     assert!(text.contains("act-1"));
 }
 
-/// A failed file write is reported as an internal error and leaves no file.
+/// A destination whose parent directory is absent fails as an internal error
+/// and leaves no destination file.
 #[test]
 fn a_write_failure_is_an_internal_error() {
     let store = store();
     want_intent(&store, "act-1");
-    let scratch = Scratch::with_missing_parent();
+    let scratch = Scratch::new();
+    let staging = scratch.staging_dir();
+    let destination = scratch.root.join("absent").join("export.tsv");
     let err = write_review_export(
         &ctx(Actor::Harness),
         &store,
+        &store,
         &query(10),
-        accepted_controls(),
-        scratch.path(),
+        &accepted_controls(),
+        &spec(&unique("review-export"), &destination, &staging),
     )
     .expect_err("a missing parent directory must fail the write");
     assert_eq!(err.code, ErrorCode::Internal);
-    assert!(!scratch.path().exists(), "a failed write leaves no file");
+    assert!(
+        !destination.exists(),
+        "a failed write leaves no destination file"
+    );
 }
 
 /// An unprivileged actor is refused.
@@ -204,14 +214,17 @@ fn a_write_failure_is_an_internal_error() {
 fn the_file_export_refuses_an_unprivileged_actor() {
     let store = store();
     let scratch = Scratch::new();
+    let staging = scratch.staging_dir();
+    let destination = scratch.destination();
     let err = write_review_export(
         &ctx(Actor::User),
         &store,
+        &store,
         &query(10),
-        accepted_controls(),
-        scratch.path(),
+        &accepted_controls(),
+        &spec(&unique("review-export"), &destination, &staging),
     )
     .expect_err("unprivileged export");
     assert_eq!(err.code, ErrorCode::Forbidden);
-    assert!(!scratch.path().exists());
+    assert!(!destination.exists());
 }

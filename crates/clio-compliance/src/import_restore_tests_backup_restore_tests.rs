@@ -98,6 +98,10 @@ fn export_bundle(source: &SqliteStore, bank: &str, mode: ExportContentMode) -> S
         filter: ExportFilter::default(),
         content_mode: mode,
         timestamp: T,
+        subject_id: None,
+        facts: None,
+        backend: None,
+        delivery: None,
     })
     .expect("export succeeds");
     dest_str

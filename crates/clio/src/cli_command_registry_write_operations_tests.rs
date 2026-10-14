@@ -164,7 +164,7 @@ fn export_matches_the_registered_usage_and_parser() {
     let spec = record("export");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio export --out FILE [--content-mode dsar_plaintext|ciphertext_backup] [--category C] [--time-start TS] [--time-end TS] [--include-archived true|false] [--include-discarded true|false] [--subject S] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "export full usage"
     );
     assert_eq!(
@@ -181,7 +181,8 @@ fn export_matches_the_registered_usage_and_parser() {
             "time-start",
             "time-end",
             "include-archived",
-            "include-discarded"
+            "include-discarded",
+            "subject"
         ]
     );
     assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);

@@ -29,11 +29,11 @@ use super::{
     FamilyClass, SubjectBundle, SubjectBundleManifest, SubjectFamilyInput, build_subject_bundle,
 };
 use crate::export::HISTORY_LIMIT;
-use crate::inventory::{InventoryBackend, InventoryFacts, InventoryInput, scope_inventory};
+use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::{ACTOR, OTHER, SELECTED, TS, fixture_id};
 use crate::inventory_pg_support_tests::{
-    carrier, ledger_paths, pg_checked_url, pg_skip_note, write_direct_link_class,
-    write_hashed_link_class, write_shared_class,
+    carrier, pg_checked_url, pg_skip_note, write_direct_link_class, write_hashed_link_class,
+    write_shared_class,
 };
 use crate::test_unique::unique;
 use clio_store::{
@@ -121,19 +121,12 @@ pub(crate) fn open_bundle_pg_fixture() -> Result<(PgTestGuard, PgBundleFixture),
 /// One bundle for `subject_id` over the fixture's live scoped target.
 fn build(fixture: &PgBundleFixture, subject_id: &str) -> SubjectBundle {
     let facts = fixture.facts();
-    let inventory = scope_inventory(&InventoryInput {
-        facts: facts.clone(),
-        // Placeholder paths: Postgres holds no store file and the KMS is in memory.
-        paths: ledger_paths(&std::env::temp_dir().join(&fixture.bank)),
-        declared_copies: Vec::new(),
-        peers_enabled: Some(false),
-    });
     build_subject_bundle(&SubjectFamilyInput {
         store: &fixture.store,
         bank_id: &fixture.bank,
         subject_id,
         facts: &facts,
-        inventory: &inventory,
+        backend: InventoryBackend::Postgres,
     })
     .expect("build the subject bundle")
 }

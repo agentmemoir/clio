@@ -3,15 +3,19 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the static record of the one `compliance`
-//! command: `compliance inventory`, the read-only scope ledger's local surface.
+//! This module is responsible for the static record of the `compliance`
+//! commands: `compliance inventory`, the read-only scope ledger's local
+//! surface, and `compliance review-export`, the content-free review-file
+//! export.
 //!
 //! ## Owns
 //! - The `compliance inventory` `CommandSpec` record and the tranche that
-//!   lists it, carrying the bytes its authored usage row and catalog row held
+//!   lists them, carrying the bytes its authored usage row and catalog row held
 //! - The record's repeatable `--copy PATH` declaration, and the pinned usage
 //!   line: the frozen line names only `--output`, so the override keeps those
 //!   bytes while the options block and the catalog still document `--copy`
+//! - The `compliance review-export` `CommandSpec` record and its `--out`,
+//!   `--limit`, and `--cursor` flags
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -24,19 +28,24 @@
 //! Changes to this command's flags, usage text, or summary should normally
 //! require changes here. Changes to the ledger's semantics should not.
 //!
-//! Keep this module focused on the one compliance record.
+//! Keep this module focused on the compliance records.
 //
 // The record carries the bytes its authored rows held: the summary is the
 // catalog row, the usage line is the registered usage text, so both rendered
 // surfaces and the frozen golden capture keep their exact output.
 
-use crate::cli_command_registry::GLOBAL_OUTPUT;
+use crate::cli_command_registry::{GLOBAL_ACTOR, GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
 /// The declared globals `compliance inventory` accepts without printing: the
 /// shared parser admits every declared global, so the record that prints only
 /// `--output` lists the other six here.
 const INVENTORY_UNPRINTED: &[&str] = &["db", "backend", "bank", "actor", "no-input", "yes"];
+
+/// The declared globals `compliance review-export` accepts without printing:
+/// it documents `--bank`, `--actor`, and `--output`, so the other four ride
+/// along.
+const REVIEW_EXPORT_UNPRINTED: &[&str] = &["db", "backend", "no-input", "yes"];
 
 /// The repeatable `--copy PATH` of `compliance inventory`: each occurrence
 /// declares one caller-held copy, and `compliance_cli` hands every declared
@@ -89,8 +98,69 @@ pub(crate) const COMPLIANCE_INVENTORY: CommandSpec = CommandSpec {
     section: Section::Read,
 };
 
-/// The one compliance record, in capture order.
-pub(crate) static COMPLIANCE_LEAVES: &[CommandSpec] = &[COMPLIANCE_INVENTORY];
+/// The `compliance review-export` required destination.
+const REVIEW_OUT_REQUIRED: Flag = Flag {
+    required: true,
+    ..Flag::text(
+        "out",
+        "FILE",
+        "Names the review file to write; `cli_write_portability::run_review_export` passes it to the `review_export` tool as `destination`, which refuses to overwrite an existing caller file.",
+    )
+};
+
+/// The optional review page size.
+const REVIEW_LIMIT: Flag = Flag::text(
+    "limit",
+    "N",
+    "Bounds the review page to N rows; `cli_write_portability::run_review_export` passes it as `limit`, and the tool applies its own default when omitted.",
+);
+
+/// The optional review cursor.
+const REVIEW_CURSOR: Flag = Flag::text(
+    "cursor",
+    "C",
+    "Resumes the review after this decimal sequence position; `cli_write_portability::run_review_export` passes it as `cursor`.",
+);
+
+/// The review-export note: content-free rows, custody, and the actor gate.
+const REVIEW_EXPORT_NOTE: &str = "writes the ordered local review events as content-free rows (sequence position, action id, state) under durable destination custody: the destination is recorded pending before any bytes land, an existing file is never overwritten, and only a harness or system actor may export";
+
+/// `clio compliance review-export`: write the content-free review file.
+pub(crate) const COMPLIANCE_REVIEW_EXPORT: CommandSpec = CommandSpec {
+    name: "compliance review-export",
+    aliases: &[],
+    summary: "Write the ordered local review events to a content-free file under destination custody (requires --actor harness|system)",
+    notes: &[REVIEW_EXPORT_NOTE],
+    positionals: &[],
+    documented: &[
+        REVIEW_OUT_REQUIRED,
+        REVIEW_LIMIT,
+        REVIEW_CURSOR,
+        GLOBAL_BANK,
+        GLOBAL_ACTOR,
+        GLOBAL_OUTPUT,
+    ],
+    accepted_extra: REVIEW_EXPORT_UNPRINTED,
+    flag_aliases: &[],
+    usage_override: None,
+    usage_alternates: &[],
+    examples: &[
+        Example {
+            command: "clio compliance review-export --out review.txt --actor harness",
+            comment: Some("Write the review file under destination custody."),
+        },
+        Example {
+            command: "clio compliance review-export --out review.txt --limit 100 --actor system -o json",
+            comment: Some("Write a bounded review page and emit JSON."),
+        },
+    ],
+    tool: None,
+    section: Section::Write,
+};
+
+/// The two compliance records, in capture order.
+pub(crate) static COMPLIANCE_LEAVES: &[CommandSpec] =
+    &[COMPLIANCE_INVENTORY, COMPLIANCE_REVIEW_EXPORT];
 
 #[cfg(test)]
 #[path = "cli_command_registry_compliance_tests.rs"]

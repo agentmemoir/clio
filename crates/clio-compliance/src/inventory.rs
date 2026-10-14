@@ -27,7 +27,7 @@
 //! Keep this module focused on the read-only scope ledger.
 
 #[path = "inventory_rows.rs"]
-mod inventory_rows;
+pub(crate) mod inventory_rows;
 
 use self::inventory_rows::{ROW_PLAN, RowPlan, missing_tables, named_by_plan, pg_source_note};
 use clio_store::{PostgresTargetState, SqliteFileState};

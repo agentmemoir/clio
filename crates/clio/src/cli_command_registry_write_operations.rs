@@ -77,6 +77,13 @@ const OUT_REQUIRED: Flag = Flag {
     )
 };
 
+/// `export --subject S`: scope the bundle to one data subject.
+const SUBJECT_OPTIONAL: Flag = Flag::text(
+    "subject",
+    "S",
+    "Narrows the bundle to one data subject; `cli_write_portability::export_call` passes it to the `export` tool as `subject_id`, which selects the subject-scoped bundle path.",
+);
+
 /// `import` cannot run without its source bundle.
 const SOURCE_REQUIRED: Flag = Flag {
     required: true,
@@ -281,6 +288,7 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
                 &["true", "false"],
             )
         },
+        SUBJECT_OPTIONAL,
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,

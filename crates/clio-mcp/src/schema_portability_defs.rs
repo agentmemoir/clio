@@ -4,8 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for per-tool JSON Schema definitions for the
-//! JSON portability tools (`export`, `import`) and the `import_provider`
-//! first-release stub, published in the same `tool_schema` pack.
+//! JSON portability tools (`export`, `import`, `review_export`) and the
+//! `import_provider` first-release stub, published in the same `tool_schema`
+//! pack.
 //!
 //! ## Owns
 //! - One `inputSchema` per portability tool
@@ -21,10 +22,11 @@
 //!
 //! Keep this module focused on portability schema definitions.
 
-use crate::schema_defs::{ToolDef, allow_duplicate_prop, b, s};
+use crate::schema_defs::{ToolDef, allow_duplicate_prop, b, num, s};
 
 /// All portability tool definitions.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn portability_defs() -> Vec<ToolDef> {
     vec![
         ToolDef {
@@ -55,6 +57,26 @@ pub fn portability_defs() -> Vec<ToolDef> {
                     "include_discarded",
                     b("Include operationally discarded rows (default true)."),
                 ),
+                (
+                    "subject_id",
+                    s("One data subject to select; omit to export the whole bank."),
+                ),
+            ],
+        },
+        ToolDef {
+            name: "review_export",
+            description: "Write one content-free file of the ordered local event review rows \
+                          (sequence, action id, state) under durable destination custody. \
+                          Requires a harness/system actor; refuses to overwrite an existing \
+                          destination.",
+            required: &["destination"],
+            props: vec![
+                ("destination", s("File path for the review export.")),
+                (
+                    "limit",
+                    num("Maximum rows to export (default 100, max 1000)."),
+                ),
+                ("cursor", s("Resume after this decimal sequence position.")),
             ],
         },
         ToolDef {

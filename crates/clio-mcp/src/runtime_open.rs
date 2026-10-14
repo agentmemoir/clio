@@ -30,18 +30,20 @@ use crate::index_drain::{INDEX_MAX_BATCH, IndexDrain};
 use crate::ops_embedder::{OpsEmbedConfig, build_ops_embedder_from};
 use crate::runtime::{McpOpenOptions, McpState, PipelineStatus};
 use clio_admission::RankingEnv;
+use clio_compliance::{InventoryBackend, InventoryFacts};
 use clio_config::retention_store::RetentionStore;
 use clio_retrieve::{AssociationEngine, HybridRetriever};
 use clio_store::AssocPolicy;
 use clio_store::{
-    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DekProvider, HistoryStore,
-    HygieneStore, IndexStore, LocalDevKms, OpsStore, PersonaStore, PostgresStore, SqliteStore,
+    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DekProvider,
+    DestinationCustodyStore, HistoryStore, HygieneStore, IndexStore, LocalDevKms, LocalEventStore,
+    OpsStore, PersonaStore, PostgresStore, PostgresTargetState, SqliteFileState, SqliteStore,
     Store, SyncStore,
 };
 use clio_types::{AmError, ErrorCode};
 use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// All-repository view of one concrete backend store.
@@ -57,6 +59,8 @@ trait Repos:
     + OpsStore
     + BatchStore
     + SyncStore
+    + LocalEventStore
+    + DestinationCustodyStore
 {
 }
 impl<
@@ -70,7 +74,9 @@ impl<
         + HygieneStore
         + OpsStore
         + BatchStore
-        + SyncStore,
+        + SyncStore
+        + LocalEventStore
+        + DestinationCustodyStore,
 > Repos for T
 {
 }
@@ -170,6 +176,7 @@ impl McpState {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn build(
         store: &Arc<dyn Repos>,
         belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector>,
@@ -188,9 +195,12 @@ impl McpState {
         let continuous: Arc<dyn ContinuousStore> = store.clone();
         let compliance: Arc<dyn ComplianceStore> = store.clone();
         let hygiene: Arc<dyn HygieneStore> = store.clone();
+        let events: Arc<dyn LocalEventStore> = store.clone();
+        let custody: Arc<dyn DestinationCustodyStore> = store.clone();
         let batch: Arc<dyn BatchStore> = store.clone();
         let ops_store: Arc<dyn OpsStore> = store.clone();
         let sync: Arc<dyn SyncStore> = store.clone();
+        let (inventory_facts, inventory_backend, inventory_measured) = measure_inventory(options);
         // One embedder resolution, shared by retrieval and the index drain.
         let ops_embedder = build_ops_embedder_from(&OpsEmbedConfig::from_effective(
             effective,
@@ -236,7 +246,7 @@ impl McpState {
             env.clone(),
             AssocPolicy::from_coactivation(&env.coactivation),
         ));
-        Ok(Arc::new(Self {
+        let state = Arc::new(Self {
             persona,
             belief,
             belief_corrector,
@@ -244,6 +254,11 @@ impl McpState {
             continuous,
             compliance,
             hygiene,
+            events,
+            custody,
+            inventory_facts: Arc::new(inventory_facts),
+            inventory_measured,
+            inventory_backend,
             batch,
             ops_store,
             store: store_any,
@@ -287,7 +302,71 @@ impl McpState {
             principal: None,
             #[cfg(test)]
             test_now: None,
-        }))
+        });
+        if let Err(err) = reconcile_after_open(&state) {
+            eprintln!("clio-mcp: export destination reconcile failed: {err}");
+        }
+        Ok(state)
+    }
+}
+
+/// Reconcile any open export destinations left by a restart.
+///
+/// Best-effort at open: a refusal of the copy controls or a read failure must
+/// never crash the runtime, so the caller logs and continues.
+fn reconcile_after_open(state: &McpState) -> Result<(), clio_types::AmError> {
+    clio_compliance::reconcile_open_destinations(&*state.events, &*state.custody).map(|_| ())
+}
+
+/// Best-effort live-store facts for a subject-scoped export.
+///
+/// A `sqlite::memory:` store and any measurement failure yield an empty
+/// measurement marked unmeasured, so a subject export refuses with
+/// `InvalidArgument` instead of emitting a wrong manifest.
+fn measure_inventory(options: &McpOpenOptions) -> (InventoryFacts, InventoryBackend, bool) {
+    let empty_sqlite = || {
+        InventoryFacts::Sqlite(SqliteFileState {
+            path: PathBuf::new(),
+            exists: false,
+            bytes: 0,
+            table_counts: Vec::new(),
+            banks: Vec::new(),
+        })
+    };
+    let empty_postgres = || {
+        InventoryFacts::Postgres(PostgresTargetState {
+            schema: String::new(),
+            tables: Vec::new(),
+            table_counts: Vec::new(),
+            banks: Vec::new(),
+        })
+    };
+    if options.backend.as_str() == "postgres" {
+        return match clio_store::postgres_target_state(&options.database_url) {
+            Ok(state) => (
+                InventoryFacts::Postgres(state),
+                InventoryBackend::Postgres,
+                true,
+            ),
+            Err(err) => {
+                eprintln!("clio-mcp: postgres inventory measurement failed: {err}");
+                (empty_postgres(), InventoryBackend::Postgres, false)
+            }
+        };
+    }
+    if options.database_url == "sqlite::memory:" {
+        return (empty_sqlite(), InventoryBackend::Sqlite, false);
+    }
+    match clio_store::sqlite_file_state(Path::new(&options.database_url)) {
+        Ok(state) => (
+            InventoryFacts::Sqlite(state),
+            InventoryBackend::Sqlite,
+            true,
+        ),
+        Err(err) => {
+            eprintln!("clio-mcp: sqlite inventory measurement failed: {err}");
+            (empty_sqlite(), InventoryBackend::Sqlite, false)
+        }
     }
 }
 

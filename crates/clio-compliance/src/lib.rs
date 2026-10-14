@@ -48,7 +48,9 @@ mod copy_disposition;
 mod correct;
 mod erase;
 mod export;
+mod export_custody;
 mod export_mask;
+mod export_subject;
 mod import;
 mod inventory;
 #[cfg(test)]
@@ -85,7 +87,11 @@ pub use erase::{
     DEFAULT_REASON_CODE, EraseArgs, EraseEvent, EraseOutcome, EraseSink, EraseVecSink,
     erase_request, tombstone_salt, tombstone_salt_from,
 };
-pub use export::{ExportArgs, ExportFilter, ExportOutcome, export};
+pub use export::{ExportArgs, ExportDelivery, ExportFilter, ExportOutcome, export};
+pub use export_custody::{
+    CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,
+    reconcile_open_destinations,
+};
 pub use import::{ImportArgs, ImportReport, import};
 pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,
@@ -95,6 +101,7 @@ pub use local_review::{
     DEFAULT_REVIEW_LIMIT, LocalReviewPage, LocalReviewQuery, MAX_REVIEW_LIMIT, ReviewOutputRoute,
     record_review_output_custody, review_local_events, review_output_routes,
 };
+pub use local_review_export::write_review_export;
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
 pub use subject_request::{
@@ -115,6 +122,10 @@ pub use subject_request_manifest::{
 pub use validate::{ValidateAction, ValidateArgs, ValidateOutcome, validate};
 
 #[cfg(test)]
+// Re-exported so the sibling suites keep their crate-root import paths;
+// the suites themselves are declared by their owning production files.
+pub(crate) use export_subject::export_subject_scenarios_tests;
+#[cfg(test)]
 mod export_tests;
 #[cfg(test)]
 mod import_fixture;
@@ -133,6 +144,8 @@ mod inventory_pg_support_tests;
 #[cfg(test)]
 #[path = "inventory_pg_tests.rs"]
 mod inventory_pg_tests;
+#[cfg(test)]
+pub(crate) use local_review_export::review_export_scenarios_tests;
 #[cfg(test)]
 mod subject_request_events_tests;
 #[cfg(test)]

@@ -17,20 +17,23 @@
 //! ## Does not own
 //! - The family selection itself (`inventory_map` supplies it)
 //! - The checksum and canonicalization primitives (`bundle`)
-//! - Any public export surface: no CLI, MCP, or file destination exists here,
-//!   and the public export filter gains no subject selector
+//! - The export payload the delivered file carries and its completeness
+//!   manifest (`crate::export_subject_selection`)
+//! - The export entrypoint and its CLI and MCP surfaces (`crate::export` and
+//!   its callers)
 //!
 //! ## Boundary
 //!
 //! Changes to what the bundle bytes contain or how the manifest verifies
 //! should normally require changes here. Changes to how a family selects
-//! records belong in `inventory_map`; changes to the public export path
-//! belong in `export`.
+//! records belong in `inventory_map`; changes to the delivered subject export
+//! belong in `export_subject_selection`.
 //!
 //! Keep this module focused on the internal subject bundle.
 
-// The bundle is internal and nothing in production calls it yet: this module
-// and its tests are its only consumers. A later gate owns the first caller.
+// The selection bytes stay an internal verification artifact: the export path
+// consumes the manifest, the tests verify the bytes against the checksum, and
+// no other production code reads the bytes themselves.
 #![allow(dead_code)]
 
 pub(crate) use super::inventory_map::{FamilyClass, FamilySelection, SubjectFamilyInput};
@@ -48,8 +51,8 @@ const SUBJECT_BUNDLE_FORMAT_VERSION: u64 = 1;
 
 /// One subject's bundle: versioned selection bytes plus their manifest.
 ///
-/// In memory only. No destination path exists on this type and no function
-/// here writes a file, so no production destination can be produced.
+/// In memory only: no function here writes a file. The export path builds the
+/// delivered file's records and completeness manifest from this manifest.
 pub(crate) struct SubjectBundle {
     /// The versioned selection bytes, canonical JSON.
     pub(crate) bytes: Vec<u8>,

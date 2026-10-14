@@ -33,11 +33,12 @@ use crate::erase_test_support::local_kms;
 use crate::migrate::IntoAmError;
 
 /// The reserved slot tables, sorted to match the inventory assertions.
-const SLOT_TABLES: [&str; 8] = [
+const SLOT_TABLES: [&str; 9] = [
     "archive_experiments",
     "copy_inventory",
     "durable_requests",
     "erasure_adapters",
+    "export_destinations",
     "local_erasure_journal",
     "local_events",
     "restore_guards",
@@ -45,9 +46,9 @@ const SLOT_TABLES: [&str; 8] = [
 ];
 
 /// The slot tables that still hold only the placeholder key: every reserved
-/// table except `local_events`, `durable_requests`, and `copy_inventory`,
-/// whose real column sets are pinned here and below (`copy_inventory` in the
-/// two placeholder-slot tests, the other two by name).
+/// table except `local_events`, `durable_requests`, `copy_inventory`, and
+/// `export_destinations`, which carry real column sets instead. The
+/// placeholder-slot tests below pin `copy_inventory` by columns too.
 const PLACEHOLDER_SLOTS: [&str; 5] = [
     "archive_experiments",
     "erasure_adapters",
@@ -84,15 +85,17 @@ const COPY_INVENTORY_COLUMNS: [&str; 8] = [
     "updated_at",
 ];
 
-/// Every slot table the static asset declares matches the pinned list.
+/// Every slot table the static asset declares matches the pinned list, in
+/// both directions: the pin covers the full slot inventory.
 #[test]
 fn the_slot_asset_declares_every_reserved_table() {
-    for slot in SLOT_TABLES {
-        assert!(
-            super::SQL_COMPLIANCE_SLOTS.contains(&format!("CREATE TABLE IF NOT EXISTS {slot}")),
-            "slot asset is missing the reserved table {slot}"
-        );
-    }
+    let mut declared: Vec<&str> = super::SQL_COMPLIANCE_SLOTS
+        .lines()
+        .filter_map(|line| line.strip_prefix("CREATE TABLE IF NOT EXISTS "))
+        .map(str::trim)
+        .collect();
+    declared.sort_unstable();
+    assert_eq!(declared, SLOT_TABLES, "slot table inventory drift");
 }
 
 /// Require every reserved slot table in a sorted table inventory.
