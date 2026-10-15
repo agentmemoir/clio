@@ -59,6 +59,7 @@ mod inventory;
 mod local_action_probe;
 mod local_review;
 mod local_review_export;
+mod restore_guard;
 mod scratchpad;
 mod stats;
 pub mod subject_bank_coordination;
@@ -87,7 +88,7 @@ pub use correct::{
 };
 pub use erase::{
     DEFAULT_REASON_CODE, EraseArgs, EraseEvent, EraseOutcome, EraseSink, EraseVecSink,
-    erase_request, tombstone_salt, tombstone_salt_from,
+    erase_request, tombstone_salt, tombstone_salt_fingerprint, tombstone_salt_from,
 };
 pub use erasure_journal::{
     ArchiveClaim, AuthorityRefusal, DenialRecord, ErasureJournal, JournalState, MemberFacts,
@@ -109,6 +110,10 @@ pub use local_review::{
     record_review_output_custody, review_local_events, review_output_routes,
 };
 pub use local_review_export::write_review_export;
+pub use restore_guard::{
+    JournalHold, RESTORE_EVENT_KIND, RESTORE_EVENT_SCOPE, RestoreGuard, RestoreGuardRefusal,
+    RestoreRequest, begin_restore, check_restore_at_plan, reconcile_restore_actions,
+};
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
 pub use subject_request::{

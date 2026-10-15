@@ -5,23 +5,25 @@
 //!
 //! This module is responsible for the durable erasure journal: the owner-only
 //! authority that records a denied subject key before its key material is
-//! lost, and the failure-closed check a restore runs against that record.
+//! lost.
 //!
 //! ## Owns
-//! - The journal model: schema version, deployment identity, generation, denials
-//! - The journal-state load and the denial, init, handoff, and check operations
+//! - The journal model: schema version, deployment identity, generation,
+//!   subject-salt fingerprint, and denials
+//! - The journal-state load and the denial, init, and handoff operations
 //!
 //! ## Does not own
 //! - Where the journal lives (`clio-config::resolve_journal_path`) or minting
 //!   deployment identities (`clio-config::new_deployment_id`)
 //! - The owner-only file mechanics and atomic write (`erasure_journal_file`)
+//! - The archive authority check a restore runs (`archive_authority` owns that)
 //! - Archive member scanning or restore orchestration (callers own those)
 //!
 //! ## Boundary
 //!
-//! Changes to the journal's shape or the refuse-or-pass rules should normally
-//! require changes here. Changes to where the journal lives or to how a
-//! restore is orchestrated should not.
+//! Changes to the journal's shape or its deny-or-accept operations should
+//! normally require changes here. Changes to where the journal lives or to how
+//! a restore is orchestrated should not.
 //!
 //! Keep this module focused on the durable erasure authority.
 //!
@@ -34,7 +36,10 @@
 //! The generation guard is a guard, not tamper-proofing: an owner-only file
 //! cannot detect a same-owner rollback, so an older copy is refused by
 //! generation comparison, and the owner-only mode check is a no-op on
-//! non-Unix platforms, where no mode bits exist.
+//! non-Unix platforms, where no mode bits exist. The journal records the
+//! fingerprint of the deployment tombstone salt it was written under; the
+//! archive authority check refuses an archive whose fingerprint is absent or
+//! differs from it.
 
 use std::fs;
 use std::path::Path;
@@ -69,6 +74,12 @@ pub struct ErasureJournal {
     pub deployment_id: String,
     /// Denial generation; it moves by one for every recorded denial.
     pub generation: u64,
+    /// The fingerprint of the deployment tombstone salt this journal was written
+    /// under, so a restore can refuse an archive whose subject ids were hashed
+    /// under a different salt. `None` for a journal written before the field
+    /// existed; a reader treats that as unverifiable and fails closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salt_fingerprint: Option<String>,
     /// The denials in the order they were recorded.
     pub denials: Vec<DenialRecord>,
 }
@@ -149,6 +160,7 @@ fn empty_journal() -> ErasureJournal {
         schema_version: SCHEMA_VERSION,
         deployment_id: clio_config::new_deployment_id(),
         generation: 0,
+        salt_fingerprint: Some(crate::erase::tombstone_salt_fingerprint()),
         denials: Vec::new(),
     }
 }
@@ -290,157 +302,20 @@ pub fn handoff(source: &Path, destination: &Path) -> Result<ErasureJournal, AmEr
     }
 }
 
-/// What an incoming archive records about the authority it was made under.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArchiveClaim {
-    /// The deployment identity the archive was made under.
-    pub deployment_id: String,
-    /// The authority generation the archive was made under.
-    pub generation: u64,
-}
+/// The archive authority check: what an archive claims, what its members show,
+/// and the refuse-or-pass rule. It lives in its own module so this one stays
+/// focused on the journal.
+#[path = "archive_authority.rs"]
+mod archive_authority;
 
-/// What one archive member shows about subject references.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MemberFacts {
-    /// The member proved to hold no subject reference.
-    None,
-    /// The member references a subject through a content-free record — a
-    /// destroyed key slot, a tombstone, or a ciphertext row without a usable
-    /// DEK. Ciphertext rows without a usable DEK still count as presence.
-    Reference {
-        /// The referenced subject key's deployment-wide identity.
-        subject_hash: String,
-    },
-    /// The member cannot be classified.
-    Unknown,
-}
-
-/// Why the authority check refused a restore.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthorityRefusal {
-    /// The live journal is missing.
-    CurrentMissing,
-    /// The live journal is damaged.
-    CurrentDamaged,
-    /// No authority was presented with the archive.
-    PresentedMissing,
-    /// The presented authority is damaged.
-    PresentedDamaged,
-    /// The presented authority belongs to another deployment.
-    PresentedOtherDeployment,
-    /// The presented authority is older than the live one: a known-old copy.
-    PresentedOlderGeneration,
-    /// The presented authority is newer than the live one, so it cannot be the live authority.
-    PresentedNewerGeneration,
-    /// The archive claims another deployment, so a fresh empty journal cannot validate it.
-    ClaimOtherDeployment,
-    /// The archive claims a generation newer than the live authority's.
-    ClaimNewerGeneration,
-    /// A member cannot be classified, so its subject membership is unknown.
-    UnknownMember,
-    /// A member references a subject the live authority denies.
-    DeniedSubject,
-}
-
-impl AuthorityRefusal {
-    /// The refusal's stable code in the crate's error vocabulary.
-    #[must_use]
-    pub const fn code(self) -> ErrorCode {
-        match self {
-            Self::CurrentMissing | Self::PresentedMissing => ErrorCode::NotFound,
-            Self::CurrentDamaged | Self::PresentedDamaged | Self::UnknownMember => {
-                ErrorCode::ConfigCorrupt
-            }
-            Self::PresentedOtherDeployment
-            | Self::PresentedOlderGeneration
-            | Self::PresentedNewerGeneration
-            | Self::ClaimOtherDeployment
-            | Self::ClaimNewerGeneration
-            | Self::DeniedSubject => ErrorCode::Forbidden,
-        }
-    }
-}
-
-impl std::fmt::Display for AuthorityRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::CurrentMissing => "the erasure journal is missing",
-            Self::CurrentDamaged => "the erasure journal is damaged",
-            Self::PresentedMissing => "no authority was presented with the archive",
-            Self::PresentedDamaged => "the presented authority is damaged",
-            Self::PresentedOtherDeployment => "the presented authority is another deployment's",
-            Self::PresentedOlderGeneration => "the presented authority is older than the live one",
-            Self::PresentedNewerGeneration => "the presented authority is newer than the live one",
-            Self::ClaimOtherDeployment => "the archive claims another deployment",
-            Self::ClaimNewerGeneration => {
-                "the archive claims a generation newer than the live authority's"
-            }
-            Self::UnknownMember => "an archive member cannot be classified",
-            Self::DeniedSubject => "an archive member references a currently denied subject",
-        })
-    }
-}
-
-impl std::error::Error for AuthorityRefusal {}
-
-/// Run the failure-closed authority check for restoring `members` under the
-/// live `current` authority, the same authority `presented` with the archive,
-/// and what the archive itself `claim`s.
-///
-/// The check passes only when the live authority is current, the presented
-/// authority is that same live authority (same deployment, same generation),
-/// the archive claims that deployment at no newer a generation, and every
-/// member either proves no subject reference or references a subject the live
-/// authority does not deny. Only proved absence passes; absent, damaged,
-/// mismatched, known-older, unknown, or denied material refuses.
-///
-/// # Errors
-/// The [`AuthorityRefusal`] naming the first refusal, in check order.
-pub fn check_archive_authority(
-    current: &JournalState,
-    presented: Option<&JournalState>,
-    claim: &ArchiveClaim,
-    members: &[MemberFacts],
-) -> Result<(), AuthorityRefusal> {
-    let current = match current {
-        JournalState::Current(journal) => journal,
-        JournalState::Missing => return Err(AuthorityRefusal::CurrentMissing),
-        JournalState::Damaged => return Err(AuthorityRefusal::CurrentDamaged),
-    };
-    let presented = match presented {
-        Some(JournalState::Current(journal)) => journal,
-        Some(JournalState::Damaged) => return Err(AuthorityRefusal::PresentedDamaged),
-        None | Some(JournalState::Missing) => return Err(AuthorityRefusal::PresentedMissing),
-    };
-    if presented.deployment_id != current.deployment_id {
-        return Err(AuthorityRefusal::PresentedOtherDeployment);
-    }
-    if presented.generation < current.generation {
-        return Err(AuthorityRefusal::PresentedOlderGeneration);
-    }
-    if presented.generation > current.generation {
-        return Err(AuthorityRefusal::PresentedNewerGeneration);
-    }
-    if claim.deployment_id != current.deployment_id {
-        return Err(AuthorityRefusal::ClaimOtherDeployment);
-    }
-    if claim.generation > current.generation {
-        return Err(AuthorityRefusal::ClaimNewerGeneration);
-    }
-    for member in members {
-        match member {
-            MemberFacts::None => {}
-            MemberFacts::Unknown => return Err(AuthorityRefusal::UnknownMember),
-            MemberFacts::Reference { subject_hash } => {
-                if current.is_denied(subject_hash) {
-                    return Err(AuthorityRefusal::DeniedSubject);
-                }
-            }
-        }
-    }
-    Ok(())
-}
+pub use archive_authority::{ArchiveClaim, AuthorityRefusal, MemberFacts, check_archive_authority};
 
 #[cfg(test)]
 #[path = "erasure_journal_tests.rs"]
 mod erasure_journal_tests;
+
+/// The archive authority check tests, split out so the model and operations
+/// tests stay focused.
+#[cfg(test)]
+#[path = "erasure_journal_check_tests.rs"]
+mod erasure_journal_check_tests;

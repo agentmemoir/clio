@@ -270,6 +270,28 @@ pub(crate) fn key_store_path(store: &Path) -> PathBuf {
     PathBuf::from(format!("{}.kms.json", store.display()))
 }
 
+/// Ensure a current erasure journal exists under `scratch` and return its
+/// authority, so an archive built here matches the live authority a restore
+/// checks against. Idempotent: a current journal is kept as it is.
+pub(crate) fn ensure_journal(scratch: &Scratch) -> clio_backup::manifest::ManifestAuthority {
+    ensure_journal_in(scratch.path())
+}
+
+/// [`ensure_journal`] for a directory the fixture derives rather than a
+/// `Scratch`, such as a backup directory's parent.
+pub(crate) fn ensure_journal_in(dir: &Path) -> clio_backup::manifest::ManifestAuthority {
+    let path = dir.join(clio_config::ERASURE_JOURNAL_FILE_NAME);
+    let journal = match clio_compliance::load_journal(&path) {
+        clio_compliance::JournalState::Current(journal) => journal,
+        _ => clio_compliance::initialize_new_empty(&path).expect("create the erasure journal"),
+    };
+    clio_backup::manifest::ManifestAuthority {
+        deployment_id: journal.deployment_id,
+        generation: journal.generation,
+        salt_fingerprint: journal.salt_fingerprint,
+    }
+}
+
 /// A well-formed archive whose manifest records a payload digest the payload
 /// does not have.
 ///
@@ -294,6 +316,7 @@ pub(crate) fn archive_with_wrong_digest(scratch: &Scratch, store: &Path) -> (Str
 /// an id fails the fixture loudly instead of letting a test assert nothing.
 pub(crate) fn snapshot(scratch: &Scratch, items: usize) -> String {
     populated_store(&scratch.join("clio.db"), items, 1);
+    ensure_journal(scratch);
     let (_, payload, _) = run_json_in(scratch, &["create"]);
     payload["snapshot_id"]
         .as_str()
@@ -363,6 +386,7 @@ fn build_archive(
         keys,
         label: None,
         note: None,
+        authority: Some(ensure_journal(scratch)),
         tool_version: "clio 0.1.0".to_owned(),
     };
     let report = clio_backup::create_archive(&request).expect("create the archive");

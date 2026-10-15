@@ -33,6 +33,7 @@ use crate::backup_restore_flow::{
     RESULT_RESTORED, Report, RestorePlanInput, pre_restore_decision, pre_restore_from,
 };
 use crate::backup_restore_space::{key_destination, preflight};
+use crate::backup_restore_sqlite::{RestorePlacement, merge_settle_failure};
 use crate::cli_error::CliError;
 use crate::count_noun::count_noun;
 use clio_backup::dump_meta::DumpMeta;
@@ -64,6 +65,8 @@ pub(crate) fn plan_postgres(input: RestorePlanInput<'_>) -> Result<Plan, CliErro
         archive,
         backup_dir,
         check,
+        journal_path,
+        authority,
     } = input;
     let state = clio_store::postgres_target_state(&target.url)
         .map_err(|error| target_unreachable(&error))?;
@@ -116,6 +119,9 @@ pub(crate) fn plan_postgres(input: RestorePlanInput<'_>) -> Result<Plan, CliErro
         no_pre_backup,
         dry_run: parsed.has("dry-run"),
         key,
+        journal_path,
+        claim: authority.claim,
+        members: authority.members,
         extracted,
         snapshot_id: id,
     })
@@ -195,7 +201,10 @@ fn counts_incoming(meta: &DumpMeta) -> Counts {
 /// # Errors
 /// The pre-restore snapshot fails, the store half's restore refuses or fails,
 /// or the measurement after the commit fails.
-pub(crate) fn place_postgres(plan: Plan) -> Result<Report, CliError> {
+pub(crate) fn place_postgres(
+    plan: Plan,
+    placement: RestorePlacement<'_>,
+) -> Result<Report, CliError> {
     // The skip decision was taken from a measurement made before the operator
     // was asked, and the confirmation prompt waits on a human for as long as
     // they take. So the target is measured again here and the decision is taken
@@ -204,12 +213,25 @@ pub(crate) fn place_postgres(plan: Plan) -> Result<Report, CliError> {
     let state = clio_store::postgres_target_state(&plan.target.url)
         .map_err(|error| target_unreachable(&error))?;
     let decided = pre_restore_decision(plan.no_pre_backup, true, state.is_empty());
-    let pre_restore = pre_restore_from(&plan, decided)?;
     let key_restored = plan.key.is_some();
     let meta = plan
         .dump_meta
         .as_ref()
         .expect("a Postgres plan carries its dump meta");
+    // The one guard is taken before the pre-restore snapshot and held across
+    // the load and the separate key swap: it takes the journal lock, reconciles
+    // any pending restore under it, records the durable intent, and re-checks
+    // the authority, so a denial that landed between plan and placement is
+    // caught before the snapshot or the load touches anything. A snapshot
+    // failure refuses the guard, so no pending intent is orphaned.
+    let guard = placement.begin(&plan)?;
+    let pre_restore = match pre_restore_from(&plan, decided) {
+        Ok(pre_restore) => pre_restore,
+        Err(error) => {
+            placement.refuse(guard);
+            return Err(error);
+        }
+    };
     let request = PostgresRestoreRequest {
         url: plan.target.url.clone(),
         // The plan measured the target, so its store schema is the one the
@@ -230,12 +252,17 @@ pub(crate) fn place_postgres(plan: Plan) -> Result<Report, CliError> {
             })
             .collect(),
     };
-    let restored = clio_store::restore_postgres(&request).map_err(|error| {
-        backup_restore_exit::from_am_error(
-            backup_restore_exit::postgres_load_failure(&error),
-            &error,
-        )
-    })?;
+    let restored = match clio_store::restore_postgres(&request) {
+        Ok(restored) => restored,
+        Err(error) => {
+            // The one-transaction load rolled back, so nothing was replaced.
+            placement.refuse(guard);
+            return Err(backup_restore_exit::from_am_error(
+                backup_restore_exit::postgres_load_failure(&error),
+                &error,
+            ));
+        }
+    };
     let key_swap = plan
         .key
         .as_ref()
@@ -244,6 +271,16 @@ pub(crate) fn place_postgres(plan: Plan) -> Result<Report, CliError> {
     let key_failure = key_swap.as_ref().and_then(|report| report.failure.clone());
     let counts_after = Counts::of_rows(&restored.table_counts, &restored.banks);
     let mismatch = count_mismatch_message(meta, &restored.table_counts);
+    let result = match (&mismatch, &key_failure) {
+        (Some(_), _) => RESULT_COUNT_MISMATCH,
+        (None, Some(_)) => RESULT_PARTIAL,
+        (None, None) => RESULT_RESTORED,
+    };
+    // The load and the key swap are the effects the guard authorizes. The store
+    // is already reloaded, so a failed outcome write leaves a pending action for
+    // reconciliation and is surfaced on the report, never returned: the report
+    // carries the pre-restore snapshot id, the operator's only way back.
+    let settle = placement.settle(guard, true, result).err();
     // Both failures are reported when both happened. A key store that was not
     // placed is a separate problem from a count that did not match, and an
     // operator who reads only one line is sent to the wrong fix.
@@ -253,12 +290,13 @@ pub(crate) fn place_postgres(plan: Plan) -> Result<Report, CliError> {
         (None, Some(_)) => Some(FAILED_STEP_KEY_SWAP.to_owned()),
         (None, None) => None,
     };
-    let failure = match (mismatch.clone(), key_failure.clone()) {
+    let failure = match (mismatch, key_failure) {
         (Some(counts), Some(key)) => Some(format!("{counts}; the key store: {key}")),
         (Some(counts), None) => Some(counts),
         (None, Some(key)) => Some(key),
         (None, None) => None,
     };
+    let (failed_step, failure) = merge_settle_failure(failed_step, failure, settle);
     Ok(Report {
         snapshot_id: plan.snapshot_id,
         target: plan.target,
@@ -270,11 +308,7 @@ pub(crate) fn place_postgres(plan: Plan) -> Result<Report, CliError> {
         counts_incoming: None,
         schema: plan.schema,
         store_schema: plan.store_schema,
-        result: match (&mismatch, &key_failure) {
-            (Some(_), _) => RESULT_COUNT_MISMATCH,
-            (None, Some(_)) => RESULT_PARTIAL,
-            (None, None) => RESULT_RESTORED,
-        },
+        result,
         failed_step,
         failure,
         dry_run: false,

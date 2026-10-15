@@ -108,6 +108,28 @@ impl KeysInfo {
     }
 }
 
+/// The deployment identity and erasure generation an archive was made under.
+///
+/// A restore compares this pair with the current erasure authority, so it can
+/// refuse an archive from the wrong deployment or one older than the last
+/// erasure. The value travels here as plain data: the caller reads the erasure
+/// journal and supplies it, and this crate never reads that journal itself.
+///
+/// The salt fingerprint is a one-way digest of the deployment tombstone salt
+/// the archive's member subject ids were hashed under. A restore refuses an
+/// archive whose fingerprint is absent or differs from the live authority's,
+/// because a different salt makes the recorded subject hashes incomparable.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestAuthority {
+    pub deployment_id: String,
+    pub generation: u64,
+    /// The fingerprint of the salt that hashed the archive's subject ids, or
+    /// `None` for an archive written before the field existed. A reader treats
+    /// an absent fingerprint as "cannot be verified" and a restore refuses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salt_fingerprint: Option<String>,
+}
+
 /// The backup manifest: the first archive member, as JSON.
 ///
 /// Field order is the serialization order, so identical manifests
@@ -131,6 +153,11 @@ pub struct BackupManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub compression: String,
+    /// The erasure authority this archive was made under, when the caller
+    /// recorded one. Absent in an archive written before the field existed, so
+    /// it is defaulted on read and omitted on write when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<ManifestAuthority>,
 }
 
 impl BackupManifest {
@@ -262,3 +289,8 @@ impl BackupManifest {
 #[cfg(test)]
 #[path = "manifest_tests.rs"]
 mod tests;
+
+/// The manifest authority tests, split out so the field-set tests stay focused.
+#[cfg(test)]
+#[path = "manifest_authority_tests.rs"]
+mod authority_tests;

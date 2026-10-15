@@ -153,6 +153,7 @@ fn sqlite_denied_membership_from_a_tombstone_refuses_with_the_journal_unchanged(
     let claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
     };
     let journal_before = file_sha256(&journal);
 

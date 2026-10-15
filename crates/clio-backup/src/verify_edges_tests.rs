@@ -101,6 +101,7 @@ fn manifest_with_size(bytes: u64, sha256: &str) -> crate::manifest::BackupManife
         label: None,
         note: None,
         compression: crate::manifest::COMPRESSION.to_owned(),
+        authority: None,
     }
 }
 
@@ -207,6 +208,7 @@ fn postgres_archive(
         label: None,
         note: None,
         tool_version: "test".to_owned(),
+        authority: None,
     };
     crate::create_archive(&request).expect("assemble the archive")
 }

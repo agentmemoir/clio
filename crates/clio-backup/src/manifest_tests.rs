@@ -21,7 +21,7 @@
 use super::*;
 use clio_types::{AmError, ErrorCode};
 
-fn sample() -> BackupManifest {
+pub(super) fn sample() -> BackupManifest {
     BackupManifest {
         kind: KIND.into(),
         format_version: FORMAT_VERSION,
@@ -58,6 +58,11 @@ fn sample() -> BackupManifest {
         label: Some("nightly".into()),
         note: None,
         compression: COMPRESSION.into(),
+        authority: Some(ManifestAuthority {
+            deployment_id: "deploy-1".into(),
+            generation: 7,
+            salt_fingerprint: Some("fp-1".into()),
+        }),
     }
 }
 
@@ -422,6 +427,6 @@ fn keys_declaration_shapes_parse_only_when_they_agree() {
 }
 
 /// The manifest document as a JSON value, for assertions about its shape.
-fn parsed_value(bytes: &[u8]) -> serde_json::Value {
+pub(super) fn parsed_value(bytes: &[u8]) -> serde_json::Value {
     serde_json::from_slice(bytes).expect("the manifest is valid JSON")
 }

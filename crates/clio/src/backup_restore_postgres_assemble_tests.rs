@@ -27,6 +27,8 @@ use clio_backup::create::KeySource;
 use clio_store::PostgresDumpFacts;
 use std::path::{Path, PathBuf};
 
+use crate::backup_cli_fixtures::ensure_journal_in;
+
 /// Assemble one Postgres archive from a real dump's facts, through the
 /// archive half's public API.
 ///
@@ -160,6 +162,11 @@ fn build_pg_archive(
         counts_complete: true,
         label: None,
         note: None,
+        authority: Some(ensure_journal_in(
+            backup_dir
+                .parent()
+                .expect("the backup directory has a parent"),
+        )),
         tool_version: clio::identity(),
     };
     let report = clio_backup::create_archive(&request).expect("assemble the archive");

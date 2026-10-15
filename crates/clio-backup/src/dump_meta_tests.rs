@@ -286,6 +286,7 @@ fn read_from_archive_refuses_an_archive_without_the_member() {
         label: None,
         note: None,
         tool_version: "test".to_owned(),
+        authority: None,
     };
     let archive = create_archive(&request).unwrap();
     let error = DumpMeta::read_from_archive(&archive.path).unwrap_err();
@@ -334,6 +335,7 @@ fn read_from_archive_names_the_dump_meta_on_an_archive_with_a_key_member() {
         label: None,
         note: None,
         tool_version: "test".to_owned(),
+        authority: None,
     };
     let archive = crate::create_archive(&request).unwrap();
     // The archive really does carry the three members the cap has to allow.

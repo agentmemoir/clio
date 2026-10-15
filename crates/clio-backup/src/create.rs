@@ -31,8 +31,8 @@ use crate::archive_name::{self, collision_suffix};
 use crate::atomic_publish::AtomicFile;
 use crate::container::ArchiveWriter;
 use crate::manifest::{
-    BackupManifest, COMPRESSION, CountsInfo, FORMAT_VERSION, KIND, KeysInfo, PayloadInfo,
-    SnapshotInfo, StoreInfo,
+    BackupManifest, COMPRESSION, CountsInfo, FORMAT_VERSION, KIND, KeysInfo, ManifestAuthority,
+    PayloadInfo, SnapshotInfo, StoreInfo,
 };
 use crate::staging::{self, StagedFile};
 use clio_types::{AmError, ErrorCode};
@@ -110,6 +110,9 @@ pub struct CreateRequest {
     pub label: Option<String>,
     /// Operator note, verbatim after cleaning.
     pub note: Option<String>,
+    /// The erasure authority the snapshot was made under, supplied by the
+    /// caller; `None` records no authority.
+    pub authority: Option<ManifestAuthority>,
     /// The tool that wrote the archive.
     pub tool_version: String,
 }
@@ -314,6 +317,7 @@ fn build_manifest(
         label: clean_text(request.label.as_deref()),
         note: clean_text(request.note.as_deref()),
         compression: COMPRESSION.to_owned(),
+        authority: request.authority.clone(),
     };
     manifest.validate()?;
     Ok(manifest)

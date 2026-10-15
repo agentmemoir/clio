@@ -112,6 +112,7 @@ pub(crate) fn request(dir: &Path, payload: StagedFile) -> CreateRequest {
         label: None,
         note: None,
         tool_version: "clio 0.1.0".to_owned(),
+        authority: None,
     }
 }
 

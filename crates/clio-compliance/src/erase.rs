@@ -13,6 +13,8 @@
 //! - Orchestrating the store crypto-shred transaction and `MemTree` propagation
 //! - Recording the durable denial in the owner-only erasure journal strictly
 //!   before the store can destroy the subject key
+//! - Holding the journal's placement lock across the denial and the key
+//!   destruction, so a restore placement cannot interleave between them
 //! - Content-free erasure telemetry, carrying the presenting credential's label
 //!   when a credential presented the request
 //!
@@ -56,6 +58,22 @@ pub fn tombstone_salt_from(raw: Option<String>) -> Vec<u8> {
 #[must_use]
 pub fn tombstone_salt() -> Vec<u8> {
     tombstone_salt_from(std::env::var("CLIO_COMPLIANCE_SALT").ok())
+}
+
+/// Domain string keyed by the deployment salt so a fingerprint reveals nothing
+/// about the salt itself.
+const SALT_FINGERPRINT_DOMAIN: &str = "clio-compliance-salt-fingerprint-v1";
+
+/// A non-reversible fingerprint of the deployment tombstone salt.
+///
+/// The archive manifest and the erasure journal each record this value, so a
+/// restore can refuse an archive whose subject ids were hashed under a
+/// different salt than the live authority recorded. It is a one-way digest of
+/// a fixed domain string keyed by the salt, so it neither reveals the salt nor
+/// changes when the salt does not.
+#[must_use]
+pub fn tombstone_salt_fingerprint() -> String {
+    sha256_hex(&tombstone_salt(), SALT_FINGERPRINT_DOMAIN)
 }
 
 /// Inputs for the in-process `erase_request` tool.
@@ -201,6 +219,8 @@ pub struct EraseOutcome {
 /// `status: PROCESSING` instead of a false `COMPLETED`. The denial is durably
 /// recorded in the owner-only journal strictly before the store can destroy
 /// the key: a failed journal write aborts with no store effect and no key loss.
+/// The denial and the key destruction run under the journal's exclusive
+/// placement lock, so a restore placement cannot interleave between them.
 ///
 /// # Errors
 /// Validation, authorisation, confirmation, journal, DEK, or storage failures.
@@ -223,6 +243,12 @@ pub fn erase_request(args: &EraseArgs<'_>) -> Result<EraseOutcome, AmError> {
         deleted_at: args.timestamp,
         salt: args.salt,
     };
+    // Hold the placement/erasure coordination lock across the denial and the
+    // key destruction, so a restore placement cannot interleave between them.
+    // A lock-acquire failure fails closed: it returns the `AmError` the hold
+    // produced, the same `?` mapping the `record_denial` call below uses. The
+    // hold drops with this scope, after `erase_subject` returns.
+    let _hold = crate::restore_guard::JournalHold::acquire(args.journal_path)?;
     // Denial precedes key loss: the journal write fsyncs the file and its
     // directory, and a failure here aborts before `erase_subject` runs.
     let subject_hash = sha256_hex(args.salt, args.subject_id);

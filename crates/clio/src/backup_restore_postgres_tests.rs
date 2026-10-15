@@ -20,7 +20,7 @@
 //! Never compiled into production builds.
 
 use super::assemble_tests::assemble_pg_archive;
-use crate::backup_cli_fixtures::{Scratch, item, run_json_in_with};
+use crate::backup_cli_fixtures::{Scratch, ensure_journal, item, run_json_in_with};
 use clio_store::{DekProvider, LocalDevKms, PostgresStore, ScopedSchema, Store, lock_pg_test};
 use serde_json::json;
 use std::path::Path;
@@ -51,6 +51,7 @@ pub(crate) fn seed(scoped: &ScopedSchema, kms_path: &Path, items: usize) {
 /// Snapshot `scoped`'s store through the real `clio backup create`, carrying
 /// the key store at `kms_path`, and return the snapshot id.
 pub(crate) fn snapshot(scratch: &Scratch, scoped: &ScopedSchema, kms_path_string: &str) -> String {
+    ensure_journal(scratch);
     let (code, payload, err) = run_json_in_with(
         scratch,
         &["create"],

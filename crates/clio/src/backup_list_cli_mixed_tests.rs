@@ -92,6 +92,7 @@ fn postgres_archive(scratch: &Scratch) -> String {
         keys: None,
         label: Some("pg-handbuilt".to_owned()),
         note: None,
+        authority: None,
         tool_version: "test".to_owned(),
     };
     let report = clio_backup::create_archive(&request).expect("assemble the archive");

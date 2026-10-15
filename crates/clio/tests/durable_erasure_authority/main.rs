@@ -27,5 +27,9 @@
 mod handoff;
 mod membership;
 mod postgres;
+mod restore_guard;
+mod restore_guard_crash;
+mod restore_guard_fixtures;
+mod restore_guard_recovery;
 mod sqlite;
 mod support;

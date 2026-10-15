@@ -42,10 +42,20 @@ use crate::cli_help_usage;
 use crate::cli_output::{self, OutputMode};
 use crate::cli_read::{CliIo, emit, fail};
 use clio_backup::create::{CreateRequest, KeySource};
+use clio_backup::manifest::ManifestAuthority;
+use clio_compliance::{JournalState, load_journal};
 use clio_types::AmError;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+/// The create dry-run plan, split out so this file stays focused on the run.
+#[path = "backup_create_dry_run.rs"]
+mod backup_create_dry_run;
+
+/// The warning a create emits when it records no erasure authority, so a later
+/// restore of the archive refuses until a current journal exists.
+const NO_AUTHORITY_WARNING: &str = "no erasure authority was recorded: the erasure journal is missing or damaged, and a restore of this archive will refuse until a current journal exists";
 
 /// Run `clio backup create` against injected streams, env, and cwd.
 pub(crate) fn run(
@@ -91,15 +101,30 @@ pub(crate) fn run(
     };
     let backup = resolve_backup_dir(&get, &current_dir);
     if parsed.has("dry-run") {
-        return dry_run(io, mode, &target, &backup.path, keep);
+        return backup_create_dry_run::dry_run(io, mode, &target, &backup.path, keep);
     }
+    // Record the deployment's current erasure authority; a missing or damaged
+    // journal records none, and the create warns rather than failing silently.
+    let authority = clio_config::resolve_journal_path(&get)
+        .ok()
+        .and_then(|path| current_authority(&path));
+    let authority_recorded = authority.is_some();
     match take_snapshot(
         &target,
         &backup.path,
         parsed.value("label"),
         parsed.value("note"),
+        authority,
     ) {
-        Ok(created) => emit_created(io, mode, &created, &parsed, keep, &backup.path),
+        Ok(created) => emit_created(
+            io,
+            mode,
+            &created,
+            &parsed,
+            keep,
+            &backup.path,
+            authority_recorded,
+        ),
         Err(error) => fail(io, mode, &CliError::from_am_error(&error)),
     }
 }
@@ -119,9 +144,19 @@ fn emit_created(
     parsed: &ParsedArgs,
     keep: Option<usize>,
     backup_dir: &Path,
+    authority_recorded: bool,
 ) -> ExitCode {
-    let mut payload = backup_create_report::payload(&created.archive, &created.facts);
+    let mut payload: Value = backup_create_report::payload(&created.archive, &created.facts);
     let mut text = backup_create_report::render(&created.archive, &created.facts);
+    // A create that could not read the erasure journal records no authority in
+    // the manifest, so the archive fails closed at restore. Say so here rather
+    // than reporting a silent success.
+    if !authority_recorded {
+        payload["authority_warning"] = json!(NO_AUTHORITY_WARNING);
+        text.push('\n');
+        text.push_str("  warning: ");
+        text.push_str(NO_AUTHORITY_WARNING);
+    }
     let mut exit = EXIT_OK;
     if let Some(keep) = keep {
         match crate::backup_prune_cli::run_keep(keep, parsed, backup_dir) {
@@ -232,12 +267,13 @@ pub(crate) fn take_snapshot(
     backup_dir: &Path,
     label: Option<&str>,
     note: Option<&str>,
+    authority: Option<ManifestAuthority>,
 ) -> Result<Created, AmError> {
     match target.backend.as_str() {
-        "postgres" => {
-            crate::backup_create_postgres::take_snapshot_postgres(target, backup_dir, label, note)
-        }
-        _ => take_snapshot_sqlite(target, backup_dir, label, note),
+        "postgres" => crate::backup_create_postgres::take_snapshot_postgres(
+            target, backup_dir, label, note, authority,
+        ),
+        _ => take_snapshot_sqlite(target, backup_dir, label, note, authority),
     }
 }
 
@@ -247,6 +283,7 @@ fn take_snapshot_sqlite(
     backup_dir: &Path,
     label: Option<&str>,
     note: Option<&str>,
+    authority: Option<ManifestAuthority>,
 ) -> Result<Created, AmError> {
     clio_backup::staging::ensure_backup_dir(backup_dir)?;
     let staged = clio_backup::staging::reserve_path(backup_dir, "payload")?;
@@ -259,8 +296,9 @@ fn take_snapshot_sqlite(
     // read fails the run here, before `create_archive` is reached: no archive is
     // written, and the staged payload removes itself as the `?` returns. That
     // ordering is the property that makes a refused run leave nothing behind.
-    let archive =
-        clio_backup::create_archive(&request(target, backup_dir, payload, &facts, label, note)?)?;
+    let archive = clio_backup::create_archive(&request(
+        target, backup_dir, payload, &facts, label, note, authority,
+    )?)?;
     Ok(Created {
         archive,
         facts: SnapshotView::of_sqlite(&facts, target),
@@ -278,6 +316,7 @@ fn request(
     facts: &clio_store::SnapshotFacts,
     label: Option<&str>,
     note: Option<&str>,
+    authority: Option<ManifestAuthority>,
 ) -> Result<CreateRequest, AmError> {
     let slug = clio_config::backup_path::store_slug(target.url.as_str(), target.backend.as_str());
     Ok(CreateRequest {
@@ -299,7 +338,22 @@ fn request(
         keys: key_member(target)?,
         label: label.map(str::to_owned),
         note: note.map(str::to_owned),
+        authority,
         tool_version: clio::identity(),
+    })
+}
+
+/// The authority the journal records, or `None` for a missing or damaged one.
+pub(crate) fn current_authority(journal_path: &Path) -> Option<ManifestAuthority> {
+    let JournalState::Current(journal) = load_journal(journal_path) else {
+        return None;
+    };
+    Some(ManifestAuthority {
+        deployment_id: journal.deployment_id,
+        generation: journal.generation,
+        // The fingerprint of the salt in effect now, which is the salt the
+        // archive's subject ids will be re-hashed under at restore.
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
     })
 }
 
@@ -321,87 +375,6 @@ pub(crate) fn key_member(target: &ResolvedTarget) -> Result<Option<KeySource>, A
         path: source.path,
         subjects: source.subjects,
     }))
-}
-
-/// `--dry-run`: print the plan, write nothing.
-fn dry_run(
-    io: &mut CliIo,
-    mode: OutputMode,
-    target: &ResolvedTarget,
-    backup_dir: &Path,
-    keep: Option<usize>,
-) -> ExitCode {
-    let existing = clio_backup::list_snapshot_rows(backup_dir, None).map_or(0, |rows| rows.len());
-    // A SQLite store's size is the file's. A Postgres store's rows are not a
-    // file, so its size is unknown until a dump runs: it is reported as `null`,
-    // never as a zero that reads as "this costs nothing".
-    let (store_bytes, needed) = if target.is_postgres() {
-        (Value::Null, Value::Null)
-    } else {
-        let bytes = std::fs::metadata(&target.path).map_or(0, |meta| meta.len());
-        // The staged copy plus the compressed archive, so the plan never
-        // understates what the run needs.
-        (json!(bytes), json!(bytes.saturating_mul(2)))
-    };
-    // The Postgres target is measured read-only so the plan can name the schema
-    // and the table count, as every Postgres report does. A dry run that cannot
-    // reach the target says so instead of failing: it wrote nothing either way.
-    let measured = target.is_postgres().then(|| {
-        clio_store::postgres_target_state(&target.url)
-            .map(|state| (state.schema.clone(), state.table_count()))
-            .map_err(|error| error.message)
-    });
-    let (schema, tables, note) = match &measured {
-        Some(Ok((schema, tables))) => (json!(schema), json!(tables), String::new()),
-        Some(Err(message)) => (
-            Value::Null,
-            Value::Null,
-            format!("\n  the target was not measured: {message}"),
-        ),
-        None => (Value::Null, Value::Null, String::new()),
-    };
-    // Two meanings, two names: the JSON carries the count a script compares, and
-    // the text carries the sentence an operator reads. One variable holding both
-    // is how a dry run ends up reporting `keep` as prose.
-    let keep_note = keep_note(keep);
-    let sizes = match (&store_bytes, &needed) {
-        (Value::Null, Value::Null) => "store size unknown · space needed unknown".to_owned(),
-        (bytes, needed) => format!("store {bytes} B · estimated space needed {needed} B"),
-    };
-    emit(
-        io,
-        mode,
-        &json!({
-            "ok": true,
-            "dry_run": true,
-            "path": backup_dir.display().to_string(),
-            "store": target.display,
-            "backend": target.backend,
-            "database": target.database,
-            "schema": schema,
-            "tables": tables,
-            "existing_snapshots": existing,
-            "keep": keep,
-            "store_bytes": store_bytes,
-            "estimated_bytes_needed": needed,
-        }),
-        &format!(
-            "dry run: would snapshot {} into {}\n  {sizes} · existing snapshots \
-             {existing}{keep_note}{note}",
-            target.display,
-            backup_dir.display(),
-        ),
-    );
-    ExitCode::from(EXIT_OK)
-}
-
-/// The dry run's line about `--keep`.
-///
-/// A create dry run writes nothing, so it runs no prune either; it says which
-/// keep count a real run would apply rather than staying silent about a flag the
-/// operator passed.
-fn keep_note(keep: Option<usize>) -> String {
-    keep.map_or_else(String::new, |keep| format!(" · keep {keep}"))
 }
 
 #[cfg(test)]

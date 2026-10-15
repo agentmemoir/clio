@@ -20,8 +20,8 @@ use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_types::{Actor, ErrorCode};
 use mcp_principal_binding_support::{
     Journal, Store, assert_no_secret_material, bearer, bound_server, bound_server_with_journal,
-    bound_server_with_shared, call, erase_at, export_at, forbidden, post, spawn_server, stored,
-    tool_error_code, tool_ok,
+    bound_server_with_shared, bound_server_without_journal, call, erase_at, export_at, forbidden,
+    post, spawn_server, stored, tool_error_code, tool_ok,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -29,25 +29,34 @@ use std::sync::Arc;
 #[test]
 fn a_harness_credential_may_erase_and_export() {
     // The compliance verbs authorize on the actor the credential names, so a
-    // scoped harness record reaches both.
+    // scoped harness record reaches both. The document-named journal diverges
+    // from the deployment resolution, so the erase is refused fail-closed;
+    // export still reaches the authorization gate.
     let store = Store::new("harness");
     let mut secrets = Vec::new();
     let credentials = store.write(&[("ci", Actor::Harness, &["demo"])], &mut secrets);
-    // The confirmed erasure records a durable denial: keep it at this test's
-    // own journal path, which the guard removes.
     let journal = Journal::new("harness-erase");
     let port = bound_server_with_journal(&credentials, "not-listed", &journal);
+    let auth = bearer(&secrets[0]);
 
-    for body in [export_at("demo"), erase_at("demo")] {
-        let (status, response) = post(port, &body, &bearer(&secrets[0]));
-        assert_eq!(status, 200, "{response}");
-        assert!(!forbidden(&response), "must be allowed: {response}");
-    }
-    // The confirmed erasure recorded its durable denial at this test's journal
-    // path, not at the deployment's resolved location.
+    let (status, response) = post(port, &export_at("demo"), &auth);
+    assert_eq!(status, 200, "{response}");
+    assert!(!forbidden(&response), "export must be allowed: {response}");
+
+    let (status, response) = post(port, &erase_at("demo"), &auth);
+    assert_eq!(status, 200, "{response}");
     assert!(
-        journal.path().exists(),
-        "the confirmed erasure must record its denial at the test's journal path"
+        !forbidden(&response),
+        "the divergence refusal is not an authorization denial: {response}"
+    );
+    assert_eq!(
+        tool_error_code(&response).as_deref(),
+        Some("config_corrupt"),
+        "the divergent document must refuse the erase fail-closed: {response}"
+    );
+    assert!(
+        !journal.path().exists(),
+        "a refused erasure must not write the divergent journal"
     );
 }
 
@@ -57,7 +66,9 @@ fn an_agent_credential_may_not_erase_or_export() {
     let store = Store::new("agent");
     let mut secrets = Vec::new();
     let credentials = store.write(&[("bot", Actor::Agent, &["demo"])], &mut secrets);
-    let port = bound_server(&credentials, "not-listed");
+    // No document-named journal: authorization is what refuses the agent, so
+    // the erase must reach the authorization gate, not a divergence check.
+    let port = bound_server_without_journal(&credentials, "not-listed");
 
     for body in [export_at("demo"), erase_at("demo")] {
         let (status, response) = post(port, &body, &bearer(&secrets[0]));
@@ -355,7 +366,9 @@ fn an_agent_record_keeps_reads_and_writes_and_refuses_the_compliance_verbs() {
     let store = Store::new("agent-verbs");
     let mut secrets = Vec::new();
     let credentials = store.write(&[("bot", Actor::Agent, &["demo"])], &mut secrets);
-    let port = bound_server(&credentials, "demo");
+    // No document-named journal, so the erase reaches the authorization gate
+    // and is refused for the actor rather than for a journal divergence.
+    let port = bound_server_without_journal(&credentials, "demo");
     let auth = bearer(&secrets[0]);
 
     let (status, response) = post(port, &store_item_at("demo", "agent-1"), &auth);

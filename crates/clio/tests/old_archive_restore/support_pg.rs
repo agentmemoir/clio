@@ -32,6 +32,7 @@ use clio::store::{
 use clio_backup::dump_meta::{
     DUMP_FORMAT_VERSION, DUMP_KIND, DUMP_META_MEMBER, DumpColumn, DumpMeta, DumpTable,
 };
+use clio_backup::manifest::ManifestAuthority;
 use clio_backup::staging;
 use clio_backup::{CreateRequest, StagedMember, create_archive};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -115,6 +116,18 @@ pub fn require_postgres(reachable: bool) -> bool {
 
 /// Assemble a Postgres archive from the live store at `url`, carrying `kms_path`.
 pub fn archive_postgres(backup_dir: &Path, url: &str, kms_path: &Path, slug: &str) -> Archive {
+    archive_postgres_with_authority(backup_dir, url, kms_path, slug, None)
+}
+
+/// Assemble a Postgres archive that records the erasure `authority` it was made
+/// under, so the guarded restore can classify its claim.
+pub fn archive_postgres_with_authority(
+    backup_dir: &Path,
+    url: &str,
+    kms_path: &Path,
+    slug: &str,
+    authority: Option<ManifestAuthority>,
+) -> Archive {
     staging::ensure_backup_dir(backup_dir).expect("create the backup directory");
     let mut staged_paths: Vec<PathBuf> = Vec::new();
     let mut stage =
@@ -186,6 +199,7 @@ pub fn archive_postgres(backup_dir: &Path, url: &str, kms_path: &Path, slug: &st
         keys: key_source(kms_path),
         label: None,
         note: None,
+        authority,
         tool_version: clio::version().to_owned(),
     };
     publish(create_archive(&request).expect("create the postgres archive"))

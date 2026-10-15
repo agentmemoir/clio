@@ -99,6 +99,7 @@ pub(crate) fn postgres_archive(
         label: None,
         note: None,
         tool_version: "test".to_owned(),
+        authority: None,
     };
     crate::create_archive(&request).expect("assemble the archive")
 }

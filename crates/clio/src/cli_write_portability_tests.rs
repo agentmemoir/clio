@@ -36,7 +36,6 @@ fn temp_bundle(label: &str) -> String {
 }
 
 // ---------- export -> import round trip, idempotent ----------
-
 #[test]
 fn export_import_round_trip_is_idempotent() {
     let s = state();
@@ -87,7 +86,6 @@ fn export_import_round_trip_is_idempotent() {
 }
 
 // ---------- import --dry-run proves zero writes ----------
-
 #[test]
 fn import_dry_run_reports_without_writing() {
     let s = state();
@@ -164,10 +162,13 @@ fn erase_without_confirm_refuses_with_exit_two() {
 }
 
 #[test]
-fn erase_with_confirm_completes_the_shred() {
+fn erase_with_confirm_refuses_a_divergent_document_fail_closed() {
+    // The state names its own journal through the document, which diverges from
+    // the deployment resolution, so the erase is refused fail-closed rather than
+    // locking a file the restore CLI never reads.
     let (journal, s) = journal_state("erase-confirm");
     seed_item(&s, "demo", "itm-e1", "prefers terse answers");
-    seed_item(&s, "demo", "itm-e2", "prefers aisle seats");
+    let before = bank_count(&s, "demo");
     let (code, out, err) = run_write_state(
         "erase",
         &[
@@ -186,18 +187,19 @@ fn erase_with_confirm_completes_the_shred() {
         &s,
         false,
     );
-    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
-    let payload = json_of(&out);
-    let status = payload["status"].as_str().expect("status");
-    assert!(status == "COMPLETED" || status == "PROCESSING", "{payload}");
-    assert!(payload["item_count"].as_u64().unwrap_or(0) > 0, "{payload}");
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
     assert!(
-        payload["tombstones_written"].as_u64().unwrap_or(0) > 0,
-        "{payload}"
+        err.contains("CLIO_ERASURE_JOURNAL_FILE"),
+        "the refusal must name the remedy: {err}"
     );
     assert!(
-        journal.path().exists(),
-        "the confirmed erase must record its denial at the injected journal path"
+        !journal.path().exists(),
+        "a refused erase must not write the divergent journal"
+    );
+    assert_eq!(
+        bank_count(&s, "demo"),
+        before,
+        "refusal must be zero writes"
     );
 }
 
@@ -309,7 +311,6 @@ fn usage_failures_exit_two_and_name_the_missing_flag() {
 }
 
 // ---------- masking ----------
-
 #[test]
 fn export_keeps_planted_secrets_out_of_the_cli_output() {
     let s = state();
@@ -329,7 +330,6 @@ fn export_keeps_planted_secrets_out_of_the_cli_output() {
 }
 
 // ---------- group contract / render goldens ----------
-
 #[test]
 fn group_contract_holds_for_every_verb() {
     let group = super::PortabilityWriteGroup;

@@ -3,28 +3,25 @@
 //
 //! End-to-end compliance erasure conformance.
 //!
-//! Ingest items → read them → `erase_request` → DEK destroyed → reads fail
-//! closed with `erased_subject` → tombstones are content-free.
+//! Ingest items → read them → erase → DEK destroyed → reads fail closed with
+//! `erased_subject` → tombstones are content-free.
 //!
-//! Every state here is opened with its own scratch journal path (removed when
-//! the test's guard drops), so a confirmed erasure's durable denial never lands
-//! at the deployment's resolved journal location and two tests never race on
-//! one file.
+//! A state here names its own scratch journal path through the document seam.
+//! That path diverges from the deployment resolution, so the MCP `erase_request`
+//! tool refuses fail-closed; the erasure a downstream surface needs is driven
+//! through the compliance handler directly, and one test pins the refusal.
 
-use clio_compliance::{JournalState, load_journal};
+use clio_compliance::{EraseArgs, EraseVecSink, erase_request, tombstone_salt};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_mcp::write_tools::dispatch;
-use clio_store::sha256_hex;
-use clio_types::{Actor, EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
+use clio_types::{Actor, Bank, EpistemicKind, ItemKind, MemoryItem, OpContext, SemanticCategory};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const BANK: &str = "erase-e2e-bank";
 const SUBJECT: &str = "erase-e2e-subject";
-/// The subject of the `not_found` erase: no items and never a key.
-const MISSING_SUBJECT: &str = "missing-subject";
 
 /// Calls served so far, so no two tests share a scratch directory.
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -115,110 +112,76 @@ fn erase_args(actor: &str, confirm: bool, request: &str) -> Value {
     })
 }
 
+/// Destroy a subject's DEK through the real compliance erasure call.
+///
+/// A downstream surface's setup uses this directly rather than the MCP
+/// `erase_request` tool: the tool refuses a document-named journal that
+/// diverges from the deployment resolution, while this test is about retrieve
+/// after an erasure, not about the erase tool.
+fn erase_directly(st: &McpState, journal: &Path, subject: &str, request: &str) {
+    let sink = EraseVecSink::default();
+    let ctx = OpContext::new(Bank::new(BANK), Actor::Harness);
+    let salt = tombstone_salt();
+    let outcome = erase_request(&EraseArgs {
+        store: &*st.compliance,
+        journal_path: journal,
+        maint: Some(&st.maint),
+        ctx: &ctx,
+        subject_id: subject,
+        legal_basis: "GDPR_ART_17",
+        request_id: request,
+        reason_code: None,
+        confirm: true,
+        salt: &salt,
+        timestamp: "2024-01-01T00:00:00Z",
+        sink: &sink,
+    })
+    .expect("run the erasure");
+    assert_eq!(outcome.status, "COMPLETED", "the erasure did not complete");
+}
+
+/// A document-named journal that differs from the deployment resolution is
+/// refused: erase would otherwise lock a file the restore CLI never reads, so
+/// the erase denial and restore placement would not share one lock.
 #[test]
-fn erase_request_end_to_end_fails_closed() {
-    let scratch = Scratch::new("e2e");
+fn erase_request_refuses_a_document_divergent_from_the_deployment() {
+    let scratch = Scratch::new("divergent");
     let st = state(&scratch);
-    let item_id = "e2e-item-1";
+    let item_id = "e2e-item-divergent";
     st.store
         .create_memory_item(&item(item_id), "harness")
         .expect("seed item");
 
-    // Readable before erasure.
-    let before = dispatch(
+    let refused = dispatch(
+        &st,
+        "erase_request",
+        &erase_args("harness", true, "req-divergent"),
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["code"], "config_corrupt", "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("CLIO_ERASURE_JOURNAL_FILE"),
+        "the refusal must name the remedy: {refused}"
+    );
+
+    // Nothing was shredded, no denial was written, and the item stays readable.
+    assert!(
+        !st.compliance.subject_dek_destroyed(SUBJECT).unwrap(),
+        "a refused erase must not destroy the subject key"
+    );
+    assert!(
+        !scratch.journal().exists(),
+        "a refused erase must not write the divergent journal"
+    );
+    let read = dispatch(
         &st,
         "get_snapshot",
         &json!({"bank": BANK, "item_id": item_id}),
     );
-    assert_eq!(before["ok"], true, "{before}");
-
-    // Agent actor is not privileged: 403, zero writes.
-    let agent = dispatch(&st, "erase_request", &erase_args("agent", true, "r-agent"));
-    assert_eq!(agent["ok"], false);
-    assert_eq!(agent["code"], "forbidden");
-    assert!(!st.compliance.subject_dek_destroyed(SUBJECT).unwrap());
-
-    // Harness without confirm is rejected with zero writes.
-    let unconfirmed = dispatch(
-        &st,
-        "erase_request",
-        &erase_args("harness", false, "r-noconfirm"),
-    );
-    assert_eq!(unconfirmed["ok"], false);
-    assert_eq!(unconfirmed["code"], "forbidden");
-    assert!(!st.compliance.subject_dek_destroyed(SUBJECT).unwrap());
-
-    // Confirmed privileged erasure completes.
-    let done = dispatch(
-        &st,
-        "erase_request",
-        &erase_args("harness", true, "req-e2e-1"),
-    );
-    assert_eq!(done["ok"], true, "{done}");
-    assert_eq!(done["status"], "COMPLETED");
-    assert_eq!(done["request_id"], "req-e2e-1");
-    assert_eq!(done["item_count"], 1);
-    assert_eq!(done["subject_hash"].as_str().unwrap().len(), 64);
-    // The durable denial landed at this test's journal path, not the
-    // deployment's resolved location.
-    assert!(
-        scratch.journal().exists(),
-        "the confirmed erase must record its denial at the test's journal path"
-    );
-
-    // Fail-closed reads: no panic, structured erased_subject indicator.
-    for tool in ["get", "get_snapshot", "get_gist"] {
-        let read = dispatch(&st, tool, &json!({"bank": BANK, "item_id": item_id}));
-        assert_eq!(read["ok"], false, "{tool}: {read}");
-        assert_eq!(read["code"], "erased_subject", "{tool}: {read}");
-    }
-
-    // Tombstones are content-free.
-    let tombstones = st.compliance.read_tombstones(BANK, "req-e2e-1").unwrap();
-    assert_eq!(tombstones.len(), 1);
-    let t = &tombstones[0];
-    assert_eq!(t.subject_hash.len(), 64);
-    assert_eq!(t.item_id_hash.as_deref().map(str::len), Some(64));
-    assert_eq!(t.reason_code, "COMPLIANCE_CRYPTO_SHRED");
-    let serialized = serde_json::to_string(&tombstones).unwrap();
-    assert!(!serialized.contains(SUBJECT), "{serialized}");
-    assert!(!serialized.contains(item_id), "{serialized}");
-    assert!(!serialized.contains("private"), "{serialized}");
-
-    // Erasing an unknown subject reports not_found and writes no tombstone.
-    let missing = dispatch(
-        &st,
-        "erase_request",
-        &json!({
-            "bank": BANK, "actor": "harness", "subject_id": MISSING_SUBJECT,
-            "legal_basis": "GDPR_ART_17", "request_id": "req-missing", "confirm": true
-        }),
-    );
-    assert_eq!(missing["ok"], false);
-    assert_eq!(missing["code"], "not_found");
-    let tombstones = st.compliance.read_tombstones(BANK, "req-missing").unwrap();
-    assert!(tombstones.is_empty(), "{tombstones:?}");
-
-    // The failure is reported, but the journal write precedes the store
-    // outcome, so the subject hash stays denied: every later restore that
-    // references it refuses, while no key was ever destroyed. The denial is
-    // keyed to the same one-way hash the store derives.
-    let expected_hash = sha256_hex(&clio_compliance::tombstone_salt(), MISSING_SUBJECT);
-    let JournalState::Current(journal) = load_journal(&scratch.journal()) else {
-        panic!("the failed erase must still leave a current journal");
-    };
-    assert!(
-        journal.is_denied(&expected_hash),
-        "the failed erase must leave the subject hash denied: {journal:?}"
-    );
-    let denial = journal.denied(&expected_hash).expect("the denial record");
-    assert_eq!(denial.banks, vec![BANK.to_owned()]);
-    // Nothing was erased for the denied subject: its key is not destroyed.
-    assert!(
-        !st.compliance
-            .subject_dek_destroyed(MISSING_SUBJECT)
-            .unwrap()
-    );
+    assert_eq!(read["ok"], true, "the item stays readable: {read}");
 }
 
 // Retrieve must never return a crypto-shredded item in candidates.
@@ -264,12 +227,7 @@ fn retrieve_excludes_erased_item_from_candidates() {
         .any(|h| h["item_id"].as_str() == Some(item_id));
     assert!(found, "{before}");
 
-    let done = dispatch(
-        &st,
-        "erase_request",
-        &erase_args("harness", true, "req-t19-03"),
-    );
-    assert_eq!(done["ok"], true, "{done}");
+    erase_directly(&st, &scratch.journal(), SUBJECT, "req-t19-03");
 
     // After erasure the item is absent from candidate results, and no
     // personal text leaks through the retrieval surface.
