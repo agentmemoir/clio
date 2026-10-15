@@ -148,7 +148,7 @@ fn scope_ledger_names_every_family_with_a_source_and_a_link_or_a_gap() {
         );
     }
 
-    // The three records that exist nowhere stay open and say what is missing.
+    // The three records the store measurement cannot reach stay open and say why.
     for family in ["erasure_journal", "stderr_events", "enabled_peers"] {
         let row = row_for(&ledger, family);
         assert!(row.open, "{family} must stay open");
@@ -218,7 +218,7 @@ fn absent_sources_and_paths_stay_open_with_named_reasons() {
         ("store_file", "store file not found"),
         ("kms_file", "key file not found"),
         ("backup_archives", "backup archives root not found"),
-        ("erasure_journal", "no erasure journal exists"),
+        ("erasure_journal", "owner-only file outside the store"),
         ("stderr_events", "no durable stderr event store exists"),
     ] {
         assert!(

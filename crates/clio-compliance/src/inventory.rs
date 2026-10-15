@@ -108,7 +108,7 @@ pub enum RetentionAction {
     Retain,
     /// Record what the holder says; Clio never deletes a copy it does not hold.
     Record,
-    /// The action is undecided because the record or the verifier does not exist.
+    /// The action is undecided because the ledger cannot reach the record or the verifier.
     Open,
 }
 
@@ -116,7 +116,7 @@ pub enum RetentionAction {
 pub(crate) enum RowSource {
     /// The row's named store tables, joined.
     Tables,
-    /// A fixed description (a record that is stored nowhere).
+    /// A fixed description (a record the store does not hold).
     Fixed(&'static str),
     /// The store file, or the Postgres target schema.
     StoreFile,

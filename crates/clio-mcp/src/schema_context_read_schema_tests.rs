@@ -11,6 +11,8 @@
 //! ## Owns
 //! - `inspect` row enrichment and unreadable-body survival assertions
 //! - `tool_schema` context property assertions for the store/admit/correct set
+//! - The scratch erasure journal the shared state helper names, so a confirmed
+//!   erasure's durable denial never lands at the deployment's resolved path
 //!
 //! ## Does not own
 //! - Runtime decoding of `context` (see `context_write_tests`)
@@ -23,11 +25,57 @@
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::write_tools::dispatch;
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+/// Opens served so far, so no two tests share a scratch journal name.
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// One per-test erasure-journal path, removed when the guard drops.
+///
+/// A confirmed erasure durably records its denial in this file, so an opened
+/// state must name its own path through the document seam: a state without one
+/// falls back to the deployment resolution and would write — or fail against —
+/// the host's data directory.
+struct Journal {
+    path: PathBuf,
+}
+
+impl Journal {
+    fn new(tag: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        Self {
+            path: std::env::temp_dir().join(format!(
+                "am-inspect-schema-journal-{tag}-{}-{nanos}-{sequence}.json",
+                std::process::id()
+            )),
+        }
+    }
+
+    /// The effective document that pins this journal for one opened state.
+    fn document(&self) -> Value {
+        json!({ "erasure_journal_file": self.path.to_string_lossy() })
+    }
+
+    /// The file a confirmed erasure records its durable denial at.
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for Journal {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn state(journal: &Journal) -> Arc<McpState> {
+    McpState::open_with_effective(&McpOpenOptions::default(), &journal.document()).expect("state")
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -65,7 +113,8 @@ fn row<'a>(items: &'a [Value], id: &str) -> &'a Value {
 
 #[test]
 fn inspect_returns_context_and_omits_absent_context() {
-    let s = state();
+    let journal = Journal::new("returns-context");
+    let s = state(&journal);
     store_item(&s, "itm-with", "subj-with", Some("inspect context"));
     store_item(&s, "itm-without", "subj-without", None);
 
@@ -82,7 +131,8 @@ fn inspect_returns_context_and_omits_absent_context() {
 
 #[test]
 fn inspect_survives_a_crypto_shredded_subject() {
-    let s = state();
+    let journal = Journal::new("shredded");
+    let s = state(&journal);
     store_item(&s, "itm-shredded", "subj-shredded", Some("must vanish"));
     store_item(&s, "itm-alive", "subj-alive", Some("still readable"));
 
@@ -99,6 +149,12 @@ fn inspect_survives_a_crypto_shredded_subject() {
         }),
     );
     assert_eq!(erased["ok"], json!(true), "{erased}");
+    // The durable denial landed at this test's journal path, not the
+    // deployment's resolved location.
+    assert!(
+        journal.path().exists(),
+        "the confirmed erase must record its denial at the test's journal path"
+    );
 
     // The metadata row survives; its content (and context) is unreadable, so
     // the listing omits context for that row instead of failing.
@@ -120,7 +176,8 @@ fn inspect_survives_a_crypto_shredded_subject() {
 
 #[test]
 fn inspect_survives_an_unreadable_legacy_row() {
-    let s = state();
+    let journal = Journal::new("legacy-row");
+    let s = state(&journal);
     store_item(
         &s,
         "itm-readable",

@@ -89,7 +89,9 @@ pub(crate) const LOCAL_ERASURE_JOURNAL: RowPlan = RowPlan {
     tables: &["local_erasure_journal"],
     source: RowSource::Tables,
     link: None,
-    gap: Some("no subject column: the local erasure journal slot carries an id only"),
+    gap: Some(
+        "no subject column: the local erasure journal slot stays a reserved id-only placeholder; the durable erasure journal is an owner-only file outside the store",
+    ),
     owner: Owner::Clio,
     custody: Custody::Clio,
     readability: Readability::Plaintext,

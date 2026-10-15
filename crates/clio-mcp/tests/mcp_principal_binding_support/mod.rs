@@ -9,9 +9,12 @@
 //!
 //! ## Owns
 //! - `Store`: one owner-only credential store per test, removed on drop
-//! - `spawn_server_with` / `spawn_server` / `bound_server` /
-//!   `bound_server_with_shared`: the real accept loop on `127.0.0.1:0`, with the
-//!   deployment options a scenario needs
+//! - `Journal`: one scratch erasure-journal path, removed on drop, for a
+//!   scenario whose server confirms an erasure
+//! - `spawn_server_with` / `spawn_server_with_journal` / `spawn_server` /
+//!   `bound_server` / `bound_server_with_shared` / `bound_server_with_journal`:
+//!   the real accept loop on `127.0.0.1:0`, with the deployment options a
+//!   scenario needs
 //! - `post`, `bearer`, and the result predicates (`tool_ok`, `forbidden`, ...)
 //! - The request builders (`export_at`, `erase_at`) and the `stored` read-back
 //!
@@ -32,8 +35,10 @@
 //! so no two servers collide. Every store is a fresh scratch path under the OS
 //! temp directory carrying the pid, a monotonic counter, and a nanosecond stamp,
 //! and is removed when the guard drops, so no two tests share a path. Secrets
-//! come from the store writer, never from a literal. Nothing reads the host
-//! environment.
+//! come from the store writer, never from a literal. Every opened state names
+//! its own erasure-journal path in its effective document, so a served
+//! confirmed erasure cannot write the deployment's resolved journal file.
+//! Nothing reads the host environment.
 
 use clio_mcp::http::HttpConfig;
 use clio_mcp::http_auth::CredentialStore;
@@ -127,15 +132,92 @@ fn tighten(path: &Path) {
 ///
 /// The options are a parameter so a scenario that needs a deployment-level
 /// permission switched on — the shared bank surface is the only one today — can
-/// ask for it instead of asserting only its absence.
+/// ask for it instead of asserting only its absence. Every server names its own
+/// erasure-journal path in its document, so no served confirmed erasure can
+/// write the deployment's resolved journal file; a scenario that expects the
+/// written file to be cleaned up keeps a [`Journal`] guard and uses
+/// [`spawn_server_with_journal`] instead.
 pub fn spawn_server_with(cfg: HttpConfig, options: &McpOpenOptions) -> u16 {
-    let state = McpState::open_with_effective(options, &serde_json::json!({})).expect("state");
+    spawn_server_document(
+        cfg,
+        options,
+        &journal_document(&unique_journal_path("server")),
+    )
+}
+
+/// Serve with `journal` as the state's owner-only erasure journal, so a
+/// confirmed erasure's durable denial is the test's file and is removed when
+/// the guard drops.
+pub fn spawn_server_with_journal(
+    cfg: HttpConfig,
+    options: &McpOpenOptions,
+    journal: &Journal,
+) -> u16 {
+    spawn_server_document(cfg, options, &journal.document())
+}
+
+/// Open one state against `document` and serve it in a background thread.
+fn spawn_server_document(cfg: HttpConfig, options: &McpOpenOptions, document: &Value) -> u16 {
+    let state = McpState::open_with_effective(options, document).expect("state");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
         let _ = clio_mcp::http::serve_with_listener(state, cfg, listener);
     });
     port
+}
+
+/// A unique journal path under the OS temp dir; never a path another server or
+/// test shares, and never the deployment's resolved location.
+fn unique_journal_path(tag: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "am-mcp-binding-journal-{tag}-{}-{nanos}-{sequence}.json",
+        std::process::id()
+    ))
+}
+
+/// The effective document that pins `path` as a state's erasure journal; the
+/// key is `clio_config`'s `CLIO_ERASURE_JOURNAL_FILE` override, supplied by the
+/// host that already resolved the document instead of by the environment.
+fn journal_document(path: &Path) -> Value {
+    json!({ "erasure_journal_file": path.to_string_lossy() })
+}
+
+/// One scratch erasure-journal path, removed when the guard drops; held for as
+/// long as the server that writes it.
+pub struct Journal {
+    path: PathBuf,
+}
+
+impl Journal {
+    /// A unique path under the OS temp dir; nothing is written until a
+    /// confirmed erasure runs.
+    pub fn new(tag: &str) -> Self {
+        Self {
+            path: unique_journal_path(tag),
+        }
+    }
+
+    /// The effective document pinning this journal for one opened state.
+    pub fn document(&self) -> Value {
+        journal_document(&self.path)
+    }
+
+    /// The path a confirmed erasure records its denial at.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for Journal {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// Serve with the default open options and only the default bank chosen.
@@ -176,6 +258,27 @@ pub fn bound_server_with_shared(
             shared_bank_enabled,
             ..McpOpenOptions::default()
         },
+    )
+}
+
+/// A record-scoped server, exactly as [`bound_server`], whose state names
+/// `journal` as its erasure journal: the compliance verb that confirms an
+/// erasure records its durable denial in this test's own file.
+pub fn bound_server_with_journal(
+    store: &CredentialStore,
+    default_bank: &str,
+    journal: &Journal,
+) -> u16 {
+    spawn_server_with_journal(
+        HttpConfig {
+            credentials: Some(Arc::new(store.clone())),
+            ..HttpConfig::default()
+        },
+        &McpOpenOptions {
+            default_bank: default_bank.into(),
+            ..McpOpenOptions::default()
+        },
+        journal,
     )
 }
 

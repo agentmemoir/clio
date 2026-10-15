@@ -11,12 +11,16 @@
 //! - `erase_request` argument validation and the harness authorisation gate
 //! - The confirm gate (unconfirmed calls never mutate)
 //! - Orchestrating the store crypto-shred transaction and `MemTree` propagation
+//! - Recording the durable denial in the owner-only erasure journal strictly
+//!   before the store can destroy the subject key
 //! - Content-free erasure telemetry, carrying the presenting credential's label
 //!   when a credential presented the request
 //!
 //! ## Does not own
 //! - The persistence transaction itself (`clio-store::ComplianceStore`)
 //! - Dirty-path refresh algorithm (`clio-write::MemTreeMaint`)
+//! - The journal's model, checks, or owner-only file mechanics
+//!   (`erasure_journal`, `erasure_journal_file`)
 //! - MCP argument decoding and schema publication (`clio-mcp`)
 //!
 //! ## Boundary
@@ -30,6 +34,7 @@ use clio_store::{ComplianceStore, SubjectEraseSpec, sha256_hex};
 use clio_types::{Actor, AmError, ErrorCode, OpContext};
 use clio_write::MemTreeMaint;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// Default machine reason code recorded on every compliance tombstone.
@@ -57,6 +62,9 @@ pub fn tombstone_salt() -> Vec<u8> {
 pub struct EraseArgs<'a> {
     /// Compliance persistence boundary.
     pub store: &'a dyn ComplianceStore,
+    /// Owner-only erasure-journal path: the durable denial of the subject key
+    /// is recorded here before any key loss. Never a path a restore replaces.
+    pub journal_path: &'a Path,
     /// Live `MemTree` engine for derived-summary propagation (optional).
     pub maint: Option<&'a Arc<MemTreeMaint>>,
     /// Bank / actor context (actor must be privileged).
@@ -124,6 +132,10 @@ fn principal_label(ctx: &OpContext) -> Option<String> {
 #[path = "erase_tests.rs"]
 mod erase_tests;
 
+#[cfg(test)]
+#[path = "erase_failure_tests.rs"]
+mod erase_failure_tests;
+
 /// In-memory sink for tests.
 #[derive(Debug, Default)]
 pub struct EraseVecSink {
@@ -186,10 +198,12 @@ pub struct EraseOutcome {
 ///
 /// The DEK is destroyed before the derived-structure purge so the content is
 /// unrecoverable even if propagation fails; a propagation failure then reports
-/// `status: PROCESSING` instead of a false `COMPLETED`.
+/// `status: PROCESSING` instead of a false `COMPLETED`. The denial is durably
+/// recorded in the owner-only journal strictly before the store can destroy
+/// the key: a failed journal write aborts with no store effect and no key loss.
 ///
 /// # Errors
-/// Validation, authorisation, confirmation, DEK, or storage failures.
+/// Validation, authorisation, confirmation, journal, DEK, or storage failures.
 pub fn erase_request(args: &EraseArgs<'_>) -> Result<EraseOutcome, AmError> {
     validate(args)?;
     authorize(args.ctx.actor)?;
@@ -209,6 +223,14 @@ pub fn erase_request(args: &EraseArgs<'_>) -> Result<EraseOutcome, AmError> {
         deleted_at: args.timestamp,
         salt: args.salt,
     };
+    // Denial precedes key loss: the journal write fsyncs the file and its
+    // directory, and a failure here aborts before `erase_subject` runs.
+    let subject_hash = sha256_hex(args.salt, args.subject_id);
+    crate::erasure_journal::record_denial(
+        args.journal_path,
+        &subject_hash,
+        &[args.ctx.bank.as_str().to_owned()],
+    )?;
     match args.store.erase_subject(&spec) {
         Ok(outcome) => {
             let refreshed = propagate(args.maint, spec.bank_id, &outcome.item_ids);

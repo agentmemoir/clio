@@ -218,6 +218,7 @@ fn a_one_shot_binding_completes_the_consolidate_wave() {
         clio_config::Runtime::with_env(&|_| None),
         &serde_json::json!({}),
         true,
+        None,
     )
     .expect("one-shot state");
     let out = call(&s, "consolidate", json!({"bank": "bank-a"}));

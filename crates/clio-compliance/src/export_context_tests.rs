@@ -26,6 +26,7 @@ use crate::export_tests::{
     Fixture, T, args, assert_emitted_contexts_are_bounded, ctx, dest_path, domain_context, fixture,
     item, read, seed_plain_domain_record_contexts, store,
 };
+use crate::inventory_fixture::FixtureDir;
 use crate::test_unique::unique;
 use clio_store::Store;
 use clio_types::{Actor, Bank, MemoryItem, OpContext, SemanticCategory};
@@ -171,8 +172,13 @@ fn erased_subject_context_never_reappears_in_plaintext_export() {
     let ctx = OpContext::new(Bank::new(f.bank.clone()), Actor::Harness);
     // A fresh salt per run: no test asserts the tombstone hash value.
     let salt = rand::random::<[u8; 16]>();
+    // The journal lives in a Drop-guarded directory, so it is removed with the
+    // fixture instead of being left behind under the shared temp root.
+    let journal_dir = FixtureDir::create(&unique("ctx-erase-journal"));
+    let journal = journal_dir.path().join("erasure-journal.json");
     let outcome = erase_request(&EraseArgs {
         store: &f.store,
+        journal_path: &journal,
         maint: None,
         ctx: &ctx,
         subject_id: &subject,

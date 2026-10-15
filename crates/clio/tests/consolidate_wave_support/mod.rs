@@ -205,6 +205,13 @@ impl Fixture {
             "CLIO_DEPLOYMENT_CONFIG",
             self.dir.0.join("absent-overlay.json"),
         );
+        // The cleared environment leaves no journal fallback, so name this
+        // fixture's own file: a confirmed erasure records its durable denial
+        // inside the directory the fixture removes when it drops.
+        cmd.env(
+            "CLIO_ERASURE_JOURNAL_FILE",
+            self.dir.0.join("erasure-journal.json"),
+        );
         cmd
     }
 

@@ -114,8 +114,8 @@ fn assert_rows_are_well_formed(ledger: &ScopeInventory) {
     }
 }
 
-/// The four records that exist nowhere stay open and say why.
-fn assert_absent_records_stay_open(ledger: &ScopeInventory) {
+/// The four records the store measurement cannot reach stay open and say why.
+fn assert_unreachable_records_stay_open(ledger: &ScopeInventory) {
     for family in [
         "erasure_journal",
         "stderr_events",
@@ -189,7 +189,7 @@ fn inventory_pg_ledger_names_the_same_families_as_sqlite() {
     );
 
     assert_rows_are_well_formed(&ledger);
-    assert_absent_records_stay_open(&ledger);
+    assert_unreachable_records_stay_open(&ledger);
 
     eprintln!(
         "inventory_pg live: schema {} holds {} app tables ({} items rows)",

@@ -416,8 +416,11 @@ pub(crate) fn write_hashed_link_class(store: &SqliteStore, bank: &str) {
     let ctx = OpContext::new(Bank::new(bank.to_owned()), Actor::Harness);
     // A fresh salt per run: no test asserts the tombstone hash value.
     let salt = rand::random::<[u8; 16]>();
+    let journal_dir = FixtureDir::create(&unique("inv-fx-erase-journal"));
+    let journal = journal_dir.path().join("erasure-journal.json");
     let args = EraseArgs {
         store,
+        journal_path: &journal,
         maint: None,
         ctx: &ctx,
         subject_id: UNKNOWN,

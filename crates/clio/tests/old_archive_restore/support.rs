@@ -94,6 +94,17 @@ pub fn unique(tag: &str) -> String {
     format!("old-archive-{tag}-{}-{sequence}", std::process::id())
 }
 
+/// The owner-only journal path for one scenario's erasures: a sibling entry of
+/// the per-test scratch root under the system temp root, outside every path a
+/// restore replaces (never the database file or its sidecars, the key store,
+/// or the backup/staging directories).
+///
+/// A caller that lets the write reach this path owns removing it; the negative
+/// scenario refuses before any journal write, so it leaves nothing behind.
+pub fn journal_path(tag: &str) -> PathBuf {
+    std::env::temp_dir().join(unique(tag))
+}
+
 /// One synthetic item: dual content, sealed under the subject's DEK on write.
 fn item(id: &str, subject: &str, gist: &str) -> MemoryItem {
     MemoryItem {
@@ -254,8 +265,13 @@ pub fn erase_subject(store: &dyn ComplianceStore, subject: &str, request_id: &st
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(BANK), Actor::Harness);
     let salt = tombstone_salt();
+    // The journal lives in its own per-call scratch directory: it stays outside
+    // every path a restore replaces, and goes away with the guard on drop.
+    let scratch = Scratch::new("erase-journal");
+    let journal = scratch.join("erasure-journal.json");
     let outcome = erase_request(&EraseArgs {
         store,
+        journal_path: &journal,
         maint: None,
         ctx: &ctx,
         subject_id: subject,

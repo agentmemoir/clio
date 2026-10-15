@@ -11,7 +11,8 @@
 //! - One embedder resolution shared by retrieval and the index drain
 //! - The retriever, its read-only diagnostic twin, and the hub/association/
 //!   maintenance engine wiring
-//! - Extraction-readiness derivation and the retention-store loader
+//! - Extraction-readiness derivation, the caller-supplied erasure-journal
+//!   path, and the retention-store loader
 //!
 //! ## Does not own
 //! - The `McpState` type and its public `open` API (see `runtime`)
@@ -112,12 +113,16 @@ fn retriever_pair(
 impl McpState {
     /// Open runtime state over a concrete store backend, keeping `runtime` as
     /// the effective-config `Runtime` served by the config/ranking tools.
+    ///
+    /// `journal_path` is already resolved by the constructor: the deployment
+    /// constructors pass `None`, and only a host-supplied document names one.
     pub(crate) fn open_with_runtime_and_effective(
         options: &McpOpenOptions,
         runtime: clio_config::Runtime,
         effective: &Value,
+        journal_path: Option<PathBuf>,
     ) -> Result<Arc<Self>, AmError> {
-        Self::open_with_runtime_effective_and_wave(options, runtime, effective, false)
+        Self::open_with_runtime_effective_and_wave(options, runtime, effective, false, journal_path)
     }
 
     pub(crate) fn open_with_runtime_effective_and_wave(
@@ -125,6 +130,7 @@ impl McpState {
         runtime: clio_config::Runtime,
         effective: &Value,
         join_consolidate_wave: bool,
+        journal_path: Option<PathBuf>,
     ) -> Result<Arc<Self>, AmError> {
         let kms: Arc<dyn DekProvider> = match &options.kms_path {
             Some(path) => Arc::new(LocalDevKms::open_persistent(path)?),
@@ -150,6 +156,7 @@ impl McpState {
                     kms,
                     runtime,
                     join_consolidate_wave,
+                    journal_path,
                 )
             }
             "postgres" => {
@@ -167,6 +174,7 @@ impl McpState {
                     kms,
                     runtime,
                     join_consolidate_wave,
+                    journal_path,
                 )
             }
             other => Err(AmError::new(
@@ -177,6 +185,7 @@ impl McpState {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments, reason = "field set and seam together")]
     fn build(
         store: &Arc<dyn Repos>,
         belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector>,
@@ -185,6 +194,7 @@ impl McpState {
         kms: Arc<dyn DekProvider>,
         config: clio_config::Runtime,
         join_consolidate_wave: bool,
+        journal_path: Option<PathBuf>,
     ) -> Result<Arc<Self>, AmError> {
         let env = RankingEnv::system_defaults();
         let store_any: Arc<dyn Store> = store.clone();
@@ -295,6 +305,7 @@ impl McpState {
             device_id: format!("device-{}", std::process::id()),
             retention: Arc::new(std::sync::Mutex::new(load_retention_store())),
             retention_path: clio_config::retention_store::resolve_retention_path(None),
+            journal_path,
             config: Arc::new(std::sync::Mutex::new(config)),
             id_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             // Unbound at construction: only a credential-bearing transport ever
