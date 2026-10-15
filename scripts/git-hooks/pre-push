@@ -58,7 +58,7 @@ except subprocess.TimeoutExpired:
     print("pre-push: checks exceeded the push time budget", file=sys.stderr)
     sys.exit(1)
 ' "$runner"
-    )
+    ) </dev/null
     cleanup
     scratch=
 done

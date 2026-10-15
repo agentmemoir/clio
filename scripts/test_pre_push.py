@@ -115,6 +115,36 @@ class PushTests(RepoCase):
         self.assertIn("found a leak", result.stdout + result.stderr)
         self.assertNotIn("detached", self.git("worktree", "list").stdout)
 
+    def test_check_reading_stdin_cannot_hide_a_later_ref(self) -> None:
+        remote = self.root / "remote.git"
+        self.git("init", "--bare", str(remote))
+        self.git("remote", "add", "origin", str(remote))
+        (self.root / ".git" / "hooks" / "pre-push").symlink_to(SHIM)
+        write_hook(self.hooks / "05-read-input.sh", "cat >/dev/null\nexit 0")
+        (self.root / "a.rs").write_text("LEAK\n")
+        self.git("add", "a.rs")
+        self.git("commit", "-qm", "leak")
+        leaked = self.git("rev-parse", "HEAD").stdout.strip()
+        environment = dict(os.environ)
+        environment.pop("CLIO_PRECOMMIT_HOOKS", None)
+        result = subprocess.run(
+            ["git", "push", "origin", f"{self.clean}:refs/heads/aaa",
+             f"{leaked}:refs/heads/bbb"],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("found a leak", result.stdout + result.stderr)
+        self.assertEqual(
+            self.git(f"--git-dir={remote}", "for-each-ref", "--format=%(refname)").stdout,
+            "",
+        )
+        self.assertNotIn("detached", self.git("worktree", "list").stdout)
+
     def test_main_local_hook_failure_cleans_worktree(self) -> None:
         write_hook(self.hooks / "20-fail.sh", "exit 1")
         self.assertNotEqual(self.push(self.clean).returncode, 0)
