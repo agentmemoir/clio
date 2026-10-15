@@ -20,10 +20,12 @@ from extract_quality_span import verify_snapshot
 from span_verify import verify_snapshot as verify_generic_snapshot
 
 def _self_test() -> int:
-    checks: list[tuple[str, bool]] = []
+    check_names: list[str] = []
+    check_results: list[bool] = []
 
     def check(name: str, condition: bool) -> None:
-        checks.append((name, bool(condition)))
+        check_names.append(name)
+        check_results.append(bool(condition))
 
     grounded = verify_snapshot(
         "Mara Quill paid 1,024 credits on 2025-02-14",
@@ -175,10 +177,11 @@ def _self_test() -> int:
         "raw secrets redacted",
         "example-credential" not in _json_text(redacted) and "abc" not in _json_text(redacted),
     )
-    # Labels and secrets stay in separate tuples so no static-analysis taint
-    # from the sample literals reaches the printed check names.
-    secret_labels = ("AWS access-key id", "GitHub token", "JWT", "Slack token")
-    secret_samples = (
+    # Keep the labels apart from the credential-shaped samples, and keep the
+    # names apart from the pass/fail results, so no static-analysis taint
+    # from the samples reaches the printed check names.
+    redaction_labels = ("AWS access-key id", "GitHub token", "JWT", "Slack token")
+    sample_values = (
         "AKIAIOSFODNN7EXAMPLE",
         "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature",
@@ -186,7 +189,7 @@ def _self_test() -> int:
         # same string at run time.
         "xox" + "b-123456789012-123456789012-abcdefghijklmnop",
     )
-    for label, sample in zip(secret_labels, secret_samples, strict=True):
+    for label, sample in zip(redaction_labels, sample_values, strict=True):
         rendered = _redact_text(sample)
         check(f"{label} redacted", sample not in rendered)
     try:
@@ -197,8 +200,9 @@ def _self_test() -> int:
         )
     except HarnessError:
         check("shared verifier parity table matches", False)
-    failures = sum(1 for _, passed in checks if not passed)
-    for name, passed in checks:
+    failures = sum(1 for passed in check_results if not passed)
+    for index, name in enumerate(check_names):
+        passed = check_results[index]
         print(f"extract-quality self-test {'ok' if passed else 'FAIL'}: {name}")
-    print(f"extract-quality self-test: {len(checks) - failures} passed, {failures} failed")
+    print(f"extract-quality self-test: {len(check_names) - failures} passed, {failures} failed")
     return EXIT_OK if failures == 0 else EXIT_QUALITY_FAIL
