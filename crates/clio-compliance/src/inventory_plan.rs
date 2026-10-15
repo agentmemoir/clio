@@ -37,7 +37,7 @@ use self::inventory_plan_slots::{
 /// (named exactly as the completeness manifest names them), then the derived
 /// and bank structures, telemetry, sync state, key and tombstone records, the
 /// legacy tables no code path uses, the local compliance slot tables, the file
-/// and peer facts, and the source records stored nowhere. A `gap` is present exactly when the row has no
+/// and peer facts, and the source records the store does not hold. A `gap` is present exactly when the row has no
 /// direct, resolvable subject link.
 pub(crate) static ROW_PLAN: &[RowPlan] = &[
     RowPlan {
@@ -401,9 +401,11 @@ pub(crate) static ROW_PLAN: &[RowPlan] = &[
     RowPlan {
         family: "erasure_journal",
         tables: &[],
-        source: RowSource::Fixed("erasure journal (not stored)"),
+        source: RowSource::Fixed("erasure journal file (owner-only, outside the store)"),
         link: None,
-        gap: Some("no erasure journal exists: an erasure in progress is unrecorded"),
+        gap: Some(
+            "the durable erasure journal is an owner-only file outside the store: the read-only store measurement cannot reach it",
+        ),
         owner: Owner::Clio,
         custody: Custody::Clio,
         readability: Readability::Unknown,

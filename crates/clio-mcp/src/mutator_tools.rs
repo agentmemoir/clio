@@ -10,6 +10,9 @@
 //! ## Owns
 //! - JSON argument decoding and result shaping for these mutators
 //! - Confirmation handling for `discard` (dry-run without `confirm`)
+//! - Journal-path resolution for the `erase_request` boundary: the path the
+//!   state's effective document named when it carries one, else the ambient
+//!   deployment resolution (internal configuration, never caller input)
 //!
 //! ## Does not own
 //! - Gated write-path handlers (see `write_tools`)
@@ -276,14 +279,23 @@ fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
 /// `erase_request`: verified compliance crypto-shred (never aliases discard).
 ///
 /// Requires a privileged actor and `confirm=true`; the authorization and
-/// confirmation gates live in the in-process `clio-compliance` handler.
+/// confirmation gates live in the in-process `clio-compliance` handler. The
+/// owner-only erasure-journal path is internal configuration, never caller
+/// input: the state prefers the path its effective document named, and a
+/// state without one keeps the `CLIO_ERASURE_JOURNAL_FILE`-over-data-directory
+/// deployment resolution.
 #[inline(never)]
 fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
     let salt = clio_compliance::tombstone_salt();
+    let journal = match &state.journal_path {
+        Some(path) => path.clone(),
+        None => clio_config::resolve_journal_path(&|key| std::env::var(key).ok())?,
+    };
     let e_args = clio_compliance::EraseArgs {
         store: &*state.compliance,
+        journal_path: &journal,
         maint: Some(&state.maint),
         ctx: &ctx,
         subject_id: req_str(args, "subject_id")?,

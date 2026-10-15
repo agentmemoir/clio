@@ -11,7 +11,8 @@
 //!
 //! ## Owns
 //! - Hermetic `McpState::open_with_effective` behaviour over both backends,
-//!   including bank/actor argument precedence and next-item-id allocation
+//!   including bank/actor argument precedence, next-item-id allocation, and
+//!   the document-named erasure-journal seam
 //! - Empty signal sources, extractor fail-closed configuration, and
 //!   file-backed KMS persistence across opens
 //!
@@ -74,6 +75,68 @@ fn hermetic_open_ignores_the_deployment_file() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The document seam keeps only a usable string: a named path survives
+/// (trimmed), while an absent key, a blank or NUL-bearing value, or a
+/// non-string names nothing.
+#[test]
+fn erasure_journal_path_from_document_keeps_only_usable_paths() {
+    let named = json!({"erasure_journal_file": "  /tmp/journal.json  "});
+    assert_eq!(
+        erasure_journal_path_from_document(&named),
+        Some(std::path::PathBuf::from("/tmp/journal.json"))
+    );
+    for unnamed in [
+        json!({}),
+        json!({"erasure_journal_file": ""}),
+        json!({"erasure_journal_file": "   "}),
+        json!({"erasure_journal_file": "bad\u{0}path"}),
+        json!({"erasure_journal_file": 7}),
+    ] {
+        assert_eq!(
+            erasure_journal_path_from_document(&unnamed),
+            None,
+            "{unnamed}"
+        );
+    }
+}
+
+/// A host document that names the journal path sets the state field; a
+/// document without the key leaves it to the deployment resolution.
+#[test]
+fn open_with_effective_takes_the_document_named_journal_path() {
+    let path = std::env::temp_dir().join(format!("clio-runtime-journal-{}", std::process::id()));
+    let named = McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &json!({"erasure_journal_file": path.to_string_lossy()}),
+    )
+    .expect("state");
+    assert_eq!(named.journal_path.as_deref(), Some(path.as_path()));
+
+    let unnamed =
+        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    assert_eq!(unnamed.journal_path, None);
+}
+
+/// The deployment constructor never takes the document key, even when a
+/// runtime document carries one, so `open` keeps the environment resolution.
+#[test]
+fn open_with_runtime_keeps_the_ambient_journal_resolution() {
+    let mut runtime = clio_config::Runtime::with_env(&|_| None);
+    runtime
+        .load_file_json(r#"{"erasure_journal_file": "/tmp/named-by-the-document.json"}"#)
+        .expect("file layer");
+    assert_eq!(
+        runtime
+            .effective_raw()
+            .pointer("/erasure_journal_file")
+            .and_then(Value::as_str),
+        Some("/tmp/named-by-the-document.json"),
+        "premise: the document carries the key"
+    );
+    let state = McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state");
+    assert_eq!(state.journal_path, None);
 }
 
 #[test]

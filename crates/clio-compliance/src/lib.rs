@@ -47,6 +47,8 @@ mod canonical;
 mod copy_disposition;
 mod correct;
 mod erase;
+mod erasure_journal;
+mod erasure_journal_file;
 mod export;
 mod export_custody;
 mod export_mask;
@@ -86,6 +88,11 @@ pub use correct::{
 pub use erase::{
     DEFAULT_REASON_CODE, EraseArgs, EraseEvent, EraseOutcome, EraseSink, EraseVecSink,
     erase_request, tombstone_salt, tombstone_salt_from,
+};
+pub use erasure_journal::{
+    ArchiveClaim, AuthorityRefusal, DenialRecord, ErasureJournal, JournalState, MemberFacts,
+    SCHEMA_VERSION, check_archive_authority, handoff, initialize_new_empty, load_journal,
+    record_denial,
 };
 pub use export::{ExportArgs, ExportDelivery, ExportFilter, ExportOutcome, export};
 pub use export_custody::{

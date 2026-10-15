@@ -19,8 +19,9 @@ use clio_mcp::protocol::McpHandler;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_types::{Actor, ErrorCode};
 use mcp_principal_binding_support::{
-    Store, assert_no_secret_material, bearer, bound_server, bound_server_with_shared, call,
-    erase_at, export_at, forbidden, post, spawn_server, stored, tool_error_code, tool_ok,
+    Journal, Store, assert_no_secret_material, bearer, bound_server, bound_server_with_journal,
+    bound_server_with_shared, call, erase_at, export_at, forbidden, post, spawn_server, stored,
+    tool_error_code, tool_ok,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -32,13 +33,22 @@ fn a_harness_credential_may_erase_and_export() {
     let store = Store::new("harness");
     let mut secrets = Vec::new();
     let credentials = store.write(&[("ci", Actor::Harness, &["demo"])], &mut secrets);
-    let port = bound_server(&credentials, "not-listed");
+    // The confirmed erasure records a durable denial: keep it at this test's
+    // own journal path, which the guard removes.
+    let journal = Journal::new("harness-erase");
+    let port = bound_server_with_journal(&credentials, "not-listed", &journal);
 
     for body in [export_at("demo"), erase_at("demo")] {
         let (status, response) = post(port, &body, &bearer(&secrets[0]));
         assert_eq!(status, 200, "{response}");
         assert!(!forbidden(&response), "must be allowed: {response}");
     }
+    // The confirmed erasure recorded its durable denial at this test's journal
+    // path, not at the deployment's resolved location.
+    assert!(
+        journal.path().exists(),
+        "the confirmed erasure must record its denial at the test's journal path"
+    );
 }
 
 #[test]

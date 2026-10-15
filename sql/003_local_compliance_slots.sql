@@ -18,7 +18,7 @@
 --   G19   copy_inventory         copy inventory, staging, custody, product copy result
 --         export_destinations    export destination custody and pending delivery state
 --   G14D  archive_experiments    old-archive experiment and restore/journal design
---   G14A  local_erasure_journal  durable local erasure journal and deny marker
+--   G14A  local_erasure_journal  reserved id-only slot; the durable erasure journal is an owner-only file outside the store
 --   G14I  restore_guards         shared restore refusal and placement guards
 --   G8B   erasure_adapters       SQLite/Postgres erasure adapters and retry proof
 --
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS archive_experiments
   id                                                                                           text PRIMARY KEY
 );
 
--- G14A: durable local erasure journal and deny marker.
+-- G14A: reserved id-only placeholder slot; the durable erasure journal is an owner-only file outside the store.
 CREATE TABLE IF NOT EXISTS local_erasure_journal
 (
   id                                                                                           text PRIMARY KEY

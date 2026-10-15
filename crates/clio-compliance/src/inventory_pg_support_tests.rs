@@ -15,8 +15,8 @@
 //!
 //! ## Does not own
 //! - The ledger and its row plan (`inventory.rs`, `inventory_rows.rs`)
-//! - The SQLite fixture (`inventory_fixture.rs`): only its class names and ids
-//!   are reused, because its writers are SQLite-typed
+//! - The SQLite fixture (`inventory_fixture.rs`): its class names, ids, and the
+//!   shared `FixtureDir` guard are reused; only its writers are SQLite-typed
 //! - The fixture triples and their assertions (`inventory_pg_triples_tests.rs`,
 //!   mounted as `inventory_pg_tests::triples`)
 //!
@@ -28,7 +28,7 @@
 
 use crate::erase::{EraseArgs, EraseVecSink, erase_request};
 use crate::inventory::InventoryPaths;
-use crate::inventory_fixture::{OTHER, SELECTED, SHARED, UNKNOWN, fixture_id};
+use crate::inventory_fixture::{FixtureDir, OTHER, SELECTED, SHARED, UNKNOWN, fixture_id};
 use crate::test_unique::unique;
 use clio_config::db_url_env::database_url_from_process_env;
 use clio_config::kms_path::KMS_SIBLING_SUFFIX;
@@ -96,29 +96,6 @@ pub(crate) fn url_password(url: &str) -> Option<String> {
     url_userinfo(url)?
         .split_once(':')
         .map(|(_, password)| password.to_owned())
-}
-
-/// A test-owned directory removed when the fixture drops.
-struct FixtureDir(PathBuf);
-
-impl FixtureDir {
-    /// Create the directory under the system temporary root.
-    fn create(name: &str) -> Self {
-        let path = std::env::temp_dir().join(name);
-        std::fs::create_dir_all(&path).expect("create the fixture directory");
-        Self(path)
-    }
-
-    /// The directory path.
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for FixtureDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }
 
 /// The ledger paths one Postgres fixture reports, under `dir`.
@@ -410,8 +387,13 @@ pub(crate) fn write_hashed_link_class(store: &PostgresStore, bank: &str) {
     let ctx = OpContext::new(Bank::new(bank.to_owned()), Actor::Harness);
     // A fresh salt per run: no test asserts the tombstone hash value.
     let salt = rand::random::<[u8; 16]>();
+    // The journal lives in a Drop-guarded directory, so it is removed with the
+    // fixture instead of being left behind under the shared temp root.
+    let journal_dir = FixtureDir::create(&unique("inv-pg-erase-journal"));
+    let journal = journal_dir.path().join("erasure-journal.json");
     let args = EraseArgs {
         store,
+        journal_path: &journal,
         maint: None,
         ctx: &ctx,
         subject_id: UNKNOWN,

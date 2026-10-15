@@ -27,6 +27,7 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::erase::{EraseArgs, EraseVecSink};
+use crate::inventory_fixture::FixtureDir;
 use crate::subject_request::{
     PathOwner, PathSlot, PathState, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
     RequestState, SubjectRequestLedger, SubjectRequestRecord,
@@ -116,21 +117,29 @@ pub(super) fn persist(durable: &dyn DurableRequestStore, record: &SubjectRequest
 /// the DEK destroyed first; once `fail` clears the erasure completes. Counts
 /// every erase call. The `banks` preset is the live bank set the effect would
 /// fan out to; the seam reads it back from this same store. The failure mode
-/// mirrors `MockEraseStore`.
+/// mirrors `MockEraseStore`. Carries the owner-only journal its erase args
+/// record into.
 pub(super) struct RetryStore {
     pub(super) fail: AtomicBool,
     dek_destroyed: AtomicBool,
     erase_calls: AtomicUsize,
     pub(super) banks: Vec<String>,
+    journal: PathBuf,
+    /// The per-test directory the journal lives in, removed on drop.
+    #[expect(dead_code, reason = "read only by its own drop")]
+    dir: FixtureDir,
 }
 
 impl RetryStore {
     pub(super) fn failing() -> Self {
+        let dir = FixtureDir::create(&unique("erase-journal"));
         Self {
             fail: AtomicBool::new(true),
             dek_destroyed: AtomicBool::new(false),
             erase_calls: AtomicUsize::new(0),
             banks: Vec::new(),
+            journal: dir.path().join("erasure-journal.json"),
+            dir,
         }
     }
 
@@ -186,9 +195,9 @@ impl ComplianceStore for RetryStore {
     }
 }
 
-/// Erase arguments bound to `store`, `ctx`, and `sink`.
+/// Erase arguments bound to `store`, `ctx`, `sink`, and the store's journal.
 pub(super) fn erase_args<'a>(
-    store: &'a dyn ComplianceStore,
+    store: &'a RetryStore,
     ctx: &'a OpContext,
     sink: &'a EraseVecSink,
     request_id: &'a str,
@@ -197,6 +206,7 @@ pub(super) fn erase_args<'a>(
 ) -> EraseArgs<'a> {
     EraseArgs {
         store,
+        journal_path: &store.journal,
         maint: None,
         ctx,
         subject_id,

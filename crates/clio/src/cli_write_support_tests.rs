@@ -22,8 +22,10 @@ use crate::cli_read::{CliIo, run_verb};
 use crate::cli_read_test_support::{TS, call, state};
 use crate::cli_write::run_with_state;
 use serde_json::json;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn utf8(bytes: Vec<u8>) -> String {
     String::from_utf8(bytes).expect("utf8")
@@ -162,4 +164,59 @@ pub(crate) fn shared_state() -> Arc<clio_mcp::runtime::McpState> {
         &serde_json::json!({}),
     )
     .expect("shared state")
+}
+
+/// Erasure-journal paths handed out so far, so no two tests share one.
+static JOURNAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test owner-only erasure-journal path, removed when the guard drops.
+///
+/// A confirmed erase writes the durable denial at the path its state named;
+/// a state that names none falls back to the deployment resolution, which in
+/// a test process is the operator's real data directory. Every test that
+/// reaches a confirmed erase opens through `journal_state` instead.
+pub(crate) struct JournalGuard(PathBuf);
+
+impl JournalGuard {
+    fn unique(label: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let sequence = JOURNAL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        Self(std::env::temp_dir().join(format!(
+            "clio-erasure-journal-{label}-{}-{nanos}-{sequence}.json",
+            std::process::id()
+        )))
+    }
+
+    /// The path the state's document names and the erase writes.
+    pub(crate) fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for JournalGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Open in-memory state whose effective document names a unique per-test
+/// erasure-journal path, so a confirmed erase can never write the ambient
+/// deployment location. The returned guard removes the file when it drops.
+pub(crate) fn journal_state(label: &str) -> (JournalGuard, Arc<clio_mcp::runtime::McpState>) {
+    let journal = JournalGuard::unique(label);
+    let state = clio_mcp::runtime::McpState::open_with_effective(
+        &clio_mcp::runtime::McpOpenOptions::default(),
+        &json!({ "erasure_journal_file": journal.path().to_string_lossy() }),
+    )
+    .expect("state");
+    (journal, state)
+}
+
+/// Item count for `bank`, straight from the `stats` tool.
+pub(crate) fn bank_count(state: &clio_mcp::runtime::McpState, bank: &str) -> u64 {
+    let report = call(state, "stats", json!({"bank": bank, "actor": "agent"}));
+    report["items_total"].as_u64().unwrap_or(u64::MAX)
 }

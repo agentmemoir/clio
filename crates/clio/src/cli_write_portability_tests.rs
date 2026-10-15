@@ -19,9 +19,9 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::cli_read_test_support::{call, json_of, seed_item, state};
+use crate::cli_read_test_support::{json_of, seed_item, state};
 use crate::cli_write_group::WriteGroup;
-use crate::cli_write_test_support::run_write_state;
+use crate::cli_write_test_support::{bank_count, journal_state, run_write_state};
 use serde_json::{Value, json};
 use std::process::ExitCode;
 
@@ -33,11 +33,6 @@ fn temp_bundle(label: &str) -> String {
         std::process::id()
     ));
     path.to_string_lossy().into_owned()
-}
-
-fn bank_count(s: &clio_mcp::runtime::McpState, bank: &str) -> u64 {
-    let report = call(s, "stats", json!({"bank": bank, "actor": "agent"}));
-    report["items_total"].as_u64().unwrap_or(u64::MAX)
 }
 
 // ---------- export -> import round trip, idempotent ----------
@@ -170,7 +165,7 @@ fn erase_without_confirm_refuses_with_exit_two() {
 
 #[test]
 fn erase_with_confirm_completes_the_shred() {
-    let s = state();
+    let (journal, s) = journal_state("erase-confirm");
     seed_item(&s, "demo", "itm-e1", "prefers terse answers");
     seed_item(&s, "demo", "itm-e2", "prefers aisle seats");
     let (code, out, err) = run_write_state(
@@ -199,6 +194,10 @@ fn erase_with_confirm_completes_the_shred() {
     assert!(
         payload["tombstones_written"].as_u64().unwrap_or(0) > 0,
         "{payload}"
+    );
+    assert!(
+        journal.path().exists(),
+        "the confirmed erase must record its denial at the injected journal path"
     );
 }
 

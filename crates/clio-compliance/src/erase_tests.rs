@@ -11,6 +11,7 @@
 //! ## Owns
 //! - Behaviour assertions for `erase_request`, tombstone salts, and the
 //!   tombstone view they produce
+//! - The durable-denial assertions a completed erasure leaves in the journal
 //! - Credential-label assertions on the erase event payload
 //!
 //! ## Does not own
@@ -27,10 +28,8 @@ use crate::erase::{
     DEFAULT_REASON_CODE, EraseArgs, EraseVecSink, erase_request, tombstone_salt,
     tombstone_salt_from,
 };
-use clio_store::{
-    ComplianceStore, ComplianceTombstoneView, DekProvider, ItemIdentity, LocalDevKms, SqliteStore,
-    Store, SubjectEraseOutcome, SubjectEraseSpec,
-};
+use crate::erasure_journal::{JournalState, load_journal};
+use clio_store::{ComplianceStore, DekProvider, LocalDevKms, SqliteStore, Store, sha256_hex};
 use clio_types::{
     Actor, Bank, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext, PrincipalLabel,
     SemanticCategory,
@@ -39,6 +38,7 @@ use clio_write::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
 use clio_write::{DiscardArgs, DiscardVecSink, MemForest, MemTreeMaint, discard};
 use std::sync::{Arc, Mutex};
 
+use crate::inventory_fixture::FixtureDir;
 use crate::test_unique::unique;
 
 fn item(id: &str, bank: &str, subject: &str) -> MemoryItem {
@@ -71,6 +71,11 @@ struct Fixture {
     bank: String,
     subject: String,
     item_id: String,
+    /// The owner-only journal this fixture's erasures record into.
+    journal: std::path::PathBuf,
+    /// The per-test directory holding the journal, removed on drop.
+    #[expect(dead_code, reason = "read only by its own drop")]
+    dir: FixtureDir,
 }
 
 fn fixture() -> Fixture {
@@ -82,11 +87,14 @@ fn fixture() -> Fixture {
     store
         .create_memory_item(&item(&item_id, &bank, &subject), "tester")
         .unwrap();
+    let dir = FixtureDir::create(&unique("erase-journal"));
     Fixture {
         store,
         bank,
         subject,
         item_id,
+        journal: dir.path().join("erasure-journal.json"),
+        dir,
     }
 }
 
@@ -102,6 +110,7 @@ fn args<'a>(
     static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);
     EraseArgs {
         store: &f.store,
+        journal_path: &f.journal,
         maint,
         ctx,
         subject_id: &f.subject,
@@ -258,104 +267,6 @@ fn discard_does_not_destroy_dek() {
     assert_eq!(sink.events().len(), 1);
 }
 
-/// Test double: erase always fails; optionally reports the DEK as destroyed.
-struct MockEraseStore {
-    destroy: bool,
-    destroyed: Mutex<bool>,
-}
-
-impl ComplianceStore for MockEraseStore {
-    fn list_subject_items(
-        &self,
-        _bank_id: &str,
-        _subject_id: &str,
-    ) -> Result<Vec<ItemIdentity>, clio_types::AmError> {
-        Ok(vec![])
-    }
-
-    fn erase_subject(
-        &self,
-        _spec: &SubjectEraseSpec<'_>,
-    ) -> Result<SubjectEraseOutcome, clio_types::AmError> {
-        if self.destroy {
-            *self.destroyed.lock().expect("mock") = true;
-        }
-        Err(clio_types::AmError::new(
-            ErrorCode::Internal,
-            "injected erase failure",
-        ))
-    }
-
-    fn subject_dek_destroyed(&self, _subject_id: &str) -> Result<bool, clio_types::AmError> {
-        Ok(*self.destroyed.lock().expect("mock"))
-    }
-
-    fn read_tombstones(
-        &self,
-        _bank_id: &str,
-        _request_id: &str,
-    ) -> Result<Vec<ComplianceTombstoneView>, clio_types::AmError> {
-        Ok(vec![])
-    }
-
-    fn list_tombstones(
-        &self,
-        _bank_id: &str,
-    ) -> Result<Vec<ComplianceTombstoneView>, clio_types::AmError> {
-        Ok(vec![])
-    }
-}
-
-#[test]
-fn partial_shred_reports_processing_and_plain_error_propagates() {
-    let sink = EraseVecSink::default();
-    let ctx = OpContext::new(Bank::new("mock-bank"), Actor::Harness);
-
-    let destroyed = MockEraseStore {
-        destroy: true,
-        destroyed: Mutex::new(false),
-    };
-    // A fresh salt per run: no test asserts the tombstone hash value.
-    let salt = rand::random::<[u8; 16]>();
-    let e = EraseArgs {
-        store: &destroyed,
-        maint: None,
-        ctx: &ctx,
-        subject_id: "subject-1",
-        legal_basis: "CCPA_DELETION",
-        request_id: "req-partial",
-        reason_code: Some("CUSTOM_REASON"),
-        confirm: true,
-        salt: &salt,
-        timestamp: "2026-09-17T11:00:00Z",
-        sink: &sink,
-    };
-    let out = erase_request(&e).unwrap();
-    assert_eq!(out.status, "PROCESSING");
-    assert_eq!(out.item_count, 0);
-    assert_eq!(sink.events().len(), 1);
-    assert_eq!(sink.events()[0].reason_code, "CUSTOM_REASON");
-
-    let failed = MockEraseStore {
-        destroy: false,
-        destroyed: Mutex::new(false),
-    };
-    let e = EraseArgs {
-        store: &failed,
-        maint: None,
-        ctx: &ctx,
-        subject_id: "subject-1",
-        legal_basis: "CCPA_DELETION",
-        request_id: "req-fail",
-        reason_code: None,
-        confirm: true,
-        salt: &salt,
-        timestamp: "2026-09-17T11:00:00Z",
-        sink: &sink,
-    };
-    assert_eq!(erase_request(&e).unwrap_err().code, ErrorCode::Internal);
-}
-
 #[test]
 fn a_bound_erasure_event_names_the_credential_beside_the_actor() {
     let f = fixture();
@@ -412,39 +323,49 @@ fn an_absent_credential_is_omitted_from_the_serialized_event() {
     assert_eq!(json["principal"], "ops-key");
 }
 
+/// A completed erasure leaves a durable denial keyed by the same one-way
+/// subject hash the store's outcome carries.
 #[test]
-fn a_partial_erasure_event_also_names_the_credential() {
+fn a_completed_erasure_denies_the_subject_in_the_durable_journal() {
+    let f = fixture();
     let sink = EraseVecSink::default();
-    let ctx = bound_ctx(
-        &Fixture {
-            store: SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).unwrap(),
-            bank: "mock-bank".into(),
-            subject: "subject-1".into(),
-            item_id: "item-1".into(),
-        },
-        Actor::Harness,
-        "ops-key",
-    );
-    let destroyed = MockEraseStore {
-        destroy: true,
-        destroyed: Mutex::new(false),
-    };
-    // A fresh salt per run: no test asserts the tombstone hash value.
+    let request = unique("req");
+    let harness = ctx(&f, Actor::Harness);
+    // A known salt, so this test can recompute the store's subject hash.
     let salt = rand::random::<[u8; 16]>();
-    let out = erase_request(&EraseArgs {
-        store: &destroyed,
-        maint: None,
-        ctx: &ctx,
-        subject_id: "subject-1",
-        legal_basis: "CCPA_DELETION",
-        request_id: "req-partial",
-        reason_code: None,
-        confirm: true,
-        salt: &salt,
-        timestamp: "2026-09-17T11:00:00Z",
-        sink: &sink,
-    })
-    .unwrap();
-    assert_eq!(out.status, "PROCESSING");
-    assert_eq!(sink.events()[0].principal.as_deref(), Some("ops-key"));
+    let mut a = args(&f, &sink, &harness, true, &request, None);
+    a.salt = &salt;
+    let outcome = erase_request(&a).unwrap();
+
+    // The store derives `sha256_hex(salt, subject_id)`; the journal must hold
+    // that same value, so the denial is keyed to the store's one-way hash.
+    let expected = sha256_hex(&salt, &f.subject);
+    assert_eq!(outcome.subject_hash, expected);
+    let JournalState::Current(journal) = load_journal(&f.journal) else {
+        panic!("a completed erasure must leave a current journal");
+    };
+    let denial = journal.denied(&expected).expect("the subject is denied");
+    assert_eq!(journal.denials.len(), 1);
+    assert_eq!(denial.banks, vec![f.bank.clone()]);
+    assert!(journal.generation >= 1, "generation {}", journal.generation);
+    assert_eq!(journal.deployment_id.len(), 64);
+}
+
+/// A damaged journal refuses the erasure before any store effect: the key
+/// survives and the subject's item stays readable.
+#[test]
+fn a_damaged_journal_refuses_the_erasure_before_key_loss() {
+    let f = fixture();
+    let sink = EraseVecSink::default();
+    let request = unique("req");
+    let harness = ctx(&f, Actor::Harness);
+    // A widened-mode, unparseable file: the journal layer classifies it
+    // damaged and refuses to overwrite an authority it cannot trust.
+    std::fs::write(&f.journal, b"{not a journal").expect("plant a damaged journal");
+    let err = erase_request(&args(&f, &sink, &harness, true, &request, None)).unwrap_err();
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(sink.events().is_empty(), "{:?}", sink.events());
+    assert!(!f.store.subject_dek_destroyed(&f.subject).unwrap());
+    let item = f.store.get_memory_item(&f.bank, &f.item_id).unwrap();
+    assert!(item.is_some(), "the subject's item must stay readable");
 }

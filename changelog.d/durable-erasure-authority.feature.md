@@ -1,0 +1,1 @@
+A durable owner-only erasure journal now records a compliance denial of a data subject before its key material is destroyed, keeping the deployment identity, generation, and denial across a restart and a cross-host handoff, and a new failure-closed authority check refuses missing, damaged, other-deployment, known-old, unknown-member, and currently denied authority.

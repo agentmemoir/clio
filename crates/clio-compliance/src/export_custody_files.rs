@@ -144,7 +144,7 @@ pub(crate) fn write_destination_temp(
 ///
 /// The staged and destination-temp files hold export bytes, so they are
 /// owner-only from the first byte.
-fn open_owner_only(path: &Path) -> std::io::Result<fs::File> {
+pub(crate) fn open_owner_only(path: &Path) -> std::io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

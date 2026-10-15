@@ -26,6 +26,7 @@
 //! Keep this module focused on the coordination refusal.
 
 use crate::erase::{EraseArgs, EraseVecSink};
+use crate::inventory_fixture::FixtureDir;
 use crate::subject_bank_coordination::{coordinated_erase_request, require_all_banks_confirmed};
 use crate::subject_request::{
     FinalOutcome, PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
@@ -36,6 +37,7 @@ use clio_store::{
 };
 use clio_types::{Actor, AmError, Bank, ErrorCode, OpContext};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The bank the confirmed request is bound to.
@@ -88,17 +90,25 @@ fn shared_banks(banks: &[&str]) -> Vec<String> {
 /// `banks` preset is the live bank set the effect would fan out to (the real
 /// stores read it through `erase_bank_set`); the seam reads it back from this
 /// same store, so the check and the effect never diverge. The failure mode
-/// mirrors the `MockEraseStore` pattern in `erase_tests.rs`.
+/// mirrors the `MockEraseStore` pattern in `erase_failure_tests.rs`. Carries
+/// the owner-only journal its erase args record into.
 struct CountingStore {
     erase_calls: AtomicUsize,
     banks: Vec<String>,
+    journal: PathBuf,
+    /// The per-test directory the journal lives in, removed on drop.
+    #[expect(dead_code, reason = "read only by its own drop")]
+    dir: FixtureDir,
 }
 
 impl CountingStore {
     fn with_banks(banks: Vec<String>) -> Self {
+        let dir = FixtureDir::create(&unique("erase-journal"));
         Self {
             erase_calls: AtomicUsize::new(0),
             banks,
+            journal: dir.path().join("erasure-journal.json"),
+            dir,
         }
     }
 
@@ -155,11 +165,11 @@ impl ComplianceStore for CountingStore {
     }
 }
 
-/// Erase arguments bound to `store`, `ctx`, and `sink` (the shared
-/// `subject_request_store_wiring_tests.rs` argument shape, mirrored here
-/// because test modules cannot cross-import private seam doubles).
+/// Erase arguments bound to `store`, `ctx`, `sink`, and the store's journal
+/// (the shared `subject_request_store_wiring_tests.rs` argument shape, mirrored
+/// here because test modules cannot cross-import private seam doubles).
 fn erase_args<'a>(
-    store: &'a dyn ComplianceStore,
+    store: &'a CountingStore,
     ctx: &'a OpContext,
     sink: &'a EraseVecSink,
     request_id: &'a str,
@@ -168,6 +178,7 @@ fn erase_args<'a>(
 ) -> EraseArgs<'a> {
     EraseArgs {
         store,
+        journal_path: &store.journal,
         maint: None,
         ctx,
         subject_id,

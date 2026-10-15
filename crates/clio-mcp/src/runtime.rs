@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - The `McpState` type, its field set, and the public `open` entry points
-//! - Effective-config provider resolution policy (`open` vs `open_with_effective`)
+//! - Effective-config resolution policy (`open` vs `open_with_effective`),
+//!   including the document-named erasure-journal seam
 //! - Bank/actor defaults and the shared-bank permission gate
 //! - stderr telemetry sink adapters (events never touch stdout)
 //!
@@ -185,6 +186,18 @@ pub struct McpState {
     pub config: Arc<std::sync::Mutex<clio_config::Runtime>>,
     /// Durable retention store file, when one is configured for this process.
     pub retention_path: Option<std::path::PathBuf>,
+    /// Owner-only erasure-journal path a host-supplied document named (see
+    /// `erasure_journal_path_from_document`).
+    ///
+    /// `Some` comes only from [`McpState::open_with_effective`], the
+    /// constructor for a host that already resolved its own configuration:
+    /// the erase boundary records the denial there and no ambient environment
+    /// is read. Every other constructor — `open`, `open_one_shot`, and
+    /// `open_with_runtime` — leaves this `None`, so the erase boundary keeps
+    /// the deployment resolution it has always applied: the
+    /// `CLIO_ERASURE_JOURNAL_FILE` override over the resolved data directory.
+    /// Internal configuration, never a caller or MCP argument.
+    pub journal_path: Option<std::path::PathBuf>,
     /// Monotonic counter for caller-omitted item ids (see `runtime_context`).
     ///
     /// Behind an `Arc` because the counter must stay process-wide: a per-request
@@ -259,6 +272,28 @@ impl Default for McpOpenOptions {
     }
 }
 
+/// Effective-document key naming the owner-only erasure journal.
+///
+/// The key is the injection seam for a host that already resolved its own
+/// configuration and opens through [`McpState::open_with_effective`]; it
+/// mirrors `clio_config::ERASURE_JOURNAL_FILE_ENV`, which stays the deployment
+/// override. The deployment constructors (`open`, `open_one_shot`) never read
+/// it, so they keep resolving the journal exactly as they always have.
+pub(crate) const ERASURE_JOURNAL_FILE_POINTER: &str = "/erasure_journal_file";
+
+/// The owner-only erasure-journal path an effective document names, if any.
+///
+/// A blank or NUL-bearing value counts as unnamed, matching the rule
+/// `clio_config::resolve_journal_path` applies to its own override.
+pub(crate) fn erasure_journal_path_from_document(effective: &Value) -> Option<std::path::PathBuf> {
+    effective
+        .pointer(ERASURE_JOURNAL_FILE_POINTER)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && !path.contains('\0'))
+        .map(std::path::PathBuf::from)
+}
+
 impl McpState {
     /// A shallow copy of this state carrying `principal`, for one request.
     ///
@@ -299,7 +334,9 @@ impl McpState {
     pub fn open_one_shot(options: &McpOpenOptions) -> Result<Arc<Self>, AmError> {
         let runtime = clio_config::Runtime::new();
         let effective = runtime.effective_raw();
-        Self::open_with_runtime_effective_and_wave(options, runtime, &effective, true)
+        // Not the document seam: a deployment process keeps the
+        // environment-over-data-directory journal resolution.
+        Self::open_with_runtime_effective_and_wave(options, runtime, &effective, true, None)
     }
 
     /// Open runtime state against an explicit effective config document.
@@ -308,7 +345,10 @@ impl McpState {
     /// second environment read; behavior is identical to [`Self::open`] except
     /// that the config/ranking tools are served by a hermetic, env-free
     /// runtime (defaults only), while providers resolve from the caller's
-    /// document.
+    /// document. This is also the one constructor that honours a
+    /// document-named erasure journal (`/erasure_journal_file`), because a
+    /// host that resolved the document is naming the path; the deployment
+    /// constructors never read that key.
     ///
     /// # Errors
     /// As [`Self::open`].
@@ -320,11 +360,16 @@ impl McpState {
             options,
             clio_config::Runtime::with_env(&|_| None),
             effective,
+            erasure_journal_path_from_document(effective),
         )
     }
 
     /// Open runtime state keeping `runtime` as the effective-config `Runtime`
     /// served by the config/ranking tools.
+    ///
+    /// Unlike [`Self::open_with_effective`], a document-named erasure journal
+    /// is not taken: the path stays unset and the erase boundary keeps its
+    /// environment-over-data-directory resolution.
     ///
     /// # Errors
     /// As [`Self::open`].
@@ -333,7 +378,7 @@ impl McpState {
         runtime: clio_config::Runtime,
     ) -> Result<Arc<Self>, AmError> {
         let effective = runtime.effective_raw();
-        Self::open_with_runtime_and_effective(options, runtime, &effective)
+        Self::open_with_runtime_and_effective(options, runtime, &effective, None)
     }
 }
 

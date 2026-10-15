@@ -24,7 +24,7 @@
 //! Keep this module focused on the erasure authorization negatives.
 
 use crate::support::{
-    BANK, DENIED_ITEM, DENIED_SUBJECT, Readback, Scratch, open_sqlite, readback,
+    BANK, DENIED_ITEM, DENIED_SUBJECT, Readback, Scratch, journal_path, open_sqlite, readback,
     subject_key_destroyed, write_item,
 };
 use clio::{Actor, Bank, ErrorCode, OpContext};
@@ -41,11 +41,15 @@ fn unauthorized_and_unconfirmed_erases_are_refused_without_state_change() {
 
     let sink = EraseVecSink::default();
     let salt = tombstone_salt();
+    // A sibling of the scenario's scratch root; both refusals below precede
+    // any journal write, so nothing is recorded at this path.
+    let journal = journal_path("negative-journal");
 
     // A user actor carries no compliance erasure privilege.
     let user = OpContext::new(Bank::new(BANK), Actor::User);
     let refused = erase_request(&EraseArgs {
         store: &store,
+        journal_path: &journal,
         maint: None,
         ctx: &user,
         subject_id: DENIED_SUBJECT,
@@ -77,6 +81,7 @@ fn unauthorized_and_unconfirmed_erases_are_refused_without_state_change() {
     let harness = OpContext::new(Bank::new(BANK), Actor::Harness);
     let unconfirmed = erase_request(&EraseArgs {
         store: &store,
+        journal_path: &journal,
         maint: None,
         ctx: &harness,
         subject_id: DENIED_SUBJECT,
