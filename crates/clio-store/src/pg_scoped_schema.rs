@@ -43,6 +43,15 @@ use crate::postgres::PostgresStore;
 use clio_types::AmError;
 use postgres::Client;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Scoped schemas created so far in this process.
+///
+/// The process id separates concurrent test binaries, but inside one binary it
+/// is constant, so two calls in the same clock tick would build the same schema
+/// name and the second `CREATE SCHEMA` would panic. The counter makes every call
+/// distinct no matter how coarse the clock is.
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// A private schema with a search_path-scoped store URL, dropped on exit.
 pub struct ScopedSchema {
@@ -63,11 +72,12 @@ impl ScopedSchema {
     #[must_use]
     pub fn new(base_url: &str) -> Self {
         let name = format!(
-            "am_scoped_{}_{}",
+            "am_scoped_{}_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
+                .map_or(0, |d| d.as_nanos()),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
         let mut client = crate::pg_tls::connect(base_url).expect("scoped schema connect");
         client
