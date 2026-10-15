@@ -138,6 +138,9 @@ mod ops_cli;
 mod pg_test_helpers;
 mod port_scan;
 mod ranking_cli;
+/// The archive-to-authority-check classifier the guarded restore calls at plan
+/// and placement.
+mod restore_authority;
 mod retention_cli;
 mod runtime_cli;
 mod setup_ask;

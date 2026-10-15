@@ -171,10 +171,11 @@ static JOURNAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// A per-test owner-only erasure-journal path, removed when the guard drops.
 ///
-/// A confirmed erase writes the durable denial at the path its state named;
-/// a state that names none falls back to the deployment resolution, which in
-/// a test process is the operator's real data directory. Every test that
-/// reaches a confirmed erase opens through `journal_state` instead.
+/// A state that names this path in its document diverges from the deployment
+/// resolution, so a confirmed erase is refused fail-closed and writes nothing;
+/// a state that names none falls back to the deployment resolution, which in a
+/// test process is the operator's real data directory. A test that pins the
+/// refusal opens through `journal_state` instead.
 pub(crate) struct JournalGuard(PathBuf);
 
 impl JournalGuard {
@@ -190,7 +191,7 @@ impl JournalGuard {
         )))
     }
 
-    /// The path the state's document names and the erase writes.
+    /// The divergent path a refused erase must not write.
     pub(crate) fn path(&self) -> &Path {
         &self.0
     }
@@ -203,7 +204,8 @@ impl Drop for JournalGuard {
 }
 
 /// Open in-memory state whose effective document names a unique per-test
-/// erasure-journal path, so a confirmed erase can never write the ambient
+/// erasure-journal path. The path diverges from the deployment resolution, so a
+/// confirmed erase is refused fail-closed and never writes the ambient
 /// deployment location. The returned guard removes the file when it drops.
 pub(crate) fn journal_state(label: &str) -> (JournalGuard, Arc<clio_mcp::runtime::McpState>) {
     let journal = JournalGuard::unique(label);

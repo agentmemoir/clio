@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 ///
 /// The container is hand-built because a production create only writes declared
 /// members; the extra member is exactly the unclassifiable case.
-fn raw_with_unclassifiable(archive: &Archive, dir: &Path) -> PathBuf {
+pub(crate) fn raw_with_unclassifiable(archive: &Archive, dir: &Path) -> PathBuf {
     std::fs::create_dir_all(dir).expect("create the raw-build directory");
     let extracted =
         extract_members(&archive.path, &archive.manifest, dir).expect("extract the archive");

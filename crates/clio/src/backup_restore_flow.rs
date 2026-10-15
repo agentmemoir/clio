@@ -34,9 +34,12 @@ use crate::backup_create_cli::take_snapshot;
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_postgres::{place_postgres, plan_postgres};
 use crate::backup_restore_schema::{Schema, compare_schema};
+use crate::backup_restore_sqlite::{RestorePlacement, open_restore_events};
 use crate::cli_args::ParsedArgs;
 use crate::cli_error::CliError;
+use crate::restore_authority::{ClassifiedArchive, ClassifyRefusal, classify_archive};
 use clio_backup::{BackupManifest, ExtractedArchive};
+use clio_compliance::{ArchiveClaim, AuthorityRefusal, JournalHold, MemberFacts};
 use clio_store::{KeyPlacement, SpaceCheck, SqliteFileState, SwapReport};
 use std::path::{Path, PathBuf};
 
@@ -146,6 +149,12 @@ pub(crate) struct Plan {
     pub(crate) no_pre_backup: bool,
     pub(crate) dry_run: bool,
     pub(crate) key: Option<KeyPlacement>,
+    /// The owner-only erasure journal the guarded restore re-checks and locks.
+    pub(crate) journal_path: PathBuf,
+    /// The authority the archive claims, classified at plan time.
+    pub(crate) claim: ArchiveClaim,
+    /// Every member's subject-reference fact, classified at plan time.
+    pub(crate) members: Vec<MemberFacts>,
     pub(crate) extracted: ExtractedArchive,
 }
 
@@ -219,6 +228,22 @@ pub(crate) fn plan(
         clio_store::SCHEMA_VERSION,
     )?;
     refuse_missing_keys(&manifest, parsed)?;
+    // The authority gate: the archive is checked against the current journal
+    // before any plan is built; the same check runs again under the lock.
+    // One shared resolution: the restore CLI and the MCP erase boundary resolve
+    // the same erasure journal, so the lock this restore takes is the lock an
+    // erasure denial consults.
+    let journal_path = JournalHold::resolve_journal_path(None, env)
+        .map_err(|error| CliError::refusal(error.code.as_str(), error.message))?;
+    let authority =
+        classify_archive(&archive, &manifest).map_err(|refusal| classify_refusal(&refusal))?;
+    clio_compliance::check_restore_at_plan(
+        &journal_path,
+        None,
+        &authority.claim,
+        &authority.members,
+    )
+    .map_err(authority_refusal)?;
     let postgres = manifest.store.backend == "postgres";
     let input = RestorePlanInput {
         parsed,
@@ -229,6 +254,8 @@ pub(crate) fn plan(
         archive: &archive,
         backup_dir: &backup.path,
         check,
+        journal_path,
+        authority,
     };
     if postgres {
         plan_postgres(input)
@@ -248,6 +275,8 @@ pub(crate) struct RestorePlanInput<'a> {
     pub(crate) archive: &'a Path,
     pub(crate) backup_dir: &'a Path,
     pub(crate) check: &'a dyn SpaceCheck,
+    pub(crate) journal_path: PathBuf,
+    pub(crate) authority: ClassifiedArchive,
 }
 
 /// The report for a dry run: the plan, with nothing placed.
@@ -273,14 +302,38 @@ pub(crate) fn planned(plan: Plan) -> Report {
 
 /// Place a planned restore: snapshot the current store first, then place.
 pub(crate) fn place(plan: Plan) -> Result<Report, CliError> {
-    // One dispatch point, and it reads the target the plan already resolved:
-    // the backend mismatch refusal above guarantees the archive and the target
-    // agree, so this is the same decision the plan half was chosen by.
+    // The durable event store beside the journal is outside every replaced
+    // path. The journal hold and the pending-action reconcile both happen
+    // inside the placement guard, under one lock, so the lock proves no peer
+    // restore is mid placement.
+    let events = open_restore_events(&plan.journal_path)?;
+    let now = clio_mcp::runtime::now_utc();
+    let placement = RestorePlacement {
+        events: &*events,
+        now: &now,
+    };
     if plan.target.is_postgres() {
-        place_postgres(plan)
+        place_postgres(plan, placement)
     } else {
-        crate::backup_restore_sqlite::place_sqlite(plan)
+        crate::backup_restore_sqlite::place_sqlite(plan, placement)
     }
+}
+
+/// A classification refusal as a clear restore refusal, keeping its own code.
+fn classify_refusal(refusal: &ClassifyRefusal) -> CliError {
+    let code = refusal.code();
+    let error = CliError::refusal(code.as_str(), refusal.to_string());
+    match code {
+        clio_types::ErrorCode::ArchiveCorrupt | clio_types::ErrorCode::Internal => {
+            error.with_hint(HINT_ARCHIVE_DAMAGED)
+        }
+        _ => error,
+    }
+}
+
+/// An authority refusal as a clear restore refusal, keeping its own code.
+fn authority_refusal(refusal: AuthorityRefusal) -> CliError {
+    CliError::refusal(refusal.code().as_str(), refusal.to_string())
 }
 
 /// The pre-restore outcome a placement starts from, from a decision taken
@@ -303,13 +356,17 @@ pub(crate) fn pre_restore_from(plan: &Plan, decided: PreRestore) -> Result<PreRe
 /// Take the pre-restore snapshot, or fail the run with the create error.
 pub(crate) fn take_pre_restore(plan: &Plan) -> Result<PreRestore, CliError> {
     let label = format!("pre-restore snapshot of {}", plan.snapshot_id);
-    let created =
-        take_snapshot(&plan.target, &plan.backup_dir, Some(&label), None).map_err(|error| {
-            backup_restore_exit::from_am_error(
-                backup_restore_exit::snapshot_failure(&error),
-                &error,
-            )
-        })?;
+    let authority = crate::backup_create_cli::current_authority(&plan.journal_path);
+    let created = take_snapshot(
+        &plan.target,
+        &plan.backup_dir,
+        Some(&label),
+        None,
+        authority,
+    )
+    .map_err(|error| {
+        backup_restore_exit::from_am_error(backup_restore_exit::snapshot_failure(&error), &error)
+    })?;
     Ok(PreRestore {
         reason: None,
         id: Some(created.archive.id),

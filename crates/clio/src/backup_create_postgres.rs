@@ -32,6 +32,7 @@ use clio_backup::create::{CreateRequest, StagedMember};
 use clio_backup::dump_meta::{
     DUMP_FORMAT_VERSION, DUMP_KIND, DUMP_META_MEMBER, DumpColumn, DumpMeta, DumpTable,
 };
+use clio_backup::manifest::ManifestAuthority;
 use clio_store::{PG_CONSISTENCY, PG_METHOD};
 use clio_types::AmError;
 use std::path::{Path, PathBuf};
@@ -51,6 +52,7 @@ pub(crate) fn take_snapshot_postgres(
     backup_dir: &Path,
     label: Option<&str>,
     note: Option<&str>,
+    authority: Option<ManifestAuthority>,
 ) -> Result<Created, AmError> {
     clio_backup::staging::ensure_backup_dir(backup_dir)?;
     let mut staged_paths: Vec<PathBuf> = Vec::new();
@@ -108,6 +110,7 @@ pub(crate) fn take_snapshot_postgres(
         keys: key_member(target)?,
         label: label.map(str::to_owned),
         note: note.map(str::to_owned),
+        authority,
         tool_version: clio::identity(),
     };
     let archive = clio_backup::create_archive(&request)?;

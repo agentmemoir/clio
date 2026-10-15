@@ -177,6 +177,7 @@ fn an_unwritable_target_directory_is_refused_before_any_snapshot() {
 /// A populated store plus one archive of it, through the real create path.
 fn snapshot_fixture(scratch: &Scratch) -> String {
     populated_store(&store_path(scratch), 3, 1);
+    crate::backup_cli_fixtures::ensure_journal(scratch);
     let (_, payload, _) = run_json_in(scratch, &["create"]);
     payload["snapshot_id"]
         .as_str()

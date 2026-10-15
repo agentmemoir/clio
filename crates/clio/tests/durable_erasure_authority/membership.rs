@@ -51,6 +51,7 @@ fn missing_damaged_other_deployment_and_known_old_authority_all_refuse() {
     let claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
     };
     let current_state = JournalState::Current(current.clone());
 
@@ -160,6 +161,7 @@ fn a_new_empty_journal_refuses_to_certify_an_old_archive() {
     let old_claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
     };
     // The fresh journal bytes the refusal below is measured against, hashed
     // across the call: a refused certification that rewrote its authority
@@ -198,6 +200,7 @@ fn denied_and_unknown_membership_refuse_while_un_denied_membership_passes() {
     let claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
     };
     // The on-disk authority the state above was loaded from, hashed across the
     // refusal batch below.

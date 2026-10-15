@@ -281,18 +281,21 @@ fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
 /// Requires a privileged actor and `confirm=true`; the authorization and
 /// confirmation gates live in the in-process `clio-compliance` handler. The
 /// owner-only erasure-journal path is internal configuration, never caller
-/// input: the state prefers the path its effective document named, and a
-/// state without one keeps the `CLIO_ERASURE_JOURNAL_FILE`-over-data-directory
-/// deployment resolution.
+/// input: the one shared resolution uses the deployment resolution
+/// (`CLIO_ERASURE_JOURNAL_FILE` over the data directory) and accepts the path
+/// the state's effective document named only when it equals that resolution. A
+/// divergent document is refused, so erase denial cannot lock a file the
+/// restore CLI never reads; the restore CLI resolves through the same function,
+/// so both take the same lock.
 #[inline(never)]
 fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args);
     let salt = clio_compliance::tombstone_salt();
-    let journal = match &state.journal_path {
-        Some(path) => path.clone(),
-        None => clio_config::resolve_journal_path(&|key| std::env::var(key).ok())?,
-    };
+    let journal = clio_compliance::JournalHold::resolve_journal_path(
+        state.journal_path.as_deref(),
+        &|key| std::env::var(key).ok(),
+    )?;
     let e_args = clio_compliance::EraseArgs {
         store: &*state.compliance,
         journal_path: &journal,

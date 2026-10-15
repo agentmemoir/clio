@@ -40,6 +40,11 @@ rand = { workspace = true }
 # control is not possible under the workspace's `unsafe_code = "deny"`, so this
 # is the whole of the raw-terminal surface, behind a seam.
 rpassword = { workspace = true }
+# Raw read-only SQL over an archive's payload and key-store members, so the
+# restore authority check can read subject references the store API does not
+# expose. Already in the workspace through `clio-store`; promoted here because
+# the check runs in the binary.
+rusqlite = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # The one signal the process sets itself: restoring the default `SIGPIPE`
@@ -57,6 +62,3 @@ workspace = true
 # compiles in the test-only injection seam; without it such a test would fall
 # through to the machine's real key store.
 clio-config = { workspace = true, features = ["test-key-injection"] }
-# Raw SQL reads of the seeded store file: the end-to-end lexical evidence
-# asserts the stored column through SQLite itself, not through the store API.
-rusqlite = { workspace = true }

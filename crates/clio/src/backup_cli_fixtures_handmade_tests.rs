@@ -21,7 +21,7 @@
 //! Changes to what the hand-built archive carries belong here. Changes to the
 //! assertions that use it do not.
 
-use crate::backup_cli_fixtures::{Scratch, key_store_path};
+use crate::backup_cli_fixtures::{Scratch, ensure_journal, key_store_path};
 use clio_store::{DekProvider, LocalDevKms};
 use std::path::{Path, PathBuf};
 
@@ -92,6 +92,7 @@ pub(crate) fn hand_built_archive(
         label: None,
         note: None,
         compression: clio_backup::COMPRESSION.to_owned(),
+        authority: Some(ensure_journal(scratch)),
     };
     adjust(&mut manifest);
     drop(staged);

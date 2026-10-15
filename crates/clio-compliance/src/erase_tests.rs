@@ -29,6 +29,7 @@ use crate::erase::{
     tombstone_salt_from,
 };
 use crate::erasure_journal::{JournalState, load_journal};
+use crate::restore_guard::JournalHold;
 use clio_store::{ComplianceStore, DekProvider, LocalDevKms, SqliteStore, Store, sha256_hex};
 use clio_types::{
     Actor, Bank, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext, PrincipalLabel,
@@ -368,4 +369,26 @@ fn a_damaged_journal_refuses_the_erasure_before_key_loss() {
     assert!(!f.store.subject_dek_destroyed(&f.subject).unwrap());
     let item = f.store.get_memory_item(&f.bank, &f.item_id).unwrap();
     assert!(item.is_some(), "the subject's item must stay readable");
+}
+
+/// While the placement lock is held, an erasure fails closed on the lock
+/// before the durable denial or any store effect.
+#[test]
+fn a_held_journal_lock_refuses_the_erasure_before_any_effect() {
+    let f = fixture();
+    let sink = EraseVecSink::default();
+    let request = unique("req");
+    let harness = ctx(&f, Actor::Harness);
+    let hold = JournalHold::acquire(&f.journal).expect("hold the placement lock");
+    let err = erase_request(&args(&f, &sink, &harness, true, &request, None)).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Internal, "{}", err.message);
+    drop(hold);
+    assert!(sink.events().is_empty(), "{:?}", sink.events());
+    assert!(!f.store.subject_dek_destroyed(&f.subject).unwrap());
+    let tombstones = f.store.read_tombstones(&f.bank, &request).unwrap();
+    assert!(tombstones.is_empty(), "{tombstones:?}");
+    assert!(
+        matches!(load_journal(&f.journal), JournalState::Missing),
+        "the denial must not run while the lock is held"
+    );
 }

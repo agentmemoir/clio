@@ -227,6 +227,7 @@ fn verify_refuses_a_dump_meta_that_does_not_parse() {
             label: None,
             note: None,
             tool_version: "test".to_owned(),
+            authority: None,
         }
     };
     let _ = archive;
@@ -280,6 +281,7 @@ fn a_key_member_still_travels_with_a_postgres_archive() {
         label: None,
         note: None,
         tool_version: "test".to_owned(),
+        authority: None,
     };
     let archive = crate::create_archive(&request).expect("assemble");
     let out = Scratch::new("pg-archive-keys-out");

@@ -34,6 +34,7 @@ use clio::store::{
 use clio::{
     Actor, Bank, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext, SemanticCategory,
 };
+use clio_backup::manifest::ManifestAuthority;
 use clio_backup::staging;
 use clio_backup::{
     BackupManifest, CreateReport, CreateRequest, ExtractedArchive, KeySource, create_archive,
@@ -69,10 +70,20 @@ pub struct Scratch {
 
 impl Scratch {
     /// Create a fresh, unique temp directory for one scenario.
+    ///
+    /// The directory is created exclusively, so a stale directory another run
+    /// left at the same name is never reused; a collision retries with a fresh
+    /// name. The directory is removed when this guard drops.
     pub fn new(tag: &str) -> Self {
-        let path = std::env::temp_dir().join(unique(tag));
-        std::fs::create_dir_all(&path).expect("create the scratch directory");
-        Self { path }
+        for _ in 0..64 {
+            let path = std::env::temp_dir().join(unique(tag));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Self { path },
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create the scratch directory {}: {error}", path.display()),
+            }
+        }
+        panic!("could not create a unique scratch directory for {tag}");
     }
 
     /// Join a relative path under the scratch directory.
@@ -164,6 +175,18 @@ pub struct Archive {
 
 /// Assemble a SQLite archive from the live store at `db`, carrying `kms_path`.
 pub fn archive_sqlite(backup_dir: &Path, db: &Path, kms_path: &Path, slug: &str) -> Archive {
+    archive_sqlite_with_authority(backup_dir, db, kms_path, slug, None)
+}
+
+/// Assemble a SQLite archive that records the erasure `authority` it was made
+/// under, so the guarded restore can classify its claim.
+pub fn archive_sqlite_with_authority(
+    backup_dir: &Path,
+    db: &Path,
+    kms_path: &Path,
+    slug: &str,
+    authority: Option<ManifestAuthority>,
+) -> Archive {
     staging::ensure_backup_dir(backup_dir).expect("create the backup directory");
     let staged = backup_dir.join("payload.stage");
     let facts = clio::store::snapshot_sqlite_into(db, &staged).expect("snapshot the sqlite store");
@@ -188,6 +211,7 @@ pub fn archive_sqlite(backup_dir: &Path, db: &Path, kms_path: &Path, slug: &str)
         keys: key_source(kms_path),
         label: None,
         note: None,
+        authority,
         tool_version: clio::version().to_owned(),
     };
     publish(create_archive(&request).expect("create the sqlite archive"))

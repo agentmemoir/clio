@@ -279,6 +279,7 @@ pub use sqlite_snapshot::{
     CONSISTENCY, METHOD, PAYLOAD_MEMBER, SnapshotFacts, snapshot_sqlite_into,
 };
 pub use store::Store;
+pub use store_lock::ExclusiveHold;
 pub use sync_store::{
     DeadLetterStatus, JournalAppendOutcome, SyncConflictRow, SyncDeadLetterRow, SyncFeedRow,
     SyncJournalRow, SyncStore,

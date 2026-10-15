@@ -23,9 +23,17 @@
 //! Keep this target focused on measuring restore readability, not on the
 //! primitives it measures.
 
+mod guard_cli;
+mod guard_cli_erasure;
+mod guard_cli_pg;
+mod guard_cli_placement;
+mod guard_fixtures;
 mod members;
 mod negative;
 mod postgres;
 mod sqlite;
 mod support;
 mod support_pg;
+
+#[path = "../common/mod.rs"]
+mod common;

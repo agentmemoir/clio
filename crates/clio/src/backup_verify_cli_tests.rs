@@ -292,6 +292,7 @@ fn unknown_backend_archive(scratch: &Scratch) -> String {
         label: None,
         note: None,
         compression: clio_backup::COMPRESSION.to_owned(),
+        authority: None,
     };
     let mut writer = clio_backup::ArchiveWriter::new(std::io::Cursor::new(Vec::new()));
     writer

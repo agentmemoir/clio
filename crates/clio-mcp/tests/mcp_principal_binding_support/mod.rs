@@ -12,9 +12,9 @@
 //! - `Journal`: one scratch erasure-journal path, removed on drop, for a
 //!   scenario whose server confirms an erasure
 //! - `spawn_server_with` / `spawn_server_with_journal` / `spawn_server` /
-//!   `bound_server` / `bound_server_with_shared` / `bound_server_with_journal`:
-//!   the real accept loop on `127.0.0.1:0`, with the deployment options a
-//!   scenario needs
+//!   `bound_server` / `bound_server_with_shared` / `bound_server_with_journal` /
+//!   `bound_server_without_journal`: the real accept loop on `127.0.0.1:0`,
+//!   with the deployment options a scenario needs
 //! - `post`, `bearer`, and the result predicates (`tool_ok`, `forbidden`, ...)
 //! - The request builders (`export_at`, `erase_at`) and the `stored` read-back
 //!
@@ -35,10 +35,11 @@
 //! so no two servers collide. Every store is a fresh scratch path under the OS
 //! temp directory carrying the pid, a monotonic counter, and a nanosecond stamp,
 //! and is removed when the guard drops, so no two tests share a path. Secrets
-//! come from the store writer, never from a literal. Every opened state names
-//! its own erasure-journal path in its effective document, so a served
-//! confirmed erasure cannot write the deployment's resolved journal file.
-//! Nothing reads the host environment.
+//! come from the store writer, never from a literal. A server either names its
+//! own erasure-journal path in its effective document — which the erase boundary
+//! now accepts only when it matches the deployment resolution — or names none
+//! (`bound_server_without_journal`), so a served confirmed erasure never writes
+//! the deployment's resolved journal file. Nothing reads the host environment.
 
 use clio_mcp::http::HttpConfig;
 use clio_mcp::http_auth::CredentialStore;
@@ -132,11 +133,11 @@ fn tighten(path: &Path) {
 ///
 /// The options are a parameter so a scenario that needs a deployment-level
 /// permission switched on — the shared bank surface is the only one today — can
-/// ask for it instead of asserting only its absence. Every server names its own
-/// erasure-journal path in its document, so no served confirmed erasure can
-/// write the deployment's resolved journal file; a scenario that expects the
-/// written file to be cleaned up keeps a [`Journal`] guard and uses
-/// [`spawn_server_with_journal`] instead.
+/// ask for it instead of asserting only its absence. This server names its own
+/// erasure-journal path in its document; because that path diverges from the
+/// deployment resolution, a served confirmed erasure is refused fail-closed and
+/// writes nothing. A scenario that performs a confirmed erasure over a shared
+/// lock uses the deployment resolution (or a matching document) instead.
 pub fn spawn_server_with(cfg: HttpConfig, options: &McpOpenOptions) -> u16 {
     spawn_server_document(
         cfg,
@@ -145,9 +146,10 @@ pub fn spawn_server_with(cfg: HttpConfig, options: &McpOpenOptions) -> u16 {
     )
 }
 
-/// Serve with `journal` as the state's owner-only erasure journal, so a
-/// confirmed erasure's durable denial is the test's file and is removed when
-/// the guard drops.
+/// Serve with `journal` as the state's document-named erasure journal; the
+/// guard removes the file when it drops. Because `journal` diverges from the
+/// deployment resolution, a confirmed erasure is refused fail-closed, so this
+/// pins that no denial is written at the divergent path.
 pub fn spawn_server_with_journal(
     cfg: HttpConfig,
     options: &McpOpenOptions,
@@ -188,27 +190,28 @@ fn journal_document(path: &Path) -> Value {
     json!({ "erasure_journal_file": path.to_string_lossy() })
 }
 
-/// One scratch erasure-journal path, removed when the guard drops; held for as
-/// long as the server that writes it.
+/// One scratch erasure-journal path, removed when the guard drops. The filename
+/// format keeps two tests apart even though a divergent document is refused
+/// before anything is written.
 pub struct Journal {
     path: PathBuf,
 }
 
 impl Journal {
-    /// A unique path under the OS temp dir; nothing is written until a
-    /// confirmed erasure runs.
+    /// A unique path under the OS temp dir; the erase boundary refuses a
+    /// divergent document, so nothing is written here.
     pub fn new(tag: &str) -> Self {
         Self {
             path: unique_journal_path(tag),
         }
     }
 
-    /// The effective document pinning this journal for one opened state.
+    /// The effective document naming this journal for one opened state.
     pub fn document(&self) -> Value {
         journal_document(&self.path)
     }
 
-    /// The path a confirmed erasure records its denial at.
+    /// The divergent path a refused erasure must not write.
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -279,6 +282,25 @@ pub fn bound_server_with_journal(
             ..McpOpenOptions::default()
         },
         journal,
+    )
+}
+
+/// A record-scoped server that names no journal: the erase boundary keeps its
+/// deployment resolution, so an unauthorized erase is refused for
+/// authorization before any journal is touched. Use it for the
+/// authorization-only scenarios; a scenario that performs a confirmed erasure
+/// must name its own journal through [`bound_server_with_journal`].
+pub fn bound_server_without_journal(store: &CredentialStore, default_bank: &str) -> u16 {
+    spawn_server_document(
+        HttpConfig {
+            credentials: Some(Arc::new(store.clone())),
+            ..HttpConfig::default()
+        },
+        &McpOpenOptions {
+            default_bank: default_bank.into(),
+            ..McpOpenOptions::default()
+        },
+        &json!({}),
     )
 }
 

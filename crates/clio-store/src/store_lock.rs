@@ -3,15 +3,17 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the cross-process store lock: the advisory
-//! whole-file hold every store open takes shared and a restore takes
-//! exclusive, so a restore refuses while any process holds the store.
+//! This module is responsible for the cross-process advisory whole-file hold
+//! on the lock derived from a path. A store open takes it shared and a restore
+//! takes it exclusive, so a restore refuses while any process holds the store.
+//! The same hold is taken exclusively on the erasure journal path, so a
+//! restore placement and an erasure denial share one lock.
 //!
 //! ## Owns
 //! - `SharedHold` and `ExclusiveHold`, their bounded wait and their release
 //!   on drop
-//! - The lock file: its path beside the store, its owner-only creation, and
-//!   the pid the exclusive hold records in it
+//! - The lock file: its path beside the path it is given, its owner-only
+//!   creation, and the pid the exclusive hold records in it
 //! - The process-local hold counts that make the restore's own opens
 //!   coexist with its exclusive hold
 //!
@@ -19,24 +21,25 @@
 //! - The process-local open-handle registry (see `open_handles`), the inner
 //!   check a restore runs behind this lock
 //! - The swap that takes the exclusive hold (see `restore_swap`)
+//! - The erasure journal and what an erasure denial does under the hold
 //! - SQLite's own file locking and Postgres's advisory locks
 //!
 //! ## Boundary
 //!
-//! Changes to when the store is locked or refused should normally require
-//! changes here. Changes to what a restore replaces should not.
+//! Changes to when a path is locked or refused should normally require changes
+//! here. Changes to what a restore replaces or an erasure denies should not.
 //!
-//! Keep this module focused on the cross-process store lock.
+//! Keep this module focused on the cross-process file hold.
 //!
 //! # How the lock works
 //!
-//! The lock is one advisory `flock` on `<store>.lock`, beside the store file,
-//! taken through the standard library's file-lock calls. The OS releases the
-//! hold when the process exits, so a lock file left behind by a dead process
-//! never blocks a later run: the next process locks the same file again, and
-//! a stale file is harmless. Shared holds coexist with each other; a hold
-//! that would contend waits a bounded time and then refuses, always naming
-//! the lock and the direction of the contention, and naming the holding
+//! The lock is one advisory `flock` on `<path>.lock`, beside the path it is
+//! derived from, taken through the standard library's file-lock calls. The OS
+//! releases the hold when the process exits, so a lock file left behind by a
+//! dead process never blocks a later run: the next process locks the same file
+//! again, and a stale file is harmless. Shared holds coexist with each other;
+//! a hold that would contend waits a bounded time and then refuses, always
+//! naming the lock and the direction of the contention, and naming the holding
 //! process where the platform reports one. Linux lists flock holders with
 //! their pid in `/proc/locks`; elsewhere the list is empty. The exclusive
 //! hold records its own pid in the lock file, so a store open refused during
@@ -168,28 +171,29 @@ impl Drop for SharedHold {
     }
 }
 
-/// The restore's exclusive hold on a store: refused while any process holds
-/// the store shared, released on drop.
+/// An exclusive hold on the lock derived from a path: refused while any
+/// process holds that lock shared, released on drop. A restore takes it on the
+/// store; a denial takes it on the erasure journal, so both share one lock.
 #[derive(Debug)]
-pub(crate) struct ExclusiveHold {
+pub struct ExclusiveHold {
     lock_path: PathBuf,
     file: File,
 }
 
 impl ExclusiveHold {
-    /// Take the store exclusively, waiting a bounded time for every shared
-    /// hold, in every process, to clear.
+    /// Take the lock derived from `path` exclusively, waiting a bounded time
+    /// for every shared hold, in every process, to clear.
     ///
     /// # Errors
-    /// This process already holds the store shared or exclusively, the lock
+    /// This process already holds the lock shared or exclusively, the lock
     /// file cannot be opened for writing, or another process held the lock
     /// for the whole bounded wait.
-    pub(crate) fn acquire(store: &Path) -> Result<Self, AmError> {
-        Self::acquire_with_wait(store, LOCK_WAIT)
+    pub fn acquire(path: &Path) -> Result<Self, AmError> {
+        Self::acquire_with_wait(path, LOCK_WAIT)
     }
 
-    pub(crate) fn acquire_with_wait(store: &Path, wait: Duration) -> Result<Self, AmError> {
-        let lock_path = lock_file_path(store);
+    pub(crate) fn acquire_with_wait(path: &Path, wait: Duration) -> Result<Self, AmError> {
+        let lock_path = lock_file_path(path);
         {
             let holds = holds().lock().expect("store-lock registry poisoned");
             let counts = holds.get(&lock_path);
@@ -218,7 +222,7 @@ impl ExclusiveHold {
             }
         }
         let file = open_lock_file(&lock_path, true)?;
-        try_bounded(&file, wait, Mode::Exclusive, store, &lock_path)?;
+        try_bounded(&file, wait, Mode::Exclusive, path, &lock_path)?;
         record_pid(&file);
         let mut holds = holds().lock().expect("store-lock registry poisoned");
         holds.entry(lock_path.clone()).or_default().exclusive = true;

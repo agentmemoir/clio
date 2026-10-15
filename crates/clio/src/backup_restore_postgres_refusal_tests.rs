@@ -22,7 +22,9 @@
 
 use super::assemble_tests::{assemble_pg_archive, assemble_pg_archive_with_keys};
 use super::tests::{base_url, seed, snapshot};
-use crate::backup_cli_fixtures::{Scratch, populated_store, run_json_in, run_json_in_with};
+use crate::backup_cli_fixtures::{
+    Scratch, ensure_journal_in, populated_store, run_json_in, run_json_in_with,
+};
 use clio_backup::dump_meta::DUMP_META_MEMBER;
 use clio_store::sqlite_content_digest;
 use clio_store::{PG_CONSISTENCY, PG_METHOD, ScopedSchema, lock_pg_test};
@@ -78,6 +80,11 @@ fn a_dump_meta_that_does_not_parse_is_refused_with_the_damaged_hint() {
     std::fs::create_dir_all(&backup_dir).expect("create the backup directory");
     let payload = clio_backup::staging::stage_bytes(b"not json at all", &backup_dir, "bad-meta")
         .expect("stage a bad meta");
+    let authority = Some(ensure_journal_in(
+        backup_dir
+            .parent()
+            .expect("the backup directory has a parent"),
+    ));
     let request = clio_backup::create::CreateRequest {
         backup_dir,
         slug: "clio".to_owned(),
@@ -96,6 +103,7 @@ fn a_dump_meta_that_does_not_parse_is_refused_with_the_damaged_hint() {
         keys: None,
         label: None,
         note: None,
+        authority,
         tool_version: clio::identity(),
     };
     let report = clio_backup::create_archive(&request).expect("assemble the archive");
@@ -316,6 +324,11 @@ fn read_dump_meta_names_the_meta_member_when_its_bytes_do_not_parse() {
     std::fs::create_dir_all(&backup_dir).expect("create the backup directory");
     let payload = clio_backup::staging::stage_bytes(b"not json at all", &backup_dir, "bad-meta")
         .expect("stage a bad meta");
+    let authority = Some(ensure_journal_in(
+        backup_dir
+            .parent()
+            .expect("the backup directory has a parent"),
+    ));
     let request = clio_backup::create::CreateRequest {
         backup_dir,
         slug: "clio".to_owned(),
@@ -334,6 +347,7 @@ fn read_dump_meta_names_the_meta_member_when_its_bytes_do_not_parse() {
         keys: None,
         label: None,
         note: None,
+        authority,
         tool_version: clio::identity(),
     };
     let report = clio_backup::create_archive(&request).expect("assemble the archive");

@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for the SQLite half of `clio backup restore`:
 //! measuring the target file, proving room, extracting the archive's members,
-//! and placing them with the file swap.
+//! placing them with the file swap, and the guarded-restore placement plumbing
+//! both backend halves share.
 //!
 //! ## Owns
 //! - `plan_sqlite`: the target measurement, space pre-flight, extraction, and
@@ -13,20 +14,25 @@
 //! - `place_sqlite`: the staged payload swap and the key swap
 //! - `projected_snapshot_bytes`, the room estimate the pre-restore snapshot
 //!   makes
+//! - `RestorePlacement` and its helpers: the durable restore event store the
+//!   guarded restore records into, the action id, the guard begin and settle,
+//!   and the guard-refusal mapping
 //!
 //! ## Does not own
 //! - The swap mechanics (see `clio-store`'s `restore_swap`)
 //! - The shared plan and report types, refusals, and dispatch (see
 //!   `backup_restore_flow`)
 //! - The space footprints and the key placement (see `backup_restore_space`)
+//! - The authority check itself (see `clio-compliance`'s restore guard)
 //! - The Postgres plan and placement (see `backup_restore_postgres`)
 //!
 //! ## Boundary
 //!
-//! Changes to the order of a SQLite restore should normally require changes
-//! here. Changes to the report shape or the exit codes should not.
+//! Changes to the order of a SQLite restore, or to the guarded-restore
+//! placement plumbing, should normally require changes here. Changes to the
+//! report shape or the exit codes should not.
 //!
-//! Keep this module focused on the SQLite restore halves.
+//! Keep this module focused on the SQLite restore half and the placement guard.
 
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
@@ -35,8 +41,11 @@ use crate::backup_restore_flow::{
 };
 use crate::backup_restore_space::{key_destination, preflight};
 use crate::cli_error::CliError;
-use clio_store::{SqliteFileState, SwapRequest};
+use clio_compliance::{RestoreGuard, RestoreGuardRefusal, RestoreRequest, begin_restore};
+use clio_store::{DekProvider, LocalDevKms, LocalEventStore, SqliteFileState, SwapRequest};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The SQLite plan: measure the target file, prove room, extract, measure the
 /// incoming payload.
@@ -50,6 +59,8 @@ pub(crate) fn plan_sqlite(input: RestorePlanInput<'_>) -> Result<Plan, CliError>
         archive,
         backup_dir,
         check,
+        journal_path,
+        authority,
     } = input;
     let target_state =
         clio_store::sqlite_file_state(&target.path).map_err(|error| target_unmeasurable(&error))?;
@@ -100,14 +111,20 @@ pub(crate) fn plan_sqlite(input: RestorePlanInput<'_>) -> Result<Plan, CliError>
         no_pre_backup,
         dry_run: parsed.has("dry-run"),
         key,
+        journal_path,
+        claim: authority.claim,
+        members: authority.members,
         extracted,
         snapshot_id: id,
     })
 }
 
-/// The SQLite placement: swap the staged payload over the live store, then
-/// the staged key store.
-pub(crate) fn place_sqlite(plan: Plan) -> Result<Report, CliError> {
+/// The SQLite placement: take the guard, snapshot the live store, then swap the
+/// staged payload over it and the staged key store.
+pub(crate) fn place_sqlite(
+    plan: Plan,
+    placement: RestorePlacement<'_>,
+) -> Result<Report, CliError> {
     // The skip decision was taken from a measurement made before the operator
     // was asked, and the confirmation prompt waits on a human for as long as
     // they take. So the target is measured again here and the decision is taken
@@ -117,18 +134,60 @@ pub(crate) fn place_sqlite(plan: Plan) -> Result<Report, CliError> {
     let now = clio_store::sqlite_file_state(&plan.target.path)
         .map_err(|error| target_unmeasurable(&error))?;
     let decided = pre_restore_decision(plan.no_pre_backup, now.exists, now.is_empty());
-    let pre_restore = pre_restore_from(&plan, decided)?;
     let key_restored = plan.key.is_some();
+    // The guard is taken before the pre-restore snapshot: it takes the journal
+    // lock, reconciles any pending restore under it, records the durable intent,
+    // and re-checks the authority, so a denial that landed between plan and
+    // placement is caught before any snapshot is written. A snapshot failure
+    // refuses the guard, so no pending intent is orphaned.
+    let guard = placement.begin(&plan)?;
+    let pre_restore = match pre_restore_from(&plan, decided) {
+        Ok(pre_restore) => pre_restore,
+        Err(error) => {
+            placement.refuse(guard);
+            return Err(error);
+        }
+    };
     let request = SwapRequest {
         staged_payload: plan.extracted.payload.file.path().to_path_buf(),
         target: plan.target.path.clone(),
         key: plan.key,
     };
-    let swap = clio_store::swap_sqlite_store(&request).map_err(|error| {
-        backup_restore_exit::from_am_error(backup_restore_exit::swap_failure(&error), &error)
-    })?;
+    let swap = match clio_store::swap_sqlite_store(&request) {
+        Ok(swap) => swap,
+        Err(error) => {
+            // Nothing was placed, so the guard is settled denied and the lock
+            // is released before the refusal is returned.
+            placement.refuse(guard);
+            return Err(backup_restore_exit::from_am_error(
+                backup_restore_exit::swap_failure(&error),
+                &error,
+            ));
+        }
+    };
     let partial = swap.is_partial();
+    // The store is already replaced, so a failed outcome write leaves a pending
+    // action for reconciliation and is surfaced on the report, never returned:
+    // the report carries the pre-restore snapshot id, the operator's only way
+    // back.
+    let settle = placement
+        .settle(
+            guard,
+            true,
+            if partial {
+                RESULT_PARTIAL
+            } else {
+                RESULT_RESTORED
+            },
+        )
+        .err();
     let key_replaced = key_restored.then_some(swap.key_replaced);
+    let counts_after = Counts::of_swap(&swap);
+    let (failed_step, failure) = merge_settle_failure(
+        swap.failed_step.map(ToOwned::to_owned),
+        swap.failure,
+        settle,
+    );
     Ok(Report {
         snapshot_id: plan.snapshot_id,
         target: plan.target,
@@ -136,7 +195,7 @@ pub(crate) fn place_sqlite(plan: Plan) -> Result<Report, CliError> {
         // The counts the swap is about to replace, not the ones the operator
         // confirmed against: this is the store's state immediately before it.
         counts_before: Counts::of_state(&now),
-        counts_after: Some(Counts::of_swap(&swap)),
+        counts_after: Some(counts_after),
         counts_incoming: None,
         schema: plan.schema,
         store_schema: plan.store_schema,
@@ -145,8 +204,8 @@ pub(crate) fn place_sqlite(plan: Plan) -> Result<Report, CliError> {
         } else {
             RESULT_RESTORED
         },
-        failed_step: swap.failed_step.map(ToOwned::to_owned),
-        failure: swap.failure,
+        failed_step,
+        failure,
         dry_run: false,
         key_restored,
         key_replaced,
@@ -181,6 +240,142 @@ pub(crate) fn target_dir(target: &Path) -> PathBuf {
 /// permissions-only hint sends the operator down the wrong path.
 fn target_unmeasurable(error: &clio_types::AmError) -> CliError {
     backup_restore_exit::from_am_error(RestoreFailure::TargetUnmeasurable, error)
+}
+
+/// The file name of the durable event store a guarded restore writes to, beside
+/// the erasure journal.
+const RESTORE_EVENTS_FILE: &str = "restore-guard-events.db";
+
+/// The actor a guarded restore records: the operator acts for the deployment.
+pub(crate) const RESTORE_ACTOR: &str = clio_types::Actor::System.as_str();
+
+/// The outcome text a refused placement records.
+const SETTLE_REFUSED: &str = "the restore was refused before placement";
+
+/// The step name reported when the durable outcome write failed after placement.
+pub(crate) const FAILED_STEP_SETTLE: &str = "recording the restore outcome";
+
+/// A per-process sequence, so two restores in one process never share an action
+/// id, matching the export and review-export id shape.
+static RESTORE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// The durable action id one guarded restore records.
+///
+/// The process id and the in-process sequence alone can repeat across a restart
+/// with a reused pid, and a repeated id is refused as a duplicate intent, so a
+/// legitimate restore would be refused. A random tail from the same random
+/// source the encryption key uses makes the id collision-free across restarts.
+fn next_restore_action_id() -> String {
+    format!(
+        "restore-{}-{}-{:016x}",
+        std::process::id(),
+        RESTORE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        rand::random::<u64>()
+    )
+}
+
+/// Open the durable restore event store the guarded restore records into.
+///
+/// It is a SQLite database beside the erasure journal, outside every path a
+/// restore replaces, so a pending action survives the placement and a restart
+/// can reconcile it.
+pub(crate) fn open_restore_events(
+    journal_path: &Path,
+) -> Result<Arc<dyn LocalEventStore>, CliError> {
+    let path = journal_path.with_file_name(RESTORE_EVENTS_FILE);
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = clio_store::SqliteStore::open(&path, kms)
+        .map_err(|error| CliError::operational(error.code.as_str(), error.message))?;
+    Ok(Arc::new(store))
+}
+
+/// An `AmError` from the durable event store as a CLI failure.
+pub(crate) fn event_error(error: clio_types::AmError) -> CliError {
+    CliError::operational(error.code.as_str(), error.message)
+}
+
+/// A guard refusal as a restore refusal, keeping its own code.
+fn guard_refusal(refusal: &RestoreGuardRefusal) -> CliError {
+    CliError::refusal(refusal.code().as_str(), refusal.to_string())
+}
+
+/// The guarded-restore placement handle: the durable event store and the event
+/// time a restore records. Both backend halves take one guard around their
+/// placement.
+#[derive(Clone, Copy)]
+pub(crate) struct RestorePlacement<'a> {
+    pub(crate) events: &'a dyn LocalEventStore,
+    pub(crate) now: &'a str,
+}
+
+impl RestorePlacement<'_> {
+    /// Begin the guard immediately before placement.
+    ///
+    /// The guard takes the journal lock, reconciles any pending restore action
+    /// under it, records the durable intent, and re-checks the authority under
+    /// the same hold; the lock is held until the guard settles.
+    pub(crate) fn begin(&self, plan: &Plan) -> Result<RestoreGuard, CliError> {
+        let action_id = next_restore_action_id();
+        let request = RestoreRequest {
+            journal_path: &plan.journal_path,
+            presented: None,
+            claim: &plan.claim,
+            members: &plan.members,
+            actor: RESTORE_ACTOR,
+            action_id: &action_id,
+            now: self.now,
+        };
+        begin_restore(self.events, &request).map_err(|refusal| guard_refusal(&refusal))
+    }
+
+    /// Record the placement outcome and release the journal lock.
+    pub(crate) fn settle(
+        &self,
+        guard: RestoreGuard,
+        allowed: bool,
+        result: &str,
+    ) -> Result<(), CliError> {
+        guard
+            .settle(self.events, allowed, result)
+            .map_err(event_error)
+    }
+
+    /// Record a refusal and release the lock, ignoring an outcome-write failure:
+    /// the refusal is already the caller's error, and a pending row is left for
+    /// reconciliation.
+    pub(crate) fn refuse(&self, guard: RestoreGuard) {
+        let _ = guard.settle(self.events, false, SETTLE_REFUSED);
+    }
+}
+
+/// Merge a post-placement settle failure into a report's step and failure text.
+///
+/// The placement already happened, so the failure is surfaced on the report
+/// rather than returned; the report is the operator's only record of the
+/// pre-restore snapshot. A settle failure leaves a pending action that the next
+/// restore reconciles.
+pub(crate) fn merge_settle_failure(
+    failed_step: Option<String>,
+    failure: Option<String>,
+    settle: Option<CliError>,
+) -> (Option<String>, Option<String>) {
+    let Some(error) = settle else {
+        return (failed_step, failure);
+    };
+    let step = failed_step.map_or_else(
+        || FAILED_STEP_SETTLE.to_owned(),
+        |step| format!("{step}, {FAILED_STEP_SETTLE}"),
+    );
+    let text = failure.map_or_else(
+        || {
+            format!(
+                "the restore outcome could not be recorded: {}",
+                error.message()
+            )
+        },
+        |text| format!("{text}; the restore outcome: {}", error.message()),
+    );
+    (Some(step), Some(text))
 }
 
 /// The projected pre-restore footprint, with and without a key store.
