@@ -402,7 +402,10 @@ fn sqlite_an_open_copy_action_blocks_closure_after_a_restart() {
             "p1".into(),
             PathSlot {
                 owner: PathOwner::Clio,
-                state: PathState::Pending,
+                // Done is the only state `closure_inputs` treats as a known
+                // path; a pending path would refuse as UnknownProductPath and
+                // never reach the open-copy-action check this test proves.
+                state: PathState::Done,
             },
         );
         record.actions.insert(
