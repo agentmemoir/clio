@@ -1,0 +1,1 @@
+`make quick` selects the tests that use a changed file that owns no test module, such as a fixture, a test helper, `tests/common/mod.rs`, or a production module without tests of its own, instead of every test of its package; it falls back to the whole package, and the plan says why, only when no test names the file or the crate root re-exports it.

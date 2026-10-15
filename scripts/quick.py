@@ -16,7 +16,8 @@ there and not here.
 
 The mapping from a file to its tests is `owned_tests.owned_selection`, which
 reads the module declarations the compiler obeys, so a `#[path]` rename is
-followed. The plan prints the estimate from the last run's per-test times, read
+followed. A file that owns no test module selects the tests that use it
+(`owned_users.users_of`), and its whole package only when none is found. The plan prints the estimate from the last run's per-test times, read
 from this checkout and from the main checkout when this is a linked worktree;
 it builds nothing and runs nothing. `--closure` estimates the packages `make
 coverage-fast` would run, with the build and coverage cost counted, which is how
@@ -45,6 +46,7 @@ from precommit_hooks import main_checkout  # noqa: E402
 from quick_estimate import Case, Estimate, estimate, failed_cases, newest_history, wall_seconds  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
 import quick_untested as untested  # noqa: E402
+from owned_users import Users, users_of  # noqa: E402
 
 # `owned_selection` re-walks the whole crate, and re-runs `cargo metadata`, for
 # every file it is asked about. One of each is enough for one run, and without
@@ -71,6 +73,7 @@ NO_CHANGE = "quick: no changed Rust file"
 SCHEMA_CHECK = runner.ROOT / "scripts" / "schema_args_check.py"
 
 Lookup = Callable[[str], "owned.OwnedSelection"]
+UsersLookup = Callable[[str], Users]
 
 
 class Selection(NamedTuple):
@@ -96,6 +99,24 @@ def term_for(rel: str, package: str, lookup: Lookup = owned.owned_selection) -> 
     return Term(package, modules=modules), f"{rel} -> {package}: {len(modules)} test module(s)"
 
 
+def terms_for(rel: str, package: str, lookup: Lookup, users: UsersLookup) -> tuple[list[Term], str]:
+    """`term_for`, except that a file owning no test module selects the tests that use it."""
+    term, note = term_for(rel, package, lookup)
+    if not term.is_wide:
+        return [term], note
+    try:
+        found = users(rel)
+    except (owned.ResolutionError, SourceError) as error:
+        found = Users(reason=str(error))
+    if found.reason:
+        reason = f"{term.reason}, and {found.reason}"
+        return [term._replace(reason=reason)], f"{rel} -> {package}: whole package, {reason}"
+    terms = [Term(package, binary=name) for name in found.binaries]
+    terms += [Term(package, modules=found.modules)] if found.modules else []
+    used = f"{len(found.modules)} test module(s) and {len(found.binaries)} test target(s)"
+    return terms, f"{rel} -> {package}: owns no test module, used by {used}"
+
+
 def merge(terms: Sequence[Term]) -> list[Term]:
     """One term per (package, kinds, binary); a whole-package term absorbs the rest."""
     wide = {term.package for term in terms if term.is_wide}
@@ -111,7 +132,9 @@ def merge(terms: Sequence[Term]) -> list[Term]:
     return list(merged.values())
 
 
-def select(files: Sequence[str], packages: Sequence[dict], lookup: Lookup = owned.owned_selection) -> Selection:
+def select(
+    files: Sequence[str], packages: Sequence[dict], lookup: Lookup = owned.owned_selection, users: UsersLookup = users_of
+) -> Selection:
     """The terms for `files`; fails closed on a file no workspace package owns."""
     terms: list[Term] = []
     notes: list[str] = []
@@ -119,8 +142,8 @@ def select(files: Sequence[str], packages: Sequence[dict], lookup: Lookup = owne
         owners = runner.package_owners(rel, packages)
         if not owners:
             raise runner.RunError(f"{rel} belongs to no workspace package, so Quick cannot select its tests")
-        term, note = term_for(rel, owners[0], lookup)
-        terms.append(term)
+        found, note = terms_for(rel, owners[0], lookup, users)
+        terms.extend(found)
         notes.append(note)
     return Selection(merge(terms), notes)
 

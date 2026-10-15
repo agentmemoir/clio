@@ -15,5 +15,6 @@ quick:
 scripts-check-quick:
 	python3 scripts/quick_selftest.py
 	python3 scripts/quick_untested_selftest.py
+	python3 scripts/quick_users_selftest.py
 	python3 scripts/schema_args_selftest.py
 	python3 scripts/schema_args_check.py
