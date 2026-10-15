@@ -154,11 +154,12 @@ def estimate_line(found: Estimate | None, budget: float, label: str, factor: flo
     return lines
 
 
-def plan_lines(selection: Selection, history: list[Case]) -> list[str]:
+def plan_lines(selection: Selection, history: list[Case], packages: Sequence[dict]) -> list[str]:
     lines = [f"quick: {note}" for note in selection.notes]
     lines.append(f"quick: filter: {union_expression(selection.terms)}")
-    if target_flags(selection.terms):
-        lines.append(f"quick: cargo targets: {' '.join(target_flags(selection.terms))}")
+    targets = target_flags(selection.terms, packages)
+    if targets:
+        lines.append(f"quick: cargo targets: {' '.join(targets)}")
     keep = lambda terms: (lambda case: any(t.matches(case.binary_id, case.name) for t in terms))  # noqa: E731
     total = estimate(history, keep(selection.terms))
     lines += estimate_line(total, QUICK_BUDGET_S, "estimate")
@@ -231,19 +232,25 @@ def schema_check(files: Sequence[str]) -> int:
     return subprocess.run([sys.executable, str(SCHEMA_CHECK)], cwd=runner.ROOT).returncode
 
 
-def target_flags(terms: Sequence[Term]) -> list[str]:
+def target_flags(terms: Sequence[Term], packages: Sequence[dict]) -> list[str]:
     """Cargo target filters for a selection.
 
     Unit tests live in the lib and bin targets, and an integration test in its own
-    target. A selection with no whole-package term needs only those, so the rest
-    are not built. Without this, a one-module change relinked every integration
-    binary of the package and ran each once to list its tests, and that took
-    minutes on a package with twenty of them.
+    target. Only those are built. Without this, a one-module change relinked every
+    integration binary of the package and ran each once to list its tests, and that
+    took minutes on a package with twenty of them.
+
+    Cargo applies the filters to every selected package, so a whole-package term
+    names each integration target of its own package. Dropping the filters for it
+    would build every target of the other packages too.
     """
-    if any(term.is_wide for term in terms):
+    if all(term.is_wide for term in terms):
         return []
-    flags = ["--lib", "--bins"] if any(term.modules or term.kinds for term in terms) else []
-    for name in sorted({term.binary for term in terms if term.binary}):
+    wide = {term.package for term in terms if term.is_wide}
+    names = {term.binary for term in terms if term.binary}
+    names.update(name for package in packages if package["name"] in wide for name in package["tests"])
+    flags = ["--lib", "--bins"] if wide or any(term.modules or term.kinds for term in terms) else []
+    for name in sorted(names):
         flags += ["--test", name]
     return flags
 
@@ -273,7 +280,7 @@ def nextest(
     return subprocess.run(command, cwd=runner.ROOT, env=runner.hermetic_env()).returncode
 
 
-def run_selection(selection: Selection, retry_failed: bool) -> int:
+def run_selection(selection: Selection, packages: Sequence[dict], retry_failed: bool) -> int:
     if retry_failed:
         failed = failed_cases(QUICK_JUNIT)
         if failed:
@@ -293,7 +300,7 @@ def run_selection(selection: Selection, retry_failed: bool) -> int:
     return nextest(
         sorted({term.package for term in selection.terms}),
         union_expression(selection.terms),
-        targets=target_flags(selection.terms),
+        targets=target_flags(selection.terms, packages),
     )
 
 
@@ -337,10 +344,10 @@ def run(args: argparse.Namespace) -> int:
     if args.json:
         print(plan_json(selection, files, extra.left_out))
         return runner.EXIT_OK
-    print("\n".join([*plan_lines(selection, history), *left_out]), flush=True)
+    print("\n".join([*plan_lines(selection, history, packages), *left_out]), flush=True)
     if args.plan:
         return runner.EXIT_OK
-    return schema_check(files) or run_selection(selection, args.retry_failed)
+    return schema_check(files) or run_selection(selection, packages, args.retry_failed)
 
 
 def main(argv: Sequence[str]) -> int:

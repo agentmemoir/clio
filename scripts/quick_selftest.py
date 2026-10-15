@@ -214,7 +214,7 @@ class PlanTests(unittest.TestCase):
         terms = [Term(name, modules=("m",)) for name in "pqrs"]
         selection = quick.Selection(terms, ["note"])
         history = [est.Case(name, "m::t", 100.0 * i, False) for i, name in enumerate("pqrs", 1)]
-        lines = quick.plan_lines(selection, history)
+        lines = quick.plan_lines(selection, history, [])
         self.assertTrue(any("over the 60 s budget" in line for line in lines))
         dear = [line for line in lines if line.startswith("quick:   ")]
         self.assertEqual(len(dear), 3)
@@ -222,9 +222,9 @@ class PlanTests(unittest.TestCase):
 
     def test_a_cheap_plan_is_within_budget_and_no_history_is_unknown(self) -> None:
         selection = quick.Selection([Term("p", modules=("a",))], ["note"])
-        cheap = quick.plan_lines(selection, self.history(1.0))
+        cheap = quick.plan_lines(selection, self.history(1.0), [])
         self.assertTrue(any("within the 60 s budget" in line for line in cheap))
-        unknown = quick.plan_lines(selection, [])
+        unknown = quick.plan_lines(selection, [], [])
         self.assertTrue(any("unknown" in line for line in unknown))
 
     def test_the_closure_estimate_judges_the_done_budget(self) -> None:
@@ -291,21 +291,21 @@ class RunTests(unittest.TestCase):
         calls: list[tuple] = []
         with mock.patch.object(quick, "failed_cases", return_value=[("p", "a::x")]):
             with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(), targets=(): calls.append((pkgs, e, tuple(extra))) or 0):
-                self.assertEqual(quick.run_selection(selection, True), 0)
+                self.assertEqual(quick.run_selection(selection, [], True), 0)
             self.assertEqual(
                 calls,
                 [(["p"], "(binary_id(=p) & test(=a::x))", ("--no-tests=pass",)), (["p"], "package(=p)", ())],
             )
             calls.clear()
             with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(), targets=(): calls.append((pkgs, e, tuple(extra))) or 1):
-                self.assertEqual(quick.run_selection(selection, True), 1)
+                self.assertEqual(quick.run_selection(selection, [], True), 1)
             self.assertEqual(len(calls), 1, "a failing retry must not run the full selection")
 
     def test_without_a_retry_the_full_selection_runs_once(self) -> None:
         calls: list[tuple] = []
         selection = quick.Selection([Term("q", modules=("m",)), Term("p")], [])
         with mock.patch.object(quick, "nextest", side_effect=lambda pkgs, e, extra=(), targets=(): calls.append((pkgs, e, tuple(extra))) or 0):
-            quick.run_selection(selection, False)
+            quick.run_selection(selection, [], False)
         self.assertEqual(calls, [(["p", "q"], quick.union_expression(selection.terms), ())])
 
     def test_the_command_uses_the_quick_profile_and_the_hermetic_environment(self) -> None:
@@ -332,17 +332,22 @@ class RunTests(unittest.TestCase):
 
 class TargetTests(unittest.TestCase):
     def test_a_selection_of_modules_builds_only_the_lib_and_bin_targets(self) -> None:
-        self.assertEqual(quick.target_flags([Term("p", modules=("a",))]), ["--lib", "--bins"])
-        self.assertEqual(quick.target_flags([Term("p", kinds=("lib", "bin"))]), ["--lib", "--bins"])
+        self.assertEqual(quick.target_flags([Term("p", modules=("a",))], []), ["--lib", "--bins"])
+        self.assertEqual(quick.target_flags([Term("p", kinds=("lib", "bin"))], []), ["--lib", "--bins"])
 
     def test_an_integration_term_names_its_own_target_once(self) -> None:
         terms = [Term("p", binary="it"), Term("q", binary="it"), Term("r", binary="aa")]
-        self.assertEqual(quick.target_flags(terms), ["--test", "aa", "--test", "it"])
+        self.assertEqual(quick.target_flags(terms, []), ["--test", "aa", "--test", "it"])
         mixed = [Term("p", modules=("a",)), Term("q", binary="it")]
-        self.assertEqual(quick.target_flags(mixed), ["--lib", "--bins", "--test", "it"])
+        self.assertEqual(quick.target_flags(mixed, []), ["--lib", "--bins", "--test", "it"])
 
-    def test_a_whole_package_term_builds_every_target(self) -> None:
-        self.assertEqual(quick.target_flags([Term("p", modules=("a",)), Term("q")]), [])
+    def test_a_whole_package_term_widens_only_its_own_package(self) -> None:
+        packages = [{"name": "p", "tests": ["p_slow"]}, {"name": "q", "tests": ["q_b", "q_a"]}]
+        mixed = [Term("p", modules=("a",)), Term("q")]
+        self.assertEqual(
+            quick.target_flags(mixed, packages), ["--lib", "--bins", "--test", "q_a", "--test", "q_b"]
+        )
+        self.assertEqual(quick.target_flags([Term("q")], packages), [])
 
     def test_a_retry_names_the_target_each_failure_came_from(self) -> None:
         failed = [("p", "m::a"), ("p", "m::b"), ("p::bin/p", "x"), ("p::it", "y")]
@@ -352,7 +357,7 @@ class TargetTests(unittest.TestCase):
 
     def test_the_plan_and_the_command_carry_the_target_filters(self) -> None:
         selection = quick.Selection([Term("p", modules=("a",))], ["note"])
-        self.assertIn("quick: cargo targets: --lib --bins", quick.plan_lines(selection, []))
+        self.assertIn("quick: cargo targets: --lib --bins", quick.plan_lines(selection, [], []))
         with mock.patch.object(quick.subprocess, "run") as run:
             run.return_value.returncode = 0
             quick.nextest(["p"], "package(=p)", targets=["--lib", "--bins"])
