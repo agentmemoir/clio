@@ -164,7 +164,7 @@ fn erased_subject_context_never_reappears_in_plaintext_export() {
     let f = Fixture {
         store,
         bank,
-        dest: path.to_string_lossy().into_owned(),
+        dest: path.as_str().to_owned(),
         path,
     };
     let request = unique("req");

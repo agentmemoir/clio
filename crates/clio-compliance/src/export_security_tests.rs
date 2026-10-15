@@ -59,7 +59,7 @@ fn t22_08_agent_actor_is_rejected_without_writing() {
     ))
     .unwrap_err();
     assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
-    assert!(!f.path.exists());
+    assert!(!f.path.as_path().exists());
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn compliance_purged_content_fails_export_closed() {
     let f = Fixture {
         store,
         bank,
-        dest: path.to_string_lossy().into_owned(),
+        dest: path.as_str().to_owned(),
         path,
     };
     let ctx = ctx(&f, Actor::Harness);
@@ -157,7 +157,7 @@ fn compliance_purged_content_fails_export_closed() {
     // unreadable content rather than a backend fault. The export still fails
     // closed and writes nothing.
     assert_eq!(err.code, clio_types::ErrorCode::UnreadableContent);
-    assert!(!f.path.exists());
+    assert!(!f.path.as_path().exists());
 }
 
 #[test]

@@ -96,7 +96,7 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
     let f = export_fixtures::Fixture {
         store,
         bank,
-        dest: path.to_string_lossy().into_owned(),
+        dest: path.as_str().to_owned(),
         path,
     };
     let export_ctx = export_fixtures::ctx(&f, Actor::Harness);
@@ -107,7 +107,7 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
         ExportContentMode::DsarPlaintext,
     ))
     .expect("export succeeds");
-    let text = std::fs::read_to_string(&f.path).expect("bundle readable");
+    let text = std::fs::read_to_string(f.path.as_path()).expect("bundle readable");
     assert!(
         !text.contains("[REDACTED]"),
         "the expanded value must not be written"
