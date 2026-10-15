@@ -243,6 +243,7 @@ class RecognisesWhatTheHostSupports(unittest.TestCase):
         execution, which is the only way to reach the refusal path on a host whose
         temporary directory is in fact usable.
         """
+        import phase_sampler
         import phase_timer
 
         with new_exec_tempdir(purpose="the stub ps", parents=parents) as tmp:
@@ -251,13 +252,13 @@ class RecognisesWhatTheHostSupports(unittest.TestCase):
             fake.chmod(0o755)
             ahead = os.pathsep.join([str(fake.parent), *os.environ["PATH"].split(os.pathsep)])
             saved_path, os.environ["PATH"] = os.environ["PATH"], ahead
-            saved_fields, phase_timer._PS_FIELDS = phase_timer._PS_FIELDS, None
+            saved_fields, phase_sampler._PS_FIELDS = phase_sampler._PS_FIELDS, None
             try:
                 self._assert_the_stub_is_what_answers()
                 return phase_timer._supported_ps_fields()
             finally:
                 os.environ["PATH"] = saved_path
-                phase_timer._PS_FIELDS = saved_fields
+                phase_sampler._PS_FIELDS = saved_fields
 
     def _assert_the_stub_is_what_answers(self) -> None:
         """Require the stub on PATH to answer as itself, before the probe is asked.

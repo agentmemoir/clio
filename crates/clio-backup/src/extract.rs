@@ -13,10 +13,8 @@
 //! - The member walk and its refusals: a payload whose size or digest does not
 //!   match the manifest, and a key member the manifest does not declare or
 //!   that is not a SQLite key-store database
-//! - The Postgres dump-table walk: reading the dump meta out of the payload
-//!   member before the first table member is opened, refusing a table member
-//!   whose declared size the meta does not record before staging it, and
-//!   skipping a table member the meta does not declare
+//! - Driving the Postgres dump-table walk, with each table member's proof
+//!   against the dump meta in `extract_dump_tables`
 //! - Removing every staged member that is not returned
 //! - Sweeping the last run's staging journal, and recording this run's own
 //! - The code a staging failure keeps: archive damage, and an archive over the
@@ -39,7 +37,11 @@
 
 use crate::KEY_MEMBER;
 use crate::container::{ArchiveReader, MemberHeader};
-use crate::dump_meta::{DUMP_TABLES_PREFIX, DumpMeta, DumpTable};
+use crate::dump_meta::{DUMP_TABLES_PREFIX, DumpMeta};
+use crate::extract_dump_tables::{
+    check_dump_tables_complete, declared_table, read_dump_meta, take_dump_table,
+    undeclared_table_member,
+};
 use crate::key_member::take_key_member;
 use crate::manifest::BackupManifest;
 use crate::staging::{self, StagedFile};
@@ -197,57 +199,6 @@ pub fn extract_members(
     })
 }
 
-/// The one table the dump meta declares under `name`.
-///
-/// A table member the meta does not declare has no declared size and no digest,
-/// so it is skipped rather than staged: a restore must never write out rows that
-/// nothing in the archive vouches for.
-fn declared_table<'a>(meta: Option<&'a DumpMeta>, name: &str) -> Option<&'a DumpTable> {
-    meta?.tables.iter().find(|table| table.member == name)
-}
-
-/// The refusal for a `dump/tables/` member the dump meta does not declare.
-fn undeclared_table_member(name: &str) -> AmError {
-    AmError::new(
-        ErrorCode::ArchiveCorrupt,
-        format!(
-            "the archive carries {name:?}, but the dump meta declares no table member with \
-             that name"
-        ),
-    )
-}
-
-/// Read the dump meta out of the staged payload member.
-fn read_dump_meta(
-    payload: &ExtractedMember,
-    manifest: &BackupManifest,
-) -> Result<DumpMeta, AmError> {
-    let bytes = crate::dump_meta::read_bounded_meta_bytes(payload.file.path())?;
-    DumpMeta::from_json_bytes(&bytes).map_err(|error| corrupt(&manifest.payload.member, &error))
-}
-
-/// Refuse a dump that lost a declared table on the way here.
-///
-/// Every declared table has to have been staged, with exactly the bytes and
-/// digest the meta records, and that is checked member by member as each one
-/// streams. A declared table whose member never appeared is a damaged dump, and
-/// naming it here is the last chance to do so.
-fn check_dump_tables_complete(meta: &DumpMeta, staged: &[String]) -> Result<(), AmError> {
-    for table in &meta.tables {
-        if !staged.iter().any(|name| name == &table.member) {
-            return Err(AmError::new(
-                ErrorCode::ArchiveCorrupt,
-                format!(
-                    "the dump meta declares table member {:?} for table {:?}, but the archive \
-                     does not carry it",
-                    table.member, table.table
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// Take the open payload member: refuse a header size the manifest does not
 /// record before inflating anything, then prove the streamed size and digest.
 fn take_payload(
@@ -287,64 +238,6 @@ fn take_payload(
                 if problems.len() == 1 { "does" } else { "do" },
                 manifest.payload.bytes,
                 manifest.payload.sha256,
-                staged.bytes(),
-                staged.sha256()
-            ),
-        ));
-    }
-    Ok(ExtractedMember {
-        member: header.name.clone(),
-        file: staged,
-    })
-}
-
-/// Take the open table member: the dump meta's declared size is checked before
-/// anything is inflated, then the streamed size and digest are proved against
-/// the meta's own record.
-///
-/// The size check comes first for the same reason the payload's does: a member
-/// whose header declares more bytes than the dump meta records is not the
-/// member the meta describes, so no reason exists to write it to disk. The
-/// staged file is dropped on the refusal path, so the check is about not
-/// writing untrusted bytes at all, not about cleaning up afterwards.
-fn take_dump_table(
-    reader: &mut ArchiveReader<std::fs::File>,
-    header: &MemberHeader,
-    table: &DumpTable,
-    dir: &Path,
-    journal: &mut Option<StagingJournal>,
-) -> Result<ExtractedMember, AmError> {
-    if header.size != table.bytes {
-        return Err(AmError::new(
-            ErrorCode::ArchiveCorrupt,
-            format!(
-                "archive member {:?}: the archive header declares {} bytes, but the dump meta \
-                 records {} bytes for table {:?}, so the member cannot be the one the dump meta \
-                 describes",
-                header.name, header.size, table.bytes, table.table
-            ),
-        ));
-    }
-    let staged = stage_recorded(reader, dir, "restore-table", &header.name, journal)?;
-    let mut problems: Vec<&str> = Vec::new();
-    if staged.bytes() != table.bytes {
-        problems.push("size");
-    }
-    if staged.sha256() != table.sha256 {
-        problems.push("digest");
-    }
-    if !problems.is_empty() {
-        return Err(AmError::new(
-            ErrorCode::ArchiveCorrupt,
-            format!(
-                "archive member {:?}: its {} for table {:?} {} not match the dump meta's record \
-                 (meta: {} bytes, digest {}; member: {} bytes, digest {})",
-                header.name,
-                problems.join(" and the "),
-                if problems.len() == 1 { "does" } else { "do" },
-                table.table,
-                table.bytes,
-                table.sha256,
                 staged.bytes(),
                 staged.sha256()
             ),
