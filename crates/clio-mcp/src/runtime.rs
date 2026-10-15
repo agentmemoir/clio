@@ -34,8 +34,9 @@ use clio_history::HistoryPolicy;
 use clio_index::Embedder;
 use clio_retrieve::{AssociationEngine, HybridRetriever};
 use clio_store::{
-    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DekProvider, HistoryStore,
-    HygieneStore, IndexStore, OpsStore, PersonaStore, Store, SyncStore,
+    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DekProvider,
+    DestinationCustodyStore, HistoryStore, HygieneStore, IndexStore, LocalEventStore, OpsStore,
+    PersonaStore, Store, SyncStore,
 };
 use clio_types::{Actor, AmError};
 use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
@@ -91,6 +92,17 @@ pub struct McpState {
     pub compliance: Arc<dyn ComplianceStore>,
     /// Hygiene persistence view (flags, archive markers, log).
     pub hygiene: Arc<dyn HygieneStore>,
+    /// Durable local event writer for protected-action intents and outcomes.
+    pub events: Arc<dyn LocalEventStore>,
+    /// Export destination-custody persistence.
+    pub custody: Arc<dyn DestinationCustodyStore>,
+    /// Best-effort measured live-store facts for a subject-scoped export.
+    pub inventory_facts: Arc<clio_compliance::InventoryFacts>,
+    /// Whether [`Self::inventory_facts`] is a real measurement. A subject
+    /// export refuses (`InvalidArgument`) rather than emit a wrong manifest.
+    pub inventory_measured: bool,
+    /// The store backend [`Self::inventory_facts`] describes.
+    pub inventory_backend: clio_compliance::InventoryBackend,
     /// Admission/ranking environment snapshot.
     pub env: RankingEnv,
     /// Association engine (co-activation + explicit edges).

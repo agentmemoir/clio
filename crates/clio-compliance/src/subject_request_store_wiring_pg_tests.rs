@@ -39,16 +39,17 @@ use clio_store::{
 use clio_types::{AmError, ErrorCode};
 
 /// A private-schema Postgres store; the store drops before the schema
-/// (`subject_bundle_pg_tests.rs` fixture shape).
-struct PgFixture {
-    store: PostgresStore,
+/// (`subject_bundle_pg_tests.rs` fixture shape). The copy-scenario twin
+/// reopens the same fixture.
+pub(super) struct PgFixture {
+    pub(super) store: PostgresStore,
     schema: ScopedSchema,
     _guard: PgTestGuard,
 }
 
 impl PgFixture {
     /// Close the store and reopen the same schema: the restart boundary.
-    fn restart(&mut self) {
+    pub(super) fn restart(&mut self) {
         self.store = PostgresStore::open(self.schema.url(), kms())
             .expect("reopen the fixture store on the same scoped schema");
     }
@@ -59,7 +60,7 @@ const SUITE: &str = "subject request wiring Postgres tests";
 
 /// Open the live Postgres fixture, or print a skip note and return `None`
 /// when the shared server is unreachable.
-fn pg_fixture_or_skip() -> Option<PgFixture> {
+pub(super) fn pg_fixture_or_skip() -> Option<PgFixture> {
     let guard = lock_pg_test();
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
@@ -145,7 +146,7 @@ fn postgres_a_reused_id_with_a_changed_scope_refuses_without_mutation() {
     let request_id = unique("pg-req");
     let scope = subject_scope();
     let record = started_record(&request_id, &scope);
-    let stored_row = record_to_row(&record).expect("the record encodes");
+    let stored_row = record_to_row(&record);
     persist(&fixture.store, &record);
     fixture.restart();
     let mut ledger = reload_ledger(&fixture.store).expect("the ledger reloads");

@@ -28,11 +28,11 @@ use super::super::ROW_PLAN;
 use super::{
     FamilyClass, FamilySelection, SubjectFamilyInput, SubjectFamilyMapping, subject_family_mapping,
 };
-use crate::inventory::{InventoryBackend, InventoryFacts, InventoryInput, scope_inventory};
+use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::{OTHER, SELECTED, fixture_id};
 use crate::inventory_pg_support_tests::{
-    ledger_paths, pg_checked_url, pg_skip_note, semantic_item, write_direct_link_class,
-    write_hashed_link_class, write_shared_class,
+    pg_checked_url, pg_skip_note, semantic_item, write_direct_link_class, write_hashed_link_class,
+    write_shared_class,
 };
 use crate::test_unique::unique;
 use clio_store::{
@@ -103,19 +103,12 @@ fn map_over(
     subject_id: &str,
     facts: &InventoryFacts,
 ) -> SubjectFamilyMapping {
-    let inventory = scope_inventory(&InventoryInput {
-        facts: facts.clone(),
-        // Placeholder paths: Postgres holds no store file and the KMS is in memory.
-        paths: ledger_paths(&std::env::temp_dir().join(&fixture.bank)),
-        declared_copies: Vec::new(),
-        peers_enabled: Some(false),
-    });
     subject_family_mapping(&SubjectFamilyInput {
         store: &fixture.store,
         bank_id: &fixture.bank,
         subject_id,
         facts,
-        inventory: &inventory,
+        backend: InventoryBackend::Postgres,
     })
     .expect("the mapping reads the live Postgres store without error")
 }

@@ -52,6 +52,7 @@ pub const BOUND_WRITE_TOOLS: &[&str] = &[
     "export",
     "import",
     "import_provider",
+    "review_export",
     "repair",
     "reindex",
     "sync_push",

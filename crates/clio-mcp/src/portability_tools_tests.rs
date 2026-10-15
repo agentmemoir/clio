@@ -18,6 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use clio_store::LocalEventIntent;
 use serde_json::{Value, json};
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -261,4 +262,97 @@ fn portability_dispatch_unknown_tool_and_missing_provider() {
 
     let err2 = call(&s, "import_provider", json!({"actor": "harness"}));
     assert_eq!(err2["ok"], Value::Bool(false));
+}
+
+// ---------- review_export ----------
+
+/// Seed one completed local event row. The outcome `result` carries a marker so
+/// the review export can be checked for content-freeness.
+fn seed_review_event(state: &crate::runtime::McpState, action_id: &str, denied: bool) {
+    state
+        .events
+        .record_intent(&LocalEventIntent {
+            action_id,
+            actor: "harness",
+            scope: "review",
+            kind: "export",
+            event_time: "2026-01-01T00:00:00Z",
+        })
+        .expect("record intent");
+    state
+        .events
+        .record_outcome(action_id, denied, "SECRET-MARKER")
+        .expect("record outcome");
+}
+
+#[test]
+fn review_export_is_listed_in_the_portability_schema() {
+    let defs = crate::schema_portability_defs::portability_defs();
+    let def = defs
+        .iter()
+        .find(|d| d.name == "review_export")
+        .expect("review_export schema");
+    assert_eq!(def.required, &["destination"][..]);
+    let names: Vec<&str> = def.props.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names, vec!["destination", "limit", "cursor"]);
+}
+
+#[test]
+fn review_export_writes_ordered_content_free_rows() {
+    let s = state();
+    seed_review_event(&s, "rev-allowed", false);
+    seed_review_event(&s, "rev-denied", true);
+    let dest = temp_path("review-rows");
+    let out = call(
+        &s,
+        "review_export",
+        json!({
+            "destination": dest,
+            "bank": "bank-a",
+            "actor": "harness",
+            "timestamp": "2026-01-01T00:00:00Z"
+        }),
+    );
+    assert_eq!(out["ok"], Value::Bool(true), "{out}");
+    assert_eq!(out["destination"], Value::from(dest.as_str()));
+    let text = fs::read_to_string(&dest).expect("review export file");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert!(lines[0].ends_with("rev-allowed\tallowed"), "{text}");
+    assert!(lines[1].ends_with("rev-denied\tdenied"), "{text}");
+    assert!(
+        lines.iter().all(|line| line.split('\t').count() == 3),
+        "{text}"
+    );
+    assert!(!text.contains("SECRET-MARKER"), "content-free: {text}");
+    fs::remove_file(&dest).ok();
+}
+
+#[test]
+fn review_export_refuses_an_existing_destination_without_overwriting() {
+    let s = state();
+    seed_review_event(&s, "rev-exists", false);
+    let dest = temp_path("review-exists");
+    fs::write(&dest, "KEEP").expect("seed destination");
+    let out = call(
+        &s,
+        "review_export",
+        json!({"destination": dest, "bank": "bank-a", "actor": "harness"}),
+    );
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert_eq!(out["code"], "invalid_argument", "{out}");
+    assert_eq!(fs::read_to_string(&dest).expect("kept file"), "KEEP");
+    fs::remove_file(&dest).ok();
+}
+
+#[test]
+fn review_export_missing_destination_is_a_usage_error() {
+    let s = state();
+    let out = call(
+        &s,
+        "review_export",
+        json!({"bank": "bank-a", "actor": "harness"}),
+    );
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert_eq!(out["code"], "invalid_argument", "{out}");
 }

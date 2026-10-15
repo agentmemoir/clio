@@ -29,20 +29,54 @@
 
 use super::{ROW_PLAN, RowPlan, missing_tables, pattern_matches};
 use crate::export::{HISTORY_LIMIT, hit_history_limit};
-use crate::inventory::{InventoryBackend, InventoryFacts, Readability, RowSource, ScopeInventory};
+use crate::inventory::{InventoryBackend, InventoryFacts, Readability, RowSource};
 use clio_store::{BeliefStore, ComplianceStore, HistoryStore, ItemIdentity, Store};
 use clio_types::{AmError, BeliefObject, FailureRecord, TaskRecord, TripleRecord};
 
 /// The store reads one subject-family mapping needs.
 ///
 /// Both store backends satisfy the blanket implementation, so the mapping
-/// binds to either one without a change in `clio-store`.
-pub(crate) trait FamilyLinkRead:
-    Store + ComplianceStore + HistoryStore + BeliefStore
-{
+/// binds to either one without a change in `clio-store`. A caller that holds
+/// the four repository views separately implements this over an adapter.
+pub(crate) trait FamilyLinkRead {
+    /// The subject's own item identities, selected by its stored `subject_id`.
+    fn list_subject_items(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+    ) -> Result<Vec<ItemIdentity>, AmError>;
+    /// Every triple in the bank; the mapping keeps those carried by the
+    /// subject's own items.
+    fn list_triples(&self, bank_id: &str) -> Result<Vec<TripleRecord>, AmError>;
+    /// The bank's task history, capped at `limit`.
+    fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError>;
+    /// The bank's failure history, capped at `limit`.
+    fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError>;
+    /// Every belief object in the bank; the mapping keeps the subject's own.
+    fn list_beliefs(&self, bank_id: &str) -> Result<Vec<BeliefObject>, AmError>;
 }
 
-impl<T: Store + ComplianceStore + HistoryStore + BeliefStore> FamilyLinkRead for T {}
+impl<T: Store + ComplianceStore + HistoryStore + BeliefStore> FamilyLinkRead for T {
+    fn list_subject_items(
+        &self,
+        bank_id: &str,
+        subject_id: &str,
+    ) -> Result<Vec<ItemIdentity>, AmError> {
+        ComplianceStore::list_subject_items(self, bank_id, subject_id)
+    }
+    fn list_triples(&self, bank_id: &str) -> Result<Vec<TripleRecord>, AmError> {
+        Store::list_triples(self, bank_id)
+    }
+    fn list_tasks(&self, bank_id: &str, limit: usize) -> Result<Vec<TaskRecord>, AmError> {
+        HistoryStore::list_tasks(self, bank_id, limit)
+    }
+    fn list_failures(&self, bank_id: &str, limit: usize) -> Result<Vec<FailureRecord>, AmError> {
+        HistoryStore::list_failures(self, bank_id, limit)
+    }
+    fn list_beliefs(&self, bank_id: &str) -> Result<Vec<BeliefObject>, AmError> {
+        BeliefStore::list_beliefs(self, bank_id)
+    }
+}
 
 /// How one planned family binds to the mapped subject on this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +131,8 @@ pub(crate) struct SubjectFamilyInput<'a> {
     pub(crate) subject_id: &'a str,
     /// The live-store facts the measured row counts come from, store-wide.
     pub(crate) facts: &'a InventoryFacts,
-    /// The scope ledger this mapping is reported beside; supplies the backend.
-    pub(crate) inventory: &'a ScopeInventory,
+    /// The scope ledger's backend, supplied by the caller.
+    pub(crate) backend: InventoryBackend,
 }
 
 /// Every planned family bound to one subject on one store.
@@ -151,7 +185,7 @@ pub(crate) fn subject_family_mapping(
     let omitted_total = families.iter().map(|selection| selection.omitted).sum();
     let complete = families.iter().all(|selection| selection.complete);
     Ok(SubjectFamilyMapping {
-        backend: input.inventory.backend,
+        backend: input.backend,
         subject_id: input.subject_id.to_owned(),
         families,
         selected_total,

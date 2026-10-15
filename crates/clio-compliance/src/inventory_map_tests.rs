@@ -25,7 +25,7 @@
 use super::{
     FamilyClass, FamilySelection, SubjectFamilyInput, SubjectFamilyMapping, subject_family_mapping,
 };
-use crate::inventory::{InventoryBackend, InventoryFacts, InventoryInput, scope_inventory};
+use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::{ACTOR, OTHER, SELECTED, carrier, fixture_id, semantic_item};
 use crate::inventory_map_fixtures::{FIXTURE_COUNTS, MapFixture};
 use crate::test_unique::unique;
@@ -83,18 +83,12 @@ fn map_over(
     subject_id: &str,
     facts: &InventoryFacts,
 ) -> SubjectFamilyMapping {
-    let inventory = scope_inventory(&InventoryInput {
-        facts: facts.clone(),
-        paths: fixture.paths(),
-        declared_copies: Vec::new(),
-        peers_enabled: Some(false),
-    });
     subject_family_mapping(&SubjectFamilyInput {
         store: &fixture.store,
         bank_id: &fixture.bank,
         subject_id,
         facts,
-        inventory: &inventory,
+        backend: InventoryBackend::Sqlite,
     })
     .expect("the mapping reads the fixture store without error")
 }

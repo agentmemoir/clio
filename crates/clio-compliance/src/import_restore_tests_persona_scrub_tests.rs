@@ -270,6 +270,10 @@ fn persona_import_staging_matches_the_export_side_context_contract() {
         filter: ExportFilter::default(),
         content_mode: ExportContentMode::DsarPlaintext,
         timestamp: T,
+        subject_id: None,
+        facts: None,
+        backend: None,
+        delivery: None,
     })
     .expect("export succeeds");
 

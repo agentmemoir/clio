@@ -30,7 +30,7 @@ use super::{
 };
 use crate::bundle::sha256_hex_bytes;
 use crate::export::HISTORY_LIMIT;
-use crate::inventory::{InventoryFacts, InventoryInput, scope_inventory};
+use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::{ACTOR, OTHER, SELECTED, TS, carrier, fixture_id};
 use crate::inventory_map_fixtures::{FIXTURE_COUNTS, MapFixture};
 use crate::test_unique::unique;
@@ -42,18 +42,12 @@ use std::path::Path;
 /// One bundle for `subject_id` over the fixture's live store file.
 fn build(fixture: &MapFixture, subject_id: &str) -> SubjectBundle {
     let facts = fixture.facts();
-    let inventory = scope_inventory(&InventoryInput {
-        facts: facts.clone(),
-        paths: fixture.paths(),
-        declared_copies: Vec::new(),
-        peers_enabled: Some(false),
-    });
     build_subject_bundle(&SubjectFamilyInput {
         store: &fixture.store,
         bank_id: &fixture.bank,
         subject_id,
         facts: &facts,
-        inventory: &inventory,
+        backend: InventoryBackend::Sqlite,
     })
     .expect("build the subject bundle")
 }
@@ -338,18 +332,12 @@ fn a_fixture_change_during_construction_keeps_counts_and_checksum_on_the_same_by
         .expect("remove one stored item row");
     assert!(removed, "the fixture item must exist before the removal");
 
-    let inventory = scope_inventory(&InventoryInput {
-        facts: facts.clone(),
-        paths: fixture.paths(),
-        declared_copies: Vec::new(),
-        peers_enabled: Some(false),
-    });
     let bundle = build_subject_bundle(&SubjectFamilyInput {
         store: &fixture.store,
         bank_id: &fixture.bank,
         subject_id: SELECTED,
         facts: &facts,
-        inventory: &inventory,
+        backend: InventoryBackend::Sqlite,
     })
     .expect("build over the changed store");
 
@@ -415,18 +403,12 @@ fn a_balanced_family_is_complete_while_the_bundle_stays_open() {
             *count = 1;
         }
     }
-    let inventory = scope_inventory(&InventoryInput {
-        facts: facts.clone(),
-        paths: fixture.paths(),
-        declared_copies: Vec::new(),
-        peers_enabled: Some(false),
-    });
     let bundle = build_subject_bundle(&SubjectFamilyInput {
         store: &fixture.store,
         bank_id: &fixture.bank,
         subject_id: SELECTED,
         facts: &facts,
-        inventory: &inventory,
+        backend: InventoryBackend::Sqlite,
     })
     .expect("build the bundle over the balanced facts");
 

@@ -7,7 +7,8 @@
 --      Postgres: 002_vectors_postgres.sql, then this file
 --
 -- These slots reserve storage ownership. The local_events table carries the
--- real local event schema and durable_requests the real request schema;
+-- real local event schema, durable_requests the real request schema, and
+-- copy_inventory and export_destinations the real copy-inventory schemas;
 -- every other table is a minimal text-key placeholder that its owner group
 -- will build on later (no feature columns or rows yet).
 -- Owner groups:
@@ -15,6 +16,7 @@
 --   G7    subject_family_links   subject-family mapping (stored subject links)
 --         durable_requests       durable request state (request schema slot)
 --   G19   copy_inventory         copy inventory, staging, custody, product copy result
+--         export_destinations    export destination custody and pending delivery state
 --   G14D  archive_experiments    old-archive experiment and restore/journal design
 --   G14A  local_erasure_journal  durable local erasure journal and deny marker
 --   G14I  restore_guards         shared restore refusal and placement guards
@@ -64,10 +66,38 @@ CREATE TABLE IF NOT EXISTS durable_requests
   record                                                                                       text NOT NULL
 );
 
--- G19: copy inventory, staging, custody, product copy result.
+-- G19: copy inventory, staging, custody, product copy result. One row per
+-- inventoried copy. The row carries custody and operator-action metadata
+-- only: no copy content, no digest of subject data. `request_id` and
+-- `custody` are fixed when the copy is inventoried; `exception_reason`
+-- names an open gap while the copy has no request result yet.
 CREATE TABLE IF NOT EXISTS copy_inventory
 (
-  id                                                                                           text PRIMARY KEY
+  copy_id                                                                                      text PRIMARY KEY,
+  request_id                                                                                   text NOT NULL,
+  custody                                                                                      text NOT NULL,
+  owner                                                                                        text NOT NULL,
+  required_action                                                                              text NOT NULL,
+  state                                                                                        text NOT NULL,
+  exception_reason                                                                             text,
+  updated_at                                                                                   text NOT NULL
+);
+
+-- Export destination custody. One row per export action, keyed by the export
+-- action id. The row records the destination path, the custody owner, the
+-- required action, and the pending delivery state before the destination file
+-- is written, so a crash after the write leaves a known open copy that
+-- reconciliation can find by action id. `state` is pending until the delivery
+-- completes or fails, and `exception_reason` carries the failure reason.
+CREATE TABLE IF NOT EXISTS export_destinations
+(
+  action_id                                                                                    text PRIMARY KEY,
+  destination_path                                                                             text NOT NULL,
+  custody_owner                                                                                text NOT NULL,
+  required_action                                                                              text NOT NULL,
+  state                                                                                        text NOT NULL CHECK (state IN ('pending', 'delivered', 'failed')),
+  exception_reason                                                                             text,
+  updated_at                                                                                   text NOT NULL
 );
 
 -- G14D: old-archive experiment and restore/journal design.

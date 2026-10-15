@@ -59,9 +59,12 @@ mod compliance_store;
 mod content_envelope;
 mod content_read_errors;
 mod continuous;
+mod copy_inventory;
+mod copy_inventory_converge;
 mod db_url;
 mod dek;
 mod dek_slots;
+mod destination_custody;
 mod distill_intent;
 mod distilled_evidence;
 mod distilled_freshness;
@@ -215,7 +218,9 @@ pub use compliance_store::{
 };
 pub use content_read_errors::is_unreadable_content;
 pub use continuous::ContinuousStore;
+pub use copy_inventory::{CopyInventoryRow, CopyInventoryStore};
 pub use dek::{CiphertextEnvelope, DekProvider, LocalDevKms};
+pub use destination_custody::{DestinationCustodyRow, DestinationCustodyStore};
 pub use distill_intent::DistillIntent;
 pub use distilled_evidence::{EvidenceEntry, RevisionEvidence, evidence_from_items};
 pub use distilled_freshness::{

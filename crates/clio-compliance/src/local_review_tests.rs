@@ -281,9 +281,10 @@ fn a_bad_cursor_is_invalid_argument() {
     }
 }
 
-/// The route inventory marks only the operator stdout route available.
+/// The route inventory marks both the operator stdout and the file export
+/// routes available, because durable destination custody backs the file export.
 #[test]
-fn the_output_route_inventory_marks_only_operator_stdout_available() {
+fn the_output_route_inventory_marks_both_routes_available() {
     let routes = review_output_routes();
     assert_eq!(
         routes,
@@ -294,8 +295,8 @@ fn the_output_route_inventory_marks_only_operator_stdout_available() {
     );
     assert!(ReviewOutputRoute::OperatorStdout.available());
     assert!(
-        !ReviewOutputRoute::FileExport.available(),
-        "the file export stays unavailable"
+        ReviewOutputRoute::FileExport.available(),
+        "the file export is available under durable destination custody"
     );
 }
 

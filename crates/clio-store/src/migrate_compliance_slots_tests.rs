@@ -33,11 +33,12 @@ use crate::erase_test_support::local_kms;
 use crate::migrate::IntoAmError;
 
 /// The reserved slot tables, sorted to match the inventory assertions.
-const SLOT_TABLES: [&str; 8] = [
+const SLOT_TABLES: [&str; 9] = [
     "archive_experiments",
     "copy_inventory",
     "durable_requests",
     "erasure_adapters",
+    "export_destinations",
     "local_erasure_journal",
     "local_events",
     "restore_guards",
@@ -45,12 +46,11 @@ const SLOT_TABLES: [&str; 8] = [
 ];
 
 /// The slot tables that still hold only the placeholder key: every reserved
-/// table except `local_events` and `durable_requests`, whose fuller schemas
-/// are pinned by `the_local_events_slot_holds_the_event_columns` and
-/// `the_durable_requests_slot_holds_the_request_columns`.
-const PLACEHOLDER_SLOTS: [&str; 6] = [
+/// table except `local_events`, `durable_requests`, `copy_inventory`, and
+/// `export_destinations`, which carry real column sets instead. The
+/// placeholder-slot tests below pin `copy_inventory` by columns too.
+const PLACEHOLDER_SLOTS: [&str; 5] = [
     "archive_experiments",
-    "copy_inventory",
     "erasure_adapters",
     "local_erasure_journal",
     "restore_guards",
@@ -73,15 +73,29 @@ const LOCAL_EVENT_COLUMNS: [&str; 8] = [
 const DURABLE_REQUEST_COLUMNS: [&str; 6] =
     ["request_id", "kind", "state", "scope", "deadline", "record"];
 
-/// Every slot table the static asset declares matches the pinned list.
+/// The `copy_inventory` column set, in DDL order.
+const COPY_INVENTORY_COLUMNS: [&str; 8] = [
+    "copy_id",
+    "request_id",
+    "custody",
+    "owner",
+    "required_action",
+    "state",
+    "exception_reason",
+    "updated_at",
+];
+
+/// Every slot table the static asset declares matches the pinned list, in
+/// both directions: the pin covers the full slot inventory.
 #[test]
 fn the_slot_asset_declares_every_reserved_table() {
-    for slot in SLOT_TABLES {
-        assert!(
-            super::SQL_COMPLIANCE_SLOTS.contains(&format!("CREATE TABLE IF NOT EXISTS {slot}")),
-            "slot asset is missing the reserved table {slot}"
-        );
-    }
+    let mut declared: Vec<&str> = super::SQL_COMPLIANCE_SLOTS
+        .lines()
+        .filter_map(|line| line.strip_prefix("CREATE TABLE IF NOT EXISTS "))
+        .map(str::trim)
+        .collect();
+    declared.sort_unstable();
+    assert_eq!(declared, SLOT_TABLES, "slot table inventory drift");
 }
 
 /// Require every reserved slot table in a sorted table inventory.
@@ -314,8 +328,9 @@ fn postgres_columns(store: &PostgresStore, table: &str) -> Vec<String> {
         .expect("read the postgres column set")
 }
 
-/// The still-placeholder slot tables hold only the placeholder key: a later
-/// phase that adds a feature column must update this pin, not slip past it.
+/// The still-placeholder slot tables hold only the placeholder key, and the
+/// `copy_inventory` slot holds its real copy column set: a later phase that
+/// adds a feature column must update these pins, not slip past them.
 #[test]
 fn slot_tables_hold_only_the_placeholder_key() {
     let scratch = Scratch::new();
@@ -328,10 +343,15 @@ fn slot_tables_hold_only_the_placeholder_key() {
             "slot table {slot} gained a column"
         );
     }
+    assert_eq!(
+        sqlite_columns(&store, "copy_inventory"),
+        COPY_INVENTORY_COLUMNS.map(str::to_owned).to_vec(),
+        "copy_inventory column set changed"
+    );
 }
 
 /// The Postgres still-placeholder slot tables hold the same placeholder-only
-/// column set.
+/// column set, and `copy_inventory` the same real copy column set.
 #[test]
 fn postgres_slot_tables_hold_only_the_placeholder_key() {
     let _shared = crate::lock_pg_test();
@@ -351,6 +371,11 @@ fn postgres_slot_tables_hold_only_the_placeholder_key() {
             "slot table {slot} gained a column"
         );
     }
+    assert_eq!(
+        postgres_columns(&store, "copy_inventory"),
+        COPY_INVENTORY_COLUMNS.map(str::to_owned).to_vec(),
+        "copy_inventory column set changed"
+    );
 }
 
 /// The `local_events` slot holds the real event schema, in DDL order: a column

@@ -67,7 +67,7 @@ pub struct LocalReviewPage {
 pub enum ReviewOutputRoute {
     /// Captured content-free standard output; the operator copy.
     OperatorStdout,
-    /// A file export; unavailable while the copy controls are absent.
+    /// A file export under durable destination custody.
     FileExport,
 }
 
@@ -75,10 +75,7 @@ impl ReviewOutputRoute {
     /// Whether this route may be used today.
     #[must_use]
     pub const fn available(self) -> bool {
-        match self {
-            Self::OperatorStdout => true,
-            Self::FileExport => false,
-        }
+        matches!(self, Self::OperatorStdout | Self::FileExport)
     }
 }
 

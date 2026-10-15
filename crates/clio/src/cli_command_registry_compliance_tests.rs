@@ -105,6 +105,32 @@ fn the_compliance_record_carries_no_extra_surfaces() {
     assert_examples_name_their_record("compliance inventory", spec);
 }
 
+/// `compliance review-export` renders its own usage line and builds its parser
+/// sets: `--out` is required, and it binds no MCP tool.
+#[test]
+fn compliance_review_export_matches_its_registered_usage_and_parser() {
+    let spec = record("compliance review-export");
+    assert_eq!(
+        spec.full_usage(),
+        "usage: clio compliance review-export --out FILE [--limit N] [--cursor C] [--bank BANK] [--actor ACTOR] [--output json|text]\n       writes the ordered local review events as content-free rows (sequence position, action id, state) under durable destination custody: the destination is recorded pending before any bytes land, an existing file is never overwritten, and only a harness or system actor may export",
+        "compliance review-export full usage"
+    );
+    assert_eq!(
+        spec.parser_spec().value_flags(),
+        [
+            "db", "backend", "bank", "actor", "output", "out", "limit", "cursor"
+        ]
+    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
+    assert_eq!(spec.required_flags(), ["out"]);
+    assert_eq!(spec.tool, None);
+    assert_eq!(spec.section, Section::Write);
+    assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
+    assert_eq!(spec.notes.len(), 1, "compliance review-export notes");
+    assert_example_count("compliance review-export", spec);
+    assert_examples_name_their_record("compliance review-export", spec);
+}
+
 /// The registered `compliance` leaves are exactly the tranche, once each, and
 /// the surface's subcommand list is the derivation the dispatcher reads.
 #[test]
@@ -115,7 +141,7 @@ fn the_compliance_leaves_register_once_in_capture_order() {
         .collect();
     assert_eq!(
         registered,
-        ["compliance inventory"],
+        ["compliance inventory", "compliance review-export"],
         "the registered leaves"
     );
     let tranche: Vec<&str> = crate::cli_command_registry_compliance::COMPLIANCE_LEAVES
@@ -125,7 +151,7 @@ fn the_compliance_leaves_register_once_in_capture_order() {
     assert_eq!(tranche, registered, "the tranche and the registry agree");
     assert_eq!(
         crate::compliance_cli::compliance_subcommands(),
-        ["inventory"],
+        ["inventory", "review-export"],
         "the derived subcommand list"
     );
 }

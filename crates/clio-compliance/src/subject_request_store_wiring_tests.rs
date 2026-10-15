@@ -109,9 +109,7 @@ pub(super) fn started_record(request_id: &str, scope: &RequestScope) -> SubjectR
 
 /// Persist `record`'s current state to the durable store.
 pub(super) fn persist(durable: &dyn DurableRequestStore, record: &SubjectRequestRecord) {
-    durable
-        .save(&record_to_row(record).expect("the record encodes"))
-        .expect("the row saves");
+    durable.save(&record_to_row(record)).expect("the row saves");
 }
 
 /// Compliance-store double: `erase_subject` fails while `fail` is set, marking
@@ -254,7 +252,7 @@ fn a_record_round_trips_through_the_row_shape() {
             },
         },
     );
-    let row = record_to_row(&record).expect("the record encodes");
+    let row = record_to_row(&record);
     assert_eq!(row_to_record(&row).expect("the row decodes"), record);
 }
 
@@ -344,7 +342,7 @@ fn sqlite_a_reused_id_with_a_changed_scope_refuses_without_mutation() {
     let request_id = unique("req");
     let scope = subject_scope();
     let record = started_record(&request_id, &scope);
-    let stored_row = record_to_row(&record).expect("the record encodes");
+    let stored_row = record_to_row(&record);
     {
         let store = open_sqlite(&path);
         persist(&store, &record);
@@ -404,7 +402,10 @@ fn sqlite_an_open_copy_action_blocks_closure_after_a_restart() {
             "p1".into(),
             PathSlot {
                 owner: PathOwner::Clio,
-                state: PathState::Pending,
+                // Done is the only state `closure_inputs` treats as a known
+                // path; a pending path would refuse as UnknownProductPath and
+                // never reach the open-copy-action check this test proves.
+                state: PathState::Done,
             },
         );
         record.actions.insert(

@@ -204,15 +204,80 @@ fn sqlite_a_partial_erasure_retry_never_reports_completion_early() {
 fn sqlite_a_row_with_a_drifted_kind_or_scope_column_fails_closed() {
     let scope = subject_scope();
     let record = started_record(&unique("req"), &scope);
-    let mut row = record_to_row(&record).expect("the record encodes");
+    let mut row = record_to_row(&record);
     row.kind = serde_json::to_string(&RequestKind::Copy).expect("encode kind");
     assert_eq!(row_to_record(&row).unwrap_err().code, ErrorCode::Internal);
-    let mut row = record_to_row(&record).expect("the record encodes");
+    let mut row = record_to_row(&record);
     row.scope = serde_json::to_string(&RequestScope::Bank {
         bank_id: unique("wiring-bank"),
     })
     .expect("encode scope");
     assert_eq!(row_to_record(&row).unwrap_err().code, ErrorCode::Internal);
+}
+
+/// An erasure for a request the durable store does not hold refuses before
+/// any erasure effect.
+#[test]
+fn sqlite_an_erasure_for_a_request_the_store_does_not_hold_refuses() {
+    let scratch = Scratch::new();
+    let store = open_sqlite(&scratch.0.join("store.db"));
+    let request_id = unique("req");
+    let scope = subject_scope();
+    let (bank, subject) = scope_parts(&scope);
+    let mut double = RetryStore::failing();
+    double.banks = vec![bank.clone()];
+    let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
+    let sink = EraseVecSink::default();
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
+    let live = double.effect_bank_set();
+    let err = erase_from_durable_store(&store, &request_id, &args, &live)
+        .expect_err("a missing durable row must refuse");
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert_eq!(
+        double.erase_calls(),
+        0,
+        "the refusal must precede any effect"
+    );
+}
+
+/// An erasure whose durable row no longer decodes fails closed before any
+/// erasure effect.
+#[test]
+fn sqlite_an_erasure_with_a_corrupted_durable_row_fails_closed() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("store.db");
+    let request_id = unique("req");
+    let scope = subject_scope();
+    let (bank, subject) = scope_parts(&scope);
+    {
+        let store = open_sqlite(&path);
+        persist(&store, &started_record(&request_id, &scope));
+    }
+    let store = open_sqlite(&path);
+    let mut corrupted = store
+        .load(&request_id)
+        .expect("load the row")
+        .expect("row exists");
+    corrupted.record = "{not json".into();
+    store
+        .save(&corrupted)
+        .expect("overwrite with the corrupted record");
+    let mut double = RetryStore::failing();
+    double.banks = vec![bank.clone()];
+    let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
+    let sink = EraseVecSink::default();
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
+    let live = double.effect_bank_set();
+    let err = erase_from_durable_store(&store, &request_id, &args, &live)
+        .expect_err("a corrupted durable row must refuse");
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert_eq!(
+        double.erase_calls(),
+        0,
+        "the refusal must precede any effect"
+    );
 }
 
 /// The store reports the fan-out set: the requesting bank plus every bank
@@ -246,7 +311,7 @@ fn sqlite_the_store_reports_the_erasure_fan_out_bank_set() {
 #[test]
 fn a_row_with_invalid_record_json_fails_closed() {
     let record = started_record("req", &subject_scope());
-    let mut row = record_to_row(&record).expect("encode record");
+    let mut row = record_to_row(&record);
     row.record = "{".into();
     let err = row_to_record(&row).expect_err("invalid JSON must refuse");
     assert_eq!(err.code, ErrorCode::Internal);
@@ -257,7 +322,7 @@ fn a_row_with_invalid_record_json_fails_closed() {
 #[test]
 fn a_row_with_another_request_id_fails_closed() {
     let record = started_record("req", &subject_scope());
-    let mut row = record_to_row(&record).expect("encode record");
+    let mut row = record_to_row(&record);
     row.request_id = "other-req".into();
     let err = row_to_record(&row).expect_err("mismatched request id must refuse");
     assert_eq!(err.code, ErrorCode::Internal);

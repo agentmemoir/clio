@@ -24,8 +24,9 @@
 use crate::bundle::ExportContentMode;
 use crate::export::{ExportArgs, ExportFilter, export};
 use clio_store::{
-    AssocEdgeRecord, AssocKind, BeliefStore, ComplianceStore, DekProvider, HistoryStore,
-    LocalDevKms, PersonaStore, SqliteStore, Store, SubjectEraseSpec,
+    AssocEdgeRecord, AssocKind, BeliefStore, ComplianceStore, DekProvider, DestinationCustodyRow,
+    DestinationCustodyStore, HistoryStore, LocalDevKms, LocalEventIntent, LocalEventStore,
+    PersonaStore, SqliteStore, Store, SubjectEraseSpec,
 };
 use clio_types::{
     Actor, Bank, BeliefObject, ConfidenceEntry, EpisodicType, EpistemicKind, FailureRecord,
@@ -33,6 +34,7 @@ use clio_types::{
     SourceType, TaskRecord, TripleRecord,
 };
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) const T: &str = "2026-06-01T00:00:00Z";
@@ -339,6 +341,10 @@ pub(crate) fn args<'a>(
         filter,
         content_mode: mode,
         timestamp: "2026-09-20T00:00:00Z",
+        subject_id: None,
+        facts: None,
+        backend: None,
+        delivery: None,
     }
 }
 
@@ -361,6 +367,72 @@ pub(crate) fn export_at(
 
 pub(crate) fn read(f: &Fixture) -> String {
     std::fs::read_to_string(&f.path).unwrap()
+}
+
+/// A scratch root holding a staging directory and a destination path.
+pub(crate) struct Scratch {
+    pub(crate) root: PathBuf,
+}
+
+impl Scratch {
+    pub(crate) fn new() -> Self {
+        let root = std::env::temp_dir().join(unique("clio-compliance-export-subject"));
+        std::fs::create_dir_all(&root).expect("create the scratch root");
+        Self { root }
+    }
+
+    pub(crate) fn staging_dir(&self) -> PathBuf {
+        self.root.join("staging")
+    }
+
+    pub(crate) fn destination(&self) -> PathBuf {
+        self.root.join("out.bin")
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+/// The entries of a staging directory, sorted; empty when it is absent.
+pub(crate) fn staging_entries(dir: &Path) -> Vec<PathBuf> {
+    let mut entries: Vec<PathBuf> = match std::fs::read_dir(dir) {
+        Ok(read) => read.map(|entry| entry.expect("dir entry").path()).collect(),
+        Err(_) => Vec::new(),
+    };
+    entries.sort();
+    entries
+}
+
+/// A pending custody row and a matching event intent for `action_id`.
+pub(crate) fn seed_pending(
+    events: &dyn LocalEventStore,
+    custody: &dyn DestinationCustodyStore,
+    action_id: &str,
+    destination: &Path,
+) {
+    events
+        .record_intent(&LocalEventIntent {
+            action_id,
+            actor: "tester",
+            scope: "export_custody",
+            kind: "export_delivery",
+            event_time: T,
+        })
+        .expect("record intent");
+    custody
+        .save_pending(&DestinationCustodyRow {
+            action_id: action_id.to_owned(),
+            destination_path: destination.display().to_string(),
+            custody_owner: "clio".to_owned(),
+            required_action: "delivery".to_owned(),
+            state: "pending".to_owned(),
+            exception_reason: None,
+            updated_at: T.to_owned(),
+        })
+        .expect("save pending");
 }
 
 #[cfg(test)]

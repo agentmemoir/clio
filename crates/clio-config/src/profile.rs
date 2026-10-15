@@ -180,6 +180,7 @@ pub fn coding_tool_inventory(omit_sync: bool) -> Vec<ToolInventoryEntry> {
         "stats",
         "import",
         "import_provider",
+        "review_export",
         "diagnose",
         "verify",
         "doctor",
@@ -258,6 +259,13 @@ mod tests {
                 clio_types::mcp_tools::is_bound(entry.name),
                 "{} must be reported as the build binds it",
                 entry.name
+            );
+        }
+        let with_sync = coding_tool_inventory(false);
+        for bound in clio_types::mcp_tools::bound_tools() {
+            assert!(
+                with_sync.iter().any(|e| e.name == bound),
+                "{bound} is bound over MCP, so the inventory must list it"
             );
         }
         let store = inv.iter().find(|e| e.name == "store").expect("store");
