@@ -96,6 +96,25 @@ class PushTests(RepoCase):
         sha = self.git("rev-parse", "HEAD").stdout.strip()
         self.assertEqual(self.push(sha, self.clean).returncode, 0)
 
+    def test_git_push_refuses_leak(self) -> None:
+        remote = self.root / "remote.git"
+        self.git("init", "--bare", str(remote))
+        self.git("remote", "add", "origin", str(remote))
+        (self.root / ".git" / "hooks" / "pre-push").symlink_to(SHIM)
+        (self.root / "a.rs").write_text("LEAK\n")
+        self.git("add", "a.rs")
+        self.git("commit", "-qm", "leak")
+        result = subprocess.run(
+            ["git", "push", "origin", "master"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("found a leak", result.stdout + result.stderr)
+        self.assertNotIn("detached", self.git("worktree", "list").stdout)
+
     def test_main_local_hook_failure_cleans_worktree(self) -> None:
         write_hook(self.hooks / "20-fail.sh", "exit 1")
         self.assertNotEqual(self.push(self.clean).returncode, 0)

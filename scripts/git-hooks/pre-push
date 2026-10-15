@@ -9,7 +9,6 @@ cd "$root"
 common=$(git rev-parse --git-common-dir)
 main=$(cd "$common/.." && pwd)
 runner="$main/scripts/precommit.py"
-[ -f "$runner" ] || { echo 'pre-push: missing precommit runner' >&2; exit 1; }
 
 scratch=
 cleanup() {
@@ -34,6 +33,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         result=$?
         [ "$result" -eq 1 ] || exit "$result"
     fi
+    [ -f "$runner" ] || { echo 'pre-push: missing precommit runner' >&2; exit 1; }
     scratch=$(mktemp -d "${TMPDIR:-/tmp}/clio-pre-push.XXXXXX")
     git worktree add --quiet --detach "$scratch/tree" "$local_sha"
     (
@@ -42,7 +42,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         cd "$scratch/tree"
         export CLIO_PRECOMMIT_HOOKS="$main/.clio-hooks${CLIO_PRECOMMIT_HOOKS:+:$CLIO_PRECOMMIT_HOOKS}"
         # Bound the push gate, including any child a registered check starts.
-        python3 - "$runner" <<'PYTHON'
+        python3 -c '
 import os
 import signal
 import subprocess
@@ -57,7 +57,7 @@ except subprocess.TimeoutExpired:
     child.wait()
     print("pre-push: checks exceeded the push time budget", file=sys.stderr)
     sys.exit(1)
-PYTHON
+' "$runner"
     )
     cleanup
     scratch=

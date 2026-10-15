@@ -6,7 +6,7 @@ All notable changes to Clio. The format follows [Keep a Changelog](https://keepa
 
 ### Added
 
-- A pre-push hook checks all tracked files in the pushed tree with the commit-scoped checks and removes its temporary worktree after a pass or failure.
+- A pre-push hook checks all tracked files in the pushed tree with the commit-scoped checks and removes its temporary worktree after a pass or failure. [PR #210](https://github.com/agentmemoir/clio/pull/210)
 
 - A durable local compliance event layer: content-free intent and outcome events persist on SQLite and Postgres with action id, sequence, actor, scope, kind, and a redacted result; a failed intent write refuses the protected effect with no side effects, a failed outcome write leaves one pending row that reconciles by action id after reopen, and pruning removes only completed rows; a privileged local review queries and exports the ordered events and gaps, records custody for each captured copy, and every returned row omits the outcome result text. ([#194](https://github.com/agentmemoir/clio/pull/194))
 
