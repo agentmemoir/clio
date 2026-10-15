@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from precommit_testkit import LEAK_HOOK, RepoCase, write_hook
 

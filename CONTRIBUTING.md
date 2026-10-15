@@ -78,7 +78,7 @@ make precommit-list     # show which hooks that runs, and which it leaves out
 
 ### The commit hook
 
-A hook can also run on every commit, so a check that reads your change cannot be skipped by forgetting to ask for it. Two files, because git does not use one hook for every commit:
+A hook can also run on every commit or push, so a check that reads your change cannot be skipped by forgetting to ask for it. Three files: git does not use one hook for every commit, and a push runs its own hook:
 
 ```
 ln -s ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
