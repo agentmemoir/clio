@@ -138,6 +138,11 @@ jobs:
           fi
           echo "measuring against: ${GITHUB_BASE_REF:+$GITHUB_BASE_REF (remote form)}"
 
+      # Build-free and seconds long: an over-long file fails here before the
+      # toolchain is installed, so the job stops at the cheapest gate.
+      - name: Line limit (450)
+        run: make llc
+
       # The exact version, taken from the pin rather than from the `stable`
       # channel. Naming it here as well is deliberate: the action's own
       # documentation says an explicit input can override the toolchain file,
