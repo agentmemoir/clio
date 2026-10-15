@@ -27,7 +27,6 @@
 
 mod common;
 
-use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -66,7 +65,8 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Unique scratch directory for one scenario, the pid-nanos-counter pattern the
 /// sibling harnesses use.
-fn temp_dir(tag: &str) -> PathBuf {
+/// Unique scratch directory for one case, removed when the guard drops.
+fn temp_dir(tag: &str) -> common::Scratch {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
@@ -82,7 +82,7 @@ fn temp_dir(tag: &str) -> PathBuf {
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    dir
+    common::Scratch::adopt(dir)
 }
 
 /// A documented global flag before the verb must reach the surface, not be

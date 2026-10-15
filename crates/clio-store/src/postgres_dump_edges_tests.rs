@@ -21,11 +21,27 @@ use crate::pg_lock::lock_pg_test;
 use crate::pg_scoped_schema::ScopedSchema;
 use crate::postgres_backup_model::PgTable;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// A staging directory, removed when the guard drops.
+struct StageDir(PathBuf);
+
+impl StageDir {
+    /// The directory path.
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for StageDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A fresh staging directory, unique per call within and across processes.
-fn stage_dir(tag: &str) -> PathBuf {
+fn stage_dir(tag: &str) -> StageDir {
     let dir = std::env::temp_dir().join(format!(
         "clio-pg-{tag}-{}-{}",
         std::process::id(),
@@ -34,7 +50,7 @@ fn stage_dir(tag: &str) -> PathBuf {
             .map_or(0, |d| d.as_nanos())
     ));
     std::fs::create_dir_all(&dir).expect("create the stage dir");
-    dir
+    StageDir(dir)
 }
 
 /// Run one SQL batch on a fresh connection.
@@ -45,7 +61,7 @@ fn batch(url: &str, sql: &str) {
 
 /// The stage sink: one file per table, each handed path recorded.
 fn tracking_stage(
-    dir: PathBuf,
+    dir: &Path,
     handed: Rc<RefCell<Vec<PathBuf>>>,
 ) -> impl FnMut(&PgTable, usize) -> Result<(PathBuf, std::fs::File), clio_types::AmError> {
     move |_table, _ordinal| {
@@ -77,9 +93,11 @@ fn a_schema_without_an_items_table_dumps_and_reports_no_banks() {
     let dir = stage_dir("dump-no-items");
     let handed = Rc::new(RefCell::new(Vec::new()));
 
-    let facts =
-        crate::snapshot_postgres_into(scoped.url(), &mut tracking_stage(dir, Rc::clone(&handed)))
-            .expect("dump a plain schema");
+    let facts = crate::snapshot_postgres_into(
+        scoped.url(),
+        &mut tracking_stage(dir.path(), Rc::clone(&handed)),
+    )
+    .expect("dump a plain schema");
 
     // The one table was dumped and the banks list is empty: there is no
     // `items` table to read banks from.

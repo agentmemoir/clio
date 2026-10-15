@@ -40,8 +40,8 @@ const FACT: &str = "Tom goes on a walk every Friday";
 /// blanket refusal.
 const OTHER: &str = "Tom walks his dog on Monday mornings";
 
-/// Unique temp directory for one scenario.
-fn temp_dir(tag: &str) -> PathBuf {
+/// Unique temp directory for one scenario, removed when the guard drops.
+fn temp_dir(tag: &str) -> common::Scratch {
     // The counter is what makes this distinct: the process id is constant
     // inside one test binary, so clock-plus-pid alone repeats whenever two
     // calls land in the same tick, and two scenarios then share one
@@ -56,7 +56,7 @@ fn temp_dir(tag: &str) -> PathBuf {
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+    common::Scratch::adopt(dir)
 }
 
 /// The `clio` binary with a cleared environment plus the coverage pattern.
@@ -101,12 +101,15 @@ fn json_stdout(output: &Output) -> Value {
     })
 }
 
-/// A fresh scenario database path inside a per-test directory.
+/// A fresh scenario database path inside a per-test directory, with the
+/// directory guard the caller must hold for as long as it uses the path.
 ///
 /// `--db` takes the database *file*; the existing floor harness passes its
 /// directory, which SQLite refuses to open. This returns the file path.
-fn scenario(tag: &str) -> PathBuf {
-    temp_dir(tag).join("clio.db")
+fn scenario(tag: &str) -> (common::Scratch, PathBuf) {
+    let dir = temp_dir(tag);
+    let db = dir.join("clio.db");
+    (dir, db)
 }
 
 /// One `remember` of a repeated `text`, asserting the gate refused it with exit 1,
@@ -176,7 +179,7 @@ fn recall_gists(db: &Path, query: &str) -> Vec<String> {
 
 #[test]
 fn seven_identical_remembers_store_one_item_and_recall_returns_it_once() {
-    let db = scenario("seven");
+    let (_dir, db) = scenario("seven");
 
     let first = remember(&db, FACT, &[]);
     assert_eq!(first["pass"], Value::Bool(true));
@@ -218,7 +221,7 @@ fn seven_identical_remembers_store_one_item_and_recall_returns_it_once() {
 
 #[test]
 fn a_repeat_text_view_exits_one_and_names_the_reason() {
-    let db = scenario("exit-code");
+    let (_dir, db) = scenario("exit-code");
     remember(&db, FACT, &[]);
 
     let output = run(
@@ -246,7 +249,7 @@ fn a_repeat_text_view_exits_one_and_names_the_reason() {
 
 #[test]
 fn case_punctuation_and_whitespace_variants_are_duplicates() {
-    let db = scenario("variants");
+    let (_dir, db) = scenario("variants");
     remember(&db, FACT, &[]);
 
     for variant in [
@@ -265,7 +268,7 @@ fn case_punctuation_and_whitespace_variants_are_duplicates() {
 
 #[test]
 fn a_genuinely_different_fact_is_still_stored() {
-    let db = scenario("distinct");
+    let (_dir, db) = scenario("distinct");
     remember(&db, FACT, &[]);
 
     for text in [
@@ -288,7 +291,7 @@ fn a_genuinely_different_fact_is_still_stored() {
 
 #[test]
 fn force_writes_a_second_row_on_request() {
-    let db = scenario("force");
+    let (_dir, db) = scenario("force");
     let first = remember(&db, FACT, &[]);
     let forced = remember(&db, FACT, &["--allow-duplicate"]);
 
@@ -304,7 +307,7 @@ fn force_writes_a_second_row_on_request() {
 fn a_bank_that_already_holds_identical_rows_returns_one_hit() {
     // The read side must hold for rows written before the write-side rule
     // existed, so this seeds duplicates with --allow-duplicate and then recalls.
-    let db = scenario("preexisting");
+    let (_dir, db) = scenario("preexisting");
     for _ in 0..5 {
         remember(&db, FACT, &["--allow-duplicate"]);
     }
