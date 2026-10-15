@@ -76,6 +76,7 @@ from phase_sampler import (  # noqa: E402
     _accurate_tree_counters,
     _descendants,
     _read_counters,
+    # Read-only alias: assignment does not propagate; patch phase_sampler._PS_FIELDS.
     _PS_FIELDS,  # noqa: F401 - re-exported for the sampling tests
     _supported_ps_fields,  # noqa: F401 - re-exported for the sampling tests
 )

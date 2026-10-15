@@ -175,15 +175,18 @@ def _self_test() -> int:
         "raw secrets redacted",
         "example-credential" not in _json_text(redacted) and "abc" not in _json_text(redacted),
     )
+    # Labels and secrets stay in separate tuples so no static-analysis taint
+    # from the sample literals reaches the printed check names.
+    secret_labels = ("AWS access-key id", "GitHub token", "JWT", "Slack token")
     secret_samples = (
-        ("AWS access-key id", "AKIAIOSFODNN7EXAMPLE"),
-        ("GitHub token", "ghp_0123456789abcdefghijklmnopqrstuvwxyz"),
-        ("JWT", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature"),
+        "AKIAIOSFODNN7EXAMPLE",
+        "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature",
         # Split so the file text holds no scannable token; the sample is the
         # same string at run time.
-        ("Slack token", "xox" + "b-123456789012-123456789012-abcdefghijklmnop"),
+        "xox" + "b-123456789012-123456789012-abcdefghijklmnop",
     )
-    for label, sample in secret_samples:
+    for label, sample in zip(secret_labels, secret_samples, strict=True):
         rendered = _redact_text(sample)
         check(f"{label} redacted", sample not in rendered)
     try:

@@ -219,11 +219,12 @@ test:
 	$(if $(filter 0,$(GATE_PHASE_TIMER)),,python3 scripts/phase_timer.py --json "$(PHASE_TIMER_JSON)" --) \
 	$(CARGO) nextest run --locked $(PACKAGES) --profile ci
 
-# Fast, build-free line-limit check. Markdown is exempt. Runs as a `lint`
-# prerequisite so an over-long file fails in seconds instead of after clippy's
-# build, which is the whole reason it sits before the compiler.
+# Fast, build-free line-limit check over tracked and untracked working-tree
+# files, so a new file fails before it is staged. Markdown is exempt. Runs as a
+# `lint` prerequisite so an over-long file fails in seconds instead of after
+# clippy's build, which is the whole reason it sits before the compiler.
 llc:
-	@git ls-files -z -- \
+	@git ls-files -z --cached --others --exclude-standard -- \
 		'*.rs' '*.py' '*.sh' '*.bash' \
 		'*.js' '*.ts' '*.jsx' '*.tsx' \
 		'*.go' '*.java' '*.kt' '*.scala' \
@@ -239,7 +240,7 @@ fmt:
 
 # lint last: clippy reuses a prior build's artifacts, but a build does not reuse
 # clippy's, so linting first compiled the workspace twice.
-check: fmt test lint
+check: llc fmt test lint
 
 run:
 	$(CARGO) run --locked --bin $(BIN)
