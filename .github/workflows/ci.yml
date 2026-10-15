@@ -333,6 +333,11 @@ jobs:
           CHANGELOG_BASE: ${{ env.SCOPED_BASE }}
         run: make scripts-check-changelog
 
+      # Whether prose stays one paragraph per line. Runs no build.
+      - name: Prose check
+        if: always()
+        run: make scripts-check-prose
+
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
       - name: Owned lookup acceptance

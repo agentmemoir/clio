@@ -19,8 +19,7 @@
 
 ## locomo
 
-Scored probes: 20 (failed 0) [tier stub, 20 probes; not quotable]; overall accuracy 0.0000; token F1 0.0243
-Ingestion: 2 instances, 928 turns (0 rejected by admission)
+Scored probes: 20 (failed 0) [tier stub, 20 probes; not quotable]; overall accuracy 0.0000; token F1 0.0243 Ingestion: 2 instances, 928 turns (0 rejected by admission)
 
 | Category [tier stub, 20 probes; not quotable] | Count | Accuracy | Token F1 | p95 retrieval ms |
 |---|---|---|---|---|

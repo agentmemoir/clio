@@ -10,8 +10,7 @@
 
 ## longmemeval
 
-Scored probes: 6 (failed 0); overall accuracy 0.0000; token F1 0.1526
-Ingestion: 6 instances, 96 turns (1 rejected by admission)
+Scored probes: 6 (failed 0); overall accuracy 0.0000; token F1 0.1526 Ingestion: 6 instances, 96 turns (1 rejected by admission)
 
 | Category | Count | Accuracy | Token F1 | p95 retrieval ms |
 |---|---|---|---|---|

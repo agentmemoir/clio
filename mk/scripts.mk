@@ -13,7 +13,7 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-coverage-policy scripts-check-gate-boundary \
 	scripts-check-gate-install scripts-check-quick \
 	scripts-check-ci-parity scripts-check-compose-model \
-	scripts-check-changelog
+	scripts-check-changelog scripts-check-prose
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -82,3 +82,10 @@ scripts-check-compose-model:
 scripts-check-changelog:
 	python3 scripts/changelog_fragments.py --self-test
 	python3 scripts/changelog_fragments.py --check
+
+# Whether prose stays one paragraph per line, so the reader's viewer does the
+# wrapping. Reports indented continuations and consecutive prose lines outside
+# fenced blocks, HTML comments, and YAML frontmatter. Runs no build.
+scripts-check-prose:
+	python3 scripts/check_prose.py --self-test
+	python3 scripts/check_prose.py
