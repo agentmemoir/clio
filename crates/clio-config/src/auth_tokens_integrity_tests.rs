@@ -287,8 +287,8 @@ fn a_store_this_process_cannot_read_is_a_corrupt_store() {
     //
     // Only a process the mode bits restrict can observe that refusal: root, and
     // any process holding `CAP_DAC_OVERRIDE`, reads a 0200 file. The process's
-    // own read of the locked store decides which of the two cases this is, so a
-    // root run reports the skip rather than failing on a refusal it cannot see.
+    // own read of the locked store decides which case this is, and each case
+    // asserts what it can see, so the test never passes without asserting.
     let path = scratch("unreadable");
     save_auth_tokens(&path, &[sample_record("a")]).expect("save");
     #[cfg(unix)]
@@ -301,7 +301,12 @@ fn a_store_this_process_cannot_read_is_a_corrupt_store() {
             assert!(err.message.contains("failed to read token store"), "{err}");
             assert!(err.message.contains(&path.display().to_string()), "{err}");
         } else {
-            eprintln!("skipping the read refusal: this process reads a 0200 file");
+            // The mode bits do not restrict this process, so the store reads as
+            // the one record it holds: the refusal is not observable here, and
+            // the store is still not read as an empty one.
+            let records = load_auth_tokens(&path).expect("a DAC-bypassing process reads it");
+            assert_eq!(records.len(), 1, "the locked store still holds its record");
+            assert_eq!(records[0].label, "a");
         }
         // The bytes are untouched by a refusal.
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("restore");

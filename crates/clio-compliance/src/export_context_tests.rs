@@ -161,12 +161,7 @@ fn erased_subject_context_never_reappears_in_plaintext_export() {
         .create_memory_item(&context_item(&item_id, &bank, &subject, context), "tester")
         .expect("seed context item");
     let path = dest_path("ctx-erased");
-    let f = Fixture {
-        store,
-        bank,
-        dest: path.as_str().to_owned(),
-        path,
-    };
+    let f = Fixture { store, bank, path };
     let request = unique("req");
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(f.bank.clone()), Actor::Harness);

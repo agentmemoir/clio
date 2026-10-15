@@ -53,7 +53,7 @@ fn ciphertext_backup_bundle_with_domain_records_still_imports() {
     );
 
     let h = Harness::new();
-    let report = import(&h.args(&h.ctx(), h.policy(), &f.dest, false, false, None))
+    let report = import(&h.args(&h.ctx(), h.policy(), f.path.as_str(), false, false, None))
         .expect("a content-free backup bundle must still import");
     assert!(report.applied);
     assert_eq!(report.would_overwrite, 0);
@@ -93,12 +93,7 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
         .expect("seed an expandable context");
 
     let path = export_fixtures::dest_path("ctx-bound");
-    let f = export_fixtures::Fixture {
-        store,
-        bank,
-        dest: path.as_str().to_owned(),
-        path,
-    };
+    let f = export_fixtures::Fixture { store, bank, path };
     let export_ctx = export_fixtures::ctx(&f, Actor::Harness);
     export_bundle(&export_fixtures::args(
         &f,
@@ -118,7 +113,7 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
     );
 
     let h = Harness::new();
-    import(&h.args(&h.ctx(), h.policy(), &f.dest, false, false, None))
+    import(&h.args(&h.ctx(), h.policy(), f.path.as_str(), false, false, None))
         .expect("a bundle with a dropped context still imports");
     let restored = h
         .store

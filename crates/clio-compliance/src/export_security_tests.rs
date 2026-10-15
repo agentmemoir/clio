@@ -139,12 +139,7 @@ fn compliance_purged_content_fails_export_closed() {
         })
         .unwrap();
     let path = dest_path("derived");
-    let f = Fixture {
-        store,
-        bank,
-        dest: path.as_str().to_owned(),
-        path,
-    };
+    let f = Fixture { store, bank, path };
     let ctx = ctx(&f, Actor::Harness);
     let err = export(&args(
         &f,

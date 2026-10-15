@@ -29,31 +29,36 @@ use std::path::{Path, PathBuf};
 /// each other's bundle. The guard owns that path, so a finished test leaves
 /// nothing behind under the shared temp root: `Fixture` holds one, and a test
 /// that builds its own export arguments can hold one directly.
-pub(crate) struct DestPath(PathBuf);
+///
+/// The string form is built once, at construction, so `ExportArgs` can borrow it
+/// for as long as it borrows the fixture, and a path whose bytes are not UTF-8 is
+/// converted lossily rather than panicking.
+pub(crate) struct DestPath {
+    path: PathBuf,
+    text: String,
+}
 
 impl DestPath {
     /// The destination path, for reading the written bundle back.
     pub(crate) fn as_path(&self) -> &Path {
-        &self.0
+        &self.path
     }
 
     /// The destination as a string, for `ExportArgs::destination`.
-    ///
-    /// The path is the system temp dir joined with a generated ASCII name, so a
-    /// failure here is a bug and panics rather than exporting to a path no
-    /// assertion can name.
     pub(crate) fn as_str(&self) -> &str {
-        self.0.to_str().expect("the temp path is valid UTF-8")
+        &self.text
     }
 }
 
 impl Drop for DestPath {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
 /// A unique `am-export-<name>-*.json` path under the system temp dir.
 pub(crate) fn dest_path(name: &str) -> DestPath {
-    DestPath(std::env::temp_dir().join(format!("am-export-{}.json", unique(name))))
+    let path = std::env::temp_dir().join(format!("am-export-{}.json", unique(name)));
+    let text = path.to_string_lossy().into_owned();
+    DestPath { path, text }
 }

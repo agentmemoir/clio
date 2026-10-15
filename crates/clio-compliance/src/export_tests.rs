@@ -299,7 +299,6 @@ pub(crate) fn seed(store: &SqliteStore, bank: &str) {
 pub(crate) struct Fixture {
     pub(crate) store: SqliteStore,
     pub(crate) bank: String,
-    pub(crate) dest: String,
     pub(crate) path: DestPath,
 }
 
@@ -308,13 +307,7 @@ pub(crate) fn fixture(name: &str) -> Fixture {
     let bank = unique("bank");
     seed(&store, &bank);
     let path = dest_path(name);
-    let dest = path.as_str().to_owned();
-    Fixture {
-        store,
-        bank,
-        dest,
-        path,
-    }
+    Fixture { store, bank, path }
 }
 
 pub(crate) fn ctx(f: &Fixture, actor: Actor) -> OpContext {
@@ -334,7 +327,7 @@ pub(crate) fn args<'a>(
         history: &f.store,
         belief: &f.store,
         ctx,
-        destination: &f.dest,
+        destination: f.path.as_str(),
         filter,
         content_mode: mode,
         timestamp: "2026-09-20T00:00:00Z",
