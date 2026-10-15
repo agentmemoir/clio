@@ -21,6 +21,10 @@
 //!
 //! Keep this module focused on the COPY text reader.
 
+#[cfg(test)]
+#[path = "restore_authority_copy_tests.rs"]
+mod restore_authority_copy_tests;
+
 use super::ClassifyRefusal;
 use clio_types::{AmError, ErrorCode};
 use std::io::BufRead;
