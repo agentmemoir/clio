@@ -10,8 +10,7 @@
 
 ## locomo
 
-Scored probes: 5 (failed 0); overall accuracy 0.2265; token F1 0.2127
-Ingestion: 1 instances, 509 turns (0 rejected by admission)
+Scored probes: 5 (failed 0); overall accuracy 0.2265; token F1 0.2127 Ingestion: 1 instances, 509 turns (0 rejected by admission)
 
 | Category | Count | Accuracy | Token F1 | p95 retrieval ms |
 |---|---|---|---|---|
