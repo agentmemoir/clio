@@ -39,15 +39,12 @@ use std::sync::Arc;
 
 pub(crate) const T: &str = "2026-06-01T00:00:00Z";
 
+pub(crate) use crate::export_dest_fixtures::{DestPath, dest_path};
 use crate::test_unique::unique;
 
 pub(crate) fn store() -> SqliteStore {
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     SqliteStore::open_in_memory(kms).unwrap()
-}
-
-pub(crate) fn dest_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("am-export-{}.json", unique(name)))
 }
 
 pub(crate) fn item(
@@ -302,8 +299,7 @@ pub(crate) fn seed(store: &SqliteStore, bank: &str) {
 pub(crate) struct Fixture {
     pub(crate) store: SqliteStore,
     pub(crate) bank: String,
-    pub(crate) dest: String,
-    pub(crate) path: std::path::PathBuf,
+    pub(crate) path: DestPath,
 }
 
 pub(crate) fn fixture(name: &str) -> Fixture {
@@ -311,13 +307,7 @@ pub(crate) fn fixture(name: &str) -> Fixture {
     let bank = unique("bank");
     seed(&store, &bank);
     let path = dest_path(name);
-    let dest = path.to_string_lossy().into_owned();
-    Fixture {
-        store,
-        bank,
-        dest,
-        path,
-    }
+    Fixture { store, bank, path }
 }
 
 pub(crate) fn ctx(f: &Fixture, actor: Actor) -> OpContext {
@@ -337,7 +327,7 @@ pub(crate) fn args<'a>(
         history: &f.store,
         belief: &f.store,
         ctx,
-        destination: &f.dest,
+        destination: f.path.as_str(),
         filter,
         content_mode: mode,
         timestamp: "2026-09-20T00:00:00Z",
@@ -366,7 +356,7 @@ pub(crate) fn export_at(
 }
 
 pub(crate) fn read(f: &Fixture) -> String {
-    std::fs::read_to_string(&f.path).unwrap()
+    std::fs::read_to_string(f.path.as_path()).unwrap()
 }
 
 /// A scratch root holding a staging directory and a destination path.

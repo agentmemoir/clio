@@ -34,6 +34,11 @@
 //! keystore is asked only whether a second key is also there, which it can answer
 //! without writing anything. This is also the path CI takes.
 
+// Every harness in this directory includes this module, and only some of them
+// use the scratch guard below. The other shared harness support modules carry
+// the same allowance for the same reason.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -75,4 +80,38 @@ fn key_file() -> &'static PathBuf {
 pub fn seed_key(cmd: &mut Command) -> &mut Command {
     cmd.env("CLIO_KEY_FILE", key_file())
         .env("CLIO_KEY_FILE_ONLY", "1")
+}
+
+/// A per-test scratch directory, removed when the guard drops.
+///
+/// Holding the guard is what makes the test own the directory: a finished test
+/// leaves nothing behind under the shared temp root, and a panic mid-test still
+/// removes it. Each harness keeps its own naming and adopts the directory here.
+pub(crate) struct Scratch(PathBuf);
+
+impl Scratch {
+    /// Adopt a directory this test created, removing it when the guard drops.
+    pub(crate) fn adopt(dir: PathBuf) -> Self {
+        Self(dir)
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for Scratch {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }

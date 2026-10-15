@@ -25,7 +25,7 @@
 use crate::bundle::{BundleEnvelope, ExportContentMode, ExportEntities};
 use crate::export::{ExportArgs, ExportFilter, export};
 use crate::export_mask::{mask_beliefs, mask_triples};
-use crate::export_tests::{T, belief, dest_path, item, store, triple};
+use crate::export_tests::{DestPath, T, belief, dest_path, item, store, triple};
 use crate::import::import;
 use crate::import_fixture::{Harness, entry, write_bundle};
 use crate::test_unique::unique;
@@ -81,11 +81,11 @@ fn seed_two_beliefs_and_triples(store: &SqliteStore, bank: &str, subject: &str) 
     }
 }
 
-/// Exports `bank` from `source` into a fresh temp file in `mode` and returns
-/// the destination path string.
-fn export_bundle(source: &SqliteStore, bank: &str, mode: ExportContentMode) -> String {
+/// Exports `bank` from `source` into a fresh temp file in `mode` and returns the
+/// destination guard, which removes the file when it drops.
+fn export_bundle(source: &SqliteStore, bank: &str, mode: ExportContentMode) -> DestPath {
     let dest = dest_path("f06-backup");
-    let dest_str = dest.to_string_lossy().into_owned();
+    let dest_str = dest.as_str().to_owned();
     let ctx = OpContext::new(Bank::new(bank.to_owned()), Actor::Harness);
     export(&ExportArgs {
         store: source,
@@ -104,7 +104,7 @@ fn export_bundle(source: &SqliteStore, bank: &str, mode: ExportContentMode) -> S
         delivery: None,
     })
     .expect("export succeeds");
-    dest_str
+    dest
 }
 
 /// Every triple's SPO fields carry the per-record, per-field sealed
@@ -143,7 +143,7 @@ fn backup_bundle_of_two_beliefs_restores_into_a_fresh_store() {
     let dest = export_bundle(&source, &bank, ExportContentMode::CiphertextBackup);
 
     // The exported bundle carries per-record placeholders, not one constant.
-    let text = std::fs::read_to_string(&dest).unwrap();
+    let text = std::fs::read_to_string(dest.as_path()).unwrap();
     let envelope: BundleEnvelope = serde_json::from_str(&text).unwrap();
     let propositions: Vec<&str> = envelope
         .entities
@@ -163,7 +163,7 @@ fn backup_bundle_of_two_beliefs_restores_into_a_fresh_store() {
 
     // Restore into a fresh bank.
     let h = Harness::new();
-    let report = import(&h.args(&h.ctx(), h.policy(), &dest, false, false, None))
+    let report = import(&h.args(&h.ctx(), h.policy(), dest.as_str(), false, false, None))
         .expect("a ciphertext_backup bundle of two beliefs must restore cleanly");
     assert_eq!(report.would_create, 4, "two opaque carriers + two beliefs");
     let beliefs = h.store.list_beliefs(&h.bank).unwrap();

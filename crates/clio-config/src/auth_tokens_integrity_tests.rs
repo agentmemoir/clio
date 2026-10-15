@@ -284,16 +284,30 @@ fn a_store_this_process_cannot_read_is_a_corrupt_store() {
     // passes it — nobody but the owner can see it. The read is what then
     // fails, and it fails closed as a corrupt store rather than being read as
     // an empty one. The refusal names the path and writes nothing.
+    //
+    // Only a process the mode bits restrict can observe that refusal: root, and
+    // any process holding `CAP_DAC_OVERRIDE`, reads a 0200 file. The process's
+    // own read of the locked store decides which case this is, and each case
+    // asserts what it can see, so the test never passes without asserting.
     let path = scratch("unreadable");
     save_auth_tokens(&path, &[sample_record("a")]).expect("save");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o200)).expect("lock it down");
-        let err = load_auth_tokens(&path).expect_err("unreadable");
-        assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{err}");
-        assert!(err.message.contains("failed to read token store"), "{err}");
-        assert!(err.message.contains(&path.display().to_string()), "{err}");
+        if fs::read(&path).is_err() {
+            let err = load_auth_tokens(&path).expect_err("unreadable");
+            assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{err}");
+            assert!(err.message.contains("failed to read token store"), "{err}");
+            assert!(err.message.contains(&path.display().to_string()), "{err}");
+        } else {
+            // The mode bits do not restrict this process, so the store reads as
+            // the one record it holds: the refusal is not observable here, and
+            // the store is still not read as an empty one.
+            let records = load_auth_tokens(&path).expect("a DAC-bypassing process reads it");
+            assert_eq!(records.len(), 1, "the locked store still holds its record");
+            assert_eq!(records[0].label, "a");
+        }
         // The bytes are untouched by a refusal.
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("restore");
         assert_eq!(load_auth_tokens(&path).expect("readable again").len(), 1);

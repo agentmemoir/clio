@@ -375,6 +375,10 @@ fn member_error(member: &str, error: &AmError) -> AmError {
 #[path = "create_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "create_refusal_tests.rs"]
+mod refusal_tests;
+
 /// The key size the create records in the manifest, which a restore's space
 /// pre-flight reserves against.
 #[cfg(test)]

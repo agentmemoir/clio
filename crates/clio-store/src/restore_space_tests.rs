@@ -351,6 +351,28 @@ fn the_production_check_refuses_a_path_that_is_not_a_directory() {
     );
 }
 
+/// Whether the mode bits stop this process writing into `dir`.
+///
+/// Root, and any process holding `CAP_DAC_OVERRIDE`, writes into a directory
+/// whatever its mode, so a test that asserts a write refusal cannot observe one
+/// there. The probe asks the question directly instead of reading the uid, and
+/// it removes the file it created when the write is allowed.
+#[cfg(unix)]
+fn write_is_refused(dir: &Path) -> bool {
+    let probe = dir.join(".write-probe");
+    match std::fs::write(&probe, b"x") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            false
+        }
+        Err(_) => true,
+    }
+}
+
+/// The refusal is only observable to a process the mode bits restrict, so the
+/// test asks the process's own access which case this is: a restricted process
+/// gets the refusal, and a process that bypasses the mode bits gets the answer
+/// the space it found allows.
 #[cfg(unix)]
 #[test]
 fn the_production_check_refuses_a_directory_that_denies_writes() {
@@ -360,11 +382,17 @@ fn the_production_check_refuses_a_directory_that_denies_writes() {
     std::fs::create_dir_all(&locked).expect("create the locked directory");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500))
         .expect("remove write permission");
-    let error = DiskSpace
-        .can_hold(&locked, 1)
-        .expect_err("a read-only directory must refuse");
-    assert_eq!(error.code, ErrorCode::InvalidArgument);
-    assert!(error.message.contains("not writable"), "{}", error.message);
+    if write_is_refused(&locked) {
+        let error = DiskSpace
+            .can_hold(&locked, 1)
+            .expect_err("a read-only directory must refuse");
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert!(error.message.contains("not writable"), "{}", error.message);
+    } else {
+        DiskSpace
+            .can_hold(&locked, 1)
+            .expect("a DAC-bypassing process passes the writability probe");
+    }
     // Restore the mode so the scratch cleanup can remove the directory.
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
         .expect("restore write permission");
