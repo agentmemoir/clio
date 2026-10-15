@@ -44,6 +44,7 @@ SHELL_EXTRA = (
     "scripts/gate-shim",
     "scripts/git-hooks/pre-commit",
     "scripts/git-hooks/pre-merge-commit",
+    "scripts/git-hooks/pre-push",
 )
 
 #: TOML accepts a quoted key, so `"default-members" = [...]` is the same key.

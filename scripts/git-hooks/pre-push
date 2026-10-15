@@ -1,0 +1,64 @@
+#!/bin/sh
+# Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+# SPDX-License-Identifier: Apache-2.0
+# Check the pushed tree, even when the current working tree has other bytes.
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+common=$(git rev-parse --git-common-dir)
+main=$(cd "$common/.." && pwd)
+runner="$main/scripts/precommit.py"
+[ -f "$runner" ] || { echo 'pre-push: missing precommit runner' >&2; exit 1; }
+
+scratch=
+cleanup() {
+    if [ -n "$scratch" ]; then
+        git worktree remove --force "$scratch/tree" >/dev/null 2>&1 || :
+        rm -rf "$scratch"
+    fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # An all-zero object name means deletion (local) or a new branch (remote).
+    case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+    case "$remote_sha" in
+        *[!0]*) base=$remote_sha ;;
+        *) base=$(git merge-base "$local_sha" refs/remotes/origin/master) ;;
+    esac
+    if git diff --quiet --diff-filter=d "$base" "$local_sha" --; then
+        continue
+    else
+        result=$?
+        [ "$result" -eq 1 ] || exit "$result"
+    fi
+    scratch=$(mktemp -d "${TMPDIR:-/tmp}/clio-pre-push.XXXXXX")
+    git worktree add --quiet --detach "$scratch/tree" "$local_sha"
+    (
+        # Git exports paths for the caller's tree. Clear them for this tree.
+        unset $(git rev-parse --local-env-vars)
+        cd "$scratch/tree"
+        export CLIO_PRECOMMIT_HOOKS="$main/.clio-hooks${CLIO_PRECOMMIT_HOOKS:+:$CLIO_PRECOMMIT_HOOKS}"
+        # Bound the push gate, including any child a registered check starts.
+        python3 - "$runner" <<'PYTHON'
+import os
+import signal
+import subprocess
+import sys
+
+child = subprocess.Popen([sys.executable, sys.argv[1], "--commit", "--all-files"],
+                         start_new_session=True)
+try:
+    sys.exit(child.wait(timeout=290))
+except subprocess.TimeoutExpired:
+    os.killpg(child.pid, signal.SIGKILL)
+    child.wait()
+    print("pre-push: checks exceeded the push time budget", file=sys.stderr)
+    sys.exit(1)
+PYTHON
+    )
+    cleanup
+    scratch=
+done

@@ -46,6 +46,7 @@ scripts-check-precommit:
 	python3 scripts/test_precommit_scopes.py
 	python3 scripts/test_precommit_shim.py
 	python3 scripts/test_precommit_all_files.py
+	python3 scripts/test_pre_push.py
 
 # Whether the coverage surface can still measure one run and report it once. The test/report split gives hygiene steps a boundary: remove old selected binaries before building, drop unreadable buffers and foreign binaries before the report, and use a merge mode that isolates a bad buffer; the package diagnostic builds in its own instrumented directory. These protections are invisible to a passing run, which is why nothing else in the tree would notice their removal. Runs no build and no coverage command.
 scripts-check-coverage-surface:

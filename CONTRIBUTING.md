@@ -83,7 +83,10 @@ A hook can also run on every commit, so a check that reads your change cannot be
 ```
 ln -s ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
 ln -s ../../scripts/git-hooks/pre-merge-commit .git/hooks/pre-merge-commit
+ln -s ../../scripts/git-hooks/pre-push .git/hooks/pre-push
 ```
+
+The push hook checks every tracked file in the pushed commit with the commit-scoped checks. It uses a detached temporary worktree, so local edits cannot hide a finding. A push with only deletions needs no scan. New branches use the merge-base with `origin/master`. The hook removes the worktree after a pass or a failure. Machine-local executable checks must live on storage that permits execution. Keep these checks fast; the push check has a five-minute budget.
 
 The second is not a duplicate. `git merge` does not consult `pre-commit` when a merge completes on its own: it invokes `pre-merge-commit` instead, and the only thing that would connect the two is a sample template git ships commented out. Without the second link, a merge commits with no check at all. A merge that needs conflict resolution is the other way round: git does not run `pre-merge-commit` there, and runs `pre-commit` when you commit the resolved result. Between the two, every merge is checked once.
 
