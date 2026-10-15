@@ -14,6 +14,24 @@ fn temp_root(name: &str) -> std::path::PathBuf {
     dir
 }
 
+/// Whether the mode bits stop this process writing into `dir`.
+///
+/// Root, and any process holding `CAP_DAC_OVERRIDE`, writes into a directory
+/// whatever its mode, so a test that asserts a write refusal cannot observe one
+/// there. The probe asks the question directly instead of reading the uid, and
+/// it removes the file it created when the write is allowed.
+#[cfg(unix)]
+fn write_is_refused(dir: &std::path::Path) -> bool {
+    let probe = dir.join(".write-probe");
+    match std::fs::write(&probe, b"x") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            false
+        }
+        Err(_) => true,
+    }
+}
+
 #[test]
 fn materialize_writes_every_asset_for_the_target() {
     let root = temp_root("full-arm64");
@@ -108,9 +126,23 @@ fn a_failed_backup_is_reported_not_silently_overwritten() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o555))
             .expect("make the root read-only");
-        let err = materialize(&root, ComposeTarget::MacArm64)
-            .expect_err("a failed backup must fail the materialize");
-        assert!(err.contains("cannot back up"), "{err}");
+        if write_is_refused(&root) {
+            let err = materialize(&root, ComposeTarget::MacArm64)
+                .expect_err("a failed backup must fail the materialize");
+            assert!(err.contains("cannot back up"), "{err}");
+        } else {
+            // This process bypasses the mode bits, so the backup succeeds and
+            // the hand edit survives beside the file it was taken from.
+            materialize(&root, ComposeTarget::MacArm64)
+                .expect("a DAC-bypassing process backs the edit up");
+            let backups: Vec<_> = std::fs::read_dir(&root)
+                .expect("read the root")
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.starts_with("compose.yml.bak-"))
+                .collect();
+            assert_eq!(backups.len(), 1, "the hand edit was backed up: {backups:?}");
+        }
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755))
             .expect("restore permissions");
     }

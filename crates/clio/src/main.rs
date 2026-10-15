@@ -316,6 +316,10 @@ mod help_flags_test_support;
 mod tests;
 
 #[cfg(test)]
+#[path = "main_mcp_tests.rs"]
+mod mcp_tests;
+
+#[cfg(test)]
 #[path = "main_help_topic_tests.rs"]
 mod help_topic_tests;
 

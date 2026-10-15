@@ -36,6 +36,7 @@ pub mod container;
 pub mod create;
 pub mod dump_meta;
 pub mod extract;
+mod extract_dump_tables;
 pub mod head_sink;
 pub mod inventory;
 mod key_member;

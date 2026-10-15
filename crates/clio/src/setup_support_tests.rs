@@ -154,12 +154,39 @@ pub(crate) fn ensure_test_key() {
     clio_config::secret_seal::test_key::install_process_key(TEST_SEAL_KEY);
 }
 
-/// A fresh unique temp directory for one test.
+/// A per-test scratch directory, removed when the guard drops.
+///
+/// Holding the guard is what makes the test own the directory: a finished test
+/// leaves nothing behind under the shared temp root, and a panic mid-test still
+/// removes it.
+pub(crate) struct TempDir(PathBuf);
+
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A fresh unique temp directory for one test, removed when the guard drops.
 ///
 /// Installing the shared test key here keeps every setup suite off the machine's
 /// real key store: without it, the first test that writes a credential to the
 /// deployment file would ask the operating system for a Clio encryption key.
-pub(crate) fn temp_dir(tag: &str) -> PathBuf {
+pub(crate) fn temp_dir(tag: &str) -> TempDir {
     ensure_test_key();
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -170,7 +197,7 @@ pub(crate) fn temp_dir(tag: &str) -> PathBuf {
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+    TempDir(dir)
 }
 
 /// An injected environment lookup that points `CLIO_DEPLOYMENT_CONFIG` at `path`

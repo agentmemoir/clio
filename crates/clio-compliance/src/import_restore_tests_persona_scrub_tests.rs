@@ -257,7 +257,7 @@ fn persona_import_staging_matches_the_export_side_context_contract() {
         .put_preference_state(&pref_row(&source_bank, Some(SECRET)), "tester")
         .unwrap();
     let dest = dest_path("f06-persona-contract");
-    let dest_str = dest.to_string_lossy().into_owned();
+    let dest_str = dest.as_str().to_owned();
     let ctx = OpContext::new(Bank::new(source_bank), Actor::Harness);
     export(&ExportArgs {
         store: &source,
@@ -278,7 +278,7 @@ fn persona_import_staging_matches_the_export_side_context_contract() {
     .expect("export succeeds");
 
     // The exported bundle carries the scrubbed value, not the raw secret.
-    let text = std::fs::read_to_string(&dest).unwrap();
+    let text = std::fs::read_to_string(dest.as_path()).unwrap();
     assert!(!text.contains("sk-test-1234567890"));
     let envelope: BundleEnvelope = serde_json::from_str(&text).unwrap();
     assert_eq!(

@@ -41,7 +41,7 @@ fn flags(parts: &[&[&str]]) -> Vec<String> {
 }
 
 struct Fixture {
-    dir: PathBuf,
+    dir: crate::setup_support_tests::TempDir,
     config: PathBuf,
     compose: PathBuf,
 }

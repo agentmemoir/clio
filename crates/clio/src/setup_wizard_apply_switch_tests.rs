@@ -44,7 +44,7 @@ fn flags(parts: &[&[&str]]) -> Vec<String> {
 
 /// One temp directory with the config and compose paths a run uses.
 struct Fixture {
-    dir: PathBuf,
+    dir: crate::setup_support_tests::TempDir,
     config: PathBuf,
     compose: PathBuf,
 }

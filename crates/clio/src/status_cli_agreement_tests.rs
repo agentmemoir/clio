@@ -67,7 +67,7 @@ fn flags(parts: &[&[&str]]) -> Vec<String> {
 /// store, not that a Postgres is reachable.
 struct WrittenConfig {
     config: PathBuf,
-    dir: PathBuf,
+    dir: crate::setup_support_tests::TempDir,
 }
 
 impl WrittenConfig {

@@ -149,3 +149,21 @@ pub(crate) fn names_with_extension(dir: &Path, extension: &str) -> Vec<String> {
         .filter(|name| has_extension(name, extension))
         .collect()
 }
+
+/// Whether the mode bits stop this process writing into `dir`.
+///
+/// Root, and any process holding `CAP_DAC_OVERRIDE`, writes into a directory
+/// whatever its mode, so a test that asserts a write refusal cannot observe one
+/// there. The probe asks the question directly instead of reading the uid, and
+/// it removes the file it created when the write is allowed.
+#[cfg(unix)]
+pub(crate) fn write_is_refused(dir: &Path) -> bool {
+    let probe = dir.join(".write-probe");
+    match std::fs::write(&probe, b"x") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            false
+        }
+        Err(_) => true,
+    }
+}

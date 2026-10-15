@@ -138,6 +138,8 @@ pub use validate::{ValidateAction, ValidateArgs, ValidateOutcome, validate};
 // the suites themselves are declared by their owning production files.
 pub(crate) use export_subject::export_subject_scenarios_tests;
 #[cfg(test)]
+mod export_dest_fixtures;
+#[cfg(test)]
 mod export_tests;
 #[cfg(test)]
 mod import_fixture;

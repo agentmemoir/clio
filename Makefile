@@ -142,7 +142,7 @@ PROFILE_FLAG := $(if $(strip $(PROFILE)),--profile $(PROFILE),)
 # would skip its stray profiles.
 CLEAN_FIND := find . \( -path ./.git -o -path ./private \) -prune -o
 
-.PHONY: help build compile test lint fmt check run install docs docs-open \
+.PHONY: help build compile test lint llc fmt check run install docs docs-open \
 	sweep sweep-clean clean clean-models precommit precommit-list \
 	ritual scripts-check scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-lint-scope scripts-check-toolchain-pin scripts-check-span \
@@ -219,7 +219,20 @@ test:
 	$(if $(filter 0,$(GATE_PHASE_TIMER)),,python3 scripts/phase_timer.py --json "$(PHASE_TIMER_JSON)" --) \
 	$(CARGO) nextest run --locked $(PACKAGES) --profile ci
 
-lint:
+# Fast, build-free line-limit check over tracked and untracked working-tree
+# files, so a new file fails before it is staged. Markdown is exempt. Runs as a
+# `lint` prerequisite so an over-long file fails in seconds instead of after
+# clippy's build, which is the whole reason it sits before the compiler.
+llc:
+	@git ls-files -z --cached --others --exclude-standard -- \
+		'*.rs' '*.py' '*.sh' '*.bash' \
+		'*.js' '*.ts' '*.jsx' '*.tsx' \
+		'*.go' '*.java' '*.kt' '*.scala' \
+		'*.c' '*.h' '*.cc' '*.hh' '*.cpp' '*.hpp' '*.cxx' '*.hxx' \
+		'*.rb' '*.php' '*.swift' '*.m' '*.mm' \
+		| xargs -0 -r awk 'FNR == 451 { printf "ERROR: %s exceeds 450 lines\n", FILENAME; failed = 1; nextfile } END { exit failed }'
+
+lint: llc
 	cargo clippy $(PACKAGES) --all-targets --all-features --locked
 
 fmt:
@@ -227,7 +240,7 @@ fmt:
 
 # lint last: clippy reuses a prior build's artifacts, but a build does not reuse
 # clippy's, so linting first compiled the workspace twice.
-check: fmt test lint
+check: llc fmt test lint
 
 run:
 	$(CARGO) run --locked --bin $(BIN)
