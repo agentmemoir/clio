@@ -84,15 +84,20 @@ def declared_targets(crates: dict[str, Path]) -> dict[str, set[str]]:
     """
     out: dict[str, set[str]] = {}
     for crate_dir in crates.values():
-        tests_dir = crate_dir / "tests"
-        if not tests_dir.is_dir():
-            continue
-        for entry in sorted(tests_dir.iterdir()):
-            if entry.is_file() and entry.suffix == ".rs" and entry.name != "mod.rs":
-                out.setdefault(entry.stem, set()).update(modules_in_target(entry))
-            elif entry.is_dir():
-                main = entry / "main.rs"
-                if not main.exists():
-                    continue
-                out.setdefault(entry.name, set()).update(modules_in_target(main))
+        for name, entry in target_entries(crate_dir).items():
+            out.setdefault(name, set()).update(modules_in_target(entry))
+    return out
+
+
+def target_entries(crate_dir: Path) -> dict[str, Path]:
+    """Each integration target of a crate, by name, with its entry file."""
+    tests_dir = crate_dir / "tests"
+    out: dict[str, Path] = {}
+    if not tests_dir.is_dir():
+        return out
+    for entry in sorted(tests_dir.iterdir()):
+        if entry.is_file() and entry.suffix == ".rs" and entry.name != "mod.rs":
+            out[entry.stem] = entry
+        elif entry.is_dir() and (entry / "main.rs").exists():
+            out[entry.name] = entry / "main.rs"
     return out
