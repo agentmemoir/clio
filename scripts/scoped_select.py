@@ -337,6 +337,8 @@ def workspace_packages() -> list[dict[str, Any]]:
                 # test target called `mcp_principal_binding` produces an executable
                 # that no package name matches.
                 "targets": [target["name"] for target in package.get("targets", [])],
+                # The integration test targets, which Quick names to build them.
+                "tests": [target["name"] for target in package.get("targets", []) if "test" in target["kind"]],
             }
         )
     return out

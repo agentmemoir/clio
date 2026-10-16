@@ -96,6 +96,14 @@ def walk_crate(crate_dir: Path) -> dict[Path, str]:
     roots = crate_roots(crate_dir)
     if not roots:
         raise ResolutionError(f"{crate_dir} has no lib.rs or main.rs")
+    return walk_from(tuple(roots))
+
+
+def walk_from(roots: tuple[Path, ...]) -> dict[Path, str]:
+    """Map every file reachable from `roots` to its module path; a root's path is empty.
+
+    A crate's roots are its lib.rs and main.rs; an integration target's root is its entry file.
+    """
     module_of: dict[Path, str] = {}
     seen: set[Path] = set()
 
@@ -113,7 +121,9 @@ def walk_crate(crate_dir: Path) -> dict[Path, str]:
                 child = path.parent / "mod.rs"
                 target = child if child.exists() else None
             else:
-                target = resolve_child(children_dir(path), decl)
+                # A root resolves its children beside itself, as lib.rs does, even when
+                # it is `tests/a.rs` and a `tests/a/` directory exists.
+                target = resolve_child(children_dir(path) if module_path else path.parent, decl)
             if target is None:
                 continue
             child_path = f"{module_path}::{decl.name}" if module_path else decl.name
