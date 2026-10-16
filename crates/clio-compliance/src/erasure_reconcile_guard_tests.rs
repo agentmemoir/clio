@@ -26,15 +26,17 @@
 
 use super::erasure_retry_reconcile_tests::{record_erasure_intent, resume_facts};
 use super::erasure_retry_tests::{
-    action_id, action_rows, live_set, load_row, persisted, tombstone_count,
+    Attempt, action_id, action_rows, live_set, load_row, persisted, tombstone_count,
 };
-use super::subject_request_store_wiring_tests::{RetryStore, wiring_item};
+use super::subject_request_store_wiring_tests::{
+    RetryStore, kms, persist, started_record, wiring_item,
+};
 use crate::erase::EraseVecSink;
 use crate::erasure_reconcile::{ErasureResume, reconcile_erasure_actions};
 use crate::erasure_retry::{OUTCOME_COMPLETED, OUTCOME_RECONCILED, erase_confirmed_request};
 use crate::subject_request::SubjectRequestRecord;
 use crate::test_unique::unique;
-use clio_store::{ComplianceStore, LocalEventState, LocalEventStore, Store};
+use clio_store::{ComplianceStore, LocalEventState, LocalEventStore, SqliteStore, Store};
 use clio_types::ErrorCode;
 use std::sync::atomic::Ordering;
 
@@ -84,8 +86,51 @@ fn reconcile_keeps_a_destroyed_key_without_the_purge_pending() {
     assert_eq!(settled[0].state, LocalEventState::Allowed);
     assert_eq!(settled[0].result.as_deref(), Some(OUTCOME_COMPLETED));
     assert_eq!(double.erase_calls(), 3, "each pass runs the purge once");
+}
+
+/// A key destroyed through the KMS with the purge still uncommitted is settled
+/// by the pass that commits the purge, and that pass recreates no key.
+#[test]
+fn reconcile_settles_a_destroyed_key_whose_purge_is_pending_without_recreating_it() {
+    let attempt = Attempt::new();
+    let kms = kms();
+    let store =
+        SqliteStore::open(&attempt.store_path(), kms.clone()).expect("scratch sqlite opens");
+    persist(&store, &started_record(&attempt.request_id, &attempt.scope));
+    store
+        .create_memory_item(&wiring_item(&attempt.bank, &attempt.subject), "tester")
+        .expect("seed the subject item");
+    record_erasure_intent(&store, &attempt.request_id);
+    // The key loss and the purge are independent effects: destroying the key
+    // straight through the KMS leaves the purge uncommitted on the real store.
+    kms.destroy_dek(&attempt.subject)
+        .expect("the key destruction");
     assert!(
-        double.subject_dek_destroyed(&attempt.subject).expect("key"),
+        store.subject_dek_destroyed(&attempt.subject).expect("key"),
+        "the key is destroyed and the purge has not run"
+    );
+    let sink = EraseVecSink::default();
+    let env = attempt.env(&store, &sink);
+    let live = live_set(&attempt, &store);
+    let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
+    let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
+    assert_eq!(
+        report.settled,
+        vec![action_id(&attempt)],
+        "the pass that commits the purge settles"
+    );
+    assert!(report.pending.is_empty(), "{report:?}");
+    assert!(
+        tombstone_count(&attempt, &store) > 0,
+        "the purge committed under the destroyed key"
+    );
+    let settled = action_rows(&store, &action_id(&attempt));
+    assert_eq!(settled.len(), 1, "exactly one outcome");
+    assert_eq!(settled[0].state, LocalEventState::Allowed);
+    assert_eq!(settled[0].result.as_deref(), Some(OUTCOME_COMPLETED));
+    assert_eq!(
+        kms.ensure_dek(&attempt.subject).unwrap_err().code,
+        ErrorCode::ErasedSubject,
         "the completed pass recreates no key"
     );
 }

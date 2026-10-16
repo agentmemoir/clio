@@ -16,8 +16,10 @@
 //!   record the caller cannot resume stays pending with no outcome, because
 //!   the resume facts carry the subject every probe needs; a missing,
 //!   undecodable, or column-drifted record settles denied with a no-effect
-//!   reason, while a resume whose subject disagrees with a subject-scoped
-//!   record refuses with an error before any probe
+//!   reason, a resume whose subject has no matching committed tombstone stays
+//!   pending when the request's purge evidence exists, while a resume whose
+//!   subject disagrees with a subject-scoped record refuses with an error
+//!   before any probe
 //!
 //! ## Does not own
 //! - The flow's retry contract, its step probes, and its settle
@@ -105,11 +107,16 @@ pub struct ErasureReconcileReport {
 /// - a resume whose subject disagrees with a subject-scoped record refuses
 ///   with an error before any probe, so a caller bug cannot drive a probe or
 ///   a derived refresh over another subject's rows;
+/// - a resume whose committed purge evidence exists but names another subject
+///   stays pending with no outcome written, because those tombstones prove a
+///   different subject's effect committed and this pass cannot observe one for
+///   the subject it resumes;
 /// - the effect probes (key destroyed, committed tombstones) settle a
 ///   completion and never a denial; when only the derived refresh remains it
 ///   runs first, so a restart still loses the erased content from the derived
-///   state, and a committed purge settles the completion too, because the
-///   tombstones prove the erase transaction committed;
+///   state, and a committed purge whose tombstones name the resumed subject
+///   settles the completion too, because they prove the erase transaction
+///   committed;
 /// - a preflight refusal with no effect evidence at all settles denied;
 /// - a destroyed key whose purge never committed runs the remaining work
 ///   through the flow and stays pending until it settles, so a completion is
@@ -172,15 +179,19 @@ enum ResumeOutcome {
 /// For a record this pass can probe, the effect probes run before any denial,
 /// and the peer slots gate completion: a peer that has not acknowledged or been
 /// disposed keeps the action pending with no outcome.
+/// A committed purge whose tombstones name another subject keeps the action
+/// pending before any settle or effect, because the purge evidence binds the
+/// resume to the subject it actually ran for.
 /// When only the derived refresh remains, it runs first and the settle follows
-/// from the record's slots; a committed purge without the key probe's evidence
-/// settles the same completion, because the tombstones prove the erase
-/// transaction committed. A destroyed key whose purge never committed runs the
-/// remaining work through the flow and reports settled or pending, because an
-/// irreversible key loss with failed SQL work must stay pending until the purge
-/// commits. Only a preflight refusal with the probes showing no effect at all
-/// settles denied. A resumed step's error leaves the action pending, so a hard
-/// effect error never becomes a denial.
+/// from the record's slots; a committed purge whose tombstones name the resumed
+/// subject settles the same completion without the key probe's evidence,
+/// because the tombstones prove the erase transaction committed. A destroyed
+/// key whose purge never committed runs the remaining work through the flow and
+/// reports settled or pending, because an irreversible key loss with failed SQL
+/// work must stay pending until the purge commits. Only a preflight refusal
+/// with the probes showing no effect at all settles denied. A resumed step's
+/// error leaves the action pending, so a hard effect error never becomes a
+/// denial.
 fn resume_erasure_action(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
@@ -205,8 +216,16 @@ fn resume_erasure_action(
     };
     refuse_a_foreign_subject(&record, &facts)?;
     let bank_id = bank_id_of(&record.scope);
-    let steps = probe_erasure_steps(env.store, bank_id, &facts.subject_id, request_id)?;
+    let steps = probe_erasure_steps(env.store, bank_id, &facts.subject_id, request_id, env.salt)?;
     if !peers_settled(&record) {
+        return Ok(ResumeOutcome::Pending);
+    }
+    if steps.sql_work_done && !steps.purge_names_subject {
+        // The committed purge names another subject: this pass cannot see work
+        // for the subject it resumes, so settling would report a completion for
+        // someone else's effect, and running the effect would destroy a subject
+        // the committed evidence never touched. Keep the action pending; a
+        // resume naming the purged subject still settles it.
         return Ok(ResumeOutcome::Pending);
     }
     let ctx = OpContext::new(Bank::new(bank_id.to_owned()), env.actor);

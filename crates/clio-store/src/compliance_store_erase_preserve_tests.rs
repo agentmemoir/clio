@@ -326,7 +326,7 @@ fn sqlite_erase_refuses_an_import_batch_without_recreating_the_key() {
     assert_eq!(subject_key_rows(&store, &subject), shredded);
     assert!(
         store.subject_is_shredded(&subject).unwrap(),
-        "the erasure probe an import layer consults reports shredded"
+        "the store's shredded-subject probe reports shredded; the route refuses on ensure_dek"
     );
     assert_eq!(
         kms.ensure_dek(&subject).unwrap_err().code,

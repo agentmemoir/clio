@@ -440,3 +440,8 @@ mod subject_request_store_wiring_copy_scenarios_tests;
 #[cfg(test)]
 #[path = "subject_request_store_wiring_copy_scenarios_pg_tests.rs"]
 mod subject_request_store_wiring_copy_scenarios_pg_tests;
+
+// Declared beside the seam it drives, so the completion-guard suite reuses its fixtures.
+#[cfg(test)]
+#[path = "erasure_retry_completion_guard_tests.rs"]
+mod erasure_retry_completion_guard_tests;

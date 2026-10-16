@@ -348,7 +348,11 @@ pub(crate) fn propagate(
 }
 
 /// Only harness/system actors carry compliance erasure privilege.
-fn authorize(actor: Actor) -> Result<(), AmError> {
+///
+/// The confirmed-erasure retry entry calls this before its durable intent, and
+/// the workflow calls it again before its effect, so both gates share one
+/// privilege table.
+pub(crate) fn authorize(actor: Actor) -> Result<(), AmError> {
     match actor {
         Actor::Harness | Actor::System => Ok(()),
         Actor::Agent | Actor::User => Err(AmError::new(
