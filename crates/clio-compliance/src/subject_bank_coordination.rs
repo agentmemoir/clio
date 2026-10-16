@@ -169,3 +169,7 @@ fn scope_covers(confirmed: &SubjectRequestRecord, args: &EraseArgs<'_>) -> bool 
 #[cfg(test)]
 #[path = "subject_bank_coordination_tests.rs"]
 mod subject_bank_coordination_tests;
+
+#[cfg(test)]
+#[path = "subject_bank_coordination_pg_tests.rs"]
+mod subject_bank_coordination_pg_tests;

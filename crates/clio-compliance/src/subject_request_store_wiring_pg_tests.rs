@@ -197,3 +197,18 @@ fn postgres_the_store_reports_the_erasure_fan_out_bank_set() {
         "the live set must cover every bank sharing the key"
     );
 }
+
+// The live-Postgres twins of the retry suites, declared here so they reach
+// this module's `pub(super)` fixture while `subject_request_store_wiring`
+// stays within its line cap.
+#[cfg(test)]
+#[path = "subject_request_store_wiring_erase_pg_tests.rs"]
+mod subject_request_store_wiring_erase_pg_tests;
+
+#[cfg(test)]
+#[path = "erasure_retry_pg_tests.rs"]
+mod erasure_retry_pg_tests;
+
+#[cfg(test)]
+#[path = "erasure_retry_race_pg_tests.rs"]
+mod erasure_retry_race_pg_tests;
