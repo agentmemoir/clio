@@ -20,6 +20,10 @@
 //!   pending when the request's purge evidence exists, while a resume whose
 //!   subject disagrees with a subject-scoped record refuses with an error
 //!   before any probe
+//! - The peer-denial arm: a pending per-peer event is settled from its
+//!   durable row by action id with no effect — an acknowledged row, a refusal,
+//!   or the disposition that resolved a refusal — so a retry resumes the same
+//!   action instead of repeating one
 //!
 //! ## Does not own
 //! - The flow's retry contract, its step probes, and its settle
@@ -42,12 +46,14 @@ use crate::erasure_retry::{
 };
 use crate::subject_bank_coordination::preflight_erase_request;
 use crate::subject_request::{RequestScope, SubjectRequestRecord};
-use crate::subject_request_events::ProtectedAction;
+use crate::subject_request_events::{ProtectedAction, peer_outcome};
 use crate::subject_request_store_wiring::row_to_record;
-use clio_store::{ComplianceStore, DurableRequestStore, LocalEventStore};
+use clio_store::{
+    ComplianceStore, DurableRequestStore, LocalEventStore, LocalEventView, PeerActionStore,
+};
 use clio_types::{Actor, AmError, Bank, ErrorCode, OpContext};
 use clio_write::MemTreeMaint;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -64,6 +70,8 @@ pub struct ErasureResume {
 pub struct ErasureRetryEnv<'a> {
     /// Compliance persistence boundary.
     pub store: &'a dyn ComplianceStore,
+    /// Durable per-peer action rows the completion gate reads.
+    pub peers: &'a dyn PeerActionStore,
     /// Owner-only erasure-journal path.
     pub journal_path: &'a Path,
     /// Live `MemTree` engine for the derived refresh (optional).
@@ -95,9 +103,9 @@ pub struct ErasureReconcileReport {
 /// Every pending action of the erasure event kind is reloaded from the durable
 /// request store and settled by evidence, never by refusal alone:
 ///
-/// - a record holding a peer that is not acknowledged or disposed stays
-///   pending with no outcome written, because a later acknowledgement settles
-///   it;
+/// - a record holding a peer with no durable acknowledged row or recorded
+///   deletion evidence stays pending with no outcome written, because a later
+///   acknowledgement or disposition settles it;
 /// - a missing or undecodable record settles denied with a content-free
 ///   no-effect reason;
 /// - a record the caller cannot resume stays pending with no outcome written:
@@ -122,6 +130,15 @@ pub struct ErasureReconcileReport {
 ///   through the flow and stays pending until it settles, so a completion is
 ///   never reported over uncommitted store work and the purge is retried.
 ///
+/// A pending peer-denial action is settled from its durable per-peer row by
+/// action id and runs no effect: a row the peer acknowledged, a row that
+/// refused without a disposition, and a refused row that recorded a resolving
+/// disposition each complete the pending event once, with the result text the
+/// row supports, while a pending or delivered row, and an event whose durable
+/// row is missing, stay pending for a later pass. The peer's row is never
+/// rewritten, so a retry resumes the same action and never repeats a completed
+/// delivery or purge.
+///
 /// A store probe failure propagates, so an unknown step state settles nothing.
 /// An outcome write is at most once because the write is duplicate-tolerant. A
 /// pending action of any other event kind is left for its owner.
@@ -139,23 +156,60 @@ pub fn reconcile_erasure_actions(
     if pending.is_empty() {
         return Ok(ErasureReconcileReport::default());
     }
-    let erasure_actions: BTreeSet<String> = events
+    let actionable: BTreeMap<String, LocalEventView> = events
         .list_events()?
         .into_iter()
-        .filter(|event| event.kind == ProtectedAction::Erasure.producer_id())
-        .map(|event| event.action_id)
+        .filter(|event| {
+            event.kind == ProtectedAction::Erasure.producer_id()
+                || event.kind == ProtectedAction::PeerDenial.producer_id()
+        })
+        .map(|event| (event.action_id.clone(), event))
         .collect();
     let mut report = ErasureReconcileReport::default();
     for action_id in pending {
-        if !erasure_actions.contains(&action_id) {
+        let Some(event) = actionable.get(&action_id) else {
             continue;
-        }
-        match resume_erasure_action(durable, events, env, resume, &action_id)? {
+        };
+        let outcome = if event.kind == ProtectedAction::PeerDenial.producer_id() {
+            resume_peer_action(env, events, event)?
+        } else {
+            resume_erasure_action(durable, events, env, resume, &action_id)?
+        };
+        match outcome {
             ResumeOutcome::Settled => report.settled.push(action_id),
             ResumeOutcome::Pending => report.pending.push(action_id),
         }
     }
     Ok(report)
+}
+
+/// Settle one pending peer-denial action from its durable row, with no effect.
+///
+/// The event's own durable scope names the request the per-peer rows hang off,
+/// and the action id selects the row: a row the peer acknowledged, a refusal,
+/// or a refusal that recorded a resolving disposition settles the pending
+/// event exactly once with that row's own content-free result — an approved
+/// retention is never published as a denial — while a pending or delivered row
+/// stays pending for reconciliation. The row is only read, never rewritten, so
+/// a retry resumes the same action and never repeats a completed delivery; an
+/// event with no matching durable row stays pending rather than claiming a
+/// result this pass cannot see.
+fn resume_peer_action(
+    env: &ErasureRetryEnv<'_>,
+    events: &dyn LocalEventStore,
+    event: &LocalEventView,
+) -> Result<ResumeOutcome, AmError> {
+    let rows = env.peers.load_for_request(&event.scope)?;
+    let Some(row) = rows.iter().find(|row| row.action_id == event.action_id) else {
+        return Ok(ResumeOutcome::Pending);
+    };
+    match peer_outcome(row) {
+        Some((result, denied)) => {
+            events.record_outcome(&event.action_id, denied, result)?;
+            Ok(ResumeOutcome::Settled)
+        }
+        None => Ok(ResumeOutcome::Pending),
+    }
 }
 
 /// What one pending action's resume attempt did.
@@ -177,8 +231,10 @@ enum ResumeOutcome {
 /// bug and refuses with an error before any probe, so no probe and no effect
 /// ever run over the wrong subject.
 /// For a record this pass can probe, the effect probes run before any denial,
-/// and the peer slots gate completion: a peer that has not acknowledged or been
-/// disposed keeps the action pending with no outcome.
+/// and the peer slots gate completion: a peer whose row is neither
+/// acknowledged nor a recorded removal evidence with its proof keeps the
+/// action pending with no outcome, so an approved retention and an unknown
+/// disposition keep it pending too.
 /// A committed purge whose tombstones name another subject keeps the action
 /// pending before any settle or effect, because the purge evidence binds the
 /// resume to the subject it actually ran for.
@@ -217,7 +273,8 @@ fn resume_erasure_action(
     refuse_a_foreign_subject(&record, &facts)?;
     let bank_id = bank_id_of(&record.scope);
     let steps = probe_erasure_steps(env.store, bank_id, &facts.subject_id, request_id, env.salt)?;
-    if !peers_settled(&record) {
+    let peer_rows = env.peers.load_for_request(request_id)?;
+    if !peers_settled(&record, &peer_rows) {
         return Ok(ResumeOutcome::Pending);
     }
     if steps.sql_work_done && !steps.purge_names_subject {
@@ -247,7 +304,7 @@ fn resume_erasure_action(
         // The whole effect committed: run the derived refresh it still owes,
         // touched by no destructive step, then settle from the record's slots.
         return Ok(settled_or_pending(run_erasure_steps(
-            durable, events, &args, action_id, steps,
+            durable, events, env.peers, &args, action_id, steps,
         )));
     }
     if steps.sql_work_done {
@@ -257,11 +314,13 @@ fn resume_erasure_action(
         // a live key when the restart's KMS no longer remembers the shred, so
         // the committed purge is the durable evidence that settles here, and no
         // destructive step repeats.
-        return Ok(if settle_erasure(durable, events, request_id, action_id)? {
-            ResumeOutcome::Settled
-        } else {
-            ResumeOutcome::Pending
-        });
+        return Ok(
+            if settle_erasure(durable, events, env.peers, request_id, action_id)? {
+                ResumeOutcome::Settled
+            } else {
+                ResumeOutcome::Pending
+            },
+        );
     }
     if !steps.key_destruction_done {
         // No purge committed and no key loss: only here may a preflight
@@ -276,7 +335,7 @@ fn resume_erasure_action(
     // that work settles: a completion is never settled over uncommitted store
     // work, and the purge stays retryable instead of leaving the pending set.
     Ok(settled_or_pending(run_erasure_steps(
-        durable, events, &args, action_id, steps,
+        durable, events, env.peers, &args, action_id, steps,
     )))
 }
 

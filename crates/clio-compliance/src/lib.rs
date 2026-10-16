@@ -59,6 +59,7 @@ mod export_mask;
 mod export_subject;
 mod import;
 mod inventory;
+mod journal_denial;
 #[cfg(test)]
 mod local_action_probe;
 mod local_review;
@@ -67,6 +68,7 @@ mod restore_guard;
 mod scratchpad;
 mod stats;
 pub mod subject_bank_coordination;
+mod subject_peer;
 mod subject_request;
 mod subject_request_events;
 mod subject_request_frozen;
@@ -84,7 +86,7 @@ pub use bundle::{
 pub use canonical::{CanonicalValue, canonical_get, canonical_subject};
 pub use copy_disposition::{
     CopyAction, CopyClosureFacts, CopyCustodyClass, CopyDisposition, CopyDispositionOutcome,
-    CopyOwner, CopyRequiredAction, CopyState, copy_closure_facts,
+    CopyOwner, CopyRequiredAction, CopyState, copy_closure_facts, peer_copy_disposition,
 };
 pub use correct::{
     BeliefContextCorrectArgs, BeliefContextCorrector, CorrectArgs, CorrectOutcome, CorrectResult,
@@ -113,6 +115,7 @@ pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,
     Readability, RetentionAction, ScopeInventory, scope_inventory,
 };
+pub use journal_denial::JournalDenialProbe;
 pub use local_review::{
     DEFAULT_REVIEW_LIMIT, LocalReviewPage, LocalReviewQuery, MAX_REVIEW_LIMIT, ReviewOutputRoute,
     record_review_output_custody, review_local_events, review_output_routes,
@@ -124,16 +127,22 @@ pub use restore_guard::{
 };
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
+pub use subject_peer::{
+    begin_denial, derived_peer_states, mark_acknowledged, mark_delivered, mark_refused,
+    peer_action_id, record_disposition, snapshot_peers,
+};
 pub use subject_request::{
-    FinalOutcome, PathOwner, PathSlot, PathState, PeerState, RegisterOutcome, RequestAction,
-    RequestActionKind, RequestActionState, RequestCommand, RequestKind, RequestScope, RequestState,
-    StateCategory, SubjectRequestLedger, SubjectRequestRecord, VerificationResult, transition,
+    FinalOutcome, PathOwner, PathSlot, PathState, PeerEnablement, PeerState, RegisterOutcome,
+    RequestAction, RequestActionKind, RequestActionState, RequestCommand, RequestKind,
+    RequestScope, RequestState, StateCategory, SubjectRequestLedger, SubjectRequestRecord,
+    VerificationResult, transition,
 };
 pub use subject_request_events::{
     ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventKind, ActionIntent, ActionOutcome,
     ActionPayload, BindingControls, BindingRefusal, ClosureBlock, ClosureInputs, PendingResult,
     ProtectedAction, RestoreInputs, RestoreRefusal, SubjectActionEvent, accept_closure,
-    check_binding, check_restore,
+    check_binding, check_restore, peer_denial_event, record_peer_denial_intent,
+    record_peer_denial_outcome,
 };
 pub use subject_request_manifest::{
     CopyCustodyManifest, DIGEST_ALGORITHM_PREFIX, KEY_COPY_DIGEST, KEY_PRODUCED_AT, KEY_PRODUCER,

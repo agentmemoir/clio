@@ -10,6 +10,7 @@
 //!
 //! ## Owns
 //! - Closed-stdout end-to-end tests for `mcp stdio` and `sync serve`
+//! - The per-test erasure-journal path a `sync serve` start resolves under
 //!
 //! ## Does not own
 //! - The one-shot closed-stdout contract (`broken_pipe_harness`)
@@ -28,6 +29,7 @@ mod common;
 
 use std::io::{Read, Write};
 use std::os::unix::process::ExitStatusExt;
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -41,6 +43,28 @@ fn clio() -> Command {
     }
     common::seed_key(&mut cmd);
     cmd
+}
+
+/// The same command with one per-test erasure journal named: the cleared
+/// environment leaves no data directory for the fallback to resolve, so a
+/// serve start without an explicit journal path refuses to bind.
+fn serve_clio(journal: &Path) -> Command {
+    let mut cmd = clio();
+    cmd.env("CLIO_ERASURE_JOURNAL_FILE", journal);
+    cmd
+}
+
+/// A per-test scratch directory, removed when the guard drops: the journal
+/// must live somewhere this test owns.
+fn scratch(tag: &str) -> common::Scratch {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("clio-sigpipe-{tag}-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create the scratch directory");
+    common::Scratch::adopt(dir)
 }
 
 /// Wait for the child, bounded: everything this file spawns is expected to exit
@@ -120,10 +144,12 @@ fn a_dropped_stdout_reader_does_not_kill_the_stdio_server() {
 }
 
 /// The same contract for `sync serve`: its one report is written after the
-/// reader is already gone, and the process must still exit on its own.
+/// reader is already gone, and the process must still exit on its own. The
+/// start resolves its journal inside this test's own scratch directory.
 #[test]
 fn a_dropped_stdout_reader_does_not_kill_sync_serve() {
-    let mut child = clio()
+    let scratch = scratch("sync-serve");
+    let mut child = serve_clio(&scratch.join("erasure-journal.json"))
         .args([
             "sync",
             "serve",

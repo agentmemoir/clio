@@ -4,14 +4,15 @@
 //! # Responsibility
 //!
 //! This module is responsible for the completion-guard coverage of the
-//! confirmed-erasure retry entry and its restart resume: the privileged-actor
-//! refusal before any durable intent, the denied racing-intent winner, the
-//! failed journal denial a later pass retries, the committed purge evidence
-//! bound to the resumed subject, and the copy-action arm of the settle gate.
+//! confirmed-erasure retry entry and its restart resume: the denied
+//! racing-intent winner, the failed journal denial a later pass retries, the
+//! committed purge evidence bound to the resumed subject, and the copy-action
+//! arm of the settle gate; the actor refusals live in
+//! `erasure_retry_completion_guard_split_tests.rs`.
 //!
 //! ## Owns
-//! - The actor-refusal, denied-race, journal-failure, purge-binding, and
-//!   copy-arm assertions over the retry entry and reconciliation
+//! - The denied-race, journal-failure, purge-binding, and copy-arm assertions
+//!   over the retry entry and reconciliation
 //! - The denied-winner event-writer double
 //!
 //! ## Does not own
@@ -19,12 +20,14 @@
 //!   and the shared fixtures (`erasure_retry_tests.rs`,
 //!   `erasure_retry_reconcile_tests.rs`,
 //!   `subject_request_store_wiring_tests.rs`)
+//! - The actor refusals (`erasure_retry_completion_guard_split_tests.rs`)
 //!
 //! ## Boundary
 //!
-//! Tests here break when an unprivileged or foreign-subject call reaches the
-//! durable intent or the effect, when a denied winner is resumed, or when a
-//! failed denial is not retried by a later pass.
+//! Tests here break when a foreign-subject call reaches the durable intent or
+//! the effect, when a denied winner is resumed, when a failed denial is not
+//! retried by a later pass, or when the settle gate opens over an open copy
+//! action.
 //!
 //! Test-only. Never compiled into production builds.
 
@@ -107,6 +110,7 @@ fn a_bank_scoped_resume_does_not_settle_over_another_subjects_purge() {
     assert!(!tombstones.is_empty(), "the purge leaves evidence");
     let env = ErasureRetryEnv {
         store: &store,
+        peers: &store,
         journal_path: &journal,
         maint: None,
         actor: Actor::Harness,
@@ -156,7 +160,7 @@ fn a_bank_scoped_resume_does_not_settle_over_another_subjects_purge() {
         subject_id: &other_subject,
         ..args
     };
-    let outcome = erase_confirmed_request(&store, &store, &request_id, &retry, &live)
+    let outcome = erase_confirmed_request(&store, &store, &store, &request_id, &retry, &live)
         .expect("the retry entry reports the pending action");
     assert_eq!(outcome.status, "PROCESSING", "pending action");
     let rows = action_rows(&store, &action);
@@ -180,76 +184,6 @@ fn a_bank_scoped_resume_does_not_settle_over_another_subjects_purge() {
     let rows = action_rows(&store, &action);
     assert_eq!(rows[0].state, LocalEventState::Allowed);
     assert_eq!(rows[0].result.as_deref(), Some(OUTCOME_COMPLETED));
-}
-
-/// Drive the retry entry with `actor` and pin that its refusal precedes every
-/// durable write: no intent or action row, no journal denial, no key loss, no
-/// tombstone, and the subject's data stays readable.
-fn assert_unprivileged_refusal(actor: Actor) {
-    let (attempt, store) = persisted();
-    let item = wiring_item(&attempt.bank, &attempt.subject);
-    store
-        .create_memory_item(&item, "tester")
-        .expect("seed the subject item");
-    let ctx = OpContext::new(Bank::new(attempt.bank.clone()), actor);
-    let sink = EraseVecSink::default();
-    let args = attempt.args(&store, &ctx, &sink);
-    let live = live_set(&attempt, &store);
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect_err("an unprivileged actor must refuse");
-    assert_eq!(
-        err.code,
-        ErrorCode::Forbidden,
-        "{}: {}",
-        actor.as_str(),
-        err.message
-    );
-    assert!(
-        store.list_events().expect("events").is_empty(),
-        "{} writes no intent row",
-        actor.as_str()
-    );
-    assert!(
-        store.pending_actions().expect("pending").is_empty(),
-        "{} leaves no pending action",
-        actor.as_str()
-    );
-    assert!(
-        !attempt.journal.exists(),
-        "{} writes no denial",
-        actor.as_str()
-    );
-    assert!(
-        !store.subject_dek_destroyed(&attempt.subject).expect("key"),
-        "{} loses no key",
-        actor.as_str()
-    );
-    assert_eq!(
-        tombstone_count(&attempt, &store),
-        0,
-        "{} runs no store effect",
-        actor.as_str()
-    );
-    assert!(
-        store
-            .get_memory_item(&attempt.bank, &item.id)
-            .expect("readable")
-            .is_some(),
-        "{} leaves the subject's data",
-        actor.as_str()
-    );
-}
-
-/// An agent actor is refused before the durable intent exists.
-#[test]
-fn an_agent_actor_refuses_before_the_durable_intent() {
-    assert_unprivileged_refusal(Actor::Agent);
-}
-
-/// A user actor is refused before the durable intent exists.
-#[test]
-fn a_user_actor_refuses_before_the_durable_intent() {
-    assert_unprivileged_refusal(Actor::User);
 }
 
 /// A racing intent winner that writes the intent, denies it, then fails the
@@ -300,7 +234,7 @@ fn a_denied_racing_intent_winner_refuses_the_retry() {
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
     let events = DeniedRacingIntent { inner: &store };
-    let err = erase_confirmed_request(&store, &events, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &events, &store, &attempt.request_id, &args, &live)
         .expect_err("a denied racing winner must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
     let rows = action_rows(&store, &action_id(&attempt));
@@ -346,7 +280,7 @@ fn a_failed_journal_denial_refuses_and_a_later_pass_retries_it() {
         journal_path: &unwritable,
         ..attempt.args(&store, &ctx, &sink)
     };
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("an unwritable journal must refuse");
     assert_eq!(err.code, ErrorCode::Internal, "{}", err.message);
     assert!(
@@ -378,7 +312,7 @@ fn a_failed_journal_denial_refuses_and_a_later_pass_retries_it() {
         "the subject's item survives"
     );
     // A later reconcile pass over a writable journal retries and completes it.
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report.settled, vec![action_id(&attempt)]);
@@ -417,8 +351,9 @@ fn an_open_copy_action_keeps_the_settle_pending_until_it_closes() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
-    let outcome = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect("the effect completes");
+    let outcome =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the effect completes");
     assert_eq!(
         outcome.status, "PROCESSING",
         "an open copy action keeps completion pending"
@@ -436,8 +371,9 @@ fn an_open_copy_action_keeps_the_settle_pending_until_it_closes() {
     assert!(tombstoned > 0, "the open action's effect committed");
     record.actions.get_mut("copy-1").expect("copy action").state = RequestActionState::Closed;
     persist(&store, &record);
-    let retried = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect("the retry settles");
+    let retried =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the retry settles");
     assert_eq!(retried.status, "COMPLETED");
     let rows = action_rows(&store, &action_id(&attempt));
     assert_eq!(rows[0].state, LocalEventState::Allowed);
@@ -448,3 +384,9 @@ fn an_open_copy_action_keeps_the_settle_pending_until_it_closes() {
         "the settle repeats no destructive work"
     );
 }
+
+// Declared here, beside the fixtures it reuses: the privileged-actor refusal
+// coverage of the retry entry.
+#[cfg(test)]
+#[path = "erasure_retry_completion_guard_split_tests.rs"]
+mod erasure_retry_completion_guard_split_tests;

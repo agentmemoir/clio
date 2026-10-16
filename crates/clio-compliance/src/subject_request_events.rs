@@ -10,26 +10,31 @@
 //!
 //! ## Owns
 //! - `SubjectActionEvent` stable envelope and `ActionPayload`
-//! - `ProtectedAction` (the export, erasure, and restore event producers),
-//!   `ActionIntent`, `ActionOutcome`, `ActionEventKind`, and `PendingResult`
+//! - `ProtectedAction` (the export, erasure, restore, and peer-denial event
+//!   producers), `ActionIntent`, `ActionOutcome`, `ActionEventKind`, and
+//!   `PendingResult`
 //! - `check_binding` public-binding gate and `BindingRefusal`
 //! - `check_restore` restore gate and `RestoreRefusal`
 //! - `accept_closure` closure acceptance and `ClosureBlock`
+//! - The declaration of the peer-denial producer module
 //!
 //! ## Does not own
 //! - The request state table and ledger (see `subject_request.rs`)
 //! - Copy-custody manifest fields (see `subject_request_manifest.rs`)
 //! - The in-memory event writer (see `action_event_log.rs`)
-//! - Any storage adapter, SQL, I/O, or protected action performed: the gates
-//!   are pure functions and nothing here is stateful
+//! - The peer-denial producer and its durable writes (see
+//!   `subject_request_peer_events.rs`)
+//! - The durable local event writer and its SQL (see `clio-store`); this
+//!   module only calls its interface
 //! - Subject content, identity proof, key material, or tokens: no field here
 //!   holds them, and free-text reasons must stay generic
 //!
 //! ## Boundary
 //!
 //! Changes to event shape, producer ids, gate rules, or refusal reasons should
-//! normally require changes here. Changes to request state semantics or to how
-//! events are recorded or stored should not require changes here.
+//! normally require changes here. Changes to request state semantics, to the
+//! peer-denial producer, or to how events are recorded or stored should not
+//! require changes here.
 //!
 //! Keep this module focused on the pure action-event contract.
 
@@ -44,7 +49,8 @@ pub const ACTION_EVENT_TYPE: &str = "compliance.subject_request.action";
 pub const ACTION_EVENT_VERSION: u32 = 1;
 
 /// The protected actions that produce subject-request events: the copy export
-/// producer, the verified erasure producer, and the guarded restore producer.
+/// producer, the verified erasure producer, the guarded restore producer, and
+/// the peer-denial producer.
 ///
 /// The set is closed: a new producer is a contract change, never a variant a
 /// consumer may ignore.
@@ -57,6 +63,8 @@ pub enum ProtectedAction {
     Erasure,
     /// The guarded restore producer.
     Restore,
+    /// The enabled-peer denial producer.
+    PeerDenial,
 }
 
 impl ProtectedAction {
@@ -67,6 +75,7 @@ impl ProtectedAction {
             Self::CopyExport => "copy_export",
             Self::Erasure => "erasure",
             Self::Restore => "restore",
+            Self::PeerDenial => "peer_denial",
         }
     }
 }
@@ -122,6 +131,8 @@ pub enum PendingResult {
     CopyManifestPending,
     /// The post-effect outcome has not been recorded yet.
     OutcomePending,
+    /// The peer's durable acknowledgement or refusal is not recorded yet.
+    PeerDenialPending,
 }
 
 /// One protected-action event for a subject request.
@@ -310,6 +321,15 @@ pub fn accept_closure(inputs: &ClosureInputs) -> Result<FinalOutcome, ClosureBlo
     }
 }
 
+// Declared here, beside the envelope it produces through.
+#[path = "subject_request_peer_events.rs"]
+mod subject_request_peer_events;
+
+pub(crate) use subject_request_peer_events::peer_outcome;
+pub use subject_request_peer_events::{
+    peer_denial_event, record_peer_denial_intent, record_peer_denial_outcome,
+};
+
 #[cfg(test)]
 #[path = "subject_request_events_gates_tests.rs"]
 mod subject_request_events_gates_tests;
@@ -317,3 +337,9 @@ mod subject_request_events_gates_tests;
 #[cfg(test)]
 #[path = "subject_request_events_store_tests.rs"]
 mod subject_request_events_store_tests;
+
+// Declared beside the producer it drives, so the peer-event suite reuses the
+// envelope types.
+#[cfg(test)]
+#[path = "subject_request_peer_event_tests.rs"]
+mod subject_request_peer_event_tests;

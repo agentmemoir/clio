@@ -67,6 +67,9 @@ pub mod clock;
 mod conn_pool;
 mod credential;
 pub mod crypto;
+pub mod delivery;
+pub mod denial;
+pub(crate) mod denial_guard;
 mod handle_resolution;
 pub(crate) mod http;
 mod journal_row;
@@ -82,6 +85,11 @@ mod client_wire_fixtures;
 #[cfg(test)]
 mod credential_fixtures;
 #[cfg(test)]
+#[path = "delivery_tests.rs"]
+mod delivery_tests;
+#[cfg(test)]
+mod denial_fixtures;
+#[cfg(test)]
 mod field_documentation_test_support;
 #[cfg(test)]
 #[path = "lib_tests.rs"]
@@ -89,14 +97,20 @@ mod lib_tests;
 
 /// Re-exports of the surfaces consumers (MCP bindings, CLI) need.
 pub mod prelude {
-    pub use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
+    pub use crate::apply::{
+        ApplyEngine, ApplyOutcome, ApplyResult, apply_mutation, apply_mutation_guarded,
+    };
     pub use crate::client::{SyncClientConfig, ack_skip, bidirectional, pull, push, sync_status};
     pub use crate::crypto::{SyncCipher, SyncCipherKey};
+    pub use crate::delivery::{DeliveryOutcome, DenialTarget, deliver_denial};
+    pub use crate::denial::{
+        DenialAck, DenialCarrier, DenialProof, DenialProofBinding, denial_mutation_id,
+    };
     pub use crate::protocol::{
         BankSyncStatus, PullRequest, PullResponse, PushAck, SyncContent, SyncMutation, SyncPayload,
         SyncStatusReport, decode_cursor, encode_cursor, lww_compare, reason_code_for,
     };
-    pub use crate::server::{SyncServer, SyncServerOptions, sync_serve};
+    pub use crate::server::{SyncServer, SyncServerOptions, sync_serve, sync_serve_with_denial};
 }
 
 /// Default page size for pull batches (never unbounded result sets).

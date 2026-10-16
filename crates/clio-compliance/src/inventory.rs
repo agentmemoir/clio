@@ -29,6 +29,10 @@
 #[path = "inventory_rows.rs"]
 pub(crate) mod inventory_rows;
 
+#[path = "inventory_peer_facts.rs"]
+mod inventory_peer_facts;
+
+use self::inventory_peer_facts::PeerFact;
 use self::inventory_rows::{ROW_PLAN, RowPlan, missing_tables, named_by_plan, pg_source_note};
 use clio_store::{PostgresTargetState, SqliteFileState};
 use serde::Serialize;
@@ -213,6 +217,10 @@ pub struct InventoryInput {
     pub declared_copies: Vec<PathBuf>,
     /// Whether enabled peers exist; `None` means that could not be verified.
     pub peers_enabled: Option<bool>,
+    /// The durable per-peer action rows the caller read back, when it supplied
+    /// them: the acknowledgement state of the deployment's enabled peers.
+    /// Empty when no rows were supplied or the store holds none.
+    pub peer_actions: Vec<clio_store::PeerActionRow>,
 }
 
 /// The scope ledger for one store.
@@ -232,9 +240,11 @@ pub struct ScopeInventory {
 ///
 /// A row is open when its pinned source is missing from the live facts, when
 /// its link is absent or hashed or legacy, when a declared copy's custody is
-/// unknown, when a required local path is missing, or when enabled peers
-/// cannot be verified. Nothing is written, no row is removed, and a declared
-/// copy path is only ever read with `std::fs::metadata`.
+/// unknown, when a required local path is missing, or when a supplied peer
+/// fact leaves an acknowledgement unresolved. A peers-disabled deployment
+/// records the peer family as not applicable, never as unknown. Nothing is
+/// written, no row is removed, and a declared copy path is only ever read
+/// with `std::fs::metadata`.
 #[must_use]
 pub fn scope_inventory(input: &InventoryInput) -> ScopeInventory {
     let backend = match &input.facts {
@@ -267,16 +277,18 @@ pub fn scope_inventory(input: &InventoryInput) -> ScopeInventory {
 
 /// One planned row, with every open reason the live facts produced.
 fn planned_row(plan: &RowPlan, input: &InventoryInput) -> InventoryRow {
+    let peer = PeerFact::of(input);
+    let gap = peer.superseding_gap(plan);
     let mut reasons = missing_source_reasons(plan, input);
-    if let Some(gap) = plan.gap {
-        reasons.push(gap.to_owned());
+    if let Some(gap) = &gap {
+        reasons.push(gap.clone());
     }
     path_reasons(plan, input, &mut reasons);
-    peer_reasons(plan, input, &mut reasons);
+    reasons.extend(peer.reasons(plan));
     row_from_parts(
         plan,
         resolve_source(plan, input),
-        plan.gap.map(str::to_owned),
+        gap,
         plan.custody,
         &reasons,
     )
@@ -382,22 +394,6 @@ fn path_reasons(plan: &RowPlan, input: &InventoryInput, reasons: &mut Vec<String
     }
 }
 
-/// The reason enabled peers could not be verified, when they could not.
-fn peer_reasons(plan: &RowPlan, input: &InventoryInput, reasons: &mut Vec<String>) {
-    if !matches!(plan.source, RowSource::Peers) {
-        return;
-    }
-    match input.peers_enabled {
-        None => {
-            reasons.push("peers could not be verified: no enablement fact was supplied".to_owned());
-        }
-        Some(true) => reasons.push(
-            "peers are enabled and no acknowledgement record exists to verify them".to_owned(),
-        ),
-        Some(false) => {}
-    }
-}
-
 /// Whether `path` exists, through the ledger's only filesystem access: a
 /// read-only `std::fs::metadata` call. Nothing is created, opened, or removed.
 fn present(path: &Path) -> bool {
@@ -440,7 +436,7 @@ fn resolve_source(plan: &RowPlan, input: &InventoryInput) -> String {
             format!("backup archives under {}", input.paths.backup_dir.display())
         }
         RowSource::Copies => "no caller copy declared".to_owned(),
-        RowSource::Peers => "peer enablement and acknowledgements (not stored)".to_owned(),
+        RowSource::Peers => PeerFact::of(input).source(),
     }
 }
 

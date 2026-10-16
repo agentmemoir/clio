@@ -191,6 +191,7 @@ dependencies = [
  "clio-persona",
  "clio-retrieve",
  "clio-store",
+ "clio-sync",
  "clio-types",
  "clio-write",
  "libc",

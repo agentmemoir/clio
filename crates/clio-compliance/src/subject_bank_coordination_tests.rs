@@ -4,9 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for the subject-bank coordination refusal
-//! tests: incomplete confirmation, changed bank membership, mismatched
-//! confirmations, and scope stability across a retry. Test-only: never
-//! compiled into production builds.
+//! tests: changed bank membership, mismatched confirmations, scope stability
+//! across a retry, and peer slots that no longer block the local effect.
+//! Test-only: never compiled into production builds.
 //!
 //! ## Owns
 //! - Behaviour assertions for `require_all_banks_confirmed` and
@@ -31,14 +31,15 @@ use crate::subject_bank_coordination::{
     coordinated_erase_request, preflight_erase_request, require_all_banks_confirmed,
 };
 use crate::subject_request::{
-    FinalOutcome, PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
+    FinalOutcome, PeerEnablement, PeerState, RequestKind, RequestScope, RequestState,
+    SubjectRequestLedger, SubjectRequestRecord,
 };
 use crate::test_unique::unique;
 use clio_store::{
     ComplianceStore, ComplianceTombstoneView, ItemIdentity, SubjectEraseOutcome, SubjectEraseSpec,
 };
 use clio_types::{Actor, AmError, Bank, ErrorCode, OpContext};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -64,6 +65,8 @@ fn confirmed(
         deadline: None,
         actions: BTreeMap::new(),
         paths: BTreeMap::new(),
+        peer_banks: BTreeSet::new(),
+        peer_enablement: PeerEnablement::for_peer_set(&peers),
         peers,
         exception: None,
     }
@@ -73,14 +76,16 @@ fn confirmed(
 fn two_bank(peer_b: PeerState) -> SubjectRequestRecord {
     let mut peers = BTreeMap::new();
     peers.insert(BANK_B.to_owned(), peer_b);
-    confirmed(
+    let mut record = confirmed(
         RequestKind::Erasure,
         RequestScope::Subject {
             bank_id: BANK_A.into(),
             subject_id: SUBJECT.into(),
         },
         peers,
-    )
+    );
+    record.peer_banks.insert(BANK_B.to_owned());
+    record
 }
 
 /// The banks sharing the subject key now.
@@ -209,12 +214,23 @@ fn refused_erase(record: &SubjectRequestRecord, live_banks: &[String]) -> (AmErr
     (err, store.erase_calls())
 }
 
+/// A pending peer no longer refuses the pre-effect check: the frozen bank set
+/// still matches, so the local effect runs. Whether the action may complete is
+/// the completion gate's decision, which this seam never runs.
 #[test]
-fn pending_peer_bank_refuses_before_effect() {
+fn a_pending_peer_does_not_block_the_local_effect() {
     let record = two_bank(PeerState::Pending);
-    let (err, calls) = refused_erase(&record, &shared_banks(&[BANK_A, BANK_B]));
-    assert_eq!(err.code, ErrorCode::Forbidden);
-    assert_eq!(calls, 0, "a pending peer must refuse before any effect");
+    let store = CountingStore::with_banks(shared_banks(&[BANK_A, BANK_B]));
+    let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
+    let sink = EraseVecSink::default();
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT, &salt);
+    let live = store.effect_bank_set();
+    let outcome = coordinated_erase_request(&args, &record, &live)
+        .expect("a pending peer does not block the local effect");
+    assert_eq!(outcome.status, "COMPLETED");
+    assert_eq!(store.erase_calls(), 1, "the effect runs once");
 }
 
 #[test]
@@ -266,12 +282,38 @@ fn all_banks_confirmed_erasure_proceeds() {
     assert_eq!(store.erase_calls(), 1);
 }
 
+/// A peer label is not a bank id: the check reads the recorded peer banks.
+#[test]
+fn a_peer_label_that_is_not_a_bank_id_covers_its_recorded_bank() {
+    let mut ledger = SubjectRequestLedger::new();
+    ledger
+        .register_with_enablement(
+            "req-edge",
+            RequestKind::Erasure,
+            &RequestScope::Bank {
+                bank_id: BANK_A.into(),
+            },
+            PeerEnablement::Required,
+            &["edge-node-7"],
+            &[BANK_B],
+        )
+        .expect("the request opens");
+    let mut record = ledger.record("req-edge").expect("record stored").clone();
+    assert_eq!(record.peer_banks, BTreeSet::from([BANK_B.to_owned()]));
+    require_all_banks_confirmed(&record, &shared_banks(&[BANK_A, BANK_B]))
+        .expect("the set matches");
+    record.state = RequestState::InProgress;
+    let (err, calls) = refused_erase(&record, &shared_banks(&[BANK_A, BANK_B, "bank-c"]));
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert_eq!(calls, 0, "a changed live set refuses before any effect");
+}
+
 #[test]
 fn refusal_never_changes_the_confirmed_record() {
-    let record = two_bank(PeerState::Pending);
+    let record = two_bank(PeerState::Acknowledged);
     let before = record.clone();
-    let _ = require_all_banks_confirmed(&record, &shared_banks(&[BANK_A, BANK_B]))
-        .expect_err("the pending peer must refuse");
+    let _ = require_all_banks_confirmed(&record, &shared_banks(&[BANK_A, BANK_B, "bank-c"]))
+        .expect_err("a joined bank must refuse");
     assert_eq!(record, before, "a refusal must change nothing it owns");
 }
 
@@ -389,10 +431,20 @@ fn scope_of_another_bank_refuses() {
     assert_eq!(calls, 0, "another bank's scope must never erase");
 }
 
+/// A disposed peer no longer refuses the pre-effect check either: its
+/// durable evidence decides completion in the gate, never the local effect.
 #[test]
-fn disposed_peer_is_not_authority() {
+fn a_disposed_peer_does_not_block_the_local_effect() {
     let record = two_bank(PeerState::Disposed);
-    let (err, calls) = refused_erase(&record, &shared_banks(&[BANK_A, BANK_B]));
-    assert_eq!(err.code, ErrorCode::Forbidden);
-    assert_eq!(calls, 0, "a disposed peer is not an erasure authority");
+    let store = CountingStore::with_banks(shared_banks(&[BANK_A, BANK_B]));
+    let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
+    let sink = EraseVecSink::default();
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT, &salt);
+    let live = store.effect_bank_set();
+    let outcome = coordinated_erase_request(&args, &record, &live)
+        .expect("a disposed peer does not block the local effect");
+    assert_eq!(outcome.status, "COMPLETED");
+    assert_eq!(store.erase_calls(), 1, "the effect runs once");
 }

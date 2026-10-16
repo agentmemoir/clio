@@ -30,7 +30,7 @@ mod inventory_plan_slots;
 
 use self::inventory_plan_slots::{
     ARCHIVE_EXPERIMENTS, COPY_INVENTORY, DURABLE_REQUESTS, ERASURE_ADAPTERS, LOCAL_ERASURE_JOURNAL,
-    LOCAL_EVENTS, RESTORE_GUARDS, SUBJECT_FAMILY_LINKS,
+    LOCAL_EVENTS, PEER_ACTIONS, RESTORE_GUARDS, SUBJECT_FAMILY_LINKS,
 };
 
 /// Every row the ledger reports, in report order: the nine export families
@@ -302,6 +302,7 @@ pub(crate) static ROW_PLAN: &[RowPlan] = &[
     ERASURE_ADAPTERS,
     LOCAL_ERASURE_JOURNAL,
     LOCAL_EVENTS,
+    PEER_ACTIONS,
     RESTORE_GUARDS,
     SUBJECT_FAMILY_LINKS,
     RowPlan {

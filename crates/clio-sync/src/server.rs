@@ -16,16 +16,25 @@
 //! `conn_pool`.
 //!
 //! ## Owns
-//! - `SyncServerOptions` / `SyncServer` / `sync_serve` (public server surface)
-//! - Route semantics: `/sync/push`, `/sync/pull`, `/sync/status` handlers
+//! - `SyncServerOptions` / `SyncServer` / `sync_serve` /
+//!   `sync_serve_with_denial` (public server surface)
+//! - Route semantics for the pull and status routes, and the dispatch of the
+//!   push route (defined in `server_push`)
 //! - Credential store and bank authorization checks
 //! - Server-side journal sealing via the local DEK provider (no peer DEKs)
+//! - The pull-side denial refusal: a bank a recorded denial covers, or an
+//!   unreadable denial authority, refuses the pull; the refusal and the row
+//!   read run under the bank's lock, and the refusal is re-checked after the
+//!   read
 //!
 //! ## Does not own
+//! - The push route's body, acknowledgement, and denial proof placement
+//!   (`server_push`)
 //! - Connection lifecycle: accept loop, pool slots, refusal mapping
 //!   (`server_conn`)
 //! - Read bounds and framing (`http`)
 //! - Apply matrix / conflict / DLQ semantics (see `apply`)
+//! - Denial semantics and the guards over them (`denial`, `denial_guard`)
 //! - Cursor format (see `protocol`)
 //! - Client-side push/pull loop (see `client`)
 //! - DEK/KMS internals (see `clio-store` `dek`)
@@ -39,18 +48,17 @@
 //!
 //! Keep this module focused on the sync server's routes and public surface.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation, quarantine};
 use crate::bind_warning::warn_public_bind;
 use crate::clock::now_utc;
 use crate::conn_pool::{ConnectionPool, MAX_CONNECTIONS};
 use crate::credential::{AuthOutcome, CredentialStore};
 use crate::protocol::{
-    PullRequest, PullResponse, PushAck, SyncContent, SyncMutation, decode_cursor, encode_cursor,
+    PullRequest, PullResponse, SyncContent, SyncMutation, decode_cursor, encode_cursor,
 };
 use crate::server_conn::{
     DEFAULT_REQUEST_DEADLINE_SECS, ServeContext, serve_loop, write_json, write_status_error,
 };
-use clio_store::{DekProvider, Store, SyncJournalRow, SyncStore};
+use clio_store::{DekProvider, ErasureDenial, Store, SyncJournalRow, SyncStore};
 use clio_types::{AmError, ErrorCode};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -59,6 +67,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+#[path = "server_push.rs"]
+mod server_push;
+
+pub(crate) use server_push::handle_push;
 
 /// Server construction options.
 pub struct SyncServerOptions {
@@ -102,6 +115,9 @@ pub(crate) struct ServeOptions {
     pub(crate) dev_mode: bool,
     pub(crate) deadline_secs: u64,
     pub(crate) device_id: String,
+    /// The deployment's erasure-denial authority, when one is wired. `None`
+    /// keeps every route at its pre-denial behavior.
+    pub(crate) denial: Option<Arc<dyn ErasureDenial>>,
     /// One lock per authorized bank. The server runs a worker per accepted
     /// connection, so pushes for the same bank can otherwise interleave inside
     /// the apply path, which is a check-then-act sequence over the item, the
@@ -121,7 +137,7 @@ pub(crate) struct BankLocks {
 impl BankLocks {
     /// The lock for `bank`, created on first use. The caller locks it in its
     /// own scope so the returned handle and its guard share one lifetime.
-    fn for_bank(&self, bank: &str) -> Arc<Mutex<()>> {
+    pub(crate) fn for_bank(&self, bank: &str) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().expect("bank lock map poisoned");
         Arc::clone(
             locks
@@ -153,9 +169,37 @@ impl SyncServer {
 
 /// Start the sync server on a background thread.
 ///
+/// Without a denial authority wired, every route behaves exactly as it did
+/// before the denial guards existed; [`sync_serve_with_denial`] is the same
+/// server with one wired.
+///
 /// # Errors
 /// Bind failure, or auth material missing outside dev mode.
 pub fn sync_serve(options: SyncServerOptions) -> Result<SyncServer, AmError> {
+    serve(options, None)
+}
+
+/// Start the sync server with the deployment's erasure-denial authority.
+///
+/// The authority guards the apply path — a denied subject's data is refused
+/// and a denial operation records durably and answers with its proof — and the
+/// pull path, where a bank a recorded denial covers is refused. A missing or
+/// unreadable authority refuses the affected action instead of clearing it.
+///
+/// # Errors
+/// Bind failure, or auth material missing outside dev mode.
+pub fn sync_serve_with_denial(
+    options: SyncServerOptions,
+    denial: Arc<dyn ErasureDenial>,
+) -> Result<SyncServer, AmError> {
+    serve(options, Some(denial))
+}
+
+/// Start one server; both public entry points differ only in the authority.
+fn serve(
+    options: SyncServerOptions,
+    denial: Option<Arc<dyn ErasureDenial>>,
+) -> Result<SyncServer, AmError> {
     let token_file = options.token_file.as_deref();
     let credentials = token_file.map(CredentialStore::load).transpose()?;
     if credentials.is_none() && !options.dev_mode {
@@ -187,6 +231,7 @@ pub fn sync_serve(options: SyncServerOptions) -> Result<SyncServer, AmError> {
                 .deadline_secs
                 .unwrap_or(DEFAULT_REQUEST_DEADLINE_SECS),
             device_id: options.device_id,
+            denial,
             bank_locks: BankLocks::default(),
         }),
         ttl_secs: options.ttl_secs.unwrap_or(crate::SERVE_TTL_DEFAULT_SECS),
@@ -204,101 +249,14 @@ pub(crate) fn bank_authorized(options: &ServeOptions, auth: &AuthOutcome, bank: 
     auth.allows(bank) && options.banks.iter().any(|b| b == bank)
 }
 
-pub(crate) fn handle_push(
-    options: &ServeOptions,
-    stream: TcpStream,
-    body: &str,
-    auth: &AuthOutcome,
-) -> Result<(), AmError> {
-    let payload: Value = serde_json::from_str(body)
-        .map_err(|e| AmError::new(ErrorCode::InvalidArgument, format!("bad push body: {e}")))?;
-    let bank = payload
-        .get("bank")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if !bank_authorized(options, auth, &bank) {
-        return write_status_error(
-            stream,
-            403,
-            &AmError::new(ErrorCode::Forbidden, "bank not authorized"),
-        );
+/// The status a pull refusal answers with: a bank a recorded denial covers is a
+/// `403`; an unreadable authority is the server's own failure (`500`).
+fn pull_refusal_status(err: &AmError) -> u16 {
+    if err.code == ErrorCode::ErasedSubject {
+        403
+    } else {
+        500
     }
-    let mutations: Vec<SyncMutation> = payload
-        .get("mutations")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .map(|m| serde_json::from_value(m.clone()))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()
-        .map_err(|e| AmError::new(ErrorCode::InvalidArgument, format!("bad mutation: {e}")))?
-        .unwrap_or_default();
-    // The apply path below is check-then-act over the item row, the apply
-    // guard, and the journal, and this server runs one worker per accepted
-    // connection. Taking the bank's lock before the first apply makes the
-    // dedupe checks and the LWW resolution mean what they say, whatever order
-    // two pushes for the same bank arrive in; banks never wait on each other.
-    //
-    // A poisoned lock means a previous apply panicked mid-push; the apply
-    // steps are transactional, so the next push proceeds.
-    let bank_lock = options.bank_locks.for_bank(&bank);
-    let _bank_guard = bank_lock
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let engine = ApplyEngine {
-        store: options.store.as_ref(),
-        sync: options.sync.as_ref(),
-        device_id: options.device_id.clone(),
-        kms: Some(options.kms.as_ref()),
-    };
-    let mut accepted = Vec::new();
-    let mut rejected = Vec::new();
-    for m in mutations {
-        let envelope = serde_json::to_string(&m).expect("serialize mutation");
-        // The envelope bank authorized above, but each mutation must also be
-        // authorized: a mutation for a bank this credential cannot reach is
-        // quarantined under the envelope's authorized bank — a refusal never
-        // writes into another bank — and the ack reports it rejected.
-        if !bank_authorized(options, auth, &m.bank) {
-            quarantine(
-                &engine,
-                &bank,
-                &m,
-                &envelope,
-                crate::protocol::REASON_UNAUTHORIZED_BANK,
-                &format!("mutation targets unauthorized bank {}", m.bank),
-            )?;
-            rejected.push(m.sync_mutation_id);
-            continue;
-        }
-        match apply_mutation(&engine, &m, &envelope) {
-            Ok(outcome) => match outcome {
-                ApplyOutcome::DeadLettered { .. } => rejected.push(m.sync_mutation_id),
-                _ => accepted.push(m.sync_mutation_id),
-            },
-            Err(_) => {
-                // Transient storage failure: no ack, client retries unchanged.
-                return write_status_error(
-                    stream,
-                    500,
-                    &AmError::new(ErrorCode::Internal, "transient storage failure"),
-                );
-            }
-        }
-    }
-    let cursor = encode_cursor(&bank, options.sync.journal_max_seq(&bank)?);
-    write_json(
-        stream,
-        200,
-        &serde_json::to_value(PushAck {
-            cursor,
-            accepted,
-            rejected,
-        })
-        .expect("serialize push ack"),
-    )
 }
 
 pub(crate) fn handle_pull(
@@ -321,9 +279,38 @@ pub(crate) fn handle_pull(
     } else {
         decode_cursor(&request.cursor, &request.bank)?
     };
-    let rows = options
-        .sync
-        .journal_list_since(&request.bank, since, request.limit)?;
+    // The bank guard: a bank a recorded denial covers is refused whole, and an
+    // unreadable authority refuses the pull instead of serving it. A journal
+    // row carries no readable subject, so a covered bank cannot be resolved
+    // row by row; unrelated banks still serve normally.
+    //
+    // The check and the read happen under the same per-bank lock the push
+    // route holds, so a denial for this bank cannot be recorded between them
+    // and still answered with pre-denial rows: while the lock is held the
+    // denial is either already recorded (the check refuses) or lands after the
+    // read (the page is ordered before it). The read is re-checked under the
+    // same lock because a carrier pushed under another bank may cover this one
+    // and record its marker without ever taking this bank's lock.
+    let rows = {
+        let bank_lock = options.bank_locks.for_bank(&request.bank);
+        let _bank_guard = bank_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(err) =
+            crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
+        {
+            return write_status_error(stream, pull_refusal_status(&err), &err);
+        }
+        let rows = options
+            .sync
+            .journal_list_since(&request.bank, since, request.limit)?;
+        if let Err(err) =
+            crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
+        {
+            return write_status_error(stream, pull_refusal_status(&err), &err);
+        }
+        rows
+    };
     let mutations = rows
         .iter()
         .map(|row| journal_row_to_mutation(options.kms.as_ref(), row))
@@ -424,6 +411,9 @@ pub(crate) fn handle_status(
 #[cfg(test)]
 #[path = "server_connection_cap_tests.rs"]
 mod server_connection_cap_tests;
+#[cfg(test)]
+#[path = "server_denial_tests.rs"]
+mod server_denial_tests;
 #[cfg(test)]
 #[path = "server_error_tests.rs"]
 mod server_error_tests;

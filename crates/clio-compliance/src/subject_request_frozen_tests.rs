@@ -19,11 +19,11 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::subject_request::{
-    PathOwner, PathSlot, PathState, PeerState, RequestAction, RequestActionKind,
+    PathOwner, PathSlot, PathState, PeerEnablement, PeerState, RequestAction, RequestActionKind,
     RequestActionState, RequestKind, RequestScope, RequestState, SubjectRequestLedger,
     SubjectRequestRecord, VerificationResult,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn sample_record() -> SubjectRequestRecord {
     let mut paths = BTreeMap::new();
@@ -83,6 +83,8 @@ fn sample_record() -> SubjectRequestRecord {
         actions,
         paths,
         peers,
+        peer_enablement: PeerEnablement::Required,
+        peer_banks: BTreeSet::from(["bank-b".to_owned()]),
         exception: Some("approved archival hold".to_owned()),
     }
 }
@@ -136,6 +138,14 @@ fn the_frozen_spellings_are_stable_across_a_restart() {
             serde_json::to_string(&PeerState::Acknowledged).unwrap(),
             "\"acknowledged\"",
         ),
+        (
+            serde_json::to_string(&PeerEnablement::NotApplicable).unwrap(),
+            "\"not_applicable\"",
+        ),
+        (
+            serde_json::to_string(&PeerEnablement::Required).unwrap(),
+            "\"required\"",
+        ),
     ];
     for (spelled, expected) in spellings {
         assert_eq!(spelled, expected);
@@ -159,6 +169,51 @@ fn a_restart_reloads_every_path_verbatim_without_auto_completing() {
     assert_eq!(record.paths["purge-failed"].state, PathState::Failed);
     assert_eq!(record.paths["derived-index"].state, PathState::Done);
     assert_eq!(record.paths["archive-copy"].owner, PathOwner::External);
+}
+
+#[test]
+fn the_peer_enablement_fact_loads_from_an_older_row_and_fails_closed_on_an_unknown_spelling() {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&sample_record()).expect("serialize record"))
+            .expect("parse record");
+    assert_eq!(parsed["peer_enablement"], serde_json::json!("required"));
+    let mut older = parsed.clone();
+    older
+        .as_object_mut()
+        .expect("the record is an object")
+        .remove("peer_enablement");
+    let legacy: SubjectRequestRecord = serde_json::from_value(older).expect("an older row loads");
+    assert_eq!(
+        legacy.peer_enablement,
+        PeerEnablement::NotApplicable,
+        "a row written before the fact loads as the known not-applicable value"
+    );
+    let mut damaged = parsed;
+    damaged["peer_enablement"] = serde_json::json!("mystery");
+    assert!(
+        serde_json::from_value::<SubjectRequestRecord>(damaged).is_err(),
+        "an unrecognized spelling must fail closed"
+    );
+}
+
+/// A row written before the frozen peer-bank set carries no value and loads
+/// as an empty set, so the pre-effect check covers the scope bank only.
+#[test]
+fn a_row_without_the_peer_bank_set_loads_an_empty_set() {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&sample_record()).expect("serialize record"))
+            .expect("parse record");
+    assert_eq!(parsed["peer_banks"], serde_json::json!(["bank-b"]));
+    let mut older = parsed;
+    older
+        .as_object_mut()
+        .expect("the record is an object")
+        .remove("peer_banks");
+    let legacy: SubjectRequestRecord = serde_json::from_value(older).expect("an older row loads");
+    assert!(
+        legacy.peer_banks.is_empty(),
+        "a row from before the fact loads an empty set"
+    );
 }
 
 #[test]

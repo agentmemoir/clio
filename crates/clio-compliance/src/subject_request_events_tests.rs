@@ -92,6 +92,22 @@ fn producer_ids_are_stable_strings() {
     assert_eq!(ProtectedAction::CopyExport.producer_id(), "copy_export");
     assert_eq!(ProtectedAction::Erasure.producer_id(), "erasure");
     assert_eq!(ProtectedAction::Restore.producer_id(), "restore");
+    assert_eq!(ProtectedAction::PeerDenial.producer_id(), "peer_denial");
+}
+
+/// Every durable pending result keeps the spelling a stored event carries, so
+/// a new obligation can never be read back as another one.
+#[test]
+fn the_durable_pending_results_keep_their_stored_spellings() {
+    let pinned = [
+        (PendingResult::CopyManifestPending, "copy_manifest_pending"),
+        (PendingResult::OutcomePending, "outcome_pending"),
+        (PendingResult::PeerDenialPending, "peer_denial_pending"),
+    ];
+    for (pending, spelling) in pinned {
+        let encoded = serde_json::to_string(&pending).expect("encode the pending result");
+        assert_eq!(encoded, format!("\"{spelling}\""), "{pending:?}");
+    }
 }
 
 /// A malformed-envelope case: a mutation of a valid event and the refused code.

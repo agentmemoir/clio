@@ -10,6 +10,8 @@
 //!
 //! ## Owns
 //! - `ApplyEngine` and the per-op apply matrix
+//! - The guarded apply entry (`apply_mutation_guarded`) and `ApplyResult`,
+//!   which carries the durable proof one denial operation answers with
 //! - LWW resolution + conflict journal recording
 //! - The journal self-heal contract (see `ApplyOutcome::Applied` / `Duplicate`)
 //! - Re-exports of the dead-letter quarantine helpers (defined in
@@ -19,6 +21,10 @@
 //! - Cursor advance policy (see `client` — cursors advance only after durable
 //!   apply or durable quarantine)
 //! - Transport (`server` / `client`)
+//! - The item apply effects (`apply_items`), the record effects
+//!   (`apply_records`), and the history effects (`apply_history`)
+//! - Denial semantics: the wire carrier and the proof (`denial`), and the
+//!   guards that consult the authority (`denial_guard`)
 //! - Local admission scoring: trusted peer creates apply without θ re-scoring
 //!   by design (schema/category/authz/erasure checks only)
 //!
@@ -32,6 +38,7 @@
 
 use crate::apply_records;
 use crate::clock::now_utc;
+use crate::denial::DenialProof;
 use crate::journal_row::journal_row as build_journal_row;
 use crate::protocol::{
     ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA,
@@ -39,12 +46,18 @@ use crate::protocol::{
     OP_UPSERT, SyncContent, SyncMutation,
 };
 use clio_store::{
-    AssocEdgeRecord, DeadLetterStatus, DekProvider, Store, SyncConflictRow, SyncStore,
+    AssocEdgeRecord, DeadLetterStatus, DekProvider, ErasureDenial, Store, SyncConflictRow,
+    SyncStore,
 };
-use clio_types::{AmError, ErrorCode, MemoryItem};
+use clio_types::{AmError, ErrorCode};
 
 #[path = "apply_dead_letter.rs"]
 mod apply_dead_letter;
+
+#[path = "apply_items.rs"]
+mod apply_items;
+
+use apply_items::{apply_item_discard, apply_item_invalidate, apply_item_upsert};
 
 pub use apply_dead_letter::quarantine;
 
@@ -76,6 +89,39 @@ pub enum ApplyOutcome {
     },
 }
 
+/// The result of one guarded apply: the transition, plus the durable denial
+/// proof the mutation produced.
+///
+/// The proof is present only for a denial operation whose authority is wired:
+/// on its first delivery and on every redelivery, which re-proves the same
+/// durable record without repeating any effect.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApplyResult {
+    /// The apply transition.
+    pub outcome: ApplyOutcome,
+    /// The durable proof a denial operation answers with, when it produced
+    /// one. `None` for every other mutation.
+    pub denial_proof: Option<DenialProof>,
+}
+
+impl ApplyResult {
+    /// A result with no denial proof.
+    pub(crate) fn plain(outcome: ApplyOutcome) -> Self {
+        Self {
+            outcome,
+            denial_proof: None,
+        }
+    }
+
+    /// A result carrying the durable proof one denial operation produced.
+    pub(crate) fn proven(outcome: ApplyOutcome, proof: DenialProof) -> Self {
+        Self {
+            outcome,
+            denial_proof: Some(proof),
+        }
+    }
+}
+
 /// Apply context: local durable state plus this node's identity.
 pub struct ApplyEngine<'a> {
     /// Local durable repository (ungated `Store` primitives).
@@ -102,20 +148,53 @@ pub fn apply_mutation(
     m: &SyncMutation,
     envelope_json: &str,
 ) -> Result<ApplyOutcome, AmError> {
+    apply_mutation_guarded(engine, None, m, envelope_json).map(|result| result.outcome)
+}
+
+/// Apply one remote mutation with the deployment's erasure-denial authority.
+///
+/// The authority adds two guards and one effect, all before any
+/// acknowledgement: a payload's subject is quarantined when a current denial
+/// covers it and refused transiently when the authority cannot be read; a
+/// denial operation records its denial durably and answers with the durable
+/// proof; and a redelivery of that operation re-proves the same record without
+/// repeating any effect. With no authority wired the behavior is exactly
+/// [`apply_mutation`]'s.
+///
+/// # Errors
+/// Storage failures and an unreadable authority (retryable; never advance
+/// cursors past them).
+pub fn apply_mutation_guarded(
+    engine: &ApplyEngine<'_>,
+    denial: Option<&dyn ErasureDenial>,
+    m: &SyncMutation,
+    envelope_json: &str,
+) -> Result<ApplyResult, AmError> {
     if let Err(err) = m.validate() {
-        return dead_letter(engine, m, envelope_json, &err);
+        return dead_letter(engine, m, envelope_json, &err).map(ApplyResult::plain);
     }
     if engine
         .sync
         .journal_get(&m.bank, &m.sync_mutation_id)?
         .is_some()
     {
-        return Ok(ApplyOutcome::Duplicate);
+        // A journaled denial operation still owes its proof: the durable
+        // record is already in place, so the redelivery re-proves it — which
+        // repeats no effect — instead of reporting a bare duplicate. A
+        // redelivery the authority cannot bind refuses rather than
+        // acknowledges.
+        if let Some(denial) = denial
+            && let Some(proof) =
+                crate::denial_guard::redelivery_proof(denial, &engine.device_id, m)?
+        {
+            return Ok(ApplyResult::proven(ApplyOutcome::Duplicate, proof));
+        }
+        return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
     // Operator-acked skips stay skipped: re-delivery of an acked poison id is
     // a documented no-op and may never re-open the row.
     if engine.sync.dead_letter_status(&m.sync_mutation_id)? == Some(DeadLetterStatus::AckedSkip) {
-        return Ok(ApplyOutcome::Duplicate);
+        return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
     if engine.sync.journal_apply_guard_hit(
         &m.bank,
@@ -124,7 +203,24 @@ pub fn apply_mutation(
         &m.op,
         &m.content_hash,
     )? {
-        return Ok(ApplyOutcome::Duplicate);
+        return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
+    }
+    // The subject a payload carries, consulted before any upsert or mint path
+    // can run: a denied subject never becomes readable again, and an
+    // unreadable authority refuses the mutation instead of clearing it.
+    if let Some(denial) = denial
+        && let Some(refused) = crate::denial_guard::guard_subject(engine, denial, m, envelope_json)?
+    {
+        return Ok(ApplyResult::plain(refused));
+    }
+    // The one denial operation: record the denial durably, journal the row for
+    // relay, and answer with the durable proof. With no authority wired the
+    // mutation falls through to the ordinary matrix below, exactly as it did
+    // before the guards existed.
+    if let Some(denial) = denial
+        && let Some(result) = crate::denial_guard::apply_carrier(engine, denial, m, envelope_json)?
+    {
+        return Ok(result);
     }
     let outcome = match (m.entity_kind.as_str(), m.op.as_str()) {
         (ENTITY_KIND_ITEM, OP_UPSERT) => apply_item_upsert(engine, m, envelope_json)?,
@@ -151,7 +247,8 @@ pub fn apply_mutation(
                 m,
                 envelope_json,
                 &AmError::not_implemented(&format!("{} / {}", m.entity_kind, m.op)),
-            );
+            )
+            .map(ApplyResult::plain);
         }
     };
     if outcome == ApplyOutcome::Applied {
@@ -163,122 +260,10 @@ pub fn apply_mutation(
         // first apply. A push of this mutation then reports `Duplicate`
         // instead of acking a second apply that never happened.
         if !appended.inserted {
-            return Ok(ApplyOutcome::Duplicate);
+            return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
         }
     }
-    Ok(outcome)
-}
-
-fn apply_item_upsert(
-    engine: &ApplyEngine<'_>,
-    m: &SyncMutation,
-    envelope_json: &str,
-) -> Result<ApplyOutcome, AmError> {
-    let SyncContent::Plain(v) = &m.content else {
-        return Ok(ApplyOutcome::Applied);
-    };
-    let mut item: MemoryItem = match serde_json::from_value(v.clone()) {
-        Ok(item) => item,
-        Err(e) => {
-            return crate::apply_history::reject(engine, m, envelope_json, "bad item content", &e);
-        }
-    };
-    if item.bank_id != m.bank {
-        return dead_letter(
-            engine,
-            m,
-            envelope_json,
-            &AmError::new(
-                ErrorCode::Forbidden,
-                "mutation bank does not match item bank",
-            ),
-        );
-    }
-    if engine.sync.subject_is_shredded(&item.subject_id)? {
-        return dead_letter(
-            engine,
-            m,
-            envelope_json,
-            &AmError::new(
-                ErrorCode::ErasedSubject,
-                "erased subject content resurrection",
-            ),
-        );
-    }
-    if let Err(err) = item.validate() {
-        return dead_letter(engine, m, envelope_json, &err);
-    }
-    if let Some(existing) = engine.store.get_memory_item(&m.bank, &m.entity_id)? {
-        if lww_loser(engine, m, &existing.updated_at, existing.admission_score)? {
-            return Ok(ApplyOutcome::ConflictLoser);
-        }
-        // Preserve-on-absent: a legacy peer payload
-        // without a `context` field (absent or null) never clears the stored
-        // context; a present value replaces it after validation.
-        match v.get("context") {
-            None | Some(serde_json::Value::Null) => item.context.clone_from(&existing.context),
-            Some(serde_json::Value::String(context)) => {
-                clio_types::validate_context(context)?;
-            }
-            _ => {}
-        }
-        engine.store.update_memory_item(&item, "sync-apply")?;
-    } else {
-        engine.store.create_memory_item(&item, "sync-apply")?;
-    }
-    Ok(ApplyOutcome::Applied)
-}
-
-fn apply_item_invalidate(
-    engine: &ApplyEngine<'_>,
-    m: &SyncMutation,
-    _envelope_json: &str,
-) -> Result<ApplyOutcome, AmError> {
-    if engine
-        .store
-        .get_item_identity(&m.bank, &m.entity_id)?
-        .is_none()
-    {
-        return Ok(ApplyOutcome::Applied);
-    }
-    let ended = engine.store.invalidate_item(
-        &m.bank,
-        &m.entity_id,
-        &m.transaction_time,
-        &m.transaction_time,
-        None,
-        "sync-apply",
-    )?;
-    if ended.closed_ids.is_empty() {
-        return Ok(ApplyOutcome::Duplicate);
-    }
-    Ok(ApplyOutcome::Applied)
-}
-
-fn apply_item_discard(
-    engine: &ApplyEngine<'_>,
-    m: &SyncMutation,
-    envelope_json: &str,
-) -> Result<ApplyOutcome, AmError> {
-    if engine
-        .store
-        .get_item_identity(&m.bank, &m.entity_id)?
-        .is_none()
-    {
-        return Ok(ApplyOutcome::Applied);
-    }
-    let identity = engine.store.discard_item(
-        &m.bank,
-        &m.entity_id,
-        "sync discard",
-        &m.transaction_time,
-        "sync-apply",
-    );
-    match identity {
-        Ok(_) => Ok(ApplyOutcome::Applied),
-        Err(err) if err.message.contains("already discarded") => Ok(ApplyOutcome::Duplicate),
-        Err(err) => dead_letter(engine, m, envelope_json, &err),
-    }
+    Ok(ApplyResult::plain(outcome))
 }
 
 fn apply_assoc(
@@ -424,6 +409,9 @@ pub(crate) fn lww_loser(
 #[cfg(test)]
 #[path = "apply_concurrency_tests.rs"]
 mod apply_concurrency_tests;
+#[cfg(test)]
+#[path = "apply_denial_tests.rs"]
+mod apply_denial_tests;
 #[cfg(test)]
 #[path = "apply_matrix_tests.rs"]
 mod apply_matrix_tests;

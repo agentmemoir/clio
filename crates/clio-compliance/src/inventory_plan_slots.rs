@@ -8,7 +8,7 @@
 //! reports.
 //!
 //! ## Owns
-//! - The eight slot-table `RowPlan` rows and their report order
+//! - The nine slot-table `RowPlan` rows and their report order
 //!
 //! ## Does not own
 //! - The fixed `ROW_PLAN` table and its overall report order (`inventory_plan`)
@@ -109,6 +109,23 @@ pub(crate) const LOCAL_EVENTS: RowPlan = RowPlan {
     owner: Owner::Clio,
     custody: Custody::Clio,
     readability: Readability::Plaintext,
+    key_path: None,
+    action: RetentionAction::Retain,
+    proof: "sql/003_local_compliance_slots.sql",
+};
+
+pub(crate) const PEER_ACTIONS: RowPlan = RowPlan {
+    family: "peer_actions",
+    tables: &["peer_actions"],
+    source: RowSource::Tables,
+    link: None,
+    gap: Some(
+        "no subject column: the peer action slot carries the request, peer, \
+         and action ids",
+    ),
+    owner: Owner::Clio,
+    custody: Custody::Clio,
+    readability: Readability::Metadata,
     key_path: None,
     action: RetentionAction::Retain,
     proof: "sql/003_local_compliance_slots.sql",

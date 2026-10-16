@@ -3,22 +3,26 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the one wording every Postgres test uses when
-//! it skips because the store could not be opened, so that message can never
-//! carry the connection string.
+//! This module is responsible for how a Postgres test reports an unreachable
+//! store: the one skip wording that can never carry the connection string, and
+//! the fail-closed rule that makes a skipped backend a failure unless the
+//! operator explicitly opted out.
 //!
 //! ## Owns
 //! - `pg_skip_note`, the only way a Postgres test reports "could not open"
+//! - `skip_requested` and `unreachable_pg_or_skip`: the strict default and the
+//!   sole `CLIO_SKIP_PG_TESTS` opt-out that turns it into a printed note
 //!
 //! ## Does not own
-//! - Whether a test skips at all, or under what condition (each test's own
+//! - Whether a test probes for a skippable failure at all (each test's own
 //!   `open_pg`)
 //! - The connection itself, and any redaction of a URL an operator typed
 //!
 //! ## Boundary
 //!
-//! Changes to how a Postgres skip is reported should normally require changes
-//! here. Changes to a test's skip condition should not require changes here.
+//! Changes to the fail-closed rule or to the skip wording should normally
+//! require changes here. Changes to a test's skip condition should not require
+//! changes here.
 //!
 //! Test-only: the skip note is a test diagnostic and is never compiled into a
 //! production build.
@@ -41,22 +45,60 @@ pub(crate) fn pg_skip_note(suite: &str, err: &AmError) -> String {
     format!("skipping {suite}: cannot open the Postgres store: {err}")
 }
 
+/// True only when the operator explicitly opted out of Postgres-backed tests.
+///
+/// Without the opt-out an unreachable server fails the suite: a skipped backend
+/// is not a pass, so the store's Postgres suites cannot report green without
+/// touching a database.
+#[must_use]
+pub(crate) fn skip_requested() -> bool {
+    opted_out(std::env::var("CLIO_SKIP_PG_TESTS").ok().as_deref())
+}
+
+/// The opt-out spellings, as a pure read of the variable: a test cannot mutate
+/// the process environment it shares with every other test in the run.
+fn opted_out(value: Option<&str>) -> bool {
+    matches!(value, Some("1" | "true" | "yes"))
+}
+
+/// Fail closed on an unreachable Postgres for `suite`: panic with the reason
+/// unless the operator set `CLIO_SKIP_PG_TESTS`, which prints the
+/// credential-safe skip note and lets the caller return early. The panic
+/// carries the driver's error, never the connection string.
+pub(crate) fn unreachable_pg_or_skip(suite: &str, err: &AmError) {
+    fail_or_skip(suite, err, skip_requested());
+}
+
+/// The decision, split from the environment read so both branches are
+/// testable: `skip` prints the note, the strict default panics.
+fn fail_or_skip(suite: &str, err: &AmError, skip: bool) {
+    if skip {
+        eprintln!("{}", pg_skip_note(suite, err));
+        return;
+    }
+    panic!("{suite} require a reachable Postgres: {err}");
+}
+
 #[cfg(test)]
 mod tests {
     use clio_types::{AmError, ErrorCode};
 
-    use super::pg_skip_note;
+    use super::{fail_or_skip, opted_out, pg_skip_note};
 
-    /// Regression cover for issue #37: eight Postgres test helpers printed the
-    /// whole `CLIO_DATABASE_URL` in their skip message, so a run against an
+    /// The connect refusal every test in this module reports.
+    fn connect_error() -> AmError {
+        AmError::new(
+            ErrorCode::Internal,
+            "postgres connect: FATAL: password authentication failed for user \"clio\"",
+        )
+    }
+
+    /// Regression cover: eight Postgres test helpers printed the whole
+    /// `CLIO_DATABASE_URL` in their skip message, so a run against an
     /// unreachable database published `user:password` to the test log.
     #[test]
     fn a_skip_note_never_prints_a_connection_string() {
-        let err = AmError::new(
-            ErrorCode::Internal,
-            "postgres connect: FATAL: password authentication failed for user \"clio\"",
-        );
-        let note = pg_skip_note("postgres continuous tests", &err);
+        let note = pg_skip_note("postgres continuous tests", &connect_error());
         assert!(
             !note.contains("://"),
             "a skip note must carry no connection string: {note}"
@@ -71,12 +113,34 @@ mod tests {
     /// skipped, so the suite and the server's own words have to survive.
     #[test]
     fn a_skip_note_still_names_the_suite_and_the_servers_reason() {
-        let err = AmError::new(
-            ErrorCode::Internal,
-            "postgres connect: FATAL: password authentication failed for user \"clio\"",
-        );
-        let note = pg_skip_note("postgres continuous tests", &err);
+        let note = pg_skip_note("postgres continuous tests", &connect_error());
         assert!(note.contains("postgres continuous tests"), "{note}");
         assert!(note.contains("password authentication failed"), "{note}");
+    }
+
+    /// The strict default: without the opt-out an unreachable server fails the
+    /// suite, so a skipped backend can never read as a pass.
+    #[test]
+    #[should_panic(expected = "require a reachable Postgres")]
+    fn an_unreachable_postgres_is_fatal_without_the_opt_out() {
+        fail_or_skip("postgres peer action tests", &connect_error(), false);
+    }
+
+    /// The explicit opt-out is the only path that turns the unreachable server
+    /// into a note and lets the caller return early.
+    #[test]
+    fn an_explicit_opt_out_turns_the_unreachable_postgres_into_a_note() {
+        fail_or_skip("postgres peer action tests", &connect_error(), true);
+    }
+
+    /// Only the documented spellings opt out; anything else stays strict.
+    #[test]
+    fn only_the_documented_opt_out_spellings_skip() {
+        for value in [Some("1"), Some("true"), Some("yes")] {
+            assert!(opted_out(value), "{value:?} opts out");
+        }
+        for value in [None, Some("0"), Some("no"), Some("TRUE"), Some("")] {
+            assert!(!opted_out(value), "{value:?} stays strict");
+        }
     }
 }

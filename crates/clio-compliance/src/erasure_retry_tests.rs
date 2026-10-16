@@ -5,15 +5,18 @@
 //!
 //! This module is responsible for the confirmed-erasure flow coverage: the
 //! intent-before-denial ordering, the intent-failure and intent-resume
-//! classes, the peer settle rules, a retried request's idempotency, and the
-//! unresumable-action class; the rest live in `erasure_retry_reconcile_tests.rs`.
+//! classes, and a retried request's idempotency, plus the file-backed scenario
+//! fixture the other retry suites reuse.
 //!
 //! ## Owns
 //! - The flow assertions and the shared file-backed scenario fixture
 //! - The racing telemetry sink and the shared live-bank-set read
+//! - The declaration of the peer-evidence coverage it hosts
 //!
 //! ## Does not own
 //! - The retry contract itself (`erasure_retry.rs`)
+//! - The peer-evidence settle rules (`erasure_retry_peer_evidence_tests.rs`)
+//! - The reconcile and guard suites (`erasure_retry_reconcile_tests.rs`)
 //! - The shared fixtures and erase double (`subject_request_store_wiring_tests.rs`)
 //!
 //! ## Boundary
@@ -22,17 +25,16 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::erasure_retry_reconcile_tests::{record_erasure_intent, resume_facts};
 use super::subject_request_store_wiring_tests::{
     Scratch, open_sqlite, persist, scope_parts, started_record, subject_scope, wiring_item,
 };
 use crate::erase::{EraseArgs, EraseEvent, EraseSink, EraseVecSink};
-use crate::erasure_reconcile::reconcile_erasure_actions;
 use crate::erasure_retry::{OUTCOME_COMPLETED, erase_confirmed_request, erasure_action_id};
 use crate::export_subject_scenarios_tests::FaultEvents;
 use crate::inventory_fixture::FixtureDir;
 use crate::restore_guard::RESTORE_EVENT_KIND;
-use crate::subject_request::{PeerState, RequestScope, SubjectRequestRecord};
+use crate::subject_peer::{begin_denial, mark_acknowledged};
+use crate::subject_request::{PeerState, RequestScope};
 use crate::subject_request_store_wiring::record_to_row;
 use crate::test_unique::unique;
 use clio_store::{
@@ -107,10 +109,12 @@ impl Attempt {
     pub(super) fn env<'a>(
         &'a self,
         store: &'a dyn ComplianceStore,
+        peers: &'a dyn clio_store::PeerActionStore,
         sink: &'a dyn EraseSink,
     ) -> crate::erasure_reconcile::ErasureRetryEnv<'a> {
         crate::erasure_reconcile::ErasureRetryEnv {
             store,
+            peers,
             journal_path: &self.journal,
             maint: None,
             actor: Actor::Harness,
@@ -221,7 +225,7 @@ fn intent_write_failure(attempt: &Attempt, store: &SqliteStore) -> AmError {
     let args = attempt.args(store, &ctx, &sink);
     let live = live_set(attempt, store);
     let events = FaultEvents::intent_fails();
-    erase_confirmed_request(store, &events, &attempt.request_id, &args, &live)
+    erase_confirmed_request(store, &events, store, &attempt.request_id, &args, &live)
         .expect_err("a failed intent must refuse")
 }
 
@@ -277,7 +281,7 @@ fn an_intent_id_held_by_another_event_kind_refuses() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("a foreign-kind row must refuse the erasure");
     assert_eq!(err.code, ErrorCode::Internal, "{}", err.message);
     let rows = action_rows(&store, &id);
@@ -303,6 +307,7 @@ fn a_racing_intent_write_resumes_instead_of_refusing() {
     let outcome = erase_confirmed_request(
         &store,
         &RacingIntent { inner: &store },
+        &store,
         &attempt.request_id,
         &args,
         &live,
@@ -326,10 +331,10 @@ fn a_same_scope_repeat_is_idempotent() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
-    let first = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let first = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect("the first attempt completes");
     assert_eq!(first.status, "COMPLETED");
-    let repeat = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let repeat = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect("a same-scope repeat is idempotent");
     assert_eq!(repeat.status, "COMPLETED");
     assert!(
@@ -360,7 +365,7 @@ fn a_changed_scope_repeat_refuses_before_the_effect() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
-    erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect("the first attempt completes");
     let events_before = store.list_events().expect("events").len();
     let other_subject = unique("other-subject");
@@ -368,7 +373,7 @@ fn a_changed_scope_repeat_refuses_before_the_effect() {
         subject_id: &other_subject,
         ..attempt.args(&store, &ctx, &sink)
     };
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &changed, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &changed, &live)
         .expect_err("a changed scope must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
     assert_eq!(
@@ -378,7 +383,10 @@ fn a_changed_scope_repeat_refuses_before_the_effect() {
     );
 }
 
-/// A peer slot recorded mid-effect keeps the event pending as PROCESSING.
+/// A peer slot recorded mid-effect keeps the event pending as PROCESSING, even
+/// though the peers confirmed before it already carry durable evidence: the
+/// gate re-reads the record's slots, so the new slot alone keeps completion
+/// open.
 #[test]
 fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
     let attempt = Attempt::new();
@@ -387,12 +395,19 @@ fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
     started
         .peers
         .insert(peer_bank.clone(), PeerState::Acknowledged);
+    started.peer_banks.insert(peer_bank.clone());
     {
         let store = open_sqlite(&attempt.store_path());
         persist(&store, &started);
         store
             .create_memory_item(&wiring_item(&attempt.bank, &attempt.subject), "tester")
             .expect("seed the subject item");
+        // The confirmed peer's own durable acknowledgement, so it settles by
+        // evidence rather than by a missing row; only the mid-effect slot is
+        // left without one.
+        begin_denial(&store, &attempt.request_id, &peer_bank).expect("the peer row begins");
+        mark_acknowledged(&store, &attempt.request_id, &peer_bank, "deletion-9")
+            .expect("the peer acknowledges");
     }
     let store = open_sqlite(&attempt.store_path());
     let mut joined = started.clone();
@@ -406,8 +421,9 @@ fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
     let ctx = attempt.ctx();
     let args = attempt.args(&store, &ctx, &sink);
     let live = vec![attempt.bank.clone(), peer_bank];
-    let outcome = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect("the effect completes");
+    let outcome =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the effect completes");
     assert_eq!(
         outcome.status, "PROCESSING",
         "a pending peer slot keeps completion pending"
@@ -423,26 +439,7 @@ fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
     assert!(rows[0].result.is_none(), "no outcome is written");
 }
 
-/// An unresumable record stays pending — this pass cannot observe the effect —
-/// and a later resumable pass still settles the action.
-#[test]
-fn reconcile_keeps_an_unresumable_action_pending_for_a_later_pass() {
-    let (attempt, store) = persisted();
-    store
-        .create_memory_item(&wiring_item(&attempt.bank, &attempt.subject), "tester")
-        .expect("seed the subject item");
-    record_erasure_intent(&store, &attempt.request_id);
-    let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
-    let report = reconcile_erasure_actions(&store, &store, &env, &|_| None).expect("reconcile");
-    assert_eq!(report.pending, vec![action_id(&attempt)]);
-    let rows = action_rows(&store, &action_id(&attempt));
-    assert_eq!(rows[0].state, LocalEventState::Pending, "never denied");
-    assert!(rows[0].result.is_none(), "no outcome is written");
-    let live = live_set(&attempt, &store);
-    let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
-    let later = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
-    assert_eq!(later.settled, vec![action_id(&attempt)], "it settles later");
-    let settled = action_rows(&store, &action_id(&attempt));
-    assert_eq!(settled[0].state, LocalEventState::Allowed);
-}
+// Declared here, beside the fixtures it reuses: the peer-evidence settle,
+// peer-action reconcile, and prune-survival coverage.
+#[path = "erasure_retry_peer_evidence_tests.rs"]
+mod erasure_retry_peer_evidence_tests;

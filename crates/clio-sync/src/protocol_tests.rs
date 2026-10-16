@@ -19,13 +19,14 @@
 //!
 //! Keep this module focused on sync wire contract tests.
 
+use crate::denial::{DenialAck, DenialProof};
 use crate::protocol::{
-    ENTITY_KIND_ITEM, OP_INVALIDATE, OP_UPSERT, REASON_ERASED_SUBJECT, REASON_MALFORMED,
+    ENTITY_KIND_ITEM, OP_INVALIDATE, OP_UPSERT, PushAck, REASON_ERASED_SUBJECT, REASON_MALFORMED,
     SyncContent, SyncMutation, WM_ENTITY_SEP, canonical_watermark_body, decode_cursor,
     decode_watermark, encode_cursor, encode_watermark, join_watermark_body, lww_compare,
     reason_code_for,
 };
-use clio_types::{AmError, ErrorCode};
+use clio_types::AmError;
 
 #[test]
 fn cursor_roundtrip_and_checksum_rejects() {
@@ -183,7 +184,6 @@ fn mutation() -> SyncMutation {
 fn invalidate_op_constant_matches_wire() {
     assert_eq!(OP_INVALIDATE, "invalidate");
     assert_eq!(ENTITY_KIND_ITEM, "item");
-    let _ = ErrorCode::InvalidArgument;
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -239,4 +239,50 @@ fn content_value_is_empty_for_cipher_and_present_for_plain() {
         &serde_json::json!({}),
         "cipher mutations expose an empty placeholder"
     );
+}
+
+#[test]
+fn a_denial_mutation_passes_envelope_validation() {
+    let carrier = crate::denial::DenialCarrier::new("req-1", &["bank-a"]);
+    let m =
+        crate::denial::denial_mutation("bank-a", "s-1", &carrier, "dev-a", "2026-01-01T00:00:00Z");
+    assert!(m.validate().is_ok());
+    assert_eq!(m.entity_kind, crate::protocol::ENTITY_KIND_TOMBSTONE);
+    assert_eq!(m.op, OP_UPSERT);
+    assert_eq!(m.sync_mutation_id, "denial:req-1");
+    assert_eq!(m.entity_id, "s-1");
+}
+
+#[test]
+fn a_push_ack_without_a_denial_ack_parses_and_roundtrips_with_one() {
+    // An ack written before the field existed parses unchanged, carries no
+    // proof, and serializes without the field.
+    let legacy: PushAck =
+        serde_json::from_str(r#"{"cursor":"c","accepted":["m-1"],"rejected":[]}"#)
+            .expect("legacy ack parses");
+    assert!(legacy.denial_acks.is_empty(), "{legacy:?}");
+    let text = serde_json::to_string(&legacy).expect("serialize");
+    assert!(!text.contains("denial_acks"), "{text}");
+
+    let ack = PushAck {
+        cursor: "c".into(),
+        accepted: vec!["denial:req-1".into()],
+        rejected: Vec::new(),
+        denial_acks: vec![DenialAck {
+            sync_mutation_id: "denial:req-1".into(),
+            proof: DenialProof {
+                request_ref: "req-1".into(),
+                peer_id: "srv-1".into(),
+                subject_hash: crate::denial::denial_subject_hash(
+                    crate::denial::test_fingerprint(),
+                    "s-1",
+                ),
+                generation: 3,
+                salt_fingerprint: crate::denial::test_fingerprint().into(),
+            },
+        }],
+    };
+    let roundtrip: PushAck = serde_json::from_str(&serde_json::to_string(&ack).expect("serialize"))
+        .expect("deserialize");
+    assert_eq!(roundtrip, ack);
 }
