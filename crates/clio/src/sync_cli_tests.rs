@@ -12,6 +12,8 @@
 //! ## Does not own
 //! - The command implementation under test (`sync_cli`)
 //! - Sync protocol behavior (see `clio-sync`)
+//! - The serve process's start-up denial wiring and its start/exit contract
+//!   (see `sync_cli_denial_tests`)
 //!
 //! ## Boundary
 //!
@@ -22,14 +24,28 @@ use crate::cli_args::{self, ParsedArgs};
 use crate::cli_read_test_support::state;
 use clio_mcp::runtime::McpState;
 
-/// Run one `sync` verb against injected state and a chosen deployment kind.
+/// Run one `sync` verb against injected state and a chosen deployment kind. The
+/// deployment environment is empty: nothing is configured, so every resolver
+/// sees the single-host default.
 fn run_sync(
     args: &[&str],
     single_host: bool,
     state: Option<&Arc<McpState>>,
     is_tty: bool,
 ) -> (ExitCode, String, String) {
-    let env = |_key: &str| -> Option<String> { None };
+    run_sync_env(args, single_host, state, is_tty, &|_key: &str| None)
+}
+
+/// The runner above with a deployment environment, so a test can point a verb
+/// at the journal path its deployment resolves without touching the process
+/// environment.
+fn run_sync_env(
+    args: &[&str],
+    single_host: bool,
+    state: Option<&Arc<McpState>>,
+    is_tty: bool,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> (ExitCode, String, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut input = std::io::empty();
@@ -238,30 +254,6 @@ fn build_decodes_serve_flags() {
     assert_eq!(args["banks"], json!(["demo"]));
     assert_eq!(args["ttl_secs"], json!(0));
     assert_eq!(args["dev"], json!(true));
-}
-
-#[test]
-fn serve_with_dev_and_zero_ttl_runs_and_exits() {
-    let s = state();
-    let (code, out, err) = run_sync(
-        &["serve", "--dev", "--ttl-secs", "0"],
-        false,
-        Some(&s),
-        false,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
-    let payload: Value = serde_json::from_str(out.trim()).expect("json");
-    assert!(payload["addr"].as_str().is_some(), "{payload}");
-    assert_eq!(payload["ttl_secs"], json!(0), "{payload}");
-
-    let (_, text, _) = run_sync(
-        &["serve", "--dev", "--ttl-secs", "0"],
-        false,
-        Some(&s),
-        true,
-    );
-    assert!(text.contains("sync serve listening on"), "{text}");
-    wait_for_ttl(Duration::ZERO, &crate::sigpipe::Serving::for_test());
 }
 
 #[test]

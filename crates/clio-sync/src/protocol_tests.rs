@@ -26,7 +26,7 @@ use crate::protocol::{
     decode_watermark, encode_cursor, encode_watermark, join_watermark_body, lww_compare,
     reason_code_for,
 };
-use clio_types::{AmError, ErrorCode};
+use clio_types::AmError;
 
 #[test]
 fn cursor_roundtrip_and_checksum_rejects() {
@@ -184,7 +184,6 @@ fn mutation() -> SyncMutation {
 fn invalidate_op_constant_matches_wire() {
     assert_eq!(OP_INVALIDATE, "invalidate");
     assert_eq!(ENTITY_KIND_ITEM, "item");
-    let _ = ErrorCode::InvalidArgument;
 }
 
 fn b64(bytes: &[u8]) -> String {

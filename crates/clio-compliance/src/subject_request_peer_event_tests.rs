@@ -17,6 +17,8 @@
 //! - The envelope contract (`subject_request_events.rs`) and the producer
 //!   (`subject_request_peer_events.rs`)
 //! - The durable per-peer row contract and its SQL (`clio-store`)
+//! - The scratch SQLite fixture (`subject_peer_fixtures.rs`, shared with
+//!   `subject_peer_tests.rs`)
 //!
 //! ## Boundary
 //!
@@ -26,8 +28,10 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use crate::subject_peer::subject_peer_fixtures::{Scratch, open_sqlite};
 use crate::subject_peer::{
     begin_denial, mark_acknowledged, mark_delivered, mark_refused, peer_action_id,
+    record_disposition,
 };
 use crate::subject_request::RequestScope;
 use crate::subject_request_events::{
@@ -36,40 +40,18 @@ use crate::subject_request_events::{
 };
 use crate::test_unique::unique;
 use clio_store::{
-    DekProvider, LocalDevKms, LocalEventState, LocalEventStore, PeerActionKind, PeerActionStore,
+    LocalEventState, LocalEventStore, PeerActionDisposition, PeerActionKind, PeerActionStore,
     SqliteStore,
 };
 use clio_types::{Actor, ErrorCode};
-use std::sync::Arc;
 
 const NOW: &str = "2026-01-01T00:00:00Z";
-
-/// A scratch database directory removed when the guard drops.
-struct Scratch(std::path::PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        Self(std::env::temp_dir().join(unique("clio-compliance-peer-event")))
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// A key provider for the file-backed scratch store.
-fn kms() -> Arc<dyn DekProvider> {
-    Arc::new(LocalDevKms::new())
-}
 
 /// One open scratch store, held with the directory guard that removes it on
 /// drop, so the store's file outlives the test's use of it.
 fn scratch_store() -> (Scratch, SqliteStore) {
     let scratch = Scratch::new();
-    let store =
-        SqliteStore::open(&scratch.0.join("store.db"), kms()).expect("scratch sqlite opens");
+    let store = open_sqlite(&scratch.0.join("store.db"));
     (scratch, store)
 }
 
@@ -210,5 +192,125 @@ fn a_peer_outcome_needs_the_durable_acknowledgement_or_refusal() {
             reason: "peer denial refused".into(),
         })
     );
+    assert!(event.payload.pending.is_none(), "the peer owes nothing");
+}
+
+/// A refused peer row that then recorded an approved retention publishes the
+/// retention's own content-free result, never a denial.
+#[test]
+fn a_retention_approved_peer_publishes_its_own_result_not_a_denial() {
+    let (_scratch, store) = scratch_store();
+    let request_id = unique("req");
+    let peer_id = unique("peer-retained");
+    record_peer_denial_intent(&store, &request_id, &peer_id, Actor::Harness, NOW)
+        .expect("the intent is durable before delivery");
+    begin_denial(&store, &request_id, &peer_id).expect("the peer row begins");
+    mark_refused(&store, &request_id, &peer_id).expect("the refusal records");
+    record_disposition(
+        &store,
+        &request_id,
+        &peer_id,
+        PeerActionDisposition::RetentionApproved,
+        Some("hold-7"),
+    )
+    .expect("the approved retention records");
+    record_peer_denial_outcome(&store, &store, &request_id, &peer_id)
+        .expect("the recorded retention settles the outcome");
+    let rows: Vec<_> = store
+        .list_events()
+        .expect("events")
+        .into_iter()
+        .filter(|row| row.action_id == peer_action_id(&request_id, &peer_id))
+        .collect();
+    assert_eq!(rows.len(), 1, "one settled outcome row");
+    assert_eq!(
+        rows[0].state,
+        LocalEventState::Allowed,
+        "an approved retention is not a denial"
+    );
+    assert_eq!(
+        rows[0].result.as_deref(),
+        Some("peer retention approved"),
+        "the content-free retention result"
+    );
+    let row = PeerActionStore::load(&store, &request_id, &peer_id, PeerActionKind::Denial)
+        .expect("load the peer row")
+        .expect("the durable row exists");
+    let event = peer_denial_event(
+        &request_id,
+        &peer_id,
+        &scope(&request_id),
+        Some(&row),
+        Actor::Harness,
+        NOW,
+        4,
+    )
+    .expect("the retained outcome envelope");
+    assert_eq!(
+        event.payload.outcome,
+        Some(ActionOutcome::Done),
+        "a resolved row is done, never refused"
+    );
+    assert!(event.payload.pending.is_none(), "the peer owes nothing");
+}
+
+/// A refused peer row that then recorded the peer's removal evidence
+/// publishes the recorded result, never a denial.
+#[test]
+fn a_recorded_removal_evidence_publishes_its_own_result_not_a_denial() {
+    let (_scratch, store) = scratch_store();
+    let request_id = unique("req");
+    let peer_id = unique("peer-removed");
+    record_peer_denial_intent(&store, &request_id, &peer_id, Actor::Harness, NOW)
+        .expect("the intent is durable before delivery");
+    begin_denial(&store, &request_id, &peer_id).expect("the peer row begins");
+    mark_refused(&store, &request_id, &peer_id).expect("the refusal records");
+    record_disposition(
+        &store,
+        &request_id,
+        &peer_id,
+        PeerActionDisposition::RemovalEvidence,
+        Some("deletion-9"),
+    )
+    .expect("the removal evidence records");
+    record_peer_denial_outcome(&store, &store, &request_id, &peer_id)
+        .expect("the recorded removal evidence settles the outcome");
+    let rows: Vec<_> = store
+        .list_events()
+        .expect("events")
+        .into_iter()
+        .filter(|row| row.action_id == peer_action_id(&request_id, &peer_id))
+        .collect();
+    assert_eq!(rows.len(), 1, "one settled outcome row");
+    assert_eq!(
+        rows[0].state,
+        LocalEventState::Allowed,
+        "an evidenced removal is not a denial"
+    );
+    assert_eq!(
+        rows[0].result.as_deref(),
+        Some("peer removal evidence recorded"),
+        "the content-free removal result"
+    );
+    assert!(
+        rows[0].result.as_deref().is_some_and(|result| {
+            !result.contains("deletion-9") && !result.contains(&request_id)
+        }),
+        "the proof reference and the request never enter the result text"
+    );
+    let row = PeerActionStore::load(&store, &request_id, &peer_id, PeerActionKind::Denial)
+        .expect("load the peer row")
+        .expect("the durable row exists");
+    let event = peer_denial_event(
+        &request_id,
+        &peer_id,
+        &scope(&request_id),
+        Some(&row),
+        Actor::Harness,
+        NOW,
+        5,
+    )
+    .expect("the removal outcome envelope");
+    assert_eq!(event.payload.outcome, Some(ActionOutcome::Done));
     assert!(event.payload.pending.is_none(), "the peer owes nothing");
 }

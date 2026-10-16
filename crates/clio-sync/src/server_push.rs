@@ -4,14 +4,15 @@
 //! # Responsibility
 //!
 //! This module is responsible for the sync server's push route: request
-//! decoding, per-mutation bank authorization, the per-bank apply lock, the
-//! guarded apply of every mutation, the dead-letter quarantine of refused
-//! mutations, and the acknowledgement that carries each denial operation's
-//! durable proof.
+//! decoding, per-mutation and per-covered-bank bank authorization, the
+//! per-bank apply lock, the guarded apply of every mutation, the dead-letter
+//! quarantine of refused mutations, and the acknowledgement that carries each
+//! denial operation's durable proof.
 //!
 //! ## Owns
 //! - `handle_push` and the push acknowledgement body it writes
-//! - The per-mutation authorization refusal and its quarantine placement
+//! - The authorization refusals (the envelope bank, each mutation, and every
+//!   covered bank of a denial carrier) and their quarantine placement
 //! - The denial acknowledgement list a push returns
 //!
 //! ## Does not own
@@ -109,6 +110,27 @@ pub(crate) fn handle_push(
             rejected.push(m.sync_mutation_id);
             continue;
         }
+        // A denial carrier records one serve marker per covered bank before
+        // the proof exists, so every covered bank must be authorized first:
+        // a credential for one bank must never durably refuse another. A
+        // malformed carrier is left to the apply path's own permanent reject.
+        if let Ok(Some(carrier)) = crate::denial::denial_carrier(&m)
+            && let Some(unauthorized) = carrier
+                .covered_banks()
+                .iter()
+                .find(|covered| !bank_authorized(options, auth, covered))
+        {
+            quarantine(
+                &engine,
+                &bank,
+                &m,
+                &envelope,
+                crate::protocol::REASON_UNAUTHORIZED_BANK,
+                &format!("denial carrier covers unauthorized bank {unauthorized}"),
+            )?;
+            rejected.push(m.sync_mutation_id);
+            continue;
+        }
         match apply_mutation_guarded(&engine, options.denial.as_deref(), &m, &envelope) {
             Ok(result) => {
                 // The durable record is written before this acknowledgement:
@@ -125,13 +147,12 @@ pub(crate) fn handle_push(
                     _ => accepted.push(m.sync_mutation_id),
                 }
             }
-            Err(_) => {
-                // Transient storage failure: no ack, client retries unchanged.
-                return write_status_error(
-                    stream,
-                    500,
-                    &AmError::new(ErrorCode::Internal, "transient storage failure"),
-                );
+            Err(err) => {
+                // A transient refusal: no ack, the client retries unchanged.
+                // The authority's own code is kept, so a damaged authority
+                // (`config_corrupt`) stays distinguishable from a storage
+                // failure, exactly as the pull route answers its refusals.
+                return write_status_error(stream, 500, &err);
             }
         }
     }
@@ -148,3 +169,7 @@ pub(crate) fn handle_push(
         .expect("serialize push ack"),
     )
 }
+
+#[cfg(test)]
+#[path = "server_push_denial_tests.rs"]
+mod server_push_denial_tests;

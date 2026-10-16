@@ -377,6 +377,7 @@ fn sqlite_a_pending_peer_keeps_completion_pending_without_blocking_the_effect() 
         let store = open_sqlite(&path);
         let mut record = started_record(&request_id, &scope);
         record.peers.insert(peer_bank.clone(), PeerState::Pending);
+        record.peer_banks.insert(peer_bank.clone());
         persist(&store, &record);
     }
     let store = open_sqlite(&path);

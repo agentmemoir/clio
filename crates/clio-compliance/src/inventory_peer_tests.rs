@@ -5,8 +5,9 @@
 //!
 //! This module is responsible for the peer-fact tests of the scope ledger:
 //! the peers-disabled not-applicable fact, the acknowledgement state a caller
-//! supplies from the durable per-peer rows, and the rule that supplying those
-//! rows changes no other ledger row.
+//! supplies from the durable per-peer rows, the binding rule that keeps an
+//! unbound or foreign row from settling a peer, and the rule that supplying
+//! those rows changes no other ledger row.
 //!
 //! ## Owns
 //! - The enabled-peers row assertions for the supplied enablement fact and the
@@ -185,6 +186,87 @@ fn a_refused_peer_with_an_evidenced_disposition_is_never_read_as_acknowledged() 
         !row.open && row.open_reason.is_none(),
         "an evidenced disposition is recorded, not open: {:?}",
         row.open_reason
+    );
+}
+
+#[test]
+fn an_action_id_that_is_not_the_derived_one_never_settles_the_peer() {
+    let fixture = LedgerFixture::create();
+    let request = unique("inv-peer-unbound");
+    let peer = unique("inv-peer-unbound-a");
+    begin_denial(&fixture.store, &request, &peer).expect("begin the peer's denial row");
+    mark_acknowledged(&fixture.store, &request, &peer, "gen-3:hash-c:salt-c")
+        .expect("record the peer's durable acknowledgement");
+    let mut input = input_with_rows(&fixture, &request);
+    input.peer_actions[0].action_id = "other:key".to_owned();
+
+    let ledger = scope_inventory(&input);
+    let row = row_for(&ledger, "enabled_peers");
+    assert!(
+        row.open,
+        "an action id that is not the derived one settles nothing"
+    );
+    assert!(
+        !row.source.contains("acknowledged"),
+        "an unbound row is never reported acknowledged: {}",
+        row.source
+    );
+    let why = reason(&ledger, "enabled_peers");
+    assert!(
+        why.contains(&peer) && why.contains("not bound to the derived action id"),
+        "the open reason names the unbound peer: {why}"
+    );
+}
+
+#[test]
+fn a_row_for_another_request_never_settles_the_peer() {
+    let fixture = LedgerFixture::create();
+    let request = unique("inv-peer-foreign-req");
+    let peer = unique("inv-peer-foreign-req-a");
+    begin_denial(&fixture.store, &request, &peer).expect("begin the peer's denial row");
+    mark_acknowledged(&fixture.store, &request, &peer, "gen-4:hash-d:salt-d")
+        .expect("record the peer's durable acknowledgement");
+    let mut input = input_with_rows(&fixture, &request);
+    input.peer_actions[0].request_id = unique("inv-peer-other-req");
+
+    let ledger = scope_inventory(&input);
+    let row = row_for(&ledger, "enabled_peers");
+    assert!(row.open, "a row for another request settles nothing");
+    assert!(
+        !row.source.contains("acknowledged"),
+        "a foreign-request row is never reported acknowledged: {}",
+        row.source
+    );
+    let why = reason(&ledger, "enabled_peers");
+    assert!(
+        why.contains(&peer) && why.contains("not bound to the derived action id"),
+        "the open reason names the foreign row's peer: {why}"
+    );
+}
+
+#[test]
+fn a_row_for_another_peer_never_settles_the_peer() {
+    let fixture = LedgerFixture::create();
+    let request = unique("inv-peer-foreign-peer");
+    let peer = unique("inv-peer-foreign-peer-a");
+    begin_denial(&fixture.store, &request, &peer).expect("begin the peer's denial row");
+    mark_acknowledged(&fixture.store, &request, &peer, "gen-5:hash-e:salt-e")
+        .expect("record the peer's durable acknowledgement");
+    let mut input = input_with_rows(&fixture, &request);
+    input.peer_actions[0].peer_id = unique("inv-peer-other");
+
+    let ledger = scope_inventory(&input);
+    let row = row_for(&ledger, "enabled_peers");
+    assert!(row.open, "a row for another peer settles nothing");
+    assert!(
+        !row.source.contains("acknowledged"),
+        "a foreign-peer row is never reported acknowledged: {}",
+        row.source
+    );
+    let why = reason(&ledger, "enabled_peers");
+    assert!(
+        why.contains("not bound to the derived action id"),
+        "the open reason names the unbound row: {why}"
     );
 }
 

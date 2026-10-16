@@ -27,7 +27,8 @@
 //! Keep this module focused on rendering the peer fact of one ledger run.
 
 use super::{InventoryInput, RowPlan, RowSource};
-use clio_store::{PeerActionDisposition, PeerActionRow, PeerActionState};
+use crate::subject_peer::peer_action_id;
+use clio_store::{PeerActionDisposition, PeerActionKind, PeerActionRow, PeerActionState};
 
 /// The reason a peer fact with no enablement fact stays open.
 const UNVERIFIED: &str = "peers could not be verified: no enablement fact was supplied";
@@ -108,9 +109,23 @@ fn is_peers(plan: &RowPlan) -> bool {
     matches!(plan.source, RowSource::Peers)
 }
 
-/// One durable row's state in the request fold's words: an acknowledged row is
-/// settled, a recorded disposition is a disposed row, anything else is pending.
+/// Whether one durable row is bound to the peer's own derived action id: the
+/// same binding the request fold applies, checked per row because a ledger run
+/// holds no request record. A row under another key, another request, or
+/// another peer never settles anything.
+fn is_bound(row: &PeerActionRow) -> bool {
+    row.action_kind == PeerActionKind::Denial
+        && row.action_id == peer_action_id(&row.request_id, &row.peer_id)
+}
+
+/// One durable row's state in the request fold's words: a bound acknowledged
+/// row is settled, a bound recorded disposition is a disposed row, anything
+/// else is pending. An unbound row is named as unbound and is never rendered
+/// as acknowledged.
 fn state_phrase(row: &PeerActionRow) -> &'static str {
+    if !is_bound(row) {
+        return "unbound durable row";
+    }
     if row.state == PeerActionState::Acknowledged {
         return "acknowledged";
     }
@@ -124,9 +139,16 @@ fn state_phrase(row: &PeerActionRow) -> &'static str {
     }
 }
 
-/// The named reason one durable row is not settled, or `None` when its
-/// acknowledgement or its recorded disposition settles it.
+/// The named reason one durable row is not settled, or `None` when a bound
+/// row's acknowledgement or recorded disposition settles it. A row that fails
+/// the binding rule is always unsettled and always named.
 fn unsettled_reason(row: &PeerActionRow) -> Option<String> {
+    if !is_bound(row) {
+        return Some(format!(
+            "peer `{}`: durable row is not bound to the derived action id",
+            row.peer_id
+        ));
+    }
     if row.state == PeerActionState::Acknowledged
         || row.disposition != PeerActionDisposition::Unknown
     {

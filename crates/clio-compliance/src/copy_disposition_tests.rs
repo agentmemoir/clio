@@ -28,7 +28,7 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
-use clio_store::PeerActionDisposition;
+use clio_store::{PeerActionDisposition, PeerActionKind, PeerActionRow, PeerActionState};
 
 /// A fully resolved copy under known custody with every action closed.
 fn resolved(copy_id: &str, custody: CopyCustodyClass) -> CopyDisposition {
@@ -178,15 +178,34 @@ fn disposition_roundtrips_through_json() {
     );
 }
 
+/// One durable peer denial row as the store would hold it.
+fn peer_row(
+    peer_id: &str,
+    state: PeerActionState,
+    disposition: PeerActionDisposition,
+    proof_ref: Option<&str>,
+) -> PeerActionRow {
+    PeerActionRow {
+        request_id: "req-1".into(),
+        peer_id: peer_id.into(),
+        action_kind: PeerActionKind::Denial,
+        action_id: format!("erasure:req-1:{peer_id}"),
+        state,
+        disposition,
+        proof_ref: proof_ref.map(str::to_owned),
+    }
+}
+
 /// A removal-evidence peer copy is a resolved copy: the technical state is
 /// done, the removal action is closed, and the fold claims full.
 #[test]
 fn a_removal_evidence_peer_copy_folds_to_full() {
-    let copy = peer_copy_disposition(
+    let copy = peer_copy_disposition(&peer_row(
         "peer-a",
+        PeerActionState::Refused,
         PeerActionDisposition::RemovalEvidence,
         Some("deletion-9"),
-    );
+    ));
     assert_eq!(copy.custody, CopyCustodyClass::Peer, "the peer holds it");
     assert_eq!(copy.copy_id, "peer:peer-a", "the peer's derived copy id");
     assert_eq!(copy.state, CopyState::Done, "the removal is proven");
@@ -197,15 +216,33 @@ fn a_removal_evidence_peer_copy_folds_to_full() {
     assert_eq!(facts.outcome, CopyDispositionOutcome::Full);
 }
 
+/// An acknowledged peer copy is a resolved copy even though its state is the
+/// acknowledgement rather than a recorded removal.
+#[test]
+fn an_acknowledged_peer_copy_folds_to_full() {
+    let copy = peer_copy_disposition(&peer_row(
+        "peer-a",
+        PeerActionState::Acknowledged,
+        PeerActionDisposition::Unknown,
+        None,
+    ));
+    assert_eq!(copy.state, CopyState::Done, "the acknowledgement is proof");
+    assert_eq!(copy.actions[0].state, RequestActionState::Closed);
+    let facts = copy_closure_facts(&[copy], true, false);
+    assert_eq!(facts.inputs.open_copy_actions, 0);
+    assert_eq!(facts.outcome, CopyDispositionOutcome::Full);
+}
+
 /// An approved retention peer copy keeps an open removal action: the fold is
 /// partial, never a full completion claim.
 #[test]
 fn an_approved_retention_peer_copy_folds_to_partial() {
-    let copy = peer_copy_disposition(
+    let copy = peer_copy_disposition(&peer_row(
         "peer-a",
+        PeerActionState::Refused,
         PeerActionDisposition::RetentionApproved,
-        Some("retention-7"),
-    );
+        Some("hold-7"),
+    ));
     assert_eq!(copy.custody, CopyCustodyClass::Peer, "the peer holds it");
     assert_eq!(
         copy.state,
@@ -223,7 +260,12 @@ fn an_approved_retention_peer_copy_folds_to_partial() {
 /// its removal action open, folding to partial while the custody stays known.
 #[test]
 fn an_unknown_peer_disposition_folds_to_partial_with_an_open_action() {
-    let copy = peer_copy_disposition("peer-a", PeerActionDisposition::Unknown, None);
+    let copy = peer_copy_disposition(&peer_row(
+        "peer-a",
+        PeerActionState::Delivered,
+        PeerActionDisposition::Unknown,
+        None,
+    ));
     assert_eq!(copy.custody, CopyCustodyClass::Peer, "the peer holds it");
     assert_eq!(
         copy.state,
@@ -231,6 +273,27 @@ fn an_unknown_peer_disposition_folds_to_partial_with_an_open_action() {
         "no technical result is known"
     );
     assert_eq!(copy.actions[0].kind, CopyRequiredAction::Remove);
+    assert_eq!(copy.actions[0].state, RequestActionState::Open);
+    let facts = copy_closure_facts(&[copy], true, false);
+    assert_eq!(facts.inputs.open_copy_actions, 1);
+    assert_eq!(facts.outcome, CopyDispositionOutcome::Partial);
+}
+
+/// A removal evidence disposition without its proof reference is not removal
+/// evidence: the removal action stays open and the fold never claims full.
+#[test]
+fn a_removal_evidence_peer_copy_without_its_proof_folds_to_partial() {
+    let copy = peer_copy_disposition(&peer_row(
+        "peer-a",
+        PeerActionState::Refused,
+        PeerActionDisposition::RemovalEvidence,
+        None,
+    ));
+    assert_eq!(
+        copy.state,
+        CopyState::Unknown,
+        "an unproven removal proves nothing"
+    );
     assert_eq!(copy.actions[0].state, RequestActionState::Open);
     let facts = copy_closure_facts(&[copy], true, false);
     assert_eq!(facts.inputs.open_copy_actions, 1);

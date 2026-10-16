@@ -8,9 +8,10 @@
 //! erasure-denial authority the server is served with.
 //!
 //! ## Owns
-//! - `start_serve`: option decoding, the anonymous-bind refusal, the bound
-//!   address payload, and the denial-aware serve entry point
-//! - `denial_probe`: the journal probe built from the resolved journal path
+//! - `start_serve`: option decoding (through the bound tool's own bank
+//!   decoder), the anonymous-bind refusal, and the bound address payload
+//! - `denial_probe`: the journal-backed authority the server is served with,
+//!   or the refusal when this deployment cannot name its journal
 //!
 //! ## Does not own
 //! - The verb, its flags, dispatch, or views (see `sync_cli`)
@@ -27,8 +28,9 @@
 
 use clio_compliance::JournalDenialProbe;
 use clio_mcp::runtime::McpState;
+use clio_mcp::sync_tools::banks_of;
 use clio_store::ErasureDenial;
-use clio_sync::prelude::{SyncServer, SyncServerOptions, sync_serve, sync_serve_with_denial};
+use clio_sync::prelude::{SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -38,10 +40,12 @@ use crate::cli_error::CliError;
 
 /// Start the sync server for one decoded `sync_serve` call.
 ///
-/// Mirrors the bound tool's argument decoding and its refusal of an anonymous
-/// bind outside dev mode. A resolvable erasure-journal path serves the server
-/// through the denial-aware entry point with that journal probe; a deployment
-/// with no resolvable journal path starts the server exactly as before.
+/// The arguments are decoded through the bound tool's own bank decoder, so the
+/// verb and the tool cannot disagree about the banks a serve call covers, and
+/// the anonymous bind outside dev mode is refused exactly as the tool refuses
+/// it. The server is always served with the deployment's journal-backed
+/// erasure-denial authority: a deployment whose journal path cannot be resolved
+/// is refused here, because serving unguarded would ignore recorded denials.
 pub(crate) fn start_serve(
     state: &McpState,
     args: &Value,
@@ -58,7 +62,7 @@ pub(crate) fn start_serve(
             "sync_serve requires auth material outside dev mode (refusing anonymous bind)",
         )));
     }
-    let banks = serve_banks(state, args);
+    let banks = banks_of(state, args).map_err(|error| CliError::from_am_error(&error))?;
     let ttl_secs = args.get("ttl_secs").and_then(Value::as_u64);
     let bind = args
         .get("bind")
@@ -76,11 +80,8 @@ pub(crate) fn start_serve(
         deadline_secs: None,
         device_id: state.device_id.clone(),
     };
-    let server = match denial_probe(env) {
-        Some(probe) => sync_serve_with_denial(options, probe),
-        None => sync_serve(options),
-    }
-    .map_err(|error| CliError::from_am_error(&error))?;
+    let server = sync_serve_with_denial(options, denial_probe(env)?)
+        .map_err(|error| CliError::from_am_error(&error))?;
     let payload = json!({
         "ok": true,
         "addr": server.addr(),
@@ -92,30 +93,15 @@ pub(crate) fn start_serve(
     Ok((server, payload))
 }
 
-/// The deployment's erasure-denial authority, when its journal path resolves.
-/// Resolution refusal is the no-journal deployment: the server still starts.
-fn denial_probe(env: &dyn Fn(&str) -> Option<String>) -> Option<Arc<dyn ErasureDenial>> {
-    let path = clio_config::resolve_journal_path(&|key: &str| env(key)).ok()?;
-    Some(Arc::new(JournalDenialProbe::new(path)) as Arc<dyn ErasureDenial>)
-}
-
-/// The banks one serve call covers: the decoded `banks` argument, else the
-/// state's default bank.
-fn serve_banks(state: &McpState, args: &Value) -> Vec<String> {
-    let banks: Vec<String> = args
-        .get("banks")
-        .and_then(Value::as_array)
-        .map(|banks| {
-            banks
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    if banks.is_empty() {
-        vec![state.default_bank.clone()]
-    } else {
-        banks
-    }
+/// The deployment's erasure-denial authority: the journal this deployment
+/// resolves, or the refusal that keeps a serve route from running without it.
+///
+/// An unresolvable journal path is a refusal, not a fallback: a serve process
+/// started without the authority would ignore every denial recorded against a
+/// bank it serves. A journal file that does not exist yet is not this case —
+/// the path resolves, and a missing journal is a clear one.
+fn denial_probe(env: &dyn Fn(&str) -> Option<String>) -> Result<Arc<dyn ErasureDenial>, CliError> {
+    let probe =
+        JournalDenialProbe::resolved(None, env).map_err(|error| CliError::from_am_error(&error))?;
+    Ok(Arc::new(probe) as Arc<dyn ErasureDenial>)
 }

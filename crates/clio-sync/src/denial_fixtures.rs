@@ -5,34 +5,45 @@
 //!
 //! This module is responsible for the shared erasure-denial test doubles: one
 //! in-memory authority that answers verdicts, records denials with a
-//! generation, reports its salt fingerprint, and can be made unreadable, plus
-//! a KMS wrapper that records which subjects it minted a key for or sealed
-//! content under.
+//! generation, reports its salt fingerprint, and can be made unreadable; one
+//! file-backed authority that reads its journal back on every answer; one
+//! pausing authority that holds a marker record open so a test can race a pull
+//! against it; plus a KMS wrapper that records which subjects it minted a key
+//! for or sealed content under.
 //!
 //! ## Owns
 //! - `FakeDenial`: the in-memory `ErasureDenial` implementation and its
 //!   inspection helpers (recorded banks, per-subject record count, generation)
+//! - `FileDenial`: the file-backed `ErasureDenial` implementation a durability
+//!   case reopens from its journal
+//! - `PausingDenial`: the authority that pauses one marker record and signals
+//!   the pull-guard reads around it
 //! - `CountingKms` and `store_with_counting_kms`: key-material observation
 //!
 //! ## Does not own
 //! - The seams they implement (`clio-store` `ErasureDenial`, `DekProvider`)
 //! - The guards under test (`denial_guard`) or the routes that call them
-//! - Durable storage: the doubles keep state in memory and never touch disk
+//! - The production journal and its owner-only file mechanics: the file-backed
+//!   double stores a plain test journal
 //!
 //! ## Boundary
 //!
 //! Tests that need an authority or key-material observation use these doubles;
 //! they never change them.
 //!
-//! Keep this module focused on the in-memory test doubles.
+//! Keep this module focused on the test doubles.
 
 use clio_store::{
     CiphertextEnvelope, DekProvider, DenialVerdict, ErasureDenial, LocalDevKms, SqliteStore,
 };
 use clio_types::{AmError, ErrorCode};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// The in-memory authority's recorded state.
 #[derive(Default)]
@@ -153,6 +164,148 @@ impl ErasureDenial for FakeDenial {
 
     fn salt_fingerprint(&self) -> String {
         self.fingerprint.clone()
+    }
+}
+
+/// The journal file's recorded state.
+#[derive(Default, Deserialize, Serialize)]
+struct JournalFile {
+    /// One recorded denial per subject id, in the order its banks were given.
+    denials: BTreeMap<String, Vec<String>>,
+    /// The authority generation, one per distinct recorded denial.
+    generation: u64,
+}
+
+/// A file-backed erasure-denial authority for tests: every record is written
+/// to the JSON journal at its path and every answer is read back from that
+/// file, so a reopened authority answers from the file alone. The file is a
+/// plain test journal, never the owner-only production format.
+pub(crate) struct FileDenial {
+    journal: PathBuf,
+    fingerprint: String,
+}
+
+impl FileDenial {
+    /// An authority over the journal at `journal`, reporting `fingerprint`.
+    pub(crate) fn new(journal: PathBuf, fingerprint: &str) -> Arc<Self> {
+        Arc::new(Self {
+            journal,
+            fingerprint: fingerprint.to_owned(),
+        })
+    }
+
+    /// The journal's state: a missing file is a fresh authority, and an
+    /// unreadable or damaged file is an error that must never read as clear.
+    fn load(&self) -> Result<JournalFile, AmError> {
+        match fs::read(&self.journal) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+                AmError::new(
+                    ErrorCode::ConfigCorrupt,
+                    format!("the file denial journal is damaged: {e}"),
+                )
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(JournalFile::default()),
+            Err(e) => Err(AmError::new(
+                ErrorCode::ConfigCorrupt,
+                format!("the file denial journal is unreadable: {e}"),
+            )),
+        }
+    }
+}
+
+impl ErasureDenial for FileDenial {
+    fn verdict(&self, subject_id: &str) -> DenialVerdict {
+        match self.load() {
+            Ok(state) if state.denials.contains_key(subject_id) => DenialVerdict::Denied,
+            Ok(_) => DenialVerdict::Clear,
+            Err(_) => DenialVerdict::AuthorityUnavailable,
+        }
+    }
+
+    fn record_denial(&self, subject_id: &str, banks: &[String]) -> Result<u64, AmError> {
+        let mut state = self.load()?;
+        if !state.denials.contains_key(subject_id) {
+            state.denials.insert(subject_id.to_owned(), banks.to_vec());
+            state.generation = state.generation.checked_add(1).expect("generation");
+            let bytes = serde_json::to_vec(&state).expect("serialize the file denial journal");
+            fs::write(&self.journal, bytes).map_err(|e| {
+                AmError::new(
+                    ErrorCode::ConfigCorrupt,
+                    format!("the file denial journal is unwritable: {e}"),
+                )
+            })?;
+        }
+        Ok(state.generation)
+    }
+
+    fn salt_fingerprint(&self) -> String {
+        self.fingerprint.clone()
+    }
+}
+
+/// An authority that pauses the first record of one bank's serve marker until
+/// a test releases it, and reports each pull-guard verdict read for that
+/// marker. It lets a push-during-pull race test start a pull while the
+/// recording push still holds the bank lock.
+pub(crate) struct PausingDenial {
+    inner: Arc<FakeDenial>,
+    marker: String,
+    entered: Sender<()>,
+    guard: Sender<()>,
+    paused: AtomicBool,
+    released: Mutex<bool>,
+    release: Condvar,
+}
+
+impl PausingDenial {
+    /// Wrap `inner`, pausing the record of `marker`. Returns the authority, the
+    /// record-entered signal, and the guard-verdict signal.
+    pub(crate) fn new(
+        inner: Arc<FakeDenial>,
+        marker: &str,
+    ) -> (Arc<Self>, Receiver<()>, Receiver<()>) {
+        let (entered, entered_rx) = mpsc::channel();
+        let (guard, guard_rx) = mpsc::channel();
+        let authority = Arc::new(Self {
+            inner,
+            marker: marker.to_owned(),
+            entered,
+            guard,
+            paused: AtomicBool::new(false),
+            released: Mutex::new(false),
+            release: Condvar::new(),
+        });
+        (authority, entered_rx, guard_rx)
+    }
+
+    /// Release the paused marker record; a no-op when it never paused.
+    pub(crate) fn release(&self) {
+        *self.released.lock().expect("release gate") = true;
+        self.release.notify_all();
+    }
+}
+
+impl ErasureDenial for PausingDenial {
+    fn verdict(&self, subject_id: &str) -> DenialVerdict {
+        if subject_id == self.marker {
+            let _ = self.guard.send(());
+        }
+        self.inner.verdict(subject_id)
+    }
+
+    fn record_denial(&self, subject_id: &str, banks: &[String]) -> Result<u64, AmError> {
+        if subject_id == self.marker && !self.paused.swap(true, Ordering::SeqCst) {
+            let _ = self.entered.send(());
+            let mut released = self.released.lock().expect("release gate");
+            while !*released {
+                released = self.release.wait(released).expect("release gate");
+            }
+        }
+        self.inner.record_denial(subject_id, banks)
+    }
+
+    fn salt_fingerprint(&self) -> String {
+        self.inner.salt_fingerprint()
     }
 }
 

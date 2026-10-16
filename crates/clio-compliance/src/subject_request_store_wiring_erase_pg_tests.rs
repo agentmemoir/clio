@@ -168,6 +168,7 @@ fn postgres_a_peer_recorded_before_the_settle_keeps_completion_pending() {
     started
         .peers
         .insert(peer_bank.clone(), PeerState::Acknowledged);
+    started.peer_banks.insert(peer_bank.clone());
     persist(&fixture.store, &started);
     fixture
         .store
@@ -176,6 +177,7 @@ fn postgres_a_peer_recorded_before_the_settle_keeps_completion_pending() {
     let joined_bank = unique("joined-bank");
     let mut joined = started.clone();
     joined.peers.insert(joined_bank.clone(), PeerState::Pending);
+    joined.peer_banks.insert(joined_bank.clone());
     let sink = PgRacingSink {
         durable: &fixture.store,
         row: record_to_row(&joined),

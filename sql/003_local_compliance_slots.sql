@@ -7,9 +7,11 @@
 --      Postgres: 002_vectors_postgres.sql, then this file
 --
 -- These slots reserve storage ownership. The local_events table carries the
--- real local event schema, durable_requests the real request schema, and
--- copy_inventory and export_destinations the real copy-inventory schemas;
--- every other table is a minimal text-key placeholder that its owner group
+-- real local event schema, durable_requests the real request schema,
+-- copy_inventory and export_destinations the real copy-inventory schemas, and
+-- peer_actions the real per-peer request-action schema; subject_family_links,
+-- archive_experiments, local_erasure_journal, restore_guards, and
+-- erasure_adapters are minimal text-key placeholders that their owner groups
 -- will build on later (no feature columns or rows yet).
 -- Owner groups:
 --   G6    local_events           local event store (content-free local events)
@@ -21,6 +23,7 @@
 --   G14A  local_erasure_journal  reserved id-only slot; the durable erasure journal is an owner-only file outside the store
 --   G14I  restore_guards         shared restore refusal and placement guards
 --   G8B   erasure_adapters       SQLite/Postgres erasure adapters and retry proof
+--         peer_actions           durable per-peer denial rows of the request's enabled peers
 --
 -- Every statement is idempotent (CREATE TABLE IF NOT EXISTS), so the slot batch
 -- can join the open-path migrate batch and re-run on an existing database.
@@ -129,7 +132,10 @@ CREATE TABLE IF NOT EXISTS erasure_adapters
 -- peer's durable proof arrives, so a duplicate or concurrent delivery cannot
 -- repeat a completed effect. `state`, `disposition`, and the closed action
 -- domain are CHECK-guarded, and the row key plus `action_id` bind every
--- guarded transition.
+-- guarded transition. `acknowledged` and `refused` are terminal states, and a
+-- refused row that holds no disposition may still record the one evidenced
+-- disposition that resolves it: the state stays `refused` and the peer's first
+-- evidence is never overwritten.
 CREATE TABLE IF NOT EXISTS peer_actions
 (
   request_id                                                                                   text NOT NULL,

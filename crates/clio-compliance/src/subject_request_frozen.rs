@@ -16,6 +16,7 @@
 //! - `PathSlot`, `PathState`, and `PathOwner`, the per-path state slots
 //! - `PeerState`, the state slot of one peer from the frozen snapshot
 //! - `PeerEnablement`, the peers-disabled/required fact recorded at open
+//! - The frozen peer-bank set the pre-effect coordination check reads
 //!
 //! ## Does not own
 //! - The request state table, commands, transitions, and the ledger
@@ -35,7 +36,7 @@
 use crate::subject_request::RequestState;
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Where a request applies, fixed when the request is opened.
 ///
@@ -272,6 +273,15 @@ pub struct SubjectRequestRecord {
     /// before this fact carries no value and loads as not applicable.
     #[serde(default)]
     pub peer_enablement: PeerEnablement,
+    /// The banks the confirmed peer records cover, recorded when the request
+    /// opens: the deduplicated union of the enabled credential records'
+    /// banks. The banks sharing the subject key must equal the scope bank
+    /// plus this set before any erasure effect. A stored row from before this
+    /// fact carries no value and loads as an empty set, so the pre-effect
+    /// check then covers the scope bank only and refuses every extra live
+    /// bank.
+    #[serde(default)]
+    pub peer_banks: BTreeSet<String>,
     /// The approved retention exception, once recorded; generic text.
     pub exception: Option<String>,
 }

@@ -5,9 +5,10 @@
 //!
 //! This module is responsible for the pre-effect subject-bank coordination
 //! refusal of a confirmed erasure: every bank sharing the subject key must
-//! match the confirmed scope before any effect. An unresolved peer slot
-//! refuses technical completion in the erasure's completion gate instead, so
-//! the pre-effect check keeps only the frozen bank set.
+//! match the confirmed scope and the peer banks the request recorded before
+//! any effect. An unresolved peer slot refuses technical completion in the
+//! erasure's completion gate instead, so the pre-effect check keeps only the
+//! frozen bank set.
 //!
 //! ## Owns
 //! - `require_all_banks_confirmed`, the pure check over the confirmed record
@@ -39,9 +40,12 @@ use std::collections::BTreeSet;
 /// Refuse when the bank set changed after confirmation.
 ///
 /// The confirmed record's coordination set is its scope bank plus its peer
-/// banks. The banks sharing the subject key now must equal that set exactly,
-/// so a bank that joined or left after confirmation refuses the erasure and a
-/// retry compares against the same stored set.
+/// banks, the banks its confirmed peer records covered when it opened. The
+/// banks sharing the subject key now must equal that set exactly, so a bank
+/// that joined or left after confirmation refuses the erasure and a retry
+/// compares against the same stored set. A row from before the peer banks
+/// were recorded carries an empty set, so the check then covers the scope
+/// bank only and refuses any extra live bank.
 ///
 /// The peer slots themselves do not refuse here: an unacknowledged or
 /// disposed peer refuses technical completion in the completion gate instead,
@@ -136,9 +140,10 @@ pub fn coordinated_erase_request(
     erase_request(args)
 }
 
-/// The confirmed coordination set: the scope bank plus every peer bank.
+/// The confirmed coordination set: the scope bank plus every recorded peer
+/// bank.
 fn coordination_set(confirmed: &SubjectRequestRecord) -> BTreeSet<&str> {
-    let mut banks: BTreeSet<&str> = confirmed.peers.keys().map(String::as_str).collect();
+    let mut banks: BTreeSet<&str> = confirmed.peer_banks.iter().map(String::as_str).collect();
     match &confirmed.scope {
         RequestScope::Bank { bank_id } | RequestScope::Subject { bank_id, .. } => {
             banks.insert(bank_id.as_str());

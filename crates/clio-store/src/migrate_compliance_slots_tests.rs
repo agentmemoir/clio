@@ -47,9 +47,8 @@ const SLOT_TABLES: [&str; 10] = [
 ];
 
 /// The slot tables that still hold only the placeholder key: every reserved
-/// table except `local_events`, `durable_requests`, `copy_inventory`, and
-/// `export_destinations`, which carry real column sets instead. The
-/// placeholder-slot tests below pin `copy_inventory` by columns too.
+/// table except `local_events`, `durable_requests`, `copy_inventory`,
+/// `export_destinations`, and `peer_actions`, which carry real column sets.
 const PLACEHOLDER_SLOTS: [&str; 5] = [
     "archive_experiments",
     "erasure_adapters",
@@ -113,8 +112,7 @@ fn assert_slots_present(inventory: &[String]) {
 // SQLite
 // ---------------------------------------------------------------------------
 
-/// A scratch directory removed when the guard drops (the `sqlite_open_lock_tests`
-/// fixture shape).
+/// A scratch directory removed when the guard drops (the `sqlite_open_lock_tests` shape).
 struct Scratch(std::path::PathBuf);
 
 impl Scratch {
@@ -446,3 +444,5 @@ fn postgres_durable_requests_slot_holds_the_request_columns() {
         "durable_requests column set changed"
     );
 }
+#[path = "migrate_peer_actions_tests.rs"]
+mod migrate_peer_actions_tests;

@@ -90,13 +90,13 @@ fn subject_scope(bank: &str, subject: &str) -> RequestScope {
     }
 }
 
-/// One valid credential record naming `label`.
-fn record(label: &str) -> AuthTokenRecord {
+/// One valid credential record naming `label` and covering `banks`.
+fn record(label: &str, banks: &[&str]) -> AuthTokenRecord {
     AuthTokenRecord {
         label: label.to_owned(),
         secret_sha256: "0123456789abcdef".repeat(4),
         actor: Actor::Agent,
-        banks: vec!["demo".to_owned()],
+        banks: banks.iter().map(|bank| (*bank).to_owned()).collect(),
         created_at: "2026-01-01T00:00:00Z".to_owned(),
     }
 }
@@ -144,6 +144,10 @@ fn a_peers_disabled_configuration_opens_a_not_applicable_request() {
         record.peers
     );
     assert!(
+        record.peer_banks.is_empty(),
+        "a not-applicable request freezes no peer bank"
+    );
+    assert!(
         store
             .load_for_request("req-single")
             .expect("peer rows read")
@@ -153,14 +157,21 @@ fn a_peers_disabled_configuration_opens_a_not_applicable_request() {
 }
 
 /// An enabled configuration freezes exactly the enabled credential labels and
-/// persists one pending denial row per peer with the stored record.
+/// the deduplicated union of the banks they cover, and persists one pending
+/// denial row per peer with the stored record.
 #[test]
 fn an_enabled_configuration_freezes_exactly_the_labeled_peers() {
     let scratch = Scratch::new("enabled");
     let store = scratch_store(&scratch);
     let tokens = scratch.path().join("auth_tokens.json");
-    save_auth_tokens(&tokens, &[record("peer-b"), record("peer-a")])
-        .expect("the credential store saves");
+    save_auth_tokens(
+        &tokens,
+        &[
+            record("peer-b", &["bank-b"]),
+            record("peer-a", &["bank-a", "bank-b"]),
+        ],
+    )
+    .expect("the credential store saves");
     let token_arg = tokens.to_str().expect("utf8 token path").to_owned();
     let pairs = [("CLIO_AUTH_TOKEN_FILE", token_arg.as_str())];
     let env = env_from(&pairs);
@@ -182,6 +193,12 @@ fn an_enabled_configuration_freezes_exactly_the_labeled_peers() {
         labels,
         ["peer-a", "peer-b"],
         "the frozen set is exactly the enabled labels"
+    );
+    let banks: Vec<&str> = record.peer_banks.iter().map(String::as_str).collect();
+    assert_eq!(
+        banks,
+        ["bank-a", "bank-b"],
+        "the frozen banks are the deduplicated union of the records' banks"
     );
     assert!(
         record

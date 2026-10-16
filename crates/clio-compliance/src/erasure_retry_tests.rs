@@ -5,15 +5,18 @@
 //!
 //! This module is responsible for the confirmed-erasure flow coverage: the
 //! intent-before-denial ordering, the intent-failure and intent-resume
-//! classes, the peer settle rules, and a retried request's idempotency; the
-//! rest live in `erasure_retry_reconcile_tests.rs`.
+//! classes, and a retried request's idempotency, plus the file-backed scenario
+//! fixture the other retry suites reuse.
 //!
 //! ## Owns
 //! - The flow assertions and the shared file-backed scenario fixture
 //! - The racing telemetry sink and the shared live-bank-set read
+//! - The declaration of the peer-evidence coverage it hosts
 //!
 //! ## Does not own
 //! - The retry contract itself (`erasure_retry.rs`)
+//! - The peer-evidence settle rules (`erasure_retry_peer_evidence_tests.rs`)
+//! - The reconcile and guard suites (`erasure_retry_reconcile_tests.rs`)
 //! - The shared fixtures and erase double (`subject_request_store_wiring_tests.rs`)
 //!
 //! ## Boundary
@@ -30,6 +33,7 @@ use crate::erasure_retry::{OUTCOME_COMPLETED, erase_confirmed_request, erasure_a
 use crate::export_subject_scenarios_tests::FaultEvents;
 use crate::inventory_fixture::FixtureDir;
 use crate::restore_guard::RESTORE_EVENT_KIND;
+use crate::subject_peer::{begin_denial, mark_acknowledged};
 use crate::subject_request::{PeerState, RequestScope};
 use crate::subject_request_store_wiring::record_to_row;
 use crate::test_unique::unique;
@@ -379,7 +383,10 @@ fn a_changed_scope_repeat_refuses_before_the_effect() {
     );
 }
 
-/// A peer slot recorded mid-effect keeps the event pending as PROCESSING.
+/// A peer slot recorded mid-effect keeps the event pending as PROCESSING, even
+/// though the peers confirmed before it already carry durable evidence: the
+/// gate re-reads the record's slots, so the new slot alone keeps completion
+/// open.
 #[test]
 fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
     let attempt = Attempt::new();
@@ -388,12 +395,19 @@ fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
     started
         .peers
         .insert(peer_bank.clone(), PeerState::Acknowledged);
+    started.peer_banks.insert(peer_bank.clone());
     {
         let store = open_sqlite(&attempt.store_path());
         persist(&store, &started);
         store
             .create_memory_item(&wiring_item(&attempt.bank, &attempt.subject), "tester")
             .expect("seed the subject item");
+        // The confirmed peer's own durable acknowledgement, so it settles by
+        // evidence rather than by a missing row; only the mid-effect slot is
+        // left without one.
+        begin_denial(&store, &attempt.request_id, &peer_bank).expect("the peer row begins");
+        mark_acknowledged(&store, &attempt.request_id, &peer_bank, "deletion-9")
+            .expect("the peer acknowledges");
     }
     let store = open_sqlite(&attempt.store_path());
     let mut joined = started.clone();
@@ -427,6 +441,5 @@ fn a_peer_recorded_before_the_settle_keeps_completion_pending() {
 
 // Declared here, beside the fixtures it reuses: the peer-evidence settle,
 // peer-action reconcile, and prune-survival coverage.
-#[cfg(test)]
 #[path = "erasure_retry_peer_evidence_tests.rs"]
 mod erasure_retry_peer_evidence_tests;

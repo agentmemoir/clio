@@ -11,8 +11,9 @@
 //! ## Owns
 //! - `PeerActionStore`, its row/binding/target types, and the closed kind,
 //!   state, and disposition domains with their fail-closed decoding
-//! - The validation helpers, the transition table, and the shared column
-//!   list the two driver halves in `peer_actions_backends` build their SQL on
+//! - The validation helpers, the transition table, the same-state rule, and
+//!   the shared column list the two driver halves in `peer_actions_backends`
+//!   build their SQL on
 //!
 //! ## Does not own
 //! - The per-backend SQL (`peer_actions_backends` owns the two driver halves)
@@ -69,7 +70,9 @@ pub enum PeerActionState {
     Delivered,
     /// The peer confirmed a durable denial and the required purge state.
     Acknowledged,
-    /// The peer refused, or retention kept the copies.
+    /// The peer refused, or retention kept the copies. A refused row still
+    /// accepts the one evidenced disposition that resolves it; the state stays
+    /// `refused`, so the peer's own refusal record is never lost.
     Refused,
 }
 
@@ -184,7 +187,10 @@ pub struct PeerActionTarget<'a> {
 /// durable proof arrives: a transport receipt or a read-back is not proof.
 /// A duplicate begin returns the stored row untouched, and a duplicate
 /// acknowledgement is a tolerated no-op, so a retry cannot repeat a completed
-/// effect. A restart reads rows back verbatim: nothing is auto-completed.
+/// effect. A refused row that holds no disposition yet is the one row a later
+/// operator disposition may still resolve: the recorded disposition is written
+/// on it while its state stays `refused`. A restart reads rows back verbatim:
+/// nothing is auto-completed.
 pub trait PeerActionStore: Send + Sync {
     /// Durably record the intent for one (request, peer, kind).
     ///
@@ -205,9 +211,11 @@ pub trait PeerActionStore: Send + Sync {
     /// `action_id`; a mismatched binding is refused and changes nothing. The
     /// legal moves are `pending` to `delivered`, `acknowledged`, or `refused`,
     /// and `delivered` to `acknowledged` or `refused`; `acknowledged` and
-    /// `refused` are terminal. A target equal to the stored state is a
+    /// `refused` are terminal states. A target equal to the stored state is a
     /// tolerated no-op returning the stored row, so a duplicate delivery or a
-    /// duplicate acknowledgement cannot repeat a completed effect.
+    /// duplicate acknowledgement cannot repeat a completed effect — except a
+    /// refused row that holds no disposition yet, which records the one
+    /// evidenced disposition that resolves it while its state stays `refused`.
     ///
     /// # Errors
     /// Blank required fields, no stored row for the row key,
@@ -271,8 +279,8 @@ fn validate_target(target: &PeerActionTarget<'_>) -> Result<(), AmError> {
     Ok(())
 }
 
-/// Whether `to` is a legal forward move out of `from`; the same state is a
-/// tolerated no-op handled before this table is consulted.
+/// Whether `to` is a legal forward move out of `from`; the same state is
+/// handled before this table is consulted.
 fn transition_legal(from: PeerActionState, to: PeerActionState) -> bool {
     matches!(
         (from, to),
@@ -284,6 +292,19 @@ fn transition_legal(from: PeerActionState, to: PeerActionState) -> bool {
             PeerActionState::Acknowledged | PeerActionState::Refused
         )
     )
+}
+
+/// Whether an advance to the stored state writes nothing at all.
+///
+/// A duplicate delivery or acknowledgement is a tolerated no-op: the stored
+/// row, first proof included, stands. The one exception is a refused row that
+/// holds no disposition yet — the row an operator disposition still has to
+/// resolve — which records the target's disposition and proof while its state
+/// stays `refused`. A target that carries no disposition records no evidence
+/// on any row, so it is a no-op too.
+pub(crate) fn same_state_is_no_op(stored: &PeerActionRow, target: &PeerActionTarget<'_>) -> bool {
+    target.disposition == PeerActionDisposition::Unknown
+        || stored.disposition != PeerActionDisposition::Unknown
 }
 
 /// Refuse an advance whose idempotency key differs from the stored row's.

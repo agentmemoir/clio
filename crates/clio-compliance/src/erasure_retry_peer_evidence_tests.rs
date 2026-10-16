@@ -13,12 +13,17 @@
 //!
 //! ## Owns
 //! - The peer-evidence settle assertions over the durable erasure seam
+//! - The retained-result reconcile assertion
 //! - The peer-action reconcile and prune-survival assertions
 //!
 //! ## Does not own
 //! - The retry contract (`erasure_retry.rs`), the reconcile
-//!   (`erasure_reconcile.rs`), the durable event writer (`clio-store`), and
-//!   the shared fixtures (`erasure_retry_tests.rs`,
+//!   (`erasure_reconcile.rs`), and the durable event writer (`clio-store`)
+//! - The closure-fact fold over the durable peer rows
+//!   (`peer_row_closure_facts_tests.rs`)
+//! - The arms that must stay pending and the restart boundary
+//!   (`erasure_retry_peer_pending_tests.rs`)
+//! - The shared fixtures (`erasure_retry_tests.rs`,
 //!   `subject_request_store_wiring_tests.rs`)
 //!
 //! ## Boundary
@@ -46,10 +51,17 @@ use crate::subject_request_store_wiring::erase_from_durable_store;
 use crate::test_unique::unique;
 use clio_store::{
     LocalEventIntent, LocalEventState, LocalEventStore, PeerActionDisposition, PeerActionKind,
-    PeerActionState, PeerActionStore, Store,
+    PeerActionRow, PeerActionState, PeerActionStore, SqliteStore, Store,
 };
 use clio_types::{Actor, Bank, OpContext};
 use std::sync::atomic::Ordering;
+
+/// The durable peer row one request and peer currently hold.
+fn load_peer_row(store: &SqliteStore, request_id: &str, peer_id: &str) -> PeerActionRow {
+    PeerActionStore::load(store, request_id, peer_id, PeerActionKind::Denial)
+        .expect("load the peer row")
+        .expect("the durable peer row exists")
+}
 
 /// Every peer acknowledged durably settles one allowed outcome through the
 /// durable seam.
@@ -67,6 +79,7 @@ fn every_peer_acknowledged_durably_settles_one_allowed_outcome() {
         record
             .peers
             .insert(peer_bank.clone(), PeerState::Acknowledged);
+        record.peer_banks.insert(peer_bank.clone());
         persist(&store, &record);
     }
     let store = open_sqlite(&path);
@@ -103,6 +116,7 @@ fn a_retention_approved_peer_keeps_the_completion_open() {
     let store = open_sqlite(&attempt.store_path());
     let mut record = started_record(&attempt.request_id, &attempt.scope);
     record.peers.insert(peer_bank.clone(), PeerState::Disposed);
+    record.peer_banks.insert(peer_bank.clone());
     persist(&store, &record);
     for bank in [&attempt.bank, &peer_bank] {
         store
@@ -148,6 +162,7 @@ fn a_removal_evidence_disposition_settles_with_the_proof_reference() {
     let store = open_sqlite(&attempt.store_path());
     let mut record = started_record(&attempt.request_id, &attempt.scope);
     record.peers.insert(peer_bank.clone(), PeerState::Disposed);
+    record.peer_banks.insert(peer_bank.clone());
     persist(&store, &record);
     for bank in [&attempt.bank, &peer_bank] {
         store
@@ -185,6 +200,7 @@ fn an_unknown_peer_disposition_keeps_the_completion_open() {
     let store = open_sqlite(&attempt.store_path());
     let mut record = started_record(&attempt.request_id, &attempt.scope);
     record.peers.insert(peer_bank.clone(), PeerState::Pending);
+    record.peer_banks.insert(peer_bank.clone());
     persist(&store, &record);
     for bank in [&attempt.bank, &peer_bank] {
         store
@@ -286,3 +302,114 @@ fn pruning_keeps_a_pending_peer_action_and_its_denial_state() {
         "the durable denial state survives"
     );
 }
+
+/// A refused peer row that recorded the peer's removal evidence settles the
+/// erasure: an evidenced operator disposition resolves the refusal.
+#[test]
+fn a_refused_peer_row_resolved_by_removal_evidence_settles_the_erasure() {
+    let attempt = Attempt::new();
+    let peer_bank = unique("peer-bank");
+    let store = open_sqlite(&attempt.store_path());
+    let mut record = started_record(&attempt.request_id, &attempt.scope);
+    record.peers.insert(peer_bank.clone(), PeerState::Disposed);
+    record.peer_banks.insert(peer_bank.clone());
+    persist(&store, &record);
+    for bank in [&attempt.bank, &peer_bank] {
+        store
+            .create_memory_item(&wiring_item(bank, &attempt.subject), "tester")
+            .expect("seed the subject item");
+    }
+    begin_denial(&store, &attempt.request_id, &peer_bank).expect("the peer row begins");
+    mark_refused(&store, &attempt.request_id, &peer_bank).expect("the refusal records");
+    record_disposition(
+        &store,
+        &attempt.request_id,
+        &peer_bank,
+        PeerActionDisposition::RemovalEvidence,
+        Some("deletion-9"),
+    )
+    .expect("an evidenced disposition resolves the refused row");
+    let ctx = attempt.ctx();
+    let sink = EraseVecSink::default();
+    let args = attempt.args(&store, &ctx, &sink);
+    let live = live_set(&attempt, &store);
+    let outcome =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the effect completes");
+    assert_eq!(
+        outcome.status, "COMPLETED",
+        "the evidenced disposition settles the peer"
+    );
+    let rows = action_rows(&store, &erasure_action_id(&attempt.request_id));
+    assert_eq!(rows.len(), 1, "one allowed outcome");
+    assert_eq!(rows[0].state, LocalEventState::Allowed);
+    assert_eq!(rows[0].result.as_deref(), Some(OUTCOME_COMPLETED));
+    assert!(
+        store.pending_actions().expect("pending").is_empty(),
+        "nothing stays pending"
+    );
+    assert_eq!(
+        load_peer_row(&store, &attempt.request_id, &peer_bank).state,
+        PeerActionState::Refused,
+        "the refusal state is kept"
+    );
+}
+
+/// Reconciliation settles a retention-approved peer action as an allowed
+/// retention, never as a denial.
+#[test]
+fn reconcile_settles_a_retention_approved_peer_action_as_allowed() {
+    let attempt = Attempt::new();
+    let peer_bank = unique("peer-bank");
+    let store = open_sqlite(&attempt.store_path());
+    persist(&store, &started_record(&attempt.request_id, &attempt.scope));
+    record_peer_denial_intent(&store, &attempt.request_id, &peer_bank, Actor::Harness, NOW)
+        .expect("the intent is durable before delivery");
+    begin_denial(&store, &attempt.request_id, &peer_bank).expect("the peer row begins");
+    mark_refused(&store, &attempt.request_id, &peer_bank).expect("the refusal records");
+    record_disposition(
+        &store,
+        &attempt.request_id,
+        &peer_bank,
+        PeerActionDisposition::RetentionApproved,
+        Some("hold-7"),
+    )
+    .expect("the approved retention records");
+    let sink = EraseVecSink::default();
+    let env = attempt.env(&store, &store, &sink);
+    let report = reconcile_erasure_actions(&store, &store, &env, &|_| None).expect("reconcile");
+    let action = peer_action_id(&attempt.request_id, &peer_bank);
+    assert_eq!(
+        report.settled,
+        vec![action.clone()],
+        "the recorded retention settles the action"
+    );
+    assert!(report.pending.is_empty(), "{report:?}");
+    let rows = action_rows(&store, &action);
+    assert_eq!(rows.len(), 1, "one event row for the peer action");
+    assert_eq!(
+        rows[0].state,
+        LocalEventState::Allowed,
+        "an approved retention is not a denial"
+    );
+    assert_eq!(
+        rows[0].result.as_deref(),
+        Some("peer retention approved"),
+        "the retention's own content-free result"
+    );
+    assert!(
+        store.pending_actions().expect("pending").is_empty(),
+        "no peer action stays pending"
+    );
+    assert_eq!(
+        load_peer_row(&store, &attempt.request_id, &peer_bank).state,
+        PeerActionState::Refused,
+        "the peer row is read, never rewritten"
+    );
+}
+
+// Declared here, beside the peer fixtures it reuses: the arms of the peer
+// completion gate that must stay pending, the restart boundary, and the
+// peer-denial reconcile arms over a reopened store.
+#[path = "erasure_retry_peer_pending_tests.rs"]
+mod erasure_retry_peer_pending_tests;

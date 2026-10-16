@@ -9,13 +9,14 @@
 //! from — without depending on the authority's implementation.
 //!
 //! ## Owns
-//! - `ErasureDenial`, the three-way verdict type, and its refusal rule
+//! - `ErasureDenial` and the three-way verdict type
 //!
 //! ## Does not own
 //! - Any implementation: the production authority is the owner-only erasure
 //!   journal, which lives outside this crate and implements this seam
 //! - The durable journal format, its generation, and its file mechanics
-//! - Which action a caller refuses on an unavailable authority (the caller)
+//! - Which action a caller refuses, and the refusal rule it applies to a
+//!   verdict (the caller owns both)
 //!
 //! ## Boundary
 //!

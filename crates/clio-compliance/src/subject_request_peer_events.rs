@@ -34,10 +34,10 @@ use super::{
     ACTION_EVENT_TYPE, ACTION_EVENT_VERSION, ActionEventKind, ActionIntent, ActionOutcome,
     ActionPayload, PendingResult, ProtectedAction, RequestScope, SubjectActionEvent,
 };
-use crate::subject_peer::peer_action_id;
+use crate::subject_peer::{peer_action_id, peer_row_settled};
 use clio_store::{
-    LocalEventIntent, LocalEventStore, PeerActionKind, PeerActionRow, PeerActionState,
-    PeerActionStore,
+    LocalEventIntent, LocalEventStore, PeerActionDisposition, PeerActionKind, PeerActionRow,
+    PeerActionState, PeerActionStore,
 };
 use clio_types::{Actor, AmError, ErrorCode};
 
@@ -45,14 +45,26 @@ use clio_types::{Actor, AmError, ErrorCode};
 pub(crate) const PEER_RESULT_ACKNOWLEDGED: &str = "peer denial acknowledged";
 /// The content-free result text one refused peer denial records.
 pub(crate) const PEER_RESULT_REFUSED: &str = "peer denial refused";
+/// The content-free result text one peer's recorded removal evidence records.
+pub(crate) const PEER_RESULT_REMOVED: &str = "peer removal evidence recorded";
+/// The content-free result text one peer's approved retention records.
+pub(crate) const PEER_RESULT_RETAINED: &str = "peer retention approved";
 
 /// The durable result one peer's row supports, once the row is settled.
 ///
 /// A pending or delivered row has no result yet, so no outcome — and no
-/// acknowledgement — can rest on it.
+/// acknowledgement — can rest on it. A refusal is reported as a refusal only
+/// while nothing has resolved it: a refused row that records the peer's
+/// deletion evidence or an approved retention records the disposition's own
+/// content-free text instead, because the row is then a resolved operator
+/// disposition rather than a denial.
 pub(crate) fn peer_outcome(row: &PeerActionRow) -> Option<(&'static str, bool)> {
     match row.state {
         PeerActionState::Acknowledged => Some((PEER_RESULT_ACKNOWLEDGED, false)),
+        PeerActionState::Refused if peer_row_settled(row) => Some((PEER_RESULT_REMOVED, false)),
+        PeerActionState::Refused if row.disposition == PeerActionDisposition::RetentionApproved => {
+            Some((PEER_RESULT_RETAINED, false))
+        }
         PeerActionState::Refused => Some((PEER_RESULT_REFUSED, true)),
         PeerActionState::Pending | PeerActionState::Delivered => None,
     }
@@ -62,10 +74,13 @@ pub(crate) fn peer_outcome(row: &PeerActionRow) -> Option<(&'static str, bool)> 
 ///
 /// `settled` is `None` for the pre-effect intent, which is produced before the
 /// denial is delivered and carries the peer's pending result. It is the peer's
-/// durable row for the outcome, and the row is the only acknowledgement
-/// evidence: a pending or delivered row, or a row bound to another peer
-/// action, refuses, so a transport receipt or a bare send can never produce an
-/// outcome. No subject prose, key material, identity proof, or the row's proof
+/// durable row for the outcome, and the row is the only evidence: a pending or
+/// delivered row, or a row bound to another peer action, refuses, so a
+/// transport receipt or a bare send can never produce an outcome. A row that
+/// refused but then recorded a resolving disposition is published as done,
+/// with the disposition's own content-free text on the durable event row, so
+/// no stage reports a peer as denied once an operator disposition resolved it.
+/// No subject prose, key material, identity proof, or the row's proof
 /// reference enters the envelope.
 ///
 /// # Errors
@@ -92,21 +107,19 @@ pub fn peer_denial_event(
                 && row.action_kind == PeerActionKind::Denial
                 && row.action_id == action_id =>
         {
-            match row.state {
-                PeerActionState::Acknowledged => {
-                    (ActionEventKind::Outcome, Some(ActionOutcome::Done), None)
-                }
-                PeerActionState::Refused => (
+            match peer_outcome(row) {
+                Some((result, true)) => (
                     ActionEventKind::Outcome,
                     Some(ActionOutcome::Refused {
-                        reason: PEER_RESULT_REFUSED.into(),
+                        reason: result.into(),
                     }),
                     None,
                 ),
-                PeerActionState::Pending | PeerActionState::Delivered => {
+                Some(_) => (ActionEventKind::Outcome, Some(ActionOutcome::Done), None),
+                None => {
                     return Err(AmError::new(
                         ErrorCode::Forbidden,
-                        "the peer denial row is not a durable acknowledgement or refusal",
+                        "the peer denial row carries no durable result yet",
                     ));
                 }
             }
@@ -189,12 +202,16 @@ pub fn record_peer_denial_intent(
 ///
 /// The per-peer row is the only evidence: a pending or delivered row refuses
 /// the write, so a transport receipt or a bare send can never complete the
-/// event. The write is duplicate-tolerant, so a failed outcome leaves the
-/// pending intent as the one durable reconciliation item, and a later pass
-/// settles the same action without a second peer effect.
+/// event. A row that refused and then recorded a resolving disposition writes
+/// that disposition's own content-free text as an allowed outcome, so a
+/// retention or a recorded removal is never published as a denial. The write is
+/// duplicate-tolerant, so a failed outcome leaves the pending intent as the one
+/// durable reconciliation item, and a later pass settles the same action
+/// without a second peer effect.
 ///
 /// # Errors
-/// No durable row for the peer, an unsettled row, or a storage failure.
+/// No durable row for the peer, a row with no durable result yet, or a storage
+/// failure.
 pub fn record_peer_denial_outcome(
     events: &dyn LocalEventStore,
     peers: &dyn PeerActionStore,
@@ -214,7 +231,7 @@ pub fn record_peer_denial_outcome(
     let (result, denied) = peer_outcome(&row).ok_or_else(|| {
         AmError::new(
             ErrorCode::Forbidden,
-            "the peer denial row is not a durable acknowledgement or refusal",
+            "the peer denial row carries no durable result yet",
         )
     })?;
     events.record_outcome(&action_id, denied, result)

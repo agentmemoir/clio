@@ -8,7 +8,8 @@
 //! usable as a trait object for every verdict.
 //!
 //! ## Owns
-//! - The in-test double and the verdict-distinction assertions
+//! - The in-test double, the refusal rule a caller applies, and the
+//!   verdict-distinction assertions
 //!
 //! ## Does not own
 //! - The seam itself (`erasure_denial`)

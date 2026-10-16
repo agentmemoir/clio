@@ -13,6 +13,8 @@
 //!   denial) action
 //! - `snapshot_peers`, `begin_denial`, `mark_delivered`, `mark_acknowledged`,
 //!   `mark_refused`, and `record_disposition`, the durable lifecycle helpers
+//! - `row_of` and `peer_row_settled`, the row binding and the one evidence
+//!   rule every surface over a peer row shares
 //! - `derived_peer_states`, the peer state slot fold
 //!
 //! ## Does not own
@@ -64,9 +66,12 @@ pub fn peer_action_id(request_id: &str, peer_id: &str) -> String {
 /// The record's frozen peer set is the deployment's enabled set: a
 /// not-applicable record has no peers and snapshots nothing, while a required
 /// record writes one `pending` row per peer under the request id and the
-/// record's frozen subject/bank scope. The snapshot is written before any
-/// erasure effect, and it is idempotent per peer: a repeated snapshot returns
-/// the stored rows untouched. A failed snapshot may have written the earlier
+/// peer's derived action id. The per-peer row store keys a row by the request,
+/// the peer, and the action kind alone — the record's subject and bank scope
+/// live in the durable record, not in the row, so both are bound by the record
+/// the snapshot is replayed from. The snapshot is written before any erasure
+/// effect, and it is idempotent per peer: a repeated snapshot returns the
+/// stored rows untouched. A failed snapshot may have written the earlier
 /// peers; a retry returns those rows and writes only the missing ones.
 ///
 /// # Errors
@@ -185,13 +190,17 @@ pub fn mark_refused(
 
 /// Record one peer's copy disposition with its durable proof.
 ///
-/// A removed peer is settled `refused` with the recorded disposition — the
-/// peer's deletion evidence or the approved retention — because the store
-/// keeps a settled row fixed: the disposition can only travel with the settle
-/// that moves the row, and a disposition recorded afterwards would be dropped.
-/// The call tolerates a row that already holds exactly this disposition and
-/// proof, and refuses a row settled with different evidence, so a caller never
-/// believes a disposition was recorded when the durable row says otherwise.
+/// The peer is settled `refused` with the recorded disposition — the peer's
+/// deletion evidence or the approved retention — because a disposition travels
+/// with the settle that carries it. The call also reaches a row that already
+/// refused without a disposition: that row records the operator's disposition
+/// with its state unchanged, so an explicit disposition can still resolve a
+/// refused peer. The call tolerates a row that already holds exactly this
+/// disposition and proof, and refuses a row settled with different evidence, so
+/// a caller never believes a disposition was recorded when the durable row says
+/// otherwise. Only a recorded deletion evidence with its proof settles the
+/// peer for completion; an approved retention is a recorded disposition that
+/// keeps the required removal action open.
 ///
 /// # Errors
 /// A missing row, an illegal transition, a row already settled with different
@@ -228,8 +237,13 @@ pub fn record_disposition(
 /// The record's peer state slots, derived from the durable rows in one place.
 ///
 /// A slot is [`PeerState::Acknowledged`] only when the peer's durable row is
-/// acknowledged, [`PeerState::Disposed`] when the row records a disposition,
-/// and [`PeerState::Pending`] otherwise. Only a row bound to the peer's own
+/// acknowledged, [`PeerState::Disposed`] only when the row records the peer's
+/// deletion evidence with its proof reference, and [`PeerState::Pending`]
+/// otherwise. The evidence rule is [`peer_row_settled`], the same one the
+/// completion gate and the copy fold read, so no surface reports a peer
+/// disposed while another still refuses it: a removal evidence without its
+/// proof reference, an approved retention, an unknown disposition, and a row
+/// that only delivered all stay pending. Only a row bound to the peer's own
 /// derived action id counts: a row under a different key, for another peer,
 /// for another request, or of another action kind never moves a slot, so a
 /// restart re-derives exactly the frozen set from the durable rows and an
@@ -244,6 +258,40 @@ pub fn derived_peer_states(
         .keys()
         .map(|peer_id| (peer_id.clone(), slot_state(record, peer_id, rows)))
         .collect()
+}
+
+/// Whether one peer row carries the durable evidence that settles its peer.
+///
+/// Only two things settle a peer: the peer's own acknowledgement, or the
+/// recorded deletion evidence with its proof reference. The state alone is not
+/// evidence — a delivered row, a refusal without a disposition, and an
+/// approved retention all leave the peer unsettled — and a removal evidence
+/// without its proof reference is not evidence either, so a row can never
+/// report a removal the durable record cannot show.
+#[must_use]
+pub fn peer_row_settled(row: &PeerActionRow) -> bool {
+    row.state == PeerActionState::Acknowledged
+        || (row.disposition == PeerActionDisposition::RemovalEvidence && row.proof_ref.is_some())
+}
+
+/// The durable row one peer's slot is derived from, when the rows hold it.
+///
+/// The row must be bound to the peer's own derived action id under this
+/// record's request id, peer id, and action kind; anything else belongs to
+/// another action and never moves the peer.
+#[must_use]
+pub(crate) fn row_of<'a>(
+    record: &SubjectRequestRecord,
+    peer_id: &str,
+    rows: &'a [PeerActionRow],
+) -> Option<&'a PeerActionRow> {
+    let expected = peer_action_id(&record.request_id, peer_id);
+    rows.iter().find(|row| {
+        row.request_id == record.request_id
+            && row.peer_id == peer_id
+            && row.action_kind == PeerActionKind::Denial
+            && row.action_id == expected
+    })
 }
 
 /// The binding of one peer's denial row, under its derived action id.
@@ -269,20 +317,21 @@ fn settle(
 
 /// The slot one peer's durable rows imply.
 fn slot_state(record: &SubjectRequestRecord, peer_id: &str, rows: &[PeerActionRow]) -> PeerState {
-    let expected = peer_action_id(&record.request_id, peer_id);
-    let matched = rows.iter().find(|row| {
-        row.request_id == record.request_id
-            && row.peer_id == peer_id
-            && row.action_kind == PeerActionKind::Denial
-            && row.action_id == expected
-    });
-    match matched {
+    match row_of(record, peer_id, rows) {
         Some(row) if row.state == PeerActionState::Acknowledged => PeerState::Acknowledged,
-        Some(row) if row.disposition != PeerActionDisposition::Unknown => PeerState::Disposed,
+        Some(row) if peer_row_settled(row) => PeerState::Disposed,
         _ => PeerState::Pending,
     }
 }
 
 #[cfg(test)]
+#[path = "subject_peer_fixtures.rs"]
+pub(crate) mod subject_peer_fixtures;
+
+#[cfg(test)]
 #[path = "subject_peer_tests.rs"]
 mod subject_peer_tests;
+
+#[cfg(test)]
+#[path = "subject_peer_disposition_tests.rs"]
+mod subject_peer_disposition_tests;

@@ -21,8 +21,9 @@
 //!   subject disagrees with a subject-scoped record refuses with an error
 //!   before any probe
 //! - The peer-denial arm: a pending per-peer event is settled from its
-//!   durable acknowledged or refused row by action id with no effect, so a
-//!   retry resumes the same action instead of repeating one
+//!   durable row by action id with no effect — an acknowledged row, a refusal,
+//!   or the disposition that resolved a refusal — so a retry resumes the same
+//!   action instead of repeating one
 //!
 //! ## Does not own
 //! - The flow's retry contract, its step probes, and its settle
@@ -130,11 +131,13 @@ pub struct ErasureReconcileReport {
 ///   never reported over uncommitted store work and the purge is retried.
 ///
 /// A pending peer-denial action is settled from its durable per-peer row by
-/// action id and runs no effect: an acknowledged or refused row completes the
-/// pending event once, while a pending or delivered row, and an event whose
-/// durable row is missing, stay pending for a later pass. The peer's row is
-/// never rewritten, so a retry resumes the same action and never repeats a
-/// completed delivery or purge.
+/// action id and runs no effect: a row the peer acknowledged, a row that
+/// refused without a disposition, and a refused row that recorded a resolving
+/// disposition each complete the pending event once, with the result text the
+/// row supports, while a pending or delivered row, and an event whose durable
+/// row is missing, stay pending for a later pass. The peer's row is never
+/// rewritten, so a retry resumes the same action and never repeats a completed
+/// delivery or purge.
 ///
 /// A store probe failure propagates, so an unknown step state settles nothing.
 /// An outcome write is at most once because the write is duplicate-tolerant. A
@@ -183,12 +186,14 @@ pub fn reconcile_erasure_actions(
 /// Settle one pending peer-denial action from its durable row, with no effect.
 ///
 /// The event's own durable scope names the request the per-peer rows hang off,
-/// and the action id selects the row: the acknowledged or refused row settles
-/// the pending event exactly once with a content-free result, while a pending
-/// or delivered row stays pending for reconciliation. The row is only read,
-/// never rewritten, so a retry resumes the same action and never repeats a
-/// completed delivery; an event with no matching durable row stays pending
-/// rather than claiming a result this pass cannot see.
+/// and the action id selects the row: a row the peer acknowledged, a refusal,
+/// or a refusal that recorded a resolving disposition settles the pending
+/// event exactly once with that row's own content-free result — an approved
+/// retention is never published as a denial — while a pending or delivered row
+/// stays pending for reconciliation. The row is only read, never rewritten, so
+/// a retry resumes the same action and never repeats a completed delivery; an
+/// event with no matching durable row stays pending rather than claiming a
+/// result this pass cannot see.
 fn resume_peer_action(
     env: &ErasureRetryEnv<'_>,
     events: &dyn LocalEventStore,
@@ -226,8 +231,10 @@ enum ResumeOutcome {
 /// bug and refuses with an error before any probe, so no probe and no effect
 /// ever run over the wrong subject.
 /// For a record this pass can probe, the effect probes run before any denial,
-/// and the peer slots gate completion: a peer that has not acknowledged or been
-/// disposed keeps the action pending with no outcome.
+/// and the peer slots gate completion: a peer whose row is neither
+/// acknowledged nor a recorded removal evidence with its proof keeps the
+/// action pending with no outcome, so an approved retention and an unknown
+/// disposition keep it pending too.
 /// A committed purge whose tombstones name another subject keeps the action
 /// pending before any settle or effect, because the purge evidence binds the
 /// resume to the subject it actually ran for.

@@ -9,12 +9,13 @@
 //! and the reserved bank markers that make the serve answer durable.
 //!
 //! ## Owns
+//! - `content_subject_id` / `subject_verdict`: which payload shapes are
+//!   subject-keyed and the three-way verdict for one payload's subject
 //! - `guard_subject`: the verdict a payload's subject must pass before an
 //!   upsert or mint path may run
-//! - `apply_carrier` and `redelivery_proof`: recording one denial operation
-//!   durably and returning the proof that acknowledges it
+//! - `record_carrier_proof` / `apply_carrier` / `redelivery_proof`: recording
+//!   one denial operation durably and returning the proof that acknowledges it
 //! - `pull_refusal`: the refusal for a bank a recorded denial covers
-//! - `content_subject_id`: which payload shapes are subject-keyed
 //!
 //! ## Does not own
 //! - The denial operation's wire vocabulary (`denial` owns the carrier, the

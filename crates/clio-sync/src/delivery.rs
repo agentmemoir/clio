@@ -37,12 +37,9 @@ use crate::client::SyncClientConfig;
 use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, denial_mutation, denial_mutation_id,
 };
+use crate::http::post_json_status;
 use crate::protocol::{PushAck, SyncMutation, SyncPayload};
 use clio_types::{AmError, ErrorCode};
-use serde_json::Value;
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::time::Duration;
 
 /// What one denial delivery is verified against: the expected request, peer,
 /// bank, subject, covered banks, and answering deployment.
@@ -138,7 +135,10 @@ pub fn deliver_denial(
         mutations: vec![mutation.clone()],
     };
     let body = serde_json::to_value(&payload).expect("serialize the push payload");
-    match push_exchange(&remote, cfg.token.as_deref(), &body) {
+    // The shared exchange keeps the peer's status, so a peer's refusal (4xx)
+    // stays distinct from a retryable answer (5xx) and from a transport
+    // failure, exactly as the client's pull path reads its own answers.
+    match post_json_status(&remote, "/sync/push", cfg.token.as_deref(), &body) {
         Ok((200, value)) => Ok(match serde_json::from_value::<PushAck>(value) {
             Ok(ack) => acknowledge(&mutation, &carrier, target, &ack),
             Err(err) => unreachable_answer(format!(
@@ -198,66 +198,4 @@ fn acknowledge(
 /// mutation id.
 fn unreachable_answer(reason: String) -> DeliveryOutcome {
     DeliveryOutcome::Unreachable { reason }
-}
-
-/// One push exchange, keeping the peer's HTTP status.
-///
-/// The shared client helper collapses every non-200 answer into one error; a
-/// delivery must keep a peer's refusal (4xx) distinct from a retryable answer
-/// (5xx) and from a transport failure, so the exchange is made here with the
-/// transport's own framing and read timeout.
-fn push_exchange(remote: &str, token: Option<&str>, body: &Value) -> Result<(u16, Value), AmError> {
-    let payload = serde_json::to_vec(body).expect("serialize the push body");
-    let mut stream = TcpStream::connect(remote).map_err(|err| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("sync peer connect failed: {err}"),
-        )
-    })?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .map_err(|err| {
-            AmError::new(
-                ErrorCode::Internal,
-                format!("sync peer timeout setup failed: {err}"),
-            )
-        })?;
-    let auth = token.map_or(String::new(), |secret| {
-        format!("Authorization: Bearer {secret}\r\n")
-    });
-    let head = format!(
-        "POST /sync/push HTTP/1.1\r\nHost: {remote}\r\n{auth}Content-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n",
-        payload.len()
-    );
-    stream
-        .write_all(head.as_bytes())
-        .and_then(|()| stream.write_all(&payload))
-        .map_err(|err| {
-            AmError::new(ErrorCode::Internal, format!("sync peer send failed: {err}"))
-        })?;
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).map_err(|err| {
-        AmError::new(ErrorCode::Internal, format!("sync peer read failed: {err}"))
-    })?;
-    let text = String::from_utf8_lossy(&response);
-    let status: u16 = text
-        .split_whitespace()
-        .nth(1)
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0);
-    if status == 0 {
-        return Err(AmError::new(
-            ErrorCode::Internal,
-            "the sync peer closed without an answer",
-        ));
-    }
-    let body_start = text.find("\r\n\r\n").map_or(text.len(), |pos| pos + 4);
-    let value = serde_json::from_str(text[body_start..].trim()).map_err(|err| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("the sync peer's answer is unreadable: {err}"),
-        )
-    })?;
-    Ok((status, value))
 }

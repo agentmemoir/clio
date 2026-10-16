@@ -12,7 +12,9 @@
 //! - Unit coverage for `denial`: carrier, proof, binding, marker, digest
 //!
 //! ## Does not own
-//! - The authority-facing guards (`apply_denial_tests`)
+//! - The subject-keyed payload shapes the guard reads a subject from
+//!   (`denial_subject_shape_tests`)
+//! - The guard transitions at the engine level (`apply_denial_tests`)
 //! - The routes that carry the proof (`server_denial_tests`)
 //!
 //! ## Boundary
@@ -242,3 +244,8 @@ fn the_fake_authority_matches_the_seam_contract() {
     assert_eq!(denial.fingerprint(), "fp-1");
     assert_eq!(denial.generation(), 1);
 }
+
+// The guarded-subject shape cases, beside the wire vocabulary they exercise.
+#[cfg(test)]
+#[path = "denial_subject_shape_tests.rs"]
+mod denial_subject_shape_tests;

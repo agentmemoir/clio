@@ -6,9 +6,10 @@
 //! This module tests one denial operation's delivery to one peer over real
 //! TCP: a peer that records durably and answers with a verified proof is
 //! delivered, a proof under another deployment salt is refused, a transport
-//! answer without a proof is never accepted, an unreachable peer reports
-//! unreachable, and a redelivery returns the same proof without a second
-//! effect.
+//! answer without a proof is never accepted, a peer's refusal (4xx) and a
+//! retryable answer (5xx) stay distinct, an unreachable peer reports
+//! unreachable, malformed input is refused before any exchange, and a
+//! redelivery returns the same proof without a second effect.
 //!
 //! ## Owns
 //! - Behavior coverage for `deliver_denial` and its outcome classification
@@ -32,6 +33,8 @@ use crate::denial_fixtures::FakeDenial;
 use crate::server::server_tests::{serve, sqlite};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_store::{ErasureDenial, SqliteStore, Store, SyncStore};
+use clio_types::ErrorCode;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
 
@@ -91,6 +94,134 @@ fn target(fingerprint: &str) -> DenialTarget<'_> {
         covering: &["b-a", "b-b"],
         salt_fingerprint: fingerprint,
     }
+}
+
+/// A peer that answers one push with a fixed status and body, then closes.
+fn answering_peer(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr").to_string();
+    let handle = std::thread::spawn(move || {
+        if let Ok((mut stream, _peer)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let answer = format!(
+                "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(answer.as_bytes());
+        }
+    });
+    (addr, handle)
+}
+
+/// A delivery without a peer endpoint is the caller's own input: no transport
+/// answer exists to classify.
+#[test]
+fn a_delivery_without_a_remote_endpoint_is_input_refused() {
+    let (store, _kms) = sqlite();
+    let cfg = SyncClientConfig {
+        device_id: "dev-a".into(),
+        store: Arc::clone(&store) as Arc<dyn Store>,
+        sync: store as Arc<dyn SyncStore>,
+        remote: None,
+        token: None,
+        cipher: Vec::new(),
+    };
+    let err = deliver_denial(&cfg, &target("fp-1")).expect_err("no remote is the caller's input");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+/// Every required target field is refused when blank, before any exchange.
+#[test]
+fn a_blank_target_field_is_input_refused() {
+    let cfg = client("127.0.0.1:1", "tok");
+    for delivery in [
+        DenialTarget {
+            request_ref: "",
+            ..target("fp-1")
+        },
+        DenialTarget {
+            peer_id: "",
+            ..target("fp-1")
+        },
+        DenialTarget {
+            bank: "",
+            ..target("fp-1")
+        },
+        DenialTarget {
+            subject_id: "",
+            ..target("fp-1")
+        },
+        DenialTarget {
+            salt_fingerprint: "  ",
+            ..target("fp-1")
+        },
+    ] {
+        let err = deliver_denial(&cfg, &delivery).expect_err("a blank field is the caller's input");
+        assert_eq!(err.code, ErrorCode::InvalidArgument);
+    }
+}
+
+/// A target covering no bank cannot build a carrier: the refusal is input, not
+/// a delivery outcome.
+#[test]
+fn a_target_covering_no_bank_is_input_refused() {
+    let cfg = client("127.0.0.1:1", "tok");
+    let empty = DenialTarget {
+        covering: &[],
+        ..target("fp-1")
+    };
+    let err = deliver_denial(&cfg, &empty).expect_err("a carrier needs one covered bank");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+/// A peer that answers a 4xx refusal keeps the action pending as a refusal,
+/// never as a delivery.
+#[test]
+fn a_peer_refusal_is_refused_not_pending() {
+    let (server, _store) = serve(&["b-a"], Some("tok-plain"), false, None, None);
+    let cfg = client(server.addr(), "tok-wrong");
+    let outcome = deliver_denial(&cfg, &target("fp-1")).expect("deliver");
+    assert!(
+        matches!(&outcome, DeliveryOutcome::Refused { .. }),
+        "a 4xx answer is a refusal, never a delivery: {outcome:?}"
+    );
+    server.stop();
+}
+
+/// A retryable non-4xx answer has no durable effect at the peer: the action
+/// stays pending.
+#[test]
+fn a_retryable_peer_answer_is_unreachable() {
+    let (server, _store, denial, _scratch, token) = serve_denied();
+    let cfg = client(server.addr(), &token);
+    denial.damage();
+    let outcome = deliver_denial(&cfg, &target("fp-1")).expect("deliver");
+    assert!(
+        matches!(&outcome, DeliveryOutcome::Unreachable { .. }),
+        "a 5xx keeps the action pending: {outcome:?}"
+    );
+    assert_eq!(
+        denial.records_for("s-held"),
+        0,
+        "a damaged authority records nothing"
+    );
+    server.stop();
+}
+
+/// A 200 whose body is not an acknowledgement is never delivered: without a
+/// durable proof there is nothing to retire the action on.
+#[test]
+fn an_unreadable_acknowledgement_is_not_delivered() {
+    let (addr, peer) = answering_peer(200, "{\"not\":\"an acknowledgment\"}");
+    let cfg = client(&addr, "tok");
+    let outcome = deliver_denial(&cfg, &target("fp-1")).expect("deliver");
+    assert!(
+        matches!(&outcome, DeliveryOutcome::Unreachable { .. }),
+        "an unreadable acknowledgment is not a delivery: {outcome:?}"
+    );
+    peer.join().expect("the answer thread ends");
 }
 
 /// A durable proof that verifies is a delivery, and the peer's durable record

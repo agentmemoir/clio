@@ -290,7 +290,7 @@ impl SubjectRequestLedger {
     ///
     /// An empty peer list records [`PeerEnablement::NotApplicable`] and a
     /// non-empty one [`PeerEnablement::Required`]; use
-    /// [`Self::register_with_enablement`] to supply the fact explicitly.
+    /// [`Self::register_with_enablement`] to supply the fact and the banks.
     pub fn register(
         &mut self,
         request_id: &str,
@@ -303,20 +303,20 @@ impl SubjectRequestLedger {
         } else {
             PeerEnablement::Required
         };
-        self.register_with_enablement(request_id, kind, scope, enablement, peers)
+        self.register_with_enablement(request_id, kind, scope, enablement, peers, &[])
     }
 
     /// Open a request under an explicit enablement fact, or replay its stored
     /// result.
     ///
     /// The request id is durable and its kind and scope are immutable: the
-    /// same id with the same kind and scope replays the stored record and
-    /// applies nothing, ignoring the incoming enablement fact and peer list
-    /// entirely; the same id with a changed kind or scope is refused and no
-    /// state changes. A new request persists the fact and the frozen peer
-    /// snapshot before any effect: [`PeerEnablement::Required`] needs at
-    /// least one enabled peer label and [`PeerEnablement::NotApplicable`]
-    /// none, so the stored fact never contradicts the stored set.
+    /// same id and scope replays the stored record and applies nothing,
+    /// ignoring the incoming fact, peer list, and bank set; a changed kind or
+    /// scope is refused and no state changes. A new request persists the
+    /// fact, the frozen peer snapshot, and the deduplicated peer-bank union
+    /// before any effect: [`PeerEnablement::Required`] needs at least one
+    /// enabled peer label and [`PeerEnablement::NotApplicable`] none, so the
+    /// stored fact never contradicts the stored set.
     ///
     /// # Errors
     /// A blank id, an invalid scope, an enablement fact the labels
@@ -329,6 +329,7 @@ impl SubjectRequestLedger {
         scope: &RequestScope,
         enablement: PeerEnablement,
         peers: &[&str],
+        peer_banks: &[&str],
     ) -> Result<RegisterOutcome, AmError> {
         if request_id.trim().is_empty() {
             return Err(AmError::new(
@@ -362,6 +363,7 @@ impl SubjectRequestLedger {
                         paths: BTreeMap::new(),
                         peers: peer_slots,
                         peer_enablement: enablement,
+                        peer_banks: peer_banks.iter().map(|bank| (*bank).to_owned()).collect(),
                         exception: None,
                     },
                 );

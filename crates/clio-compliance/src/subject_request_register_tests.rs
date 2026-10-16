@@ -25,7 +25,7 @@ use crate::subject_request::{
     SubjectRequestLedger, SubjectRequestRecord,
 };
 use clio_types::ErrorCode;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn subject_scope() -> RequestScope {
     RequestScope::Subject {
@@ -70,6 +70,10 @@ fn register_opens_a_received_record_with_the_given_kind_scope_and_peers() {
     .into_iter()
     .collect();
     assert_eq!(record.peers, peers, "duplicates collapse and slots sort");
+    assert!(
+        record.peer_banks.is_empty(),
+        "the label-only convenience freezes no peer bank"
+    );
 }
 
 #[test]
@@ -82,6 +86,7 @@ fn register_with_enablement_persists_the_fact_and_the_frozen_set() {
             &subject_scope(),
             PeerEnablement::Required,
             &["peer-b", "peer-a", "peer-b"],
+            &["bank-c", "bank-b", "bank-b"],
         )
         .unwrap();
     assert_eq!(outcome, RegisterOutcome::Opened);
@@ -95,7 +100,12 @@ fn register_with_enablement_persists_the_fact_and_the_frozen_set() {
     .collect();
     assert_eq!(
         record.peers, peers,
-        "the enabled set is frozen as pending slots"
+        "the enabled labels are frozen as pending slots"
+    );
+    assert_eq!(
+        record.peer_banks,
+        BTreeSet::from(["bank-b".to_owned(), "bank-c".to_owned()]),
+        "the peer banks are the deduplicated union, beside the labels"
     );
 }
 
@@ -135,6 +145,7 @@ fn an_enablement_fact_the_labels_contradict_is_refused_without_storing() {
                 &subject_scope(),
                 enablement,
                 &peers,
+                &[],
             )
             .unwrap_err();
         assert_eq!(
@@ -156,6 +167,7 @@ fn a_replay_ignores_the_incoming_enablement_fact_and_labels() {
             &subject_scope(),
             PeerEnablement::Required,
             &["peer-1"],
+            &["bank-a"],
         )
         .unwrap();
     let before = ledger.record("r1").cloned();
@@ -165,6 +177,7 @@ fn a_replay_ignores_the_incoming_enablement_fact_and_labels() {
             RequestKind::Erasure,
             &subject_scope(),
             PeerEnablement::NotApplicable,
+            &[],
             &[],
         )
         .unwrap();
@@ -177,11 +190,16 @@ fn a_replay_ignores_the_incoming_enablement_fact_and_labels() {
     assert_eq!(
         ledger.record("r1").cloned(),
         before,
-        "a replay keeps the stored fact and set"
+        "a replay keeps the stored fact, labels, and banks"
     );
     assert_eq!(
         ledger.record("r1").expect("record stored").peer_enablement,
         PeerEnablement::Required
+    );
+    assert_eq!(
+        ledger.record("r1").expect("record stored").peer_banks,
+        BTreeSet::from(["bank-a".to_owned()]),
+        "a replay keeps the stored banks"
     );
 }
 

@@ -17,6 +17,7 @@
 //!   (`peer_actions_backends`)
 //! - The slot DDL text (`migrate` and `sql/003_local_compliance_slots.sql`)
 //! - The Postgres backend assertions (`peer_actions_pg_tests`)
+//! - The race and refusal edges (`peer_actions_edge_tests`)
 //!
 //! ## Boundary
 //!
@@ -395,3 +396,6 @@ impl Drop for Scratch {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+#[path = "peer_actions_edge_tests.rs"]
+mod edge;

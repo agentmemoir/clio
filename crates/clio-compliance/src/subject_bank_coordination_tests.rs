@@ -32,14 +32,14 @@ use crate::subject_bank_coordination::{
 };
 use crate::subject_request::{
     FinalOutcome, PeerEnablement, PeerState, RequestKind, RequestScope, RequestState,
-    SubjectRequestRecord,
+    SubjectRequestLedger, SubjectRequestRecord,
 };
 use crate::test_unique::unique;
 use clio_store::{
     ComplianceStore, ComplianceTombstoneView, ItemIdentity, SubjectEraseOutcome, SubjectEraseSpec,
 };
 use clio_types::{Actor, AmError, Bank, ErrorCode, OpContext};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -65,6 +65,7 @@ fn confirmed(
         deadline: None,
         actions: BTreeMap::new(),
         paths: BTreeMap::new(),
+        peer_banks: BTreeSet::new(),
         peer_enablement: PeerEnablement::for_peer_set(&peers),
         peers,
         exception: None,
@@ -75,14 +76,16 @@ fn confirmed(
 fn two_bank(peer_b: PeerState) -> SubjectRequestRecord {
     let mut peers = BTreeMap::new();
     peers.insert(BANK_B.to_owned(), peer_b);
-    confirmed(
+    let mut record = confirmed(
         RequestKind::Erasure,
         RequestScope::Subject {
             bank_id: BANK_A.into(),
             subject_id: SUBJECT.into(),
         },
         peers,
-    )
+    );
+    record.peer_banks.insert(BANK_B.to_owned());
+    record
 }
 
 /// The banks sharing the subject key now.
@@ -211,9 +214,9 @@ fn refused_erase(record: &SubjectRequestRecord, live_banks: &[String]) -> (AmErr
     (err, store.erase_calls())
 }
 
-/// A pending peer no longer refuses the pre-effect check: the frozen bank
-/// set still matches, so the local effect runs and the completion gate holds
-/// the action pending instead.
+/// A pending peer no longer refuses the pre-effect check: the frozen bank set
+/// still matches, so the local effect runs. Whether the action may complete is
+/// the completion gate's decision, which this seam never runs.
 #[test]
 fn a_pending_peer_does_not_block_the_local_effect() {
     let record = two_bank(PeerState::Pending);
@@ -277,6 +280,32 @@ fn all_banks_confirmed_erasure_proceeds() {
         .expect("every coordinating bank confirmed");
     assert_eq!(outcome.status, "COMPLETED");
     assert_eq!(store.erase_calls(), 1);
+}
+
+/// A peer label is not a bank id: the check reads the recorded peer banks.
+#[test]
+fn a_peer_label_that_is_not_a_bank_id_covers_its_recorded_bank() {
+    let mut ledger = SubjectRequestLedger::new();
+    ledger
+        .register_with_enablement(
+            "req-edge",
+            RequestKind::Erasure,
+            &RequestScope::Bank {
+                bank_id: BANK_A.into(),
+            },
+            PeerEnablement::Required,
+            &["edge-node-7"],
+            &[BANK_B],
+        )
+        .expect("the request opens");
+    let mut record = ledger.record("req-edge").expect("record stored").clone();
+    assert_eq!(record.peer_banks, BTreeSet::from([BANK_B.to_owned()]));
+    require_all_banks_confirmed(&record, &shared_banks(&[BANK_A, BANK_B]))
+        .expect("the set matches");
+    record.state = RequestState::InProgress;
+    let (err, calls) = refused_erase(&record, &shared_banks(&[BANK_A, BANK_B, "bank-c"]));
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert_eq!(calls, 0, "a changed live set refuses before any effect");
 }
 
 #[test]

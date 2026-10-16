@@ -23,7 +23,9 @@
 //! - Credential store and bank authorization checks
 //! - Server-side journal sealing via the local DEK provider (no peer DEKs)
 //! - The pull-side denial refusal: a bank a recorded denial covers, or an
-//!   unreadable denial authority, refuses the pull
+//!   unreadable denial authority, refuses the pull; the refusal and the row
+//!   read run under the bank's lock, and the refusal is re-checked after the
+//!   read
 //!
 //! ## Does not own
 //! - The push route's body, acknowledgement, and denial proof placement
@@ -247,6 +249,16 @@ pub(crate) fn bank_authorized(options: &ServeOptions, auth: &AuthOutcome, bank: 
     auth.allows(bank) && options.banks.iter().any(|b| b == bank)
 }
 
+/// The status a pull refusal answers with: a bank a recorded denial covers is a
+/// `403`; an unreadable authority is the server's own failure (`500`).
+fn pull_refusal_status(err: &AmError) -> u16 {
+    if err.code == ErrorCode::ErasedSubject {
+        403
+    } else {
+        500
+    }
+}
+
 pub(crate) fn handle_pull(
     options: &ServeOptions,
     stream: TcpStream,
@@ -262,26 +274,43 @@ pub(crate) fn handle_pull(
             &AmError::new(ErrorCode::Forbidden, "bank not authorized"),
         );
     }
-    // The bank guard: a bank a recorded denial covers is refused whole, and an
-    // unreadable authority refuses the pull instead of serving it. A journal
-    // row carries no readable subject, so a covered bank cannot be resolved
-    // row by row; unrelated banks still serve normally.
-    if let Err(err) = crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank) {
-        let status = if err.code == ErrorCode::ErasedSubject {
-            403
-        } else {
-            500
-        };
-        return write_status_error(stream, status, &err);
-    }
     let since = if request.cursor.is_empty() {
         0
     } else {
         decode_cursor(&request.cursor, &request.bank)?
     };
-    let rows = options
-        .sync
-        .journal_list_since(&request.bank, since, request.limit)?;
+    // The bank guard: a bank a recorded denial covers is refused whole, and an
+    // unreadable authority refuses the pull instead of serving it. A journal
+    // row carries no readable subject, so a covered bank cannot be resolved
+    // row by row; unrelated banks still serve normally.
+    //
+    // The check and the read happen under the same per-bank lock the push
+    // route holds, so a denial for this bank cannot be recorded between them
+    // and still answered with pre-denial rows: while the lock is held the
+    // denial is either already recorded (the check refuses) or lands after the
+    // read (the page is ordered before it). The read is re-checked under the
+    // same lock because a carrier pushed under another bank may cover this one
+    // and record its marker without ever taking this bank's lock.
+    let rows = {
+        let bank_lock = options.bank_locks.for_bank(&request.bank);
+        let _bank_guard = bank_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(err) =
+            crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
+        {
+            return write_status_error(stream, pull_refusal_status(&err), &err);
+        }
+        let rows = options
+            .sync
+            .journal_list_since(&request.bank, since, request.limit)?;
+        if let Err(err) =
+            crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
+        {
+            return write_status_error(stream, pull_refusal_status(&err), &err);
+        }
+        rows
+    };
     let mutations = rows
         .iter()
         .map(|row| journal_row_to_mutation(options.kms.as_ref(), row))

@@ -5,12 +5,17 @@
 //!
 //! This module tests the sync server's denial surface over real TCP: the pull
 //! refusal for a bank a recorded denial covers while an unrelated bank still
-//! serves, the refusal of a pull whose authority is unreadable, the durable
-//! proof a push acknowledgement carries for a denial operation, its
-//! redelivery, and the refusal a restarted server still reports.
+//! serves, the refusal of a pull whose authority is unreadable, the refusal a
+//! pull racing a recording denial observes, the durable proof a push
+//! acknowledgement carries for a denial operation, its redelivery, and the
+//! refusal a server still reports after the store and the authority are
+//! reopened.
 //!
 //! ## Owns
-//! - Behavior coverage for the pull-side bank guard and the push-side proof
+//! - Behavior coverage for the pull-side bank guard (including the bank lock
+//!   its check and read hold) and the push-side proof
+//! - The push-during-pull race coverage the pausing fixture drives, and the
+//!   scratch directory the durability case creates
 //!
 //! ## Does not own
 //! - The apply-side guards at the engine level (`apply_denial_tests`)
@@ -24,15 +29,20 @@
 //! Keep this module focused on the server's denial surface.
 
 use crate::credential_fixtures::{Scratch, record, secret};
-use crate::denial::{DenialCarrier, DenialProof, DenialProofBinding, denial_mutation};
-use crate::denial_fixtures::FakeDenial;
+use crate::denial::{
+    DenialCarrier, DenialProof, DenialProofBinding, denial_mutation, denied_bank_marker,
+};
+use crate::denial_fixtures::{FakeDenial, FileDenial, PausingDenial};
 use crate::protocol::{SyncContent, SyncMutation};
-use crate::server::server_tests::{http, item_value, mutation, push_body, sqlite};
+use crate::server::server_tests::{http, item_value, mutation, push_body, sqlite, wait_closed};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
-use clio_store::{DekProvider, ErasureDenial, SqliteStore, Store, SyncStore};
+use clio_store::{DekProvider, ErasureDenial, LocalDevKms, SqliteStore, Store, SyncStore};
 use serde_json::{Value, json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 
 /// Server options over `store` and the credential store at `store_path`.
 fn options(
@@ -80,6 +90,41 @@ fn serve_denied() -> (
     )
     .expect("serve");
     (server, store, denial, scratch, token)
+}
+
+/// Ceiling on a signal that must arrive (the recording push reaching its
+/// marker record). Generous: only a hung server can miss it.
+const SIGNAL_BUDGET: Duration = Duration::from_secs(10);
+/// Ceiling on the pull's guard signal while the recording push holds the bank
+/// lock. On the locked server this signal can never arrive before the release,
+/// so the bound is what turns "the pull waits on the lock" into a finite wait;
+/// a server that checks without the lock signals well inside it.
+const BLOCKED_BUDGET: Duration = Duration::from_secs(2);
+
+/// A scratch directory for the durability case's store and journal, removed on
+/// drop: the repo's temp-file fixture pattern one level up, so the SQLite
+/// sidecars the file leaves beside itself go with it.
+struct ScratchDir {
+    path: PathBuf,
+}
+
+impl ScratchDir {
+    fn new(name: &str) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "am-sync-{name}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&path).expect("scratch dir");
+        Self { path }
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 /// One push of `mutations` under `bank`.
@@ -191,23 +236,41 @@ fn a_push_acknowledges_a_denial_with_its_durable_proof() {
 }
 
 #[test]
-fn a_redelivered_denial_push_returns_the_same_proof() {
+fn a_redelivered_denial_push_repeats_no_record_and_answers_the_current_generation() {
     let (server, _store, denial, _scratch, token) = serve_denied();
     let addr = server.addr().to_owned();
     let op = denial_op("b-a", &["b-a"]);
     let (_, first) = push(&addr, &token, "b-a", std::slice::from_ref(&op));
     let (_, second) = push(&addr, &token, "b-a", std::slice::from_ref(&op));
     assert_eq!(second["accepted"], json!(["denial:req-1"]));
+    let first_proof: DenialProof =
+        serde_json::from_value(first["denial_acks"][0]["proof"].clone()).expect("proof parses");
+    let second_proof: DenialProof =
+        serde_json::from_value(second["denial_acks"][0]["proof"].clone()).expect("proof parses");
+    assert_eq!(second_proof.request_ref, first_proof.request_ref);
+    assert_eq!(second_proof.peer_id, first_proof.peer_id);
+    assert_eq!(second_proof.subject_hash, first_proof.subject_hash);
+    assert_eq!(second_proof.salt_fingerprint, first_proof.salt_fingerprint);
+    // The seam's bound for a repeat: no change, and the current generation —
+    // never a generation older than the first record's.
+    assert!(
+        second_proof.generation >= first_proof.generation,
+        "a repeat answers the current generation: {second_proof:?} vs {first_proof:?}"
+    );
     assert_eq!(
-        second["denial_acks"], first["denial_acks"],
-        "a redelivery answers with the same durable proof"
+        denial.generation(),
+        first_proof.generation,
+        "the redelivery recorded nothing, so the generation never moved"
     );
     assert_eq!(denial.records_for("s-held"), 1, "one durable record");
     server.stop();
 }
 
+/// A second server object over the same in-memory store and the same authority
+/// object still refuses: the refusal is the shared authority's, not either
+/// server's own process state. A real reopen is covered below.
 #[test]
-fn a_restarted_server_still_refuses_a_denied_bank() {
+fn a_second_server_over_the_same_authority_still_refuses_a_denied_bank() {
     let (scratch, token) = credential();
     let (store, kms) = sqlite();
     let denial = FakeDenial::new("fp-1");
@@ -220,8 +283,6 @@ fn a_restarted_server_still_refuses_a_denied_bank() {
     assert_eq!(status, 200, "{ack}");
     first.stop();
 
-    // A fresh server over the same store and the same authority: the refusal
-    // comes from the authority, not from process state.
     let second = sync_serve_with_denial(
         options(&store, kms, scratch.path()),
         Arc::clone(&denial) as Arc<dyn ErasureDenial>,
@@ -231,4 +292,109 @@ fn a_restarted_server_still_refuses_a_denied_bank() {
     assert_eq!(status, 403, "{value}");
     assert_eq!(value["code"], "erased_subject");
     second.stop();
+}
+
+/// A denial recorded before a restart still refuses after both the store and
+/// the authority are reopened from their files: the durable journal record,
+/// not any shared process state, carries the refusal.
+#[test]
+fn a_reopened_store_and_journal_refuse_a_bank_denied_before_the_restart() {
+    let scratch = Scratch::new("denial-durable");
+    let token = secret("t");
+    scratch.write(&[record("client-a", &token, &["b-a"])]);
+    let dir = ScratchDir::new("denial-durable");
+    let store_path = dir.path.join("store.db");
+    let journal = dir.path.join("erasure-journal.json");
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+
+    {
+        let store = Arc::new(SqliteStore::open(&store_path, Arc::clone(&kms)).expect("open"));
+        let denial = FileDenial::new(journal.clone(), "fp-1");
+        let server = sync_serve_with_denial(
+            options(&store, Arc::clone(&kms), scratch.path()),
+            Arc::clone(&denial) as Arc<dyn ErasureDenial>,
+        )
+        .expect("serve");
+        let addr = server.addr().to_owned();
+        let (status, ack) = push(&addr, &token, "b-a", &[denial_op("b-a", &["b-a"])]);
+        assert_eq!(status, 200, "{ack}");
+        server.stop();
+        wait_closed(&addr, 5, "the first durable server");
+    }
+
+    // A second server over a reopened store and a fresh authority object over
+    // the same journal file: only the files can answer.
+    let store = Arc::new(SqliteStore::open(&store_path, Arc::clone(&kms)).expect("reopen"));
+    assert!(
+        store.journal_max_seq("b-a").expect("journal") > 0,
+        "the reopened store still holds the pre-denial journal row"
+    );
+    let denial = FileDenial::new(journal, "fp-1");
+    let server = sync_serve_with_denial(
+        options(&store, kms, scratch.path()),
+        Arc::clone(&denial) as Arc<dyn ErasureDenial>,
+    )
+    .expect("serve");
+    let (status, value) = pull(server.addr(), &token, "b-a");
+    assert_eq!(status, 403, "{value}");
+    assert_eq!(value["code"], "erased_subject");
+    server.stop();
+}
+
+/// A pull that races a denial being recorded must be refused, not served. The
+/// recording push holds its bank's lock from before its apply, so the pull
+/// cannot pass its own guard and read rows while the denial is in flight: it
+/// waits on the lock, then refuses the now-covered bank.
+#[test]
+fn a_pull_racing_a_recording_denial_is_refused_not_served() {
+    let (scratch, token) = credential();
+    let (store, kms) = sqlite();
+    let (denial, entered, guard) =
+        PausingDenial::new(FakeDenial::new("fp-1"), &denied_bank_marker("b-a"));
+    let server = sync_serve_with_denial(
+        options(&store, kms, scratch.path()),
+        Arc::clone(&denial) as Arc<dyn ErasureDenial>,
+    )
+    .expect("serve");
+    let addr = server.addr().to_owned();
+    // One pre-denial row, so a pull that slipped past its guard would serve a
+    // real page instead of an empty one.
+    let (status, value) = push(
+        &addr,
+        &token,
+        "b-a",
+        &[mutation("m-1", "b-a", "2026-01-01T00:00:00Z", "g")],
+    );
+    assert_eq!(status, 200, "{value}");
+
+    let push_addr = addr.clone();
+    let push_token = token.clone();
+    let push_worker = thread::spawn(move || {
+        push(
+            &push_addr,
+            &push_token,
+            "b-a",
+            &[denial_op("b-a", &["b-a"])],
+        )
+    });
+    entered
+        .recv_timeout(SIGNAL_BUDGET)
+        .expect("the recording push reaches the marker record");
+    let pull_addr = addr;
+    let pull_token = token;
+    let pull_worker = thread::spawn(move || pull(&pull_addr, &pull_token, "b-a"));
+    // The pull cannot reach its guard while the push holds the bank lock. A
+    // server that checked without the lock reaches the guard here, reads the
+    // pre-denial page, and answers 200.
+    let guard_reached = guard.recv_timeout(BLOCKED_BUDGET).is_ok();
+    denial.release();
+    let (push_status, ack) = push_worker.join().expect("push thread");
+    let (pull_status, page) = pull_worker.join().expect("pull thread");
+    assert_eq!(push_status, 200, "{ack}");
+    assert!(
+        !guard_reached,
+        "the pull read a verdict while the recording push held the bank lock"
+    );
+    assert_eq!(pull_status, 403, "{page}");
+    server.stop();
 }

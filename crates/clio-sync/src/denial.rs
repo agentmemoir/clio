@@ -13,6 +13,7 @@
 //!   decode and validation
 //! - The stable denial mutation id convention
 //! - `DenialProof`, `DenialProofBinding`, and the fail-closed verification
+//! - `DenialAck`: the proof riding one push acknowledgement
 //! - The reserved denied-bank marker id namespace
 //!
 //! ## Does not own
@@ -202,6 +203,12 @@ pub fn denial_subject_hash(salt_fingerprint: &str, subject_id: &str) -> String {
 /// recorded generation, the subject identity it binds, its own device id, and
 /// the fingerprint of the salt it hashed under make an acknowledgement
 /// authoritative, and a restore into another deployment cannot reproduce one.
+///
+/// The proof carries no purge or custody evidence of its own: the durable
+/// denial record and the covered banks' reserved serve markers are the whole
+/// evidence the answering deployment gives, and they make the denied content
+/// unreadable by refusing those banks. A peer's purge is a separate later
+/// step that this acknowledgement does not attest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DenialProof {
     /// The durable request reference the denial was recorded under.

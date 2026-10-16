@@ -23,7 +23,7 @@ use crate::subject_request::{
     RequestActionState, RequestKind, RequestScope, RequestState, SubjectRequestLedger,
     SubjectRequestRecord, VerificationResult,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn sample_record() -> SubjectRequestRecord {
     let mut paths = BTreeMap::new();
@@ -84,6 +84,7 @@ fn sample_record() -> SubjectRequestRecord {
         paths,
         peers,
         peer_enablement: PeerEnablement::Required,
+        peer_banks: BTreeSet::from(["bank-b".to_owned()]),
         exception: Some("approved archival hold".to_owned()),
     }
 }
@@ -192,6 +193,26 @@ fn the_peer_enablement_fact_loads_from_an_older_row_and_fails_closed_on_an_unkno
     assert!(
         serde_json::from_value::<SubjectRequestRecord>(damaged).is_err(),
         "an unrecognized spelling must fail closed"
+    );
+}
+
+/// A row written before the frozen peer-bank set carries no value and loads
+/// as an empty set, so the pre-effect check covers the scope bank only.
+#[test]
+fn a_row_without_the_peer_bank_set_loads_an_empty_set() {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&sample_record()).expect("serialize record"))
+            .expect("parse record");
+    assert_eq!(parsed["peer_banks"], serde_json::json!(["bank-b"]));
+    let mut older = parsed;
+    older
+        .as_object_mut()
+        .expect("the record is an object")
+        .remove("peer_banks");
+    let legacy: SubjectRequestRecord = serde_json::from_value(older).expect("an older row loads");
+    assert!(
+        legacy.peer_banks.is_empty(),
+        "a row from before the fact loads an empty set"
     );
 }
 

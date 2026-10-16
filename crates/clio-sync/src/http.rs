@@ -11,7 +11,8 @@
 //! and the total request deadline the caller supplies.
 //!
 //! ## Owns
-//! - Request framing helpers (`read_request`, route parse, header lookup)
+//! - Request framing helpers (`read_request`, route parse, header lookup) and
+//!   the JSON POST exchange (`post_json` / `post_json_status`)
 //! - The per-request read bounds: head cap, body cap, per-read slice, and
 //!   in-loop deadline enforcement (values named in the constants below)
 //!
@@ -267,6 +268,29 @@ pub(crate) fn post_json<T: serde::de::DeserializeOwned>(
     token: Option<&str>,
     body: &serde_json::Value,
 ) -> Result<T, AmError> {
+    let (status, value) = post_json_status(remote, path, token, body)?;
+    if status != 200 {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            format!("remote rejected ({status}): {value}"),
+        ));
+    }
+    serde_json::from_value(value).map_err(io_bad_shape)
+}
+
+/// POST one JSON request and return the peer's status with its parsed JSON
+/// body: the shared exchange behind [`post_json`], for a caller that must
+/// keep a 4xx refusal, a retryable non-4xx answer, and a transport failure
+/// distinguishable instead of collapsing them.
+///
+/// # Errors
+/// Connect, transport, or decode failures.
+pub(crate) fn post_json_status(
+    remote: &str,
+    path: &str,
+    token: Option<&str>,
+    body: &serde_json::Value,
+) -> Result<(u16, serde_json::Value), AmError> {
     // Serializing a `serde_json::Value` cannot fail.
     let payload = serde_json::to_vec(body).expect("serialize request");
     let mut stream = TcpStream::connect(remote).map_err(io_connect)?;
@@ -294,13 +318,7 @@ pub(crate) fn post_json<T: serde::de::DeserializeOwned>(
     let body_start = text.find("\r\n\r\n").map_or(text.len(), |p| p + 4);
     let value: serde_json::Value =
         serde_json::from_str(text[body_start..].trim()).map_err(io_bad_response)?;
-    if status != 200 {
-        return Err(AmError::new(
-            ErrorCode::Forbidden,
-            format!("remote rejected ({status}): {value}"),
-        ));
-    }
-    serde_json::from_value(value).map_err(io_bad_shape)
+    Ok((status, value))
 }
 
 #[cfg(test)]

@@ -10,7 +10,8 @@
 //!
 //! ## Owns
 //! - Outgoing change-feed packaging into `sync_payload` batches
-//! - Pull apply loop with the never-advance-past-failures cursor policy
+//! - Pull apply loop under the optional erasure-denial authority, with the
+//!   never-advance-past-failures cursor policy
 //! - Bidirectional mode (documented order: pull then push)
 //! - `sync_status` surface (device id, cursors, pending, conflicts, DLQ)
 //! - Minimal HTTP/1.1 JSON client for the server transport
@@ -28,13 +29,15 @@
 //!
 //! Keep this module focused on the sync client.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, admission_score, apply_mutation, quarantine};
+use crate::apply::{
+    ApplyEngine, ApplyOutcome, admission_score, apply_mutation_guarded, quarantine,
+};
 use crate::client_feed::push_bank;
 use crate::http::post_json;
 use crate::protocol::{
     BankSyncStatus, PullRequest, PullResponse, SyncContent, SyncMutation, SyncStatusReport,
 };
-use clio_store::{DeadLetterStatus, Store, SyncStore};
+use clio_store::{DeadLetterStatus, ErasureDenial, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
 use serde_json::Value;
 use std::sync::Arc;
@@ -52,9 +55,8 @@ pub struct SyncClientConfig {
     /// Bearer token for the remote (masked on status).
     pub token: Option<String>,
     /// Optional client-side encryption keys, newest first: content leaves the
-    /// node as ciphertext sealed with the newest key and the server stores
-    /// opaque bytes. An empty list means encryption off, which is what every
-    /// existing deployment has today.
+    /// node sealed with the newest key and the server stores opaque bytes.
+    /// An empty list means encryption off.
     pub cipher: Vec<crate::crypto::SyncCipherKey>,
 }
 
@@ -100,28 +102,52 @@ pub fn push(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStat
     Ok(out)
 }
 
-/// Pull remote mutations and apply them (pull mode).
+/// Pull remote mutations and apply them (pull mode) with no erasure-denial
+/// authority: the documented no-journal deployment. A deployment holding a
+/// denial journal passes it to [`pull_with_denial`] instead.
+pub fn pull(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStatus>, AmError> {
+    pull_with_denial(cfg, banks, None)
+}
+
+/// Pull remote mutations and apply them under the deployment's erasure-denial
+/// authority: every pulled mutation passes the guarded apply entry before it
+/// can write, a denied subject is dead-lettered, and an authority that cannot
+/// be read refuses with the cursor unchanged.
 ///
 /// # Errors
 /// Transport, auth, or transient storage failures (cursor unchanged).
-pub fn pull(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStatus>, AmError> {
+pub fn pull_with_denial(
+    cfg: &SyncClientConfig,
+    banks: &[String],
+    denial: Option<&dyn ErasureDenial>,
+) -> Result<Vec<BankSyncStatus>, AmError> {
     let remote = required_remote(cfg)?;
     let mut out = Vec::new();
     for bank in banks {
-        out.push(pull_bank(cfg, &remote, bank)?);
+        out.push(pull_bank(cfg, &remote, bank, denial)?);
     }
     Ok(out)
 }
 
 /// Bidirectional mode: pull first, then push (documented order).
-///
-/// # Errors
-/// Transport, auth, or transient storage failures (cursors unchanged).
 pub fn bidirectional(
     cfg: &SyncClientConfig,
     banks: &[String],
 ) -> Result<Vec<BankSyncStatus>, AmError> {
-    let mut out = pull(cfg, banks)?;
+    bidirectional_with_denial(cfg, banks, None)
+}
+
+/// Bidirectional mode under the erasure-denial authority: the pull half is
+/// [`pull_with_denial`], the push half is unchanged.
+///
+/// # Errors
+/// Transport, auth, or transient storage failures (cursor unchanged).
+pub fn bidirectional_with_denial(
+    cfg: &SyncClientConfig,
+    banks: &[String],
+    denial: Option<&dyn ErasureDenial>,
+) -> Result<Vec<BankSyncStatus>, AmError> {
+    let mut out = pull_with_denial(cfg, banks, denial)?;
     out.extend(push(cfg, banks)?);
     Ok(out)
 }
@@ -180,13 +206,12 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
     })
 }
 
-/// Outbound mutation count for `bank`, counted per feed kind against that
-/// kind's own push watermark (item, assoc edge, triple, persona stable/
-/// preference, belief, task, failure) after the one-shot conversion of the
-/// retired shared `push_wm` cursor. `push_bank`, `pull_bank`, and
-/// `sync_status` all report it rather than a hard-coded zero. The count is a
-/// bounded next-page size (`PULL_PAGE_LIMIT` per kind) and stays approximate:
-/// it never subtracts rows a push would skip for a missing carrier.
+/// Outbound mutation count for `bank`: each feed kind's rows past that kind's
+/// own push watermark (item, assoc edge, triple, persona stable/preference,
+/// belief, task, failure; the retired shared `push_wm` converts once).
+/// `push_bank`, `pull_bank`, and `sync_status` report it, never a hard-coded
+/// zero. Bounded by `PULL_PAGE_LIMIT` per kind and approximate: it never
+/// subtracts rows a push would skip for a missing carrier.
 pub(crate) fn pending_push(cfg: &SyncClientConfig, bank: &str) -> Result<i64, AmError> {
     let mut count = 0usize;
     for kind in crate::client_feed::PUSH_KINDS {
@@ -205,7 +230,12 @@ fn required_remote(cfg: &SyncClientConfig) -> Result<String, AmError> {
     })
 }
 
-fn pull_bank(cfg: &SyncClientConfig, remote: &str, bank: &str) -> Result<BankSyncStatus, AmError> {
+fn pull_bank(
+    cfg: &SyncClientConfig,
+    remote: &str,
+    bank: &str,
+    denial: Option<&dyn ErasureDenial>,
+) -> Result<BankSyncStatus, AmError> {
     let mut cursor = cfg.sync.cursor_get(bank, "pull")?.unwrap_or_default();
     let engine = ApplyEngine {
         store: cfg.store.as_ref(),
@@ -234,10 +264,8 @@ fn pull_bank(cfg: &SyncClientConfig, remote: &str, bank: &str) -> Result<BankSyn
                 frozen = true;
                 break;
             };
-            if matches!(
-                apply_mutation(&engine, &m, &envelope)?,
-                ApplyOutcome::DeadLettered { .. }
-            ) {
+            let result = apply_mutation_guarded(&engine, denial, &m, &envelope)?;
+            if matches!(result.outcome, ApplyOutcome::DeadLettered { .. }) {
                 frozen = true;
                 break;
             }
@@ -294,31 +322,32 @@ fn decrypt_for_apply(
         .iter()
         .map(crate::crypto::SyncCipherKey::key_id)
         .collect();
-    if cfg.cipher.is_empty() {
+    // One refusal shape for every unopenable row: quarantine it under the
+    // row's own bank and stop, so the cursor freezes at the prior id and the
+    // operator can discard the row deliberately with `ack_skip`.
+    let refuse = |bank: &str, reason: &str| -> Result<Option<SyncMutation>, AmError> {
         quarantine(
             &engine,
-            &m.bank,
+            bank,
             m,
             envelope_json,
             crate::protocol::REASON_MALFORMED,
-            "no sync cipher key configured",
+            reason,
         )?;
-        return Ok(None);
+        Ok(None)
+    };
+    if cfg.cipher.is_empty() {
+        return refuse(&m.bank, "no sync cipher key configured");
     }
     // A row with no key identifier no longer opens: current writes always
     // stamp one, and trial-opening every held key widens the wrong-key
     // surface. The refusal is a stable quarantine the operator discards.
     let Some(stamped) = &cipher.key_id else {
-        quarantine(
-            &engine,
+        return refuse(
             &m.bank,
-            m,
-            envelope_json,
-            crate::protocol::REASON_MALFORMED,
             "sync cipher carries no key identifier; this release opens only ciphertext stamped \
              with a held key identifier. Discard the row deliberately with `clio sync ack-skip`",
-        )?;
-        return Ok(None);
+        );
     };
     // A row stamped with an identifier none of the held keys produce was
     // written by a key this node does not hold. Refusing before any open
@@ -326,40 +355,16 @@ fn decrypt_for_apply(
     // generic open failure. Both the stamped and the held values are derived
     // and non-reversible; neither is ever a key or a prefix of one.
     let Some(key) = cfg.cipher.iter().find(|k| k.key_id() == *stamped) else {
-        quarantine(
-            &engine,
-            &m.bank,
-            m,
-            envelope_json,
-            crate::protocol::REASON_MALFORMED,
-            &missing_key_reason(stamped, &held),
-        )?;
-        return Ok(None);
+        return refuse(&m.bank, &missing_key_reason(stamped, &held));
     };
     // A ciphertext the stamped key cannot open (wrong key, tampering,
     // corruption) is a permanent per-row failure: quarantine it so
     // `pull_cursor` freezes at the prior id and the operator can `ack_skip`.
     let Ok(bytes) = key.open(cipher) else {
-        quarantine(
-            &engine,
-            &m.bank,
-            m,
-            envelope_json,
-            crate::protocol::REASON_MALFORMED,
-            &open_failed_reason(stamped),
-        )?;
-        return Ok(None);
+        return refuse(&m.bank, &open_failed_reason(stamped));
     };
     let Ok(plain) = serde_json::from_slice::<Value>(&bytes) else {
-        quarantine(
-            &engine,
-            &m.bank,
-            m,
-            envelope_json,
-            crate::protocol::REASON_MALFORMED,
-            "decrypted sync content was not JSON",
-        )?;
-        return Ok(None);
+        return refuse(&m.bank, "decrypted sync content was not JSON");
     };
     let mut opened = m.clone();
     opened.content = SyncContent::Plain(plain.clone());
@@ -371,15 +376,7 @@ fn decrypt_for_apply(
     let kind = opened.entity_kind.clone();
     let bank = opened.bank.clone();
     if let Err(failure) = crate::handle_resolution::resolve_entity_id(&mut opened, &plain) {
-        quarantine(
-            &engine,
-            &bank,
-            m,
-            envelope_json,
-            crate::protocol::REASON_MALFORMED,
-            &failure.reason(&kind, &bank),
-        )?;
-        return Ok(None);
+        return refuse(&bank, &failure.reason(&kind, &bank));
     }
     restore_admission_receipt(&mut opened, &plain);
     Ok(Some(opened))

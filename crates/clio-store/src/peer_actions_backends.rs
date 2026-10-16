@@ -26,8 +26,8 @@
 
 use super::{
     COLUMNS, PeerActionBinding, PeerActionKind, PeerActionRow, PeerActionStore, PeerActionTarget,
-    StoredRow, binding_conflict, illegal_transition, lost_row, transition_legal, unknown_action,
-    validate_binding, validate_target,
+    StoredRow, binding_conflict, illegal_transition, lost_row, same_state_is_no_op,
+    transition_legal, unknown_action, validate_binding, validate_target,
 };
 use crate::migrate::IntoAmError;
 use crate::postgres::PostgresStore;
@@ -127,12 +127,14 @@ impl PeerActionStore for SqliteStore {
                 return Err(binding_conflict(binding));
             }
             if stored.state == target.to {
-                // A duplicate delivery or acknowledgement: the completed row
-                // stays exactly as it is, so the effect cannot repeat.
-                tx.commit().am("peer action commit")?;
-                return Ok(stored);
-            }
-            if !transition_legal(stored.state, target.to) {
+                // The state is unchanged: either the tolerated no-op a
+                // duplicate delivery or acknowledgement is, or the one
+                // disposition a refused row still owes is recorded here.
+                if same_state_is_no_op(&stored, target) {
+                    tx.commit().am("peer action commit")?;
+                    return Ok(stored);
+                }
+            } else if !transition_legal(stored.state, target.to) {
                 return Err(illegal_transition(stored.state, target.to));
             }
             tx.execute(
@@ -284,12 +286,14 @@ impl PeerActionStore for PostgresStore {
                 return Err(binding_conflict(binding));
             }
             if stored.state == target.to {
-                // A duplicate delivery or acknowledgement: the completed row
-                // stays exactly as it is, so the effect cannot repeat.
-                tx.commit().am("peer action commit")?;
-                return Ok(stored);
-            }
-            if !transition_legal(stored.state, target.to) {
+                // The state is unchanged: either the tolerated no-op a
+                // duplicate delivery or acknowledgement is, or the one
+                // disposition a refused row still owes is recorded here.
+                if same_state_is_no_op(&stored, target) {
+                    tx.commit().am("peer action commit")?;
+                    return Ok(stored);
+                }
+            } else if !transition_legal(stored.state, target.to) {
                 return Err(illegal_transition(stored.state, target.to));
             }
             tx.execute(

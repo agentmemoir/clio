@@ -5,11 +5,13 @@
 //!
 //! This module tests the durable per-peer action store on Postgres: the
 //! idempotent begin and read-back after a reopen, the guarded advance and its
-//! tolerated duplicates, and the fail-closed decoding of unknown spellings.
+//! tolerated duplicates, the fail-closed decoding of unknown spellings, and the
+//! blank-binding and out-of-domain refusals.
 //!
 //! ## Owns
 //! - The scratch-Postgres database fixture and its drop guard
-//! - The Postgres begin/advance/reopen/refusal assertions
+//! - The Postgres begin/advance/reopen/refusal assertions, including the
+//!   blank-binding and out-of-domain refusals and the multi-row read order
 //!
 //! ## Does not own
 //! - The store contract (`peer_actions`) and its driver SQL
@@ -17,6 +19,7 @@
 //! - The slot DDL text (`migrate` and `sql/003_local_compliance_slots.sql`)
 //! - Shared-Postgres test serialization (`pg_lock`)
 //! - The SQLite backend assertions (`peer_actions_tests`)
+//! - The two-handle begin race (`peer_actions_pg_edge_tests`)
 //!
 //! ## Boundary
 //!
@@ -33,7 +36,10 @@ use crate::peer_actions::{
     PeerActionTarget,
 };
 use crate::postgres::PostgresStore;
-use clio_types::ErrorCode;
+use clio_types::{AmError, ErrorCode};
+
+/// The suite name every fail-closed skip in this module carries.
+const SUITE: &str = "postgres peer action tests";
 
 /// The fixed row key every test begins.
 fn binding<'a>(request: &'a str, peer: &'a str, action_id: &'a str) -> PeerActionBinding<'a> {
@@ -58,16 +64,15 @@ fn target(
     }
 }
 
-/// The shared Postgres URL, or `None` after noting why the suite skips (the
-/// `durable_requests_pg_tests` fixture shape: the note names the suite and the
-/// server's reason, never the connection string).
+/// The shared Postgres URL, or `None` after the fail-closed skip line. Only
+/// the explicit `CLIO_SKIP_PG_TESTS` opt-out reaches that line: without it an
+/// unreachable server fails the suite, so this backend cannot report green
+/// without touching a database. The note names the suite and the server's
+/// reason, never the connection string (the `durable_requests_pg_tests` shape).
 fn shared_url() -> Option<String> {
     let url = crate::db_url::postgres_url_from_env();
     if let Err(err) = crate::pg_tls::connect(&url) {
-        eprintln!(
-            "{}",
-            crate::pg_skip::pg_skip_note("postgres peer action tests", &err)
-        );
+        crate::pg_skip::unreachable_pg_or_skip(SUITE, &err);
         return None;
     }
     Some(url)
@@ -111,10 +116,7 @@ fn open_pg(url: &str) -> Option<PostgresStore> {
     match PostgresStore::open(url, local_kms()) {
         Ok(store) => Some(store),
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres peer action tests", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip(SUITE, &err);
             None
         }
     }
@@ -267,7 +269,8 @@ fn postgres_a_guarded_advance_refuses_a_mismatched_binding() {
     assert_eq!(acked.proof_ref.as_deref(), Some("generation=1"));
 }
 
-/// An unrecognized stored enum spelling fails closed on Postgres too.
+/// An unrecognized stored enum spelling fails closed on Postgres too, for the
+/// state, the disposition, and the action kind alike.
 #[test]
 fn postgres_unknown_stored_spellings_fail_closed() {
     let _shared = crate::lock_pg_test();
@@ -293,7 +296,9 @@ fn postgres_unknown_stored_spellings_fail_closed() {
                      INSERT INTO peer_actions VALUES
                          ('req-state', 'peer-a', 'denial', 'act-1', 'lost', 'unknown', NULL);
                      INSERT INTO peer_actions VALUES
-                         ('req-disposition', 'peer-b', 'denial', 'act-2', 'pending', 'kept', NULL);",
+                         ('req-disposition', 'peer-b', 'denial', 'act-2', 'pending', 'kept', NULL);
+                     INSERT INTO peer_actions VALUES
+                         ('req-kind', 'peer-c', 'void', 'act-3', 'pending', 'unknown', NULL);",
                 )
                 .am("install the unchecked peer_actions table")?;
             Ok(())
@@ -307,4 +312,95 @@ fn postgres_unknown_stored_spellings_fail_closed() {
         .load("req-disposition", "peer-b", PeerActionKind::Denial)
         .expect_err("an unknown disposition must fail closed");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    let err = store
+        .load_for_request("req-kind")
+        .expect_err("an unknown action kind must fail closed");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
 }
+
+/// A binding with a blank required field is refused before any statement runs,
+/// and the refusal names the field.
+#[test]
+fn postgres_a_blank_binding_is_refused() {
+    let _shared = crate::lock_pg_test();
+    let Some((_db, store)) = scratch_store("blank") else {
+        return;
+    };
+    for (field, blank) in [
+        ("request_id", binding(" ", "peer-1", "act-1")),
+        ("peer_id", binding("req-1", "", "act-1")),
+        ("action_id", binding("req-1", "peer-1", "\t")),
+    ] {
+        let err = store.begin(&blank).expect_err("a blank field must refuse");
+        assert_eq!(err.code, ErrorCode::InvalidArgument, "{field}");
+        assert!(
+            err.message.contains(field),
+            "the refusal names {field}: {}",
+            err.message
+        );
+    }
+    assert!(
+        store.load_for_request("req-1").expect("list").is_empty(),
+        "no refused binding left a row"
+    );
+}
+
+/// The one-request read orders the rows by peer id, then action kind: every
+/// other read in this suite holds a single row.
+#[test]
+fn postgres_load_for_request_orders_two_rows_by_peer_id() {
+    let _shared = crate::lock_pg_test();
+    let Some((_db, store)) = scratch_store("order") else {
+        return;
+    };
+    store
+        .begin(&binding("req-order", "peer-b", "act-b"))
+        .expect("begin peer-b");
+    store
+        .begin(&binding("req-order", "peer-a", "act-a"))
+        .expect("begin peer-a");
+    let rows = store
+        .load_for_request("req-order")
+        .expect("list the ordered rows");
+    let peers: Vec<&str> = rows.iter().map(|row| row.peer_id.as_str()).collect();
+    assert_eq!(peers, ["peer-a", "peer-b"], "ordered by peer id");
+    assert_eq!(rows.len(), 2, "both rows are returned");
+}
+
+/// The DDL's CHECK domains refuse an out-of-domain state through the table
+/// itself, without the recreated unchecked fixture the fail-closed test needs.
+#[test]
+fn postgres_the_check_domains_refuse_an_out_of_domain_state() {
+    let _shared = crate::lock_pg_test();
+    let Some((_db, store)) = scratch_store("domain") else {
+        return;
+    };
+    let refusal = store
+        .with_client(|client| {
+            client
+                .execute(
+                    "INSERT INTO peer_actions
+                         (request_id, peer_id, action_kind, action_id, state, disposition, proof_ref)
+                     VALUES ('req-domain', 'peer-a', 'denial', 'act-1', 'lost', 'unknown', NULL)",
+                    &[],
+                )
+                .map(|_| ())
+                .map_err(|err| AmError::new(ErrorCode::InvalidArgument, format!("{err:?}")))
+        })
+        .expect_err("an out-of-domain state must be refused");
+    assert!(
+        refusal.message.contains("check constraint") && refusal.message.contains("23514"),
+        "the refusal is the CHECK domain's (SQLSTATE 23514): {}",
+        refusal.message
+    );
+    assert!(
+        store
+            .load_for_request("req-domain")
+            .expect("list")
+            .is_empty(),
+        "the refused row is not stored"
+    );
+}
+
+#[path = "peer_actions_pg_edge_tests.rs"]
+mod edge;

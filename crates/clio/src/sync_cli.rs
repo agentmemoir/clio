@@ -363,11 +363,46 @@ fn emit_single_host(io: &mut CliIo, mode: OutputMode) -> ExitCode {
     ExitCode::from(EXIT_OK)
 }
 
+/// The wait a serve hold blocks on, with the flag that ends it early. Both are
+/// process-wide because a serve verb holds the process itself.
+static SERVE_HOLD: (std::sync::Mutex<()>, std::sync::Condvar) =
+    (std::sync::Mutex::new(()), std::sync::Condvar::new());
+
+/// Whether a test released the serve hold (see `release_serve_hold`); nothing
+/// in a production run sets it, so the hold is the resolved TTL there.
+static SERVE_HOLD_RELEASED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Hold the serve process for the resolved TTL so the server stays reachable.
+///
+/// The wait ends at the TTL, or when a test releases it. The flag is read before
+/// waiting and again after every wakeup, so a release that lands first is not
+/// missed and a spurious wakeup does not end the hold.
 fn wait_for_ttl(ttl: Duration, _serving: &crate::sigpipe::Serving) {
-    if !ttl.is_zero() {
-        std::thread::sleep(ttl);
+    if ttl.is_zero() {
+        return;
     }
+    let (lock, wait) = &SERVE_HOLD;
+    let Ok(mut guard) = lock.lock() else {
+        return;
+    };
+    while !SERVE_HOLD_RELEASED.load(std::sync::atomic::Ordering::SeqCst) {
+        let Ok((next, timeout)) = wait.wait_timeout(guard, ttl) else {
+            return;
+        };
+        if timeout.timed_out() {
+            return;
+        }
+        guard = next;
+    }
+}
+
+/// End the serve hold now, so a test can pull from the server the verb started
+/// instead of waiting the resolved TTL out. It only ever shortens a hold.
+#[cfg(test)]
+pub(crate) fn release_serve_hold() {
+    SERVE_HOLD_RELEASED.store(true, std::sync::atomic::Ordering::SeqCst);
+    SERVE_HOLD.1.notify_all();
 }
 
 #[cfg(test)]

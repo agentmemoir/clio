@@ -25,7 +25,7 @@
 
 use crate::apply::apply_tests::{env, fixture, item_value};
 use crate::apply::{ApplyEngine, ApplyOutcome, ApplyResult, apply_mutation_guarded};
-use crate::denial::{DenialCarrier, bank_verdict, denial_mutation};
+use crate::denial::{DenialCarrier, bank_verdict, denial_mutation, denied_bank_marker};
 use crate::denial_fixtures::{FakeDenial, store_with_counting_kms};
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation};
 use clio_store::{DeadLetterStatus, DenialVerdict, ErasureDenial, SqliteStore, Store, SyncStore};
@@ -277,4 +277,30 @@ fn subject_data_without_a_wired_authority_is_untouched() {
     let result = apply_guarded(store.as_ref(), None, &m).expect("apply runs");
     assert_eq!(result.outcome, ApplyOutcome::Applied);
     assert!(store.get_memory_item("b-item", "i-1").unwrap().is_some());
+}
+
+#[test]
+fn a_carrier_without_a_salt_fingerprint_refuses_before_any_marker() {
+    let (store, _kms) = fixture();
+    let denial = FakeDenial::new("");
+    let m = denial_op("b-a", "s-1", "req-1", &["b-a"]);
+    let err = apply_guarded(store.as_ref(), Some(denial.as_ref()), &m)
+        .expect_err("a carrier whose authority reports no salt fingerprint refuses");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert_eq!(
+        denial.records_for("s-1"),
+        0,
+        "no subject record exists without a fingerprint"
+    );
+    assert_eq!(
+        denial.records_for(&denied_bank_marker("b-a")),
+        0,
+        "no serve marker exists without a fingerprint"
+    );
+    assert!(
+        store
+            .journal_get("b-a", &m.sync_mutation_id)
+            .unwrap()
+            .is_none()
+    );
 }

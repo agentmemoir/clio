@@ -5,8 +5,8 @@
 //!
 //! This module tests the production erasure-denial seam: a fresh deployment is
 //! clear, a recorded denial survives and keeps its generation, a damaged
-//! journal is unavailable and refuses a write, and the seam is usable as a
-//! trait object.
+//! journal is unavailable and refuses a write, a journal this deployment cannot
+//! name is refused rather than probed, and the seam is usable as a trait object.
 //!
 //! ## Owns
 //! - The scratch journal fixture and the seam assertions
@@ -145,6 +145,43 @@ fn a_damaged_journal_is_unavailable_and_a_write_refuses() {
         bytes,
         "the damaged journal was not overwritten"
     );
+}
+
+/// A deployment that cannot name its journal is refused rather than probed:
+/// there is no fallback, because a route serving without the authority would
+/// ignore every recorded denial.
+#[test]
+fn an_unresolvable_journal_path_refuses_to_build_a_probe() {
+    let unnamed = |_: &str| -> Option<String> { None };
+    let error = JournalDenialProbe::resolved(None, &unnamed)
+        .err()
+        .expect("nowhere for the journal to live");
+    assert_eq!(error.code, ErrorCode::ConfigCorrupt);
+    let message = error.message.as_str();
+    assert!(
+        message.contains(clio_config::ERASURE_JOURNAL_FILE_ENV),
+        "the refusal names the override that fixes it: {message}"
+    );
+}
+
+/// The probe reads the same journal whether a host names it in an effective
+/// document or leaves it to the deployment resolution.
+#[test]
+fn a_document_path_this_deployment_resolves_is_the_journals_path() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    let get = |key: &str| {
+        (key == clio_config::ERASURE_JOURNAL_FILE_ENV).then(|| path.display().to_string())
+    };
+    for document in [None, Some(path.as_path())] {
+        assert_eq!(
+            JournalDenialProbe::resolved(document, &get)
+                .expect("the resolved journal")
+                .journal_path(),
+            path,
+            "document {document:?}"
+        );
+    }
 }
 
 /// The probe serves the seam as a trait object, naming its journal path.

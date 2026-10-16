@@ -41,7 +41,7 @@ use clio_types::{
     Actor, AmError, Bank, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext,
     SemanticCategory,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -120,6 +120,7 @@ fn confirmed(
         deadline: None,
         actions: BTreeMap::new(),
         paths: BTreeMap::new(),
+        peer_banks: BTreeSet::new(),
         peer_enablement: PeerEnablement::for_peer_set(&peers),
         peers,
         exception: None,
@@ -130,14 +131,16 @@ fn confirmed(
 fn two_bank(peer_b: PeerState) -> SubjectRequestRecord {
     let mut peers = BTreeMap::new();
     peers.insert(BANK_B.to_owned(), peer_b);
-    confirmed(
+    let mut record = confirmed(
         RequestKind::Erasure,
         RequestScope::Subject {
             bank_id: BANK_A.into(),
             subject_id: SUBJECT.into(),
         },
         peers,
-    )
+    );
+    record.peer_banks.insert(BANK_B.to_owned());
+    record
 }
 
 /// The live bank set the erasure effect fans out to for one subject, read from
@@ -199,8 +202,8 @@ fn erase_args<'a>(
 }
 
 /// A pending peer does not refuse on Postgres either: the frozen bank set
-/// still matches, so the local effect runs once and the completion gate holds
-/// the action pending instead.
+/// still matches, so the local effect runs once. Completion is the completion
+/// gate's decision, which this seam never runs.
 #[test]
 fn postgres_a_pending_peer_does_not_block_the_local_erasure_effect() {
     let Some(fixture) = pg_store_or_skip() else {

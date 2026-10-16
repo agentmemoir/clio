@@ -9,12 +9,13 @@
 //! record, the not-applicable round trip, and the slot fold.
 //!
 //! ## Owns
-//! - The scratch SQLite fixture and the scoped-Postgres fixture with its guard
-//! - The snapshot/restart/acknowledgement/disposition/fold assertions
+//! - The snapshot/restart/acknowledgement/fold assertions
 //!
 //! ## Does not own
 //! - The lifecycle helpers (`subject_peer.rs`) and the row store
 //!   (`clio-store`'s `peer_actions`)
+//! - The disposition evidence coverage (`subject_peer_disposition_tests.rs`)
+//! - The scratch SQLite fixture (`subject_peer_fixtures.rs`)
 //! - The frozen record vocabulary (`subject_request_frozen_tests.rs`) and the
 //!   register binding (`subject_request_register_tests.rs`)
 //!
@@ -25,6 +26,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::subject_peer_fixtures::{Scratch, kms, open_sqlite};
 use crate::inventory_pg_support_tests::{pg_checked_url, pg_skip_note};
 use crate::subject_peer::{
     derived_peer_states, mark_acknowledged, mark_delivered, mark_refused, peer_action_id,
@@ -37,42 +39,15 @@ use crate::subject_request::{
 use crate::subject_request_store_wiring::{record_to_row, row_to_record};
 use crate::test_unique::unique;
 use clio_store::{
-    DekProvider, DurableRequestStore, LocalDevKms, PeerActionDisposition, PeerActionKind,
-    PeerActionRow, PeerActionState, PeerActionStore, PgTestGuard, PostgresStore, ScopedSchema,
-    SqliteStore, lock_pg_test, probe_postgres,
+    DurableRequestStore, PeerActionDisposition, PeerActionKind, PeerActionRow, PeerActionState,
+    PeerActionStore, PgTestGuard, PostgresStore, ScopedSchema, lock_pg_test, probe_postgres,
 };
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-/// A key provider for the scratch stores.
-fn kms() -> Arc<dyn DekProvider> {
-    Arc::new(LocalDevKms::new())
-}
-
-/// A scratch directory removed when the guard drops.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        Self(std::env::temp_dir().join(unique("clio-compliance-subject-peer")))
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Open the file-backed SQLite store at `path`; a reopen is the restart.
-fn open_sqlite(path: &Path) -> SqliteStore {
-    SqliteStore::open(path, kms()).expect("scratch sqlite opens")
-}
-
-/// The stored record of a freshly opened request.
-fn open_record(
+/// The stored record of a freshly opened request. The fixture drives the peer
+/// lifecycle only, so the frozen peer-bank set stays empty.
+pub(super) fn open_record(
     request_id: &str,
     enablement: PeerEnablement,
     peers: &[&str],
@@ -83,7 +58,14 @@ fn open_record(
         subject_id: unique("peer-subject"),
     };
     ledger
-        .register_with_enablement(request_id, RequestKind::Erasure, &scope, enablement, peers)
+        .register_with_enablement(
+            request_id,
+            RequestKind::Erasure,
+            &scope,
+            enablement,
+            peers,
+            &[],
+        )
         .expect("the request opens");
     ledger
         .record(request_id)
@@ -277,16 +259,13 @@ fn a_refusal_without_a_disposition_leaves_the_peer_open() {
         PeerState::Pending,
         "no disposition means no disposal"
     );
-    let err = record_disposition(
-        &store,
-        "req-1",
-        "peer-1",
-        PeerActionDisposition::RetentionApproved,
-        Some("hold-7"),
-    )
-    .expect_err("a settled row cannot change its disposition");
-    assert_eq!(err.code, ErrorCode::Forbidden);
-    assert_eq!(store.load_for_request("req-1").expect("list"), rows);
+    let again = mark_refused(&store, "req-1", "peer-1").expect("the duplicate refusal");
+    assert_eq!(again, refused, "the refusal is recorded once");
+    assert_eq!(
+        store.load_for_request("req-1").expect("list"),
+        rows,
+        "a duplicate refusal changes nothing"
+    );
 }
 
 /// The fold reads only rows bound to the peer's own derived key.
@@ -321,11 +300,11 @@ fn the_fold_derives_slots_only_from_rows_bound_to_the_peers_own_key() {
         derived_peer_states(&record, &rows),
         BTreeMap::from([
             ("peer-a".to_owned(), PeerState::Acknowledged),
-            ("peer-b".to_owned(), PeerState::Disposed),
+            ("peer-b".to_owned(), PeerState::Pending),
             ("peer-c".to_owned(), PeerState::Pending),
             ("peer-d".to_owned(), PeerState::Pending),
         ]),
-        "acknowledged, disposed, delivered, and undecided refusals stay distinct"
+        "an approval or a refusal without removal evidence keeps the peer open"
     );
     let mut mismatched = rows[0].clone();
     mismatched.action_id = "other:key".into();
