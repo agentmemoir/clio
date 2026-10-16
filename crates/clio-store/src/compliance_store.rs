@@ -223,6 +223,24 @@ pub trait ComplianceStore: Send + Sync {
     fn list_tombstones(&self, bank_id: &str) -> Result<Vec<ComplianceTombstoneView>, AmError>;
 }
 
+/// Read the live bank set an erasure fans out to for one data subject.
+///
+/// Kept apart from [`ComplianceStore`] so the coordination seam can take the
+/// live set through a `dyn` object without forcing every existing
+/// `dyn ComplianceStore` test double to implement this method.
+pub trait BankScopeStore: Send + Sync {
+    /// The requesting bank plus every bank holding the subject's items,
+    /// sorted; read from the live items, never a configured list.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn erase_bank_set(&self, bank_id: &str, subject_id: &str) -> Result<Vec<String>, AmError>;
+}
+
+#[cfg(test)]
+#[path = "compliance_store_bank_scope_tests.rs"]
+mod compliance_store_bank_scope_tests;
+
 #[cfg(test)]
 #[path = "compliance_store_context_store_tests.rs"]
 mod compliance_store_context_store_tests;

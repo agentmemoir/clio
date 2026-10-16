@@ -37,10 +37,10 @@ use clio_config::retention_store::RetentionStore;
 use clio_retrieve::{AssociationEngine, HybridRetriever};
 use clio_store::AssocPolicy;
 use clio_store::{
-    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DekProvider,
-    DestinationCustodyStore, HistoryStore, HygieneStore, IndexStore, LocalDevKms, LocalEventStore,
-    OpsStore, PersonaStore, PostgresStore, PostgresTargetState, SqliteFileState, SqliteStore,
-    Store, SyncStore,
+    BankScopeStore, BatchStore, BeliefStore, ComplianceStore, ContinuousStore, CopyInventoryStore,
+    DekProvider, DestinationCustodyStore, DurableRequestStore, HistoryStore, HygieneStore,
+    IndexStore, LocalDevKms, LocalEventStore, OpsStore, PeerActionStore, PersonaStore,
+    PostgresStore, PostgresTargetState, SqliteFileState, SqliteStore, Store, SyncStore,
 };
 use clio_types::{AmError, ErrorCode};
 use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
@@ -172,6 +172,10 @@ impl McpState {
         let compliance: Arc<dyn ComplianceStore> = store.clone();
         let hygiene: Arc<dyn HygieneStore> = store.clone();
         let events: Arc<dyn LocalEventStore> = store.clone();
+        let durable: Arc<dyn DurableRequestStore> = store.clone();
+        let peer_actions: Arc<dyn PeerActionStore> = store.clone();
+        let copies: Arc<dyn CopyInventoryStore> = store.clone();
+        let bank_scope: Arc<dyn BankScopeStore> = store.clone();
         let custody: Arc<dyn DestinationCustodyStore> = store.clone();
         let batch: Arc<dyn BatchStore> = store.clone();
         let ops_store: Arc<dyn OpsStore> = store.clone();
@@ -231,6 +235,10 @@ impl McpState {
             compliance,
             hygiene,
             events,
+            durable,
+            peer_actions,
+            copies,
+            bank_scope,
             custody,
             inventory_facts: Arc::new(inventory_facts),
             inventory_measured,

@@ -113,6 +113,11 @@ pub(crate) fn run(
     match sub.as_str() {
         "inventory" => run_inventory(io, fallback, collected, current_dir),
         "review-export" => crate::cli_write_portability::run_review_export(io, fallback, collected),
+        "request-start" | "request-status" | "request-retry" | "request-copy"
+        | "request-exception" | "request-events" | "request-close" | "peer-status"
+        | "peer-retry" | "peer-disposition" => {
+            crate::compliance_request_cli::run_request(io, fallback, &sub, collected)
+        }
         // The derived list above already refused every other spelling; the
         // fallback keeps the arm-free case a refusal rather than a silent run.
         other => fail(io, fallback, &unknown_subcommand(other)),

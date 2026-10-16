@@ -63,6 +63,16 @@ pub const BOUND_WRITE_TOOLS: &[&str] = &[
     "config_set",
     "config_profile_apply",
     "ranking_env_set",
+    "subject_request_start",
+    "subject_request_status",
+    "subject_request_retry",
+    "subject_request_copy",
+    "subject_request_exception",
+    "subject_request_events",
+    "subject_request_close",
+    "subject_request_peer_status",
+    "subject_request_peer_retry",
+    "subject_request_peer_disposition",
 ];
 
 /// Read/retrieve/compose tool names bound over MCP in this build (read rows).

@@ -3,10 +3,9 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the static record of the `compliance`
-//! commands: `compliance inventory`, the read-only scope ledger's local
-//! surface, and `compliance review-export`, the content-free review-file
-//! export.
+//! This module is responsible for the static records of the `compliance`
+//! commands: the read-only scope ledger, the content-free review-file export,
+//! and the tranche that lists every compliance record in capture order.
 //!
 //! ## Owns
 //! - The `compliance inventory` `CommandSpec` record and the tranche that
@@ -16,12 +15,18 @@
 //!   bytes while the options block and the catalog still document `--copy`
 //! - The `compliance review-export` `CommandSpec` record and its `--out`,
 //!   `--limit`, and `--cursor` flags
+//! - The re-export of the ten `compliance` request records
+//!   (`request-start`, `request-status`, `request-retry`, `request-copy`,
+//!   `request-exception`, `request-events`, `request-close`, `peer-status`,
+//!   `peer-retry`, `peer-disposition`) from the `requests` sibling
 //!
 //! ## Does not own
+//! - The ten request records and their flags (see the `requests` sibling
+//!   module)
 //! - The record model or its rendering (see `cli_command_spec`)
 //! - The registry and the shared global flags (see `cli_command_registry`)
 //! - The ledger's semantics (see `clio_compliance`) or the command's dispatch,
-//!   decoding, and views (see `compliance_cli`)
+//!   decoding, and views (see `compliance_cli` / `compliance_request_cli`)
 //!
 //! ## Boundary
 //!
@@ -36,6 +41,19 @@
 
 use crate::cli_command_registry::{GLOBAL_ACTOR, GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
+
+/// The ten subject-request and peer-request records: a sibling file so the
+/// module stays within the size cap. The records are re-exported below so
+/// `COMPLIANCE_LEAVES` can name them.
+#[path = "cli_command_registry_compliance_requests.rs"]
+mod requests;
+
+pub(crate) use requests::{
+    COMPLIANCE_PEER_DISPOSITION, COMPLIANCE_PEER_RETRY, COMPLIANCE_PEER_STATUS,
+    COMPLIANCE_REQUEST_CLOSE, COMPLIANCE_REQUEST_COPY, COMPLIANCE_REQUEST_EVENTS,
+    COMPLIANCE_REQUEST_EXCEPTION, COMPLIANCE_REQUEST_RETRY, COMPLIANCE_REQUEST_START,
+    COMPLIANCE_REQUEST_STATUS,
+};
 
 /// The declared globals `compliance inventory` accepts without printing: the
 /// shared parser admits every declared global, so the record that prints only
@@ -158,9 +176,21 @@ pub(crate) const COMPLIANCE_REVIEW_EXPORT: CommandSpec = CommandSpec {
     section: Section::Write,
 };
 
-/// The two compliance records, in capture order.
-pub(crate) static COMPLIANCE_LEAVES: &[CommandSpec] =
-    &[COMPLIANCE_INVENTORY, COMPLIANCE_REVIEW_EXPORT];
+/// The twelve compliance records, in capture order.
+pub(crate) static COMPLIANCE_LEAVES: &[CommandSpec] = &[
+    COMPLIANCE_INVENTORY,
+    COMPLIANCE_REVIEW_EXPORT,
+    COMPLIANCE_REQUEST_START,
+    COMPLIANCE_REQUEST_STATUS,
+    COMPLIANCE_REQUEST_RETRY,
+    COMPLIANCE_REQUEST_COPY,
+    COMPLIANCE_REQUEST_EXCEPTION,
+    COMPLIANCE_REQUEST_EVENTS,
+    COMPLIANCE_REQUEST_CLOSE,
+    COMPLIANCE_PEER_STATUS,
+    COMPLIANCE_PEER_RETRY,
+    COMPLIANCE_PEER_DISPOSITION,
+];
 
 #[cfg(test)]
 #[path = "cli_command_registry_compliance_tests.rs"]
