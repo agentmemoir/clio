@@ -21,8 +21,9 @@
 //! - `record_copy_disposition` and `record_retention_exception`, the
 //!   privileged-actor gates for recording a copy disposition and a
 //!   request-level retention exception
-//! - `erase_from_durable_store`, routing an erasure through the confirmed
-//!   record loaded from the durable store
+//! - `erase_from_durable_store`, the internal request-bound entry that loads
+//!   the confirmed record from the durable store and runs the erasure retry
+//!   contract
 //!
 //! The copy-disposition seam is a test and tooling seam, not the shipping
 //! command-layer path: `copy_row_closure_facts`, `record_copy_disposition`,
@@ -36,6 +37,7 @@
 //!   register/apply contracts (`subject_request.rs`)
 //! - The bank-coordination check and its refusals
 //!   (`subject_bank_coordination.rs`)
+//! - The confirmed-erasure retry contract (`erasure_retry.rs`)
 //! - The erasure workflow (`erase.rs`)
 //!
 //! ## Boundary
@@ -52,13 +54,14 @@ use crate::copy_disposition::{
 };
 use crate::erase::{EraseArgs, EraseOutcome};
 use crate::local_review::authorize;
-use crate::subject_bank_coordination::coordinated_erase_request;
 use crate::subject_request::{
     PathState, RequestActionState, RequestKind, RequestScope, SubjectRequestLedger,
     SubjectRequestRecord,
 };
 use crate::subject_request_events::ClosureInputs;
-use clio_store::{CopyInventoryRow, CopyInventoryStore, DurableRequestRow, DurableRequestStore};
+use clio_store::{
+    CopyInventoryRow, CopyInventoryStore, DurableRequestRow, DurableRequestStore, LocalEventStore,
+};
 use clio_types::{Actor, AmError, ErrorCode, OpContext};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -173,35 +176,36 @@ pub fn closure_inputs(record: &SubjectRequestRecord, product_path: &str) -> Clos
     }
 }
 
-/// Erase through the confirmed record the durable store holds.
+/// Erase through the confirmed record the durable store holds, internally.
 ///
-/// Test and tooling seam, not the shipping command-layer path: its callers
-/// are tests that persist a record first. The shipping erasure path calls
-/// the erasure workflow directly without passing through this seam.
+/// Internal request-bound erasure entry, not yet bound to any command: its
+/// callers are tests that persist a record first, and the bank-scope public
+/// tool keeps its own path. Internal means no command is bound to it yet,
+/// while the crate-root entry stays available to the command layer.
 ///
 /// The store row is the only source of the confirmed scope and peer slots: a
-/// missing row refuses, and the loaded record drives the coordination checks
-/// before [`coordinated_erase_request`] runs any effect. `live_banks` must be
-/// the bank set the erasure effect fans out to, read from the effect's own
-/// store just before the call. A retry after a partial failure reloads the
-/// same row, so the authorized scope can never widen between attempts.
+/// missing row refuses, and the loaded record drives the coordination
+/// preflight before the retry contract runs the durable intent, the steps
+/// still outstanding, and the settle. `live_banks` must be the bank set the
+/// erasure effect fans out to, read from the effect's own store just before
+/// the call; the flow checks it once, before the intent and any effect, so a
+/// subject-bank write that lands before that read refuses the erasure, while
+/// the unguarded window runs from the read to the store's own in-transaction
+/// bank re-select. A retry reloads the same row, so the authorized scope can
+/// never widen between attempts, and the durable record itself is never
+/// rewritten.
 ///
 /// # Errors
 /// A missing row, a row that does not decode, a coordination refusal, or any
-/// [`crate::erase::erase_request`] failure.
+/// failure of [`crate::erasure_retry::erase_confirmed_request`].
 pub fn erase_from_durable_store(
     durable: &dyn DurableRequestStore,
+    events: &dyn LocalEventStore,
     request_id: &str,
     args: &EraseArgs<'_>,
     live_banks: &[String],
 ) -> Result<EraseOutcome, AmError> {
-    let row = durable.load(request_id)?.ok_or_else(|| {
-        AmError::new(
-            ErrorCode::NotFound,
-            format!("no durable request {request_id}"),
-        )
-    })?;
-    coordinated_erase_request(args, &row_to_record(&row)?, live_banks)
+    crate::erasure_retry::erase_confirmed_request(durable, events, request_id, args, live_banks)
 }
 
 /// The stored custody class of a copy row.
@@ -411,6 +415,20 @@ mod subject_request_store_wiring_tests;
 #[path = "subject_request_store_wiring_erase_tests.rs"]
 mod subject_request_store_wiring_erase_tests;
 
+// Declared here, beside the seam it drives, so the retry suites reuse this
+// module's shared erasure fixtures.
+#[cfg(test)]
+#[path = "erasure_retry_tests.rs"]
+mod erasure_retry_tests;
+
+#[cfg(test)]
+#[path = "erasure_retry_reconcile_tests.rs"]
+mod erasure_retry_reconcile_tests;
+
+#[cfg(test)]
+#[path = "erasure_reconcile_guard_tests.rs"]
+mod erasure_reconcile_guard_tests;
+
 #[cfg(test)]
 #[path = "subject_request_store_wiring_pg_tests.rs"]
 mod subject_request_store_wiring_pg_tests;
@@ -422,3 +440,8 @@ mod subject_request_store_wiring_copy_scenarios_tests;
 #[cfg(test)]
 #[path = "subject_request_store_wiring_copy_scenarios_pg_tests.rs"]
 mod subject_request_store_wiring_copy_scenarios_pg_tests;
+
+// Declared beside the seam it drives, so the completion-guard suite reuses its fixtures.
+#[cfg(test)]
+#[path = "erasure_retry_completion_guard_tests.rs"]
+mod erasure_retry_completion_guard_tests;

@@ -10,6 +10,8 @@
 //! ## Owns
 //! - `require_all_banks_confirmed`, the pure check over the confirmed record
 //!   and the banks that share the subject key now
+//! - `preflight_erase_request`, the pre-effect confirmation check a caller
+//!   runs before a durable intent and any effect
 //! - `coordinated_erase_request`, the erase entry that refuses before
 //!   [`crate::erase::erase_request`] runs any effect
 //!
@@ -72,11 +74,8 @@ pub fn require_all_banks_confirmed(
     Ok(())
 }
 
-/// Refuse an erasure whose confirmation does not match the call, then erase.
-///
-/// Test and tooling seam, not the shipping command-layer path: its callers
-/// are tests that hold a confirmed record. The shipping erasure path calls
-/// the erasure workflow directly without passing through this seam.
+/// Refuse an erasure whose confirmation does not match the call, before any
+/// intent, denial, or effect.
 ///
 /// The confirmed record must carry the call's request id, be an erasure in
 /// progress, and be bound to the bank (and subject, for a subject scope) the
@@ -84,16 +83,19 @@ pub fn require_all_banks_confirmed(
 /// out to, read from the effect's own store just before the call; the refusal
 /// compares that live set with the confirmed scope, so a stale or separately
 /// configured list can never widen or narrow the authorized scope. The
-/// coordination check runs next, so a missing authority or a changed bank
+/// coordination check runs last, so a missing authority or a changed bank
 /// set refuses before any intent or key loss.
 ///
+/// The preflight reads and writes nothing, so a caller can run it, then a
+/// durable intent, then the effect.
+///
 /// # Errors
-/// A coordination refusal, or any [`erase_request`] failure.
-pub fn coordinated_erase_request(
+/// A refusal naming the first fact the call does not satisfy.
+pub fn preflight_erase_request(
     args: &EraseArgs<'_>,
     confirmed: &SubjectRequestRecord,
     live_banks: &[String],
-) -> Result<EraseOutcome, AmError> {
+) -> Result<(), AmError> {
     if confirmed.request_id != args.request_id {
         return Err(AmError::new(
             ErrorCode::Forbidden,
@@ -118,7 +120,27 @@ pub fn coordinated_erase_request(
             "the confirmed scope does not cover this erasure's bank or subject",
         ));
     }
-    require_all_banks_confirmed(confirmed, live_banks)?;
+    require_all_banks_confirmed(confirmed, live_banks)
+}
+
+/// Refuse an erasure whose confirmation does not match the call, then erase.
+///
+/// Test and tooling seam, not the shipping command-layer path: its callers
+/// are tests that hold a confirmed record. The shipping erasure path calls
+/// the erasure workflow directly without passing through this seam.
+///
+/// The preflight runs first, so a missing authority or a changed bank set
+/// refuses before any intent or key loss; then the erasure workflow runs
+/// unchanged.
+///
+/// # Errors
+/// A coordination refusal, or any [`erase_request`] failure.
+pub fn coordinated_erase_request(
+    args: &EraseArgs<'_>,
+    confirmed: &SubjectRequestRecord,
+    live_banks: &[String],
+) -> Result<EraseOutcome, AmError> {
+    preflight_erase_request(args, confirmed, live_banks)?;
     erase_request(args)
 }
 
@@ -147,3 +169,7 @@ fn scope_covers(confirmed: &SubjectRequestRecord, args: &EraseArgs<'_>) -> bool 
 #[cfg(test)]
 #[path = "subject_bank_coordination_tests.rs"]
 mod subject_bank_coordination_tests;
+
+#[cfg(test)]
+#[path = "subject_bank_coordination_pg_tests.rs"]
+mod subject_bank_coordination_pg_tests;

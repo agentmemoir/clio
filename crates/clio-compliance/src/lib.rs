@@ -14,6 +14,8 @@
 //! - `correct` routing: discrete item corrections vs continuous attribute
 //!   adjustments, with mandatory reason validation
 //! - `erase_request` verified crypto-shredding workflow and its authorization gate
+//! - `erase_confirmed_request` retry contract for a confirmed erasure, and
+//!   `reconcile_erasure_actions` over the actions it left pending
 //! - `scope_inventory` read-only local compliance scope ledger
 //! - `Scratchpad` ephemeral session workspace with quotas and TTL
 //! - `canonical_put` / `canonical_get` single-slot adapter
@@ -49,6 +51,8 @@ mod correct;
 mod erase;
 mod erasure_journal;
 mod erasure_journal_file;
+mod erasure_reconcile;
+mod erasure_retry;
 mod export;
 mod export_custody;
 mod export_mask;
@@ -95,6 +99,10 @@ pub use erasure_journal::{
     SCHEMA_VERSION, check_archive_authority, handoff, initialize_new_empty, load_journal,
     record_denial,
 };
+pub use erasure_reconcile::{
+    ErasureReconcileReport, ErasureResume, ErasureRetryEnv, reconcile_erasure_actions,
+};
+pub use erasure_retry::erase_confirmed_request;
 pub use export::{ExportArgs, ExportDelivery, ExportFilter, ExportOutcome, export};
 pub use export_custody::{
     CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,

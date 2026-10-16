@@ -332,7 +332,14 @@ pub fn erase_request(args: &EraseArgs<'_>) -> Result<EraseOutcome, AmError> {
 
 /// Detach erased leaves and recompute `MemTree` ancestors through the existing
 /// dirty-path engine; returns the number of refreshed nodes.
-fn propagate(maint: Option<&Arc<MemTreeMaint>>, bank_id: &str, item_ids: &[String]) -> usize {
+///
+/// Shared with the confirmed-erasure retry path, which runs it alone when the
+/// destructive steps are already done.
+pub(crate) fn propagate(
+    maint: Option<&Arc<MemTreeMaint>>,
+    bank_id: &str,
+    item_ids: &[String],
+) -> usize {
     let Some(maint) = maint else {
         return 0;
     };
@@ -341,7 +348,11 @@ fn propagate(maint: Option<&Arc<MemTreeMaint>>, bank_id: &str, item_ids: &[Strin
 }
 
 /// Only harness/system actors carry compliance erasure privilege.
-fn authorize(actor: Actor) -> Result<(), AmError> {
+///
+/// The confirmed-erasure retry entry calls this before its durable intent, and
+/// the workflow calls it again before its effect, so both gates share one
+/// privilege table.
+pub(crate) fn authorize(actor: Actor) -> Result<(), AmError> {
     match actor {
         Actor::Harness | Actor::System => Ok(()),
         Actor::Agent | Actor::User => Err(AmError::new(

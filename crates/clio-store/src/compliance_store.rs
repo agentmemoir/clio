@@ -232,6 +232,14 @@ mod compliance_store_context_store_tests;
 mod compliance_store_erase_distilled_unit_tests;
 
 #[cfg(test)]
+#[path = "compliance_store_erase_preserve_tests.rs"]
+mod compliance_store_erase_preserve_tests;
+
+#[cfg(test)]
+#[path = "postgres_erase_retry_tests.rs"]
+mod postgres_erase_retry_tests;
+
+#[cfg(test)]
 #[path = "compliance_store_erase_tests.rs"]
 pub(crate) mod compliance_store_erase_tests;
 
