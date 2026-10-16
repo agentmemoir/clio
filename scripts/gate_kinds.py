@@ -112,6 +112,10 @@ MAKE_KINDS = {
     # while looking like a target that had them.
     "coverage-package": "coverage-package",
 }
+#: Make goals whose verdict is never stored, whatever other goal shares the line:
+#: a stored test verdict would replay a flake's pass. Make runs every goal on the
+#: line, so one of these anywhere makes the whole line a must-run command.
+UNCACHED_MAKE_GOALS = frozenset({"test-fast", "precommit", "quick"})
 #: Every kind that produces or consumes a coverage report, which is what a clean
 #: has to discard: a report measures a build, and a clean removes the build, so a
 #: stored verdict for one of these describes a tree that no longer exists. A kind

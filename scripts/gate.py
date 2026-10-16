@@ -20,9 +20,9 @@ still produce a whole-workspace report and this wrapper still caches them, but
 they judge nothing: the one coverage requirement is that every Rust file a change
 created or modified reaches 80% of its lines, and `make coverage-fast` (its own
 kind, so a replay is never labelled as the wider report) is what decides a
-change. `make test-fast` is deliberately not routed
-through this cache: a stored test verdict would replay a flake's pass, which is
-the opposite of what a test gate is for.
+change. `make test-fast`, `make precommit` and `make quick` are deliberately not
+cached, even behind another goal on the same line: a stored test verdict would
+replay a flake's pass, which is the opposite of what a test gate is for.
 
 The tree is fingerprinted again after the command; if it changed while the
 command ran, the result is not cached.
@@ -103,6 +103,7 @@ from gate_kinds import (
     LOG_TAIL_LINES,
     LOOKUP_KINDS,
     MAKE_KINDS,
+    UNCACHED_MAKE_GOALS,
     NEXTEST_EXECUTING_SUBCOMMANDS,
     NEXTEST_KNOWN_SUBCOMMANDS,
     NEXTEST_LOOKUP_KIND,
@@ -143,6 +144,7 @@ from gate_classify import (
     llvm_cov_measures_coverage,
     llvm_cov_subcommand_index,
     make_is_dry_run,
+    make_target_indexes,
     nextest_subcommand,
     nextest_subcommand_index,
 )
@@ -191,6 +193,11 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         # a capture it never made. The capture is a must-run command, and the
         # early return below is what keeps this run's verdict out of the cache.
         capture_requested = os.environ.get("CLIO_GOLDEN_CAPTURE") == "1"
+        # Make runs every goal on its line, so `make lint test-fast` runs the
+        # tests too and must never replay a pass stored for the whole line.
+        uncached_goal = Path(argv[0]).name == "make" and any(
+            argv[index] in UNCACHED_MAKE_GOALS for index in make_target_indexes(argv)
+        )
         if Path(argv[0]).name == "cargo" and argv[1:2] == ["nextest"] and not nextest_subcommand(argv):
             # Loud on purpose. A subcommand this file does not recognise is
             # classified as a lookup rather than guessed at, which is the safe
@@ -234,7 +241,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         # may only proceed once the release build cache is warm, which the key
         # cannot see, so a replayed verdict is always about a different cache
         # state than the one the run meets.
-        if clean_requested or capture_requested:
+        if clean_requested or capture_requested or uncached_goal:
             force = True
         scoped_argv, scope = scope_command(kind, argv, root, state.changed)
         ran.update(argv=scoped_argv)
@@ -287,11 +294,12 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
             except OSError as error:
                 print(f"gate: warning: cannot record Cargo work evidence: {error}", file=sys.stderr)
         published = _publish_log(log_path, log_dir, kind, code, run_line=_run_line(root, fp, finished))
-        # Both must-run commands return here, before the verdict is stored: a
-        # clean stores nothing so its removal is never replayed, and a capture
+        # Every must-run command returns here, before the verdict is stored: a
+        # clean stores nothing so its removal is never replayed, a capture
         # stores nothing so a later run of the same command cannot inherit a
-        # refusal measured against a colder cache.
-        if clean_requested or capture_requested:
+        # refusal measured against a colder cache, and a line with a never-cached
+        # goal stores nothing so a test pass is never replayed.
+        if clean_requested or capture_requested or uncached_goal:
             if clean_requested:
                 _purge_coverage_cache(root)
             print(f"gate: {kind} exit {code} in {round(finished - started, 1)}s; log: {published or log_path}")
