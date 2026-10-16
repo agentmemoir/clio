@@ -1,0 +1,1 @@
+The gate no longer replays a stored pass for a `make` line that names `test-fast`, `precommit` or `quick` after another goal, such as `make lint test-fast`: such a line runs every time and stores no verdict. A line that names `coverage-fast` behind another goal is now judged as `coverage-fast`, so the Done check's refusal still applies.
