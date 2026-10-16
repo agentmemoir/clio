@@ -49,6 +49,8 @@ pub struct LocalReviewQuery {
     pub limit: usize,
     /// Resume after this decimal sequence position; `None` starts at the first.
     pub cursor: Option<String>,
+    /// Restrict the page to one request id when present; `None` reviews all.
+    pub request_id: Option<String>,
 }
 
 /// One page of ordered local event rows.
@@ -120,6 +122,15 @@ fn parse_cursor(cursor: Option<&str>) -> Result<i64, AmError> {
     Ok(value)
 }
 
+/// Whether one event row names a request id, content-free.
+///
+/// A row matches when its stored scope names the request, or when its action
+/// id was derived from the request id.
+fn belongs_to_request(row: &LocalEventView, request_id: &str) -> bool {
+    row.scope == request_id
+        || crate::erasure_retry::request_id_of(&row.action_id) == Some(request_id)
+}
+
 /// Read one ordered, bounded page of local event rows.
 ///
 /// Only a harness or system actor may review. The list is read in full and
@@ -141,10 +152,14 @@ pub fn review_local_events(
         ));
     }
     let cursor = parse_cursor(query.cursor.as_deref())?;
+    let request_filter = query.request_id.as_deref();
     let mut rows: Vec<LocalEventView> = store
         .list_events()?
         .into_iter()
-        .filter(|row| row.seq > cursor)
+        .filter(|row| {
+            row.seq > cursor
+                && request_filter.is_none_or(|request_id| belongs_to_request(row, request_id))
+        })
         .map(|mut row| {
             row.result = None;
             row

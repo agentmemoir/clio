@@ -141,7 +141,20 @@ fn the_compliance_leaves_register_once_in_capture_order() {
         .collect();
     assert_eq!(
         registered,
-        ["compliance inventory", "compliance review-export"],
+        [
+            "compliance inventory",
+            "compliance review-export",
+            "compliance request-start",
+            "compliance request-status",
+            "compliance request-retry",
+            "compliance request-copy",
+            "compliance request-exception",
+            "compliance request-events",
+            "compliance request-close",
+            "compliance peer-status",
+            "compliance peer-retry",
+            "compliance peer-disposition",
+        ],
         "the registered leaves"
     );
     let tranche: Vec<&str> = crate::cli_command_registry_compliance::COMPLIANCE_LEAVES
@@ -151,7 +164,20 @@ fn the_compliance_leaves_register_once_in_capture_order() {
     assert_eq!(tranche, registered, "the tranche and the registry agree");
     assert_eq!(
         crate::compliance_cli::compliance_subcommands(),
-        ["inventory", "review-export"],
+        [
+            "inventory",
+            "review-export",
+            "request-start",
+            "request-status",
+            "request-retry",
+            "request-copy",
+            "request-exception",
+            "request-events",
+            "request-close",
+            "peer-status",
+            "peer-retry",
+            "peer-disposition",
+        ],
         "the derived subcommand list"
     );
 }

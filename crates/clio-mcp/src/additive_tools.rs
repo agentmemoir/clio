@@ -47,6 +47,18 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         "validate" => validate_tool(state, args),
         "retention_profile_set" => crate::retention_tools::profile_set(state, args),
         "hygiene_clean" => crate::hygiene_tools::dispatch_inner(state, "hygiene_clean", args),
+        "subject_request_start"
+        | "subject_request_status"
+        | "subject_request_retry"
+        | "subject_request_copy"
+        | "subject_request_exception"
+        | "subject_request_events"
+        | "subject_request_close"
+        | "subject_request_peer_status"
+        | "subject_request_peer_retry"
+        | "subject_request_peer_disposition" => {
+            crate::subject_request_tools::dispatch_inner(state, name, args)
+        }
         "sync_push" | "sync_pull" | "sync_serve" | "sync_ack_skip" => {
             crate::sync_tools::dispatch_inner(state, name, args)
         }

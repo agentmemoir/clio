@@ -145,6 +145,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     let query = LocalReviewQuery {
         limit: opt_usize(args, "limit").unwrap_or(DEFAULT_REVIEW_LIMIT),
         cursor: strict_opt_str(args, "cursor")?.map(str::to_owned),
+        request_id: None,
     };
     let controls = BindingControls {
         copy_controls_accepted: true,

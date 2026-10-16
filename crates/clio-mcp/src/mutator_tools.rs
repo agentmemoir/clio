@@ -278,8 +278,11 @@ fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
 
 /// `erase_request`: verified compliance crypto-shred (never aliases discard).
 ///
-/// Requires a privileged actor and `confirm=true`; the authorization and
-/// confirmation gates live in the in-process `clio-compliance` handler. The
+/// Requires a privileged actor and `confirm=true`; the confirmation gate is
+/// enforced here and the authorization gate lives in the durable erasure
+/// contract. The confirmed call opens a durable subject request bound to the
+/// subject scope and runs the effect through that stored confirmation, so the
+/// shipping erasure path is one guarded route. The
 /// owner-only erasure-journal path is internal configuration, never caller
 /// input: the one shared resolution uses the deployment resolution
 /// (`CLIO_ERASURE_JOURNAL_FILE` over the data directory) and accepts the path
@@ -296,22 +299,63 @@ fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
         state.journal_path.as_deref(),
         &|key| std::env::var(key).ok(),
     )?;
+    let request_id = req_str(args, "request_id")?.to_owned();
+    let subject_id = req_str(args, "subject_id")?.to_owned();
+    let confirm = opt_bool(args, "confirm", false)?;
+    // The confirmation gate stays ahead of every durable effect, exactly as the
+    // in-process erasure workflow enforced it.
+    if !confirm {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "erase_request requires confirm=true; unconfirmed calls never mutate",
+        ));
+    }
     let e_args = clio_compliance::EraseArgs {
         store: &*state.compliance,
         journal_path: &journal,
         maint: Some(&state.maint),
         ctx: &ctx,
-        subject_id: req_str(args, "subject_id")?,
+        subject_id: &subject_id,
         legal_basis: req_str(args, "legal_basis")?,
-        request_id: req_str(args, "request_id")?,
+        request_id: &request_id,
         reason_code: opt_str(args, "reason_code"),
-        confirm: opt_bool(args, "confirm", false)?,
+        confirm,
         salt: &salt,
         timestamp: &ts,
         sink: &StderrSinks,
     };
-    let outcome = clio_compliance::erase_request(&e_args)?;
-    Ok(serde_json::to_value(&outcome).expect("serialize tool payload"))
+    // A confirmed erasure now runs only through the durable request service: the
+    // request binds this id to a subject scope, and the retry runs the effect
+    // only through the stored confirmation.
+    let scope = clio_compliance::RequestScope::Subject {
+        bank_id: ctx.bank.as_str().to_owned(),
+        subject_id: subject_id.clone(),
+    };
+    let env = crate::subject_request_tools::env(state);
+    let (enablement, peers, banks) = crate::subject_request_tools::deployment_enablement(state)?;
+    let peer_refs: Vec<&str> = peers.iter().map(String::as_str).collect();
+    let bank_refs: Vec<&str> = banks.iter().map(String::as_str).collect();
+    clio_compliance::subject_request_service::open(
+        &env,
+        &ctx,
+        &request_id,
+        clio_compliance::RequestKind::Erasure,
+        &scope,
+        enablement,
+        &peer_refs,
+        &bank_refs,
+    )?;
+    let live_banks = state
+        .bank_scope
+        .erase_bank_set(ctx.bank.as_str(), &subject_id)?;
+    let report = clio_compliance::subject_request_service::retry_erasure(
+        &env,
+        &ctx,
+        &request_id,
+        &e_args,
+        &live_banks,
+    )?;
+    Ok(crate::subject_request_tools::retry_value(&report))
 }
 
 /// `consolidate`: maintenance trigger (dirty refresh + hub distill).

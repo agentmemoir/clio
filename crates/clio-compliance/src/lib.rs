@@ -73,6 +73,8 @@ mod subject_request;
 mod subject_request_events;
 mod subject_request_frozen;
 mod subject_request_manifest;
+mod subject_request_report;
+pub mod subject_request_service;
 pub mod subject_request_store_wiring;
 mod validate;
 
@@ -148,6 +150,11 @@ pub use subject_request_manifest::{
     CopyCustodyManifest, DIGEST_ALGORITHM_PREFIX, KEY_COPY_DIGEST, KEY_PRODUCED_AT, KEY_PRODUCER,
     KEY_RECEIVED_AT, KEY_RECEIVER,
 };
+pub use subject_request_service::{
+    PendingOperatorAction, RequestOutcome, RequestStatusReport, SubjectRequestEnv,
+    TechnicalCompletion, apply_command, close, derive_peer_enablement, open, peer_disposition,
+    peer_report, record_copy, record_exception, report, retry_erasure, review_events,
+};
 pub use validate::{ValidateAction, ValidateArgs, ValidateOutcome, validate};
 
 #[cfg(test)]
@@ -179,5 +186,7 @@ mod inventory_pg_tests;
 pub(crate) use local_review_export::review_export_scenarios_tests;
 #[cfg(test)]
 mod subject_request_events_tests;
+#[cfg(test)]
+mod subject_request_service_fixtures;
 #[cfg(test)]
 mod test_unique;
