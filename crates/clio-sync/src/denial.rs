@@ -332,18 +332,23 @@ fn refusal(message: impl Into<String>) -> AmError {
     AmError::new(ErrorCode::Forbidden, message.into())
 }
 
-/// The deployment fingerprint the denial tests hash under. Test-only, so the
-/// wire tests pin the same bytes without repeating the literal at each salt
-/// call site.
+/// The deployment fingerprint the denial tests hash under. Test-only: one
+/// fresh value per process, so no fixed salt bytes appear in the tests and
+/// every proof and binding in one run still agrees with each other.
 #[cfg(test)]
 pub(crate) fn test_fingerprint() -> &'static str {
-    "fp-1"
+    static FP: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| rand::random::<u64>().to_string());
+    FP.as_str()
 }
 
-/// The second deployment fingerprint the digest test contrasts against.
+/// The second deployment fingerprint the digest test contrasts against: a
+/// different fresh value per process, stable for the whole run.
 #[cfg(test)]
 pub(crate) fn test_other_fingerprint() -> &'static str {
-    "fp-2"
+    static FP: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| rand::random::<u64>().to_string());
+    FP.as_str()
 }
 
 #[cfg(test)]

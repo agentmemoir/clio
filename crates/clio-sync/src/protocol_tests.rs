@@ -278,7 +278,7 @@ fn a_push_ack_without_a_denial_ack_parses_and_roundtrips_with_one() {
                     "s-1",
                 ),
                 generation: 3,
-                salt_fingerprint: "fp-1".into(),
+                salt_fingerprint: crate::denial::test_fingerprint().into(),
             },
         }],
     };
