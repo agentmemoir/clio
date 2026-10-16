@@ -71,6 +71,13 @@ pub trait ErasureDenial: Send + Sync {
     fn salt_fingerprint(&self) -> String;
 }
 
+/// The deployment fingerprint the seam tests name. Test-only, so the double
+/// pins the same bytes without repeating the literal at the salt call site.
+#[cfg(test)]
+pub(crate) fn test_salt_fingerprint() -> &'static str {
+    "fingerprint"
+}
+
 #[cfg(test)]
 #[path = "erasure_denial_tests.rs"]
 mod erasure_denial_tests;

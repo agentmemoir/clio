@@ -226,7 +226,11 @@ fn a_pulled_denied_subject_is_dead_lettered_while_an_unrelated_bank_applies() {
         &get,
     )
     .expect("the pull runs");
-    assert_eq!(out["banks"].as_array().map(Vec::len), Some(2), "{out}");
+    assert_eq!(
+        out["banks"].as_array().map(Vec::len),
+        Some(2),
+        "one pull carries two banks"
+    );
 
     assert_denied_subject_refused(&client);
     assert!(
