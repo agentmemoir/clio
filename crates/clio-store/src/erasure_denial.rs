@@ -71,11 +71,13 @@ pub trait ErasureDenial: Send + Sync {
     fn salt_fingerprint(&self) -> String;
 }
 
-/// The deployment fingerprint the seam tests name. Test-only, so the double
-/// pins the same bytes without repeating the literal at the salt call site.
+/// The deployment fingerprint the seam tests name. Test-only: one fresh
+/// value per process, so no fixed salt bytes appear in the tests.
 #[cfg(test)]
 pub(crate) fn test_salt_fingerprint() -> &'static str {
-    "fingerprint"
+    static FP: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| rand::random::<u64>().to_string());
+    FP.as_str()
 }
 
 #[cfg(test)]
