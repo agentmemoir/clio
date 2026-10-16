@@ -148,7 +148,8 @@ fn a_proof_verifies_against_its_own_binding() {
 fn a_proof_answered_under_another_fingerprint_is_refused() {
     let m = request_mutation("s-1", "req-1", &["b-a"]);
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
-    let elsewhere = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_other_fingerprint());
+    let elsewhere =
+        DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_other_fingerprint());
     let err = proof("req-1", "s-1")
         .verify(&elsewhere)
         .expect_err("another deployment's fingerprint");
@@ -164,7 +165,8 @@ fn a_proof_bound_to_another_request_or_peer_is_refused() {
 
     let other = request_mutation("s-1", "req-2", &["b-a"]);
     let other_carrier = denial_carrier(&other).expect("decode").expect("carrier");
-    let wrong_request = DenialProofBinding::for_carrier(&other, &other_carrier, "peer-1", test_fingerprint());
+    let wrong_request =
+        DenialProofBinding::for_carrier(&other, &other_carrier, "peer-1", test_fingerprint());
     assert!(proof("req-1", "s-1").verify(&wrong_request).is_err());
 }
 
