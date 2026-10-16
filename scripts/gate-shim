@@ -12,7 +12,8 @@
 # passes through too, so nested commands run for real.
 #
 # Inside a checkout, `make test-fast`, `make precommit` and `make quick` are
-# timed and never cached: a stored result would replay a pass, and their output
+# timed and never cached, even after another goal on the same line: a stored
+# result would replay a pass, and their output
 # has to stream. An installed gate-hook runs them and records the run; without
 # one they pass through.
 set -u
@@ -71,7 +72,6 @@ elif [ "$self_name" = "make" ]; then
         case "$arg" in
             ritual | check | test | lint | coverage | cov | coverage-fast | coverage-clean | coverage-html | coverage-lcov | coverage-open | coverage-package)
                 heavy=1
-                break
                 ;;
             test-fast | precommit | quick)
                 timed=1
@@ -79,6 +79,8 @@ elif [ "$self_name" = "make" ]; then
                 ;;
         esac
     done
+    # make runs every goal, so a timed goal anywhere on the line keeps it uncached.
+    [ "$timed" = 1 ] && heavy=0
     if [ "$heavy" = 1 ] || [ "$timed" = 1 ]; then
         dry_run=$(python3 "$root/scripts/gate_classify.py" "$real" "$@") || pass_through "$@"
         [ "$dry_run" = 1 ] && pass_through "$@"

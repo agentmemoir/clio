@@ -210,10 +210,14 @@ def llvm_cov_measures_coverage(argv: list[str]) -> bool:
 def command_kind(argv: list[str]) -> str:
     base = Path(argv[0]).name
     if base == "make":
-        for index in make_target_indexes(argv):
-            arg = argv[index]
-            if arg in MAKE_KINDS:
-                return MAKE_KINDS[arg]
+        goals = [argv[index] for index in make_target_indexes(argv)]
+        # `coverage-fast` names the line wherever it sits, so the Done check's
+        # refusal and its once-per-branch record see it behind another goal.
+        if "coverage-fast" in goals:
+            return MAKE_KINDS["coverage-fast"]
+        for goal in goals:
+            if goal in MAKE_KINDS:
+                return MAKE_KINDS[goal]
         return "make"
     if base == "cargo" and len(argv) > 1:
         if argv[1] == "nextest":

@@ -114,6 +114,36 @@ class RunLogTests(unittest.TestCase):
         self.assertIn("could not append to the run log", err.getvalue())
 
 
+class MixedGoalTests(unittest.TestCase):
+    """A make line is cached only when no goal on it is a never-cached one, wherever that goal sits."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name).resolve()
+        self.root = make_repo(self.tmp, "main")
+        self.count = self.tmp / "count"
+        recipe = f"\t@echo ran >> {self.count}\n"
+        (self.root / "Makefile").write_text(f"lint:\n{recipe}test-fast:\n{recipe}precommit:\n{recipe}quick:\n{recipe}")
+
+    def runs(self, *goals: str) -> int:
+        """Run `make <goals>` through the gate twice; return how many recipes really ran."""
+        argv = ["make", "-C", str(self.root), *goals]
+        with mock.patch.dict(os.environ, {"GATE_SCOPE": "off"}):
+            for _ in range(2):
+                self.assertEqual(run_in(self.root, self.tmp / "cache", argv), 0)
+        return len(self.count.read_text().splitlines()) if self.count.is_file() else 0
+
+    def test_a_never_cached_goal_after_a_cached_one_runs_every_time(self) -> None:
+        for goal in ("test-fast", "precommit", "quick"):
+            self.count.unlink(missing_ok=True)
+            self.assertEqual(self.runs("lint", goal), 4, goal)
+        self.assertNotIn(True, [line["replayed"] for line in lines(self.tmp / "cache")])
+
+    def test_a_cached_goal_alone_still_replays(self) -> None:
+        self.assertEqual(self.runs("lint"), 1)
+
+
 class ScopedRunAdviceTests(unittest.TestCase):
     def test_a_scoped_run_leaves_the_verdict_to_ci_and_never_asks_for_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -184,6 +214,10 @@ class TimedTargetHandoffTests(unittest.TestCase):
             hooked, real = self.run_make(args, **extra)
             self.assertEqual(hooked, [], f"{args} {extra}")
             self.assertEqual(real, [" ".join(args)], f"{args} {extra}")
+
+    def test_a_timed_target_after_a_cached_one_still_goes_to_the_hook(self) -> None:
+        hooked, real = self.run_make(["lint", "test-fast"])
+        self.assertEqual((hooked, real), (["lint test-fast"], []))
 
     def test_without_a_hook_the_target_runs_unrecorded(self) -> None:
         hooked, real = self.run_make(["quick"], hook=False)

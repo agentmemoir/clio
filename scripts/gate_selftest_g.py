@@ -88,6 +88,12 @@ class GateDecisionTests(unittest.TestCase):
         fresh, replay = lines(self.cache)
         self.assertEqual((fresh["replayed"], replay["replayed"], replay["estimate_s"]), (False, True, None))
 
+    def test_coverage_fast_after_another_goal_is_still_judged(self) -> None:
+        code, err, _, ran = self.attempt(argv=["/usr/bin/make", "lint", *MAKE[1:]], estimate=OVER)
+        self.assertEqual(code, done.EXIT_REFUSED)
+        self.assertIn("gate: coverage-fast refused", err)
+        ran.assert_not_called()
+
     def test_a_person_at_a_terminal_is_never_refused(self) -> None:
         code, _, asked, ran = self.attempt(estimate=OVER, terminal=True)
         self.assertEqual(code, 0)
