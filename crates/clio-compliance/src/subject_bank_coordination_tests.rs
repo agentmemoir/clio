@@ -27,7 +27,9 @@
 
 use crate::erase::{EraseArgs, EraseVecSink};
 use crate::inventory_fixture::FixtureDir;
-use crate::subject_bank_coordination::{coordinated_erase_request, require_all_banks_confirmed};
+use crate::subject_bank_coordination::{
+    coordinated_erase_request, preflight_erase_request, require_all_banks_confirmed,
+};
 use crate::subject_request::{
     FinalOutcome, PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
 };
@@ -229,6 +231,23 @@ fn departed_bank_refuses_before_effect() {
     let (err, calls) = refused_erase(&record, &shared_banks(&[BANK_A]));
     assert_eq!(err.code, ErrorCode::Forbidden);
     assert_eq!(calls, 0, "a departed bank must refuse before any effect");
+}
+
+/// The preflight alone writes nothing: a confirmed record passes it while the
+/// store runs no effect.
+#[test]
+fn the_preflight_writes_nothing_on_success() {
+    let record = two_bank(PeerState::Acknowledged);
+    let store = CountingStore::with_banks(shared_banks(&[BANK_A, BANK_B]));
+    let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
+    let sink = EraseVecSink::default();
+    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
+    let salt = rand::random::<[u8; 16]>();
+    let args = erase_args(&store, &ctx, &sink, &record.request_id, SUBJECT, &salt);
+    let live = store.effect_bank_set();
+    preflight_erase_request(&args, &record, &live)
+        .expect("a confirmed record passes the preflight");
+    assert_eq!(store.erase_calls(), 0, "the preflight alone runs no effect");
 }
 
 #[test]

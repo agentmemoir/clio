@@ -332,7 +332,14 @@ pub fn erase_request(args: &EraseArgs<'_>) -> Result<EraseOutcome, AmError> {
 
 /// Detach erased leaves and recompute `MemTree` ancestors through the existing
 /// dirty-path engine; returns the number of refreshed nodes.
-fn propagate(maint: Option<&Arc<MemTreeMaint>>, bank_id: &str, item_ids: &[String]) -> usize {
+///
+/// Shared with the confirmed-erasure retry path, which runs it alone when the
+/// destructive steps are already done.
+pub(crate) fn propagate(
+    maint: Option<&Arc<MemTreeMaint>>,
+    bank_id: &str,
+    item_ids: &[String],
+) -> usize {
     let Some(maint) = maint else {
         return 0;
     };
