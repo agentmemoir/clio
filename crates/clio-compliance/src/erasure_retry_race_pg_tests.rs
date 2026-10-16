@@ -187,6 +187,13 @@ fn postgres_a_racing_intent_write_resumes_without_a_second_effect() {
         erase_confirmed_request(&fixture.store, &events, &attempt.request_id, &args, &live)
             .expect("the raced intent resumes the flow");
     assert_eq!(outcome.status, "COMPLETED");
+    assert!(
+        fixture
+            .store
+            .subject_dek_destroyed(&attempt.subject)
+            .expect("key"),
+        "the completed race destroys the key, as the SQLite twin pins"
+    );
     let rows = pg_action_rows(&fixture.store, &erasure_action_id(&attempt.request_id));
     assert_eq!(rows.len(), 1, "one event row for the action");
     assert_eq!(rows[0].state, LocalEventState::Allowed);

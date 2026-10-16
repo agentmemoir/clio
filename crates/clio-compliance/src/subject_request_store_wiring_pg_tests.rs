@@ -53,20 +53,41 @@ impl PgFixture {
         self.store = PostgresStore::open(self.schema.url(), kms())
             .expect("reopen the fixture store on the same scoped schema");
     }
+
+    /// Run one batch of SQL against the fixture's private schema. The
+    /// fault-injection a test needs (a trigger) has no store API to reach it,
+    /// so the fixture's own schema connection carries it.
+    pub(super) fn execute(&self, sql: &str) -> Result<(), AmError> {
+        self.schema.execute(sql)
+    }
 }
 
 /// The suite name every skip note in this module carries.
 const SUITE: &str = "subject request wiring Postgres tests";
 
-/// Open the live Postgres fixture, or print a skip note and return `None`
-/// when the shared server is unreachable.
+/// True only when the operator explicitly opted out of Postgres-backed tests.
+/// Without this opt-out an unreachable Postgres fails the caller instead of
+/// silently reporting green.
+fn skip_requested() -> bool {
+    matches!(
+        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
+/// Open the live Postgres fixture. An unreachable Postgres panics unless the
+/// operator set `CLIO_SKIP_PG_TESTS`, which prints the skip note and returns
+/// `None`. Neither the skip note nor the panic carries a connection string.
 pub(super) fn pg_fixture_or_skip() -> Option<PgFixture> {
     let guard = lock_pg_test();
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
         let err = AmError::new(ErrorCode::Internal, format!("postgres probe: {detail}"));
-        eprintln!("{}", pg_skip_note(SUITE, &err));
-        return None;
+        if skip_requested() {
+            eprintln!("{}", pg_skip_note(SUITE, &err));
+            return None;
+        }
+        panic!("{SUITE} require a reachable Postgres: {err}");
     }
     let schema = ScopedSchema::new(&base);
     let store = PostgresStore::open(schema.url(), kms()).expect("open the scoped fixture store");
@@ -212,3 +233,9 @@ mod erasure_retry_pg_tests;
 #[cfg(test)]
 #[path = "erasure_retry_race_pg_tests.rs"]
 mod erasure_retry_race_pg_tests;
+
+// The remaining live-Postgres fault-point twins, declared here for the same
+// reason as the retry suites above.
+#[cfg(test)]
+#[path = "erasure_retry_fault_pg_tests.rs"]
+mod erasure_retry_fault_pg_tests;

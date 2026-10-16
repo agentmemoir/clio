@@ -55,28 +55,52 @@ const SUBJECT: &str = "subject-1";
 /// A private-schema Postgres store, dropped before its schema.
 struct PgStore {
     store: PostgresStore,
-    _schema: ScopedSchema,
+    schema: ScopedSchema,
     _guard: PgTestGuard,
 }
 
-/// Open the live Postgres fixture, or print a skip note and return `None`.
+impl PgStore {
+    /// Run one batch of SQL against the fixture's private schema. The
+    /// fault-injection a test needs (a trigger) has no store API to reach it,
+    /// so the fixture's own schema connection carries it.
+    fn execute(&self, sql: &str) -> Result<(), AmError> {
+        self.schema.execute(sql)
+    }
+}
+
+/// True only when the operator explicitly opted out of Postgres-backed tests.
+/// Without this opt-out an unreachable Postgres fails the test instead of
+/// silently reporting green.
+fn skip_requested() -> bool {
+    matches!(
+        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
+/// Open the live Postgres fixture. An unreachable Postgres fails the test
+/// unless the operator set `CLIO_SKIP_PG_TESTS`, which prints the skip note and
+/// returns `None`.
 fn pg_store_or_skip() -> Option<PgStore> {
     let guard = lock_pg_test();
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
         let err = AmError::new(ErrorCode::Internal, format!("postgres probe: {detail}"));
-        eprintln!(
-            "{}",
-            pg_skip_note("subject bank coordination Postgres tests", &err)
-        );
-        return None;
+        if skip_requested() {
+            eprintln!(
+                "{}",
+                pg_skip_note("subject bank coordination Postgres tests", &err)
+            );
+            return None;
+        }
+        panic!("subject bank coordination Postgres tests require Postgres: {err}");
     }
     let schema = ScopedSchema::new(&base);
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     let store = PostgresStore::open(schema.url(), kms).expect("open the scoped fixture store");
     Some(PgStore {
         store,
-        _schema: schema,
+        schema,
         _guard: guard,
     })
 }
@@ -115,9 +139,10 @@ fn two_bank(peer_b: PeerState) -> SubjectRequestRecord {
     )
 }
 
-/// The banks sharing the subject key now.
-fn shared_banks(banks: &[&str]) -> Vec<String> {
-    banks.iter().map(|bank| (*bank).to_owned()).collect()
+/// The live bank set the erasure effect fans out to for one subject, read from
+/// the same store the effect uses (mirrors `pg_live_set`).
+fn live_bank_set(store: &PostgresStore, bank: &str, subject: &str) -> Vec<String> {
+    store.erase_bank_set(bank, subject).expect("live bank set")
 }
 
 /// One semantic item carrying one data subject.
@@ -181,10 +206,15 @@ fn postgres_a_pending_peer_refuses_before_any_erasure_effect() {
     };
     let record = two_bank(PeerState::Pending);
     let item = subject_item(BANK_A, SUBJECT);
+    let peer_item = subject_item(BANK_B, SUBJECT);
     fixture
         .store
         .create_memory_item(&item, "tester")
         .expect("seed the subject item");
+    fixture
+        .store
+        .create_memory_item(&peer_item, "tester")
+        .expect("seed the peer bank item");
     let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
     let sink = EraseVecSink::default();
     let salt = rand::random::<[u8; 16]>();
@@ -199,7 +229,8 @@ fn postgres_a_pending_peer_refuses_before_any_erasure_effect() {
         SUBJECT,
         &salt,
     );
-    let live = shared_banks(&[BANK_A, BANK_B]);
+    let live = live_bank_set(&fixture.store, BANK_A, SUBJECT);
+    assert_eq!(live, vec![BANK_A.to_owned(), BANK_B.to_owned()]);
     let err =
         coordinated_erase_request(&args, &record, &live).expect_err("a pending peer must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
@@ -234,10 +265,21 @@ fn postgres_a_joined_bank_refuses_before_any_erasure_effect() {
     };
     let record = two_bank(PeerState::Acknowledged);
     let item = subject_item(BANK_A, SUBJECT);
+    let peer_item = subject_item(BANK_B, SUBJECT);
+    let joined_bank = unique("pg-joined-bank");
+    let joined_item = subject_item(&joined_bank, SUBJECT);
     fixture
         .store
         .create_memory_item(&item, "tester")
         .expect("seed the subject item");
+    fixture
+        .store
+        .create_memory_item(&peer_item, "tester")
+        .expect("seed the peer bank item");
+    fixture
+        .store
+        .create_memory_item(&joined_item, "tester")
+        .expect("seed the joined bank item");
     let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
     let sink = EraseVecSink::default();
     let salt = rand::random::<[u8; 16]>();
@@ -252,7 +294,8 @@ fn postgres_a_joined_bank_refuses_before_any_erasure_effect() {
         SUBJECT,
         &salt,
     );
-    let live = shared_banks(&[BANK_A, BANK_B, "bank-c"]);
+    let live = live_bank_set(&fixture.store, BANK_A, SUBJECT);
+    assert_eq!(live.len(), 3, "the joined bank is live: {live:?}");
     let err =
         coordinated_erase_request(&args, &record, &live).expect_err("a joined bank must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
@@ -277,6 +320,11 @@ fn postgres_a_departed_bank_refuses_before_any_erasure_effect() {
         return;
     };
     let record = two_bank(PeerState::Acknowledged);
+    let item = subject_item(BANK_A, SUBJECT);
+    fixture
+        .store
+        .create_memory_item(&item, "tester")
+        .expect("seed the subject item");
     let ctx = OpContext::new(Bank::new(BANK_A.to_owned()), Actor::Harness);
     let sink = EraseVecSink::default();
     let salt = rand::random::<[u8; 16]>();
@@ -291,7 +339,12 @@ fn postgres_a_departed_bank_refuses_before_any_erasure_effect() {
         SUBJECT,
         &salt,
     );
-    let live = shared_banks(&[BANK_A]);
+    let live = live_bank_set(&fixture.store, BANK_A, SUBJECT);
+    assert_eq!(
+        live,
+        vec![BANK_A.to_owned()],
+        "only the requesting bank is live"
+    );
     let err =
         coordinated_erase_request(&args, &record, &live).expect_err("a departed bank must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
@@ -310,11 +363,16 @@ fn postgres_every_peer_acknowledged_completes_and_keeps_the_control_subject() {
     };
     let record = two_bank(PeerState::Acknowledged);
     let item = subject_item(BANK_A, SUBJECT);
+    let peer_item = subject_item(BANK_B, SUBJECT);
     let control = subject_item(BANK_A, "control-subject");
     fixture
         .store
         .create_memory_item(&item, "tester")
         .expect("seed the subject item");
+    fixture
+        .store
+        .create_memory_item(&peer_item, "tester")
+        .expect("seed the peer bank item");
     fixture
         .store
         .create_memory_item(&control, "tester")
@@ -333,7 +391,8 @@ fn postgres_every_peer_acknowledged_completes_and_keeps_the_control_subject() {
         SUBJECT,
         &salt,
     );
-    let live = shared_banks(&[BANK_A, BANK_B]);
+    let live = live_bank_set(&fixture.store, BANK_A, SUBJECT);
+    assert_eq!(live, vec![BANK_A.to_owned(), BANK_B.to_owned()]);
     let outcome = coordinated_erase_request(&args, &record, &live)
         .expect("every coordinating bank confirmed");
     assert_eq!(outcome.status, "COMPLETED");
@@ -358,3 +417,7 @@ fn postgres_every_peer_acknowledged_completes_and_keeps_the_control_subject() {
         "the control subject remains readable"
     );
 }
+
+#[cfg(test)]
+#[path = "subject_bank_coordination_multibank_pg_tests.rs"]
+mod subject_bank_coordination_multibank_pg_tests;

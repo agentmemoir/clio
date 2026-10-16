@@ -33,18 +33,20 @@ use crate::subject_request_store_wiring::subject_request_store_wiring_pg_tests::
     pg_action_rows, pg_live_set, pg_tombstone_count,
 };
 use crate::subject_request_store_wiring::erasure_retry_tests::Attempt;
-use crate::subject_request_store_wiring::subject_request_store_wiring_pg_tests::pg_fixture_or_skip;
+use crate::subject_request_store_wiring::subject_request_store_wiring_pg_tests::{
+    PgFixture, pg_fixture_or_skip,
+};
 use crate::subject_request_store_wiring::subject_request_store_wiring_tests::{
-    RetryStore, erase_args, persist, started_record, wiring_item,
+    persist, started_record, wiring_item,
 };
 use crate::subject_request_store_wiring::{erase_from_durable_store, record_to_row};
 use crate::test_unique::unique;
 use clio_store::{
-    ComplianceStore, DurableRequestRow, DurableRequestStore, LocalEventState, LocalEventStore,
-    Store,
+    ComplianceStore, ComplianceTombstoneView, DurableRequestRow, DurableRequestStore, ItemIdentity,
+    LocalEventState, LocalEventStore, PostgresStore, Store, SubjectEraseOutcome, SubjectEraseSpec,
 };
-use clio_types::{Actor, Bank, ErrorCode, OpContext};
-use std::sync::atomic::Ordering;
+use clio_types::{AmError, ErrorCode};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A sink that lands a concurrent request write before the settle, as a peer
 /// joining mid-effect does.
@@ -234,9 +236,71 @@ fn postgres_a_peer_recorded_before_the_settle_keeps_completion_pending() {
     );
 }
 
-/// A partial erasure retried through the Postgres durable store stays
-/// `PROCESSING` while the purge is incomplete and reports `COMPLETED` only
-/// once it succeeds.
+/// A thin [`ComplianceStore`] over the real Postgres store that counts erase
+/// calls, so this suite drives the effect through the live store and still
+/// pins one effect run per attempt.
+struct PgCountingErase<'a> {
+    inner: &'a PostgresStore,
+    erase_calls: AtomicUsize,
+}
+
+impl ComplianceStore for PgCountingErase<'_> {
+    fn list_subject_items(&self, bank: &str, subject: &str) -> Result<Vec<ItemIdentity>, AmError> {
+        self.inner.list_subject_items(bank, subject)
+    }
+
+    fn erase_subject(&self, spec: &SubjectEraseSpec<'_>) -> Result<SubjectEraseOutcome, AmError> {
+        self.erase_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.erase_subject(spec)
+    }
+
+    fn subject_dek_destroyed(&self, subject: &str) -> Result<bool, AmError> {
+        self.inner.subject_dek_destroyed(subject)
+    }
+
+    fn read_tombstones(
+        &self,
+        bank: &str,
+        request_id: &str,
+    ) -> Result<Vec<ComplianceTombstoneView>, AmError> {
+        self.inner.read_tombstones(bank, request_id)
+    }
+
+    fn list_tombstones(&self, bank: &str) -> Result<Vec<ComplianceTombstoneView>, AmError> {
+        self.inner.list_tombstones(bank)
+    }
+}
+
+/// Install a `BEFORE INSERT` trigger that aborts every tombstone write, so the
+/// Postgres erasure fails after it destroys the key and before it commits.
+fn install_tombstone_trigger(fixture: &PgFixture) {
+    fixture
+        .execute(
+            "CREATE FUNCTION fail_erase_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION 'forced tombstone failure'; END $$",
+        )
+        .expect("create the fault function");
+    fixture
+        .execute(
+            "CREATE TRIGGER fail_erase_tombstone BEFORE INSERT ON compliance_tombstones
+             FOR EACH ROW EXECUTE FUNCTION fail_erase_tombstone()",
+        )
+        .expect("create the fault trigger");
+}
+
+/// Remove the injected tombstone trigger so a later retry can commit.
+fn drop_tombstone_trigger(fixture: &PgFixture) {
+    fixture
+        .execute("DROP TRIGGER IF EXISTS fail_erase_tombstone ON compliance_tombstones")
+        .expect("drop the fault trigger");
+    fixture
+        .execute("DROP FUNCTION IF EXISTS fail_erase_tombstone()")
+        .expect("drop the fault function");
+}
+
+/// A partial erasure retried through the real Postgres store stays `PROCESSING`
+/// while an injected in-transaction fault keeps the purge uncommitted, and
+/// reports `COMPLETED` only once the purge commits.
 #[test]
 fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
     let Some(fixture) = pg_fixture_or_skip() else {
@@ -247,25 +311,26 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
         &fixture.store,
         &started_record(&attempt.request_id, &attempt.scope),
     );
+    fixture
+        .store
+        .create_memory_item(&wiring_item(&attempt.bank, &attempt.subject), "tester")
+        .expect("seed the subject item the real erase destroys");
     let before = fixture
         .store
         .load(&attempt.request_id)
         .expect("load")
         .expect("row exists");
-    let mut double = RetryStore::failing();
-    double.banks = vec![attempt.bank.clone()];
-    let ctx = OpContext::new(Bank::new(attempt.bank.clone()), Actor::Harness);
+    // The fault aborts every tombstone insert inside the erasure transaction,
+    // so the key is destroyed and the purge rolls back.
+    install_tombstone_trigger(&fixture);
+    let double = PgCountingErase {
+        inner: &fixture.store,
+        erase_calls: AtomicUsize::new(0),
+    };
+    let ctx = attempt.ctx();
     let sink = EraseVecSink::default();
-    let salt = rand::random::<[u8; 16]>();
-    let args = erase_args(
-        &double,
-        &ctx,
-        &sink,
-        &attempt.request_id,
-        &attempt.subject,
-        &salt,
-    );
-    let live = double.effect_bank_set();
+    let args = attempt.args(&double, &ctx, &sink);
+    let live = pg_live_set(&attempt, &fixture.store);
     let first = erase_from_durable_store(
         &fixture.store,
         &fixture.store,
@@ -276,9 +341,21 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
     .expect("a partial failure reports PROCESSING");
     assert_eq!(first.status, "PROCESSING");
     assert_eq!(
-        double.erase_calls(),
+        double.erase_calls.load(Ordering::SeqCst),
         1,
         "the first attempt runs the effect once"
+    );
+    assert!(
+        fixture
+            .store
+            .subject_dek_destroyed(&attempt.subject)
+            .expect("key"),
+        "the fault destroys the key before the purge rolls back"
+    );
+    assert_eq!(
+        pg_tombstone_count(&attempt, &fixture.store),
+        0,
+        "the aborted purge commits no tombstone"
     );
     let retry = erase_from_durable_store(
         &fixture.store,
@@ -292,7 +369,11 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
         retry.status, "PROCESSING",
         "a retry never reports false completion"
     );
-    assert_eq!(double.erase_calls(), 2, "each attempt runs the effect once");
+    assert_eq!(
+        double.erase_calls.load(Ordering::SeqCst),
+        2,
+        "each attempt runs the effect once"
+    );
     assert_eq!(
         fixture
             .store
@@ -302,7 +383,8 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
         before,
         "an attempt must not rewrite the durable row"
     );
-    double.fail.store(false, Ordering::SeqCst);
+    // Remove the fault: the retry commits the purge and completes.
+    drop_tombstone_trigger(&fixture);
     let recovered = erase_from_durable_store(
         &fixture.store,
         &fixture.store,
@@ -312,5 +394,13 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
     )
     .expect("the recovered attempt completes");
     assert_eq!(recovered.status, "COMPLETED");
-    assert_eq!(double.erase_calls(), 3, "each attempt runs the effect once");
+    assert_eq!(
+        double.erase_calls.load(Ordering::SeqCst),
+        3,
+        "each attempt runs the effect once"
+    );
+    assert!(
+        pg_tombstone_count(&attempt, &fixture.store) > 0,
+        "the recovered attempt commits the purge"
+    );
 }

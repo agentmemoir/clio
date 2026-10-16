@@ -14,7 +14,8 @@
 //!
 //! ## Does not own
 //! - The erasure transaction under test (`postgres_erase`)
-//! - The SQLite twins of these scenarios (`compliance_store_erase_preserve_tests`)
+//! - The SQLite twins of the direct-key-loss and later-write scenarios
+//!   (`compliance_store_erase_preserve_tests`)
 //! - Shared fixtures and assertions (`erase_test_support`)
 //!
 //! ## Boundary
@@ -27,7 +28,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::compliance_store::ComplianceStore;
+use crate::compliance_store::{ComplianceStore, SubjectEraseOutcome};
 use crate::db_url::postgres_url_from_env;
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::erase_test_support::{assert_erased, memory_item, seed, spec, unique};
@@ -79,16 +80,28 @@ impl PgEnv {
     }
 }
 
+/// True only when the operator explicitly opted out of Postgres-backed tests.
+fn skip_requested() -> bool {
+    matches!(
+        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
 /// Probe the shared server and build a private-schema environment.
 ///
-/// `None` when the server is unreachable: the test prints the one skip note and
-/// returns, so a run without Postgres stays green.
+/// `None` only when the operator opted out in `CLIO_SKIP_PG_TESTS`, so a run
+/// without Postgres stays green; otherwise an unreachable server panics so the
+/// suite cannot pass with zero assertions.
 fn open_pg() -> Option<PgEnv> {
     let guard = lock_pg_test();
     let base = postgres_url_from_env();
-    if crate::probe_postgres(&base).is_err() {
-        eprintln!("skipping postgres erase-retry tests: shared Postgres unreachable");
-        return None;
+    if let Err(err) = crate::probe_postgres(&base) {
+        if skip_requested() {
+            eprintln!("skipping postgres erase-retry tests: shared Postgres unreachable");
+            return None;
+        }
+        panic!("postgres erase-retry tests require a reachable Postgres: {err}");
     }
     let scoped = ScopedSchema::new(&base);
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
@@ -99,10 +112,11 @@ fn open_pg() -> Option<PgEnv> {
             kms,
             _guard: guard,
         }),
-        Err(err) => {
+        Err(err) if skip_requested() => {
             eprintln!("{}", pg_skip_note("postgres erase-retry tests", &err));
             None
         }
+        Err(err) => panic!("postgres erase-retry tests cannot open the store: {err}"),
     }
 }
 
@@ -114,6 +128,7 @@ struct DirectKeyLoss {
     subject: String,
     survivor_item: String,
     erased_key_rows: Vec<(String, String, Option<String>)>,
+    outcome: SubjectEraseOutcome,
 }
 
 /// Destroy one subject's key straight through the KMS, then erase the subject:
@@ -143,7 +158,8 @@ fn erased_after_a_direct_key_loss(env: PgEnv) -> DirectKeyLoss {
 
     // The erasure still performs its SQL work, and the key stays destroyed.
     let request = unique("pg-req");
-    env.store
+    let outcome = env
+        .store
         .erase_subject(&spec(&bank, &subject, &request))
         .unwrap();
     assert_erased(
@@ -156,6 +172,7 @@ fn erased_after_a_direct_key_loss(env: PgEnv) -> DirectKeyLoss {
         subject,
         survivor_item,
         erased_key_rows,
+        outcome,
     }
 }
 
@@ -173,8 +190,12 @@ fn postgres_erase_after_a_direct_key_loss_completes_and_refuses_a_new_key() {
         subject,
         survivor_item,
         erased_key_rows,
+        outcome,
     } = erased_after_a_direct_key_loss(env);
 
+    assert!(outcome.vectors_purged >= 1, "{outcome:?}");
+    assert!(outcome.memtree_nodes_purged >= 2, "{outcome:?}");
+    assert_eq!(outcome.tombstones_written, 2);
     assert_eq!(erased_key_rows.len(), 1, "{erased_key_rows:?}");
     assert_eq!(erased_key_rows[0].0, "shredded", "{erased_key_rows:?}");
     assert!(erased_key_rows[0].2.is_some(), "{erased_key_rows:?}");
@@ -342,7 +363,7 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
     let subject = unique("pg-subject");
     let survivor = unique("pg-survivor-subject");
     let survivor_item = unique("pg-survivor-item");
-    let (_item_a, _parent) = seed(&env.store, &bank, &subject);
+    let (item_a, _parent) = seed(&env.store, &bank, &subject);
     env.store
         .create_memory_item(&memory_item(&bank, &survivor_item, &survivor), "tester")
         .unwrap();
@@ -381,7 +402,7 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
         env.kms.ensure_dek(&subject).unwrap_err().code,
         ErrorCode::ErasedSubject
     );
-    // The SQL work rolled back: no shred marker, no tombstone, items still there.
+    // The SQL work rolled back: no shred marker, no tombstone, vectors intact.
     assert!(
         !env.store.subject_is_shredded(&subject).unwrap(),
         "the shred marker rolled back"
@@ -393,11 +414,21 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
             .is_empty(),
         "the request is not falsely completed"
     );
-    assert_eq!(
-        env.store.list_subject_items(&bank, &subject).unwrap().len(),
-        2,
-        "the purge rolled back"
-    );
+    // The purge rolled back: the item's dense vector row is still there, so a
+    // committed purge would fail this line.
+    let embeddings: i64 = env
+        .store
+        .with_client(|client| {
+            Ok(client
+                .query_one(
+                    "SELECT count(*) FROM item_embeddings WHERE item_id = $1",
+                    &[&item_a],
+                )
+                .am("embedding count")?
+                .get(0))
+        })
+        .unwrap();
+    assert_eq!(embeddings, 1, "the purge rolled back");
     // A new content key is refused even though the SQL work is pending.
     let refused = env
         .store

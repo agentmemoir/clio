@@ -207,7 +207,9 @@ fn postgres_a_same_scope_repeat_is_idempotent() {
     .expect("the first attempt completes");
     assert_eq!(first.status, "COMPLETED");
     let tombstones = pg_tombstone_count(&attempt, &fixture.store);
-    assert!(tombstones > 0, "the first attempt commits the purge");
+    // The SQLite twin pins the exact count; one subject erase writes one
+    // tombstone here, so the count is pinned exactly.
+    assert_eq!(tombstones, 1, "the first attempt commits the purge once");
     let repeat = erase_confirmed_request(
         &fixture.store,
         &fixture.store,
