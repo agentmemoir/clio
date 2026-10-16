@@ -5,7 +5,10 @@
 //!
 //! This module is responsible for the pre-effect subject-bank coordination
 //! refusal of a confirmed erasure: every bank sharing the subject key must
-//! match the confirmed scope and hold authority before any effect.
+//! match the confirmed scope and the peer banks the request recorded before
+//! any effect. An unresolved peer slot refuses technical completion in the
+//! erasure's completion gate instead, so the pre-effect check keeps only the
+//! frozen bank set.
 //!
 //! ## Owns
 //! - `require_all_banks_confirmed`, the pure check over the confirmed record
@@ -30,25 +33,28 @@
 //! Keep this module focused on the subject-bank coordination refusal.
 
 use crate::erase::{EraseArgs, EraseOutcome, erase_request};
-use crate::subject_request::{
-    PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
-};
+use crate::subject_request::{RequestKind, RequestScope, RequestState, SubjectRequestRecord};
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeSet;
 
-/// Refuse when a coordinating bank lacks authority or the bank set changed.
+/// Refuse when the bank set changed after confirmation.
 ///
 /// The confirmed record's coordination set is its scope bank plus its peer
-/// banks. The banks sharing the subject key now must equal that set exactly,
-/// and every peer must have acknowledged the erasure: a pending or disposed
-/// peer means part of the subject's data is not authorized for erasure.
+/// banks, the banks its confirmed peer records covered when it opened. The
+/// banks sharing the subject key now must equal that set exactly, so a bank
+/// that joined or left after confirmation refuses the erasure and a retry
+/// compares against the same stored set. A row from before the peer banks
+/// were recorded carries an empty set, so the check then covers the scope
+/// bank only and refuses any extra live bank.
 ///
-/// The check reads the frozen scope and writes nothing. A retry compares
-/// against the same stored scope, so the authorized scope never widens.
+/// The peer slots themselves do not refuse here: an unacknowledged or
+/// disposed peer refuses technical completion in the completion gate instead,
+/// so an offline peer cannot block the local effect forever.
+///
+/// The check reads the frozen scope and writes nothing.
 ///
 /// # Errors
-/// Refusal when the bank set changed after confirmation, or a coordinating
-/// bank has not confirmed the erasure.
+/// Refusal when the bank set changed after confirmation.
 pub fn require_all_banks_confirmed(
     confirmed: &SubjectRequestRecord,
     live_banks: &[String],
@@ -59,16 +65,6 @@ pub fn require_all_banks_confirmed(
         return Err(AmError::new(
             ErrorCode::Forbidden,
             "the banks sharing the subject key changed after confirmation",
-        ));
-    }
-    if confirmed
-        .peers
-        .values()
-        .any(|state| *state != PeerState::Acknowledged)
-    {
-        return Err(AmError::new(
-            ErrorCode::Forbidden,
-            "a bank sharing the subject key has not confirmed the erasure",
         ));
     }
     Ok(())
@@ -83,8 +79,8 @@ pub fn require_all_banks_confirmed(
 /// out to, read from the effect's own store just before the call; the refusal
 /// compares that live set with the confirmed scope, so a stale or separately
 /// configured list can never widen or narrow the authorized scope. The
-/// coordination check runs last, so a missing authority or a changed bank
-/// set refuses before any intent or key loss.
+/// coordination check runs last, so an incomplete confirmation or a changed
+/// bank set refuses before any intent or key loss.
 ///
 /// The preflight reads and writes nothing, so a caller can run it, then a
 /// durable intent, then the effect.
@@ -129,8 +125,8 @@ pub fn preflight_erase_request(
 /// are tests that hold a confirmed record. The shipping erasure path calls
 /// the erasure workflow directly without passing through this seam.
 ///
-/// The preflight runs first, so a missing authority or a changed bank set
-/// refuses before any intent or key loss; then the erasure workflow runs
+/// The preflight runs first, so an incomplete confirmation or a changed bank
+/// set refuses before any intent or key loss; then the erasure workflow runs
 /// unchanged.
 ///
 /// # Errors
@@ -144,9 +140,10 @@ pub fn coordinated_erase_request(
     erase_request(args)
 }
 
-/// The confirmed coordination set: the scope bank plus every peer bank.
+/// The confirmed coordination set: the scope bank plus every recorded peer
+/// bank.
 fn coordination_set(confirmed: &SubjectRequestRecord) -> BTreeSet<&str> {
-    let mut banks: BTreeSet<&str> = confirmed.peers.keys().map(String::as_str).collect();
+    let mut banks: BTreeSet<&str> = confirmed.peer_banks.iter().map(String::as_str).collect();
     match &confirmed.scope {
         RequestScope::Bank { bank_id } | RequestScope::Subject { bank_id, .. } => {
             banks.insert(bank_id.as_str());

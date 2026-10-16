@@ -15,7 +15,8 @@
 //!   key file first, the status custody read follows the recorded marker
 //!
 //! ## Does not own
-//! - The tool behavior itself (`sync_tools.rs` or `clio-sync`)
+//! - The tool behavior itself (`sync_tools.rs`, `sync_transfer.rs`, or
+//!   `clio-sync`)
 //! - The dispatch and schema tests (see `sync_tools_tests`)
 //!
 //! ## Boundary
@@ -128,7 +129,7 @@ fn sync_transfer_and_sync_status_agree_on_encryption_for_the_same_arguments() {
     // resolves either; an explicit path that held no key would be an error.
     let none = |_key: &str| None;
     let pushed =
-        crate::sync_tools::sync_transfer_with(&st, &json!({ "remote": addr }), "push", &none)
+        super::sync_transfer::transfer_with(&st, &json!({ "remote": addr }), "push", &none)
             .expect("push");
     let status = crate::sync_tools::sync_status_with(&st, &json!({}), &none).expect("status");
     assert_eq!(pushed["encryption"], Value::Bool(false));
@@ -142,9 +143,8 @@ fn sync_transfer_and_sync_status_agree_on_encryption_for_the_same_arguments() {
     let get = |key: &str| (key == clio_config::SYNC_KEY_FILE_ENV).then(|| path.clone());
     clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("generate");
     clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("rotate");
-    let pushed =
-        crate::sync_tools::sync_transfer_with(&st, &json!({ "remote": addr }), "push", &get)
-            .expect("push");
+    let pushed = super::sync_transfer::transfer_with(&st, &json!({ "remote": addr }), "push", &get)
+        .expect("push");
     let status = crate::sync_tools::sync_status_with(&st, &json!({}), &get).expect("status");
     assert_eq!(pushed["encryption"], Value::Bool(true));
     assert_eq!(pushed["encryption"], status["encryption"]);
@@ -180,9 +180,8 @@ fn sync_transfer_without_a_key_reads_newest_and_archived_keys_from_custody() {
     let serve = dispatch(&st, "sync_serve", &json!({ "dev": true, "ttl_secs": 20 }));
     assert_eq!(serve["ok"], Value::Bool(true), "{serve}");
     let addr = serve["addr"].as_str().expect("addr").to_owned();
-    let pushed =
-        crate::sync_tools::sync_transfer_with(&st, &json!({ "remote": addr }), "push", &get)
-            .expect("push");
+    let pushed = super::sync_transfer::transfer_with(&st, &json!({ "remote": addr }), "push", &get)
+        .expect("push");
     assert_eq!(pushed["encryption"], Value::Bool(true));
 }
 
@@ -229,12 +228,8 @@ fn sync_transfer_errors_when_the_custody_store_cannot_be_read() {
     let get =
         |key: &str| (key == clio_config::SYNC_KEY_FILE_ENV).then(|| path.display().to_string());
 
-    let result = crate::sync_tools::sync_transfer_with(
-        &st,
-        &json!({ "remote": "127.0.0.1:1" }),
-        "push",
-        &get,
-    );
+    let result =
+        super::sync_transfer::transfer_with(&st, &json!({ "remote": "127.0.0.1:1" }), "push", &get);
 
     assert!(result.is_err(), "a damaged custody store is an error");
 }
@@ -257,12 +252,8 @@ fn transfer_refuses_a_missing_named_file_while_status_answers_from_the_archive()
     clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("rotate");
     std::fs::remove_file(&path).expect("remove the current key file");
 
-    let transfer = crate::sync_tools::sync_transfer_with(
-        &st,
-        &json!({ "remote": "127.0.0.1:1" }),
-        "push",
-        &get,
-    );
+    let transfer =
+        super::sync_transfer::transfer_with(&st, &json!({ "remote": "127.0.0.1:1" }), "push", &get);
     assert!(
         transfer.is_err(),
         "a named key file that is missing is an error on the transfer path"

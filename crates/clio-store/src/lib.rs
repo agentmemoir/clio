@@ -75,6 +75,7 @@ mod distilled_unit_store;
 mod durable_requests;
 mod embedding_space;
 mod erase_hash;
+mod erasure_denial;
 mod history_store;
 mod hygiene_seq;
 mod hygiene_store;
@@ -97,6 +98,7 @@ mod model;
 mod opaque_item_persist;
 mod open_handles;
 mod ops_store;
+mod peer_actions;
 mod persona_store;
 mod postgres;
 mod postgres_assoc;
@@ -238,6 +240,7 @@ pub use embedding_space::{
     MAX_VECTOR_DIMS, SETTING_EMBEDDING_DIM, SETTING_EMBEDDING_MODEL,
 };
 pub use erase_hash::sha256_hex;
+pub use erasure_denial::{DenialVerdict, ErasureDenial};
 pub use history_store::HistoryStore;
 pub use hygiene_store::{HygieneLogEntry, HygieneStore};
 pub use index_store::IndexStore;
@@ -251,6 +254,10 @@ pub use model::{
     OpaqueItemRecord, SearchHit, VectorSlot,
 };
 pub use ops_store::{IntegritySignals, OpsStore, StoreCounts};
+pub use peer_actions::{
+    PeerActionBinding, PeerActionDisposition, PeerActionKind, PeerActionRow, PeerActionState,
+    PeerActionStore, PeerActionTarget,
+};
 pub use persona_store::PersonaStore;
 pub use pg_probe::DatabaseReport;
 pub use pg_tls::{

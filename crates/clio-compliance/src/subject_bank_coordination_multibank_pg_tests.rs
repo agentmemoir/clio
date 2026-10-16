@@ -4,14 +4,15 @@
 //! # Responsibility
 //!
 //! This module is responsible for the live-Postgres multi-bank coordination
-//! proofs: a retry after a failure that lands past the key destruction but
-//! before the commit still purges the remaining work over the banks that share
-//! the subject key, keeps the control subject readable, and holds a pending
-//! peer until it acknowledges; and a real `MemTreeMaint` drops the erased
-//! subject's gist from the shared derived summary once the retry refresh runs.
+//! proofs: every attempt with a pending peer holds completion open while the
+//! forced purge fault lands past the key destruction but before the commit,
+//! the acknowledged retry purges the remaining work over the banks that share
+//! the subject key, keeps the control subject readable, and settles; and a
+//! real `MemTreeMaint` drops the erased subject's gist from the shared
+//! derived summary once the retry refresh runs.
 //!
 //! ## Owns
-//! - The Postgres multi-bank key-loss retry assertion
+//! - The Postgres multi-bank retry and pending-peer assertions
 //! - The Postgres shared-derivative summary assertion
 //!
 //! ## Does not own
@@ -23,8 +24,9 @@
 //!
 //! ## Boundary
 //!
-//! Tests here break when the Postgres retry stops purging the remaining work
-//! past a key loss or the derived refresh stops dropping the erased gist.
+//! Tests here break when the Postgres retry stops purging the remaining
+//! work past a key loss, when a pending peer blocks it, or when the derived
+//! refresh stops dropping the erased gist.
 //!
 //! Test-only. Never compiled into production builds.
 //!
@@ -46,7 +48,7 @@ use crate::test_unique::unique;
 use clio_store::{
     ComplianceStore, DurableRequestStore, LocalEventState, LocalEventStore, PostgresStore, Store,
 };
-use clio_types::{Actor, Bank, ErrorCode, OpContext};
+use clio_types::{Actor, Bank, OpContext};
 use clio_write::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
 use clio_write::{MemForest, MemTreeMaint};
 use std::collections::BTreeMap;
@@ -93,27 +95,32 @@ fn drop_tombstone_trigger(fixture: &PgStore) {
         .expect("drop the fault function");
 }
 
-/// A pending peer refuses each retry before any intent, key loss, or store
-/// effect; the exact denial repeats and the stored peer stays pending.
-fn assert_pending_peer_refuses_each_attempt(
+/// A pending peer no longer refuses the flow: with the purge fault forced,
+/// every attempt reports PROCESSING, writes no tombstone, and the frozen peer
+/// slot stays pending until it acknowledges.
+fn assert_pending_peer_keeps_completion_open_across_attempts(
     fixture: &PgStore,
     record: &SubjectRequestRecord,
     args: &EraseArgs<'_>,
     live: &[String],
 ) {
     for _ in 0..2 {
-        let err = erase_confirmed_request(
+        let held = erase_confirmed_request(
+            &fixture.store,
             &fixture.store,
             &fixture.store,
             &record.request_id,
             args,
             live,
         )
-        .expect_err("a pending peer must refuse");
-        assert_eq!(err.code, ErrorCode::Forbidden, "the same denial repeats");
+        .expect("the faulted attempt reports processing");
+        assert_eq!(
+            held.status, "PROCESSING",
+            "a pending peer holds the completion open"
+        );
         assert!(
-            !fixture.store.subject_dek_destroyed(SUBJECT).expect("key"),
-            "the refusal loses no key"
+            fixture.store.subject_dek_destroyed(SUBJECT).expect("key"),
+            "the fault loses the key before the commit fails"
         );
         assert_eq!(
             fixture
@@ -122,7 +129,12 @@ fn assert_pending_peer_refuses_each_attempt(
                 .expect("tombstones")
                 .len(),
             0,
-            "the refusal writes no tombstone"
+            "the faulted attempt writes no tombstone"
+        );
+        assert_eq!(
+            fixture.store.pending_actions().expect("pending"),
+            vec![erasure_action_id(&record.request_id)],
+            "the action stays pending"
         );
     }
     let stored = row_to_record(
@@ -140,47 +152,6 @@ fn assert_pending_peer_refuses_each_attempt(
     );
 }
 
-/// Force a failure after the DEK destruction and before the commit; the key is
-/// lost, no tombstone is written, and the action stays pending.
-fn force_key_loss_before_commit(
-    fixture: &PgStore,
-    record: &SubjectRequestRecord,
-    args: &EraseArgs<'_>,
-    live: &[String],
-) {
-    install_tombstone_trigger(fixture);
-    let failed = erase_confirmed_request(
-        &fixture.store,
-        &fixture.store,
-        &record.request_id,
-        args,
-        live,
-    )
-    .expect("the key-loss attempt reports processing");
-    assert_eq!(
-        failed.status, "PROCESSING",
-        "the failed purge stays pending past the key loss"
-    );
-    assert!(
-        fixture.store.subject_dek_destroyed(SUBJECT).expect("key"),
-        "the key is destroyed before the commit fails"
-    );
-    assert_eq!(
-        fixture
-            .store
-            .read_tombstones(BANK_A, &record.request_id)
-            .expect("tombstones")
-            .len(),
-        0,
-        "the aborted purge wrote no tombstone"
-    );
-    assert_eq!(
-        fixture.store.pending_actions().expect("pending"),
-        vec![erasure_action_id(&record.request_id)],
-        "the action stays pending"
-    );
-}
-
 /// Remove the injected trigger and retry: the purge commits, the control
 /// subject stays readable, the scope is unchanged, and one Allowed event row
 /// carries the completed outcome.
@@ -193,6 +164,7 @@ fn assert_retry_purges_remaining_work(
 ) {
     drop_tombstone_trigger(fixture);
     let completed = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &record.request_id,
@@ -282,18 +254,27 @@ fn postgres_multi_bank_key_loss_retry_purges_remaining_work_and_holds_the_peer_p
         SUBJECT,
         &salt,
     );
-    // A pending peer refuses each attempt before any intent, key loss, or
-    // store effect, and the exact denial repeats.
-    assert_pending_peer_refuses_each_attempt(&fixture, &record, &args, &live);
-    // Acknowledge the peer, then force a failure after the DEK destruction and
-    // before the commit.
+    // A pending peer never blocks the local effect; with the purge fault in
+    // place, each attempt holds the completion open and keeps the peer
+    // pending until it acknowledges.
+    install_tombstone_trigger(&fixture);
+    assert_pending_peer_keeps_completion_open_across_attempts(&fixture, &record, &args, &live);
+    drop_tombstone_trigger(&fixture);
+    // Acknowledge the peer durably and in the record, then retry: the purge
+    // commits and the action settles, keeping the control subject readable.
     record
         .peers
         .insert(BANK_B.to_owned(), PeerState::Acknowledged);
     persist(&fixture.store, &record);
-    force_key_loss_before_commit(&fixture, &record, &args, &live);
-    // The retry purges the remaining work and settles, keeping the control
-    // subject readable and the scope unchanged.
+    crate::subject_peer::begin_denial(&fixture.store, &record.request_id, BANK_B)
+        .expect("the peer row begins");
+    crate::subject_peer::mark_acknowledged(
+        &fixture.store,
+        &record.request_id,
+        BANK_B,
+        "deletion-9",
+    )
+    .expect("the peer acknowledges");
     assert_retry_purges_remaining_work(&fixture, &record, &control.id, &args, &live);
 }
 
@@ -348,8 +329,15 @@ fn postgres_shared_derivative_summary_drops_the_erased_gist_after_the_retry() {
     // The effect commits but the outcome write fails, so a restart reconciles
     // and still owes the derived refresh.
     let events = FaultEvents::outcome_fails_over(&fixture.store);
-    erase_confirmed_request(&fixture.store, &events, &record.request_id, &args, &live)
-        .expect_err("the outcome failure leaves the action pending");
+    erase_confirmed_request(
+        &fixture.store,
+        &events,
+        &fixture.store,
+        &record.request_id,
+        &args,
+        &live,
+    )
+    .expect_err("the outcome failure leaves the action pending");
     assert!(
         fixture.store.subject_dek_destroyed(SUBJECT).expect("key"),
         "the effect destroys the key"
@@ -360,6 +348,7 @@ fn postgres_shared_derivative_summary_drops_the_erased_gist_after_the_retry() {
     );
     let env = ErasureRetryEnv {
         store: &fixture.store,
+        peers: &fixture.store,
         journal_path: &journal,
         maint: Some(&maint),
         actor: Actor::Harness,

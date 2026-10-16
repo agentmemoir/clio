@@ -17,6 +17,10 @@
 //! - `CopyDisposition` one recorded copy disposition
 //! - `CopyDispositionOutcome` and `CopyClosureFacts`
 //! - `copy_closure_facts` the fail-closed fold into closure-gate facts
+//! - `request_closure_facts`, the same fold with the request's own required
+//!   actions counted on top, which the stored-row folds share
+//! - `peer_copy_disposition`, the mapping of one peer's durable denial row
+//!   onto the same vocabulary, through the shared peer evidence rule
 //!
 //! ## Does not own
 //! - The closure gate itself and its `FinalOutcome` decision (see
@@ -37,8 +41,10 @@
 //!
 //! Keep this module focused on the pure copy-disposition contract.
 
+use crate::subject_peer::peer_row_settled;
 use crate::subject_request::RequestActionState;
 use crate::subject_request_events::ClosureInputs;
+use clio_store::{PeerActionDisposition, PeerActionRow};
 use serde::{Deserialize, Serialize};
 
 /// Where a known subject-data copy is held.
@@ -216,6 +222,67 @@ pub fn copy_closure_facts(
             retention_exception_approved,
         },
         outcome,
+    }
+}
+
+/// Fold a set of copy dispositions and a request's own facts into the facts
+/// the closure gate consumes.
+///
+/// `base` carries the request-level facts — whether the named product path is
+/// known and whether an approved retention exception applies — and the
+/// request's own open required actions count on top of the dispositions' open
+/// actions, so neither source can hide an open action from the gate. An
+/// outcome the dispositions alone would call [`CopyDispositionOutcome::Full`]
+/// drops to partial while a request-level required action is still open.
+#[must_use]
+pub fn request_closure_facts(
+    dispositions: &[CopyDisposition],
+    base: ClosureInputs,
+) -> CopyClosureFacts {
+    let mut facts = copy_closure_facts(
+        dispositions,
+        base.product_path_known,
+        base.retention_exception_approved,
+    );
+    facts.inputs.open_copy_actions += base.open_copy_actions;
+    if facts.outcome == CopyDispositionOutcome::Full && facts.inputs.open_copy_actions > 0 {
+        facts.outcome = CopyDispositionOutcome::Partial;
+    }
+    facts
+}
+
+/// The copy disposition one peer's durable denial row supports.
+///
+/// The row is the input, because the peer's state carries evidence the
+/// disposition alone cannot: the row settles its copy only when the peer
+/// acknowledged it or when it records the peer's deletion evidence with its
+/// proof reference, the same rule the completion gate and the slot fold read.
+/// An approved retention keeps the removal action open with its state pending,
+/// and anything else — an unknown disposition, a delivered row, or a removal
+/// evidence whose proof reference is missing — keeps the removal action and
+/// the technical state unknown, so [`copy_closure_facts`] yields a partial
+/// outcome and the closure gate refuses the open action instead of a full
+/// completion claim. The peer holds the copy in every case, so the custody
+/// class stays known and the fold can never report it refused.
+#[must_use]
+pub fn peer_copy_disposition(row: &PeerActionRow) -> CopyDisposition {
+    let removed = peer_row_settled(row);
+    let (state, action) = if removed {
+        (CopyState::Done, RequestActionState::Closed)
+    } else if row.disposition == PeerActionDisposition::RetentionApproved {
+        (CopyState::Pending, RequestActionState::Open)
+    } else {
+        (CopyState::Unknown, RequestActionState::Open)
+    };
+    CopyDisposition {
+        copy_id: format!("peer:{}", row.peer_id),
+        custody: CopyCustodyClass::Peer,
+        owner: CopyOwner::System,
+        state,
+        actions: vec![CopyAction {
+            kind: CopyRequiredAction::Remove,
+            state: action,
+        }],
     }
 }
 

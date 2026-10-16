@@ -30,6 +30,7 @@
 use crate::index_drain::{INDEX_MAX_BATCH, IndexDrain};
 use crate::ops_embedder::{OpsEmbedConfig, build_ops_embedder_from};
 use crate::runtime::{McpOpenOptions, McpState, PipelineStatus};
+use crate::runtime_repos::Repos;
 use clio_admission::RankingEnv;
 use clio_compliance::{InventoryBackend, InventoryFacts};
 use clio_config::retention_store::RetentionStore;
@@ -46,41 +47,6 @@ use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-/// All-repository view of one concrete backend store.
-trait Repos:
-    Store
-    + IndexStore
-    + PersonaStore
-    + BeliefStore
-    + HistoryStore
-    + ContinuousStore
-    + ComplianceStore
-    + HygieneStore
-    + OpsStore
-    + BatchStore
-    + SyncStore
-    + LocalEventStore
-    + DestinationCustodyStore
-{
-}
-impl<
-    T: Store
-        + IndexStore
-        + PersonaStore
-        + BeliefStore
-        + HistoryStore
-        + ContinuousStore
-        + ComplianceStore
-        + HygieneStore
-        + OpsStore
-        + BatchStore
-        + SyncStore
-        + LocalEventStore
-        + DestinationCustodyStore,
-> Repos for T
-{
-}
 
 /// The caller's retriever and its read-only diagnostic twin: both from the
 /// same env, store, index, embedder, and reranker, with the twin's

@@ -34,6 +34,8 @@
 // binary, so one binary uses the parts it needs and its neighbour uses the rest.
 #![allow(dead_code)]
 
+pub mod peer;
+
 use rusqlite::Connection;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
@@ -172,10 +174,17 @@ impl Drop for NodeDir {
 /// `clio` with a cleared environment and one node's scratch directory, so a run
 /// never reads the machine's config, key store, or data directory.
 ///
-/// Three variables are load-bearing. `CLIO_KEY_FILE` and `CLIO_KEY_FILE_ONLY`
+/// Five variables are load-bearing. `CLIO_KEY_FILE` and `CLIO_KEY_FILE_ONLY`
 /// keep each node's content encryption in its own scratch key file, because the
 /// OS keychain can prompt for access and a machine holding both a keychain entry
-/// and a key file makes a write fail with a two-key conflict.
+/// and a key file makes a write fail with a two-key conflict. `CLIO_KMS_FILE`
+/// keeps each node's local dev-KMS key store in the same scratch directory: a
+/// Postgres-backed node has no database file to name a sibling for, so without
+/// it the key store falls back to the machine's data directory and every node
+/// on the machine would share one, sealed under whichever node's key file wrote
+/// it first. `CLIO_ERASURE_JOURNAL_FILE` names the node's own erasure journal:
+/// the cleared environment leaves no data directory for the fallback to
+/// resolve, and a serve start without a journal path refuses to bind.
 /// `CLIO_DEPLOYMENT_CONFIG` points at a path that does not exist, so the
 /// deployment config is defaulted instead of read from the machine's real one,
 /// which keeps the result a fact about this test rather than about this host.
@@ -186,6 +195,11 @@ pub fn clio(node: &Path) -> Command {
     cmd.env("CLIO_BACKUP_DIR", node.join("backups"));
     cmd.env("CLIO_KEY_FILE", node.join("keys.key"));
     cmd.env("CLIO_KEY_FILE_ONLY", "1");
+    cmd.env("CLIO_KMS_FILE", node.join("clio.kms.json"));
+    cmd.env(
+        "CLIO_ERASURE_JOURNAL_FILE",
+        node.join("erasure-journal.json"),
+    );
     cmd.env(
         "CLIO_DEPLOYMENT_CONFIG",
         node.join("no-such-deployment-overlay.json"),
@@ -247,10 +261,23 @@ pub fn json_stdout(args: &[&str], output: &Output) -> Value {
 /// The store lives inside `dir` and is removed with it on drop.
 #[must_use]
 pub fn write_credential_store(dir: &NodeDir) -> PathBuf {
+    write_credential_store_for(dir, &[BANK])
+}
+
+/// Write one scratch, owner-only credential store whose record reaches `banks`,
+/// whose secret digest is [`TOKEN`]'s, and return its path.
+///
+/// The multi-bank form: a harness whose scenario covers more than one bank
+/// needs the same one synthetic bearer to reach every bank it serves, because
+/// the server's own bank authorization reads the presented credential's
+/// records. The store lives inside `dir` and is removed with it on drop.
+#[must_use]
+pub fn write_credential_store_for(dir: &NodeDir, banks: &[&str]) -> PathBuf {
     use clio_config::auth_tokens::{
         AUTH_TOKEN_FILE_NAME, digest_hex, new_auth_token, save_auth_tokens,
     };
-    let (mut record, _generated) = new_auth_token("sync-harness", "harness", &[BANK.to_owned()])
+    let owned: Vec<String> = banks.iter().map(|bank| (*bank).to_owned()).collect();
+    let (mut record, _generated) = new_auth_token("sync-harness", "harness", &owned)
         .expect("build the harness credential record");
     record.secret_sha256 = digest_hex(TOKEN);
     let path = dir.path().join(AUTH_TOKEN_FILE_NAME);

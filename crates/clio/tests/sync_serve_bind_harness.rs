@@ -16,8 +16,8 @@
 //! - The warning text itself (`clio-sync` `bind_warning_tests`)
 //! - The documented field sets (`clio-sync` `client_feed_documentation_tests`)
 //! - Transport protocol behavior after startup
-//! - The scratch credential store a normal-mode start loads (`sync_wire_support`
-//!   writes it)
+//! - The cleared environment, scratch credential store, and erasure journal a
+//!   normal-mode start loads (`sync_wire_support` supplies them)
 //!
 //! ## Boundary
 //!
@@ -27,23 +27,26 @@
 //! Keep this module focused on the process-level sync serve startup contract.
 
 use std::io::{BufRead, BufReader, Read};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
 #[path = "sync_wire_support/mod.rs"]
 mod sync_wire_support;
-use sync_wire_support::{NodeDir, write_credential_store};
+use sync_wire_support::{NodeDir, clio, write_credential_store};
 
 /// The warning prefix the sync server writes to stderr on a public bind.
 const WARNING_PREFIX: &str = "sync serve: bind ";
 /// The line `clio sync serve` prints once the server is up.
 const LISTENING_PREFIX: &str = "sync serve listening on ";
 
-fn spawn_serve(extra: &[&str]) -> Child {
+/// Spawn `clio sync serve` with the test's own scratch directory, so every
+/// writable path a start resolves — the erasure journal a serve start refuses
+/// to bind without, among them — stays inside this test's scratch directory.
+fn spawn_serve(scratch: &NodeDir, extra: &[&str]) -> Child {
     let mut args = vec!["sync", "serve"];
     args.extend_from_slice(extra);
-    Command::new(env!("CARGO_BIN_EXE_clio"))
+    clio(scratch.path())
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -136,17 +139,21 @@ fn kill_and_collect_stderr(mut child: Child) -> Vec<u8> {
 /// this harness checks that a real binary's stderr carries the names at all.
 #[test]
 fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
-    let mut child = spawn_serve(&[
-        "--bind",
-        "0.0.0.0:0",
-        "--dev",
-        "--ttl-secs",
-        "30",
-        "--output",
-        "json",
-        "--db",
-        "sqlite::memory:",
-    ]);
+    let scratch = NodeDir::new("bind-public-dev");
+    let mut child = spawn_serve(
+        &scratch,
+        &[
+            "--bind",
+            "0.0.0.0:0",
+            "--dev",
+            "--ttl-secs",
+            "30",
+            "--output",
+            "json",
+            "--db",
+            "sqlite::memory:",
+        ],
+    );
     let stderr = stderr_until(&mut child, WARNING_PREFIX);
     assert!(
         stderr.contains(WARNING_PREFIX),
@@ -192,16 +199,19 @@ fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
 fn a_public_bind_warns_with_a_credential_store() {
     let credentials = NodeDir::new("bind-credentials");
     let store = write_credential_store(&credentials);
-    let mut child = spawn_serve(&[
-        "--bind",
-        "0.0.0.0:0",
-        "--token-file",
-        store.to_str().expect("utf-8 scratch path"),
-        "--ttl-secs",
-        "30",
-        "--db",
-        "sqlite::memory:",
-    ]);
+    let mut child = spawn_serve(
+        &credentials,
+        &[
+            "--bind",
+            "0.0.0.0:0",
+            "--token-file",
+            store.to_str().expect("utf-8 scratch path"),
+            "--ttl-secs",
+            "30",
+            "--db",
+            "sqlite::memory:",
+        ],
+    );
     let stderr = stderr_until(&mut child, WARNING_PREFIX);
     assert!(
         stderr.contains(WARNING_PREFIX),
@@ -213,17 +223,21 @@ fn a_public_bind_warns_with_a_credential_store() {
 /// A loopback bind prints no warning: the same start, silent stderr.
 #[test]
 fn a_loopback_bind_stays_silent() {
-    let mut child = spawn_serve(&[
-        "--bind",
-        "127.0.0.1:0",
-        "--dev",
-        "--ttl-secs",
-        "30",
-        "--output",
-        "text",
-        "--db",
-        "sqlite::memory:",
-    ]);
+    let scratch = NodeDir::new("bind-loopback");
+    let mut child = spawn_serve(
+        &scratch,
+        &[
+            "--bind",
+            "127.0.0.1:0",
+            "--dev",
+            "--ttl-secs",
+            "30",
+            "--output",
+            "text",
+            "--db",
+            "sqlite::memory:",
+        ],
+    );
     let listening = stdout_listening(&mut child);
     assert!(listening, "the loopback bind must proceed");
     let stderr = kill_and_collect_stderr(child);
@@ -238,14 +252,18 @@ fn a_loopback_bind_stays_silent() {
 /// refusal is on stderr, so the warning never replaces the refusal.
 #[test]
 fn an_anonymous_public_bind_outside_dev_mode_is_still_refused() {
-    let mut child = spawn_serve(&[
-        "--bind",
-        "0.0.0.0:0",
-        "--ttl-secs",
-        "30",
-        "--db",
-        "sqlite::memory:",
-    ]);
+    let scratch = NodeDir::new("bind-anonymous");
+    let mut child = spawn_serve(
+        &scratch,
+        &[
+            "--bind",
+            "0.0.0.0:0",
+            "--ttl-secs",
+            "30",
+            "--db",
+            "sqlite::memory:",
+        ],
+    );
     let stderr = stderr_until(&mut child, "refusing anonymous bind");
     assert!(
         stderr.contains("refusing anonymous bind"),

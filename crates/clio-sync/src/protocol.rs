@@ -7,6 +7,9 @@
 //!  the mutation envelope, payload batch, opaque cursor codec, the
 //! default LWW conflict comparison, and the masked status report shape.
 //!
+//! The denial operation's own carrier and proof vocabulary lives in `denial`;
+//! this module carries its per-mutation acknowledgement on `PushAck`.
+//!
 //! ## Owns
 //! - `SyncMutation` / `SyncPayload` envelope and request/response types
 //! - Opaque `sync_cursor` encode/decode (seq + checksum)
@@ -192,6 +195,11 @@ pub struct PushAck {
     pub accepted: Vec<String>,
     /// Mutation ids the server rejected outright (never silently dropped).
     pub rejected: Vec<String>,
+    /// The durable proofs for the acknowledged denial operations, in payload
+    /// order. Empty (and omitted from the wire) when the push acknowledged
+    /// none, so a reader that does not know the field parses an ack unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denial_acks: Vec<crate::denial::DenialAck>,
 }
 
 /// Pull request: fetch journal rows since `cursor`.

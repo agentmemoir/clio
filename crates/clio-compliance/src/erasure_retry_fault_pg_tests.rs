@@ -123,6 +123,7 @@ fn postgres_a_changed_scope_retry_refuses_before_the_effect() {
     erase_confirmed_request(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -135,6 +136,7 @@ fn postgres_a_changed_scope_retry_refuses_before_the_effect() {
         ..attempt.args(&fixture.store, &ctx, &sink)
     };
     let err = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,
@@ -168,6 +170,7 @@ fn postgres_a_key_probe_error_keeps_the_intent_pending() {
     let args = attempt.args(&double, &ctx, &sink);
     let live = vec![attempt.bank.clone()];
     let err = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,

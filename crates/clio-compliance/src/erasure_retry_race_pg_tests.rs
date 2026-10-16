@@ -112,7 +112,7 @@ fn postgres_reconcile_keeps_a_destroyed_key_without_the_purge_pending() {
     let mut double = RetryStore::failing();
     double.banks = vec![attempt.bank.clone()];
     let sink = EraseVecSink::default();
-    let env = attempt.env(&double, &sink);
+    let env = attempt.env(&double, &fixture.store, &sink);
     let live = double.effect_bank_set();
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let action_id = erasure_action_id(&attempt.request_id);
@@ -183,9 +183,15 @@ fn postgres_a_racing_intent_write_resumes_without_a_second_effect() {
     let events = PgRacingIntent {
         inner: &fixture.store,
     };
-    let outcome =
-        erase_confirmed_request(&fixture.store, &events, &attempt.request_id, &args, &live)
-            .expect("the raced intent resumes the flow");
+    let outcome = erase_confirmed_request(
+        &fixture.store,
+        &events,
+        &fixture.store,
+        &attempt.request_id,
+        &args,
+        &live,
+    )
+    .expect("the raced intent resumes the flow");
     assert_eq!(outcome.status, "COMPLETED");
     assert!(
         fixture
@@ -238,6 +244,7 @@ fn postgres_a_duplicate_call_after_completion_adds_no_second_effect() {
     erase_confirmed_request(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -245,6 +252,7 @@ fn postgres_a_duplicate_call_after_completion_adds_no_second_effect() {
     .expect("the first attempt completes");
     let tombstones = pg_tombstone_count(&attempt, &fixture.store);
     let duplicate = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,

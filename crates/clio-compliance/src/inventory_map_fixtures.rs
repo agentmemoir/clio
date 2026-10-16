@@ -72,6 +72,7 @@ pub(crate) const FIXTURE_COUNTS: &[(&str, u64, u64, bool)] = &[
     ("erasure_adapters", 0, 0, true),
     ("local_erasure_journal", 0, 0, true),
     ("local_events", 0, 1, true),
+    ("peer_actions", 0, 0, true),
     ("restore_guards", 0, 0, true),
     ("subject_family_links", 0, 0, true),
     ("store_file", 0, 0, true),

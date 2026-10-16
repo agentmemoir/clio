@@ -4,10 +4,10 @@
 //! # Responsibility
 //!
 //! This module is responsible for the live-Postgres twin of the subject-bank
-//! coordination refusals: a pending or disposed peer and a changed bank
-//! membership refuse before any erasure effect, and an acknowledged set runs
-//! the real Postgres transaction and key store while a control subject stays
-//! readable.
+//! coordination refusals: a changed bank membership refuses before any
+//! erasure effect, a pending peer no longer blocks the local effect, and an
+//! acknowledged set runs the real Postgres transaction and key store while a
+//! control subject stays readable.
 //!
 //! ## Owns
 //! - The Postgres coordination refusal and acknowledgement assertions
@@ -30,7 +30,7 @@ use crate::inventory_fixture::FixtureDir;
 use crate::inventory_pg_support_tests::{pg_checked_url, pg_skip_note};
 use crate::subject_bank_coordination::coordinated_erase_request;
 use crate::subject_request::{
-    PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
+    PeerEnablement, PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
 };
 use crate::test_unique::unique;
 use clio_store::{
@@ -41,7 +41,7 @@ use clio_types::{
     Actor, AmError, Bank, EpistemicKind, ErrorCode, ItemKind, MemoryItem, OpContext,
     SemanticCategory,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -120,6 +120,8 @@ fn confirmed(
         deadline: None,
         actions: BTreeMap::new(),
         paths: BTreeMap::new(),
+        peer_banks: BTreeSet::new(),
+        peer_enablement: PeerEnablement::for_peer_set(&peers),
         peers,
         exception: None,
     }
@@ -129,14 +131,16 @@ fn confirmed(
 fn two_bank(peer_b: PeerState) -> SubjectRequestRecord {
     let mut peers = BTreeMap::new();
     peers.insert(BANK_B.to_owned(), peer_b);
-    confirmed(
+    let mut record = confirmed(
         RequestKind::Erasure,
         RequestScope::Subject {
             bank_id: BANK_A.into(),
             subject_id: SUBJECT.into(),
         },
         peers,
-    )
+    );
+    record.peer_banks.insert(BANK_B.to_owned());
+    record
 }
 
 /// The live bank set the erasure effect fans out to for one subject, read from
@@ -197,10 +201,11 @@ fn erase_args<'a>(
     }
 }
 
-/// A pending peer refuses on Postgres before any key loss or store effect,
-/// and the subject's item stays readable.
+/// A pending peer does not refuse on Postgres either: the frozen bank set
+/// still matches, so the local effect runs once. Completion is the completion
+/// gate's decision, which this seam never runs.
 #[test]
-fn postgres_a_pending_peer_refuses_before_any_erasure_effect() {
+fn postgres_a_pending_peer_does_not_block_the_local_erasure_effect() {
     let Some(fixture) = pg_store_or_skip() else {
         return;
     };
@@ -231,29 +236,31 @@ fn postgres_a_pending_peer_refuses_before_any_erasure_effect() {
     );
     let live = live_bank_set(&fixture.store, BANK_A, SUBJECT);
     assert_eq!(live, vec![BANK_A.to_owned(), BANK_B.to_owned()]);
-    let err =
-        coordinated_erase_request(&args, &record, &live).expect_err("a pending peer must refuse");
-    assert_eq!(err.code, ErrorCode::Forbidden);
+    let before = record.clone();
+    let outcome = coordinated_erase_request(&args, &record, &live)
+        .expect("a pending peer does not block the local effect");
+    assert_eq!(outcome.status, "COMPLETED");
+    assert_eq!(record, before, "the local effect never rewrites the record");
     assert!(
-        !fixture.store.subject_dek_destroyed(SUBJECT).expect("key"),
-        "the refusal loses no key"
+        fixture.store.subject_dek_destroyed(SUBJECT).expect("key"),
+        "the effect destroys the key"
+    );
+    assert!(
+        !fixture
+            .store
+            .read_tombstones(BANK_A, &record.request_id)
+            .expect("tombstones")
+            .is_empty(),
+        "the effect commits the purge"
     );
     assert_eq!(
         fixture
             .store
-            .read_tombstones(BANK_A, &record.request_id)
-            .expect("tombstones")
-            .len(),
-        0,
-        "the refusal writes no tombstone"
-    );
-    assert!(
-        fixture
-            .store
             .get_memory_item(BANK_A, &item.id)
-            .expect("readable")
-            .is_some(),
-        "the subject's item survives the refusal"
+            .expect_err("the erased subject's item is unreadable")
+            .code,
+        ErrorCode::ErasedSubject,
+        "the destroyed key refuses the item read"
     );
 }
 

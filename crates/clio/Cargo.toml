@@ -27,6 +27,10 @@ clio-retrieve = { workspace = true }
 clio-history = { workspace = true }
 clio-hygiene = { workspace = true }
 clio-mcp = { workspace = true }
+# `sync serve` starts the deployment's server itself so the process can be
+# served through the denial-aware entry point with the erasure-journal probe;
+# the crate is already in this binary's build graph through `clio-mcp`.
+clio-sync = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

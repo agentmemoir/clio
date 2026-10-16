@@ -6,10 +6,12 @@
 //! This module is responsible for the reconcile states the sibling suites have
 //! no room for: a destroyed key whose purge never committed and stays pending
 //! until a later pass runs the purge, a reconcile denial that is terminal for
-//! the flow, and a resume whose subject disagrees with the durable record.
+//! the flow, an unresumable record that stays pending for a later pass, and a
+//! resume whose subject disagrees with the durable record.
 //!
 //! ## Owns
-//! - The partial-effect, terminal-denial, and foreign-subject assertions
+//! - The partial-effect, unresumable, terminal-denial, and foreign-subject
+//!   assertions
 //!
 //! ## Does not own
 //! - The reconcile (`erasure_reconcile.rs`), the flow (`erasure_retry.rs`), and
@@ -19,8 +21,8 @@
 //! ## Boundary
 //!
 //! Tests here break when reconciliation settles over uncommitted store work,
-//! when a denied action is resumed, or when a resume may probe a subject its
-//! record does not name.
+//! when an unresumable record is denied, when a denied action is resumed, or
+//! when a resume may probe a subject its record does not name.
 //!
 //! Test-only. Never compiled into production builds.
 
@@ -49,7 +51,7 @@ fn reconcile_keeps_a_destroyed_key_without_the_purge_pending() {
     let mut double = RetryStore::failing();
     double.banks = vec![attempt.bank.clone()];
     let sink = EraseVecSink::default();
-    let env = attempt.env(&double, &sink);
+    let env = attempt.env(&double, &store, &sink);
     let live = double.effect_bank_set();
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let first = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
@@ -110,7 +112,7 @@ fn reconcile_settles_a_destroyed_key_whose_purge_is_pending_without_recreating_i
         "the key is destroyed and the purge has not run"
     );
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let live = live_set(&attempt, &store);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
@@ -146,7 +148,7 @@ fn reconcile_denial_refuses_a_later_flow_call() {
         .expect("seed the subject item");
     record_erasure_intent(&store, &attempt.request_id);
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let changed = vec![attempt.bank.clone(), unique("joined-bank")];
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, changed.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
@@ -159,7 +161,7 @@ fn reconcile_denial_refuses_a_later_flow_call() {
     let live = live_set(&attempt, &store);
     let args = attempt.args(&store, &ctx, &sink);
     // The changed bank set is cleared up, so only the denial can refuse here.
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("a denied action is never resumed");
     assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
     let rows = action_rows(&store, &action_id(&attempt));
@@ -213,7 +215,7 @@ fn reconcile_refuses_a_resume_that_names_another_subject() {
         .expect("seed the other subject");
     record_erasure_intent(&store, &attempt.request_id);
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let live = live_set(&attempt, &store);
     let resume = |_: &SubjectRequestRecord| {
         Some(ErasureResume {
@@ -256,4 +258,28 @@ fn reconcile_refuses_a_resume_that_names_another_subject() {
         0,
         "the refusal writes no tombstone"
     );
+}
+
+/// An unresumable record stays pending — this pass cannot observe the effect —
+/// and a later resumable pass still settles the action.
+#[test]
+fn reconcile_keeps_an_unresumable_action_pending_for_a_later_pass() {
+    let (attempt, store) = persisted();
+    store
+        .create_memory_item(&wiring_item(&attempt.bank, &attempt.subject), "tester")
+        .expect("seed the subject item");
+    record_erasure_intent(&store, &attempt.request_id);
+    let sink = EraseVecSink::default();
+    let env = attempt.env(&store, &store, &sink);
+    let report = reconcile_erasure_actions(&store, &store, &env, &|_| None).expect("reconcile");
+    assert_eq!(report.pending, vec![action_id(&attempt)]);
+    let rows = action_rows(&store, &action_id(&attempt));
+    assert_eq!(rows[0].state, LocalEventState::Pending, "never denied");
+    assert!(rows[0].result.is_none(), "no outcome is written");
+    let live = live_set(&attempt, &store);
+    let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
+    let later = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
+    assert_eq!(later.settled, vec![action_id(&attempt)], "it settles later");
+    let settled = action_rows(&store, &action_id(&attempt));
+    assert_eq!(settled[0].state, LocalEventState::Allowed);
 }

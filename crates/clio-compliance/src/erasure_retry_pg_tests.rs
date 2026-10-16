@@ -152,8 +152,15 @@ fn postgres_an_intent_write_failure_refuses_before_the_effect() {
     let args = attempt.args(&fixture.store, &ctx, &sink);
     let live = pg_live_set(&attempt, &fixture.store);
     let events = FaultEvents::intent_fails();
-    let err = erase_confirmed_request(&fixture.store, &events, &attempt.request_id, &args, &live)
-        .expect_err("a failed intent must refuse");
+    let err = erase_confirmed_request(
+        &fixture.store,
+        &events,
+        &fixture.store,
+        &attempt.request_id,
+        &args,
+        &live,
+    )
+    .expect_err("a failed intent must refuse");
     assert_eq!(err.code, ErrorCode::Internal, "the injected intent fault");
     assert_eq!(
         pg_tombstone_count(&attempt, &fixture.store),
@@ -200,6 +207,7 @@ fn postgres_a_same_scope_repeat_is_idempotent() {
     let first = erase_confirmed_request(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -211,6 +219,7 @@ fn postgres_a_same_scope_repeat_is_idempotent() {
     // tombstone here, so the count is pinned exactly.
     assert_eq!(tombstones, 1, "the first attempt commits the purge once");
     let repeat = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,
@@ -266,6 +275,7 @@ fn postgres_an_intent_id_held_by_another_event_kind_refuses() {
     let err = erase_confirmed_request(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -301,6 +311,7 @@ fn postgres_a_harmless_effect_failure_keeps_the_intent_pending_until_a_resume_co
     let err = erase_confirmed_request(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -323,13 +334,14 @@ fn postgres_a_harmless_effect_failure_keeps_the_intent_pending_until_a_resume_co
     );
     let rows = pg_action_rows(&fixture.store, &action_id);
     assert!(rows[0].result.is_none(), "no outcome, never a denial");
-    let env = attempt.env(&double, &sink);
+    let env = attempt.env(&double, &fixture.store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&fixture.store, &fixture.store, &env, &resume)
         .expect("reconcile");
     assert_eq!(report.pending, vec![action_id.clone()]);
     double.fail_effect.store(false, Ordering::SeqCst);
     let recovered = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,
@@ -364,8 +376,15 @@ fn postgres_an_outcome_failure_reconciles_across_a_restart_without_another_erase
     let sink = EraseVecSink::default();
     let args = attempt.args(&fixture.store, &ctx, &sink);
     let events = FaultEvents::outcome_fails_over(&fixture.store);
-    erase_confirmed_request(&fixture.store, &events, &attempt.request_id, &args, &live)
-        .expect_err("the failed outcome write is reported");
+    erase_confirmed_request(
+        &fixture.store,
+        &events,
+        &fixture.store,
+        &attempt.request_id,
+        &args,
+        &live,
+    )
+    .expect_err("the failed outcome write is reported");
     let action_id = erasure_action_id(&attempt.request_id);
     assert_eq!(
         fixture.store.pending_actions().expect("pending"),
@@ -388,7 +407,7 @@ fn postgres_an_outcome_failure_reconciles_across_a_restart_without_another_erase
     );
     let changed = vec![attempt.bank.clone(), unique("joined-bank")];
     let sink = EraseVecSink::default();
-    let env = attempt.env(&fixture.store, &sink);
+    let env = attempt.env(&fixture.store, &fixture.store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, changed.clone()));
     let report = reconcile_erasure_actions(&fixture.store, &fixture.store, &env, &resume)
         .expect("reconcile");

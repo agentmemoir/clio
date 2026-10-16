@@ -6,8 +6,9 @@
 //! This module is responsible for the consumer-side wiring between the typed
 //! subject-request contract and the durable request store: the record/row
 //! mapping, the restart ledger reload, the closure-fact derivation from a
-//! stored record, and the erasure seam that loads the confirmed record from
-//! the durable store before any effect.
+//! stored record's own actions, its copy rows, and its durable peer rows, and
+//! the erasure seam that loads the confirmed record from the durable store
+//! before any effect.
 //!
 //! ## Owns
 //! - `record_to_row` / `row_to_record`, the canonical serialization of a
@@ -15,9 +16,10 @@
 //! - `reload_ledger`, rebuilding the ledger from the store's restart read
 //! - `closure_inputs`, deriving the closure-acceptance facts from a stored
 //!   record
-//! - `copy_row_disposition` and `copy_row_closure_facts`, attaching every
-//!   stored copy row of a request to a request result or a named open gap
-//!   and folding the rows into the closure-gate facts
+//! - `copy_row_closure_facts` and `peer_row_closure_facts`, folding the stored
+//!   copy rows and the durable peer rows of a request into the closure-gate
+//!   facts, with `copy_row_disposition` (declared in `copy_row_disposition.rs`
+//!   and re-exported here) parsing one stored copy row
 //! - `record_copy_disposition` and `record_retention_exception`, the
 //!   privileged-actor gates for recording a copy disposition and a
 //!   request-level retention exception
@@ -25,10 +27,12 @@
 //!   the confirmed record from the durable store and runs the erasure retry
 //!   contract
 //!
-//! The copy-disposition seam is a test and tooling seam, not the shipping
+//! The copy-inventory seam is a test and tooling seam, not the shipping
 //! command-layer path: `copy_row_closure_facts`, `record_copy_disposition`,
 //! and `record_retention_exception` have no shipping caller yet, so no
-//! request path refuses on copy state through them.
+//! request path refuses on copy-inventory state through them. The peer fold
+//! is on the request path: the erasure settle reads it through the retry
+//! contract, so an unevidenced peer keeps the request outcome partial.
 //!
 //! ## Does not own
 //! - The durable request SQL, its scope-conflict refusal, and its row
@@ -48,12 +52,11 @@
 //!
 //! Keep this module focused on the durable-record consumer mapping.
 
-use crate::copy_disposition::{
-    CopyAction, CopyClosureFacts, CopyCustodyClass, CopyDisposition, CopyDispositionOutcome,
-    CopyOwner, CopyRequiredAction, CopyState, copy_closure_facts,
-};
+use crate::copy_disposition::{CopyClosureFacts, peer_copy_disposition, request_closure_facts};
 use crate::erase::{EraseArgs, EraseOutcome};
+use crate::erasure_retry::erase_confirmed_request;
 use crate::local_review::authorize;
+use crate::subject_peer::row_of;
 use crate::subject_request::{
     PathState, RequestActionState, RequestKind, RequestScope, SubjectRequestLedger,
     SubjectRequestRecord,
@@ -61,10 +64,17 @@ use crate::subject_request::{
 use crate::subject_request_events::ClosureInputs;
 use clio_store::{
     CopyInventoryRow, CopyInventoryStore, DurableRequestRow, DurableRequestStore, LocalEventStore,
+    PeerActionRow,
 };
 use clio_types::{Actor, AmError, ErrorCode, OpContext};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+// Declared here, beside the fold that consumes the parse.
+#[path = "copy_row_disposition.rs"]
+mod copy_row_disposition;
+
+pub use copy_row_disposition::copy_row_disposition;
 
 /// Encode one field of the durable record.
 ///
@@ -179,9 +189,8 @@ pub fn closure_inputs(record: &SubjectRequestRecord, product_path: &str) -> Clos
 /// Erase through the confirmed record the durable store holds, internally.
 ///
 /// Internal request-bound erasure entry, not yet bound to any command: its
-/// callers are tests that persist a record first, and the bank-scope public
-/// tool keeps its own path. Internal means no command is bound to it yet,
-/// while the crate-root entry stays available to the command layer.
+/// callers persist a record first, and the bank-scope public tool keeps its own
+/// path while the crate-root entry stays available to the command layer.
 ///
 /// The store row is the only source of the confirmed scope and peer slots: a
 /// missing row refuses, and the loaded record drives the coordination
@@ -201,100 +210,12 @@ pub fn closure_inputs(record: &SubjectRequestRecord, product_path: &str) -> Clos
 pub fn erase_from_durable_store(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
+    peers: &dyn clio_store::PeerActionStore,
     request_id: &str,
     args: &EraseArgs<'_>,
     live_banks: &[String],
 ) -> Result<EraseOutcome, AmError> {
-    crate::erasure_retry::erase_confirmed_request(durable, events, request_id, args, live_banks)
-}
-
-/// The stored custody class of a copy row.
-///
-/// A class name the disposition vocabulary does not hold is
-/// [`CopyCustodyClass::Unknown`], which refuses any completion claim.
-fn custody_class(text: &str) -> CopyCustodyClass {
-    match text {
-        "clio" => CopyCustodyClass::Clio,
-        "operator" => CopyCustodyClass::Operator,
-        "caller" => CopyCustodyClass::Caller,
-        "peer" => CopyCustodyClass::Peer,
-        "review_output" => CopyCustodyClass::ReviewOutput,
-        _ => CopyCustodyClass::Unknown,
-    }
-}
-
-/// The technical erasure state of a copy row.
-///
-/// A state name the disposition vocabulary does not hold is
-/// [`CopyState::Unknown`], which refuses a technical-completion claim.
-fn copy_state(text: &str) -> CopyState {
-    match text {
-        "pending" => CopyState::Pending,
-        "done" => CopyState::Done,
-        "failed" => CopyState::Failed,
-        _ => CopyState::Unknown,
-    }
-}
-
-/// Parse one stored copy row into its disposition.
-///
-/// The row is metadata only: the disposition carries the row's custody,
-/// owner, required action, and state, and no copy content. The parse fails
-/// closed: an owner or a required action the vocabulary does not hold
-/// refuses the row, because neither has an unknown variant, while an
-/// unrecognized custody or state maps to its own unknown variant.
-///
-/// The row's action stays open while the copy owes a durable result: a named
-/// exception reason or any technical state other than done keeps it open, so
-/// the row attaches to a named open gap instead of a request result.
-///
-/// # Errors
-/// An owner or a required action the disposition vocabulary does not hold.
-pub fn copy_row_disposition(row: &CopyInventoryRow) -> Result<CopyDisposition, AmError> {
-    let owner = match row.owner.as_str() {
-        "harness" => CopyOwner::Harness,
-        "system" => CopyOwner::System,
-        other => {
-            return Err(AmError::new(
-                ErrorCode::Internal,
-                format!(
-                    "copy `{}` names owner `{other}`, which carries no compliance privilege",
-                    row.copy_id
-                ),
-            ));
-        }
-    };
-    let kind = match row.required_action.as_str() {
-        "erase" => CopyRequiredAction::Erase,
-        "remove" => CopyRequiredAction::Remove,
-        "delivery" => CopyRequiredAction::Delivery,
-        "notice" => CopyRequiredAction::Notice,
-        other => {
-            return Err(AmError::new(
-                ErrorCode::Internal,
-                format!(
-                    "copy `{}` names required action `{other}`, which the vocabulary does not hold",
-                    row.copy_id
-                ),
-            ));
-        }
-    };
-    let state = copy_state(&row.state);
-    let open = row.exception_reason.is_some() || state != CopyState::Done;
-    Ok(CopyDisposition {
-        copy_id: row.copy_id.clone(),
-        custody: custody_class(&row.custody),
-        owner,
-        state,
-        actions: vec![CopyAction {
-            kind,
-            state: if open {
-                RequestActionState::Open
-            } else {
-                RequestActionState::Closed
-            },
-        }],
-    })
+    erase_confirmed_request(durable, events, peers, request_id, args, live_banks)
 }
 
 /// The closure facts the stored record and its copy rows support.
@@ -323,17 +244,33 @@ pub fn copy_row_closure_facts(
         .filter(|row| row.request_id == record.request_id)
         .map(copy_row_disposition)
         .collect::<Result<Vec<_>, _>>()?;
-    let base = closure_inputs(record, product_path);
-    let mut facts = copy_closure_facts(
+    Ok(request_closure_facts(
         &dispositions,
-        base.product_path_known,
-        base.retention_exception_approved,
-    );
-    facts.inputs.open_copy_actions += base.open_copy_actions;
-    if facts.outcome == CopyDispositionOutcome::Full && facts.inputs.open_copy_actions > 0 {
-        facts.outcome = CopyDispositionOutcome::Partial;
-    }
-    Ok(facts)
+        closure_inputs(record, product_path),
+    ))
+}
+
+/// The closure facts the stored record and its durable peer rows support.
+///
+/// Each frozen peer slot contributes the disposition its own durable row
+/// supports — an acknowledged row or a recorded removal evidence with its
+/// proof closes the peer's removal action, while an approved retention, an
+/// unknown disposition, and a missing row leave it open — so a peer that is
+/// not evidenced reaches the request outcome as an open action with a partial
+/// outcome, and the closure gate refuses the completion instead.
+#[must_use]
+pub fn peer_row_closure_facts(
+    record: &SubjectRequestRecord,
+    peer_rows: &[PeerActionRow],
+    product_path: &str,
+) -> CopyClosureFacts {
+    let dispositions = record
+        .peers
+        .keys()
+        .filter_map(|peer_id| row_of(record, peer_id, peer_rows))
+        .map(peer_copy_disposition)
+        .collect::<Vec<_>>();
+    request_closure_facts(&dispositions, closure_inputs(record, product_path))
 }
 
 /// Record one copy disposition through the privileged-actor gate.
@@ -428,6 +365,12 @@ mod erasure_retry_reconcile_tests;
 #[cfg(test)]
 #[path = "erasure_reconcile_guard_tests.rs"]
 mod erasure_reconcile_guard_tests;
+
+// Declared beside the fold it drives, so the peer-row closure-fact suite
+// reuses this module's erasure and restart fixtures.
+#[cfg(test)]
+#[path = "peer_row_closure_facts_tests.rs"]
+mod peer_row_closure_facts_tests;
 
 #[cfg(test)]
 #[path = "subject_request_store_wiring_pg_tests.rs"]

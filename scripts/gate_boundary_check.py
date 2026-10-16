@@ -90,6 +90,9 @@ CALLER_NAMED = frozenset(
         # Sync apply persists ALREADY-ADMITTED peer creates: the convergence rule
         # forbids re-running local admission on trusted remote creates.
         "crates/clio-sync/src/apply.rs",
+        # Same already-admitted path as `apply.rs`: the item upsert effect
+        # moved here when the apply engine was split.
+        "crates/clio-sync/src/apply_items.rs",
         # The MCP `import_provider` adapter admits through
         # `clio_admission::gated_create_raw`.
         "crates/clio-mcp/src/provider_adapter.rs",

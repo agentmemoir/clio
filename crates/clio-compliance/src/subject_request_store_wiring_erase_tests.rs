@@ -33,14 +33,14 @@ use super::subject_request_store_wiring_tests::{
 };
 use crate::erase::EraseVecSink;
 use crate::erasure_retry::erasure_action_id;
-use crate::subject_request::{PeerState, RequestKind, RequestScope};
+use crate::subject_request::{PeerState, RequestKind, RequestScope, RequestState};
 use crate::subject_request_store_wiring::{erase_from_durable_store, record_to_row, row_to_record};
 use crate::test_unique::unique;
-use clio_store::{ComplianceStore, DurableRequestStore, LocalEventState, LocalEventStore, Store};
+use clio_store::{ComplianceStore, DurableRequestStore, LocalEventStore, Store};
 use clio_types::{Actor, Bank, ErrorCode, OpContext};
 use std::sync::atomic::Ordering;
 
-/// A peer bank that has not acknowledged refuses the durable-store erasure
+/// A confirmation that is not in progress refuses the durable-store erasure
 /// before any erasure effect.
 #[test]
 fn sqlite_an_incomplete_confirmation_refuses_before_any_erasure_effect() {
@@ -49,11 +49,10 @@ fn sqlite_an_incomplete_confirmation_refuses_before_any_erasure_effect() {
     let request_id = unique("req");
     let scope = subject_scope();
     let (bank, subject) = scope_parts(&scope);
-    let peer_bank = unique("peer-bank");
     {
         let store = open_sqlite(&path);
         let mut record = started_record(&request_id, &scope);
-        record.peers.insert(peer_bank.clone(), PeerState::Pending);
+        record.state = RequestState::Received;
         persist(&store, &record);
     }
     let store = open_sqlite(&path);
@@ -62,15 +61,15 @@ fn sqlite_an_incomplete_confirmation_refuses_before_any_erasure_effect() {
         .expect("load the row")
         .expect("row exists");
     let mut double = RetryStore::failing();
-    double.banks = vec![bank.clone(), peer_bank];
+    double.banks = vec![bank.clone()];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
     // A fresh salt per test; retries reuse it and no assertion fixes a hash.
     let salt = rand::random::<[u8; 16]>();
     let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
-    let err = erase_from_durable_store(&store, &store, &request_id, &args, &live)
-        .expect_err("an unacknowledged peer must refuse");
+    let err = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
+        .expect_err("an incomplete confirmation must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
     assert_eq!(
         double.erase_calls(),
@@ -110,7 +109,7 @@ fn sqlite_a_new_subject_bank_write_after_confirmation_cannot_widen_the_erasure()
     let ctx = attempt.ctx();
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
-    let err = erase_from_durable_store(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_from_durable_store(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("a widened bank set must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden);
     assert!(
@@ -175,7 +174,7 @@ fn sqlite_a_partial_erasure_retry_never_reports_completion_early() {
     let salt = rand::random::<[u8; 16]>();
     let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
-    let first = erase_from_durable_store(&store, &store, &request_id, &args, &live)
+    let first = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
         .expect("a partial failure reports PROCESSING");
     assert_eq!(first.status, "PROCESSING");
     assert_eq!(
@@ -191,7 +190,7 @@ fn sqlite_a_partial_erasure_retry_never_reports_completion_early() {
         before,
         "an attempt must not rewrite the durable row"
     );
-    let retry = erase_from_durable_store(&store, &store, &request_id, &args, &live)
+    let retry = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
         .expect("the retried attempt also reports PROCESSING");
     assert_eq!(
         retry.status, "PROCESSING",
@@ -207,7 +206,7 @@ fn sqlite_a_partial_erasure_retry_never_reports_completion_early() {
         "a retry reloads the same row"
     );
     double.fail.store(false, Ordering::SeqCst);
-    let recovered = erase_from_durable_store(&store, &store, &request_id, &args, &live)
+    let recovered = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
         .expect("the recovered attempt completes");
     assert_eq!(recovered.status, "COMPLETED");
     assert_eq!(double.erase_calls(), 3, "each attempt runs the effect once");
@@ -250,7 +249,7 @@ fn sqlite_an_erasure_for_a_request_the_store_does_not_hold_refuses() {
     let salt = rand::random::<[u8; 16]>();
     let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
-    let err = erase_from_durable_store(&store, &store, &request_id, &args, &live)
+    let err = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
         .expect_err("a missing durable row must refuse");
     assert_eq!(err.code, ErrorCode::NotFound);
     assert_eq!(
@@ -289,7 +288,7 @@ fn sqlite_an_erasure_with_a_corrupted_durable_row_fails_closed() {
     let salt = rand::random::<[u8; 16]>();
     let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
-    let err = erase_from_durable_store(&store, &store, &request_id, &args, &live)
+    let err = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
         .expect_err("a corrupted durable row must refuse");
     assert_eq!(err.code, ErrorCode::Internal);
     assert_eq!(
@@ -358,16 +357,16 @@ fn sqlite_a_missing_request_refuses_before_any_erasure_effect() {
     let sink = EraseVecSink::default();
     let salt = rand::random::<[u8; 16]>();
     let args = erase_args(&double, &ctx, &sink, "missing", "subject", &salt);
-    let err = erase_from_durable_store(&store, &store, "missing", &args, &[])
+    let err = erase_from_durable_store(&store, &store, &store, "missing", &args, &[])
         .expect_err("missing confirmation must refuse");
     assert_eq!(err.code, ErrorCode::NotFound);
     assert_eq!(double.erase_calls(), 0, "no confirmation permits no effect");
 }
 
-/// A pending peer refuses the seam before any intent event, store effect, or
-/// key loss.
+/// A pending peer does not refuse the seam: the intent is written, the
+/// effect runs once, and the completion gate keeps the action pending.
 #[test]
-fn sqlite_a_pending_peer_refuses_before_any_intent_event() {
+fn sqlite_a_pending_peer_keeps_completion_pending_without_blocking_the_effect() {
     let scratch = Scratch::new();
     let path = scratch.0.join("store.db");
     let request_id = unique("req");
@@ -378,72 +377,32 @@ fn sqlite_a_pending_peer_refuses_before_any_intent_event() {
         let store = open_sqlite(&path);
         let mut record = started_record(&request_id, &scope);
         record.peers.insert(peer_bank.clone(), PeerState::Pending);
+        record.peer_banks.insert(peer_bank.clone());
         persist(&store, &record);
     }
     let store = open_sqlite(&path);
     let mut double = RetryStore::failing();
-    double.banks = vec![bank.clone(), peer_bank];
+    double.banks = vec![bank.clone(), peer_bank.clone()];
     let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
     let sink = EraseVecSink::default();
     // A fresh salt per test; retries reuse it and no assertion fixes a hash.
     let salt = rand::random::<[u8; 16]>();
     let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
     let live = double.effect_bank_set();
-    let err = erase_from_durable_store(&store, &store, &request_id, &args, &live)
-        .expect_err("a pending peer must refuse the preflight");
-    assert_eq!(err.code, ErrorCode::Forbidden);
-    assert!(
-        store.list_events().expect("events").is_empty(),
-        "the refusal writes no intent event"
+    let outcome = erase_from_durable_store(&store, &store, &store, &request_id, &args, &live)
+        .expect("a pending peer does not refuse the effect");
+    assert_eq!(outcome.status, "PROCESSING", "the completion stays open");
+    assert_eq!(double.erase_calls(), 1, "the effect runs once");
+    assert_eq!(
+        store.pending_actions().expect("pending"),
+        vec![erasure_action_id(&request_id)],
+        "the action stays pending"
     );
-    assert_eq!(double.erase_calls(), 0, "the refusal runs no store effect");
-    assert!(
-        !double.subject_dek_destroyed(&subject).expect("key"),
-        "the refusal loses no key"
+    let stored = row_to_record(&store.load(&request_id).expect("load").expect("row exists"))
+        .expect("decode");
+    assert_eq!(
+        stored.peers.get(&peer_bank),
+        Some(&PeerState::Pending),
+        "the peer stays pending"
     );
-}
-
-/// Every peer acknowledged settles one allowed outcome through the seam.
-#[test]
-fn sqlite_every_peer_acknowledged_settles_one_allowed_outcome() {
-    let scratch = Scratch::new();
-    let path = scratch.0.join("store.db");
-    let request_id = unique("req");
-    let scope = subject_scope();
-    let (bank, subject) = scope_parts(&scope);
-    let peer_bank = unique("peer-bank");
-    {
-        let store = open_sqlite(&path);
-        let mut record = started_record(&request_id, &scope);
-        record
-            .peers
-            .insert(peer_bank.clone(), PeerState::Acknowledged);
-        persist(&store, &record);
-    }
-    let store = open_sqlite(&path);
-    let mut double = RetryStore::failing();
-    double.fail.store(false, Ordering::SeqCst);
-    double.banks = vec![bank.clone(), peer_bank];
-    let ctx = OpContext::new(Bank::new(bank), Actor::Harness);
-    let sink = EraseVecSink::default();
-    // A fresh salt per test; retries reuse it and no assertion fixes a hash.
-    let salt = rand::random::<[u8; 16]>();
-    let args = erase_args(&double, &ctx, &sink, &request_id, &subject, &salt);
-    let live = double.effect_bank_set();
-    let outcome = erase_from_durable_store(&store, &store, &request_id, &args, &live)
-        .expect("the coordinated erasure completes");
-    assert_eq!(outcome.status, "COMPLETED");
-    let action_id = erasure_action_id(&request_id);
-    assert!(
-        store.pending_actions().expect("pending").is_empty(),
-        "the action is settled"
-    );
-    let rows: Vec<_> = store
-        .list_events()
-        .expect("events")
-        .into_iter()
-        .filter(|event| event.action_id == action_id)
-        .collect();
-    assert_eq!(rows.len(), 1, "one allowed outcome");
-    assert_eq!(rows[0].state, LocalEventState::Allowed);
 }

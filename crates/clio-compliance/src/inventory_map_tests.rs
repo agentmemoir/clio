@@ -59,6 +59,7 @@ const CLASS_MAP: &[(&str, FamilyClass)] = &[
     ("erasure_adapters", FamilyClass::InseparableShared),
     ("local_erasure_journal", FamilyClass::InseparableShared),
     ("local_events", FamilyClass::InseparableShared),
+    ("peer_actions", FamilyClass::InseparableShared),
     ("restore_guards", FamilyClass::InseparableShared),
     ("subject_family_links", FamilyClass::InseparableShared),
     ("store_file", FamilyClass::NotStored),
