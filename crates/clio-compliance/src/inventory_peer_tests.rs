@@ -6,12 +6,14 @@
 //! This module is responsible for the peer-fact tests of the scope ledger:
 //! the peers-disabled not-applicable fact, the acknowledgement state a caller
 //! supplies from the durable per-peer rows, the binding rule that keeps an
-//! unbound or foreign row from settling a peer, and the rule that supplying
-//! those rows changes no other ledger row.
+//! unbound or foreign row from settling a peer, the evidence rule that a
+//! recorded removal is proven only by its proof reference, and the rule that
+//! supplying those rows changes no other ledger row.
 //!
 //! ## Owns
 //! - The enabled-peers row assertions for the supplied enablement fact and the
 //!   durable per-peer action rows read back from the fixture store
+//! - The unproven-removal negative and its proven positive over that same row
 //!
 //! ## Does not own
 //! - The ledger itself (`inventory.rs`) and its peer rendering
@@ -19,6 +21,9 @@
 //! - The durable per-peer row contract (`clio-store`'s `peer_actions`)
 //!
 //! ## Boundary
+//!
+//! Tests here break when an unbound, foreign, or unproven durable row settles
+//! or disposes the ledger's peers row.
 //!
 //! Test-only. Never compiled into production builds.
 //!
@@ -187,6 +192,76 @@ fn a_refused_peer_with_an_evidenced_disposition_is_never_read_as_acknowledged() 
         "an evidenced disposition is recorded, not open: {:?}",
         row.open_reason
     );
+}
+
+#[test]
+fn an_unproven_removal_evidence_row_stays_open_and_is_never_disposed() {
+    let fixture = LedgerFixture::create();
+    let request = unique("inv-peer-unproven");
+    let peer = unique("inv-peer-unproven-a");
+    begin_denial(&fixture.store, &request, &peer).expect("begin the peer's denial row");
+    record_disposition(
+        &fixture.store,
+        &request,
+        &peer,
+        PeerActionDisposition::RemovalEvidence,
+        None,
+    )
+    .expect("record the peer's unproven removal");
+
+    let ledger = scope_inventory(&input_with_rows(&fixture, &request));
+    let row = row_for(&ledger, "enabled_peers");
+    assert!(
+        row.open,
+        "a removal the durable row cannot prove keeps the peer open"
+    );
+    assert!(
+        row.source
+            .contains(&format!("{peer} pending, removal evidence is unproven")),
+        "the unproven removal is named pending: {}",
+        row.source
+    );
+    assert!(
+        !row.source.contains("disposed"),
+        "an unproven removal is never reported disposed: {}",
+        row.source
+    );
+    let why = reason(&ledger, "enabled_peers");
+    assert!(
+        why.contains(&peer) && why.contains("unproven"),
+        "the open reason names the unproven removal: {why}"
+    );
+}
+
+#[test]
+fn a_proven_removal_evidence_row_is_reported_disposed() {
+    let fixture = LedgerFixture::create();
+    let request = unique("inv-peer-proven");
+    let peer = unique("inv-peer-proven-a");
+    begin_denial(&fixture.store, &request, &peer).expect("begin the peer's denial row");
+    record_disposition(
+        &fixture.store,
+        &request,
+        &peer,
+        PeerActionDisposition::RemovalEvidence,
+        Some("deletion-9"),
+    )
+    .expect("record the peer's proven removal");
+
+    let ledger = scope_inventory(&input_with_rows(&fixture, &request));
+    let row = row_for(&ledger, "enabled_peers");
+    assert!(
+        row.source
+            .contains(&format!("{peer} disposed (removal evidence)")),
+        "the proven removal is named disposed: {}",
+        row.source
+    );
+    assert!(
+        !row.open && row.open_reason.is_none(),
+        "a proven removal settles the peer: {:?}",
+        row.open_reason
+    );
+    assert!(row.gap.is_none(), "no acknowledgement gap applies");
 }
 
 #[test]

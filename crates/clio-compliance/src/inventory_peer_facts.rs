@@ -17,6 +17,8 @@
 //! - The durable per-peer action row contract (`clio-store`'s `peer_actions`)
 //! - Which peers a deployment enables, and reading their durable rows: the
 //!   caller supplies both the enablement fact and the rows it read back
+//! - The evidence rule itself (`subject_peer`'s `peer_row_settled`): this
+//!   module reads it and never re-derives it
 //! - Whether a peer's result settles a request (the request record owns that)
 //!
 //! ## Boundary
@@ -27,11 +29,13 @@
 //! Keep this module focused on rendering the peer fact of one ledger run.
 
 use super::{InventoryInput, RowPlan, RowSource};
-use crate::subject_peer::peer_action_id;
+use crate::subject_peer::{peer_action_id, peer_row_settled};
 use clio_store::{PeerActionDisposition, PeerActionKind, PeerActionRow, PeerActionState};
 
 /// The reason a peer fact with no enablement fact stays open.
 const UNVERIFIED: &str = "peers could not be verified: no enablement fact was supplied";
+/// The reason a bound row's recorded removal evidence stays open.
+const UNPROVEN_REMOVAL: &str = "pending, removal evidence is unproven";
 /// The reason an enabled deployment without supplied rows stays open.
 const ENABLED_NO_RECORD: &str =
     "peers are enabled and no acknowledgement record exists to verify them";
@@ -119,9 +123,10 @@ fn is_bound(row: &PeerActionRow) -> bool {
 }
 
 /// One durable row's state in the request fold's words: a bound acknowledged
-/// row is settled, a bound recorded disposition is a disposed row, anything
-/// else is pending. An unbound row is named as unbound and is never rendered
-/// as acknowledged.
+/// row is settled, a bound removal the row carries the evidence for is a
+/// disposed row, anything else is pending. A removal evidence without its
+/// proof reference is not evidence, so it is named pending too. An unbound row
+/// is named as unbound and is never rendered as acknowledged.
 fn state_phrase(row: &PeerActionRow) -> &'static str {
     if !is_bound(row) {
         return "unbound durable row";
@@ -130,7 +135,12 @@ fn state_phrase(row: &PeerActionRow) -> &'static str {
         return "acknowledged";
     }
     match row.disposition {
-        PeerActionDisposition::RemovalEvidence => "disposed (removal evidence)",
+        // The crate's one evidence rule decides the removal arm, so a removal
+        // the durable row cannot show is never reported disposed.
+        PeerActionDisposition::RemovalEvidence if peer_row_settled(row) => {
+            "disposed (removal evidence)"
+        }
+        PeerActionDisposition::RemovalEvidence => UNPROVEN_REMOVAL,
         PeerActionDisposition::RetentionApproved => "disposed (retention approved)",
         PeerActionDisposition::Unknown if row.state == PeerActionState::Refused => {
             "refused, no disposition recorded"
@@ -139,9 +149,13 @@ fn state_phrase(row: &PeerActionRow) -> &'static str {
     }
 }
 
-/// The named reason one durable row is not settled, or `None` when a bound
-/// row's acknowledgement or recorded disposition settles it. A row that fails
-/// the binding rule is always unsettled and always named.
+/// The named reason one durable row is not settled: `None` for a bound row
+/// whose disposition is an approved retention — a disposition this surface
+/// reports as recorded, because the request record owns whether a retention
+/// settles the request — and for a bound row the crate's one evidence rule
+/// (`peer_row_settled`) settles. Every other bound row is named open — a
+/// removal evidence without its proof reference is not evidence — and a row
+/// that fails the binding rule is always unsettled and always named.
 fn unsettled_reason(row: &PeerActionRow) -> Option<String> {
     if !is_bound(row) {
         return Some(format!(
@@ -149,12 +163,12 @@ fn unsettled_reason(row: &PeerActionRow) -> Option<String> {
             row.peer_id
         ));
     }
-    if row.state == PeerActionState::Acknowledged
-        || row.disposition != PeerActionDisposition::Unknown
-    {
+    if row.disposition == PeerActionDisposition::RetentionApproved || peer_row_settled(row) {
         return None;
     }
-    let phrase = if row.state == PeerActionState::Refused {
+    let phrase = if row.disposition == PeerActionDisposition::RemovalEvidence {
+        UNPROVEN_REMOVAL
+    } else if row.state == PeerActionState::Refused {
         "refused, no disposition recorded"
     } else {
         "pending acknowledgement"
