@@ -26,7 +26,7 @@
 use crate::crypto::SyncCipher;
 use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, bank_verdict, denial_carrier, denial_mutation,
-    denial_mutation_id, denial_subject_hash,
+    denial_mutation_id, denial_subject_hash, test_fingerprint, test_other_fingerprint,
 };
 use crate::denial_fixtures::FakeDenial;
 use crate::protocol::{ENTITY_KIND_ITEM, SyncContent, SyncMutation};
@@ -50,7 +50,7 @@ fn proof(request_ref: &str, subject: &str) -> DenialProof {
     DenialProof {
         request_ref: request_ref.into(),
         peer_id: "peer-1".into(),
-        subject_hash: denial_subject_hash("fp-1", subject),
+        subject_hash: denial_subject_hash(test_fingerprint(), subject),
         generation: 3,
         salt_fingerprint: "fp-1".into(),
     }
@@ -220,16 +220,16 @@ fn a_damaged_authority_reports_authority_unavailable() {
 #[test]
 fn the_subject_digest_is_stable_and_bound_to_the_fingerprint() {
     assert_eq!(
-        denial_subject_hash("fp-1", "s-1"),
-        denial_subject_hash("fp-1", "s-1")
+        denial_subject_hash(test_fingerprint(), "s-1"),
+        denial_subject_hash(test_fingerprint(), "s-1")
     );
     assert_ne!(
-        denial_subject_hash("fp-1", "s-1"),
-        denial_subject_hash("fp-2", "s-1")
+        denial_subject_hash(test_fingerprint(), "s-1"),
+        denial_subject_hash(test_other_fingerprint(), "s-1")
     );
     assert_ne!(
-        denial_subject_hash("fp-1", "s-1"),
-        denial_subject_hash("fp-1", "s-2")
+        denial_subject_hash(test_fingerprint(), "s-1"),
+        denial_subject_hash(test_fingerprint(), "s-2")
     );
 }
 

@@ -26,7 +26,7 @@
 
 use clio_types::AmError;
 
-use crate::erasure_denial::{DenialVerdict, ErasureDenial};
+use crate::erasure_denial::{DenialVerdict, ErasureDenial, test_salt_fingerprint};
 
 /// A double serving one fixed verdict and one fixed generation.
 struct FakeDenial {
@@ -44,7 +44,7 @@ impl ErasureDenial for FakeDenial {
     }
 
     fn salt_fingerprint(&self) -> String {
-        "fingerprint".to_owned()
+        test_salt_fingerprint().to_owned()
     }
 }
 
@@ -76,7 +76,7 @@ fn the_seam_serves_every_verdict_through_a_trait_object() {
         };
         let seam: &dyn ErasureDenial = &probe;
         assert_eq!(seam.verdict("subject-a"), verdict);
-        assert_eq!(seam.salt_fingerprint(), "fingerprint");
+        assert_eq!(seam.salt_fingerprint(), test_salt_fingerprint());
         assert_eq!(
             seam.record_denial("subject-a", &["bank-a".to_owned()])
                 .expect("the double records"),

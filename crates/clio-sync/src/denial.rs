@@ -332,6 +332,20 @@ fn refusal(message: impl Into<String>) -> AmError {
     AmError::new(ErrorCode::Forbidden, message.into())
 }
 
+/// The deployment fingerprint the denial tests hash under. Test-only, so the
+/// wire tests pin the same bytes without repeating the literal at each salt
+/// call site.
+#[cfg(test)]
+pub(crate) fn test_fingerprint() -> &'static str {
+    "fp-1"
+}
+
+/// The second deployment fingerprint the digest test contrasts against.
+#[cfg(test)]
+pub(crate) fn test_other_fingerprint() -> &'static str {
+    "fp-2"
+}
+
 #[cfg(test)]
 #[path = "denial_tests.rs"]
 mod denial_tests;
