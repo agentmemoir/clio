@@ -184,11 +184,15 @@ fn repeated_sqlite_loads_keep_the_schema_inventory_stable() {
 // Postgres
 // ---------------------------------------------------------------------------
 
-/// The shared Postgres URL, or `None` when the database is unreachable (the
-/// `postgres_bootstrap_lock_tests` fixture shape).
-fn shared_url() -> Option<String> {
+/// The shared Postgres URL, or `None` after the fail-closed skip line: an
+/// unreachable Postgres fails the suite unless `CLIO_SKIP_PG_TESTS` opts out.
+fn shared_url_or_skip() -> Option<String> {
     let url = postgres_url_from_env();
-    crate::pg_tls::connect(&url).ok().map(|_| url)
+    if let Err(err) = crate::pg_tls::connect(&url) {
+        crate::pg_skip::unreachable_pg_or_skip("postgres compliance slot tests", &err);
+        return None;
+    }
+    Some(url)
 }
 
 /// A database created for one test, dropped when the test ends — including
@@ -248,8 +252,7 @@ fn postgres_inventory(store: &PostgresStore) -> Vec<String> {
 #[test]
 fn a_fresh_postgres_store_loads_every_compliance_slot() {
     let _shared = crate::lock_pg_test();
-    let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
+    let Some(url) = shared_url_or_skip() else {
         return;
     };
     let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
@@ -264,8 +267,7 @@ fn a_fresh_postgres_store_loads_every_compliance_slot() {
 #[test]
 fn repeated_postgres_loads_keep_the_schema_inventory_stable() {
     let _shared = crate::lock_pg_test();
-    let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
+    let Some(url) = shared_url_or_skip() else {
         return;
     };
     let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
@@ -354,8 +356,7 @@ fn slot_tables_hold_only_the_placeholder_key() {
 #[test]
 fn postgres_slot_tables_hold_only_the_placeholder_key() {
     let _shared = crate::lock_pg_test();
-    let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
+    let Some(url) = shared_url_or_skip() else {
         return;
     };
     let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
@@ -395,8 +396,7 @@ fn the_local_events_slot_holds_the_event_columns() {
 #[test]
 fn postgres_local_events_slot_holds_the_event_columns() {
     let _shared = crate::lock_pg_test();
-    let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
+    let Some(url) = shared_url_or_skip() else {
         return;
     };
     let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
@@ -429,8 +429,7 @@ fn the_durable_requests_slot_holds_the_request_columns() {
 #[test]
 fn postgres_durable_requests_slot_holds_the_request_columns() {
     let _shared = crate::lock_pg_test();
-    let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
+    let Some(url) = shared_url_or_skip() else {
         return;
     };
     let mut admin = crate::pg_tls::connect(&url).expect("admin connect");

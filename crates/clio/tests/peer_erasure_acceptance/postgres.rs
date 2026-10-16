@@ -24,9 +24,11 @@
 
 use super::nodes::Node;
 use super::run::Run;
-use super::scenarios_disposition::{scenario_04, scenario_06_disabled};
+use super::scenarios_disposition::{
+    scenario_04, scenario_04_removal, scenario_05, scenario_06_disabled, scenario_06_invalid,
+};
 use super::scenarios_peer::scenario_01;
-use super::scenarios_replay::scenario_02;
+use super::scenarios_replay::{scenario_02, scenario_03};
 use super::support::BANKS;
 
 /// The base URL a Postgres-backed run reports, or a skip when the operator
@@ -62,6 +64,18 @@ fn postgres_t02_reconnect_denies_before_serving_or_applying() {
     scenario_02(&mut run, &a, &b);
 }
 
+/// Scenario 03 on loopback Postgres.
+#[test]
+fn postgres_t03_duplicate_delivery_and_restart_reconcile_once() {
+    let Some(mut run) = Run::postgres("pg-s03") else {
+        return;
+    };
+    let base = pg_base(&run);
+    let a = Node::postgres("pg-s03-a", &base, &BANKS);
+    let b = Node::postgres("pg-s03-b", &base, &BANKS);
+    scenario_03(&mut run, &a, &b);
+}
+
 /// Scenario 04 on loopback Postgres.
 #[test]
 fn postgres_t04_retention_and_unknown_dispositions_stay_open() {
@@ -75,6 +89,29 @@ fn postgres_t04_retention_and_unknown_dispositions_stay_open() {
     scenario_04(&mut run, &a, &b, &c);
 }
 
+/// Scenario 04, removal arm, on loopback Postgres.
+#[test]
+fn postgres_t04_removal_evidence_settles_the_request() {
+    let Some(mut run) = Run::postgres("pg-s04-removal") else {
+        return;
+    };
+    let base = pg_base(&run);
+    let a = Node::postgres("pg-s04-removal-a", &base, &BANKS);
+    scenario_04_removal(&mut run, &a);
+}
+
+/// Scenario 05 on loopback Postgres.
+#[test]
+fn postgres_t05_failed_intent_and_outcome_prune_preserves_safety_state() {
+    let Some(mut run) = Run::postgres("pg-s05") else {
+        return;
+    };
+    let base = pg_base(&run);
+    let a = Node::postgres("pg-s05-a", &base, &BANKS);
+    let b = Node::postgres("pg-s05-b", &base, &BANKS);
+    scenario_05(&mut run, &a, &b);
+}
+
 /// Scenario 06, disabled arm, on loopback Postgres.
 #[test]
 fn postgres_t06_peers_disabled_is_not_applicable() {
@@ -82,4 +119,17 @@ fn postgres_t06_peers_disabled_is_not_applicable() {
         return;
     };
     scenario_06_disabled(&mut run);
+}
+
+/// Scenario 06, invalid-result arm, on loopback Postgres.
+#[test]
+fn postgres_t06_invalid_results_cannot_acknowledge_or_widen_scope() {
+    let Some(mut run) = Run::postgres("pg-s06") else {
+        return;
+    };
+    let base = pg_base(&run);
+    let a = Node::postgres("pg-s06-a", &base, &BANKS);
+    let b = Node::postgres("pg-s06-b", &base, &BANKS);
+    let c = Node::postgres("pg-s06-c", &base, &BANKS);
+    scenario_06_invalid(&mut run, &a, &b, &c);
 }

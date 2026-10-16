@@ -5,12 +5,14 @@
 //!
 //! This module is responsible for the arms of the peer completion gate that
 //! must refuse: a delivered row, a removal evidence without its proof
-//! reference, and the restart boundary over a pending or delivered row, where
+//! reference, a second peer whose own row is unsettled while another peer
+//! settled, and the restart boundary over a pending or delivered row, where
 //! the erasure entry and the restart reconciliation both keep the action open
 //! and repeat no store work.
 //!
 //! ## Owns
 //! - The delivered-row and unproven-removal completion-gate negatives
+//! - The two-peer negative over one acknowledged and one unsettled peer row
 //! - The restart-over-an-unsettled-peer assertions and their shared body
 //! - The peer-denial reconcile arms over a reopened store
 //!
@@ -24,8 +26,9 @@
 //! ## Boundary
 //!
 //! Tests here break when a delivered or unproven peer row settles a
-//! completion, when a restart repeats a purge, or when reconciliation claims a
-//! result for a missing, pending, or delivered peer row.
+//! completion, when one peer's own evidence settles another peer's row, when a
+//! restart repeats a purge, or when reconciliation claims a result for a
+//! missing, pending, or delivered peer row.
 //!
 //! Test-only. Never compiled into production builds.
 
@@ -164,6 +167,62 @@ fn a_removal_evidence_without_its_proof_keeps_the_completion_open() {
         vec![action],
         "the action stays pending"
     );
+}
+
+/// One peer's own durable row is the only evidence that settles it: a second
+/// peer without evidence keeps the completion open however the first settled.
+#[test]
+fn a_second_peer_without_its_own_evidence_keeps_the_completion_open() {
+    let attempt = Attempt::new();
+    let settled_peer = unique("peer-bank");
+    let open_peer = unique("peer-bank");
+    let store = open_sqlite(&attempt.store_path());
+    let mut record = started_record(&attempt.request_id, &attempt.scope);
+    record
+        .peers
+        .insert(settled_peer.clone(), PeerState::Acknowledged);
+    record.peers.insert(open_peer.clone(), PeerState::Pending);
+    record.peer_banks.insert(settled_peer.clone());
+    record.peer_banks.insert(open_peer.clone());
+    persist(&store, &record);
+    for bank in [&attempt.bank, &settled_peer, &open_peer] {
+        store
+            .create_memory_item(&wiring_item(bank, &attempt.subject), "tester")
+            .expect("seed the subject item");
+    }
+    begin_denial(&store, &attempt.request_id, &settled_peer).expect("the peer row begins");
+    mark_acknowledged(&store, &attempt.request_id, &settled_peer, "deletion-9")
+        .expect("the settled peer acknowledges");
+    begin_denial(&store, &attempt.request_id, &open_peer).expect("the peer row begins");
+    mark_delivered(&store, &attempt.request_id, &open_peer).expect("the delivery records");
+    let ctx = attempt.ctx();
+    let sink = EraseVecSink::default();
+    let args = attempt.args(&store, &ctx, &sink);
+    let live = live_set(&attempt, &store);
+    let outcome =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the effect completes");
+    assert_eq!(
+        outcome.status, "PROCESSING",
+        "a settled peer settles no other peer's row"
+    );
+    let action = erasure_action_id(&attempt.request_id);
+    let rows = action_rows(&store, &action);
+    assert_eq!(rows.len(), 1, "one event row for the action");
+    assert_eq!(rows[0].state, LocalEventState::Pending, "never settled");
+    assert!(rows[0].result.is_none(), "no outcome is written");
+    assert_eq!(
+        store.pending_actions().expect("pending"),
+        vec![action],
+        "the action still awaits the unsettled peer"
+    );
+    let peer_row = load_peer_row(&store, &attempt.request_id, &open_peer);
+    assert_eq!(
+        peer_row.state,
+        PeerActionState::Delivered,
+        "the unsettled peer keeps its delivery"
+    );
+    assert_eq!(peer_row.proof_ref, None, "no proof is recorded for it");
 }
 
 /// Run the durable erasure entry twice across a restart with one peer row left
