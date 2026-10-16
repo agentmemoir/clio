@@ -107,6 +107,7 @@ fn a_bank_scoped_resume_does_not_settle_over_another_subjects_purge() {
     assert!(!tombstones.is_empty(), "the purge leaves evidence");
     let env = ErasureRetryEnv {
         store: &store,
+        peers: &store,
         journal_path: &journal,
         maint: None,
         actor: Actor::Harness,
@@ -156,7 +157,7 @@ fn a_bank_scoped_resume_does_not_settle_over_another_subjects_purge() {
         subject_id: &other_subject,
         ..args
     };
-    let outcome = erase_confirmed_request(&store, &store, &request_id, &retry, &live)
+    let outcome = erase_confirmed_request(&store, &store, &store, &request_id, &retry, &live)
         .expect("the retry entry reports the pending action");
     assert_eq!(outcome.status, "PROCESSING", "pending action");
     let rows = action_rows(&store, &action);
@@ -195,7 +196,7 @@ fn assert_unprivileged_refusal(actor: Actor) {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("an unprivileged actor must refuse");
     assert_eq!(
         err.code,
@@ -300,7 +301,7 @@ fn a_denied_racing_intent_winner_refuses_the_retry() {
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
     let events = DeniedRacingIntent { inner: &store };
-    let err = erase_confirmed_request(&store, &events, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &events, &store, &attempt.request_id, &args, &live)
         .expect_err("a denied racing winner must refuse");
     assert_eq!(err.code, ErrorCode::Forbidden, "{}", err.message);
     let rows = action_rows(&store, &action_id(&attempt));
@@ -346,7 +347,7 @@ fn a_failed_journal_denial_refuses_and_a_later_pass_retries_it() {
         journal_path: &unwritable,
         ..attempt.args(&store, &ctx, &sink)
     };
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("an unwritable journal must refuse");
     assert_eq!(err.code, ErrorCode::Internal, "{}", err.message);
     assert!(
@@ -378,7 +379,7 @@ fn a_failed_journal_denial_refuses_and_a_later_pass_retries_it() {
         "the subject's item survives"
     );
     // A later reconcile pass over a writable journal retries and completes it.
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report.settled, vec![action_id(&attempt)]);
@@ -417,8 +418,9 @@ fn an_open_copy_action_keeps_the_settle_pending_until_it_closes() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let live = live_set(&attempt, &store);
-    let outcome = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect("the effect completes");
+    let outcome =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the effect completes");
     assert_eq!(
         outcome.status, "PROCESSING",
         "an open copy action keeps completion pending"
@@ -436,8 +438,9 @@ fn an_open_copy_action_keeps_the_settle_pending_until_it_closes() {
     assert!(tombstoned > 0, "the open action's effect committed");
     record.actions.get_mut("copy-1").expect("copy action").state = RequestActionState::Closed;
     persist(&store, &record);
-    let retried = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect("the retry settles");
+    let retried =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the retry settles");
     assert_eq!(retried.status, "COMPLETED");
     let rows = action_rows(&store, &action_id(&attempt));
     assert_eq!(rows[0].state, LocalEventState::Allowed);

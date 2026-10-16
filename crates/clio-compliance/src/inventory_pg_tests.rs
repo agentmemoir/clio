@@ -86,6 +86,7 @@ fn pg_ledger(fixture: &PgLedgerFixture) -> ScopeInventory {
         paths: fixture.paths(),
         declared_copies: Vec::new(),
         peers_enabled: None,
+        peer_actions: Vec::new(),
     })
 }
 
@@ -152,7 +153,7 @@ fn inventory_pg_ledger_names_the_same_families_as_sqlite() {
         postgres_names, sqlite_names,
         "the two backends name the same families"
     );
-    assert_eq!(postgres_names.len(), 34, "the pinned family set is 34 rows");
+    assert_eq!(postgres_names.len(), 35, "the pinned family set is 35 rows");
     for family in [
         "items",
         "triples",

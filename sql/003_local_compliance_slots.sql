@@ -123,3 +123,21 @@ CREATE TABLE IF NOT EXISTS erasure_adapters
 (
   id                                                                                           text PRIMARY KEY
 );
+
+-- Peer-facing request actions. One row per (request, peer, action kind): the
+-- intent is written before the peer effect and stays `pending` until the
+-- peer's durable proof arrives, so a duplicate or concurrent delivery cannot
+-- repeat a completed effect. `state`, `disposition`, and the closed action
+-- domain are CHECK-guarded, and the row key plus `action_id` bind every
+-- guarded transition.
+CREATE TABLE IF NOT EXISTS peer_actions
+(
+  request_id                                                                                   text NOT NULL,
+  peer_id                                                                                      text NOT NULL,
+  action_kind                                                                                  text NOT NULL CHECK (action_kind IN ('denial')),
+  action_id                                                                                    text NOT NULL,
+  state                                                                                        text NOT NULL CHECK (state IN ('pending', 'delivered', 'acknowledged', 'refused')),
+  disposition                                                                                  text NOT NULL CHECK (disposition IN ('removal_evidence', 'retention_approved', 'unknown')),
+  proof_ref                                                                                    text,
+  PRIMARY KEY (request_id, peer_id, action_kind)
+);

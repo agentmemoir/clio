@@ -15,6 +15,8 @@
 //!   resolved TTL so the background server is reachable
 //!
 //! ## Does not own
+//! - The serve process's start and its erasure-denial wiring (see
+//!   `sync_cli_serve`)
 //! - Sync protocol, apply matrix, conflict rule, or auth (`clio-sync`)
 //! - The in-process call bridge or output/error contracts (see `cli_read`)
 //! - The database precedence resolver (see `clio_config::db_path`)
@@ -28,6 +30,7 @@
 //!
 //! Keep this module focused on the `clio sync` surface.
 
+use self::sync_cli_serve::start_serve;
 use crate::cli_args::{self, FlagSpec, ParsedArgs};
 use crate::cli_error::{CliError, EXIT_OK};
 use crate::cli_help;
@@ -40,6 +43,9 @@ use serde_json::{Map, Value, json};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
+
+#[path = "sync_cli_serve.rs"]
+mod sync_cli_serve;
 
 /// The sync subcommands this surface binds.
 const SUBCOMMANDS: &[&str] = &["status", "push", "pull", "serve"];
@@ -141,16 +147,29 @@ fn run(
             Err(error) => return fail(io, mode, &error),
         },
     };
-    match call_tool(&state, tool, &tool_args) {
-        Ok(payload) => {
-            emit(io, mode, &payload, &render(&verb, &payload));
-            if verb == "sync serve" {
+    // `sync serve` starts the deployment's server here, so the serve process
+    // can be handed the erasure-denial authority the deployment names; every
+    // other verb keeps the in-process tool bridge.
+    if verb == "sync serve" {
+        return match start_serve(&state, &tool_args, io.env) {
+            Ok((server, payload)) => {
+                emit(io, mode, &payload, &render(&verb, &payload));
                 let ttl = payload.get("ttl_secs").and_then(Value::as_u64).unwrap_or(0);
                 wait_for_ttl(
                     Duration::from_secs(ttl),
                     serving.expect("only the serve verb reaches the hold-open wait"),
                 );
+                // The TTL is spent, so the process ends here: stop the accept
+                // loop explicitly rather than leaving it to process exit.
+                server.stop();
+                ExitCode::from(EXIT_OK)
             }
+            Err(error) => fail(io, mode, &error),
+        };
+    }
+    match call_tool(&state, tool, &tool_args) {
+        Ok(payload) => {
+            emit(io, mode, &payload, &render(&verb, &payload));
             ExitCode::from(EXIT_OK)
         }
         Err(error) => fail(io, mode, &error),

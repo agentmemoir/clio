@@ -33,7 +33,7 @@ use crate::erase_test_support::local_kms;
 use crate::migrate::IntoAmError;
 
 /// The reserved slot tables, sorted to match the inventory assertions.
-const SLOT_TABLES: [&str; 9] = [
+const SLOT_TABLES: [&str; 10] = [
     "archive_experiments",
     "copy_inventory",
     "durable_requests",
@@ -41,6 +41,7 @@ const SLOT_TABLES: [&str; 9] = [
     "export_destinations",
     "local_erasure_journal",
     "local_events",
+    "peer_actions",
     "restore_guards",
     "subject_family_links",
 ];

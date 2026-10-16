@@ -104,6 +104,7 @@ fn postgres_a_new_subject_bank_write_after_confirmation_cannot_widen_the_erasure
     let err = erase_from_durable_store(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -185,6 +186,7 @@ fn postgres_a_peer_recorded_before_the_settle_keeps_completion_pending() {
     let outcome = erase_confirmed_request(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -209,15 +211,27 @@ fn postgres_a_peer_recorded_before_the_settle_keeps_completion_pending() {
         tombstones > 0,
         "the effect committed while the peer stayed pending"
     );
-    // Acknowledging the joined peer lets the same action settle, with no
-    // repeated destructive work.
+    // Acknowledging the joined peer durably and in the record lets the same
+    // action settle, with no repeated destructive work.
     let mut acknowledged = joined.clone();
     acknowledged
         .peers
         .insert(joined_bank.clone(), PeerState::Acknowledged);
     persist(&fixture.store, &acknowledged);
+    for peer in [&peer_bank, &joined_bank] {
+        crate::subject_peer::begin_denial(&fixture.store, &attempt.request_id, peer)
+            .expect("the peer row begins");
+        crate::subject_peer::mark_acknowledged(
+            &fixture.store,
+            &attempt.request_id,
+            peer,
+            "deletion-9",
+        )
+        .expect("the peer acknowledges");
+    }
     let live_all = vec![attempt.bank.clone(), peer_bank, joined_bank];
     let retried = erase_confirmed_request(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,
@@ -334,6 +348,7 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
     let first = erase_from_durable_store(
         &fixture.store,
         &fixture.store,
+        &fixture.store,
         &attempt.request_id,
         &args,
         &live,
@@ -358,6 +373,7 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
         "the aborted purge commits no tombstone"
     );
     let retry = erase_from_durable_store(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,
@@ -386,6 +402,7 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
     // Remove the fault: the retry commits the purge and completes.
     drop_tombstone_trigger(&fixture);
     let recovered = erase_from_durable_store(
+        &fixture.store,
         &fixture.store,
         &fixture.store,
         &attempt.request_id,

@@ -40,12 +40,14 @@
 
 use crate::erase::{EraseArgs, EraseOutcome, authorize, erase_request, propagate};
 use crate::subject_bank_coordination::preflight_erase_request;
-use crate::subject_request::{PeerState, SubjectRequestRecord};
+use crate::subject_peer::peer_action_id;
+use crate::subject_request::SubjectRequestRecord;
 use crate::subject_request_events::ProtectedAction;
 use crate::subject_request_store_wiring::{closure_inputs, row_to_record};
 use clio_store::{
     ComplianceStore, DurableRequestStore, LocalEventIntent, LocalEventState, LocalEventStore,
-    LocalEventView, sha256_hex,
+    LocalEventView, PeerActionDisposition, PeerActionKind, PeerActionRow, PeerActionState,
+    PeerActionStore, sha256_hex,
 };
 use clio_types::{AmError, ErrorCode};
 
@@ -152,9 +154,10 @@ pub(crate) fn probe_erasure_steps(
 /// otherwise the effect runs once. A committed purge whose tombstones name
 /// another subject runs no step and leaves the event pending, because the
 /// evidence binds the retry to the subject the purge ran for. The event
-/// settles allowed only when the
-/// durable record's current peer and action slots are complete; otherwise it
-/// stays pending and the outcome reports processing, with the same status
+/// settles allowed only when the durable record's current action slots are
+/// complete and every coordinating peer carries durable evidence — an
+/// acknowledged row or a recorded deletion evidence; otherwise it stays
+/// pending and the outcome reports processing, with the same status
 /// vocabulary the erasure workflow uses. A hard effect error writes no
 /// outcome: the action stays pending and the error is returned, so a later
 /// resume can still complete it. Denied outcomes are only for reconciliation's
@@ -166,6 +169,7 @@ pub(crate) fn probe_erasure_steps(
 pub fn erase_confirmed_request(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
+    peers: &dyn PeerActionStore,
     request_id: &str,
     args: &EraseArgs<'_>,
     live_banks: &[String],
@@ -189,7 +193,7 @@ pub fn erase_confirmed_request(
         args.request_id,
         args.salt,
     )?;
-    run_erasure_steps(durable, events, args, &action_id, steps)
+    run_erasure_steps(durable, events, peers, args, &action_id, steps)
 }
 
 /// Write the action's durable intent unless this action's event already exists.
@@ -274,15 +278,34 @@ fn find_action(
         .find(|event| event.action_id == action_id))
 }
 
-/// Whether every coordinating peer slot of an erasure is settled.
+/// Whether every coordinating peer of an erasure is settled by durable
+/// evidence.
 ///
-/// An acknowledged or disposed peer is settled; a pending peer keeps the
-/// erasure's completion pending.
-pub(crate) fn peers_settled(record: &SubjectRequestRecord) -> bool {
+/// A peer is settled only when its own durable action row is acknowledged, or
+/// when the row records the peer's deletion evidence with its proof
+/// reference. A delivered row, a refusal without a disposition, an approved
+/// retention exception, an unknown disposition, and a missing or foreign row
+/// all leave the peer unsettled, so completion stays open until reconciliation
+/// or an explicit operator disposition.
+pub(crate) fn peers_settled(record: &SubjectRequestRecord, rows: &[PeerActionRow]) -> bool {
     record
         .peers
-        .values()
-        .all(|state| matches!(state, PeerState::Acknowledged | PeerState::Disposed))
+        .keys()
+        .all(|peer_id| peer_settled(record, peer_id, rows))
+}
+
+/// Whether one peer's own durable row carries the evidence completion needs.
+fn peer_settled(record: &SubjectRequestRecord, peer_id: &str, rows: &[PeerActionRow]) -> bool {
+    let expected = peer_action_id(&record.request_id, peer_id);
+    rows.iter().any(|row| {
+        row.request_id == record.request_id
+            && row.peer_id == peer_id
+            && row.action_kind == PeerActionKind::Denial
+            && row.action_id == expected
+            && (row.state == PeerActionState::Acknowledged
+                || (row.disposition == PeerActionDisposition::RemovalEvidence
+                    && row.proof_ref.is_some()))
+    })
 }
 
 /// Run the work a confirmed erasure still owes, then settle its event.
@@ -299,6 +322,7 @@ pub(crate) fn peers_settled(record: &SubjectRequestRecord) -> bool {
 pub(crate) fn run_erasure_steps(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
+    peers: &dyn PeerActionStore,
     args: &EraseArgs<'_>,
     action_id: &str,
     steps: ErasureStepStatus,
@@ -330,7 +354,7 @@ pub(crate) fn run_erasure_steps(
     if outcome.status != STATUS_COMPLETED {
         return Ok(outcome);
     }
-    if !settle_erasure(durable, events, args.request_id, action_id)? {
+    if !settle_erasure(durable, events, peers, args.request_id, action_id)? {
         outcome.status = STATUS_PROCESSING.into();
     }
     Ok(outcome)
@@ -374,15 +398,19 @@ fn pending_outcome(args: &EraseArgs<'_>) -> EraseOutcome {
 ///
 /// The record is re-read, so a peer slot or a required action recorded while
 /// the effect ran keeps the event pending instead of reporting a completion
-/// the durable state cannot claim. The action row's own state is read before
-/// the write, so a completion is never written over a denied row: a denial is
-/// terminal and returns false. An allowed row already holds the completion, so
-/// it returns true without a second write. A pending row is completed and
-/// returns true. Every step run settles through this, so a completed effect
-/// settles the same way however it is reached.
+/// the durable state cannot claim. The peer evidence is read from the durable
+/// per-peer rows, so only an acknowledged row or a recorded deletion evidence
+/// settles a peer: an approved retention, an unknown disposition, and a
+/// missing row keep the event pending. The action row's own state is read
+/// before the write, so a completion is never written over a denied row: a
+/// denial is terminal and returns false. An allowed row already holds the
+/// completion, so it returns true without a second write. A pending row is
+/// completed and returns true. Every step run settles through this, so a
+/// completed effect settles the same way however it is reached.
 pub(crate) fn settle_erasure(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
+    peers: &dyn PeerActionStore,
     request_id: &str,
     action_id: &str,
 ) -> Result<bool, AmError> {
@@ -390,7 +418,8 @@ pub(crate) fn settle_erasure(
         return Ok(false);
     };
     let record = row_to_record(&row)?;
-    if !completion_allowed(&record) {
+    let rows = peers.load_for_request(request_id)?;
+    if !completion_allowed(&record, &rows) {
         return Ok(false);
     }
     match find_action(events, action_id)? {
@@ -410,8 +439,9 @@ pub(crate) fn settle_erasure(
 
 /// Whether every coordinating slot of the erasure is settled.
 ///
-/// Only the open-action count of the closure facts is read here; the product
-/// path a request names is the request ledger's own completion decision.
-fn completion_allowed(record: &SubjectRequestRecord) -> bool {
-    peers_settled(record) && closure_inputs(record, "").open_copy_actions == 0
+/// Only the durable peer evidence and the open-action count of the closure
+/// facts are read here; the product path a request names is the request
+/// ledger's own completion decision.
+fn completion_allowed(record: &SubjectRequestRecord, rows: &[PeerActionRow]) -> bool {
+    peers_settled(record, rows) && closure_inputs(record, "").open_copy_actions == 0
 }

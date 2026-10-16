@@ -72,6 +72,7 @@ mod runtime_context;
 mod runtime_index;
 mod runtime_open;
 mod runtime_ranking;
+mod runtime_repos;
 mod runtime_retention;
 mod runtime_sinks;
 pub mod schema;

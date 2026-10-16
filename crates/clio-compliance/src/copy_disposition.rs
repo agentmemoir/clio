@@ -17,6 +17,8 @@
 //! - `CopyDisposition` one recorded copy disposition
 //! - `CopyDispositionOutcome` and `CopyClosureFacts`
 //! - `copy_closure_facts` the fail-closed fold into closure-gate facts
+//! - `peer_copy_disposition`, the mapping of one peer's recorded denial
+//!   result onto the same vocabulary
 //!
 //! ## Does not own
 //! - The closure gate itself and its `FinalOutcome` decision (see
@@ -39,6 +41,7 @@
 
 use crate::subject_request::RequestActionState;
 use crate::subject_request_events::ClosureInputs;
+use clio_store::PeerActionDisposition;
 use serde::{Deserialize, Serialize};
 
 /// Where a known subject-data copy is held.
@@ -216,6 +219,42 @@ pub fn copy_closure_facts(
             retention_exception_approved,
         },
         outcome,
+    }
+}
+
+/// The copy disposition one peer's recorded denial result supports.
+///
+/// A peer's denial row acknowledged durably, or a row that records the peer's
+/// deletion evidence with its proof reference, is a resolved copy: the
+/// technical state is done and the removal action is closed. An approved
+/// retention and an unknown disposition are not removal evidence: the copy
+/// keeps an open removal action, and an unknown disposition also keeps its
+/// technical state unknown, so [`copy_closure_facts`] yields a partial or
+/// refused outcome instead of a full completion claim. The peer holds the
+/// copy in every case, so the custody class stays known.
+#[must_use]
+pub fn peer_copy_disposition(
+    peer_id: &str,
+    disposition: PeerActionDisposition,
+    proof_ref: Option<&str>,
+) -> CopyDisposition {
+    let removed = disposition == PeerActionDisposition::RemovalEvidence && proof_ref.is_some();
+    let (state, action) = if removed {
+        (CopyState::Done, RequestActionState::Closed)
+    } else if disposition == PeerActionDisposition::RetentionApproved {
+        (CopyState::Pending, RequestActionState::Open)
+    } else {
+        (CopyState::Unknown, RequestActionState::Open)
+    };
+    CopyDisposition {
+        copy_id: format!("peer:{peer_id}"),
+        custody: CopyCustodyClass::Peer,
+        owner: CopyOwner::System,
+        state,
+        actions: vec![CopyAction {
+            kind: CopyRequiredAction::Remove,
+            state: action,
+        }],
     }
 }
 

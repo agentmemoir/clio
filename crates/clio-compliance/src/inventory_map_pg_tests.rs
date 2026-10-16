@@ -70,6 +70,7 @@ const PINNED: &[(&str, FamilyClass, u64, u64, u64, bool)] = &[
     ("erasure_adapters", FamilyClass::InseparableShared, 0, 0, 0, true),
     ("local_erasure_journal", FamilyClass::InseparableShared, 0, 0, 0, true),
     ("local_events", FamilyClass::InseparableShared, 0, 0, 0, true),
+    ("peer_actions", FamilyClass::InseparableShared, 0, 0, 0, true),
     ("restore_guards", FamilyClass::InseparableShared, 0, 0, 0, true),
     ("subject_family_links", FamilyClass::InseparableShared, 0, 0, 0, true),
     ("store_file", FamilyClass::NotStored, 0, 0, 0, true),

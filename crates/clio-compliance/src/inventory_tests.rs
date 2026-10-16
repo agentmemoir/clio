@@ -50,6 +50,7 @@ const EXPECTED_FAMILIES: &[&str] = &[
     "legacy_tombstones",
     "local_erasure_journal",
     "local_events",
+    "peer_actions",
     "persona_erase_tombstones",
     "persona_preferences",
     "persona_stable",
@@ -99,6 +100,7 @@ fn probe_input(facts: InventoryFacts, paths: InventoryPaths) -> InventoryInput {
         paths,
         declared_copies: Vec::new(),
         peers_enabled: None,
+        peer_actions: Vec::new(),
     }
 }
 
@@ -399,3 +401,6 @@ fn write_file(path: &Path, text: &str) {
 
 #[path = "inventory_link_tests.rs"]
 mod inventory_link_tests;
+
+#[path = "inventory_peer_tests.rs"]
+mod inventory_peer_tests;

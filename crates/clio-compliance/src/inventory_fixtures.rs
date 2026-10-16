@@ -142,8 +142,7 @@ impl LedgerFixture {
         }
     }
 
-    /// A ledger input with the given declared copies and peer fact, measured
-    /// from the store file at call time.
+    /// A ledger input with the given declared copies and peer fact, measured from the store file.
     pub(crate) fn input(
         &self,
         declared_copies: Vec<PathBuf>,
@@ -155,6 +154,7 @@ impl LedgerFixture {
             paths: self.paths(),
             declared_copies,
             peers_enabled,
+            peer_actions: Vec::new(),
         }
     }
 

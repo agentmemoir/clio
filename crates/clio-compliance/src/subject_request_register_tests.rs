@@ -20,9 +20,9 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::subject_request::{
-    PeerState, RegisterOutcome, RequestAction, RequestActionKind, RequestActionState,
-    RequestCommand, RequestKind, RequestScope, RequestState, SubjectRequestLedger,
-    SubjectRequestRecord,
+    PeerEnablement, PeerState, RegisterOutcome, RequestAction, RequestActionKind,
+    RequestActionState, RequestCommand, RequestKind, RequestScope, RequestState,
+    SubjectRequestLedger, SubjectRequestRecord,
 };
 use clio_types::ErrorCode;
 use std::collections::BTreeMap;
@@ -70,6 +70,119 @@ fn register_opens_a_received_record_with_the_given_kind_scope_and_peers() {
     .into_iter()
     .collect();
     assert_eq!(record.peers, peers, "duplicates collapse and slots sort");
+}
+
+#[test]
+fn register_with_enablement_persists_the_fact_and_the_frozen_set() {
+    let mut ledger = SubjectRequestLedger::new();
+    let outcome = ledger
+        .register_with_enablement(
+            "r1",
+            RequestKind::Erasure,
+            &subject_scope(),
+            PeerEnablement::Required,
+            &["peer-b", "peer-a", "peer-b"],
+        )
+        .unwrap();
+    assert_eq!(outcome, RegisterOutcome::Opened);
+    let record = ledger.record("r1").expect("record stored");
+    assert_eq!(record.peer_enablement, PeerEnablement::Required);
+    let peers: BTreeMap<String, PeerState> = [
+        ("peer-a".to_owned(), PeerState::Pending),
+        ("peer-b".to_owned(), PeerState::Pending),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        record.peers, peers,
+        "the enabled set is frozen as pending slots"
+    );
+}
+
+#[test]
+fn register_derives_the_enablement_fact_from_the_enabled_labels() {
+    let mut ledger = SubjectRequestLedger::new();
+    ledger
+        .register("r1", RequestKind::Erasure, &subject_scope(), &[])
+        .unwrap();
+    assert_eq!(
+        ledger.record("r1").expect("record stored").peer_enablement,
+        PeerEnablement::NotApplicable,
+        "no enabled peer records means peer work is not applicable"
+    );
+    ledger
+        .register("r2", RequestKind::Erasure, &subject_scope(), &["peer-1"])
+        .unwrap();
+    assert_eq!(
+        ledger.record("r2").expect("record stored").peer_enablement,
+        PeerEnablement::Required,
+        "an enabled peer records a required set"
+    );
+}
+
+#[test]
+fn an_enablement_fact_the_labels_contradict_is_refused_without_storing() {
+    let cases = [
+        (PeerEnablement::Required, Vec::new()),
+        (PeerEnablement::NotApplicable, vec!["peer-1"]),
+    ];
+    for (enablement, peers) in cases {
+        let mut ledger = SubjectRequestLedger::new();
+        let err = ledger
+            .register_with_enablement(
+                "r1",
+                RequestKind::Erasure,
+                &subject_scope(),
+                enablement,
+                &peers,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            ErrorCode::InvalidArgument,
+            "the fact {enablement:?} and labels {peers:?} disagree"
+        );
+        assert!(ledger.record("r1").is_none(), "nothing is stored");
+    }
+}
+
+#[test]
+fn a_replay_ignores_the_incoming_enablement_fact_and_labels() {
+    let mut ledger = SubjectRequestLedger::new();
+    ledger
+        .register_with_enablement(
+            "r1",
+            RequestKind::Erasure,
+            &subject_scope(),
+            PeerEnablement::Required,
+            &["peer-1"],
+        )
+        .unwrap();
+    let before = ledger.record("r1").cloned();
+    let outcome = ledger
+        .register_with_enablement(
+            "r1",
+            RequestKind::Erasure,
+            &subject_scope(),
+            PeerEnablement::NotApplicable,
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        outcome,
+        RegisterOutcome::Replayed {
+            state: RequestState::Received
+        }
+    );
+    assert_eq!(
+        ledger.record("r1").cloned(),
+        before,
+        "a replay keeps the stored fact and set"
+    );
+    assert_eq!(
+        ledger.record("r1").expect("record stored").peer_enablement,
+        PeerEnablement::Required
+    );
 }
 
 #[test]

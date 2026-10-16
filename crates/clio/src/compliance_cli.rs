@@ -31,13 +31,16 @@
 //!
 //! Keep this module focused on the `clio compliance` surface.
 
+#[path = "compliance_request_open.rs"]
+pub(crate) mod compliance_request_open;
+
 use crate::cli_args::{self, FlagSpec, ParsedArgs};
 use crate::cli_error::{CliError, EXIT_OK, EXIT_USAGE};
 use crate::cli_output::{self, OutputMode};
 use crate::cli_read::{CliIo, emit, fail};
 use clio_compliance::{
-    Custody, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, RetentionAction,
-    ScopeInventory, scope_inventory,
+    Custody, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, PeerEnablement,
+    RetentionAction, ScopeInventory, scope_inventory,
 };
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -182,8 +185,9 @@ fn unknown_subcommand(sub: &str) -> CliError {
 /// Run `compliance inventory`: parse the record's flags, build the report, and
 /// emit it. Exit 0 whenever a report was produced, even an incomplete one.
 ///
-/// Peer enablement is not readable from the CLI, so the report's `complete`
-/// field stays `false` from this command.
+/// Peer enablement is read from the deployment's effective configuration; a
+/// fact this command cannot verify leaves the peer row open, never silently
+/// complete.
 fn run_inventory(
     io: &mut CliIo,
     fallback: OutputMode,
@@ -260,14 +264,24 @@ fn inventory_report(
         kms_path: clio_config::kms_path::resolve_kms_path(&get, &target.url).unwrap_or_default(),
         backup_dir: clio_config::resolve_backup_dir(&get, current_dir).path,
     };
+    // Peer enablement is a fact of the deployment's effective configuration:
+    // sync omitted is a single-host deployment, and an enabled deployment's
+    // enabled credential records name its peers. When that fact cannot be read
+    // (no credential store path, an unreadable store) it cannot be verified
+    // here, so the ledger receives `None` and its peer row stays open rather
+    // than claiming a scope this command cannot verify.
+    let effective = clio_config::Runtime::with_env(&get).effective_raw();
+    let peers_enabled = compliance_request_open::peer_enablement(&effective, &get)
+        .ok()
+        .map(|(enablement, _labels)| enablement == PeerEnablement::Required);
     let input = InventoryInput {
         facts,
         paths,
         declared_copies: parsed.values_of("copy").iter().map(PathBuf::from).collect(),
-        // The configuration surface exposes no cheap peer-enablement read, so
-        // the ledger receives `None` and its peer row stays open rather than
-        // claiming a scope this command cannot verify.
-        peers_enabled: None,
+        peers_enabled,
+        // This command measures facts read-only and holds no store handle, so
+        // no durable per-peer action rows are supplied.
+        peer_actions: Vec::new(),
     };
     Ok(scope_inventory(&input))
 }
@@ -384,3 +398,7 @@ mod compliance_cli_tests;
 #[cfg(test)]
 #[path = "compliance_cli_review_export_tests.rs"]
 mod compliance_cli_review_export_tests;
+
+#[cfg(test)]
+#[path = "compliance_cli_peer_tests.rs"]
+mod compliance_cli_peer_tests;

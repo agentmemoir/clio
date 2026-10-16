@@ -437,3 +437,7 @@ fn serve_help_documents_the_token_file_and_never_the_removed_token() {
     assert!(!out.contains("CLIO_SYNC_TOKEN"), "{out}");
     assert!(!out.contains("legacy single token"), "{out}");
 }
+
+#[cfg(test)]
+#[path = "sync_cli_denial_tests.rs"]
+mod denial_tests;

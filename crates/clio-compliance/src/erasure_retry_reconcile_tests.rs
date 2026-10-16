@@ -164,7 +164,7 @@ fn an_outcome_failure_reconciles_without_another_erase() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let events = FaultEvents::outcome_fails_over(&store);
-    erase_confirmed_request(&store, &events, &attempt.request_id, &args, &live)
+    erase_confirmed_request(&store, &events, &store, &attempt.request_id, &args, &live)
         .expect_err("the failed outcome write is reported");
     let pending = store.pending_actions().expect("pending");
     assert_eq!(
@@ -189,7 +189,7 @@ fn an_outcome_failure_reconciles_without_another_erase() {
     );
     let changed = vec![attempt.bank.clone(), unique("joined-bank")];
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, changed.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report.settled, vec![action_id(&attempt)]);
@@ -218,7 +218,7 @@ fn reconcile_settles_denied_a_missing_record() {
     let missing = unique("missing-request");
     record_erasure_intent(&store, &missing);
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, vec![]));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report.settled, vec![erasure_action_id(&missing)]);
@@ -247,7 +247,7 @@ fn reconcile_keeps_a_committed_effect_pending_while_a_peer_is_unresolved() {
     erase_request(&args).expect("the effect commits");
     record_erasure_intent(&store, &attempt.request_id);
     assert!(tombstone_count(&attempt, &store) > 0, "the purge committed");
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report.pending, vec![action_id(&attempt)]);
@@ -264,7 +264,7 @@ fn reconcile_settles_denied_when_the_preflight_refuses_without_effect_evidence()
     let (attempt, store) = persisted();
     record_erasure_intent(&store, &attempt.request_id);
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let changed = vec![attempt.bank.clone(), unique("joined-bank")];
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, changed.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
@@ -287,7 +287,7 @@ fn reconcile_counts_a_processing_effect_as_pending() {
     let mut double = RetryStore::failing();
     double.banks = vec![attempt.bank.clone()];
     let sink = EraseVecSink::default();
-    let env = attempt.env(&double, &sink);
+    let env = attempt.env(&double, &store, &sink);
     let live = double.effect_bank_set();
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
@@ -318,7 +318,7 @@ fn reconcile_leaves_another_event_kind_for_its_owner() {
         })
         .expect("the foreign intent records");
     let sink = EraseVecSink::default();
-    let env = attempt.env(&store, &sink);
+    let env = attempt.env(&store, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, vec![]));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report, ErasureReconcileReport::default());
@@ -359,11 +359,11 @@ fn reconcile_refresh_only_resume_detaches_the_erased_content() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&store, &ctx, &sink);
     let events = FaultEvents::outcome_fails_over(&store);
-    erase_confirmed_request(&store, &events, &attempt.request_id, &args, &live)
+    erase_confirmed_request(&store, &events, &store, &attempt.request_id, &args, &live)
         .expect_err("the outcome failure leaves the action pending");
     let env = ErasureRetryEnv {
         maint: Some(&maint),
-        ..attempt.env(&store, &sink)
+        ..attempt.env(&store, &store, &sink)
     };
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
@@ -386,7 +386,7 @@ fn a_harmless_effect_failure_keeps_the_intent_pending_until_a_resume_completes()
     let sink = EraseVecSink::default();
     let args = attempt.args(&double, &ctx, &sink);
     let live = vec![attempt.bank.clone()];
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("the hard effect error is reported");
     assert_eq!(
         err.message, "injected effect failure",
@@ -403,13 +403,14 @@ fn a_harmless_effect_failure_keeps_the_intent_pending_until_a_resume_completes()
     let rows = action_rows(&store, &action_id(&attempt));
     assert!(rows[0].result.is_none(), "no outcome, never a denial");
     // The restart pass counts the same hard error as pending, never denied.
-    let env = attempt.env(&double, &sink);
+    let env = attempt.env(&double, &store, &sink);
     let resume = |_: &SubjectRequestRecord| Some(resume_facts(&attempt, live.clone()));
     let report = reconcile_erasure_actions(&store, &store, &env, &resume).expect("reconcile");
     assert_eq!(report.pending, vec![action_id(&attempt)]);
     double.fail_effect.store(false, Ordering::SeqCst);
-    let recovered = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
-        .expect("the resume completes");
+    let recovered =
+        erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
+            .expect("the resume completes");
     assert_eq!(recovered.status, "COMPLETED");
     let settled = action_rows(&store, &action_id(&attempt));
     assert_eq!(settled.len(), 1, "exactly one outcome");
@@ -426,7 +427,7 @@ fn a_key_probe_error_keeps_the_intent_pending() {
     let sink = EraseVecSink::default();
     let args = attempt.args(&double, &ctx, &sink);
     let live = vec![attempt.bank.clone()];
-    let err = erase_confirmed_request(&store, &store, &attempt.request_id, &args, &live)
+    let err = erase_confirmed_request(&store, &store, &store, &attempt.request_id, &args, &live)
         .expect_err("the key probe failure is reported");
     assert_eq!(err.code, ErrorCode::Internal);
     assert_eq!(

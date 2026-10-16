@@ -53,6 +53,7 @@ use crate::copy_disposition::{
     CopyOwner, CopyRequiredAction, CopyState, copy_closure_facts,
 };
 use crate::erase::{EraseArgs, EraseOutcome};
+use crate::erasure_retry::erase_confirmed_request;
 use crate::local_review::authorize;
 use crate::subject_request::{
     PathState, RequestActionState, RequestKind, RequestScope, SubjectRequestLedger,
@@ -179,9 +180,8 @@ pub fn closure_inputs(record: &SubjectRequestRecord, product_path: &str) -> Clos
 /// Erase through the confirmed record the durable store holds, internally.
 ///
 /// Internal request-bound erasure entry, not yet bound to any command: its
-/// callers are tests that persist a record first, and the bank-scope public
-/// tool keeps its own path. Internal means no command is bound to it yet,
-/// while the crate-root entry stays available to the command layer.
+/// callers persist a record first, and the bank-scope public tool keeps its own
+/// path while the crate-root entry stays available to the command layer.
 ///
 /// The store row is the only source of the confirmed scope and peer slots: a
 /// missing row refuses, and the loaded record drives the coordination
@@ -201,11 +201,12 @@ pub fn closure_inputs(record: &SubjectRequestRecord, product_path: &str) -> Clos
 pub fn erase_from_durable_store(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
+    peers: &dyn clio_store::PeerActionStore,
     request_id: &str,
     args: &EraseArgs<'_>,
     live_banks: &[String],
 ) -> Result<EraseOutcome, AmError> {
-    crate::erasure_retry::erase_confirmed_request(durable, events, request_id, args, live_banks)
+    erase_confirmed_request(durable, events, peers, request_id, args, live_banks)
 }
 
 /// The stored custody class of a copy row.

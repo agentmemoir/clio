@@ -8,15 +8,14 @@
 //! the local command contracts over an in-memory request ledger.
 //!
 //! ## Owns
-//! - `RequestScope` bank and subject scope definitions
 //! - `RequestState`, `FinalOutcome`, `StateCategory`, and the state table
 //! - `RequestCommand` and the total, idempotent `transition` function
 //! - The `SubjectRequestLedger` register/apply contracts, including the
-//!   id-kind-scope binding
+//!   id-kind-scope binding and the enablement fact recorded at open
 //!
 //! ## Does not own
-//! - The durable record and its frozen field vocabulary
-//!   (`subject_request_frozen.rs`)
+//! - The durable record, its frozen field vocabulary, and the immutable
+//!   `RequestScope` it binds (`subject_request_frozen.rs`)
 //! - Any storage adapter, SQL, or database access: the ledger is in-memory
 //!   only, and reloading records models a restart
 //! - Any CLI or I/O: commands are data applied by functions
@@ -36,62 +35,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub use crate::subject_request_frozen::{
-    PathOwner, PathSlot, PathState, PeerState, RequestAction, RequestActionKind,
-    RequestActionState, RequestKind, SubjectRequestRecord, VerificationResult,
+    PathOwner, PathSlot, PathState, PeerEnablement, PeerState, RequestAction, RequestActionKind,
+    RequestActionState, RequestKind, RequestScope, SubjectRequestRecord, VerificationResult,
 };
-
-/// Where a request applies, fixed when the request is opened.
-///
-/// The scope of a stored request never changes; see
-/// [`SubjectRequestLedger::register`] for the binding rule.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RequestScope {
-    /// The whole bank: every subject the bank holds.
-    Bank {
-        /// The bank the request covers.
-        bank_id: String,
-    },
-    /// One subject inside a bank.
-    Subject {
-        /// The bank the subject lives in.
-        bank_id: String,
-        /// The subject the request covers.
-        subject_id: String,
-    },
-}
-
-impl RequestScope {
-    /// The contract scope check, shared with the action-event validator so no
-    /// event carries a scope the contract would refuse.
-    pub(crate) fn validate(&self) -> Result<(), AmError> {
-        match self {
-            Self::Bank { bank_id } => Self::validate_bank(bank_id),
-            Self::Subject {
-                bank_id,
-                subject_id,
-            } => {
-                Self::validate_bank(bank_id)?;
-                if subject_id.trim().is_empty() {
-                    return Err(AmError::new(
-                        ErrorCode::InvalidArgument,
-                        "subject scope needs a subject id",
-                    ));
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn validate_bank(bank_id: &str) -> Result<(), AmError> {
-        if bank_id.trim().is_empty() {
-            return Err(AmError::new(
-                ErrorCode::MissingBank,
-                "request scope needs a bank id",
-            ));
-        }
-        Ok(())
-    }
-}
 
 /// The final outcome of finished work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -342,16 +288,46 @@ impl SubjectRequestLedger {
 
     /// Open a request, or replay its stored result.
     ///
-    /// The request id is durable and its kind and scope are immutable: the
-    /// same id with the same kind and scope replays the stored record and
-    /// applies nothing, ignoring the incoming peer list entirely; the same id
-    /// with a changed kind or scope is refused and no state changes. The peer
-    /// snapshot is captured once, at open; a replay keeps the stored snapshot.
+    /// An empty peer list records [`PeerEnablement::NotApplicable`] and a
+    /// non-empty one [`PeerEnablement::Required`]; use
+    /// [`Self::register_with_enablement`] to supply the fact explicitly.
     pub fn register(
         &mut self,
         request_id: &str,
         kind: RequestKind,
         scope: &RequestScope,
+        peers: &[&str],
+    ) -> Result<RegisterOutcome, AmError> {
+        let enablement = if peers.is_empty() {
+            PeerEnablement::NotApplicable
+        } else {
+            PeerEnablement::Required
+        };
+        self.register_with_enablement(request_id, kind, scope, enablement, peers)
+    }
+
+    /// Open a request under an explicit enablement fact, or replay its stored
+    /// result.
+    ///
+    /// The request id is durable and its kind and scope are immutable: the
+    /// same id with the same kind and scope replays the stored record and
+    /// applies nothing, ignoring the incoming enablement fact and peer list
+    /// entirely; the same id with a changed kind or scope is refused and no
+    /// state changes. A new request persists the fact and the frozen peer
+    /// snapshot before any effect: [`PeerEnablement::Required`] needs at
+    /// least one enabled peer label and [`PeerEnablement::NotApplicable`]
+    /// none, so the stored fact never contradicts the stored set.
+    ///
+    /// # Errors
+    /// A blank id, an invalid scope, an enablement fact the labels
+    /// contradict, a blank peer label, or a reused id bound to a different
+    /// kind or scope.
+    pub fn register_with_enablement(
+        &mut self,
+        request_id: &str,
+        kind: RequestKind,
+        scope: &RequestScope,
+        enablement: PeerEnablement,
         peers: &[&str],
     ) -> Result<RegisterOutcome, AmError> {
         if request_id.trim().is_empty() {
@@ -372,7 +348,7 @@ impl SubjectRequestLedger {
                 "request id is already bound to a different kind or scope",
             )),
             None => {
-                let peer_slots = peer_snapshot(peers)?;
+                let peer_slots = peer_snapshot(enablement, peers)?;
                 self.requests.insert(
                     request_id.to_owned(),
                     SubjectRequestRecord {
@@ -385,6 +361,7 @@ impl SubjectRequestLedger {
                         actions: BTreeMap::new(),
                         paths: BTreeMap::new(),
                         peers: peer_slots,
+                        peer_enablement: enablement,
                         exception: None,
                     },
                 );
@@ -425,9 +402,30 @@ impl SubjectRequestLedger {
     }
 }
 
-/// One pending slot per peer of a new request; duplicates collapse, and a
-/// blank id is refused.
-fn peer_snapshot(peers: &[&str]) -> Result<BTreeMap<String, PeerState>, AmError> {
+/// One pending slot per enabled peer of a new request.
+///
+/// A required request needs at least one label and a not-applicable one none,
+/// so the stored fact and the frozen set always agree; duplicates collapse,
+/// and a blank label is refused.
+fn peer_snapshot(
+    enablement: PeerEnablement,
+    peers: &[&str],
+) -> Result<BTreeMap<String, PeerState>, AmError> {
+    if peers.is_empty() {
+        return match enablement {
+            PeerEnablement::NotApplicable => Ok(BTreeMap::new()),
+            PeerEnablement::Required => Err(AmError::new(
+                ErrorCode::InvalidArgument,
+                "a required peer set needs at least one enabled peer",
+            )),
+        };
+    }
+    if enablement == PeerEnablement::NotApplicable {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "peer work is not applicable to a request with enabled peers",
+        ));
+    }
     let mut slots = BTreeMap::new();
     for peer_id in peers {
         if peer_id.trim().is_empty() {
