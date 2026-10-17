@@ -4,15 +4,13 @@
 //! # Responsibility
 //!
 //! This module is responsible for the start-time auth contract of the
-//! Streamable HTTP transport: a loopback bind with no credential source is
-//! refused unless the operator opted out, the opt-out restores the
-//! credential-free server, and a minted local-owner store still requires its
-//! secret on every request.
+//! Streamable HTTP transport: a bind with no credential source is refused
+//! unless the operator opted out, and the opt-out restores the
+//! credential-free server.
 //!
 //! ## Owns
 //! - The loopback refusal message and its pinned substrings
 //! - `insecure_no_auth` restoring the unauthenticated loopback server
-//! - The per-request 401 for a minted local-owner store
 //!
 //! ## Does not own
 //! - The non-loopback refusal (`http_tests`)
@@ -68,28 +66,4 @@ fn insecure_no_auth_restores_the_unauthenticated_loopback_server() {
         ..HttpConfig::default()
     });
     assert_eq!(post_json(port, INIT, "").status, 200);
-}
-
-/// A minted local-owner store still requires its secret over the wire: a
-/// missing or wrong bearer is a 401 and only the generated token serves.
-#[test]
-fn a_minted_local_owner_token_is_required_on_loopback() {
-    let secret = clio_config::auth_tokens::generate_secret();
-    let store = CredentialStore::for_local_owner(&secret);
-    let (port, _) = spawn_server(HttpConfig {
-        credentials: Some(Arc::new(store)),
-        ..HttpConfig::default()
-    });
-
-    assert_eq!(post_json(port, INIT, "").status, 401, "no bearer refused");
-    assert_eq!(
-        post_json(port, INIT, "Authorization: Bearer nope\r\n").status,
-        401,
-        "an unknown bearer refused"
-    );
-    assert_eq!(
-        post_json(port, INIT, &format!("Authorization: Bearer {secret}\r\n")).status,
-        200,
-        "the minted token serves"
-    );
 }

@@ -105,6 +105,34 @@ fn a_harness_credential_may_mutate_administrative_config() {
 }
 
 #[test]
+fn a_system_credential_may_mutate_administrative_config() {
+    let store = Store::new("admin-system-config");
+    let mut secrets = Vec::new();
+    let credentials = store.write(&[("owner", Actor::System, &["demo"])], &mut secrets);
+    let port = bound_server(&credentials, "demo");
+    let auth = bearer(&secrets[0]);
+
+    for (name, args) in config_mutations() {
+        let (status, response) = post(port, &call(name, args), &auth);
+        assert_eq!(status, 200, "{name}: {response}");
+        assert!(
+            tool_ok(&response),
+            "a system credential may `{name}`: {response}"
+        );
+    }
+    let (status, response) = post(
+        port,
+        &call("retention_profile_set", deployment_retention_mutation()),
+        &auth,
+    );
+    assert_eq!(status, 200, "{response}");
+    assert!(
+        tool_ok(&response),
+        "a system credential may set a deployment profile: {response}"
+    );
+}
+
+#[test]
 fn an_agent_credential_may_not_set_a_deployment_retention_profile() {
     let store = Store::new("admin-agent-retention");
     let mut secrets = Vec::new();
