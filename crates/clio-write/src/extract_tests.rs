@@ -303,6 +303,37 @@ fn template_rejects_non_object_snapshot() {
 }
 
 #[test]
+fn template_rejects_an_oversized_gist() {
+    #[derive(Debug)]
+    struct LongGistTransport;
+    impl Transport for LongGistTransport {
+        fn post_json(&self, _u: &str, _b: &Value) -> Result<Value, AmError> {
+            Ok(json!({
+                "snapshot": {"entity": "Ada"},
+                "gist": "x".repeat(clio_types::GIST_MAX_CHARS + 1),
+            }))
+        }
+    }
+    let ex = TemplateApiExtractor {
+        url: "http://extract.local".into(),
+        model: "m".into(),
+        temperature: 0.0,
+        transport: LongGistTransport,
+    };
+    let err = ex
+        .extract(&ExtractRequest {
+            source_text: "Ada was here".into(),
+            tool_payload: None,
+            schema_template: json!({}),
+            verify_feedback: None,
+            context: None,
+        })
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::OutOfRange);
+    assert!(err.message.contains("gist"), "{err}");
+}
+
+#[test]
 fn template_api_uses_transport() {
     let ex = TemplateApiExtractor {
         url: "http://extract.local".into(),

@@ -62,7 +62,7 @@ fn fact_hit_golden_json_has_no_trajectory() {
     let json = serde_json::to_string(&hit).unwrap();
     assert_eq!(
         json,
-        r#"{"item_id":"sem-1","bank_id":"bank","kind":"semantic","category":"persona","epistemic_kind":"fact","gist":"likes rust","requires_confidence_check":false}"#
+        r#"{"item_id":"sem-1","bank_id":"bank","kind":"semantic","category":"persona","epistemic_kind":"fact","gist":"likes rust","gist_unverified":true,"requires_confidence_check":false}"#
     );
     let back: RetrieveHit = serde_json::from_str(&json).unwrap();
     assert_eq!(back, hit);
@@ -83,7 +83,7 @@ fn belief_item_hit_golden_json_surfaces_confidence() {
     let json = serde_json::to_string(&RetrieveHit::from_item(&item)).unwrap();
     assert_eq!(
         json,
-        r#"{"item_id":"ep-1","bank_id":"bank","kind":"episodic","episodic_type":"triple","epistemic_kind":"belief","source_type":"user_stated","confidence":0.9,"gist":"s p o","requires_confidence_check":true}"#
+        r#"{"item_id":"ep-1","bank_id":"bank","kind":"episodic","episodic_type":"triple","epistemic_kind":"belief","source_type":"user_stated","confidence":0.9,"gist":"s p o","gist_unverified":true,"requires_confidence_check":true}"#
     );
 }
 
@@ -111,7 +111,7 @@ fn belief_object_hit_uses_current_history_entry() {
     let json = serde_json::to_string(&hit).unwrap();
     assert_eq!(
         json,
-        r#"{"item_id":"bel-1","bank_id":"bank","kind":"belief","epistemic_kind":"belief","source_type":"agent_inferred","confidence":0.65,"gist":"user likes coffee","requires_confidence_check":true}"#
+        r#"{"item_id":"bel-1","bank_id":"bank","kind":"belief","epistemic_kind":"belief","source_type":"agent_inferred","confidence":0.65,"gist":"user likes coffee","gist_unverified":true,"requires_confidence_check":true}"#
     );
 }
 
@@ -135,6 +135,24 @@ fn item_hit_carries_context_and_omits_key_when_absent() {
     assert!(hit.context.is_none());
     let json = serde_json::to_string(&hit).unwrap();
     assert!(!json.contains("\"context\""), "{json}");
+}
+
+#[test]
+fn a_gist_is_delineated_as_unverified_prose() {
+    // A hit that carries a gist marks it as unverified summary prose.
+    let item = base_item();
+    let hit = RetrieveHit::from_item(&item);
+    assert!(hit.gist_unverified);
+    let json = serde_json::to_string(&hit).unwrap();
+    assert!(json.contains(r#""gist_unverified":true"#), "{json}");
+
+    // A hit with no gist omits the marker rather than asserting about nothing.
+    let mut bare = base_item();
+    bare.gist = None;
+    let hit = RetrieveHit::from_item(&bare);
+    assert!(!hit.gist_unverified);
+    let json = serde_json::to_string(&hit).unwrap();
+    assert!(!json.contains("gist_unverified"), "{json}");
 }
 
 #[test]

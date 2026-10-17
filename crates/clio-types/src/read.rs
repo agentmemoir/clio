@@ -145,6 +145,12 @@ pub struct RetrieveHit {
     /// Non-authoritative prose half; the proposition for a belief object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gist: Option<String>,
+    /// `true` when [`Self::gist`] is an unverified, model-generated summary:
+    /// prose this build never checked against a source span the way a snapshot
+    /// leaf is checked. Present only when the hit carries a gist, and never a
+    /// signal that the gist is false — only that it is ungrounded prose.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gist_unverified: bool,
     /// Optional bounded descriptive source context surfaced as hit
     /// metadata. Descriptive only: never part of the truth/epistemic semantics.
     ///
@@ -199,6 +205,7 @@ impl RetrieveHit {
             epistemic_kind: item.epistemic_kind,
             source_type: if is_belief { item.source_type } else { None },
             confidence: if is_belief { item.confidence } else { None },
+            gist_unverified: item.gist.is_some(),
             gist: item.gist.clone(),
             context: item.context.clone(),
             // The rendering is opt-in and cap-bounded; this mapper never reads
@@ -220,6 +227,7 @@ impl RetrieveHit {
             epistemic_kind: EpistemicKind::Belief,
             source_type: belief.current_source_type(),
             confidence: belief.current_confidence(),
+            gist_unverified: true,
             gist: Some(belief.proposition.clone()),
             context: belief.context.clone(),
             exact_render: None,

@@ -233,6 +233,16 @@ fn t34_05_wrong_snapshot_or_gist_shape_fails_closed() {
 }
 
 #[test]
+fn an_oversized_gist_is_rejected() {
+    let content = format!(
+        "{{\"snapshot\":{{\"entity\":\"Ada\"}},\"gist\":\"{}\"}}",
+        "x".repeat(clio_types::GIST_MAX_CHARS + 1)
+    );
+    let err = parse_chat_response(&chat_response(&content)).expect_err("cap");
+    assert_eq!(err.code, ErrorCode::OutOfRange, "{err}");
+}
+
+#[test]
 fn oversized_content_is_rejected() {
     let content = format!("\"{}\"", "x".repeat(MAX_CONTENT_BYTES + 1));
     let err = parse_chat_response(&chat_response(&content)).expect_err("cap");
