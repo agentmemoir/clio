@@ -14,8 +14,6 @@
 //! - Guarded `ALTER TABLE … ADD COLUMN` for the lineage columns (SQLite)
 //! - Guarded `ALTER TABLE … ADD COLUMN` for the domain-record `context_cipher`
 //!   columns and the `context_as_of` effective-time columns (SQLite)
-//! - Guarded `ALTER TABLE … ADD COLUMN` for the durable-request columns on a
-//!   pre-existing single-key placeholder table (SQLite)
 //!
 //! ## Does not own
 //! - Fresh-database column declaration (`sql/001_core.sql`)
@@ -120,40 +118,6 @@ pub(crate) fn converge_column_sqlite(
             [],
         )
         .am("add converged column")?;
-    }
-    Ok(())
-}
-
-/// Add the durable-request columns to a pre-existing single-key placeholder
-/// `durable_requests` table. Fresh databases are untouched; a database that
-/// already has a column is a no-op. The added columns stay nullable because
-/// SQLite only accepts a `NOT NULL` added column with a constant default: the
-/// store always writes every field, so a row written after this holds real
-/// values. The original `id` key stays in place, so the convergence also adds
-/// a unique index over `request_id`: without it the save's conflict target
-/// matches no constraint on a converged table. Placeholder tables hold no
-/// request rows by contract, so converged rows start empty and fill on save.
-pub(crate) fn converge_durable_requests_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError> {
-    converge_column_sqlite(conn, "durable_requests", "request_id", "text")?;
-    converge_column_sqlite(conn, "durable_requests", "kind", "text")?;
-    converge_column_sqlite(conn, "durable_requests", "state", "text")?;
-    converge_column_sqlite(conn, "durable_requests", "scope", "text")?;
-    converge_column_sqlite(conn, "durable_requests", "deadline", "text")?;
-    converge_column_sqlite(conn, "durable_requests", "record", "text")?;
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'durable_requests'",
-            [],
-            |r| r.get(0),
-        )
-        .am("durable requests table exists for convergence")?;
-    if exists > 0 {
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS durable_requests_request_id_uidx
-             ON durable_requests (request_id)",
-            [],
-        )
-        .am("durable requests request-id index")?;
     }
     Ok(())
 }

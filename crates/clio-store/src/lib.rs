@@ -73,6 +73,7 @@ mod distilled_unit;
 mod distilled_unit_codec;
 mod distilled_unit_store;
 mod durable_requests;
+mod durable_requests_converge;
 mod embedding_space;
 mod erase_hash;
 mod erasure_denial;

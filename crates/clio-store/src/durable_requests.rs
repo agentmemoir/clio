@@ -28,9 +28,9 @@
 //!
 //! Keep this module focused on the durable request persistence contract.
 
+use crate::durable_requests_converge::{converge_pg, converge_sqlite};
 use crate::migrate::IntoAmError;
 use crate::postgres::PostgresStore;
-use crate::schema_converge::converge_durable_requests_sqlite;
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode};
 use rusqlite::OptionalExtension;
@@ -139,25 +139,6 @@ fn lost_row() -> AmError {
 const SQLITE_COLUMNS: &str =
     "request_id, kind, state, scope, deadline, record FROM durable_requests";
 
-/// Bring a pre-existing single-key placeholder `durable_requests` table onto
-/// the request columns (`ADD COLUMN IF NOT EXISTS`, so a current table is a
-/// no-op). The slot DDL is portable across both backends, so Postgres cannot
-/// carry these in the shared slot file the way the vector file does.
-fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> {
-    client
-        .batch_execute(
-            "ALTER TABLE durable_requests ADD COLUMN IF NOT EXISTS request_id text;
-             ALTER TABLE durable_requests ADD COLUMN IF NOT EXISTS kind text;
-             ALTER TABLE durable_requests ADD COLUMN IF NOT EXISTS state text;
-             ALTER TABLE durable_requests ADD COLUMN IF NOT EXISTS scope text;
-             ALTER TABLE durable_requests ADD COLUMN IF NOT EXISTS deadline text;
-             ALTER TABLE durable_requests ADD COLUMN IF NOT EXISTS record text;
-             CREATE UNIQUE INDEX IF NOT EXISTS durable_requests_request_id_uidx
-                 ON durable_requests (request_id);",
-        )
-        .am("durable request converge")
-}
-
 fn sqlite_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DurableRequestRow> {
     Ok(DurableRequestRow {
         request_id: row.get(0)?,
@@ -183,7 +164,7 @@ impl DurableRequestStore for SqliteStore {
     fn save(&self, row: &DurableRequestRow) -> Result<(), AmError> {
         validate_row(row)?;
         self.with_conn(|conn| {
-            converge_durable_requests_sqlite(conn)?;
+            converge_sqlite(conn)?;
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .am("durable request begin")?;
@@ -227,14 +208,14 @@ impl DurableRequestStore for SqliteStore {
 
     fn load(&self, request_id: &str) -> Result<Option<DurableRequestRow>, AmError> {
         self.with_conn(|conn| {
-            converge_durable_requests_sqlite(conn)?;
+            converge_sqlite(conn)?;
             sqlite_read(conn, request_id)
         })
     }
 
     fn load_all(&self) -> Result<Vec<DurableRequestRow>, AmError> {
         self.with_conn(|conn| {
-            converge_durable_requests_sqlite(conn)?;
+            converge_sqlite(conn)?;
             let sql = format!("SELECT {SQLITE_COLUMNS} ORDER BY request_id");
             let mut stmt = conn.prepare(&sql).am("durable request list prepare")?;
             let rows = stmt
