@@ -118,15 +118,17 @@ impl CredentialStore {
     ///
     /// Used when `clio mcp http` runs on loopback with no `--token-file`: the
     /// owner still has to present a bearer secret, and this store resolves the
-    /// generated one to the administrative principal for `banks`. Built exactly
-    /// as [`Self::from_records`] builds a loaded record — the same
-    /// `StoredCredential` with the same digest — so [`Self::resolve`] keeps its
-    /// constant-time scan and discloses nothing new.
+    /// generated one to the local-owner principal. That principal is
+    /// administrative and reaches every bank, matching the authority the owner
+    /// already has over the store. Built exactly as [`Self::from_records`]
+    /// builds a loaded record — the same `StoredCredential` with the same
+    /// digest — so [`Self::resolve`] keeps its constant-time scan and discloses
+    /// nothing new.
     #[must_use]
-    pub fn for_local_owner(secret: &str, banks: Vec<String>) -> Self {
+    pub fn for_local_owner(secret: &str) -> Self {
         Self {
             credentials: vec![StoredCredential {
-                principal: Principal::new(LOCAL_OWNER_LABEL.to_owned(), Actor::System, banks),
+                principal: Principal::local_owner(LOCAL_OWNER_LABEL.to_owned(), Actor::System),
                 digest: digest_hex(secret),
             }],
         }

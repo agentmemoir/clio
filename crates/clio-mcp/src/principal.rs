@@ -46,7 +46,11 @@ pub(crate) struct Principal {
     pub(crate) label: String,
     pub(crate) actor: Actor,
     /// Exactly the banks the record named, in the order the record listed them.
+    /// Ignored when `all_banks` is set.
     pub(crate) banks: Vec<String>,
+    /// The local process owner reaches every bank because it already holds the
+    /// whole store; a record loaded from disk never sets this.
+    all_banks: bool,
 }
 
 impl Principal {
@@ -56,6 +60,22 @@ impl Principal {
             label,
             actor,
             banks,
+            all_banks: false,
+        }
+    }
+
+    /// Build the local process owner's principal.
+    ///
+    /// The loopback server mints this for itself when no `--token-file` was
+    /// given. It is administrative and reaches every bank, matching the
+    /// authority the process owner already has over the store; the bearer token
+    /// is what proves the caller is that owner.
+    pub(crate) fn local_owner(label: String, actor: Actor) -> Self {
+        Self {
+            label,
+            actor,
+            banks: Vec::new(),
+            all_banks: true,
         }
     }
 
@@ -107,7 +127,7 @@ impl Principal {
     /// # Errors
     /// [`ErrorCode::Forbidden`] when `bank` is outside the list.
     pub(crate) fn authorize_bank(&self, bank: &str) -> Result<(), AmError> {
-        if self.banks.iter().any(|b| b == bank) {
+        if self.all_banks || self.banks.iter().any(|b| b == bank) {
             return Ok(());
         }
         Err(AmError::new(
