@@ -424,3 +424,7 @@ mod maintenance_trigger_tests;
 #[cfg(test)]
 #[path = "maintenance_trigger_more_tests.rs"]
 mod maintenance_trigger_more_tests;
+
+#[cfg(test)]
+#[path = "maintenance_trigger_store_spy_tests.rs"]
+mod maintenance_trigger_store_spy_tests;

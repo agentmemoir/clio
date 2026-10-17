@@ -26,6 +26,8 @@
 
 use super::http_test_support_tests::{INIT, post_json, spawn_server};
 use super::*;
+use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
+use clio_types::Actor;
 
 /// A loopback bind with no credential source is refused at start unless the
 /// operator opted out: the local dev default no longer serves anyone who can
@@ -66,4 +68,35 @@ fn insecure_no_auth_restores_the_unauthenticated_loopback_server() {
         ..HttpConfig::default()
     });
     assert_eq!(post_json(port, INIT, "").status, 200);
+}
+
+/// With both `--insecure-no-auth` and a credential store, the store still
+/// governs every request: the help promises the store is enforced, and the
+/// request path must match. Only the start guard sees the opt-out.
+#[test]
+fn insecure_no_auth_with_a_credential_store_still_requires_the_credential() {
+    let secret = clio_config::auth_tokens::generate_secret();
+    let store = CredentialStore::from_records(vec![AuthTokenRecord {
+        label: "ci".into(),
+        secret_sha256: digest_hex(&secret),
+        actor: Actor::Harness,
+        banks: vec!["demo".into()],
+        created_at: "2026-10-01T00:00:00Z".into(),
+    }]);
+    let (port, _) = spawn_server(HttpConfig {
+        insecure_no_auth: true,
+        credentials: Some(Arc::new(store)),
+        ..HttpConfig::default()
+    });
+    assert_eq!(
+        post_json(port, INIT, "").status,
+        401,
+        "a request with no credential is refused even under the opt-out"
+    );
+    let auth = format!("Authorization: Bearer {secret}\r\n");
+    assert_eq!(
+        post_json(port, INIT, &auth).status,
+        200,
+        "the store's own credential is accepted"
+    );
 }
