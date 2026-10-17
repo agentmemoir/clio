@@ -22,7 +22,7 @@
 //! Changes to extract I/O shape should normally require changes here.
 //! Changes to verify rules should not require changes here.
 
-use clio_types::{AmError, ErrorCode};
+use clio_types::{AmError, ErrorCode, validate_gist};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -262,6 +262,9 @@ impl<T: Transport> Extractor for TemplateApiExtractor<T> {
             }
         };
         let gist = resp.get("gist").and_then(Value::as_str).map(str::to_owned);
+        if let Some(gist) = &gist {
+            validate_gist(gist)?;
+        }
         let source_ref = resp
             .get("source_ref")
             .and_then(Value::as_str)
