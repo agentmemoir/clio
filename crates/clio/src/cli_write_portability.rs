@@ -14,7 +14,8 @@
 //! - The `erase` confirmation gate call and the irreversibility dry-run preview
 //! - The `compliance review-export` runner: store open, argument build, and the
 //!   in-process `review_export` dispatch
-//! - Their human text views
+//! - The `export` and `import` human text views; `erase` renders through
+//!   `compliance_request_cli::render_request`
 //!
 //! ## Does not own
 //! - The write engine, parsing, and in-process call bridge (see `cli_write`)
@@ -68,7 +69,9 @@ impl WriteGroup for PortabilityWriteGroup {
         match verb {
             "export" => render_export(payload),
             "import" => render_import(payload),
-            _ => render_erase(payload),
+            // The erase handler returns the request report; render it through
+            // the same separated request fields the request verbs use.
+            _ => crate::compliance_request_cli::render_request(payload),
         }
     }
 
@@ -263,30 +266,6 @@ fn render_import(payload: &Value) -> String {
         );
     }
     format!("import: created {create}, skipped {skip}, rejected {reject}, overwrote {overwrite}")
-}
-
-fn render_erase(payload: &Value) -> String {
-    let status = payload.get("status").and_then(Value::as_str).unwrap_or("?");
-    let request = payload
-        .get("request_id")
-        .and_then(Value::as_str)
-        .unwrap_or("?");
-    let items = payload
-        .get("item_count")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let tombstones = payload
-        .get("tombstones_written")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let triples = payload
-        .get("triples_purged")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    format!(
-        "erased {items} item(s) for request {request} (status {status}; DEK destroyed; \
-         triples {triples}; tombstones {tombstones}; irreversible)"
-    )
 }
 
 /// Run `clio compliance review-export`: parse the record's flags and export the

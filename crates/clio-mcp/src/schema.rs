@@ -29,6 +29,7 @@ use crate::schema_defs::{ToolDef, core_defs};
 use crate::schema_hygiene_defs::hygiene_defs;
 use crate::schema_ops_defs::ops_defs;
 use crate::schema_portability_defs::portability_defs;
+use crate::schema_request_defs::request_defs;
 use crate::schema_retention_defs::retention_defs;
 use crate::schema_sync_defs::sync_defs;
 use serde_json::{Value, json};
@@ -46,6 +47,7 @@ pub fn catalog_defs() -> Vec<ToolDef> {
     all.extend(additive_defs());
     all.extend(hygiene_defs());
     all.extend(portability_defs());
+    all.extend(request_defs());
     all.extend(ops_defs());
     all.extend(sync_defs());
     all.extend(retention_defs());

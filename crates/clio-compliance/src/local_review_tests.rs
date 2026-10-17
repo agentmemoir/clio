@@ -52,6 +52,7 @@ fn query(limit: usize, cursor: Option<&str>) -> LocalReviewQuery {
     LocalReviewQuery {
         limit,
         cursor: cursor.map(str::to_owned),
+        request_id: None,
     }
 }
 
@@ -341,4 +342,45 @@ fn custody_refuses_a_bad_timestamp() {
     )
     .expect_err("bad timestamp");
     assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+/// An intent with an explicit scope, for the request-filter coverage.
+fn scoped_intent<'a>(action_id: &'a str, scope: &'a str) -> LocalEventIntent<'a> {
+    LocalEventIntent {
+        action_id,
+        actor: "tester",
+        scope,
+        kind: "erasure",
+        event_time: EVENT_TIME,
+    }
+}
+
+/// A request filter keeps only the events that name that request.
+#[test]
+fn a_request_filter_keeps_only_that_requests_events() {
+    let store = store();
+    store
+        .record_intent(&scoped_intent("erasure:req-1", "erasure"))
+        .expect("erasure event");
+    store
+        .record_intent(&scoped_intent("erasure:req-1:peer-1", "req-1"))
+        .expect("peer event");
+    store
+        .record_intent(&scoped_intent("erasure:req-2", "erasure"))
+        .expect("other request event");
+    let query = LocalReviewQuery {
+        limit: 10,
+        cursor: None,
+        request_id: Some("req-1".to_owned()),
+    };
+    let page = review_local_events(&ctx(Actor::Harness), &store, &query).expect("request review");
+    let ids: Vec<String> = page.rows.iter().map(|row| row.action_id.clone()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "erasure:req-1".to_owned(),
+            "erasure:req-1:peer-1".to_owned()
+        ],
+        "only the events naming the request stay"
+    );
 }

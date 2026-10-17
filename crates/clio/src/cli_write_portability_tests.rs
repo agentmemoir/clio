@@ -437,13 +437,14 @@ fn render_matches_the_contract_for_each_verb() {
 
     let erased = group.render(
         "erase",
-        &json!({"status": "COMPLETED", "request_id": "req-9", "item_count": 2,
-                "triples_purged": 1, "tombstones_written": 2}),
+        &json!({"ok": true, "request_id": "req-9", "state": "in_progress", "technical_completion": "pending",
+                "pending_operator_actions": [{"action_id": "act-1", "kind": "erase"}], "request_outcome": "open",
+                "action_id": "act-1", "effects_before": 0, "effects_after": 2}),
         crate::cli_style::Palette::new(false),
     );
     assert_eq!(
         erased,
-        "erased 2 item(s) for request req-9 (status COMPLETED; DEK destroyed; \
-         triples 1; tombstones 2; irreversible)"
+        "request req-9: state=in_progress; technical_completion=pending; \
+         pending_operator_actions=act-1(erase); request_outcome=open"
     );
 }

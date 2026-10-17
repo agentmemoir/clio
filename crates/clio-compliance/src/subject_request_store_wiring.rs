@@ -52,7 +52,9 @@
 //!
 //! Keep this module focused on the durable-record consumer mapping.
 
-use crate::copy_disposition::{CopyClosureFacts, peer_copy_disposition, request_closure_facts};
+use crate::copy_disposition::{
+    CopyClosureFacts, missing_peer_disposition, peer_copy_disposition, request_closure_facts,
+};
 use crate::erase::{EraseArgs, EraseOutcome};
 use crate::erasure_retry::erase_confirmed_request;
 use crate::local_review::authorize;
@@ -267,8 +269,10 @@ pub fn peer_row_closure_facts(
     let dispositions = record
         .peers
         .keys()
-        .filter_map(|peer_id| row_of(record, peer_id, peer_rows))
-        .map(peer_copy_disposition)
+        .map(|peer_id| match row_of(record, peer_id, peer_rows) {
+            Some(row) => peer_copy_disposition(row),
+            None => missing_peer_disposition(peer_id),
+        })
         .collect::<Vec<_>>();
     request_closure_facts(&dispositions, closure_inputs(record, product_path))
 }

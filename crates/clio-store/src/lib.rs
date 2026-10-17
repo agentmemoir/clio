@@ -216,7 +216,7 @@ pub use batch_model::{BatchStore, BatchWrite, MAX_BATCH_OPS};
 pub use belief_store::BeliefStore;
 pub use bootstrap::{StoreBackend, StoreOpenOptions, open_store};
 pub use compliance_store::{
-    ComplianceStore, ComplianceTombstoneView, SubjectEraseOutcome, SubjectEraseSpec,
+    BankScopeStore, ComplianceStore, ComplianceTombstoneView, SubjectEraseOutcome, SubjectEraseSpec,
 };
 pub use content_read_errors::is_unreadable_content;
 pub use continuous::ContinuousStore;

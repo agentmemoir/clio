@@ -38,6 +38,7 @@ use crate::cli_args::{self, FlagSpec, ParsedArgs};
 use crate::cli_error::{CliError, EXIT_OK, EXIT_USAGE};
 use crate::cli_output::{self, OutputMode};
 use crate::cli_read::{CliIo, emit, fail};
+use crate::compliance_request_cli;
 use clio_compliance::{
     Custody, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, PeerEnablement,
     RetentionAction, ScopeInventory, scope_inventory,
@@ -81,6 +82,10 @@ fn current_dir_error(error: &std::io::Error) -> CliError {
 ///
 /// `current_dir` is the injected seam: the real entry resolves the process
 /// current directory, tests inject one (or an error) directly.
+#[expect(
+    clippy::match_same_arms,
+    reason = "the dispatch scan reads each sub-verb as its own arm"
+)]
 pub(crate) fn run(
     io: &mut CliIo,
     args: Vec<String>,
@@ -113,6 +118,16 @@ pub(crate) fn run(
     match sub.as_str() {
         "inventory" => run_inventory(io, fallback, collected, current_dir),
         "review-export" => crate::cli_write_portability::run_review_export(io, fallback, collected),
+        "request-start" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-status" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-retry" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-copy" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-exception" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-events" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-close" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "peer-status" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "peer-retry" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "peer-disposition" => compliance_request_cli::run_request(io, fallback, &sub, collected),
         // The derived list above already refused every other spelling; the
         // fallback keeps the arm-free case a refusal rather than a silent run.
         other => fail(io, fallback, &unknown_subcommand(other)),
@@ -394,6 +409,10 @@ fn action_label(action: RetentionAction) -> &'static str {
 #[cfg(test)]
 #[path = "compliance_cli_tests.rs"]
 mod compliance_cli_tests;
+
+#[cfg(test)]
+#[path = "compliance_cli_request_routing_tests.rs"]
+mod compliance_cli_request_routing_tests;
 
 #[cfg(test)]
 #[path = "compliance_cli_review_export_tests.rs"]

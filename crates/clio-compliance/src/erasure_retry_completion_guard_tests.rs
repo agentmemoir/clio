@@ -269,10 +269,13 @@ fn a_failed_journal_denial_refuses_and_a_later_pass_retries_it() {
     store
         .create_memory_item(&item, "tester")
         .expect("seed the subject item");
-    // The journal's parent directory is deterministically absent, so the
-    // denial write cannot create its temp sibling.
+    // The journal's parent is deterministically obstructed (a regular file
+    // where its directory should be), so neither the journal lock nor the
+    // denial write can create it.
     let dir = FixtureDir::create(&unique("erase-journal-unwritable"));
-    let unwritable = dir.path().join("absent").join("erasure-journal.json");
+    let obstruction = dir.path().join("absent");
+    std::fs::write(&obstruction, b"not a directory").expect("plant the obstructing file");
+    let unwritable = obstruction.join("erasure-journal.json");
     let ctx = attempt.ctx();
     let sink = EraseVecSink::default();
     let live = live_set(&attempt, &store);

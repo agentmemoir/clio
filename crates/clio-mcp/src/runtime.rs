@@ -35,9 +35,9 @@ use clio_history::HistoryPolicy;
 use clio_index::Embedder;
 use clio_retrieve::{AssociationEngine, HybridRetriever};
 use clio_store::{
-    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DekProvider,
-    DestinationCustodyStore, HistoryStore, HygieneStore, IndexStore, LocalEventStore, OpsStore,
-    PersonaStore, Store, SyncStore,
+    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, CopyInventoryStore, DekProvider,
+    DestinationCustodyStore, DurableRequestStore, HistoryStore, HygieneStore, IndexStore,
+    LocalEventStore, OpsStore, PeerActionStore, PersonaStore, Store, SyncStore,
 };
 use clio_types::{Actor, AmError};
 use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
@@ -95,6 +95,14 @@ pub struct McpState {
     pub hygiene: Arc<dyn HygieneStore>,
     /// Durable local event writer for protected-action intents and outcomes.
     pub events: Arc<dyn LocalEventStore>,
+    /// Durable subject-request records for the request service.
+    pub durable: Arc<dyn DurableRequestStore>,
+    /// Peer-action rows for subject requests.
+    pub peer_actions: Arc<dyn PeerActionStore>,
+    /// Copy-inventory rows for subject requests.
+    pub copies: Arc<dyn CopyInventoryStore>,
+    /// Live bank set an erasure fans out to for one data subject.
+    pub bank_scope: Arc<dyn clio_store::BankScopeStore>,
     /// Export destination-custody persistence.
     pub custody: Arc<dyn DestinationCustodyStore>,
     /// Best-effort measured live-store facts for a subject-scoped export.

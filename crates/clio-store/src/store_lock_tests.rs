@@ -207,11 +207,25 @@ fn the_lock_file_is_created_owner_only() {
 }
 
 #[test]
+fn a_lock_beside_a_missing_directory_creates_its_parent() {
+    let scratch = Scratch::new("missing-parent");
+    // Neither the store nor its directory exists yet: the first hold under a
+    // fresh directory (a first erasure under a fresh data directory) creates
+    // the parent instead of failing closed on it.
+    let store = scratch.join("fresh-dir").join("clio.db");
+    drop(SharedHold::acquire(&store).expect("a missing lock parent is created"));
+    ExclusiveHold::acquire_with_wait(&store, Duration::from_millis(50))
+        .expect("the created parent holds the exclusive hold too");
+}
+
+#[test]
 fn an_open_that_cannot_create_its_lock_file_fails_with_the_stores_error_shape() {
     let scratch = Scratch::new("no-parent");
     // A store path under a file: the lock's parent cannot exist as a
     // directory, so the lock file cannot be opened.
-    let store = scratch.join("clio.db").join("nested.db");
+    let obstruction = scratch.join("clio.db");
+    std::fs::write(&obstruction, b"not a directory").expect("plant the obstructing file");
+    let store = obstruction.join("nested.db");
     let error = SharedHold::acquire(&store).expect_err("the lock must fail");
     assert!(
         error.message.contains("store lock"),

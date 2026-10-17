@@ -45,6 +45,7 @@ pub(crate) fn query(limit: usize) -> LocalReviewQuery {
     LocalReviewQuery {
         limit,
         cursor: None,
+        request_id: None,
     }
 }
 

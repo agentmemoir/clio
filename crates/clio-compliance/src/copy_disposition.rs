@@ -21,6 +21,8 @@
 //!   actions counted on top, which the stored-row folds share
 //! - `peer_copy_disposition`, the mapping of one peer's durable denial row
 //!   onto the same vocabulary, through the shared peer evidence rule
+//! - `missing_peer_disposition`, the fail-closed disposition a frozen peer
+//!   slot with no durable row folds to
 //!
 //! ## Does not own
 //! - The closure gate itself and its `FinalOutcome` decision (see
@@ -282,6 +284,27 @@ pub fn peer_copy_disposition(row: &PeerActionRow) -> CopyDisposition {
         actions: vec![CopyAction {
             kind: CopyRequiredAction::Remove,
             state: action,
+        }],
+    }
+}
+
+/// The copy disposition a frozen peer slot with no durable row supports.
+///
+/// The peer holds the copy and no row records any evidence for it, so the
+/// removal action stays open and the technical state is unknown — the same
+/// fail-closed arm a row with an unknown disposition folds to — which makes
+/// [`copy_closure_facts`] yield a partial outcome and the closure gate refuse
+/// the completion. The custody class stays known: the peer holds the copy.
+#[must_use]
+pub fn missing_peer_disposition(peer_id: &str) -> CopyDisposition {
+    CopyDisposition {
+        copy_id: format!("peer:{peer_id}"),
+        custody: CopyCustodyClass::Peer,
+        owner: CopyOwner::System,
+        state: CopyState::Unknown,
+        actions: vec![CopyAction {
+            kind: CopyRequiredAction::Remove,
+            state: RequestActionState::Open,
         }],
     }
 }

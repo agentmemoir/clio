@@ -29,9 +29,9 @@
 //! the construction sequence, decides.
 
 use clio_store::{
-    BatchStore, BeliefStore, ComplianceStore, ContinuousStore, DestinationCustodyStore,
-    DurableRequestStore, HistoryStore, HygieneStore, IndexStore, LocalEventStore, OpsStore,
-    PeerActionStore, PersonaStore, Store, SyncStore,
+    BankScopeStore, BatchStore, BeliefStore, ComplianceStore, ContinuousStore, CopyInventoryStore,
+    DestinationCustodyStore, DurableRequestStore, HistoryStore, HygieneStore, IndexStore,
+    LocalEventStore, OpsStore, PeerActionStore, PersonaStore, Store, SyncStore,
 };
 
 /// All-repository view of one concrete backend store.
@@ -51,6 +51,8 @@ pub(crate) trait Repos:
     + DestinationCustodyStore
     + DurableRequestStore
     + PeerActionStore
+    + CopyInventoryStore
+    + BankScopeStore
 {
 }
 
@@ -69,7 +71,9 @@ impl<
         + LocalEventStore
         + DestinationCustodyStore
         + DurableRequestStore
-        + PeerActionStore,
+        + PeerActionStore
+        + CopyInventoryStore
+        + BankScopeStore,
 > Repos for T
 {
 }

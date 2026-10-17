@@ -129,6 +129,12 @@ pub(crate) fn write_body(
         ));
     }
     let dir = journal_dir(path);
+    // A first denial under a fresh data directory names a journal whose
+    // parent does not exist yet. Create it, so the denial does not fail
+    // closed right after the journal lock did the same.
+    if let Err(err) = fs::create_dir_all(dir) {
+        return Err(io_error("create", dir, &err));
+    }
     let temp = temp_path(path);
     if let Ok(meta) = fs::symlink_metadata(&temp)
         && meta.file_type().is_file()
