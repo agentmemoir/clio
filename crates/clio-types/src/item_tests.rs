@@ -190,6 +190,15 @@ fn gist_validation_bounds_characters() {
 }
 
 #[test]
+fn item_validate_applies_the_gist_bound_to_every_producer() {
+    let mut item = base_semantic();
+    item.gist = Some("a".repeat(crate::GIST_MAX_CHARS + 1));
+    assert_eq!(item.validate().unwrap_err().code, ErrorCode::OutOfRange);
+    item.gist = Some("a".repeat(crate::GIST_MAX_CHARS));
+    item.validate().unwrap();
+}
+
+#[test]
 fn item_validate_applies_context_rules() {
     let mut item = base_semantic();
     item.context = Some(String::new());
