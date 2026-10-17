@@ -39,9 +39,7 @@ fn exit_status(code: i32) -> ExitStatus {
 fn exit_status(code: i32) -> ExitStatus {
     let mut command = std::process::Command::new("cmd");
     command.arg("/C").arg(format!("exit {code}"));
-    command
-        .status()
-        .expect("the test host runs its own shell")
+    command.status().expect("the test host runs its own shell")
 }
 
 /// A POSIX report: header, then filesystem, 1024-blocks, used, available,
@@ -56,7 +54,10 @@ fn a_posix_report_names_the_available_blocks() {
 
 #[test]
 fn a_report_without_a_data_line_has_no_answer() {
-    assert_eq!(parse_available_kb("Filesystem 1024-blocks Used Available\n"), None);
+    assert_eq!(
+        parse_available_kb("Filesystem 1024-blocks Used Available\n"),
+        None
+    );
 }
 
 #[test]
