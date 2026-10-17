@@ -127,9 +127,11 @@ impl clio_store::DistilledUnitStore for CountingStore {
 
 impl clio_store::TripleAssertion for CountingStore {}
 
-/// Two idle ticks read exactly the banks the tick selects, once per bank: the
-/// unresolved banks seeded in the store are never read, so the tick issues a
-/// bounded number of bank reads and never a full-store scan.
+/// Two idle ticks read only the banks the tick selects, never the store's
+/// historical bank list: the unresolved banks seeded in the store are never
+/// read, so the tick issues a bounded number of bank reads and never a
+/// full-store scan. The quiet resolved bank is read on the first tick and then
+/// evicted; the default bank is always evaluated, so it is read once per tick.
 #[test]
 fn an_idle_tick_reads_only_the_tick_banks_not_the_stored_bank_list() {
     let fixture = state();
@@ -152,28 +154,17 @@ fn an_idle_tick_reads_only_the_tick_banks_not_the_stored_bank_list() {
     scoped.evaluate_maintenance_trigger(base());
     scoped.evaluate_maintenance_trigger(base() + Duration::from_secs(5));
 
-    let mut tick_banks = scoped
-        .maintenance_trigger
-        .tick_banks(&scoped.default_bank, scoped.shared_enabled);
-    tick_banks.sort_unstable();
-    let mut expected_banks = vec![BANK.to_owned(), scoped.default_bank];
-    expected_banks.sort_unstable();
-    assert_eq!(
-        tick_banks, expected_banks,
-        "the fixture's tick set is the resolved bank and the default bank"
-    );
-
     let mut reads = spy.reads();
     reads.sort_unstable();
-    let mut expected: Vec<String> = tick_banks
-        .iter()
-        .chain(tick_banks.iter())
-        .cloned()
-        .collect();
+    let mut expected = vec![
+        BANK.to_owned(),
+        scoped.default_bank.clone(),
+        scoped.default_bank,
+    ];
     expected.sort_unstable();
     assert_eq!(
         reads, expected,
-        "two idle ticks must read each tick bank once per tick and no other bank"
+        "two idle ticks read each selected bank once per tick and no other bank"
     );
     for bank in &reads {
         assert!(
