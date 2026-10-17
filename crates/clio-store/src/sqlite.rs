@@ -121,6 +121,10 @@ impl SqliteStore {
         // Duplicate-open-triple guard must run BEFORE the unique index build:
         // a legacy duplicate fails CREATE UNIQUE INDEX with a raw driver error.
         crate::triple_invariant::ensure_no_duplicate_open_triples_sqlite(&conn)?;
+        // The local-event table convergence must run BEFORE portable DDL: an
+        // existing placeholder table lacks the columns the event writer names,
+        // and the slot DDL only declares a fresh table.
+        crate::local_events_converge::converge_sqlite(&conn)?;
         let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;

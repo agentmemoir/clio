@@ -84,7 +84,7 @@ pub(crate) fn converge_distilled_state_sqlite(conn: &rusqlite::Connection) -> Re
 /// Guarded single-column convergence: no-op when the table is absent (fresh
 /// database; portable DDL declares the column itself) or the column exists.
 /// `ddl` is the full added-column definition (type, default, constraints).
-fn converge_column_sqlite(
+pub(crate) fn converge_column_sqlite(
     conn: &rusqlite::Connection,
     table: &str,
     column: &str,

@@ -1,0 +1,1 @@
+An older database whose `local_events` table still held only the placeholder `id` column now converges onto the current event columns when the store opens, on both SQLite and Postgres, so local-event writes and reads work again instead of failing with a missing-column error. [Issue #238](https://github.com/agentmemoir/clio/issues/238)

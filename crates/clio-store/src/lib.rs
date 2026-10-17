@@ -88,6 +88,7 @@ mod kms_migrate;
 mod lexical_digest;
 mod lexical_porter;
 mod local_events;
+mod local_events_converge;
 mod local_kms_db;
 mod local_kms_migrate;
 mod local_kms_schema;
