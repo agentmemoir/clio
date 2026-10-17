@@ -1,0 +1,1 @@
+The `gate-install.sh` installer now treats the shim as active when a login shell or an interactive shell resolves it, so a plain `ssh` install on a correctly set up machine no longer fails; it also accepts only a link that resolves to the shim it installed rather than any program under the shim directory. [Issue #213](https://github.com/agentmemoir/clio/issues/213)
