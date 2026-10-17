@@ -73,10 +73,7 @@ fn want(result: Result<(), AmError>, what: &str) {
 fn shared_url() -> Option<String> {
     let url = crate::db_url::postgres_url_from_env();
     if let Err(err) = crate::pg_tls::connect(&url) {
-        eprintln!(
-            "{}",
-            crate::pg_skip::pg_skip_note("postgres durable request tests", &err)
-        );
+        crate::pg_skip::unreachable_pg_or_skip("postgres durable request tests", &err);
         return None;
     }
     Some(url)
@@ -122,10 +119,7 @@ fn open_pg(url: &str) -> Option<PostgresStore> {
     match PostgresStore::open(url, local_kms()) {
         Ok(store) => Some(store),
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres durable request tests", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("postgres durable request tests", &err);
             None
         }
     }
