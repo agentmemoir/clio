@@ -77,7 +77,8 @@ is_shim() {
 # -ic), printing only what the shell resolved. A profile that reads a terminal
 # must not hang the install, so stdin is /dev/null and `timeout` is used when
 # the host has it. Stdout alone is the answer: a profile that prints would only
-# add lines, and `is_shim` accepts an exact path, so noise reads as inactive.
+# add lines, and `is_shim` accepts only a link to the shim, so noise reads as
+# inactive.
 probe_shell() {
     flags=$1
     if command -v timeout >/dev/null 2>&1; then
