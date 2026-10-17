@@ -331,7 +331,7 @@ fn postgres_events_keep_their_order_across_a_reopen() {
         let action = id(name);
         want(
             store.record_intent(&intent(&action, LATE_TIME)),
-            "intent {action}",
+            &format!("intent {action}"),
         );
     }
     drop(store);
@@ -409,7 +409,7 @@ fn postgres_pruning_keeps_request_and_denial_state() {
     ] {
         want(
             store.record_intent(&intent(&id(name), time)),
-            "intent {name}",
+            &format!("intent {name}"),
         );
     }
     want(

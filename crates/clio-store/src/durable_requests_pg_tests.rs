@@ -27,6 +27,8 @@
 
 use crate::durable_requests::{DurableRequestRow, DurableRequestStore};
 use crate::erase_test_support::local_kms;
+use crate::migrate::IntoAmError;
+use crate::pg_scoped_schema::ScopedSchema;
 use crate::postgres::PostgresStore;
 use clio_types::{AmError, ErrorCode};
 
@@ -230,5 +232,115 @@ fn postgres_two_writers_racing_on_one_id_leave_one_winner() {
         store.load("req-race").expect("load"),
         Some(winner.clone()),
         "the stored row is the winner's"
+    );
+}
+
+/// The six request columns a converged table holds, in DDL order.
+fn expected_columns() -> Vec<String> {
+    ["request_id", "kind", "state", "scope", "deadline", "record"]
+        .iter()
+        .map(|column| (*column).to_owned())
+        .collect()
+}
+
+/// The `durable_requests` columns in ordinal order and its index names.
+fn shape(store: &PostgresStore) -> (Vec<String>, Vec<String>) {
+    store
+        .with_client(|client| {
+            let columns = client
+                .query(
+                    "SELECT column_name FROM information_schema.columns
+                     WHERE table_schema = current_schema()
+                       AND table_name = 'durable_requests'
+                     ORDER BY ordinal_position",
+                    &[],
+                )
+                .am("durable request columns")?
+                .iter()
+                .map(|row| row.get::<_, String>(0))
+                .collect::<Vec<_>>();
+            let indexes = client
+                .query(
+                    "SELECT indexname FROM pg_indexes
+                     WHERE schemaname = current_schema() AND tablename = 'durable_requests'",
+                    &[],
+                )
+                .am("durable request indexes")?
+                .iter()
+                .map(|row| row.get::<_, String>(0))
+                .collect::<Vec<_>>();
+            Ok((columns, indexes))
+        })
+        .expect("read the durable_requests shape")
+}
+
+/// The row count of `durable_requests`.
+fn row_count(store: &PostgresStore) -> i64 {
+    store
+        .with_client(|client| {
+            client
+                .query_one("SELECT count(*) FROM durable_requests", &[])
+                .am("durable request row count")
+                .map(|row| row.get(0))
+        })
+        .expect("count the durable request rows")
+}
+
+/// A schema created under the old placeholder shape converges on first use: the
+/// table ends as exactly the fresh DDL's six columns with the unique index, the
+/// placeholder row that carries no request is gone, and the save whose insert the
+/// legacy primary key would have refused lands.
+#[test]
+fn postgres_a_pre_existing_placeholder_table_converges_on_first_use() {
+    let _guard = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let source = ScopedSchema::new(&url);
+    source
+        .execute("CREATE TABLE durable_requests (id text PRIMARY KEY);")
+        .expect("the old placeholder shape");
+    source
+        .execute("INSERT INTO durable_requests VALUES ('legacy');")
+        .expect("the placeholder row");
+    let Some(store) = open_pg(source.url()) else {
+        return;
+    };
+    want(store.save(&saved_row()), "save on a converged table");
+    want(store.save(&saved_row()), "retry on a converged table");
+    assert_eq!(
+        store.load("req-1").expect("load"),
+        Some(saved_row()),
+        "the converged table reads back"
+    );
+    let (columns, indexes) = shape(&store);
+    assert_eq!(
+        columns,
+        expected_columns(),
+        "the table holds exactly the request columns, in DDL order"
+    );
+    assert!(
+        !columns.iter().any(|name| name == "id"),
+        "the legacy key is gone: {columns:?}"
+    );
+    assert!(
+        indexes
+            .iter()
+            .any(|name| name == "durable_requests_request_id_uidx"),
+        "the table backs the request-id index: {indexes:?}"
+    );
+    assert_eq!(
+        row_count(&store),
+        1,
+        "the row that carries no request is gone and only the saved row is left"
+    );
+
+    // A fresh schema's table is the shape the repair has to reach.
+    let fresh = ScopedSchema::new(&url);
+    let fresh_store = fresh.open();
+    assert_eq!(
+        shape(&fresh_store).0,
+        columns,
+        "the repaired columns equal the columns a fresh database declares"
     );
 }
