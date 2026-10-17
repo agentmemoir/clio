@@ -229,9 +229,9 @@ fn erase_subject_tx(
         .optional()
         .am("erase key check")?;
     let key_exists = key_row.is_some();
-    // A marker already marked shredded belongs to an earlier attempt of this
-    // erasure, so only that retry may read a destroy error as "the key is
-    // already gone". A missing row means false: this is a first attempt.
+    // Subject-scoped: true when the subject was already marked shredded
+    // before this attempt, by an earlier attempt or another bank's
+    // erasure, so only that state may tolerate a destroy error.
     let already_shredded = key_row.is_some_and(|shredded| shredded != 0);
     // Persona context is bank-scoped and carries no subject
     // attribution: when the subject has neither items nor a key, its

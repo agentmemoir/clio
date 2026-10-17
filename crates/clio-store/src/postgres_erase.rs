@@ -97,10 +97,9 @@ impl ComplianceStore for PostgresStore {
                 )
                 .am("erase key lock")?;
             let key_exists = key_row.is_some();
-            // A marker already marked shredded belongs to an earlier attempt of
-            // this erasure, so only that retry may read a destroy error as
-            // "the key is already gone". A missing row means false: this is a
-            // first attempt.
+            // Subject-scoped: true when the subject was already marked shredded
+            // before this attempt, by an earlier attempt or another bank's
+            // erasure, so only that state may tolerate a destroy error.
             let already_shredded = key_row.is_some_and(|row| row.get::<_, bool>(0));
             let items = select_items(&mut tx, spec.bank_id, spec.subject_id)?;
             let subject_banks = select_subject_banks(&mut tx, spec.subject_id)?;

@@ -169,9 +169,9 @@ pub struct SubjectEraseOutcome {
     pub derived_items_purged: usize,
     /// Persona rows whose sealed `context_cipher` this attempt cleared
     /// (persona context is bank-scoped, so any verified erasure in its bank
-    /// purges it). The count is the rows this attempt cleared: a completion
-    /// after a retry reports zero because the earlier attempt's committed
-    /// purge already cleared them.
+    /// purges it). The count is the rows this attempt cleared, so rows an
+    /// earlier attempt cleared are not counted again and a completion after a
+    /// retry can report zero.
     pub persona_context_rows_purged: usize,
     /// Tombstone rows written.
     pub tombstones_written: usize,
@@ -208,9 +208,9 @@ pub trait ComplianceStore: Send + Sync {
     /// a bank holding persona context rows is treated as holding erasable
     /// content and the erase proceeds with a context purge.
     ///
-    /// The returned outcome counts the rows this attempt cleared, so a
-    /// completion after a retry reports zero persona context rows because the
-    /// earlier attempt's committed transaction cleared them.
+    /// The returned outcome counts the rows this attempt cleared, so rows an
+    /// earlier attempt's purge already cleared are not counted again; a
+    /// completion after a retry can report zero persona context rows.
     ///
     /// # Errors
     /// Missing subject, validation, crypto, or storage failures.
