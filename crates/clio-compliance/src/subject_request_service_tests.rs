@@ -51,7 +51,7 @@ fn retry_names_the_pending_action_and_repeats_no_protected_effect() {
     let journal = dir.path().join("erasure-journal.json");
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
     let ctx = ctx("bank-a");
-    let salt = [0u8; 16];
+    let salt = rand::random::<[u8; 16]>();
     let sink = EraseVecSink::default();
     {
         let store = Arc::new(SqliteStore::open(&path, Arc::clone(&kms)).expect("open"));
@@ -157,7 +157,7 @@ fn peer_retry_reconciles_a_pending_peer_denial_row() {
     record_peer_denial_intent(&store, &request_id, &peer_id, Actor::Harness, NOW)
         .expect("the peer intent is durable");
     mark_acknowledged(&store, &request_id, &peer_id, "deletion-9").expect("the peer acknowledges");
-    let salt = [0u8; 16];
+    let salt = rand::random::<[u8; 16]>();
     let sink = EraseVecSink::default();
     let retry_env = ErasureRetryEnv {
         store: &store,

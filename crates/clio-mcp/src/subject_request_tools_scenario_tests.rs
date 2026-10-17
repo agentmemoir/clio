@@ -26,9 +26,10 @@
 //! The restart test owns its scratch database and key store. The confirmed
 //! erasure still writes the deployment-resolved erasure journal, not a per-test
 //! one: the erase boundary refuses a divergent document journal and this crate
-//! forbids `unsafe_code`, so the override cannot be set in-process. The
-//! journal's `ExclusiveHold` serializes parallel writers.
+//! forbids `unsafe_code`, so the override cannot be set in-process. The erasing
+//! tests here share `erase_journal_serial` to serialize on that journal.
 
+use super::subject_request_tools_tests::erase_journal_serial;
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::write_tools::dispatch;
 use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
@@ -222,6 +223,7 @@ fn begin_peer_row(state: &McpState, request_id: &str, peer: &str) {
 /// store is reopened names it and reconciles it without repeating the effect.
 #[test]
 fn subject_request_retry_after_a_failed_outcome_reconciles_on_reopen() {
+    let _serial = erase_journal_serial();
     let scratch = Scratch::new("restart");
     let db = scratch.path().join("store.db");
     let kms = scratch.path().join("clio.kms.json");
@@ -359,6 +361,7 @@ fn subject_request_partial_bank_scope_refuses_before_effects() {
 /// the request pending until the peer's evidence settles it.
 #[test]
 fn subject_request_authorized_scope_with_an_offline_peer_stays_pending() {
+    let _serial = erase_journal_serial();
     let s = state();
     let request = "req-scenario-offline-peer";
     let peer = PEER_BANK;
