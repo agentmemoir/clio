@@ -20,13 +20,14 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::batch_subject_ids;
 use crate::batch_model::{BatchStore, BatchWrite, MAX_BATCH_OPS};
 use crate::db_url::postgres_url_or_default;
 use crate::dek::{DekProvider, LocalDevKms};
-use crate::model::{AssocEdgeRecord, AssocKind};
+use crate::model::{AssocEdgeRecord, AssocKind, OpaqueItemRecord};
 use crate::postgres::PostgresStore;
 use crate::store::Store;
-use clio_types::ErrorCode;
+use clio_types::{BeliefObject, ConfidenceEntry, ErrorCode, SourceType};
 use std::sync::Arc;
 
 use crate::batch_test_support_tests::{
@@ -42,6 +43,71 @@ fn skip_requested() -> bool {
         std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
         Ok("1" | "true" | "yes")
     )
+}
+
+#[test]
+fn batch_subject_locks_are_sorted_and_deduplicated() {
+    let bank = "lock-order-bank";
+    let mut later_subject = item("lock-order-later", bank);
+    later_subject.subject_id = "subject-z".into();
+    let mut earlier_subject = item("lock-order-earlier", bank);
+    earlier_subject.subject_id = "subject-a".into();
+    let opaque = OpaqueItemRecord {
+        id: "lock-order-opaque".into(),
+        bank_id: bank.into(),
+        subject_id: "subject-a".into(),
+        kind: "semantic".into(),
+        category: Some("schema".into()),
+        episodic_type: None,
+        epistemic_kind: "fact".into(),
+        source_type: None,
+        confidence: None,
+        admission_score: None,
+        source_ref: None,
+        valid_from: "t0".into(),
+        valid_until: None,
+        tx_from: "t0".into(),
+        tx_until: None,
+        created_at: "t0".into(),
+        updated_at: "t0".into(),
+        content_cipher: "opaque".into(),
+    };
+    let writes = [
+        BatchWrite::CreateItem {
+            item: later_subject,
+            actor: "agent".into(),
+        },
+        BatchWrite::PutOpaqueItem {
+            item: opaque,
+            actor: "agent".into(),
+        },
+        BatchWrite::CanonicalPut {
+            item: earlier_subject,
+            key: "key".into(),
+            actor: "agent".into(),
+        },
+        BatchWrite::CreateBelief {
+            belief: BeliefObject {
+                id: "lock-order-belief".into(),
+                bank_id: bank.into(),
+                subject_id: "subject-m".into(),
+                proposition: "test proposition".into(),
+                context: None,
+                context_as_of: None,
+                confidence_history: vec![
+                    ConfidenceEntry::new("t0", 0.8, "turn", SourceType::UserStated).unwrap(),
+                ],
+                created_at: "t0".into(),
+                updated_at: "t0".into(),
+            },
+            actor: "agent".into(),
+        },
+    ];
+
+    assert_eq!(
+        batch_subject_ids(&writes),
+        ["subject-a", "subject-m", "subject-z"]
+    );
 }
 
 #[test]

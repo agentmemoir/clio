@@ -34,6 +34,7 @@ use crate::distilled_unit::{
 use crate::item_persist::{open_dual, require_actor, seal_dual, seal_dual_content};
 use crate::migrate::IntoAmError;
 use crate::postgres::PostgresStore;
+use crate::postgres_memory::lock_subject_write_tx;
 use clio_types::{AmError, ErrorCode, MemoryItem};
 use postgres::Client;
 
@@ -354,6 +355,7 @@ impl PostgresStore {
         let prior_id = revision_prior_id(record)?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("distilled revision begin pg")?;
+            lock_subject_write_tx(&mut tx, &new_item.subject_id)?;
             let n = tx
                 .execute(
                     "UPDATE items

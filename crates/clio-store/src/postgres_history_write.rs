@@ -141,6 +141,7 @@ pub(crate) fn commit_task_upsert_tx(
     // A malformed draft context never reaches sealing or SQL.
     draft.validate()?;
     validate_task_carrier(item, draft)?;
+    crate::postgres_memory::lock_subject_write_tx(tx, &item.subject_id)?;
     let ts = now_iso();
     let version: i64 = tx
         .query_one(
@@ -217,6 +218,7 @@ pub(crate) fn commit_failure_record_tx(
     // this directly.
     draft.validate()?;
     validate_failure_carrier(item, draft)?;
+    crate::postgres_memory::lock_subject_write_tx(tx, &item.subject_id)?;
     let ts = now_iso();
     insert_carrier(tx, item, cipher, dek_ref, &ts)?;
     let (category, _) = kind_columns(item);
