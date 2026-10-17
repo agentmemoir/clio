@@ -61,16 +61,12 @@ for name in cargo make; do
 done
 
 # Whether a path resolved by `command -v` is the shim this install linked, and
-# not merely another program under $dest. The old test matched any executable
+# not merely any program under $dest. The old test matched any executable
 # beneath $dest, so a different program at $dest/<name> or $dest/<dir>/<name>
-# read as the shim.
+# read as the shim. Only a link whose target is the shim counts.
 is_shim() {
     cand=$1
-    want=$2
     [ -n "$cand" ] || return 1
-    if [ "$cand" = "$dest/$want" ]; then
-        return 0
-    fi
     if [ -L "$cand" ] && [ "$(readlink "$cand" 2>/dev/null)" = "$shim" ]; then
         return 0
     fi
@@ -108,17 +104,17 @@ if [ "$mode" = install ]; then
     inactive=0
     for name in cargo make; do
         here=$(command -v "$name" 2>/dev/null || true)
-        if is_shim "$here" "$name"; then
+        if is_shim "$here"; then
             echo "gate-install: $name shim is active for this shell"
             continue
         fi
         via=""
         login=$(probe_shell -lc)
-        if is_shim "$login" "$name"; then
+        if is_shim "$login"; then
             via=login
         else
             interactive=$(probe_shell -ic)
-            if is_shim "$interactive" "$name"; then
+            if is_shim "$interactive"; then
                 via=interactive
             fi
         fi
