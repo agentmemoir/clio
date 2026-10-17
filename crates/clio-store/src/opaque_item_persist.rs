@@ -32,15 +32,15 @@ pub(crate) fn put_opaque_item_sqlite_tx(
     item: &OpaqueItemRecord,
 ) -> Result<(), AmError> {
     use rusqlite::{OptionalExtension, params};
-    let status: Option<String> = tx
+    let shredded: Option<i64> = tx
         .query_row(
-            "SELECT status FROM subject_keys WHERE subject_id = ?1",
+            "SELECT 1 FROM subject_keys WHERE subject_id = ?1 AND shredded_at IS NOT NULL",
             params![&item.subject_id],
             |r| r.get(0),
         )
         .optional()
         .am("opaque shredded probe")?;
-    if status.as_deref() == Some("shredded") {
+    if shredded.is_some() {
         return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
     let rows = tx
@@ -106,11 +106,11 @@ pub(crate) fn put_opaque_item_postgres_tx(
 ) -> Result<(), AmError> {
     let row = tx
         .query_opt(
-            "SELECT status FROM subject_keys WHERE subject_id = $1",
+            "SELECT 1 FROM subject_keys WHERE subject_id = $1 AND shredded_at IS NOT NULL",
             &[&item.subject_id],
         )
         .am("opaque shredded probe")?;
-    if row.is_some_and(|r| r.get::<_, String>(0) == "shredded") {
+    if row.is_some() {
         return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
     let rows = tx

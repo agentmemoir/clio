@@ -299,11 +299,12 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
                         // clear secret is never stored.
                         let secret = clio_config::auth_tokens::generate_secret();
                         cfg.credentials = Some(std::sync::Arc::new(
-                            clio_mcp::http_auth::CredentialStore::for_local_owner(
-                                &secret,
-                                vec![opts.default_bank.clone()],
-                            ),
+                            clio_mcp::http_auth::CredentialStore::for_local_owner(&secret),
                         ));
+                        // Deliberate: the operator prints the one-time token once
+                        // so a local client can use it. It is never stored, and
+                        // the server refuses without it.
+                        // codeql[rust/cleartext-logging]
                         eprintln!("mcp http auth token: {secret}");
                     }
                     cfg.bind = addr.to_string();

@@ -345,6 +345,20 @@ fn a_loopback_server_mints_a_token_and_requires_it() {
         !response.contains(&token),
         "the response leaked the minted token"
     );
+
+    // The minted owner reaches a bank outside the configured default, matching
+    // the authority the process already has over the store.
+    let other = call(
+        "store",
+        json!({
+            "bank": "minted-other-bank",
+            "item": {"id": "minted-2", "gist": "the owner reaches another bank"},
+            "category": "task_spec", "epistemic_kind": "fact"
+        }),
+    );
+    let (status, response) = post(port, &other, &bearer(&token));
+    assert_eq!(status, 200, "{response}");
+    assert!(ok(&response), "{response}");
     let _ = server.stop();
 }
 

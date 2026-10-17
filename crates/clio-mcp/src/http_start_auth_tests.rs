@@ -75,7 +75,7 @@ fn insecure_no_auth_restores_the_unauthenticated_loopback_server() {
 #[test]
 fn a_minted_local_owner_token_is_required_on_loopback() {
     let secret = clio_config::auth_tokens::generate_secret();
-    let store = CredentialStore::for_local_owner(&secret, vec!["demo".into()]);
+    let store = CredentialStore::for_local_owner(&secret);
     let (port, _) = spawn_server(HttpConfig {
         credentials: Some(Arc::new(store)),
         ..HttpConfig::default()

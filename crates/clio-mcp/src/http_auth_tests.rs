@@ -302,7 +302,7 @@ fn a_secret_in_a_query_string_never_resolves() {
 #[test]
 fn a_local_owner_store_resolves_its_secret_to_the_owning_principal() {
     let secret = secret("owner");
-    let store = CredentialStore::for_local_owner(&secret, vec!["demo".into(), "shared".into()]);
+    let store = CredentialStore::for_local_owner(&secret);
 
     let principal = store.resolve(&secret).expect("the minted secret resolves");
     assert_eq!(principal.label, "local-owner");
@@ -311,21 +311,24 @@ fn a_local_owner_store_resolves_its_secret_to_the_owning_principal() {
         Actor::System,
         "the local owner is administrative"
     );
-    assert_eq!(
-        principal.banks,
-        vec!["demo".to_owned(), "shared".to_owned()]
-    );
-    assert!(principal.authorize_bank("demo").is_ok());
     assert!(
-        principal.authorize_bank("other").is_err(),
-        "the minted list is not widened past what it names"
+        principal.banks.is_empty(),
+        "the local owner is not scoped by a stored list"
+    );
+    assert!(
+        principal.authorize_bank("demo").is_ok(),
+        "the local owner reaches a bank"
+    );
+    assert!(
+        principal.authorize_bank("any-other-bank").is_ok(),
+        "the local owner reaches every bank, matching the process owner"
     );
 }
 
 #[test]
 fn a_local_owner_store_refuses_every_other_secret() {
     let owner_secret = secret("owner");
-    let store = CredentialStore::for_local_owner(&owner_secret, vec!["demo".into()]);
+    let store = CredentialStore::for_local_owner(&owner_secret);
 
     assert!(!store.is_empty(), "the minted store holds its one record");
     assert!(store.resolve(&secret("other")).is_none());
