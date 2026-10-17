@@ -366,3 +366,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "item_persist_route_matrix_tests.rs"]
+mod item_persist_route_matrix_tests;

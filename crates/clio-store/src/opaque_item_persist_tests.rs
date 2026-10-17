@@ -3,135 +3,140 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the opaque item persistence shred-guard
-//! tests: an opaque `ciphertext_backup` import must not upsert an item for a
-//! crypto-shredded subject.
+//! This module is responsible for testing SQLite opaque item writes after subject erasure.
 //!
 //! ## Owns
-//! - The `PutOpaqueItem` erased-subject repro (SQLite + Postgres)
+//! - SQLite regression coverage for refusing erased-subject opaque writes
 //!
 //! ## Does not own
-//! - The shred guard SQL and named error (`item_persist`)
-//! - Opaque row persistence itself (`opaque_item_persist`)
+//! - Opaque row persistence (`opaque_item_persist`)
+//! - Erasure fixtures (`erase_test_support`)
 //!
 //! ## Boundary
 //!
-//! Changes to the opaque write shred guard should normally update tests here.
-//! Changes to the ordinary item write path should not require changes here.
+//! Changes to SQLite erased-subject opaque write behavior should normally require changes here. Changes to fixture shape should require `erase_test_support`.
+//!
+//! Keep this module focused on the opaque write erasure contract.
 //!
 //! Test-only. Never compiled into production builds.
 
 use crate::batch_model::{BatchStore, BatchWrite};
 use crate::compliance_store::ComplianceStore;
-use crate::erase_test_support::{local_kms, memory_item, spec, unique};
+use crate::erase_test_support::{local_kms, memory_item, opaque_write, spec, unique};
+use crate::migrate::IntoAmError;
 use crate::model::OpaqueItemRecord;
-use crate::postgres::PostgresStore;
 use crate::sqlite::SqliteStore;
 use crate::store::Store;
-use clio_types::{AmError, ErrorCode};
-
-fn opaque_item(bank: &str, id: &str, subject: &str) -> OpaqueItemRecord {
-    OpaqueItemRecord {
-        id: id.into(),
-        bank_id: bank.into(),
-        subject_id: subject.into(),
-        kind: "episodic".into(),
-        category: None,
-        episodic_type: Some("temporal".into()),
-        epistemic_kind: "fact".into(),
-        source_type: None,
-        confidence: None,
-        admission_score: None,
-        source_ref: None,
-        valid_from: "t0".into(),
-        valid_until: None,
-        tx_from: "t0".into(),
-        tx_until: None,
-        created_at: "t0".into(),
-        updated_at: "t0".into(),
-        content_cipher: "opaque-cipher".into(),
-    }
-}
+use clio_types::ErrorCode;
+use rusqlite::params;
+use std::sync::Arc;
 
 #[test]
-fn sqlite_put_opaque_item_refuses_erased_subject() {
-    let store = SqliteStore::open_in_memory(local_kms()).expect("sqlite");
-    let bank = unique("opq-b");
-    let subject = unique("opq-s");
+fn opaque_item_write_for_erased_subject_returns_error_without_creating_row() {
+    let kms = local_kms();
+    let store = SqliteStore::open_in_memory(Arc::clone(&kms)).unwrap();
+    let bank = unique("opaque-erased-bank");
+    let subject = unique("opaque-erased-subject");
+    let item_id = unique("opaque-erased-seeded-item");
+    let opaque_item_id = unique("opaque-erased-new-item");
     store
-        .create_memory_item(&memory_item(&bank, &unique("opq-i"), &subject), "tester")
+        .create_memory_item(&memory_item(&bank, &item_id, &subject), "tester")
+        .unwrap();
+    let cipher = store
+        .inspect_content_ciphertext(&bank, &item_id)
+        .unwrap()
         .unwrap();
     store
-        .erase_subject(&spec(&bank, &subject, &unique("opq-req")))
+        .erase_subject(&spec(&bank, &subject, &unique("opaque-erased-request")))
         .unwrap();
-    let restored = unique("opq-restored");
-    let err = store
-        .apply_batch(&[BatchWrite::PutOpaqueItem {
-            item: opaque_item(&bank, &restored, &subject),
-            actor: "tester".into(),
-        }])
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::ErasedSubject);
-    let rows: i64 = store
+
+    let result = store.apply_batch(&[BatchWrite::PutOpaqueItem {
+        item: OpaqueItemRecord {
+            id: opaque_item_id.clone(),
+            bank_id: bank.clone(),
+            subject_id: subject.clone(),
+            kind: "semantic".into(),
+            category: Some("tool_config".into()),
+            episodic_type: None,
+            epistemic_kind: "fact".into(),
+            source_type: None,
+            confidence: Some(0.8),
+            admission_score: Some(0.0),
+            source_ref: Some("turn_9".into()),
+            valid_from: "t0".into(),
+            valid_until: None,
+            tx_from: "t0".into(),
+            tx_until: None,
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+            content_cipher: cipher,
+        },
+        actor: "import".into(),
+    }]);
+    let opaque_row_count = store
         .with_conn(|conn| {
             conn.query_row(
                 "SELECT COUNT(*) FROM items WHERE id = ?1",
-                [&restored],
-                |r| r.get(0),
+                params![opaque_item_id],
+                |row| row.get::<_, i64>(0),
             )
-            .map_err(|e| AmError::new(ErrorCode::Internal, e.to_string()))
+            .am("read opaque item row count")
         })
         .unwrap();
+    assert!(
+        matches!(&result, Err(err) if err.code == ErrorCode::ErasedSubject),
+        "opaque write result: {result:?}; new row count: {opaque_row_count}"
+    );
+    assert_eq!(opaque_row_count, 0, "refused opaque item has no row");
     assert_eq!(
-        rows, 0,
-        "opaque import created a row for the erased subject"
+        store.get_memory_item(&bank, &item_id).unwrap_err().code,
+        ErrorCode::ErasedSubject,
+        "erased item content stays unreadable"
     );
 }
 
+/// Erasure keeps a shredded `subject_keys` row, and the erased probe keys on
+/// that row. Deleting the row therefore makes the subject look active again by
+/// policy: the probe treats a MISSING row as NOT erased. This pins that
+/// documented outcome, so a future change to the probe has to intend it.
 #[test]
-fn pg_put_opaque_item_refuses_erased_subject() {
-    let _guard = crate::pg_lock::lock_pg_test();
-    let url = crate::db_url::postgres_url_from_env();
-    let store = match PostgresStore::open(url.as_str(), local_kms()) {
-        Ok(store) => store,
-        Err(err) => {
-            crate::pg_skip::unreachable_pg_or_skip("pg opaque shred guard test", &err);
-            return;
-        }
-    };
-    let bank = unique("pg-opq-b");
-    let subject = unique("pg-opq-s");
+fn opaque_write_after_erasure_is_accepted_once_the_subject_keys_row_is_deleted() {
+    let kms = local_kms();
+    let store = SqliteStore::open_in_memory(Arc::clone(&kms)).unwrap();
+    let bank = unique("opaque-missing-sk-bank");
+    let subject = unique("opaque-missing-sk-subject");
+    let seeded_id = unique("opaque-missing-sk-seeded");
     store
-        .create_memory_item(&memory_item(&bank, &unique("pg-opq-i"), &subject), "tester")
+        .create_memory_item(&memory_item(&bank, &seeded_id, &subject), "tester")
+        .unwrap();
+    let cipher = store
+        .inspect_content_ciphertext(&bank, &seeded_id)
+        .unwrap()
         .unwrap();
     store
-        .erase_subject(&spec(&bank, &subject, &unique("pg-opq-req")))
+        .erase_subject(&spec(&bank, &subject, &unique("opaque-missing-sk-request")))
         .unwrap();
-    let restored = unique("pg-opq-restored");
-    let err = store
-        .apply_batch(&[BatchWrite::PutOpaqueItem {
-            item: opaque_item(&bank, &restored, &subject),
-            actor: "tester".into(),
-        }])
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::ErasedSubject);
-    let rows: i64 = store
-        .with_client(|client| {
-            client
-                .query_one("SELECT COUNT(*) FROM items WHERE id = $1", &[&restored])
-                .map_err(|e| AmError::new(ErrorCode::Internal, e.to_string()))
-                .map(|row| row.get(0))
-        })
-        .unwrap();
-    assert_eq!(
-        rows, 0,
-        "opaque import created a row for the erased subject"
-    );
     store
         .test_execute(&format!(
-            "DELETE FROM index_pending WHERE bank_id = '{bank}'; \
-             DELETE FROM items WHERE bank_id = '{bank}'; \
-             DELETE FROM subject_keys WHERE subject_id = '{subject}';"
+            "DELETE FROM subject_keys WHERE subject_id = '{subject}'"
         ))
         .unwrap();
+
+    let late_id = unique("opaque-missing-sk-late");
+    let result = store.apply_batch(&[opaque_write(&bank, &late_id, &subject, &cipher)]);
+    assert!(
+        result.is_ok(),
+        "a missing subject_keys row is not erased: {result:?}"
+    );
+    let rows = store
+        .with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM items WHERE id = ?1",
+                params![late_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .am("late opaque row count")
+        })
+        .unwrap();
+    assert_eq!(rows, 1, "the accepted opaque write stored a row");
 }

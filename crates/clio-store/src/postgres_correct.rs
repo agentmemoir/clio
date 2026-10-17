@@ -25,8 +25,8 @@
 use crate::audit_model::{CorrectionOutcome, CorrectionSpec};
 use crate::item_persist::{require_actor, seal_dual};
 use crate::migrate::IntoAmError;
-
 use crate::postgres::PostgresStore;
+use crate::postgres_memory::lock_subject_write_tx;
 use clio_types::{AmError, ErrorCode, MemoryItem};
 
 impl PostgresStore {
@@ -70,6 +70,7 @@ impl PostgresStore {
         );
         self.with_client(|client| {
             let mut tx = client.transaction().am("correct begin")?;
+            lock_subject_write_tx(&mut tx, &spec.new_item.subject_id)?;
             let prior = tx
                 .query_opt(
                     "SELECT discarded_at, tx_until, subject_id FROM items \
@@ -123,6 +124,24 @@ impl PostgresStore {
                 // Lost a concurrent supersession race; nothing was written.
                 return Ok(already_superseded(spec));
             }
+            let sk_rows = tx
+                .execute(
+                    "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)
+                 VALUES ($1, $2, 'active', $3, $3)
+                 ON CONFLICT (subject_id) DO UPDATE SET
+                   dek_ref = EXCLUDED.dek_ref,
+                   status = 'active',
+                   shredded_at = NULL,
+                   updated_at = EXCLUDED.updated_at
+                   WHERE subject_keys.shredded_at IS NULL",
+                    &[
+                        &spec.new_item.subject_id,
+                        &dek_ref,
+                        &spec.new_item.created_at,
+                    ],
+                )
+                .am("subject_keys upsert")?;
+            crate::item_persist::check_subject_reactivation(sk_rows, &spec.new_item.subject_id)?;
             crate::postgres_memory::map_pg_item_insert(tx.execute(
                 "INSERT INTO items (
                         id, bank_id, kind, category, episodic_type, epistemic_kind, source_type,
@@ -156,24 +175,6 @@ impl PostgresStore {
                     &spec.new_item.updated_at,
                 ],
             ))?;
-            let sk_rows = tx
-                .execute(
-                    "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)
-                 VALUES ($1, $2, 'active', $3, $3)
-                 ON CONFLICT (subject_id) DO UPDATE SET
-                   dek_ref = EXCLUDED.dek_ref,
-                   status = 'active',
-                   shredded_at = NULL,
-                   updated_at = EXCLUDED.updated_at
-                   WHERE subject_keys.shredded_at IS NULL",
-                    &[
-                        &spec.new_item.subject_id,
-                        &dek_ref,
-                        &spec.new_item.created_at,
-                    ],
-                )
-                .am("subject_keys upsert")?;
-            crate::item_persist::check_subject_reactivation(sk_rows, &spec.new_item.subject_id)?;
             insert_correct_audit(
                 &mut tx,
                 &format!("audit-corrected-{}-{ts}", spec.prior_item_id),
@@ -258,3 +259,7 @@ fn insert_correct_audit(
     .am("correct audit insert")?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "postgres_correct_tests.rs"]
+mod postgres_correct_tests;

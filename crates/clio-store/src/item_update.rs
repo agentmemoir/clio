@@ -81,6 +81,9 @@ pub(crate) fn update_memory_item_sqlite_tx(
     if stored != item.subject_id {
         return Err(crate::item_persist::subject_immutable_err(&item.id));
     }
+    if crate::sqlite_memory::subject_is_shredded_sqlite(tx, &stored)? {
+        return Err(crate::item_persist::shredded_subject_err(&stored));
+    }
     let n = tx
         .execute(
             "UPDATE items SET
@@ -172,6 +175,10 @@ pub(crate) fn update_memory_item_postgres_tx(
     if stored != item.subject_id {
         return Err(crate::item_persist::subject_immutable_err(&item.id));
     }
+    crate::postgres_memory::lock_subject_write_tx(tx, &stored)?;
+    if crate::postgres_memory::subject_is_shredded_postgres_tx(tx, &stored)? {
+        return Err(crate::item_persist::shredded_subject_err(&stored));
+    }
     let n = tx
         .execute(
             "UPDATE items SET
@@ -229,3 +236,7 @@ pub(crate) fn update_memory_item_postgres_tx(
     crate::postgres_index::enqueue_index_pending_tx(tx, &item.bank_id, &item.id)?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "item_update_tests.rs"]
+mod item_update_tests;

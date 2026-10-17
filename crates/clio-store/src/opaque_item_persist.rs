@@ -31,18 +31,11 @@ pub(crate) fn put_opaque_item_sqlite_tx(
     tx: &rusqlite::Transaction<'_>,
     item: &OpaqueItemRecord,
 ) -> Result<(), AmError> {
-    use rusqlite::{OptionalExtension, params};
-    let shredded: Option<i64> = tx
-        .query_row(
-            "SELECT 1 FROM subject_keys WHERE subject_id = ?1 AND shredded_at IS NOT NULL",
-            params![&item.subject_id],
-            |r| r.get(0),
-        )
-        .optional()
-        .am("opaque shredded probe")?;
-    if shredded.is_some() {
+    use rusqlite::params;
+    if crate::sqlite_memory::subject_is_shredded_sqlite(tx, &item.subject_id)? {
         return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
+
     let rows = tx
         .execute(
             "INSERT INTO items (
@@ -104,15 +97,11 @@ pub(crate) fn put_opaque_item_postgres_tx(
     tx: &mut postgres::Transaction<'_>,
     item: &OpaqueItemRecord,
 ) -> Result<(), AmError> {
-    let row = tx
-        .query_opt(
-            "SELECT 1 FROM subject_keys WHERE subject_id = $1 AND shredded_at IS NOT NULL",
-            &[&item.subject_id],
-        )
-        .am("opaque shredded probe")?;
-    if row.is_some() {
+    crate::postgres_memory::lock_subject_write_tx(tx, &item.subject_id)?;
+    if crate::postgres_memory::subject_is_shredded_postgres_tx(tx, &item.subject_id)? {
         return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
+
     let rows = tx
         .execute(
             "INSERT INTO items (

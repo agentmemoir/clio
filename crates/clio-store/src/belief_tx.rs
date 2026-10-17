@@ -169,16 +169,19 @@ pub(crate) fn append_confidence_sqlite_tx(
     let ts = now_iso();
     let entry_id = unique_entry_id(belief_id, &entry.as_of);
     let audit_id = format!("audit-{belief_id}-{entry_id}");
-    let exists: Option<String> = tx
+    let subject: Option<String> = tx
         .query_row(
-            "SELECT id FROM beliefs WHERE id = ?1 AND bank_id = ?2",
+            "SELECT subject_id FROM beliefs WHERE id = ?1 AND bank_id = ?2",
             params![belief_id, bank_id],
             |r| r.get(0),
         )
         .optional()
         .am("belief exists")?;
-    if exists.is_none() {
+    let Some(subject) = subject else {
         return Err(belief_not_found(belief_id));
+    };
+    if crate::sqlite_memory::subject_is_shredded_sqlite(tx, &subject)? {
+        return Err(crate::item_persist::shredded_subject_err(&subject));
     }
     if let Some(cipher) = context_cipher {
         tx.execute(
@@ -243,6 +246,7 @@ pub(crate) fn create_belief_postgres_tx(
     key: &str,
     actor: &str,
 ) -> Result<(), AmError> {
+    crate::postgres_memory::lock_subject_write_tx(tx, &belief.subject_id)?;
     let ts = now_iso();
     let audit_id = format!("audit-{}-{ts}", belief.id);
     let entries: Vec<(String, ConfidenceEntry)> = belief
@@ -336,15 +340,19 @@ pub(crate) fn append_confidence_postgres_tx(
     let ts = now_iso();
     let entry_id = unique_entry_id(belief_id, &entry.as_of);
     let audit_id = format!("audit-{belief_id}-{entry_id}");
-    let exists: Option<String> = tx
+    let subject: Option<String> = tx
         .query_opt(
-            "SELECT id FROM beliefs WHERE id = $1 AND bank_id = $2",
+            "SELECT subject_id FROM beliefs WHERE id = $1 AND bank_id = $2",
             &[&belief_id, &bank_id],
         )
         .am("belief exists")?
         .map(|r| r.get(0));
-    if exists.is_none() {
+    let Some(subject) = subject else {
         return Err(belief_not_found(belief_id));
+    };
+    crate::postgres_memory::lock_subject_write_tx(tx, &subject)?;
+    if crate::postgres_memory::subject_is_shredded_postgres_tx(tx, &subject)? {
+        return Err(crate::item_persist::shredded_subject_err(&subject));
     }
     if let Some(cipher) = context_cipher {
         tx.execute(
@@ -422,3 +430,7 @@ fn newest_entry(belief: &BeliefObject) -> &ConfidenceEntry {
 mod belief_entry_insert;
 
 use self::belief_entry_insert::{insert_entry_pg, insert_entry_sqlite};
+
+#[cfg(test)]
+#[path = "belief_tx_tests.rs"]
+mod belief_tx_tests;

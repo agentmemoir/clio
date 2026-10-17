@@ -49,6 +49,10 @@ mod persona_purge;
 mod tombstone;
 mod triple_purge;
 
+#[cfg(test)]
+#[path = "postgres_erase_tests.rs"]
+mod postgres_erase_tests;
+
 impl ComplianceStore for PostgresStore {
     fn list_subject_items(
         &self,
@@ -81,15 +85,16 @@ impl ComplianceStore for PostgresStore {
         validate_spec(spec)?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("erase begin")?;
-            let items = select_items(&mut tx, spec.bank_id, spec.subject_id)?;
-            let subject_banks = select_subject_banks(&mut tx, spec.subject_id)?;
+            crate::postgres_memory::lock_subject_write_tx(&mut tx, spec.subject_id)?;
             let key_exists = tx
                 .query_opt(
-                    "SELECT 1 FROM subject_keys WHERE subject_id = $1",
+                    "SELECT 1 FROM subject_keys WHERE subject_id = $1 FOR UPDATE",
                     &[&spec.subject_id],
                 )
-                .am("erase key check")?
+                .am("erase key lock")?
                 .is_some();
+            let items = select_items(&mut tx, spec.bank_id, spec.subject_id)?;
+            let subject_banks = select_subject_banks(&mut tx, spec.subject_id)?;
             // Persona context is bank-scoped and carries no subject
             // attribution: when the subject has neither items nor a key, its
             // bank's persona context rows are still erasable content (fail
