@@ -22,18 +22,22 @@
 use super::tests::config_with;
 use super::*;
 
-/// The toggle is off unless it is given, and a valued spelling does not turn it
-/// on: only a bare `--insecure-no-auth` is the explicit opt-out.
+/// The toggle is off by default and follows its parsed value: `=false` stays
+/// off, a bare flag and `=true` turn it on.
 #[test]
-fn the_insecure_toggle_defaults_off_and_only_a_bare_flag_turns_it_on() {
+fn the_insecure_toggle_is_off_by_default_and_follows_its_value() {
     assert!(!config_with(&[]).insecure_no_auth, "off by default");
     assert!(
         !config_with(&["--insecure-no-auth=false"]).insecure_no_auth,
-        "a valued spelling stays off"
+        "a false value stays off"
     );
     assert!(
         config_with(&["--insecure-no-auth"]).insecure_no_auth,
         "the bare flag turns it on"
+    );
+    assert!(
+        config_with(&["--insecure-no-auth=true"]).insecure_no_auth,
+        "a true value turns it on"
     );
 }
 

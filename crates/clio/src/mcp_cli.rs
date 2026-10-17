@@ -384,9 +384,10 @@ pub(crate) fn mcp_http_help() -> String {
              Required on every bind unless --insecure-no-auth is given.
 
 --insecure-no-auth
-             Serve without a credential on any bind. Without it a credential is
+             Permit a bind with no credential. Without it a credential is
              required everywhere, including loopback: name a --token-file store,
-             or this flag refuses the start.
+             or the start is refused. A --token-file store, when given, is still
+             enforced.
 
 {}",
         crate::cli_help_usage::usage_line("mcp http")
