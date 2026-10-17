@@ -243,6 +243,7 @@ pub(crate) fn create_belief_postgres_tx(
     key: &str,
     actor: &str,
 ) -> Result<(), AmError> {
+    crate::postgres_memory::lock_subject_write_tx(tx, &belief.subject_id)?;
     let ts = now_iso();
     let audit_id = format!("audit-{}-{ts}", belief.id);
     let entries: Vec<(String, ConfidenceEntry)> = belief

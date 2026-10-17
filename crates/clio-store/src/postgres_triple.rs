@@ -19,6 +19,7 @@
 use crate::item_persist::{kind_columns, require_actor, seal_dual, source_type_sql};
 use crate::migrate::{IntoAmError, now_iso};
 use crate::postgres::PostgresStore;
+use crate::postgres_memory::lock_subject_write_tx;
 use crate::triple_cipher::TripleSeal;
 use crate::triple_map::wrong_update_rule_attr;
 use clio_types::{AmError, ErrorCode, MemoryItem, TripleAddOutcome, TripleRecord};
@@ -39,6 +40,7 @@ pub(crate) fn commit_triple_add_tx(
     actor: &str,
     seal: &TripleSeal<'_>,
 ) -> Result<TripleAddOutcome, AmError> {
+    lock_subject_write_tx(tx, &item.subject_id)?;
     let (category, episodic_type) = kind_columns(item);
     let cat = category.map(str::to_owned);
     let epi = episodic_type.map(str::to_owned);

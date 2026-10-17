@@ -25,8 +25,8 @@
 use crate::audit_model::{CorrectionOutcome, CorrectionSpec};
 use crate::item_persist::{require_actor, seal_dual};
 use crate::migrate::IntoAmError;
-
 use crate::postgres::PostgresStore;
+use crate::postgres_memory::lock_subject_write_tx;
 use clio_types::{AmError, ErrorCode, MemoryItem};
 
 impl PostgresStore {
@@ -70,6 +70,7 @@ impl PostgresStore {
         );
         self.with_client(|client| {
             let mut tx = client.transaction().am("correct begin")?;
+            lock_subject_write_tx(&mut tx, &spec.new_item.subject_id)?;
             let prior = tx
                 .query_opt(
                     "SELECT discarded_at, tx_until, subject_id FROM items \
@@ -258,3 +259,7 @@ fn insert_correct_audit(
     .am("correct audit insert")?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "postgres_correct_tests.rs"]
+mod postgres_correct_tests;

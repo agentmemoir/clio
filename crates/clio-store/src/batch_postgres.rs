@@ -36,7 +36,9 @@ use crate::persona_store::{seal_persona_context, seal_persona_value};
 use crate::postgres::PostgresStore;
 use crate::postgres_assoc::{put_assoc_edge_tx, record_audit_event_tx};
 use crate::postgres_history_write::{commit_failure_record_tx, commit_task_upsert_tx};
-use crate::postgres_memory::{active_item_id_by_subject_tx, create_memory_item_tx};
+use crate::postgres_memory::{
+    active_item_id_by_subject_tx, create_memory_item_tx, lock_subject_write_tx,
+};
 use crate::postgres_persona::{put_preference_state_tx_audited, put_stable_entry_tx_audited};
 use crate::postgres_triple::commit_triple_add_tx;
 use crate::postgres_triple_read::invalidate_item_tx;
@@ -62,6 +64,9 @@ impl BatchStore for PostgresStore {
         }
         self.with_client(|client| {
             let mut tx = client.transaction().am("batch begin")?;
+            for subject_id in batch_subject_ids(writes) {
+                lock_subject_write_tx(&mut tx, subject_id)?;
+            }
             for write in writes {
                 apply_one(self, &mut tx, write)?;
             }
@@ -69,6 +74,20 @@ impl BatchStore for PostgresStore {
             Ok(())
         })
     }
+}
+
+fn batch_subject_ids(writes: &[BatchWrite]) -> Vec<&str> {
+    let mut subject_ids = writes
+        .iter()
+        .filter_map(|write| match write {
+            BatchWrite::PutOpaqueItem { item, .. } => Some(item.subject_id.as_str()),
+            BatchWrite::CreateBelief { belief, .. } => Some(belief.subject_id.as_str()),
+            _ => write.created_item().map(|item| item.subject_id.as_str()),
+        })
+        .collect::<Vec<_>>();
+    subject_ids.sort_unstable();
+    subject_ids.dedup();
+    subject_ids
 }
 
 /// Execute one pre-validated write inside the open batch transaction.
@@ -84,6 +103,7 @@ fn apply_one(
             create_memory_item_tx(tx, item, &cipher, &dek_ref, actor)
         }
         BatchWrite::CanonicalPut { item, key, actor } => {
+            lock_subject_write_tx(tx, &item.subject_id)?;
             let prior = active_item_id_by_subject_tx(tx, &item.bank_id, &item.subject_id)?
                 .filter(|prior| prior != &item.id);
             if let Some(prior_id) = &prior {

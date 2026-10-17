@@ -111,6 +111,19 @@ fn map_item_row(
     }))
 }
 
+/// Serialize a subject write with compliance erasure before taking row locks.
+pub(crate) fn lock_subject_write_tx(
+    tx: &mut postgres::Transaction<'_>,
+    subject_id: &str,
+) -> Result<(), AmError> {
+    tx.query_one(
+        "SELECT pg_advisory_xact_lock(hashtext('subject-key:' || $1))",
+        &[&subject_id],
+    )
+    .am("subject write advisory lock")?;
+    Ok(())
+}
+
 /// Transaction-scoped item create: subject_keys upsert + items insert +
 /// audit row + index-pending enqueue. Shared by the single-op path and the
 /// atomic batch executor (`batch_postgres`).
@@ -121,6 +134,7 @@ pub(crate) fn create_memory_item_tx(
     dek_ref: &str,
     actor: &str,
 ) -> Result<(), AmError> {
+    lock_subject_write_tx(tx, &item.subject_id)?;
     let (category, episodic_type) = kind_columns(item);
     let cat = category.map(str::to_owned);
     let epi = episodic_type.map(str::to_owned);
