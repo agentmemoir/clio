@@ -40,6 +40,8 @@ fn spawn_http(cfg: clio_mcp::http::HttpConfig) -> SocketAddr {
     let addr = listener.local_addr().expect("addr");
     let st = state();
     std::thread::spawn(move || {
+        let mut cfg = cfg;
+        cfg.insecure_no_auth = true;
         let _ = clio_mcp::http::serve_with_listener(st, cfg, listener);
     });
     addr

@@ -1,0 +1,1 @@
+The MCP administrative mutation tools `config_set`, `config_profile_apply`, `ranking_env_set`, and a deployment-scoped `retention_profile_set` now require an administrative caller: a principal whose actor is an agent or user is refused with `forbidden`, while harness and system principals continue to succeed. [Issue #223](https://github.com/agentmemoir/clio/issues/223)

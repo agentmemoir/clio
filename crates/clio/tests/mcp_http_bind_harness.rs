@@ -5,7 +5,7 @@
 //!
 //! This module is responsible for process-level contract tests of `clio mcp
 //! http` startup: the auto-bind port choice, the explicit-address override, the
-//! stderr announcement, stdout purity, and the non-loopback auth failure.
+//! stderr announcement, stdout purity, and the credential-required auth failure.
 //!
 //! ## Owns
 //! - Spawning the real `clio` binary and asserting its startup streams/ports
@@ -95,7 +95,7 @@ fn port_of(addr: &str) -> u16 {
 
 #[test]
 fn auto_bind_announces_on_stderr_and_keeps_stdout_pure() {
-    let mut child = spawn_http(&["--db", "sqlite::memory:"]);
+    let mut child = spawn_http(&["--db", "sqlite::memory:", "--insecure-no-auth"]);
     let addr = announced_addr(&mut child);
     assert!(!addr.is_empty(), "no listening line on stderr");
     assert!(addr.starts_with("127.0.0.1:"), "not loopback: {addr}");
@@ -121,7 +121,13 @@ fn explicit_address_is_bound_exactly() {
         let port = probe.local_addr().expect("probe addr").port();
         drop(probe);
         let want = format!("127.0.0.1:{port}");
-        let mut child = spawn_http(&["--bind", &want, "--db", "sqlite::memory:"]);
+        let mut child = spawn_http(&[
+            "--bind",
+            &want,
+            "--db",
+            "sqlite::memory:",
+            "--insecure-no-auth",
+        ]);
         let addr = announced_addr(&mut child);
         let _ = kill_and_collect_stdout(child);
         if addr != want {
@@ -135,9 +141,9 @@ fn explicit_address_is_bound_exactly() {
 
 #[test]
 fn two_instances_use_different_ports() {
-    let mut a = spawn_http(&["--db", "sqlite::memory:"]);
+    let mut a = spawn_http(&["--db", "sqlite::memory:", "--insecure-no-auth"]);
     let addr_a = announced_addr(&mut a);
-    let mut b = spawn_http(&["--db", "sqlite::memory:"]);
+    let mut b = spawn_http(&["--db", "sqlite::memory:", "--insecure-no-auth"]);
     let addr_b = announced_addr(&mut b);
     assert!(
         !addr_a.is_empty() && !addr_b.is_empty(),
@@ -161,7 +167,7 @@ fn non_loopback_without_a_credential_fails_closed() {
         (
             Vec::new(),
             "no credential source at all",
-            "non-loopback bind requires an auth token",
+            "bind requires an auth token",
         ),
         (
             vec!["--token-file", "/nonexistent/clio-auth-store.json"],
@@ -207,7 +213,7 @@ fn the_removed_token_environment_variable_cannot_supply_a_credential() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("non-loopback bind requires an auth token"),
+        stderr.contains("bind requires an auth token"),
         "unexpected stderr: {stderr}"
     );
     assert!(

@@ -71,10 +71,13 @@ fn bound_sessions_server(store: &CredentialStore) -> u16 {
 }
 
 /// An unbound loopback server with sessions enabled, exactly as a dev server.
+/// The harness opts out of the start-time auth requirement, the way the
+/// `--insecure-no-auth` flag does, so the unbound session contract is exercised.
 fn unbound_sessions_server() -> u16 {
     spawn_server_with(
         HttpConfig {
             sessions_enabled: true,
+            insecure_no_auth: true,
             ..HttpConfig::default()
         },
         &McpOpenOptions {

@@ -323,7 +323,10 @@ fn serve_with_listener_accepts_real_connections() {
     .expect("state");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
-    let cfg = HttpConfig::default();
+    let cfg = HttpConfig {
+        insecure_no_auth: true,
+        ..HttpConfig::default()
+    };
     std::thread::spawn(move || {
         let _ = serve_with_listener(state, cfg, listener);
     });

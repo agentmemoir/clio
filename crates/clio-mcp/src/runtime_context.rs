@@ -133,6 +133,9 @@ impl McpState {
         if ctx.bank.as_str().is_empty() {
             return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
         }
+        // Note the resolved bank so the background trigger sweeps it on its
+        // next tick instead of listing every bank in the store.
+        self.maintenance_trigger.note_bank(bank);
         Ok(ctx)
     }
 

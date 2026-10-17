@@ -138,7 +138,8 @@ pub(crate) enum AuthOutcome {
     /// A credential source is configured and this request presented a secret one
     /// of its records names.
     Bound(Principal),
-    /// No credential source is configured at all: a loopback bind in dev mode.
+    /// No credential source is configured, which is reachable only when the
+    /// operator passed `--insecure-no-auth`.
     ///
     /// The unbound contract applies, exactly as it does for the local
     /// transports. This is a configuration, not a per-request answer, so it is

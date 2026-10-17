@@ -11,8 +11,7 @@
 //! - The timing method: discarded warm-ups, timed samples, min/median/p95/max
 //! - The per-backend `Bounds` and the `MEASURE` report lines
 //! - The block-shape, component-count, bank-count, and archive-count
-//!   assertions taken before timing, and the per-bank and trigger-projection
-//!   derivations
+//!   assertions taken before timing
 //!
 //! ## Does not own
 //! - The fixture contents (`fixture`)
@@ -80,8 +79,6 @@ pub struct Stats {
 pub struct Bounds {
     /// Full `maintenance_status` dispatch (the operator-visible read).
     pub full_read: f64,
-    /// One `bank_ids` list query (the watched-bank component).
-    pub bank_ids: f64,
     /// `clio_write::maintenance_status` (dirty and refreshing ancestors).
     pub maintenance_status: f64,
     /// `HubDistillEngine::eligible_hubs`.
@@ -103,7 +100,6 @@ impl Bounds {
     pub fn sqlite() -> Self {
         Self {
             full_read: 2000.0,
-            bank_ids: 50.0,
             maintenance_status: 50.0,
             eligible_hubs: 50.0,
             index_drain: 100.0,
@@ -120,7 +116,6 @@ impl Bounds {
     pub fn postgres() -> Self {
         Self {
             full_read: 4000.0,
-            bank_ids: 50.0,
             maintenance_status: 50.0,
             eligible_hubs: 50.0,
             index_drain: 100.0,
@@ -194,8 +189,7 @@ pub fn run(backend: &str, fx: &Fixture, bounds: &Bounds) {
     let args = json!({"bank": MAIN_BANK, "timestamp": NOW});
 
     assert_block_shape(state, fx, &args);
-    let (full, bank_list) = measure_read_paths(backend, fx, state, &args, bounds);
-    report_derivations(backend, fx, &full, &bank_list);
+    measure_read_paths(backend, fx, state, &args, bounds);
     measure_sources(backend, fx, state, bounds);
 }
 
@@ -253,15 +247,14 @@ fn assert_block_shape(state: &McpState, fx: &Fixture, args: &serde_json::Value) 
     );
 }
 
-/// Time the operator-visible read and the watched-bank list, reporting each
-/// against its ceiling.
+/// Time the operator-visible read against its ceiling.
 fn measure_read_paths(
     backend: &str,
     fx: &Fixture,
     state: &McpState,
     args: &serde_json::Value,
     bounds: &Bounds,
-) -> (Stats, Stats) {
+) {
     // The operator-visible read: the whole dispatch, pressure block included.
     let full = time(|| {
         let out = clio_mcp::write_tools::dispatch(state, "maintenance_status", args);
@@ -275,37 +268,6 @@ fn measure_read_paths(
         "maintenance_status_dispatch",
         &full,
         bounds.full_read,
-    );
-
-    // The watched-bank list, measured apart from the pressure read.
-    let bank_list = time(|| {
-        let ids = state.ops_store.bank_ids().expect("fixture bank list");
-        u64::try_from(ids.len()).unwrap_or(u64::MAX)
-    });
-    report(backend, fx, "bank_ids", &bank_list, bounds.bank_ids);
-    (full, bank_list)
-}
-
-/// Print the per-bank and trigger-projection lines derived from the two
-/// headline measurements.
-fn report_derivations(backend: &str, fx: &Fixture, full: &Stats, bank_list: &Stats) {
-    let bank_count =
-        f64::from(u32::try_from(fx.banks.len()).expect("fixture bank count fits in u32"));
-    eprintln!(
-        "MEASURE backend={backend} banks={} items={} samples={SAMPLES} \
-         component=bank_ids_per_bank derivation=bank_ids_p95/banks per_bank_ms={:.3} \
-         machine=idle-required",
-        fx.banks.len(),
-        fx.item_count,
-        bank_list.p95 / bank_count,
-    );
-    eprintln!(
-        "MEASURE backend={backend} banks={} items={} samples={SAMPLES} \
-         component=trigger_projection derivation=full_read_p95*banks+bank_ids_p95 \
-         projected_ms={:.3} machine=idle-required",
-        fx.banks.len(),
-        fx.item_count,
-        full.p95 * bank_count + bank_list.p95,
     );
 }
 

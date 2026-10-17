@@ -184,7 +184,7 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     (
         "mcp http",
         "clio mcp http [--bind [ADDR]] [--db PATH] [--backend sqlite|postgres] \
-         [--bank BANK] [--token-file PATH] [--sessions]",
+         [--bank BANK] [--token-file PATH] [--sessions] [--insecure-no-auth]",
     ),
     (
         "ops diagnose",
