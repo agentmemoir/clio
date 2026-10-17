@@ -77,13 +77,18 @@ is_shim() {
 # -ic), printing the first line that is a symlink to the shim. A profile may
 # print to stdout, so each line is tested rather than the whole output; a
 # profile that reads a terminal must not hang the install, so stdin is /dev/null
-# and `timeout` is used when the host has it.
+# and `timeout` is used when the host has it. A killed probe returns 124, which
+# the caller reads as "could not probe" rather than "the shim is inactive".
 probe_shell() {
     flags=$1
+    rc=0
     if command -v timeout >/dev/null 2>&1; then
-        out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true)
+        out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
     else
-        out=$("$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true)
+        out=$("$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
+    fi
+    if [ "$rc" = 124 ]; then
+        return 124
     fi
     printf '%s\n' "$out" | while IFS= read -r line; do
         if is_shim "$line"; then
@@ -103,8 +108,15 @@ if [ "$mode" = install ]; then
     #
     # This shell cannot be the whole test. Over plain `ssh` it reads neither the
     # login profile nor the interactive profile, so a machine that adds $dest in
-    # one of those reads as inactive here. Ask the login shell and the
-    # interactive shell too, and judge the shim by what they resolve.
+    # one of those reads as inactive here. Ask both profile shells. The
+    # interactive shell is asked even when the login shell hits, because a login
+    # hit with an interactive shadow would otherwise print a bare "active" and
+    # hide the shell a user actually runs gates in.
+    #
+    # A profile slower than the 5s probe budget is killed by `timeout` (status
+    # 124). That is "could not probe", not "the shim is inactive": a slow
+    # profile must not fail an otherwise correct install, the same false FAIL
+    # #213 removes.
     shell=${SHELL:-/bin/sh}
     [ -x "$shell" ] || shell=/bin/sh
     inactive=0
@@ -114,18 +126,33 @@ if [ "$mode" = install ]; then
             echo "gate-install: $name shim is active for this shell"
             continue
         fi
-        via=""
-        login=$(probe_shell -lc)
-        if [ -n "$login" ]; then
-            via=login
-        else
-            interactive=$(probe_shell -ic)
-            if [ -n "$interactive" ]; then
-                via=interactive
+        login_rc=0
+        login=$(probe_shell -lc) || login_rc=$?
+        interactive_rc=0
+        interactive=$(probe_shell -ic) || interactive_rc=$?
+        if [ -n "$login" ] || [ -n "$interactive" ]; then
+            where="the login and interactive shells"
+            [ -n "$login" ] || where="the interactive shell"
+            [ -n "$interactive" ] || where="the login shell"
+            echo "gate-install: $name shim is active in $where; this non-interactive shell skips the profile that adds it"
+            if [ -n "$login" ] && [ -z "$interactive" ]; then
+                if [ "$interactive_rc" = 124 ]; then
+                    echo "gate-install: note: could not probe the interactive shell for $name within the 5s budget"
+                else
+                    echo "gate-install: note: $name is not active in the interactive shell; a tool earlier on your interactive PATH shadows the shim"
+                fi
             fi
+            if [ -z "$login" ] && [ -n "$interactive" ]; then
+                if [ "$login_rc" = 124 ]; then
+                    echo "gate-install: note: could not probe the login shell for $name within the 5s budget"
+                else
+                    echo "gate-install: note: $name is not active in the login shell; only the interactive profile adds $dest"
+                fi
+            fi
+            continue
         fi
-        if [ -n "$via" ]; then
-            echo "gate-install: $name shim is active in a $via shell; this non-interactive shell skips the profile that adds it"
+        if [ "$login_rc" = 124 ] || [ "$interactive_rc" = 124 ]; then
+            echo "gate-install: $name: a shell profile did not finish within the 5s probe budget; a slow profile is not read as inactive, so the install is not failed"
             continue
         fi
         if [ -z "$here" ]; then
