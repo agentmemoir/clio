@@ -48,6 +48,10 @@ fn spawn_server(cfg: HttpConfig) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
+        // These tests bound request reads, not the start guard, so the harness
+        // opts out of the start-time auth requirement.
+        let mut cfg = cfg;
+        cfg.insecure_no_auth = true;
         let _ = serve_with_listener(state, cfg, listener);
     });
     port

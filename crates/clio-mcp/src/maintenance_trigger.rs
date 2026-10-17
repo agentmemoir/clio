@@ -10,7 +10,7 @@
 //! ## Owns
 //! - `MaintenanceTriggerState`: the per-bank evaluation record and its
 //!   non-blocking snapshot (`MaintenanceTriggerStatus`)
-//! - `McpState::evaluate_maintenance_trigger`: read the watched banks' three
+//! - `McpState::evaluate_maintenance_trigger`: read the active banks' three
 //!   pressure counts without waiting for a lock a write needs, decide, record
 //!   the outcome, and fire eligible waves
 //! - The pure wave decision: inclusive thresholds, cooldown, hourly cap, and
@@ -35,10 +35,13 @@ use crate::runtime::McpState;
 use clio_config::ranking::MaintenanceTriggerKnobs;
 use clio_config::retention::ResolvedRetention;
 use clio_types::{Actor, Bank, OpContext};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[path = "maintenance_trigger_activity.rs"]
+mod maintenance_trigger_activity;
 
 /// Trigger evaluation cadence on the sweeper thread: ten index sweeps. The
 /// per-tick duty stays far below the drain's, so the drain's cadence and the
@@ -208,31 +211,20 @@ pub struct MaintenanceTriggerStatus {
     pub last_decline: Option<DeclineReason>,
 }
 
-/// The trigger's shared record, keyed by bank, plus the watched-bank cache.
+/// The trigger's shared record, keyed by bank, plus the active-bank registry.
 ///
 /// Behind an `Arc` on [`McpState`], so every clone of the state reads one
 /// record. Locks are held only inside short non-async methods.
 #[derive(Debug, Default)]
 pub struct MaintenanceTriggerState {
-    /// The cached bank list, refreshed at the trigger's own cadence.
-    watched: Mutex<Vec<String>>,
+    /// Banks this runtime served, noted at the per-call resolution point. A
+    /// tick evaluates these plus the default (and shared) bank instead of
+    /// listing every bank in the store on every tick.
+    active: Mutex<HashSet<String>>,
     banks: Mutex<HashMap<String, BankRecord>>,
 }
 
 impl MaintenanceTriggerState {
-    /// Replace the watched-bank cache with a fresh `bank_ids` read.
-    fn refresh_watched(&self, banks: Vec<String>) {
-        *self.watched.lock().expect("trigger watched mutex poisoned") = banks;
-    }
-
-    /// The cached watched-bank list.
-    fn watched(&self) -> Vec<String> {
-        self.watched
-            .lock()
-            .expect("trigger watched mutex poisoned")
-            .clone()
-    }
-
     /// Decide for one bank from its recorded state, then record the outcome.
     ///
     /// `pressure` is `None` when the tick could not read the bank's pressure
@@ -308,7 +300,7 @@ impl MaintenanceTriggerState {
 }
 
 impl McpState {
-    /// Evaluate every watched bank's maintenance pressure and fire eligible
+    /// Evaluate every active bank's maintenance pressure and fire eligible
     /// waves.
     ///
     /// Runs on the sweeper thread at [`MAINTENANCE_TRIGGER_INTERVAL`]; the
@@ -322,12 +314,13 @@ impl McpState {
             let runtime = self.config.lock().expect("config runtime mutex poisoned");
             runtime.ranking_env().maintenance_triggers
         };
-        // Refresh the watched-bank list at the trigger's own cadence; a failed
-        // read keeps the previous list so one bad tick never empties it.
-        if let Ok(banks) = self.ops_store.bank_ids() {
-            self.maintenance_trigger.refresh_watched(banks);
-        }
-        for bank in self.maintenance_trigger.watched() {
+        // Evaluate only the banks this runtime has resolved, plus the default
+        // (and shared) bank. The store's full historical bank list is never
+        // read here, so an idle tick issues no unbounded query.
+        for bank in self
+            .maintenance_trigger
+            .tick_banks(&self.default_bank, self.shared_enabled)
+        {
             self.evaluate_bank_trigger(&bank, &knobs, now);
         }
     }

@@ -147,6 +147,7 @@ fn the_help_text_names_the_flag_and_its_refusal_rules() {
     assert!(out.status.success(), "help must succeed");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--token-file"), "{stdout}");
+    assert!(stdout.contains("--insecure-no-auth"), "{stdout}");
     // The refusal rules are named, not implied.
     assert!(stdout.contains("absent"), "{stdout}");
     assert!(stdout.contains("holds no record"), "{stdout}");

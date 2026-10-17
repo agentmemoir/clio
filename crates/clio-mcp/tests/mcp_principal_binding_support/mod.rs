@@ -224,9 +224,16 @@ impl Drop for Journal {
 }
 
 /// Serve with the default open options and only the default bank chosen.
+///
+/// The start-time auth requirement is opted out of (`insecure_no_auth`), so this
+/// helper serves the credential-free loopback server an unbound scenario needs;
+/// the caller's other config fields are kept.
 pub fn spawn_server(cfg: HttpConfig, default_bank: &str) -> u16 {
     spawn_server_with(
-        cfg,
+        HttpConfig {
+            insecure_no_auth: true,
+            ..cfg
+        },
         &McpOpenOptions {
             default_bank: default_bank.into(),
             ..McpOpenOptions::default()

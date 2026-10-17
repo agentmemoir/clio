@@ -238,8 +238,8 @@ fn a_listed_shared_bank_is_allowed_when_the_deployment_enabled_it() {
 
 #[test]
 fn the_unbound_loopback_default_still_honors_a_declared_actor_and_bank() {
-    // No credential source at all: the local contract is unchanged, which is
-    // what keeps a developer's loopback server working.
+    // The helper opts out of the start-time auth requirement, so no credential
+    // source is configured, as a developer's `--insecure-no-auth` server does.
     let port = spawn_server(HttpConfig::default(), "demo");
     let (_, response) = post(port, &store_item_declaring("demo", "unbound-1", "user"), "");
     assert!(tool_ok(&response), "{response}");

@@ -12,7 +12,8 @@
 //! - The accept loop, connection cap, and per-request dispatch through the
 //!   bound protocol entry point
 //! - The credential source this server accepts (the operator's token store) and
-//!   the loopback rule that gates it
+//!   the startup rule that requires one on every bind unless the operator
+//!   explicitly opted out
 //! - The transport resource bounds (values defined below):
 //!   - 64 KiB head cap (`MAX_HEAD_BYTES`) and 10 MiB body cap (`MAX_BODY`),
 //!     capped separately because a client controls the header block and the
@@ -86,8 +87,8 @@ const REFUSAL_WRITE_SLICE: Duration = Duration::from_secs(2);
 /// Configuration for the Streamable HTTP transport.
 #[derive(Debug, Clone)]
 pub struct HttpConfig {
-    /// Bind address; must be loopback unless the token store holds a usable
-    /// record.
+    /// Bind address; serving it requires a credential source unless
+    /// `insecure_no_auth` is set.
     pub bind: String,
     /// Loaded network-credential store (actor plus banks per record).
     ///
@@ -96,6 +97,12 @@ pub struct HttpConfig {
     pub credentials: Option<Arc<CredentialStore>>,
     /// Mint and enforce `MCP-Session-Id` sessions.
     pub sessions_enabled: bool,
+    /// Serve without requiring any credential, even on loopback.
+    ///
+    /// Off by default: every bind requires a credential source unless this is
+    /// set. It is the explicit operator opt-out behind `--insecure-no-auth`; a
+    /// loopback bind with no `--token-file` otherwise gets a one-time token.
+    pub insecure_no_auth: bool,
     /// Extra allowed Origin hosts (localhost is always allowed).
     pub allowed_origins: Vec<String>,
     /// Total request deadline override in seconds, bounding the *read* of one
@@ -113,6 +120,7 @@ impl Default for HttpConfig {
             bind: "127.0.0.1:0".into(),
             credentials: None,
             sessions_enabled: false,
+            insecure_no_auth: false,
             allowed_origins: vec![],
             deadline_secs: None,
         }
@@ -122,7 +130,8 @@ impl Default for HttpConfig {
 /// Serve MCP over Streamable HTTP until the listener fails.
 ///
 /// # Errors
-/// Listener setup failures; a non-loopback bind without a token fails closed.
+/// Listener setup failures; a bind without a credential fails closed unless
+/// `insecure_no_auth` is set.
 pub fn serve(state: Arc<McpState>, cfg: HttpConfig) -> std::io::Result<()> {
     let listener = TcpListener::bind(&cfg.bind)?;
     serve_with_listener(state, cfg, listener)
@@ -139,16 +148,23 @@ pub fn serve_with_listener(
     listener: TcpListener,
 ) -> std::io::Result<()> {
     let loopback = listener.local_addr().is_ok_and(|a| a.ip().is_loopback());
-    if !loopback && !has_credential_source(&cfg) {
-        // Auth is required outside dev mode (non-loopback bind), and a store
-        // holding no record authorizes nothing, so it is not a source. The
-        // refusal names the one way an operator satisfies the rule, so it reads
-        // the same as the CLI's own refusal. The opening phrase is the pinned
-        // substring an operator's runbook and a search hold.
-        return Err(std::io::Error::other(
+    if !cfg.insecure_no_auth && !has_credential_source(&cfg) {
+        // Auth is required on every bind, and a store holding no record
+        // authorizes nothing, so it is not a source. The non-loopback refusal
+        // keeps the wording every existing deployment has seen; the loopback
+        // one names the flag that generates the local token. Both messages name
+        // the one way an operator satisfies the rule, so each reads the same as
+        // the CLI's own refusal. The opening phrases are the pinned substrings
+        // an operator's runbook and a search hold.
+        let message = if loopback {
+            "mcp http: loopback bind requires an auth token: point --token-file at a store \
+             holding at least one record, or pass --insecure-no-auth to serve without \
+             authentication"
+        } else {
             "mcp http: non-loopback bind requires an auth token: point --token-file \
-             at a store holding at least one record",
-        ));
+             at a store holding at least one record"
+        };
+        return Err(std::io::Error::other(message));
     }
     let handler = Arc::new(McpHandler::new(state));
     let shared = Arc::new(HttpShared::default());
@@ -416,6 +432,9 @@ mod http_request_bounds_tests;
 #[cfg(test)]
 #[path = "http_test_support_tests.rs"]
 mod http_test_support_tests;
+#[cfg(test)]
+#[path = "http_start_auth_tests.rs"]
+mod http_start_auth_tests;
 #[cfg(test)]
 #[path = "http_tests.rs"]
 mod http_tests;
