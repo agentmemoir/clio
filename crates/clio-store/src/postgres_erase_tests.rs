@@ -227,10 +227,10 @@ fn postgres_writer_and_eraser_leave_no_readable_row_for_the_erased_subject() {
     main_store
         .erase_subject(&spec(&bank, &subject, &unique("pg-race-request")))
         .unwrap();
-    let writes = done_rx.recv().expect("writer results");
+    let outcomes = done_rx.recv().expect("writer results");
     writer.join().expect("join writer thread");
 
-    for (id, result) in &writes {
+    for (id, result) in &outcomes {
         match result {
             Ok(()) => assert!(
                 !matches!(main_store.get_memory_item(&bank, id), Ok(Some(_))),
