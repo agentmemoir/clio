@@ -273,9 +273,12 @@ fn a_push_ack_without_a_denial_ack_parses_and_roundtrips_with_one() {
             proof: DenialProof {
                 request_ref: "req-1".into(),
                 peer_id: "srv-1".into(),
-                subject_hash: crate::denial::denial_subject_hash("fp-1", "s-1"),
+                subject_hash: crate::denial::denial_subject_hash(
+                    crate::denial::test_fingerprint(),
+                    "s-1",
+                ),
                 generation: 3,
-                salt_fingerprint: "fp-1".into(),
+                salt_fingerprint: crate::denial::test_fingerprint().into(),
             },
         }],
     };
