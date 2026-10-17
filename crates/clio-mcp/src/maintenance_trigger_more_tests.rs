@@ -41,7 +41,7 @@ const OTHER_BANK: &str = "trigger-other-bank";
 
 /// Publish the whole maintenance-trigger knob group the way `ranking_env_set`
 /// does, from the state the sweeper reads it from.
-fn set_trigger_knobs(state: &McpState, knobs: MaintenanceTriggerKnobs) {
+pub(super) fn set_trigger_knobs(state: &McpState, knobs: MaintenanceTriggerKnobs) {
     let mut rt = state.config.lock().expect("config runtime mutex poisoned");
     let patch = RankingEnvPatch {
         maintenance_triggers: Some(knobs),
@@ -167,14 +167,14 @@ fn idle_ticks_evaluate_only_the_active_banks() {
             .create_memory_item(&item_in(&format!("idle-{i}"), &bank), "agent")
             .expect("seed idle bank");
     }
-    // Two idle ticks with no resolved call between them: the active set stays
-    // exactly the fixture bank noted at open.
+    // Two idle ticks with no resolved call between them. The fixture bank is
+    // quiet, so the first tick evicts it and the registry is empty; no store
+    // bank ever entered it.
     state.evaluate_maintenance_trigger(base());
     state.evaluate_maintenance_trigger(base() + Duration::from_secs(5));
-    assert_eq!(
-        state.maintenance_trigger.active_banks(),
-        vec![BANK.to_owned()],
-        "no store bank was added to the active set"
+    assert!(
+        state.maintenance_trigger.active_banks().is_empty(),
+        "a quiet resolved bank leaves the active set and no store bank enters it"
     );
     for i in 0..32 {
         let bank = format!("idle-bank-{i}");

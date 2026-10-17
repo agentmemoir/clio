@@ -10,7 +10,9 @@
 //! ## Owns
 //! - `MaintenanceTriggerState::note_bank`: record a resolved bank
 //! - `MaintenanceTriggerState::active_banks`: the recorded-bank snapshot
-//! - `MaintenanceTriggerState::tick_banks`: the per-tick bank selection
+//! - `MaintenanceTriggerState::claim_tick_banks`: the per-tick bank selection
+//! - `MaintenanceTriggerState::retain_pressured`: keep only banks still needing
+//!   maintenance
 //!
 //! ## Does not own
 //! - The per-bank decision and record (`maintenance_trigger`)
@@ -54,15 +56,17 @@ impl MaintenanceTriggerState {
         banks
     }
 
-    /// The banks one tick evaluates: every active bank plus the default bank,
-    /// and the shared bank when the deployment enabled it. Never the whole
-    /// store, so an idle tick issues a bounded number of bank reads.
-    pub(super) fn tick_banks(&self, default_bank: &str, shared_enabled: bool) -> Vec<String> {
-        let mut banks: HashSet<String> = self
-            .active
-            .lock()
-            .expect("trigger active mutex poisoned")
-            .clone();
+    /// Claim the banks one tick evaluates: every active bank plus the default
+    /// bank, and the shared bank when the deployment enabled it. Never the
+    /// whole store, so an idle tick issues a bounded number of bank reads.
+    ///
+    /// Taking the active set empties the registry before evaluation, so a bank
+    /// resolved while the tick runs is recorded into the now-empty registry and
+    /// survives the [`Self::retain_pressured`] merge that ends the tick. The
+    /// caller hands back the banks that still showed pressure.
+    pub(super) fn claim_tick_banks(&self, default_bank: &str, shared_enabled: bool) -> Vec<String> {
+        let mut banks: HashSet<String> =
+            std::mem::take(&mut *self.active.lock().expect("trigger active mutex poisoned"));
         banks.insert(default_bank.to_owned());
         if shared_enabled {
             banks.insert(SHARED_BANK.to_owned());
@@ -70,5 +74,15 @@ impl MaintenanceTriggerState {
         let mut banks: Vec<String> = banks.into_iter().collect();
         banks.sort_unstable();
         banks
+    }
+
+    /// Put the banks that still showed pressure back into the registry, so the
+    /// next tick keeps evaluating them until they are quiet. A bank resolved
+    /// during the tick is already in the registry and is left alone.
+    pub(super) fn retain_pressured(&self, banks: impl IntoIterator<Item = String>) {
+        let mut active = self.active.lock().expect("trigger active mutex poisoned");
+        for bank in banks {
+            active.insert(bank);
+        }
     }
 }
