@@ -96,7 +96,27 @@ fn an_unreadable_df_report_is_an_internal_error() {
     assert_eq!(error.code, ErrorCode::Internal);
 }
 
+/// Whether this host has a `df` at one of the fixed absolute paths. A host
+/// without one is a real layout, so a live check is skipped rather than failed.
+fn host_has_df() -> bool {
+    DF_PATHS.iter().any(|path| Path::new(path).is_file())
+}
+
 #[test]
 fn no_payload_bytes_needs_no_check() {
     require_room(Path::new("/definitely/not/a/directory"), 0).expect("nothing to reserve");
+}
+
+#[test]
+fn more_bytes_than_this_host_holds_is_refused() {
+    if !host_has_df() {
+        return;
+    }
+    let error = require_room(Path::new("/"), u64::MAX).expect_err("no host holds u64::MAX bytes");
+    assert_eq!(error.code, ErrorCode::QuotaExceeded);
+    assert!(
+        error.message.contains("needs") && error.message.contains("free"),
+        "the refusal names the need and the free space: {}",
+        error.message
+    );
 }

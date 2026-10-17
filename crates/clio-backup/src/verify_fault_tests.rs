@@ -226,6 +226,22 @@ fn a_payload_header_size_the_manifest_does_not_record_is_refused_before_staging(
 }
 
 #[test]
+fn a_smaller_payload_header_is_refused_too() {
+    let scratch = Scratch::new("verify-size-lie-small");
+    let declared = crate::verify::verify_hostile_manifest_tests::PAYLOAD.len() as u64 - 1;
+    let path = archive_with_payload_header(&scratch, declared);
+
+    let error = verify_archive_with_space(&path, &mut always_ok, &|_, _| {
+        panic!("the space check must not run for a header-size lie")
+    })
+    .expect_err("a header size the manifest does not record is refused");
+
+    assert_eq!(error.code, ErrorCode::ArchiveCorrupt);
+    assert!(error.message.contains("store.db"), "{}", error.message);
+    no_staged_payload(&scratch);
+}
+
+#[test]
 fn a_payload_that_does_not_fit_is_refused_before_staging() {
     let scratch = Scratch::new("verify-no-room");
     let path = keyless_archive(&scratch);
