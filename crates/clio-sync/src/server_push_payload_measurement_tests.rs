@@ -63,8 +63,8 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
     let stamp_at =
         |hour: u32, i: usize| format!("2026-01-01T{hour:02}:{:02}:{:02}Z", i / 60, i % 60);
     let big_item = |id: &str, hour: u32, i: usize| MemoryItem {
-        snapshot: Some(json!({ "payload": "s".repeat(2048) })),
-        gist: Some("g".repeat(1024)),
+        snapshot: Some(json!({ "payload": "s".repeat(2822) })),
+        gist: Some("g".repeat(250)),
         ..base_item(bank, id, "s1", &stamp_at(hour, i), "gist")
     };
     let ctx = "c".repeat(1024);
@@ -87,8 +87,8 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
             kind: ItemKind::Episodic,
             category: None,
             episodic_type: Some(EpisodicType::Triple),
-            snapshot: Some(json!({ "payload": "s".repeat(512) })),
-            gist: Some("g".repeat(256)),
+            snapshot: Some(json!({ "payload": "s".repeat(518) })),
+            gist: Some("g".repeat(250)),
             ..big_item(&format!("car-t-{id}"), 7, i)
         };
         let triple: TripleRecord = fixture(json!({
@@ -136,8 +136,8 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
             category: None,
             episodic_type: Some(EpisodicType::Task),
             context: Some(ctx.clone()),
-            snapshot: Some(json!({ "payload": "s".repeat(512) })),
-            gist: Some("g".repeat(256)),
+            snapshot: Some(json!({ "payload": "s".repeat(518) })),
+            gist: Some("g".repeat(250)),
             ..big_item(&format!("car-k-{id}"), 8, i)
         };
         let task: TaskRecord = fixture(json!({
@@ -157,8 +157,8 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
             epistemic_kind: EpistemicKind::Belief,
             source_type: Some(SourceType::AgentInferred),
             context: Some(ctx.clone()),
-            snapshot: Some(json!({ "payload": "s".repeat(512) })),
-            gist: Some("g".repeat(256)),
+            snapshot: Some(json!({ "payload": "s".repeat(518) })),
+            gist: Some("g".repeat(250)),
             ..big_item(&format!("car-f-{id}"), 9, i)
         };
         let failure: FailureRecord = fixture(json!({

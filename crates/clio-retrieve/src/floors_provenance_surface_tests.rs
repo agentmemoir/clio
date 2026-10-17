@@ -108,6 +108,7 @@ fn hit(id: &str, rank: usize, score: f64, keyword: f64, source: Option<&str>) ->
         "entities": [],
         "epistemic_kind": if belief { "belief" } else { "fact" },
         "gist": format!("alpha memory {id}"),
+        "gist_unverified": true,
         "item_id": id,
         "kind": "semantic",
         "lexical_rank": rank,

@@ -206,7 +206,9 @@ fn budget_tokens_always_returns_first_hit_even_over_budget() {
     let store = fx::store();
     // finalize budgets the hit's lexical source text (gist + snapshot), so the
     // oversized hit must be oversized there, not only in its search document.
-    let oversized = fx::item("BIG", "bank", &"payload ".repeat(120));
+    // The gist is bounded; the snapshot carries the bulk.
+    let mut oversized = fx::item("BIG", "bank", "payload memory");
+    oversized.snapshot = Some(json!({"payload": "payload ".repeat(120)}));
     fx::put_lexical(&store, &oversized, "payload token");
     let small = fx::item("S", "bank", "small memory");
     fx::put_lexical(&store, &small, "tiny doc");

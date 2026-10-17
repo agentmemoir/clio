@@ -178,6 +178,27 @@ fn context_validation_rejects_empty_and_oversized_only() {
 }
 
 #[test]
+fn gist_validation_bounds_characters() {
+    assert_eq!(crate::GIST_MAX_CHARS, 250);
+    crate::validate_gist(&"a".repeat(crate::GIST_MAX_CHARS)).unwrap();
+    let oversized =
+        crate::validate_gist(&"a".repeat(crate::GIST_MAX_CHARS + 1)).expect_err("oversized gist");
+    assert_eq!(oversized.code, ErrorCode::OutOfRange);
+    // The limit is characters, not bytes: a multi-byte value at the character
+    // cap is accepted.
+    crate::validate_gist(&"é".repeat(crate::GIST_MAX_CHARS)).unwrap();
+}
+
+#[test]
+fn item_validate_applies_the_gist_bound_to_every_producer() {
+    let mut item = base_semantic();
+    item.gist = Some("a".repeat(crate::GIST_MAX_CHARS + 1));
+    assert_eq!(item.validate().unwrap_err().code, ErrorCode::OutOfRange);
+    item.gist = Some("a".repeat(crate::GIST_MAX_CHARS));
+    item.validate().unwrap();
+}
+
+#[test]
 fn item_validate_applies_context_rules() {
     let mut item = base_semantic();
     item.context = Some(String::new());

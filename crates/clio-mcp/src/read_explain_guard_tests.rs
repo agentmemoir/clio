@@ -70,7 +70,7 @@ const CONTENT_EXCLUDED_EXPECTED: [&str; 4] = ["gist", "context", "entities", "ex
 /// `temporal_rank` is the temporal arm's payload rank: it stays trace-absent so
 /// the per-hit trace keeps its frozen shape; the payload's hits and the trace's
 /// conditional `temporal_candidates` counter carry the arm's observability.
-const SAFE_EXCLUDED_EXPECTED: [&str; 12] = [
+const SAFE_EXCLUDED_EXPECTED: [&str; 13] = [
     "bank_id",
     "kind",
     "category",
@@ -79,6 +79,7 @@ const SAFE_EXCLUDED_EXPECTED: [&str; 12] = [
     "source_type",
     "confidence",
     "requires_confidence_check",
+    "gist_unverified",
     "scores",
     "snapshot_ref",
     "entity_match",
@@ -134,6 +135,7 @@ fn full_hit() -> ScoredHit {
             source_type: Some(SourceType::UserStated),
             confidence: Some(0.5),
             gist: Some("full gist".into()),
+            gist_unverified: true,
             context: Some("full context".into()),
             exact_render: Some(rendering()),
             requires_confidence_check: true,
@@ -170,7 +172,7 @@ macro_rules! with_hit_fields {
         $mac! {
             inner {
                 item_id, bank_id, kind, category, episodic_type, epistemic_kind,
-                source_type, confidence, gist, context, exact_render,
+                source_type, confidence, gist, gist_unverified, context, exact_render,
                 requires_confidence_check
             }
             outer {

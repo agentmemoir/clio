@@ -30,6 +30,7 @@ pub mod civil;
 pub mod context;
 pub mod decay;
 pub mod error;
+pub mod gist;
 pub mod history;
 pub mod item;
 pub mod mcp_tools;
@@ -49,6 +50,7 @@ pub use civil::{civil_from_days, days_from_civil, days_in_month, is_leap_year};
 pub use context::{Actor, Bank, BankDefaultPolicy, OpContext, resolve_bank};
 pub use decay::{half_life_factor, ramp_factor};
 pub use error::{AmError, ErrorCode, ToolResult};
+pub use gist::{GIST_MAX_CHARS, validate_gist};
 pub use history::{
     DEFAULT_HISTORY_LIMIT, DEFAULT_LESSON_MAX_TOKENS, DEFAULT_TASK_SIMILARITY_THRESHOLD,
     FailureRecord, HistoryPolicy, MAX_HISTORY_LIMIT, TaskRecord,
