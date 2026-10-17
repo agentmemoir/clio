@@ -25,7 +25,7 @@ use clio_store::{
     DistilledUnitRecord, EvidenceEntry, STALE_REVISION_REJECTED, STALE_SOURCE_CHANGED,
     STALE_SOURCE_REMOVED, UnitFreshness, evidence_from_items, snapshot_projection,
 };
-use clio_types::{AmError, EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
+use clio_types::{AmError, EpistemicKind, GIST_MAX_CHARS, ItemKind, MemoryItem, SemanticCategory};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -277,6 +277,25 @@ pub(crate) fn claimed_evidence(hub: &MemoryItem, sources: &[MemoryItem]) -> Vec<
 
 /// Build the deterministic template-derived distilled semantic item.
 ///
+/// The synthetic gist for a distilled unit.
+///
+/// The hub and up to [`DEFAULT_HUB_NEIGHBORS`] sources each contribute bounded
+/// text, but their join cannot exceed the store's `gist` bound. The unit's
+/// verified facts live in the snapshot, so the summary is cut to the published
+/// length rather than allowed to fail the write.
+fn distill_gist(hub: &MemoryItem, source_items: &[MemoryItem]) -> String {
+    let hub_gist = hub.gist.as_deref().unwrap_or(&hub.id);
+    let parts: Vec<String> = source_items
+        .iter()
+        .take(DEFAULT_HUB_NEIGHBORS)
+        .map(neighbor_text)
+        .collect();
+    format!("hub_distill: {} related to {}", hub_gist, parts.join(" | "))
+        .chars()
+        .take(GIST_MAX_CHARS)
+        .collect()
+}
+
 /// `record` is the unit's derivation record (the record [`build_distill_record`]
 /// built over the same cluster state, or the updated record a reconciliation
 /// writes); `source_items` must be the record's claim-set sources in claim
@@ -290,13 +309,7 @@ pub(crate) fn build_distill_item(
     source_items: &[MemoryItem],
     ts: &str,
 ) -> MemoryItem {
-    let hub_gist = hub.gist.as_deref().unwrap_or(&hub.id);
-    let parts: Vec<String> = source_items
-        .iter()
-        .take(DEFAULT_HUB_NEIGHBORS)
-        .map(neighbor_text)
-        .collect();
-    let gist = format!("hub_distill: {} related to {}", hub_gist, parts.join(" | "));
+    let gist = distill_gist(hub, source_items);
     MemoryItem {
         id: record.current_revision_item_id(),
         bank_id: bank.to_owned(),
@@ -329,3 +342,7 @@ pub(crate) fn build_distill_item(
         context: None,
     }
 }
+
+#[cfg(test)]
+#[path = "hub_distill_model_tests.rs"]
+mod tests;
