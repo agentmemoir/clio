@@ -76,6 +76,16 @@ fn oversized() -> Vec<u8> {
 }
 
 #[test]
+fn write_body_creates_a_missing_parent_directory() {
+    let scratch = Scratch::new();
+    // A first denial under a fresh data directory writes through a parent
+    // that does not exist yet, so the write creates it instead of refusing.
+    let path = scratch.root.join("fresh-dir").join("erasure-journal.json");
+    write_body(&path, &ExpectedBody::Absent, b"body").expect("a missing parent is created");
+    assert_eq!(std::fs::read(&path).expect("read back"), b"body");
+}
+
+#[test]
 fn write_body_writes_the_exact_bytes_owner_only() {
     let scratch = Scratch::new();
     let path = scratch.journal();

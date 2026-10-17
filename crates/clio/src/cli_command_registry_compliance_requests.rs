@@ -420,3 +420,28 @@ pub(crate) const COMPLIANCE_PEER_DISPOSITION: CommandSpec = request_spec(
     "subject_request_peer_disposition",
     Section::Write,
 );
+
+#[cfg(test)]
+mod request_spec_tests {
+    use super::*;
+
+    /// The record helper binds the name and tool it is given, called at
+    /// runtime so the helper's lines count as executed code.
+    #[test]
+    fn request_spec_binds_the_name_and_tool() {
+        const FLAGS: &[Flag] = &[];
+        const EXAMPLES: &[Example] = &[];
+        let spec = request_spec(
+            "compliance request-start",
+            "summary",
+            FLAGS,
+            EXAMPLES,
+            "subject_request_start",
+            Section::Write,
+        );
+        assert_eq!(spec.name, "compliance request-start");
+        assert_eq!(spec.tool, Some("subject_request_start"));
+        assert_eq!(spec.section, Section::Write);
+        assert_eq!(spec.accepted_extra, REQUEST_UNPRINTED);
+    }
+}
