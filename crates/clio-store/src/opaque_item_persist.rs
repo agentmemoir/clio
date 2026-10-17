@@ -43,9 +43,7 @@ pub(crate) fn put_opaque_item_sqlite_tx(
         )
         .am("check opaque item subject erasure")?;
     if subject_erased {
-        return Err(crate::item_persist::shredded_subject_err(
-            &item.subject_id,
-        ));
+        return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
 
     let rows = tx
@@ -120,9 +118,7 @@ pub(crate) fn put_opaque_item_postgres_tx(
         .map(|row| row.get::<_, bool>(0))
         .unwrap_or(false);
     if subject_erased {
-        return Err(crate::item_persist::shredded_subject_err(
-            &item.subject_id,
-        ));
+        return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
 
     let rows = tx
