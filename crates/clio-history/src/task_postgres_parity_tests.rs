@@ -38,12 +38,16 @@ fn open_pg() -> Option<(PgTestGuard, PostgresStore)> {
     if std::env::var("CLIO_PG_HISTORY_PARITY").as_deref() != Ok("1") {
         return None;
     }
-    let url = std::env::var("CLIO_DATABASE_URL").ok()?;
+    // The opt-in means run the parity tests: a missing URL or a store that
+    // will not open is a failure, never a silent skip.
+    let url = std::env::var("CLIO_DATABASE_URL")
+        .expect("CLIO_PG_HISTORY_PARITY=1 needs CLIO_DATABASE_URL");
     let guard = lock_pg_test();
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
-    PostgresStore::open(&url, kms)
-        .ok()
-        .map(|store| (guard, store))
+    let store = PostgresStore::open(&url, kms).unwrap_or_else(|err| {
+        panic!("CLIO_PG_HISTORY_PARITY=1 but the Postgres history store will not open: {err}")
+    });
+    Some((guard, store))
 }
 
 #[test]
