@@ -60,6 +60,37 @@ for name in cargo make; do
     echo "linked $link -> $shim"
 done
 
+# Whether a path resolved by `command -v` is the shim this install linked, and
+# not merely another program under $dest. The old test matched any executable
+# beneath $dest, so a different program at $dest/<name> or $dest/<dir>/<name>
+# read as the shim.
+is_shim() {
+    cand=$1
+    want=$2
+    [ -n "$cand" ] || return 1
+    if [ "$cand" = "$dest/$want" ]; then
+        return 0
+    fi
+    if [ -L "$cand" ] && [ "$(readlink "$cand" 2>/dev/null)" = "$shim" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Resolve the current `name` in $shell with the given flags (for example -lc or
+# -ic), printing only what the shell resolved. A profile that reads a terminal
+# must not hang the install, so stdin is /dev/null and `timeout` is used when
+# the host has it. Stdout alone is the answer: a profile that prints would only
+# add lines, and `is_shim` accepts an exact path, so noise reads as inactive.
+probe_shell() {
+    flags=$1
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true
+    else
+        "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true
+    fi
+}
+
 if [ "$mode" = install ]; then
     # A symlink in a directory that comes *after* the real tool on PATH never
     # runs, and the old containment test ("PATH contains $dest") reported
@@ -67,22 +98,41 @@ if [ "$mode" = install ]; then
     # is installed but shadowed reads as inactive rather than as a clean install.
     # A dead shim is a failed install, so this exits non-zero: a caller that
     # checks the exit code must not read the dead state as success.
+    #
+    # This shell cannot be the whole test. Over plain `ssh` it reads neither the
+    # login profile nor the interactive profile, so a machine that adds $dest in
+    # one of those reads as inactive here. Ask the login shell and the
+    # interactive shell too, and judge the shim by what they resolve.
+    shell=${SHELL:-/bin/sh}
+    [ -x "$shell" ] || shell=/bin/sh
     inactive=0
     for name in cargo make; do
-        resolved=$(command -v "$name" 2>/dev/null || true)
-        case "$resolved" in
-            "$dest"/*) echo "gate-install: $name shim is active for this shell" ;;
-            "")
-                printf 'gate-install: NOT ACTIVE: %s is not on PATH; add %s to your shell profile:\n' "$name" "$dest"
-                printf '  export PATH="%s:$PATH"\n' "$dest"
-                inactive=1
-                ;;
-            *)
-                printf 'gate-install: NOT ACTIVE: this shell resolves %s as %s; %s comes later on PATH\n' "$name" "$resolved" "$dest"
-                printf '  export PATH="%s:$PATH"\n' "$dest"
-                inactive=1
-                ;;
-        esac
+        here=$(command -v "$name" 2>/dev/null || true)
+        if is_shim "$here" "$name"; then
+            echo "gate-install: $name shim is active for this shell"
+            continue
+        fi
+        via=""
+        login=$(probe_shell -lc)
+        if is_shim "$login" "$name"; then
+            via=login
+        else
+            interactive=$(probe_shell -ic)
+            if is_shim "$interactive" "$name"; then
+                via=interactive
+            fi
+        fi
+        if [ -n "$via" ]; then
+            echo "gate-install: $name shim is active in a $via shell; this non-interactive shell skips the profile that adds it"
+            continue
+        fi
+        if [ -z "$here" ]; then
+            printf 'gate-install: NOT ACTIVE: %s is not on PATH; add %s to your shell profile:\n' "$name" "$dest"
+        else
+            printf 'gate-install: NOT ACTIVE: this shell resolves %s as %s; %s comes later on PATH\n' "$name" "$here" "$dest"
+        fi
+        printf '  export PATH="%s:$PATH"\n' "$dest"
+        inactive=1
     done
     if [ "$inactive" = 1 ]; then
         echo "gate-install: the shim is linked but not active; fix PATH and run this again" >&2
