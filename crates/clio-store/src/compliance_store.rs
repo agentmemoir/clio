@@ -278,6 +278,10 @@ mod compliance_store_erase_preserve_tests;
 mod postgres_erase_retry_tests;
 
 #[cfg(test)]
+#[path = "postgres_erase_crash_window_tests.rs"]
+mod postgres_erase_crash_window_tests;
+
+#[cfg(test)]
 #[path = "compliance_store_erase_tests.rs"]
 pub(crate) mod compliance_store_erase_tests;
 

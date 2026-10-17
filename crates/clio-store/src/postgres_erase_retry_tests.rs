@@ -5,15 +5,17 @@
 //!
 //! This module is responsible for Postgres evidence that a key destroyed
 //! straight through the KMS survives a retried, duplicated, or concurrent
-//! erasure, and that a forced failure after the shred marker commits leaves the
-//! subject closed for writes with no tombstone claiming the request completed.
+//! erasure.
 //!
 //! ## Owns
-//! - The Postgres direct-key-loss, repeat, duplicate, concurrent, and
-//!   forced-rollback erasure scenarios
+//! - The Postgres direct-key-loss, repeat, duplicate, and concurrent erasure
+//!   scenarios
+//! - The shared scoped-schema Postgres fixture and its skip discipline
 //!
 //! ## Does not own
 //! - The erasure transaction under test (`postgres_erase`)
+//! - The crash window at the DEK destroy
+//!   (`postgres_erase_crash_window_tests`)
 //! - The SQLite twins of the direct-key-loss and later-write scenarios
 //!   (`compliance_store_erase_preserve_tests`)
 //! - Shared fixtures and assertions (`erase_test_support`)
@@ -21,10 +23,10 @@
 //! ## Boundary
 //!
 //! Changes to what the Postgres erasure keeps after a direct key loss or a
-//! forced rollback should normally require changes here. Changes to the erasure
+//! retried erasure should normally require changes here. Changes to the erasure
 //! SQL itself should not require changes here.
 //!
-//! Keep this module focused on Postgres erasure retry and rollback evidence.
+//! Keep this module focused on Postgres erasure retry evidence.
 //!
 //! Test-only. Never compiled into production builds.
 
@@ -64,10 +66,13 @@ fn subject_key_rows(store: &PostgresStore, subject: &str) -> Vec<(String, String
 
 /// One private Postgres schema, a store over it, the KMS handle the test keeps,
 /// and the lock for the caller's whole body.
-struct PgEnv {
+///
+/// The store and the KMS are readable from the crash-window tests in a sibling
+/// module; the schema and the lock stay private to this fixture.
+pub(crate) struct PgEnv {
     scoped: ScopedSchema,
-    store: PostgresStore,
-    kms: Arc<dyn DekProvider>,
+    pub(crate) store: PostgresStore,
+    pub(crate) kms: Arc<dyn DekProvider>,
     _guard: PgTestGuard,
 }
 
@@ -75,9 +80,14 @@ impl PgEnv {
     /// A second store over the same private schema, sharing this KMS, for a
     /// test that needs two connections.
     fn second_store(&self) -> PostgresStore {
-        PostgresStore::open(self.scoped.url(), Arc::clone(&self.kms))
-            .expect("open second scoped store")
+        second_store(&self.scoped, &self.kms)
     }
+}
+
+/// A second store over the same private schema, sharing this KMS, for a test
+/// that needs a second connection opened before the first write.
+pub(crate) fn second_store(scoped: &ScopedSchema, kms: &Arc<dyn DekProvider>) -> PostgresStore {
+    PostgresStore::open(scoped.url(), Arc::clone(kms)).expect("open second scoped store")
 }
 
 /// True only when the operator explicitly opted out of Postgres-backed tests.
@@ -93,18 +103,29 @@ fn skip_requested() -> bool {
 /// `None` only when the operator opted out in `CLIO_SKIP_PG_TESTS`, so a run
 /// without Postgres stays green; otherwise an unreachable server panics so the
 /// suite cannot pass with zero assertions.
-fn open_pg() -> Option<PgEnv> {
+pub(crate) fn open_pg() -> Option<PgEnv> {
+    open_pg_with(|_, kms| kms)
+}
+
+/// The same environment over a KMS the caller builds from the private schema
+/// and the fixture KMS, so a test can watch the store's own destroy calls.
+///
+/// `None` and the panic follow the same rules as [open_pg].
+pub(crate) fn open_pg_with(
+    make_kms: impl FnOnce(&ScopedSchema, Arc<dyn DekProvider>) -> Arc<dyn DekProvider>,
+) -> Option<PgEnv> {
     let guard = lock_pg_test();
     let base = postgres_url_from_env();
     if let Err(err) = crate::probe_postgres(&base) {
         if skip_requested() {
-            eprintln!("skipping postgres erase-retry tests: shared Postgres unreachable");
+            eprintln!("skipping postgres erasure tests: shared Postgres unreachable");
             return None;
         }
-        panic!("postgres erase-retry tests require a reachable Postgres: {err}");
+        panic!("postgres erasure tests require a reachable Postgres: {err}");
     }
     let scoped = ScopedSchema::new(&base);
-    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let fixture_kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let kms = make_kms(&scoped, fixture_kms);
     match PostgresStore::open(scoped.url(), Arc::clone(&kms)) {
         Ok(store) => Some(PgEnv {
             scoped,
@@ -113,10 +134,10 @@ fn open_pg() -> Option<PgEnv> {
             _guard: guard,
         }),
         Err(err) if skip_requested() => {
-            eprintln!("{}", pg_skip_note("postgres erase-retry tests", &err));
+            eprintln!("{}", pg_skip_note("postgres erasure tests", &err));
             None
         }
-        Err(err) => panic!("postgres erase-retry tests cannot open the store: {err}"),
+        Err(err) => panic!("postgres erasure tests cannot open the store: {err}"),
     }
 }
 
@@ -348,103 +369,5 @@ fn postgres_concurrent_duplicate_erase_creates_one_key_and_one_ledger() {
     assert_eq!(
         env.kms.ensure_dek(&subject).unwrap_err().code,
         ErrorCode::ErasedSubject
-    );
-}
-
-/// A forced failure in the tombstone transaction leaves the committed purge and
-/// shred marker in place: the subject stays closed for writes, no tombstone
-/// claims the request completed, and a retry finishes the ledger.
-#[test]
-fn postgres_tombstone_failure_after_the_shred_marker_leaves_the_subject_closed() {
-    let Some(env) = open_pg() else {
-        return;
-    };
-    let bank = unique("pg-rollback");
-    let subject = unique("pg-subject");
-    let survivor = unique("pg-survivor-subject");
-    let survivor_item = unique("pg-survivor-item");
-    let (item_a, _parent) = seed(&env.store, &bank, &subject);
-    env.store
-        .create_memory_item(&memory_item(&bank, &survivor_item, &survivor), "tester")
-        .unwrap();
-
-    // A BEFORE INSERT trigger aborts every tombstone insert, so the erasure
-    // fails in its second transaction: the purge and the marker commit first.
-    env.store
-        .test_execute(
-            "CREATE FUNCTION fail_erase_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
-             BEGIN RAISE EXCEPTION 'forced tombstone failure'; END $$;
-             CREATE TRIGGER fail_erase_tombstone BEFORE INSERT ON compliance_tombstones
-             FOR EACH ROW EXECUTE FUNCTION fail_erase_tombstone()",
-        )
-        .unwrap();
-
-    let request = unique("pg-req");
-    let failed = env.store.erase_subject(&spec(&bank, &subject, &request));
-    assert!(failed.is_err(), "{failed:?}");
-
-    // Tidy the trigger so the retry can commit its ledger.
-    env.store
-        .test_execute(
-            "DROP TRIGGER IF EXISTS fail_erase_tombstone ON compliance_tombstones;
-             DROP FUNCTION IF EXISTS fail_erase_tombstone()",
-        )
-        .unwrap();
-
-    // The key destroyed between the two transactions stays destroyed.
-    assert!(env.store.subject_dek_destroyed(&subject).unwrap());
-    assert_eq!(
-        env.kms.ensure_dek(&subject).unwrap_err().code,
-        ErrorCode::ErasedSubject
-    );
-    // The purge and the shred marker committed before the destroy, so the
-    // subject is closed for writes even though the ledger rolled back.
-    assert!(
-        env.store.subject_is_shredded(&subject).unwrap(),
-        "the shred marker committed"
-    );
-    assert!(
-        env.store
-            .read_tombstones(&bank, &request)
-            .unwrap()
-            .is_empty(),
-        "the request is not falsely completed"
-    );
-    // The purge committed with the marker: the dense vector row is gone, so a
-    // rolled-back purge would fail this line.
-    let embeddings: i64 = env
-        .store
-        .with_client(|client| {
-            let sql = "SELECT count(*) FROM item_embeddings WHERE item_id = $1";
-            Ok(client
-                .query_one(sql, &[&item_a])
-                .am("embedding count")?
-                .get(0))
-        })
-        .unwrap();
-    assert_eq!(embeddings, 0, "the purge committed");
-    // A new content key is refused: the committed marker is the guard.
-    let refused = env
-        .store
-        .create_memory_item(&memory_item(&bank, &unique("pg-late"), &subject), "tester")
-        .unwrap_err();
-    assert_eq!(refused.code, ErrorCode::ErasedSubject);
-    // The other subject stays readable, and a retry writes the rolled-back ledger.
-    let survivor_row = env
-        .store
-        .get_memory_item(&bank, &survivor_item)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        survivor_row.snapshot,
-        Some(serde_json::json!({"entity": "secret-value"}))
-    );
-    env.store
-        .erase_subject(&spec(&bank, &subject, &request))
-        .expect("the retried erasure completes");
-    assert_eq!(
-        env.store.read_tombstones(&bank, &request).unwrap().len(),
-        2,
-        "the retry commits the ledger the failed attempt rolled back"
     );
 }
