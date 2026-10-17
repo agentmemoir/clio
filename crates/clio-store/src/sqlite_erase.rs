@@ -350,7 +350,8 @@ fn erase_subject_tx(
         "reason_code": spec.reason_code,
         "items": all_rows.len(),
         "triples_purged": purge.triples,
-        "persona_context_rows": persona_rows
+        "persona_context_rows": persona_rows,
+        "persona_context_rows_scope": "this erasure attempt"
     })
     .to_string();
     tx.execute(
