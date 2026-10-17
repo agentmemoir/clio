@@ -156,6 +156,19 @@ fn a_gist_is_delineated_as_unverified_prose() {
 }
 
 #[test]
+fn an_older_hit_payload_without_the_marker_still_carries_its_gist() {
+    // The marker is written by the constructors. A payload that predates it
+    // deserializes with `false`, so the gist itself is the source of truth.
+    let json = r#"{"item_id":"sem-1","bank_id":"bank","kind":"semantic","epistemic_kind":"fact","gist":"likes rust","requires_confidence_check":false}"#;
+    let hit: RetrieveHit = serde_json::from_str(json).expect("an older payload loads");
+    assert_eq!(hit.gist.as_deref(), Some("likes rust"));
+    assert!(
+        !hit.gist_unverified,
+        "the older payload carries no marker, and the field is not invented"
+    );
+}
+
+#[test]
 fn exact_render_is_absent_until_somebody_sets_it() {
     // `from_item` and `from_belief` never produce a rendering, so the field is
     // absent from the wire rather than present-and-empty.

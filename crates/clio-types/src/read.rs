@@ -149,6 +149,11 @@ pub struct RetrieveHit {
     /// prose this build never checked against a source span the way a snapshot
     /// leaf is checked. Present only when the hit carries a gist, and never a
     /// signal that the gist is false — only that it is ungrounded prose.
+    ///
+    /// The constructors set this from `gist.is_some()`. A payload written
+    /// before the key existed deserializes with `false`, so a consumer that
+    /// needs the answer for an older payload reads `gist.is_some()` rather than
+    /// treating the absent marker as a verified gist.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gist_unverified: bool,
     /// Optional bounded descriptive source context surfaced as hit
