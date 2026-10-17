@@ -106,6 +106,7 @@ fn one_sweep_evaluates_every_watched_bank() {
         .store
         .create_memory_item(&item_in("quiet-2", OTHER_BANK), "agent")
         .expect("seed second bank");
+    state.maintenance_trigger.watch_bank(OTHER_BANK);
     state.evaluate_maintenance_trigger(base());
 
     let pressured = state

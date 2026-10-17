@@ -35,7 +35,7 @@ use crate::runtime::McpState;
 use clio_config::ranking::MaintenanceTriggerKnobs;
 use clio_config::retention::ResolvedRetention;
 use clio_types::{Actor, Bank, OpContext};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -208,21 +208,23 @@ pub struct MaintenanceTriggerStatus {
     pub last_decline: Option<DeclineReason>,
 }
 
-/// The trigger's shared record, keyed by bank, plus the watched-bank cache.
+/// The trigger's shared record, keyed by bank, plus this session's watched banks.
 ///
 /// Behind an `Arc` on [`McpState`], so every clone of the state reads one
 /// record. Locks are held only inside short non-async methods.
 #[derive(Debug, Default)]
 pub struct MaintenanceTriggerState {
-    /// The cached bank list, refreshed at the trigger's own cadence.
-    watched: Mutex<Vec<String>>,
+    /// The default bank and banks used successfully during this MCP session.
+    watched: Mutex<BTreeSet<String>>,
     banks: Mutex<HashMap<String, BankRecord>>,
 }
 
 impl MaintenanceTriggerState {
-    /// Replace the watched-bank cache with a fresh `bank_ids` read.
-    fn refresh_watched(&self, banks: Vec<String>) {
-        *self.watched.lock().expect("trigger watched mutex poisoned") = banks;
+    pub(crate) fn watch_bank(&self, bank: &str) {
+        self.watched
+            .lock()
+            .expect("trigger watched mutex poisoned")
+            .insert(bank.to_owned());
     }
 
     /// The cached watched-bank list.
@@ -230,7 +232,9 @@ impl MaintenanceTriggerState {
         self.watched
             .lock()
             .expect("trigger watched mutex poisoned")
-            .clone()
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// Decide for one bank from its recorded state, then record the outcome.
@@ -308,8 +312,8 @@ impl MaintenanceTriggerState {
 }
 
 impl McpState {
-    /// Evaluate every watched bank's maintenance pressure and fire eligible
-    /// waves.
+    /// Evaluate the default and session-watched banks' pressure and fire
+    /// eligible waves.
     ///
     /// Runs on the sweeper thread at [`MAINTENANCE_TRIGGER_INTERVAL`]; the
     /// caller passes its one clock read so the whole tick shares an instant.
@@ -322,11 +326,7 @@ impl McpState {
             let runtime = self.config.lock().expect("config runtime mutex poisoned");
             runtime.ranking_env().maintenance_triggers
         };
-        // Refresh the watched-bank list at the trigger's own cadence; a failed
-        // read keeps the previous list so one bad tick never empties it.
-        if let Ok(banks) = self.ops_store.bank_ids() {
-            self.maintenance_trigger.refresh_watched(banks);
-        }
+        self.maintenance_trigger.watch_bank(&self.default_bank);
         for bank in self.maintenance_trigger.watched() {
             self.evaluate_bank_trigger(&bank, &knobs, now);
         }

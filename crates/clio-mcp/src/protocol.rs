@@ -184,6 +184,15 @@ impl McpHandler {
             // retryable, server-defined JSON-RPC error.
             return Err(err);
         }
+        if result.get("ok").and_then(Value::as_bool) == Some(true) {
+            let bank = args
+                .get("bank")
+                .and_then(Value::as_str)
+                .unwrap_or(&state.default_bank);
+            if state.require_known_bank(bank).is_ok() {
+                state.maintenance_trigger.watch_bank(bank);
+            }
+        }
         let is_error = result.get("ok").and_then(serde_json::Value::as_bool) != Some(true);
         let text = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
         // Structured rejections keep their machine-readable code inside the

@@ -63,6 +63,10 @@ fn t03_tools_list_returns_bound_set() {
 #[test]
 fn tools_call_success_wraps_result() {
     let (h, state) = handler();
+    state
+        .ops_store
+        .register_bank("bank-a", "2026-10-17T00:00:00Z")
+        .expect("register bank");
     let _ = h.handle_message(&init_msg());
     let res = h
         .handle_message(&json!({
@@ -75,7 +79,50 @@ fn tools_call_success_wraps_result() {
     let text = res["result"]["content"][0]["text"].as_str().expect("text");
     let parsed: Value = serde_json::from_str(text).expect("text is JSON");
     assert_eq!(parsed["ok"], json!(true));
-    let _ = state;
+    state.evaluate_maintenance_trigger(std::time::Instant::now());
+    assert!(
+        state.maintenance_trigger.status("bank-a").is_some(),
+        "successful tools/call registers its known bank with the sweeper"
+    );
+}
+
+#[test]
+fn failed_tools_call_does_not_watch_an_unknown_bank() {
+    let (h, state) = handler();
+    let res = h
+        .handle_message(&json!({
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "get", "arguments": {"item_id": "missing", "bank": "unknown-bank"}}
+        }))
+        .expect("response");
+    assert_eq!(res["result"]["isError"], json!(true));
+
+    state.evaluate_maintenance_trigger(std::time::Instant::now());
+    assert!(
+        state.maintenance_trigger.status("unknown-bank").is_none(),
+        "a rejected tools/call does not add an unknown bank to the sweeper"
+    );
+}
+
+#[test]
+fn successful_config_read_does_not_watch_an_unregistered_bank() {
+    let (h, state) = handler();
+    let res = h
+        .handle_message(&json!({
+            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+            "params": {"name": "retention_profile_get", "arguments": {"bank": "unregistered-config-bank"}}
+        }))
+        .expect("response");
+    assert_eq!(res["result"]["isError"], json!(false));
+
+    state.evaluate_maintenance_trigger(std::time::Instant::now());
+    assert!(
+        state
+            .maintenance_trigger
+            .status("unregistered-config-bank")
+            .is_none(),
+        "successful configuration reads do not add unregistered banks to the sweeper"
+    );
 }
 
 #[test]

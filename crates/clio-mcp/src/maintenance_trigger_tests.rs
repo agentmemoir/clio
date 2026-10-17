@@ -35,7 +35,9 @@ pub(super) const BANK: &str = "trigger-bank";
 const CREATED: &str = "2026-10-01T00:00:00Z";
 
 pub(super) fn state() -> RetentionStoreFixture {
-    RetentionStoreFixture::open_with_effective(&McpOpenOptions::default(), &json!({}))
+    let state = RetentionStoreFixture::open_with_effective(&McpOpenOptions::default(), &json!({}));
+    state.maintenance_trigger.watch_bank(BANK);
+    state
 }
 
 /// One real instant as the base; every other instant is derived from it, so
@@ -408,23 +410,28 @@ fn a_disabled_profile_declines_with_trigger_disabled() {
 }
 
 #[test]
-fn evaluation_refreshes_the_watched_bank_list() {
+fn evaluation_skips_historical_banks_until_the_session_watches_them() {
     let state = state();
+    state
+        .ops_store
+        .register_bank("historical-bank", CREATED)
+        .expect("register historical bank");
     state.evaluate_maintenance_trigger(base());
     assert!(
         state
             .maintenance_trigger
-            .status("never-evaluated")
+            .status("historical-bank")
             .is_none(),
-        "an empty store watches no banks"
+        "historical banks are not polled just because they exist"
     );
+    state.maintenance_trigger.watch_bank("active-bank");
     state
-        .store
-        .create_memory_item(&item("later-1"), "agent")
-        .expect("seed item");
+        .ops_store
+        .register_bank("active-bank", CREATED)
+        .expect("register active bank");
     state.evaluate_maintenance_trigger(base() + Duration::from_secs(5));
     assert!(
-        state.maintenance_trigger.status(BANK).is_some(),
-        "the new bank became watched and was evaluated"
+        state.maintenance_trigger.status("active-bank").is_some(),
+        "a session-watched bank is evaluated"
     );
 }
