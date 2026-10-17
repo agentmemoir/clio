@@ -124,6 +124,25 @@ pub(crate) fn lock_subject_write_tx(
     Ok(())
 }
 
+/// Return whether `subject_id` has been crypto-shredded.
+///
+/// A missing `subject_keys` row is not treated as erased, because erasure
+/// retains a shredded row; returning `false` for a missing row is deliberate.
+pub(crate) fn subject_is_shredded_postgres_tx(
+    tx: &mut postgres::Transaction<'_>,
+    subject_id: &str,
+) -> Result<bool, AmError> {
+    Ok(tx
+        .query_opt(
+            "SELECT shredded_at IS NOT NULL FROM subject_keys
+             WHERE subject_id = $1 FOR UPDATE",
+            &[&subject_id],
+        )
+        .am("check subject erasure")?
+        .map(|row| row.get::<_, bool>(0))
+        .unwrap_or(false))
+}
+
 /// Transaction-scoped item create: subject_keys upsert + items insert +
 /// audit row + index-pending enqueue. Shared by the single-op path and the
 /// atomic batch executor (`batch_postgres`).

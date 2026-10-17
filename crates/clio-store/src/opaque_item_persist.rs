@@ -32,17 +32,7 @@ pub(crate) fn put_opaque_item_sqlite_tx(
     item: &OpaqueItemRecord,
 ) -> Result<(), AmError> {
     use rusqlite::params;
-    let subject_erased = tx
-        .query_row(
-            "SELECT EXISTS (
-                SELECT 1 FROM subject_keys
-                WHERE subject_id = ?1 AND shredded_at IS NOT NULL
-            )",
-            params![item.subject_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .am("check opaque item subject erasure")?;
-    if subject_erased {
+    if crate::sqlite_memory::subject_is_shredded_sqlite(tx, &item.subject_id)? {
         return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
 
@@ -108,16 +98,7 @@ pub(crate) fn put_opaque_item_postgres_tx(
     item: &OpaqueItemRecord,
 ) -> Result<(), AmError> {
     crate::postgres_memory::lock_subject_write_tx(tx, &item.subject_id)?;
-    let subject_erased = tx
-        .query_opt(
-            "SELECT shredded_at IS NOT NULL FROM subject_keys
-             WHERE subject_id = $1 FOR UPDATE",
-            &[&item.subject_id],
-        )
-        .am("check opaque item subject erasure")?
-        .map(|row| row.get::<_, bool>(0))
-        .unwrap_or(false);
-    if subject_erased {
+    if crate::postgres_memory::subject_is_shredded_postgres_tx(tx, &item.subject_id)? {
         return Err(crate::item_persist::shredded_subject_err(&item.subject_id));
     }
 
