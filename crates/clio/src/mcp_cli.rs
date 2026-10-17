@@ -258,16 +258,14 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     // an unusable path refuses the start instead of serving a 401 for every
     // request. Fail closed on every unusable state, including a store with no
     // record: it would authorize nobody.
-    let credentials = match mcp_cli_credentials::load_http_credentials(
-        &flags,
-        &|key| std::env::var(key).ok(),
-    ) {
-        Ok(credentials) => credentials,
-        Err(reason) => {
-            eprintln!("mcp http error: {reason}");
-            return ExitCode::from(1);
-        }
-    };
+    let credentials =
+        match mcp_cli_credentials::load_http_credentials(&flags, &|key| std::env::var(key).ok()) {
+            Ok(credentials) => credentials,
+            Err(reason) => {
+                eprintln!("mcp http error: {reason}");
+                return ExitCode::from(1);
+            }
+        };
     let mut cfg = http_config(&flags);
     cfg.credentials = credentials;
     // As for the stdio transport: the server must outlive one client going away.

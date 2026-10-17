@@ -429,10 +429,7 @@ fn evaluation_covers_only_the_active_bank_list() {
         .expect("seed item");
     state.evaluate_maintenance_trigger(base() + Duration::from_secs(5));
     assert!(
-        state
-            .maintenance_trigger
-            .status(UNRESOLVED_BANK)
-            .is_none(),
+        state.maintenance_trigger.status(UNRESOLVED_BANK).is_none(),
         "an unresolved bank was not swept"
     );
 }

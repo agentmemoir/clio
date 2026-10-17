@@ -306,8 +306,15 @@ fn a_local_owner_store_resolves_its_secret_to_the_owning_principal() {
 
     let principal = store.resolve(&secret).expect("the minted secret resolves");
     assert_eq!(principal.label, "local-owner");
-    assert_eq!(principal.actor, Actor::System, "the local owner is administrative");
-    assert_eq!(principal.banks, vec!["demo".to_owned(), "shared".to_owned()]);
+    assert_eq!(
+        principal.actor,
+        Actor::System,
+        "the local owner is administrative"
+    );
+    assert_eq!(
+        principal.banks,
+        vec!["demo".to_owned(), "shared".to_owned()]
+    );
     assert!(principal.authorize_bank("demo").is_ok());
     assert!(
         principal.authorize_bank("other").is_err(),
@@ -323,5 +330,9 @@ fn a_local_owner_store_refuses_every_other_secret() {
     assert!(!store.is_empty(), "the minted store holds its one record");
     assert!(store.resolve(&secret("other")).is_none());
     assert!(store.resolve("").is_none());
-    assert!(store.resolve(&owner_secret[..owner_secret.len() - 1]).is_none());
+    assert!(
+        store
+            .resolve(&owner_secret[..owner_secret.len() - 1])
+            .is_none()
+    );
 }
