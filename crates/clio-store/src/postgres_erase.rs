@@ -89,13 +89,19 @@ impl ComplianceStore for PostgresStore {
         self.with_client(|client| {
             let mut tx = client.transaction().am("erase begin")?;
             crate::postgres_memory::lock_subject_write_tx(&mut tx, spec.subject_id)?;
-            let key_exists = tx
+            let key_row = tx
                 .query_opt(
-                    "SELECT 1 FROM subject_keys WHERE subject_id = $1 FOR UPDATE",
+                    "SELECT shredded_at IS NOT NULL FROM subject_keys
+                     WHERE subject_id = $1 FOR UPDATE",
                     &[&spec.subject_id],
                 )
-                .am("erase key lock")?
-                .is_some();
+                .am("erase key lock")?;
+            let key_exists = key_row.is_some();
+            // A marker already marked shredded belongs to an earlier attempt of
+            // this erasure, so only that retry may read a destroy error as
+            // "the key is already gone". A missing row means false: this is a
+            // first attempt.
+            let already_shredded = key_row.is_some_and(|row| row.get::<_, bool>(0));
             let items = select_items(&mut tx, spec.bank_id, spec.subject_id)?;
             let subject_banks = select_subject_banks(&mut tx, spec.subject_id)?;
             // Persona context is bank-scoped and carries no subject
@@ -173,13 +179,14 @@ impl ComplianceStore for PostgresStore {
             tx.commit().am("erase purge commit")?;
 
             // A retry that reaches this point after a crash can meet a KMS that
-            // refuses to destroy an already destroyed key, so the destroy error
-            // is tolerated only when the probe still proves the key is gone.
+            // refuses to destroy an already destroyed key, so a destroy error is
+            // tolerated only when an earlier attempt of this erasure already
+            // marked the subject shredded and the probe proves the key is gone.
             let destroyed = self.kms.destroy_dek(spec.subject_id);
             let probe = self.kms.ensure_dek(spec.subject_id);
             let key_gone = matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject);
             if let Err(err) = destroyed {
-                if !key_gone {
+                if !(already_shredded && key_gone) {
                     return Err(err);
                 }
             } else if !key_gone {
