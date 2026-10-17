@@ -216,7 +216,7 @@ fn retry_erasure_refuses_an_unconfirmed_call_without_writing() {
     let request_id = unique("req-retry-confirm");
     persist(&store, &record(&request_id, RequestState::InProgress));
     let ctx = ctx("bank-a");
-    let salt = [0u8; 16];
+    let salt = rand::random::<[u8; 16]>();
     let sink = EraseVecSink::default();
     let journal = std::env::temp_dir().join(unique("svc-confirm-journal"));
     let mut args = retry_args(

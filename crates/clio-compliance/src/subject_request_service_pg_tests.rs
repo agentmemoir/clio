@@ -98,7 +98,7 @@ fn postgres_retry_names_the_pending_action_and_repeats_no_protected_effect() {
     let store = Arc::new(fixture.store);
     let request_id = unique("req-pg-retry");
     let ctx = ctx("bank-a");
-    let salt = [0u8; 16];
+    let salt = rand::random::<[u8; 16]>();
     let sink = EraseVecSink::default();
     store
         .create_memory_item(&item("bank-a", "subject-1"), "tester")
@@ -210,7 +210,7 @@ fn postgres_peer_retry_reconciles_a_pending_peer_denial_row() {
     record_peer_denial_intent(&store, &request_id, &peer_id, Actor::Harness, NOW)
         .expect("the peer intent is durable");
     mark_acknowledged(&store, &request_id, &peer_id, "deletion-9").expect("the peer acknowledges");
-    let salt = [0u8; 16];
+    let salt = rand::random::<[u8; 16]>();
     let sink = EraseVecSink::default();
     let retry_env = ErasureRetryEnv {
         store: &store,

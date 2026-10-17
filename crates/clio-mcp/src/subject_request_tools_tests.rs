@@ -27,10 +27,10 @@
 //! (`CLIO_ERASURE_JOURNAL_FILE`, else the data directory), never a per-test
 //! path: the erase boundary refuses a document journal that diverges from that
 //! resolution, so an in-process test cannot redirect it, and this crate forbids
-//! `unsafe_code`, so it cannot set the override either. `ExclusiveHold` locks
-//! `<journal>.lock` for the whole denial write and key destruction, so parallel
-//! tests serialize instead of racing, and no test here asserts on the journal's
-//! content.
+//! `unsafe_code`, so it cannot set the override either. `clio_store`'s
+//! per-process lock registry refuses a second same-process holder at once, so
+//! the tests that erase share `erase_journal_serial` to serialize, and no test
+//! here asserts on the journal's content.
 
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::write_tools::dispatch;
@@ -111,8 +111,26 @@ fn load_record(state: &McpState, request_id: &str) -> clio_compliance::SubjectRe
     row_to_record(&row).expect("decode request")
 }
 
+/// Serializes the library tests that take the deployment-resolved erasure
+/// journal's exclusive lock.
+///
+/// The erase boundary resolves that journal from the process environment and
+/// accepts a document path only when it equals that resolution, so a test
+/// cannot redirect it in-process. `clio_store` refuses a second same-process
+/// holder at once, so an erasing test takes this mutex for its whole body.
+static ERASE_JOURNAL_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Wait for the serialization; a poisoned lock from an earlier failing test is
+/// recovered so it cannot mask this test's own result.
+pub(super) fn erase_journal_serial() -> std::sync::MutexGuard<'static, ()> {
+    ERASE_JOURNAL_SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn subject_request_start_status_copy_retry_events_close_agree_on_one_request() {
+    let _serial = erase_journal_serial();
     let s = state();
     store_item(&s, "itm-lifecycle", SUBJECT);
     let request = "req-lifecycle";
@@ -354,6 +372,7 @@ fn subject_request_wrong_actor_retry_refuses_before_effects() {
 
 #[test]
 fn subject_request_erase_request_uses_the_durable_route() {
+    let _serial = erase_journal_serial();
     let s = state();
     store_item(&s, "itm-durable-route", "subject-durable-route");
     let request = "req-durable-route";

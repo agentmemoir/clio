@@ -217,7 +217,27 @@ pub fn coding_tool_inventory(omit_sync: bool) -> Vec<ToolInventoryEntry> {
         entries.push(tool_entry(name, "config_ranking"));
     }
 
+    push_subject_request_inventory(&mut entries);
+
     entries
+}
+
+/// Append the ten `subject_request_*` inventory rows in their canonical order.
+fn push_subject_request_inventory(entries: &mut Vec<ToolInventoryEntry>) {
+    for name in [
+        "subject_request_start",
+        "subject_request_status",
+        "subject_request_retry",
+        "subject_request_copy",
+        "subject_request_exception",
+        "subject_request_events",
+        "subject_request_close",
+        "subject_request_peer_status",
+        "subject_request_peer_retry",
+        "subject_request_peer_disposition",
+    ] {
+        entries.push(tool_entry(name, "subject_request"));
+    }
 }
 
 /// One inventory entry whose `implemented` flag is read from the tool names the
