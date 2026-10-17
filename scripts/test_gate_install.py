@@ -152,6 +152,20 @@ class GateInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
 
+    def test_a_profile_that_prints_does_not_hide_the_shim(self) -> None:
+        # A profile often prints to stdout. The probe must find the shim among
+        # the printed lines, or a working machine reads as inactive.
+        if BASH is None:
+            self.skipTest("no bash to act as the interactive shell")
+        (self.home / ".bashrc").write_text(
+            f'echo "welcome back"\nexport PATH="{self.dest}:$PATH"\n',
+            encoding="utf-8",
+        )
+        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=BASH)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("shim is active", output)
+
 
 if __name__ == "__main__":
     unittest.main()

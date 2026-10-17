@@ -74,18 +74,23 @@ is_shim() {
 }
 
 # Resolve the current `name` in $shell with the given flags (for example -lc or
-# -ic), printing only what the shell resolved. A profile that reads a terminal
-# must not hang the install, so stdin is /dev/null and `timeout` is used when
-# the host has it. Stdout alone is the answer: a profile that prints would only
-# add lines, and `is_shim` accepts only a link to the shim, so noise reads as
-# inactive.
+# -ic), printing the first line that is a symlink to the shim. A profile may
+# print to stdout, so each line is tested rather than the whole output; a
+# profile that reads a terminal must not hang the install, so stdin is /dev/null
+# and `timeout` is used when the host has it.
 probe_shell() {
     flags=$1
     if command -v timeout >/dev/null 2>&1; then
-        timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true
+        out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true)
     else
-        "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true
+        out=$("$shell" "$flags" "command -v $name" </dev/null 2>/dev/null || true)
     fi
+    printf '%s\n' "$out" | while IFS= read -r line; do
+        if is_shim "$line"; then
+            printf '%s\n' "$line"
+            break
+        fi
+    done
 }
 
 if [ "$mode" = install ]; then
@@ -111,11 +116,11 @@ if [ "$mode" = install ]; then
         fi
         via=""
         login=$(probe_shell -lc)
-        if is_shim "$login"; then
+        if [ -n "$login" ]; then
             via=login
         else
             interactive=$(probe_shell -ic)
-            if is_shim "$interactive"; then
+            if [ -n "$interactive" ]; then
                 via=interactive
             fi
         fi
