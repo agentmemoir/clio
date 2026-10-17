@@ -60,6 +60,44 @@ for name in cargo make; do
     echo "linked $link -> $shim"
 done
 
+# Whether a path resolved by `command -v` is the shim this install linked, and
+# not merely any program under $dest. The old test matched any executable
+# beneath $dest, so a different program at $dest/<name> or $dest/<dir>/<name>
+# read as the shim. Only a link whose target is the shim counts.
+is_shim() {
+    cand=$1
+    [ -n "$cand" ] || return 1
+    if [ -L "$cand" ] && [ "$(readlink "$cand" 2>/dev/null)" = "$shim" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Resolve the current `name` in $shell with the given flags (for example -lc or
+# -ic), printing the first line that is a symlink to the shim. A profile may
+# print to stdout, so each line is tested rather than the whole output; a
+# profile that reads a terminal must not hang the install, so stdin is /dev/null
+# and `timeout` is used when the host has it. A killed probe returns 124, which
+# the caller reads as "could not probe" rather than "the shim is inactive".
+probe_shell() {
+    flags=$1
+    rc=0
+    if command -v timeout >/dev/null 2>&1; then
+        out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
+    else
+        out=$("$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
+    fi
+    if [ "$rc" = 124 ]; then
+        return 124
+    fi
+    printf '%s\n' "$out" | while IFS= read -r line; do
+        if is_shim "$line"; then
+            printf '%s\n' "$line"
+            break
+        fi
+    done
+}
+
 if [ "$mode" = install ]; then
     # A symlink in a directory that comes *after* the real tool on PATH never
     # runs, and the old containment test ("PATH contains $dest") reported
@@ -67,22 +105,63 @@ if [ "$mode" = install ]; then
     # is installed but shadowed reads as inactive rather than as a clean install.
     # A dead shim is a failed install, so this exits non-zero: a caller that
     # checks the exit code must not read the dead state as success.
+    #
+    # This shell cannot be the whole test. Over plain `ssh` it reads neither the
+    # login profile nor the interactive profile, so a machine that adds $dest in
+    # one of those reads as inactive here. Ask both profile shells. The
+    # interactive shell is asked even when the login shell hits, because a login
+    # hit with an interactive shadow would otherwise print a bare "active" and
+    # hide the shell a user actually runs gates in.
+    #
+    # A profile slower than the 5s probe budget is killed by `timeout` (status
+    # 124). That is "could not probe", not "the shim is inactive": a slow
+    # profile must not fail an otherwise correct install, the same false FAIL
+    # #213 removes.
+    shell=${SHELL:-/bin/sh}
+    [ -x "$shell" ] || shell=/bin/sh
     inactive=0
     for name in cargo make; do
-        resolved=$(command -v "$name" 2>/dev/null || true)
-        case "$resolved" in
-            "$dest"/*) echo "gate-install: $name shim is active for this shell" ;;
-            "")
-                printf 'gate-install: NOT ACTIVE: %s is not on PATH; add %s to your shell profile:\n' "$name" "$dest"
-                printf '  export PATH="%s:$PATH"\n' "$dest"
-                inactive=1
-                ;;
-            *)
-                printf 'gate-install: NOT ACTIVE: this shell resolves %s as %s; %s comes later on PATH\n' "$name" "$resolved" "$dest"
-                printf '  export PATH="%s:$PATH"\n' "$dest"
-                inactive=1
-                ;;
-        esac
+        here=$(command -v "$name" 2>/dev/null || true)
+        if is_shim "$here"; then
+            echo "gate-install: $name shim is active for this shell"
+            continue
+        fi
+        login_rc=0
+        login=$(probe_shell -lc) || login_rc=$?
+        interactive_rc=0
+        interactive=$(probe_shell -ic) || interactive_rc=$?
+        if [ -n "$login" ] || [ -n "$interactive" ]; then
+            where="the login and interactive shells"
+            [ -n "$login" ] || where="the interactive shell"
+            [ -n "$interactive" ] || where="the login shell"
+            echo "gate-install: $name shim is active in $where; this non-interactive shell skips the profile that adds it"
+            if [ -n "$login" ] && [ -z "$interactive" ]; then
+                if [ "$interactive_rc" = 124 ]; then
+                    echo "gate-install: note: could not probe the interactive shell for $name within the 5s budget"
+                else
+                    echo "gate-install: note: $name is not active in the interactive shell; a tool earlier on your interactive PATH shadows the shim"
+                fi
+            fi
+            if [ -z "$login" ] && [ -n "$interactive" ]; then
+                if [ "$login_rc" = 124 ]; then
+                    echo "gate-install: note: could not probe the login shell for $name within the 5s budget"
+                else
+                    echo "gate-install: note: $name is not active in the login shell; only the interactive profile adds $dest"
+                fi
+            fi
+            continue
+        fi
+        if [ "$login_rc" = 124 ] || [ "$interactive_rc" = 124 ]; then
+            echo "gate-install: $name: a shell profile did not finish within the 5s probe budget; a slow profile is not read as inactive, so the install is not failed"
+            continue
+        fi
+        if [ -z "$here" ]; then
+            printf 'gate-install: NOT ACTIVE: %s is not on PATH; add %s to your shell profile:\n' "$name" "$dest"
+        else
+            printf 'gate-install: NOT ACTIVE: this shell resolves %s as %s; %s comes later on PATH\n' "$name" "$here" "$dest"
+        fi
+        printf '  export PATH="%s:$PATH"\n' "$dest"
+        inactive=1
     done
     if [ "$inactive" = 1 ]; then
         echo "gate-install: the shim is linked but not active; fix PATH and run this again" >&2
