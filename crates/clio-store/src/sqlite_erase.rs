@@ -3,15 +3,18 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the SQLite compliance-erasure transaction:
-//! DEK destruction, derived-row purge, and content-free tombstone insert.
+//! This module is responsible for the SQLite compliance-erasure transactions:
+//! the derived-row purge and shred marker that commit first, the DEK
+//! destruction that follows them, and the content-free tombstone insert.
 //!
 //! ## Owns
 //! - `ComplianceStore` implementation for [`SqliteStore`]
-//! - The SQLite erasure transaction: DEK destruction, tombstones, audit row
+//! - The SQLite erasure split: the purge and shred marker commit, then the DEK
+//!   destruction, then the tombstones and audit row
 //! - The bank-level persona erase tombstone written for every bank whose
 //!   persona context this erasure purges (fail-closes later persona writes)
-//! - Cross-bank fan-out of the derived-structure purge before DEK shredding
+//! - Cross-bank fan-out of the derived-structure purge, which commits before
+//!   the DEK is destroyed
 //!
 //! ## Does not own
 //! - Erasure authorization/confirmation or telemetry (`clio-compliance`)
@@ -109,9 +112,10 @@ impl ComplianceStore for SqliteStore {
             // the file, where a copy of the database, a backup, or a volume
             // snapshot would still read them. `secure_delete` overwrites what it
             // frees, so the attestation is true at the byte level and not just
-            // at the row level. It is scoped to this transaction (the store's
-            // connection lock is held for the whole call) and restored on the way
-            // out, so ordinary writes pay nothing for it.
+            // at the row level. It is scoped to this call, which spans both
+            // erasure transactions (the store's connection lock is held for the
+            // whole call), and restored on the way out, so ordinary writes pay
+            // nothing for it.
             let prior_secure_delete = read_secure_delete(conn)?;
             conn.execute_batch("PRAGMA secure_delete = ON")
                 .am("erase enable secure_delete")?;
@@ -205,7 +209,7 @@ fn write_secure_delete(conn: &Connection, on: bool) -> Result<(), AmError> {
     .am("erase restore secure_delete")
 }
 
-/// The erasure transaction body, run with the connection's `secure_delete`
+/// The erasure transactions' body, run with the connection's `secure_delete`
 /// enabled by the caller.
 #[allow(clippy::too_many_lines)]
 fn erase_subject_tx(
@@ -273,14 +277,6 @@ fn erase_subject_tx(
         persona_rows += bank_rows;
     }
 
-    store.kms.destroy_dek(spec.subject_id)?;
-    let probe = store.kms.ensure_dek(spec.subject_id);
-    if !matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject) {
-        return Err(AmError::new(
-            ErrorCode::Internal,
-            "DEK destruction probe did not observe a destroyed key",
-        ));
-    }
     tx.execute(
         "INSERT INTO subject_keys (subject_id, dek_ref, status, shredded_at, created_at, updated_at)
          VALUES (?1, 'shredded', 'shredded', ?2, ?2, ?2)
@@ -290,6 +286,31 @@ fn erase_subject_tx(
         params![spec.subject_id, spec.deleted_at],
     )
     .am("erase subject_keys")?;
+    // The purge and the shred marker commit before the irreversible step that
+    // follows them, so a crash inside the KMS destroy leaves the subject closed
+    // for writes instead of leaving a destroyed key and no marker.
+    tx.commit().am("erase purge commit")?;
+
+    // A retry that reaches this point after a crash can meet a KMS that refuses
+    // to destroy an already destroyed key, so the destroy error is tolerated
+    // only when the probe still proves the key is gone.
+    let destroyed = store.kms.destroy_dek(spec.subject_id);
+    let probe = store.kms.ensure_dek(spec.subject_id);
+    let key_gone = matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject);
+    if let Err(err) = destroyed {
+        if !key_gone {
+            return Err(err);
+        }
+    } else if !key_gone {
+        return Err(AmError::new(
+            ErrorCode::Internal,
+            "DEK destruction probe did not observe a destroyed key",
+        ));
+    }
+
+    // The tombstone rows and the audit row commit only after the destroy, so a
+    // retry re-inserts them only when the previous attempt never committed them.
+    let tx = conn.transaction().am("erase ledger begin")?;
 
     let subject_hash = sha256_hex(spec.salt, spec.subject_id);
     let mut item_ids = Vec::with_capacity(all_rows.len());

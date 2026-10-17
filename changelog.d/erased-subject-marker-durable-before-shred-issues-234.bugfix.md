@@ -1,0 +1,1 @@
+A crashed erasure can no longer leave a subject's key destroyed while the store still accepts new writes for that subject: the shredded marker is now durable before the key is destroyed, so a later write is refused and the pending request completes on retry. [Issue #234](https://github.com/agentmemoir/clio/issues/234)

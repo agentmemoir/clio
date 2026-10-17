@@ -214,13 +214,15 @@ pub struct EraseOutcome {
 /// callers get [`ErrorCode::Forbidden`]. Confirmation is mandatory: without
 /// `confirm=true` the call is rejected with zero writes and no key destruction.
 ///
-/// The DEK is destroyed before the derived-structure purge so the content is
-/// unrecoverable even if propagation fails; a propagation failure then reports
-/// `status: PROCESSING` instead of a false `COMPLETED`. The denial is durably
-/// recorded in the owner-only journal strictly before the store can destroy
-/// the key: a failed journal write aborts with no store effect and no key loss.
-/// The denial and the key destruction run under the journal's exclusive
-/// placement lock, so a restore placement cannot interleave between them.
+/// The store commits the derived-structure purge and the shred marker before it
+/// destroys the DEK, so a crash in that window leaves the subject closed for
+/// later writes with its key still live, never a destroyed key and no marker.
+/// A store failure after the destroy reports `status: PROCESSING` instead of a
+/// false `COMPLETED`. The denial is durably recorded in the owner-only journal
+/// strictly before the store can destroy the key: a failed journal write aborts
+/// with no store effect and no key loss. The denial and the key destruction run
+/// under the journal's exclusive placement lock, so a restore placement cannot
+/// interleave between them.
 ///
 /// # Errors
 /// Validation, authorisation, confirmation, journal, DEK, or storage failures.

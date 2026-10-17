@@ -5,8 +5,8 @@
 //!
 //! This module is responsible for Postgres evidence that a key destroyed
 //! straight through the KMS survives a retried, duplicated, or concurrent
-//! erasure, and that an erasure transaction which rolls back leaves its SQL rows
-//! gone while the destroyed key stays destroyed.
+//! erasure, and that a forced failure after the shred marker commits leaves the
+//! subject closed for writes with no tombstone claiming the request completed.
 //!
 //! ## Owns
 //! - The Postgres direct-key-loss, repeat, duplicate, concurrent, and
@@ -351,11 +351,11 @@ fn postgres_concurrent_duplicate_erase_creates_one_key_and_one_ledger() {
     );
 }
 
-/// A forced failure after the DEK destruction rolls the SQL work back: the SQL
-/// rows are gone, the key stays destroyed, and the request is neither completed
-/// nor falsely denied.
+/// A forced failure in the tombstone transaction leaves the committed purge and
+/// shred marker in place: the subject stays closed for writes, no tombstone
+/// claims the request completed, and a retry finishes the ledger.
 #[test]
-fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
+fn postgres_tombstone_failure_after_the_shred_marker_leaves_the_subject_closed() {
     let Some(env) = open_pg() else {
         return;
     };
@@ -369,16 +369,12 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
         .unwrap();
 
     // A BEFORE INSERT trigger aborts every tombstone insert, so the erasure
-    // fails after it destroys the key and before it commits.
+    // fails in its second transaction: the purge and the marker commit first.
     env.store
         .test_execute(
             "CREATE FUNCTION fail_erase_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
-             BEGIN RAISE EXCEPTION 'forced tombstone failure'; END $$",
-        )
-        .unwrap();
-    env.store
-        .test_execute(
-            "CREATE TRIGGER fail_erase_tombstone BEFORE INSERT ON compliance_tombstones
+             BEGIN RAISE EXCEPTION 'forced tombstone failure'; END $$;
+             CREATE TRIGGER fail_erase_tombstone BEFORE INSERT ON compliance_tombstones
              FOR EACH ROW EXECUTE FUNCTION fail_erase_tombstone()",
         )
         .unwrap();
@@ -387,25 +383,25 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
     let failed = env.store.erase_subject(&spec(&bank, &subject, &request));
     assert!(failed.is_err(), "{failed:?}");
 
-    // Tidy the trigger so later assertions on this schema cannot trip it.
+    // Tidy the trigger so the retry can commit its ledger.
     env.store
-        .test_execute("DROP TRIGGER IF EXISTS fail_erase_tombstone ON compliance_tombstones")
-        .unwrap();
-    env.store
-        .test_execute("DROP FUNCTION IF EXISTS fail_erase_tombstone()")
+        .test_execute(
+            "DROP TRIGGER IF EXISTS fail_erase_tombstone ON compliance_tombstones;
+             DROP FUNCTION IF EXISTS fail_erase_tombstone()",
+        )
         .unwrap();
 
-    // The key destroyed inside the aborted transaction is not part of SQL: it
-    // stays destroyed.
+    // The key destroyed between the two transactions stays destroyed.
     assert!(env.store.subject_dek_destroyed(&subject).unwrap());
     assert_eq!(
         env.kms.ensure_dek(&subject).unwrap_err().code,
         ErrorCode::ErasedSubject
     );
-    // The SQL work rolled back: no shred marker, no tombstone, vectors intact.
+    // The purge and the shred marker committed before the destroy, so the
+    // subject is closed for writes even though the ledger rolled back.
     assert!(
-        !env.store.subject_is_shredded(&subject).unwrap(),
-        "the shred marker rolled back"
+        env.store.subject_is_shredded(&subject).unwrap(),
+        "the shred marker committed"
     );
     assert!(
         env.store
@@ -414,28 +410,26 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
             .is_empty(),
         "the request is not falsely completed"
     );
-    // The purge rolled back: the item's dense vector row is still there, so a
-    // committed purge would fail this line.
+    // The purge committed with the marker: the dense vector row is gone, so a
+    // rolled-back purge would fail this line.
     let embeddings: i64 = env
         .store
         .with_client(|client| {
+            let sql = "SELECT count(*) FROM item_embeddings WHERE item_id = $1";
             Ok(client
-                .query_one(
-                    "SELECT count(*) FROM item_embeddings WHERE item_id = $1",
-                    &[&item_a],
-                )
+                .query_one(sql, &[&item_a])
                 .am("embedding count")?
                 .get(0))
         })
         .unwrap();
-    assert_eq!(embeddings, 1, "the purge rolled back");
-    // A new content key is refused even though the SQL work is pending.
+    assert_eq!(embeddings, 0, "the purge committed");
+    // A new content key is refused: the committed marker is the guard.
     let refused = env
         .store
         .create_memory_item(&memory_item(&bank, &unique("pg-late"), &subject), "tester")
         .unwrap_err();
     assert_eq!(refused.code, ErrorCode::ErasedSubject);
-    // The other subject stays readable.
+    // The other subject stays readable, and a retry writes the rolled-back ledger.
     let survivor_row = env
         .store
         .get_memory_item(&bank, &survivor_item)
@@ -444,5 +438,13 @@ fn postgres_rollback_after_a_key_loss_leaves_the_request_pending() {
     assert_eq!(
         survivor_row.snapshot,
         Some(serde_json::json!({"entity": "secret-value"}))
+    );
+    env.store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect("the retried erasure completes");
+    assert_eq!(
+        env.store.read_tombstones(&bank, &request).unwrap().len(),
+        2,
+        "the retry commits the ledger the failed attempt rolled back"
     );
 }

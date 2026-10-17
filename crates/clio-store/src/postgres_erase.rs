@@ -3,16 +3,19 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the Postgres compliance-erasure transaction:
-//! DEK destruction, derived-row purge, and content-free tombstone insert.
+//! This module is responsible for the Postgres compliance-erasure transactions:
+//! the derived-row purge and shred marker that commit first, the DEK
+//! destruction that follows them, and the content-free tombstone insert.
 //!
 //! ## Owns
 //! - `ComplianceStore` implementation for [`PostgresStore`]
-//! - The Postgres erasure transaction ordering and audit row
+//! - The Postgres erasure split: the purge and shred marker commit, then the
+//!   DEK destruction, then the tombstones and audit row
 //! - The bank-level persona erase tombstone and per-bank advisory lock taken
 //!   for every bank whose persona context this erasure purges (fail-closes
 //!   later persona writes)
-//! - Cross-bank fan-out of the derived-structure purge before DEK shredding
+//! - Cross-bank fan-out of the derived-structure purge, which commits before
+//!   the DEK is destroyed
 //!
 //! ## Does not own
 //! - Erasure authorization/confirmation or telemetry (`clio-compliance`)
@@ -152,14 +155,6 @@ impl ComplianceStore for PostgresStore {
                 persona_rows += bank_rows;
             }
 
-            self.kms.destroy_dek(spec.subject_id)?;
-            let probe = self.kms.ensure_dek(spec.subject_id);
-            if !matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject) {
-                return Err(AmError::new(
-                    ErrorCode::Internal,
-                    "DEK destruction probe did not observe a destroyed key",
-                ));
-            }
             tx.execute(
                 "INSERT INTO subject_keys (subject_id, dek_ref, status, shredded_at, created_at, updated_at)
                  VALUES ($1, 'shredded', 'shredded', $2, $2, $2)
@@ -169,6 +164,35 @@ impl ComplianceStore for PostgresStore {
                 &[&spec.subject_id, &spec.deleted_at],
             )
             .am("erase subject_keys")?;
+            // The purge and the shred marker commit before the irreversible
+            // step that follows them, so a crash inside the KMS destroy leaves
+            // the subject closed for writes instead of leaving a destroyed key
+            // and no marker. The committed marker is also what suppresses every
+            // later subject-keyed write, so the second transaction below takes
+            // no advisory lock of its own.
+            tx.commit().am("erase purge commit")?;
+
+            // A retry that reaches this point after a crash can meet a KMS that
+            // refuses to destroy an already destroyed key, so the destroy error
+            // is tolerated only when the probe still proves the key is gone.
+            let destroyed = self.kms.destroy_dek(spec.subject_id);
+            let probe = self.kms.ensure_dek(spec.subject_id);
+            let key_gone = matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject);
+            if let Err(err) = destroyed {
+                if !key_gone {
+                    return Err(err);
+                }
+            } else if !key_gone {
+                return Err(AmError::new(
+                    ErrorCode::Internal,
+                    "DEK destruction probe did not observe a destroyed key",
+                ));
+            }
+
+            // The tombstone rows and the audit row commit only after the
+            // destroy, so a retry re-inserts them only when the previous attempt
+            // never committed them.
+            let mut tx = client.transaction().am("erase ledger begin")?;
 
             let subject_hash = sha256_hex(spec.salt, spec.subject_id);
             let mut item_ids = Vec::with_capacity(all_rows.len());
