@@ -121,6 +121,23 @@ impl SqliteStore {
                 // Lost a concurrent supersession race; nothing was written.
                 return Ok(already_superseded(spec));
             }
+            let sk_rows = tx
+                .execute(
+                    "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)
+                 VALUES (?1, ?2, 'active', ?3, ?3)
+                 ON CONFLICT(subject_id) DO UPDATE SET
+                   dek_ref = excluded.dek_ref,
+                   status = 'active',
+                   shredded_at = NULL,
+                   updated_at = excluded.updated_at
+                   WHERE subject_keys.shredded_at IS NULL",
+                    params![spec.new_item.subject_id, dek_ref, spec.new_item.created_at],
+                )
+                .am("subject_keys upsert")?;
+            crate::item_persist::check_subject_reactivation(
+                sk_rows as u64,
+                &spec.new_item.subject_id,
+            )?;
             map_item_insert(
                 tx.execute(
                     "INSERT INTO items (
@@ -157,23 +174,6 @@ impl SqliteStore {
                 )
                 .map(|c| c as u64)
                 .map_err(|e| e.to_string()),
-            )?;
-            let sk_rows = tx
-                .execute(
-                    "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)
-                 VALUES (?1, ?2, 'active', ?3, ?3)
-                 ON CONFLICT(subject_id) DO UPDATE SET
-                   dek_ref = excluded.dek_ref,
-                   status = 'active',
-                   shredded_at = NULL,
-                   updated_at = excluded.updated_at
-                   WHERE subject_keys.shredded_at IS NULL",
-                    params![spec.new_item.subject_id, dek_ref, spec.new_item.created_at],
-                )
-                .am("subject_keys upsert")?;
-            crate::item_persist::check_subject_reactivation(
-                sk_rows as u64,
-                &spec.new_item.subject_id,
             )?;
             insert_correct_audit(
                 &tx,

@@ -79,6 +79,34 @@ pub(crate) fn restore_legacy_format_row(
         .expect("legacy-format row restore");
 }
 
+/// One `BatchWrite::PutOpaqueItem` op that stores `cipher` verbatim for
+/// `subject`, so an erasure test can exercise the opaque import/write route.
+pub(crate) fn opaque_write(bank: &str, id: &str, subject: &str, cipher: &str) -> BatchWrite {
+    BatchWrite::PutOpaqueItem {
+        item: OpaqueItemRecord {
+            id: id.into(),
+            bank_id: bank.into(),
+            subject_id: subject.into(),
+            kind: "semantic".into(),
+            category: Some("tool_config".into()),
+            episodic_type: None,
+            epistemic_kind: "fact".into(),
+            source_type: None,
+            confidence: Some(0.8),
+            admission_score: Some(0.0),
+            source_ref: Some("turn_9".into()),
+            valid_from: "t0".into(),
+            valid_until: None,
+            tx_from: "t0".into(),
+            tx_until: None,
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+            content_cipher: cipher.into(),
+        },
+        actor: "import".into(),
+    }
+}
+
 pub(crate) static SALT: std::sync::LazyLock<[u8; 16]> = std::sync::LazyLock::new(rand::random);
 
 pub(crate) use crate::test_unique::unique;

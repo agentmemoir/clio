@@ -62,6 +62,25 @@ type ItemRow = (
     String,
 );
 
+/// Return whether `subject_id` has been crypto-shredded.
+///
+/// A missing `subject_keys` row is not treated as erased, because erasure
+/// retains a shredded row; returning `false` for a missing row is deliberate.
+pub(crate) fn subject_is_shredded_sqlite(
+    conn: &rusqlite::Connection,
+    subject_id: &str,
+) -> Result<bool, AmError> {
+    conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM subject_keys
+            WHERE subject_id = ?1 AND shredded_at IS NOT NULL
+        )",
+        rusqlite::params![subject_id],
+        |row| row.get::<_, bool>(0),
+    )
+    .am("check subject erasure")
+}
+
 /// Read the shared column projection from one row.
 fn map_item_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemRow> {
     Ok((

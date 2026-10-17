@@ -22,7 +22,7 @@
 
 use crate::batch_model::{BatchStore, BatchWrite};
 use crate::compliance_store::ComplianceStore;
-use crate::erase_test_support::{local_kms, memory_item, spec, unique};
+use crate::erase_test_support::{local_kms, memory_item, opaque_write, spec, unique};
 use crate::migrate::IntoAmError;
 use crate::model::OpaqueItemRecord;
 use crate::sqlite::SqliteStore;
@@ -93,4 +93,50 @@ fn opaque_item_write_for_erased_subject_returns_error_without_creating_row() {
         ErrorCode::ErasedSubject,
         "erased item content stays unreadable"
     );
+}
+
+/// Erasure keeps a shredded `subject_keys` row, and the erased probe keys on
+/// that row. Deleting the row therefore makes the subject look active again by
+/// policy: the probe treats a MISSING row as NOT erased. This pins that
+/// documented outcome, so a future change to the probe has to intend it.
+#[test]
+fn opaque_write_after_erasure_is_accepted_once_the_subject_keys_row_is_deleted() {
+    let kms = local_kms();
+    let store = SqliteStore::open_in_memory(Arc::clone(&kms)).unwrap();
+    let bank = unique("opaque-missing-sk-bank");
+    let subject = unique("opaque-missing-sk-subject");
+    let seeded_id = unique("opaque-missing-sk-seeded");
+    store
+        .create_memory_item(&memory_item(&bank, &seeded_id, &subject), "tester")
+        .unwrap();
+    let cipher = store
+        .inspect_content_ciphertext(&bank, &seeded_id)
+        .unwrap()
+        .unwrap();
+    store
+        .erase_subject(&spec(&bank, &subject, &unique("opaque-missing-sk-request")))
+        .unwrap();
+    store
+        .test_execute(&format!(
+            "DELETE FROM subject_keys WHERE subject_id = '{subject}'"
+        ))
+        .unwrap();
+
+    let late_id = unique("opaque-missing-sk-late");
+    let result = store.apply_batch(&[opaque_write(&bank, &late_id, &subject, &cipher)]);
+    assert!(
+        result.is_ok(),
+        "a missing subject_keys row is not erased: {result:?}"
+    );
+    let rows = store
+        .with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM items WHERE id = ?1",
+                params![late_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .am("late opaque row count")
+        })
+        .unwrap();
+    assert_eq!(rows, 1, "the accepted opaque write stored a row");
 }

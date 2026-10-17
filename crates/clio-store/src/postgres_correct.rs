@@ -124,6 +124,24 @@ impl PostgresStore {
                 // Lost a concurrent supersession race; nothing was written.
                 return Ok(already_superseded(spec));
             }
+            let sk_rows = tx
+                .execute(
+                    "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)
+                 VALUES ($1, $2, 'active', $3, $3)
+                 ON CONFLICT (subject_id) DO UPDATE SET
+                   dek_ref = EXCLUDED.dek_ref,
+                   status = 'active',
+                   shredded_at = NULL,
+                   updated_at = EXCLUDED.updated_at
+                   WHERE subject_keys.shredded_at IS NULL",
+                    &[
+                        &spec.new_item.subject_id,
+                        &dek_ref,
+                        &spec.new_item.created_at,
+                    ],
+                )
+                .am("subject_keys upsert")?;
+            crate::item_persist::check_subject_reactivation(sk_rows, &spec.new_item.subject_id)?;
             crate::postgres_memory::map_pg_item_insert(tx.execute(
                 "INSERT INTO items (
                         id, bank_id, kind, category, episodic_type, epistemic_kind, source_type,
@@ -157,24 +175,6 @@ impl PostgresStore {
                     &spec.new_item.updated_at,
                 ],
             ))?;
-            let sk_rows = tx
-                .execute(
-                    "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)
-                 VALUES ($1, $2, 'active', $3, $3)
-                 ON CONFLICT (subject_id) DO UPDATE SET
-                   dek_ref = EXCLUDED.dek_ref,
-                   status = 'active',
-                   shredded_at = NULL,
-                   updated_at = EXCLUDED.updated_at
-                   WHERE subject_keys.shredded_at IS NULL",
-                    &[
-                        &spec.new_item.subject_id,
-                        &dek_ref,
-                        &spec.new_item.created_at,
-                    ],
-                )
-                .am("subject_keys upsert")?;
-            crate::item_persist::check_subject_reactivation(sk_rows, &spec.new_item.subject_id)?;
             insert_correct_audit(
                 &mut tx,
                 &format!("audit-corrected-{}-{ts}", spec.prior_item_id),
