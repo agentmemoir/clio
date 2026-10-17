@@ -315,8 +315,8 @@ fn drop_tombstone_trigger(fixture: &PgFixture) {
 }
 
 /// A partial erasure retried through the real Postgres store stays `PROCESSING`
-/// while an injected in-transaction fault keeps the purge uncommitted, and
-/// reports `COMPLETED` only once the purge commits.
+/// while an injected fault keeps the tombstone ledger uncommitted, and reports
+/// `COMPLETED` only once that ledger commits.
 #[test]
 fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
     let Some(fixture) = pg_fixture_or_skip() else {
@@ -336,8 +336,9 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
         .load(&attempt.request_id)
         .expect("load")
         .expect("row exists");
-    // The fault aborts every tombstone insert inside the erasure transaction,
-    // so the key is destroyed and the purge rolls back.
+    // The fault aborts every tombstone insert in the erasure's second
+    // transaction, so the purge and the shred marker commit while the tombstone
+    // ledger rolls back.
     install_tombstone_trigger(&fixture);
     let double = PgCountingErase {
         inner: &fixture.store,
@@ -367,7 +368,7 @@ fn postgres_a_partial_erasure_retry_never_reports_completion_early() {
             .store
             .subject_dek_destroyed(&attempt.subject)
             .expect("key"),
-        "the fault destroys the key before the purge rolls back"
+        "the fault destroys the key after the purge commits"
     );
     assert_eq!(
         pg_tombstone_count(&attempt, &fixture.store),

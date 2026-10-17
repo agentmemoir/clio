@@ -167,8 +167,11 @@ pub struct SubjectEraseOutcome {
     pub triples_purged: usize,
     /// Derived (hub-distilled) items purged because they referenced an erased item.
     pub derived_items_purged: usize,
-    /// Persona rows whose sealed `context_cipher` was cleared (persona
-    /// context is bank-scoped, so any verified erasure in its bank purges it).
+    /// Persona rows whose sealed `context_cipher` this attempt cleared
+    /// (persona context is bank-scoped, so any verified erasure in its bank
+    /// purges it). The count is the rows this attempt cleared, so rows an
+    /// earlier attempt cleared are not counted again and a completion after a
+    /// retry can report zero.
     pub persona_context_rows_purged: usize,
     /// Tombstone rows written.
     pub tombstones_written: usize,
@@ -176,8 +179,11 @@ pub struct SubjectEraseOutcome {
 
 /// Persistence contract for the compliance erasure path.
 ///
-/// Implementations MUST perform the DEK destruction, derived-row purge, and
-/// tombstone insert for one subject with no plaintext kept in the ledger.
+/// Implementations MUST commit the derived-row purge and the shredded
+/// `subject_keys` marker before they destroy the DEK, so a crash between the
+/// two leaves the subject closed for writes instead of a destroyed key with no
+/// marker. They then insert the tombstone rows with no plaintext kept in the
+/// ledger.
 pub trait ComplianceStore: Send + Sync {
     /// Bank-scoped item identities belonging to a data subject (no content/DEK).
     ///
@@ -189,13 +195,22 @@ pub trait ComplianceStore: Send + Sync {
         subject_id: &str,
     ) -> Result<Vec<ItemIdentity>, AmError>;
 
-    /// Destroy the subject DEK and purge derived rows, writing tombstones.
+    /// Purge derived rows, mark the subject shredded, destroy its DEK, and write
+    /// tombstones.
+    ///
+    /// The purge and the marker commit before the DEK destruction, so a failure
+    /// after that commit leaves the subject refused for later writes while the
+    /// request stays retryable.
     ///
     /// Returns [`clio_types::ErrorCode::NotFound`] when the subject has
     /// neither items, nor a key record, nor persona context rows in the bank
     /// (no invalid tombstone is written). Persona context is bank-scoped, so
     /// a bank holding persona context rows is treated as holding erasable
     /// content and the erase proceeds with a context purge.
+    ///
+    /// The returned outcome counts the rows this attempt cleared, so rows an
+    /// earlier attempt's purge already cleared are not counted again; a
+    /// completion after a retry can report zero persona context rows.
     ///
     /// # Errors
     /// Missing subject, validation, crypto, or storage failures.
@@ -247,6 +262,10 @@ mod compliance_store_bank_scope_tests;
 mod compliance_store_context_store_tests;
 
 #[cfg(test)]
+#[path = "erase_crash_window_tests.rs"]
+mod erase_crash_window_tests;
+
+#[cfg(test)]
 #[path = "compliance_store_erase_distilled_unit_tests.rs"]
 mod compliance_store_erase_distilled_unit_tests;
 
@@ -257,6 +276,10 @@ mod compliance_store_erase_preserve_tests;
 #[cfg(test)]
 #[path = "postgres_erase_retry_tests.rs"]
 mod postgres_erase_retry_tests;
+
+#[cfg(test)]
+#[path = "postgres_erase_crash_window_tests.rs"]
+mod postgres_erase_crash_window_tests;
 
 #[cfg(test)]
 #[path = "compliance_store_erase_tests.rs"]
