@@ -32,7 +32,7 @@ use crate::export::HISTORY_LIMIT;
 use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::{ACTOR, OTHER, SELECTED, TS, fixture_id};
 use crate::inventory_pg_support_tests::{
-    carrier, pg_checked_url, pg_skip_note, write_direct_link_class, write_hashed_link_class,
+    carrier, pg_checked_url, pg_gate_or_panic, write_direct_link_class, write_hashed_link_class,
     write_shared_class,
 };
 use crate::test_unique::unique;
@@ -47,11 +47,7 @@ use std::sync::Arc;
 
 /// The live fixture, or a printed credential-safe skip note plus `None`.
 fn bundle_fixture_or_skip() -> Option<(PgTestGuard, PgBundleFixture)> {
-    let pair = open_bundle_pg_fixture();
-    if let Err(err) = &pair {
-        eprintln!("{}", pg_skip_note("subject bundle Postgres tests", err));
-    }
-    pair.ok()
+    pg_gate_or_panic("subject bundle Postgres tests", open_bundle_pg_fixture())
 }
 
 /// A private-schema store holding one row class per subject-link class, the

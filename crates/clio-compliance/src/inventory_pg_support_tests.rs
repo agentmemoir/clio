@@ -81,6 +81,24 @@ pub(crate) fn pg_skip_note(suite: &str, err: &AmError) -> String {
     format!("skipping {suite}: cannot open the Postgres store: {err}")
 }
 
+/// The fail-closed gate every fixture helper routes through: the pair on
+/// success, or a panic unless `CLIO_SKIP_PG_TESTS` opted out, in which case the
+/// credential-safe [`pg_skip_note`] prints and this yields `None`.
+pub(crate) fn pg_gate_or_panic<T>(suite: &str, pair: Result<T, AmError>) -> Option<T> {
+    match pair {
+        Ok(value) => Some(value),
+        Err(err) => {
+            let opted_out = matches!(
+                std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
+                Ok("1" | "true" | "yes")
+            );
+            assert!(opted_out, "{suite} needs Postgres: {err}");
+            eprintln!("{}", pg_skip_note(suite, &err));
+            None
+        }
+    }
+}
+
 /// The userinfo (`user:password`) a connection URL carries, read in memory and
 /// never printed.
 #[must_use]
