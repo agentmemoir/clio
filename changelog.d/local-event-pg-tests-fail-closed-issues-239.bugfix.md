@@ -1,0 +1,1 @@
+The Postgres local event tests no longer pass silently when the database cannot be opened: an unreachable Postgres now fails the suite instead of printing a skip note and returning, so a green run proves the Postgres path actually ran. Set `CLIO_SKIP_PG_TESTS` to opt out deliberately. [Issue #239](https://github.com/agentmemoir/clio/issues/239)
