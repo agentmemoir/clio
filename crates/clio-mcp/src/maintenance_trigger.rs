@@ -10,7 +10,7 @@
 //! ## Owns
 //! - `MaintenanceTriggerState`: the per-bank evaluation record and its
 //!   non-blocking snapshot (`MaintenanceTriggerStatus`)
-//! - `McpState::evaluate_maintenance_trigger`: read the watched banks' three
+//! - `McpState::evaluate_maintenance_trigger`: read the active banks' three
 //!   pressure counts without waiting for a lock a write needs, decide, record
 //!   the outcome, and fire eligible waves
 //! - The pure wave decision: inclusive thresholds, cooldown, hourly cap, and
@@ -35,10 +35,13 @@ use crate::runtime::McpState;
 use clio_config::ranking::MaintenanceTriggerKnobs;
 use clio_config::retention::ResolvedRetention;
 use clio_types::{Actor, Bank, OpContext};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[path = "maintenance_trigger_activity.rs"]
+mod maintenance_trigger_activity;
 
 /// Trigger evaluation cadence on the sweeper thread: ten index sweeps. The
 /// per-tick duty stays far below the drain's, so the drain's cadence and the
@@ -208,31 +211,20 @@ pub struct MaintenanceTriggerStatus {
     pub last_decline: Option<DeclineReason>,
 }
 
-/// The trigger's shared record, keyed by bank, plus the watched-bank cache.
+/// The trigger's shared record, keyed by bank, plus the active-bank registry.
 ///
 /// Behind an `Arc` on [`McpState`], so every clone of the state reads one
 /// record. Locks are held only inside short non-async methods.
 #[derive(Debug, Default)]
 pub struct MaintenanceTriggerState {
-    /// The cached bank list, refreshed at the trigger's own cadence.
-    watched: Mutex<Vec<String>>,
+    /// Banks this runtime served, noted at the per-call resolution point. A
+    /// tick claims these plus the default (and shared) bank, then returns only
+    /// the banks still showing pressure, so the registry stays bounded.
+    active: Mutex<HashSet<String>>,
     banks: Mutex<HashMap<String, BankRecord>>,
 }
 
 impl MaintenanceTriggerState {
-    /// Replace the watched-bank cache with a fresh `bank_ids` read.
-    fn refresh_watched(&self, banks: Vec<String>) {
-        *self.watched.lock().expect("trigger watched mutex poisoned") = banks;
-    }
-
-    /// The cached watched-bank list.
-    fn watched(&self) -> Vec<String> {
-        self.watched
-            .lock()
-            .expect("trigger watched mutex poisoned")
-            .clone()
-    }
-
     /// Decide for one bank from its recorded state, then record the outcome.
     ///
     /// `pressure` is `None` when the tick could not read the bank's pressure
@@ -308,38 +300,44 @@ impl MaintenanceTriggerState {
 }
 
 impl McpState {
-    /// Evaluate every watched bank's maintenance pressure and fire eligible
-    /// waves.
+    /// Evaluate the active banks' maintenance pressure and fire eligible waves.
     ///
-    /// Runs on the sweeper thread at [`MAINTENANCE_TRIGGER_INTERVAL`]; the
-    /// caller passes its one clock read so the whole tick shares an instant.
-    /// Each evaluated bank gets exactly one recorded outcome. A fired wave
-    /// runs on its own thread — never on the sweeper loop and never inside a
-    /// write — through the same execution pattern the manual `consolidate`
-    /// tool uses.
+    /// Runs on the sweeper thread at [`MAINTENANCE_TRIGGER_INTERVAL`]. The claim
+    /// empties the registry, so a bank resolved while the tick runs lands in the
+    /// next tick; only banks that still show pressure are put back, so the work
+    /// tracks banks that need maintenance instead of every bank ever resolved.
     pub fn evaluate_maintenance_trigger(&self, now: Instant) {
         let knobs = {
             let runtime = self.config.lock().expect("config runtime mutex poisoned");
             runtime.ranking_env().maintenance_triggers
         };
-        // Refresh the watched-bank list at the trigger's own cadence; a failed
-        // read keeps the previous list so one bad tick never empties it.
-        if let Ok(banks) = self.ops_store.bank_ids() {
-            self.maintenance_trigger.refresh_watched(banks);
+        let tick_banks = self
+            .maintenance_trigger
+            .claim_tick_banks(&self.default_bank, self.shared_enabled);
+        let mut pressured = Vec::new();
+        for bank in tick_banks {
+            if self.evaluate_bank_trigger(&bank, &knobs, now) {
+                pressured.push(bank);
+            }
         }
-        for bank in self.maintenance_trigger.watched() {
-            self.evaluate_bank_trigger(&bank, &knobs, now);
-        }
+        self.maintenance_trigger.retain_pressured(pressured);
     }
 
-    /// Evaluate one bank: read its pressure, decide, record, fire.
-    fn evaluate_bank_trigger(&self, bank: &str, knobs: &MaintenanceTriggerKnobs, now: Instant) {
+    /// Evaluate one bank: read its pressure, decide, record, fire. Returns
+    /// whether it still needs evaluation next tick.
+    fn evaluate_bank_trigger(
+        &self,
+        bank: &str,
+        knobs: &MaintenanceTriggerKnobs,
+        now: Instant,
+    ) -> bool {
         // None when a read would have to wait for a lock a write needs: the
         // tick records contention and runs nothing for this bank.
         let pressure = pressure_counts(self, bank);
         // The retention profile owns the on/off switch, and the same resolved
         // profile governs the wave's gating if one fires.
         let retention = self.resolved_retention(bank);
+        let enabled = retention.maintenance_trigger();
         // Both signals, so the second-wave guard covers the hub phase as well
         // as the structural refresh the wave slot covers.
         let hub_distill_in_flight = self
@@ -349,7 +347,7 @@ impl McpState {
         let decision = self.maintenance_trigger.evaluate(
             bank,
             knobs,
-            retention.maintenance_trigger(),
+            enabled,
             pressure,
             self.maint.waves_in_flight(),
             hub_distill_in_flight,
@@ -358,6 +356,12 @@ impl McpState {
         if decision == TriggerDecision::Fire {
             fire_wave(self, bank, knobs, retention);
         }
+        // Keep a bank that still has pressure to clear, or whose read was
+        // contended. A quiet bank, or a disabled trigger, leaves the registry,
+        // and `note_bank` keeps a bank resolved during this tick.
+        enabled
+            && pressure
+                .is_none_or(|p| p.dirty_ancestors > 0 || p.eligible_hubs > 0 || p.stale_units > 0)
     }
 }
 
@@ -431,3 +435,11 @@ mod maintenance_trigger_tests;
 #[cfg(test)]
 #[path = "maintenance_trigger_more_tests.rs"]
 mod maintenance_trigger_more_tests;
+
+#[cfg(test)]
+#[path = "maintenance_trigger_store_spy_tests.rs"]
+mod maintenance_trigger_store_spy_tests;
+
+#[cfg(test)]
+#[path = "maintenance_trigger_bounded_tests.rs"]
+mod maintenance_trigger_bounded_tests;

@@ -11,7 +11,8 @@
 //! - The `McpState` type, its field set, and the public `open` entry points
 //! - Effective-config resolution policy (`open` vs `open_with_effective`),
 //!   including the document-named erasure-journal seam
-//! - Bank/actor defaults and the shared-bank permission gate
+//! - Bank/actor defaults, the shared-bank permission gate, and the
+//!   administrative-mutation gate
 //! - stderr telemetry sink adapters (events never touch stdout)
 //!
 //! ## Does not own
@@ -39,7 +40,7 @@ use clio_store::{
     DestinationCustodyStore, DurableRequestStore, HistoryStore, HygieneStore, IndexStore,
     LocalEventStore, OpsStore, PeerActionStore, PersonaStore, Store, SyncStore,
 };
-use clio_types::{Actor, AmError};
+use clio_types::{Actor, AmError, ErrorCode};
 use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
 
 use crate::index_drain::IndexDrain;
@@ -313,6 +314,33 @@ impl McpState {
         let mut scoped = self.clone();
         scoped.principal = Some(Arc::new(principal));
         scoped
+    }
+
+    /// Refuse an administrative mutation when the bound credential is not an
+    /// administrator.
+    ///
+    /// A credential names one actor, and only `harness` and `system` carry the
+    /// privilege the config, ranking, and deployment-retention mutations need —
+    /// the same administrative set the compliance verbs use. An unbound state
+    /// (a local transport with no credential edge) is allowed, because the
+    /// process owner already holds the store.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] when a bound credential's actor is not an
+    /// administrator.
+    pub(crate) fn authorize_admin(&self) -> Result<(), AmError> {
+        let Some(principal) = &self.principal else {
+            return Ok(());
+        };
+        match principal.actor {
+            Actor::Harness | Actor::System => Ok(()),
+            Actor::Agent | Actor::User => Err(AmError::new(
+                ErrorCode::Forbidden,
+                "this credential is not an administrator; config, ranking, \
+                 and deployment-retention changes need a harness or system \
+                 credential",
+            )),
+        }
     }
 
     /// Open MCP runtime state over one backend.

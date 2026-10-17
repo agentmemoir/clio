@@ -10,8 +10,8 @@
 //! - The three `CommandSpec` records and their usage examples
 //! - The `schema-export` flag-alias pair (`path` is the accepted alias of
 //!   `out`) and both documented spellings the pair names
-//! - The `http` record's `--bind`, `--token-file`, and `--sessions` flags, and
-//!   the database trio both transports print
+//! - The `http` record's `--bind`, `--token-file`, `--sessions`, and
+//!   `--insecure-no-auth` flags, and the database trio both transports print
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche and the shared flag facts its children read (see
@@ -44,6 +44,10 @@ const BIND: Flag = Flag {
 /// The flags `mcp http` documents past the database trio.
 const TOKEN_FILE: Flag = Flag::text("token-file", "PATH", "Credential store `mcp_cli` loads.");
 const SESSIONS: Flag = Flag::toggle("sessions", "Enables `mcp_cli` http sessions.");
+const INSECURE_NO_AUTH: Flag = Flag::toggle(
+    "insecure-no-auth",
+    "Serves `mcp_cli` http without a credential.",
+);
 
 /// The flags `mcp schema-export` documents; `--path` is the accepted alias
 /// its handler resolves in place of `--out`.
@@ -129,6 +133,7 @@ pub(crate) const MCP_HTTP: CommandSpec = CommandSpec {
         GLOBAL_BANK,
         TOKEN_FILE,
         SESSIONS,
+        INSECURE_NO_AUTH,
     ],
     accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
     flag_aliases: &[],

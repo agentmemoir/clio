@@ -5,9 +5,9 @@
 //!
 //! This module is responsible for the live credential contract of `clio mcp
 //! http`: which credential class a real served process answers under, that a
-//! credential dropped from the store is refused at the next start, that the
-//! legacy flag still serves reads and writes, and that no token file leaves the
-//! credential-free loopback default alone.
+//! credential dropped from the store is refused at the next start, that a
+//! loopback start with no token file refuses rather than serving, and that
+//! `--insecure-no-auth` restores the credential-free local server.
 //!
 //! ## Owns
 //! - The two- and one-record store writers
@@ -35,7 +35,7 @@ mod common;
 mod mcp_http_token_file_support;
 
 use mcp_http_token_file_support::{
-    Server, Store, bearer, call, digests_on_disk, forbidden, ok, post,
+    Server, Store, bearer, call, digests_on_disk, forbidden, minted_token, ok, post, run_to_end,
 };
 use serde_json::json;
 // Only the store writers tighten a file's mode, so the import is gated with them.
@@ -304,9 +304,11 @@ fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
     let _ = second.stop();
 }
 
+/// A loopback server with no `--token-file` refuses to start unless the
+/// operator opts out: it never mints or prints a credential.
 #[test]
-fn no_token_file_keeps_the_credential_free_loopback_default() {
-    let server = Server::start(&[
+fn a_loopback_server_with_no_token_file_refuses_to_start() {
+    let out = run_to_end(&[
         "mcp",
         "http",
         "--db",
@@ -314,19 +316,46 @@ fn no_token_file_keeps_the_credential_free_loopback_default() {
         "--bind",
         "127.0.0.1:0",
     ]);
+    assert!(!out.status.success(), "a loopback bind must fail closed");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--token-file"), "{stderr}");
+    assert!(stderr.contains("--insecure-no-auth"), "{stderr}");
+    assert!(
+        minted_token(&stderr).is_none(),
+        "no token may be printed: {stderr}"
+    );
+}
+
+/// `--insecure-no-auth` restores the credential-free loopback server: the old
+/// local contract, now behind an explicit opt-in.
+#[test]
+fn insecure_no_auth_keeps_the_credential_free_loopback_server() {
+    let server = Server::start(&[
+        "mcp",
+        "http",
+        "--db",
+        "sqlite::memory:",
+        "--bind",
+        "127.0.0.1:0",
+        "--insecure-no-auth",
+    ]);
     assert_ne!(server.port, 0, "the server must announce a port");
-    let port = server.port;
-    // No header at all is served, as before this phase.
     let body = call(
         "store",
         json!({
             "bank": "anywhere",
-            "item": {"id": "unbound-1", "gist": "local paths are unchanged"},
+            "item": {"id": "insecure-1", "gist": "local paths are unchanged"},
             "category": "task_spec", "epistemic_kind": "fact"
         }),
     );
-    let (status, response) = post(port, &body, "");
+    let (status, response) = post(server.port, &body, "");
     assert_eq!(status, 200, "{response}");
     assert!(ok(&response), "{response}");
+    // No token was minted, so no token line was printed.
+    assert!(
+        minted_token(&server.stderr_text()).is_none(),
+        "the opt-out must not mint a token: {}",
+        server.stderr_text()
+    );
     let _ = server.stop();
 }

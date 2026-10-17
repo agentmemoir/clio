@@ -32,7 +32,7 @@ use super::maintenance_trigger_tests::{
 };
 use super::*;
 use clio_config::ranking::{MaintenanceTriggerKnobs, RankingEnvPatch};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::sync::mpsc;
 use std::thread;
 
@@ -41,7 +41,7 @@ const OTHER_BANK: &str = "trigger-other-bank";
 
 /// Publish the whole maintenance-trigger knob group the way `ranking_env_set`
 /// does, from the state the sweeper reads it from.
-fn set_trigger_knobs(state: &McpState, knobs: MaintenanceTriggerKnobs) {
+pub(super) fn set_trigger_knobs(state: &McpState, knobs: MaintenanceTriggerKnobs) {
     let mut rt = state.config.lock().expect("config runtime mutex poisoned");
     let patch = RankingEnvPatch {
         maintenance_triggers: Some(knobs),
@@ -99,13 +99,14 @@ fn a_live_knob_patch_governs_the_next_evaluation() {
 }
 
 #[test]
-fn one_sweep_evaluates_every_watched_bank() {
+fn one_sweep_evaluates_every_active_bank() {
     let state = state();
     commit_stale_unit(&state, "stale-1");
     state
         .store
         .create_memory_item(&item_in("quiet-2", OTHER_BANK), "agent")
         .expect("seed second bank");
+    state.maintenance_trigger.note_bank(OTHER_BANK);
     state.evaluate_maintenance_trigger(base());
 
     let pressured = state
@@ -130,6 +131,58 @@ fn one_sweep_evaluates_every_watched_bank() {
     assert_eq!(quiet.last_wave, None);
     assert_eq!(quiet.waves_last_hour, 0);
     wait_for_waves(&state);
+}
+
+#[test]
+fn resolving_a_bank_marks_it_active() {
+    let state = state();
+    let ctx = state
+        .resolve_ctx(&json!({"bank": OTHER_BANK}))
+        .expect("resolve the bank");
+    assert_eq!(ctx.bank.as_str(), OTHER_BANK);
+    assert!(
+        state
+            .maintenance_trigger
+            .active_banks()
+            .iter()
+            .any(|bank| bank == OTHER_BANK),
+        "the resolved bank is active"
+    );
+    state.evaluate_maintenance_trigger(base());
+    assert!(
+        state.maintenance_trigger.status(OTHER_BANK).is_some(),
+        "the resolved bank was swept"
+    );
+}
+
+#[test]
+fn idle_ticks_evaluate_only_the_active_banks() {
+    let state = state();
+    // Seed many banks in the store that this runtime never resolved. A tick
+    // that listed the store's historical banks would evaluate every one.
+    for i in 0..32 {
+        let bank = format!("idle-bank-{i}");
+        state
+            .store
+            .create_memory_item(&item_in(&format!("idle-{i}"), &bank), "agent")
+            .expect("seed idle bank");
+    }
+    // Two idle ticks with no resolved call between them. The fixture bank is
+    // quiet, so the first tick evicts it and the registry is empty; no store
+    // bank ever entered it.
+    state.evaluate_maintenance_trigger(base());
+    state.evaluate_maintenance_trigger(base() + Duration::from_secs(5));
+    assert!(
+        state.maintenance_trigger.active_banks().is_empty(),
+        "a quiet resolved bank leaves the active set and no store bank enters it"
+    );
+    for i in 0..32 {
+        let bank = format!("idle-bank-{i}");
+        assert!(
+            state.maintenance_trigger.status(&bank).is_none(),
+            "the sweep evaluated an idle store bank `{bank}`"
+        );
+    }
 }
 
 #[test]

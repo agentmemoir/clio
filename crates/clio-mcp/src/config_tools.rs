@@ -49,6 +49,7 @@ pub(crate) fn dispatch_read(state: &McpState, name: &str, args: &Value) -> Resul
 
 /// Route a mutating config/ranking tool.
 pub(crate) fn dispatch_write(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
+    state.authorize_admin()?;
     let mut rt: std::sync::MutexGuard<'_, Runtime> =
         state.config.lock().expect("config runtime mutex poisoned");
     match name {
