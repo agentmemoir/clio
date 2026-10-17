@@ -95,10 +95,7 @@ fn pg_put_opaque_item_refuses_erased_subject() {
     let store = match PostgresStore::open(url.as_str(), local_kms()) {
         Ok(store) => store,
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("pg opaque shred guard test", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("pg opaque shred guard test", &err);
             return;
         }
     };

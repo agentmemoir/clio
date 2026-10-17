@@ -150,12 +150,10 @@ pub fn serve_with_listener(
     let loopback = listener.local_addr().is_ok_and(|a| a.ip().is_loopback());
     if !cfg.insecure_no_auth && !has_credential_source(&cfg) {
         // Auth is required on every bind, and a store holding no record
-        // authorizes nothing, so it is not a source. The non-loopback refusal
-        // keeps the wording every existing deployment has seen; the loopback
-        // one names the flag that generates the local token. Both messages name
-        // the one way an operator satisfies the rule, so each reads the same as
-        // the CLI's own refusal. The opening phrases are the pinned substrings
-        // an operator's runbook and a search hold.
+        // authorizes nothing, so it is not a source. Each refusal names the one
+        // way an operator satisfies the rule, so it reads the same as the CLI's
+        // own refusal. The opening phrases are the pinned substrings an
+        // operator's runbook and a search hold.
         let message = if loopback {
             "mcp http: loopback bind requires an auth token: point --token-file at a store \
              holding at least one record, or pass --insecure-no-auth to serve without \
