@@ -180,10 +180,12 @@ fn sqlite_fail_open_kms_cannot_reactivate_shredded_subject() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::ErasedSubject);
     assert_eq!(err, shredded_subject_err(&subject));
-    assert!(store
-        .get_memory_item(&bank, &rejected_item_id)
-        .unwrap()
-        .is_none());
+    assert!(
+        store
+            .get_memory_item(&bank, &rejected_item_id)
+            .unwrap()
+            .is_none()
+    );
     // The shred marker survives the refused write.
     let still_shredded: i64 = store
         .with_conn(|conn| {
@@ -233,10 +235,12 @@ fn pg_fail_open_kms_cannot_reactivate_shredded_subject() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::ErasedSubject);
     assert_eq!(err, shredded_subject_err(&subject));
-    assert!(store
-        .get_memory_item(&bank, &rejected_item_id)
-        .unwrap()
-        .is_none());
+    assert!(
+        store
+            .get_memory_item(&bank, &rejected_item_id)
+            .unwrap()
+            .is_none()
+    );
     // Cleanup test rows (queue rows first: raw item deletes leave them behind).
     store
         .test_execute(&format!(

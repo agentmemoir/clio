@@ -213,6 +213,10 @@ fn verify_checksums(parsed: &ParsedBundle) -> Result<(), AmError> {
 mod import_tests;
 
 #[cfg(test)]
+#[path = "import_erase_tests.rs"]
+mod import_erase_tests;
+
+#[cfg(test)]
 #[path = "import_atomicity_tests.rs"]
 mod import_atomicity_tests;
 
