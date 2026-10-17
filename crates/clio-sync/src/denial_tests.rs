@@ -26,7 +26,7 @@
 use crate::crypto::SyncCipher;
 use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, bank_verdict, denial_carrier, denial_mutation,
-    denial_mutation_id, denial_subject_hash,
+    denial_mutation_id, denial_subject_hash, test_fingerprint, test_other_fingerprint,
 };
 use crate::denial_fixtures::FakeDenial;
 use crate::protocol::{ENTITY_KIND_ITEM, SyncContent, SyncMutation};
@@ -50,9 +50,9 @@ fn proof(request_ref: &str, subject: &str) -> DenialProof {
     DenialProof {
         request_ref: request_ref.into(),
         peer_id: "peer-1".into(),
-        subject_hash: denial_subject_hash("fp-1", subject),
+        subject_hash: denial_subject_hash(test_fingerprint(), subject),
         generation: 3,
-        salt_fingerprint: "fp-1".into(),
+        salt_fingerprint: test_fingerprint().into(),
     }
 }
 
@@ -140,7 +140,7 @@ fn a_ciphertext_carrier_is_refused() {
 fn a_proof_verifies_against_its_own_binding() {
     let m = request_mutation("s-1", "req-1", &["b-a"]);
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
-    let binding = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", "fp-1");
+    let binding = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_fingerprint());
     assert_eq!(proof("req-1", "s-1").verify(&binding), Ok(()));
 }
 
@@ -148,7 +148,8 @@ fn a_proof_verifies_against_its_own_binding() {
 fn a_proof_answered_under_another_fingerprint_is_refused() {
     let m = request_mutation("s-1", "req-1", &["b-a"]);
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
-    let elsewhere = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", "fp-2");
+    let elsewhere =
+        DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_other_fingerprint());
     let err = proof("req-1", "s-1")
         .verify(&elsewhere)
         .expect_err("another deployment's fingerprint");
@@ -159,12 +160,13 @@ fn a_proof_answered_under_another_fingerprint_is_refused() {
 fn a_proof_bound_to_another_request_or_peer_is_refused() {
     let m = request_mutation("s-1", "req-1", &["b-a"]);
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
-    let wrong_peer = DenialProofBinding::for_carrier(&m, &carrier, "peer-2", "fp-1");
+    let wrong_peer = DenialProofBinding::for_carrier(&m, &carrier, "peer-2", test_fingerprint());
     assert!(proof("req-1", "s-1").verify(&wrong_peer).is_err());
 
     let other = request_mutation("s-1", "req-2", &["b-a"]);
     let other_carrier = denial_carrier(&other).expect("decode").expect("carrier");
-    let wrong_request = DenialProofBinding::for_carrier(&other, &other_carrier, "peer-1", "fp-1");
+    let wrong_request =
+        DenialProofBinding::for_carrier(&other, &other_carrier, "peer-1", test_fingerprint());
     assert!(proof("req-1", "s-1").verify(&wrong_request).is_err());
 }
 
@@ -172,7 +174,7 @@ fn a_proof_bound_to_another_request_or_peer_is_refused() {
 fn a_proof_bound_to_another_subject_is_refused() {
     let m = request_mutation("s-2", "req-1", &["b-a"]);
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
-    let other_subject = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", "fp-1");
+    let other_subject = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_fingerprint());
     assert!(proof("req-1", "s-1").verify(&other_subject).is_err());
 }
 
@@ -182,7 +184,7 @@ fn a_proof_for_another_action_is_refused() {
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
     let binding = DenialProofBinding {
         action: "erasure",
-        ..DenialProofBinding::for_carrier(&m, &carrier, "peer-1", "fp-1")
+        ..DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_fingerprint())
     };
     assert!(proof("req-1", "s-1").verify(&binding).is_err());
 }
@@ -191,7 +193,7 @@ fn a_proof_for_another_action_is_refused() {
 fn a_proof_without_a_recorded_generation_is_refused() {
     let m = request_mutation("s-1", "req-1", &["b-a"]);
     let carrier = denial_carrier(&m).expect("decode").expect("carrier");
-    let binding = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", "fp-1");
+    let binding = DenialProofBinding::for_carrier(&m, &carrier, "peer-1", test_fingerprint());
     let mut empty = proof("req-1", "s-1");
     empty.generation = 0;
     assert!(empty.verify(&binding).is_err());
@@ -199,7 +201,7 @@ fn a_proof_without_a_recorded_generation_is_refused() {
 
 #[test]
 fn a_denied_bank_reports_denied_and_unrelated_banks_stay_clear() {
-    let denial = FakeDenial::new("fp-1");
+    let denial = FakeDenial::new(test_fingerprint());
     assert_eq!(bank_verdict(denial.as_ref(), "b-a"), DenialVerdict::Clear);
     denial.deny_bank("b-a");
     assert_eq!(bank_verdict(denial.as_ref(), "b-a"), DenialVerdict::Denied);
@@ -208,7 +210,7 @@ fn a_denied_bank_reports_denied_and_unrelated_banks_stay_clear() {
 
 #[test]
 fn a_damaged_authority_reports_authority_unavailable() {
-    let denial = FakeDenial::new("fp-1");
+    let denial = FakeDenial::new(test_fingerprint());
     denial.damage();
     assert_eq!(
         bank_verdict(denial.as_ref(), "b-a"),
@@ -220,28 +222,28 @@ fn a_damaged_authority_reports_authority_unavailable() {
 #[test]
 fn the_subject_digest_is_stable_and_bound_to_the_fingerprint() {
     assert_eq!(
-        denial_subject_hash("fp-1", "s-1"),
-        denial_subject_hash("fp-1", "s-1")
+        denial_subject_hash(test_fingerprint(), "s-1"),
+        denial_subject_hash(test_fingerprint(), "s-1")
     );
     assert_ne!(
-        denial_subject_hash("fp-1", "s-1"),
-        denial_subject_hash("fp-2", "s-1")
+        denial_subject_hash(test_fingerprint(), "s-1"),
+        denial_subject_hash(test_other_fingerprint(), "s-1")
     );
     assert_ne!(
-        denial_subject_hash("fp-1", "s-1"),
-        denial_subject_hash("fp-1", "s-2")
+        denial_subject_hash(test_fingerprint(), "s-1"),
+        denial_subject_hash(test_fingerprint(), "s-2")
     );
 }
 
 #[test]
 fn the_fake_authority_matches_the_seam_contract() {
-    let denial = FakeDenial::new("fp-1");
+    let denial = FakeDenial::new(test_fingerprint());
     let first = denial.deny("s-1", &["b-a"]);
     let again = denial.deny("s-1", &["b-b"]);
     assert_eq!(first, again, "a redelivery returns the current generation");
     assert_eq!(denial.records_for("s-1"), 1, "one durable record");
     assert_eq!(denial.banks_for("s-1"), Some(vec!["b-a".to_owned()]));
-    assert_eq!(denial.fingerprint(), "fp-1");
+    assert_eq!(denial.fingerprint(), test_fingerprint());
     assert_eq!(denial.generation(), 1);
 }
 
