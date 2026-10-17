@@ -387,6 +387,15 @@ fn try_bounded(
 /// pid, so it requires the writable open.
 fn open_lock_file(lock_path: &Path, require_writable: bool) -> Result<File, AmError> {
     let context = format!("opening the store lock {}", lock_path.display());
+    // The lock sits beside its store, so a store under a fresh directory (a
+    // first erasure under a fresh data directory) names a lock whose parent
+    // does not exist yet. Create it, as a store open does for its own file,
+    // so the hold does not fail closed on a missing directory.
+    if let Some(parent) = lock_path.parent().filter(|dir| !dir.as_os_str().is_empty())
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        return Err(map_db_err(&context, error));
+    }
     let writable = OpenOptions::new()
         .read(true)
         .write(true)

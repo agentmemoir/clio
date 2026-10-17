@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - `erase_confirmed_request`, the internal request-bound erasure entry
-//! - `probe_erasure_steps` and `ErasureStepStatus`, the durable step state
+//! - `probe_erasure_steps` and `ErasureStepStatus`, the durable step state,
+//!   declared in `erasure_step_probe.rs` and re-exported here
 //! - The erasure action id, derived from the request id alone
 //! - The settle the flow and reconciliation both write
 //!
@@ -45,8 +46,8 @@ use crate::subject_request::SubjectRequestRecord;
 use crate::subject_request_events::ProtectedAction;
 use crate::subject_request_store_wiring::{peer_row_closure_facts, row_to_record};
 use clio_store::{
-    ComplianceStore, DurableRequestStore, LocalEventIntent, LocalEventState, LocalEventStore,
-    LocalEventView, PeerActionRow, PeerActionStore, sha256_hex,
+    DurableRequestStore, LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView,
+    PeerActionRow, PeerActionStore, sha256_hex,
 };
 use clio_types::{AmError, ErrorCode};
 
@@ -77,68 +78,18 @@ pub(crate) fn request_id_of(action_id: &str) -> Option<&str> {
         .and_then(|rest| rest.strip_prefix(':'))
 }
 
-/// The durable step state of one confirmed erasure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ErasureStepStatus {
-    /// The subject's content key has been destroyed; this step is irreversible.
-    pub(crate) key_destruction_done: bool,
-    /// The store work committed: this request's erasure tombstones are
-    /// present, so the erase transaction that wrote them committed.
-    pub(crate) sql_work_done: bool,
-    /// The committed purge names the probed subject: one of the request's
-    /// tombstones carries its one-way subject hash. Meaningful only when
-    /// `sql_work_done` is true; a purge that names only other subjects is
-    /// another subject's committed work.
-    pub(crate) purge_names_subject: bool,
-}
-
-impl ErasureStepStatus {
-    /// True when the destructive work is done and only the derived refresh
-    /// remains before the settle.
-    #[must_use]
-    pub(crate) fn only_refresh_remains(self) -> bool {
-        self.key_destruction_done && self.sql_work_done
-    }
-}
-
-/// Read the durable step state a retry starts from.
-///
-/// The key probe is the store's negative DEK probe. The store-work probe reads
-/// the committed fact: the request's erasure tombstones were written inside
-/// the erase transaction, just before it commits, so a rolled-back attempt
-/// left none however far it got, and present tombstones mean the purge
-/// committed. Each tombstone carries the one-way hash of the subject its purge
-/// ran for, so the same read reports whether the evidence names the probed
-/// subject. A probe failure propagates, so an unknown state never skips work.
-///
-/// # Errors
-/// A store probe failure.
-pub(crate) fn probe_erasure_steps(
-    store: &dyn ComplianceStore,
-    bank_id: &str,
-    subject_id: &str,
-    request_id: &str,
-    salt: &[u8],
-) -> Result<ErasureStepStatus, AmError> {
-    let key_destruction_done = store.subject_dek_destroyed(subject_id)?;
-    let tombstones = store.read_tombstones(bank_id, request_id)?;
-    let subject_hash = sha256_hex(salt, subject_id);
-    Ok(ErasureStepStatus {
-        key_destruction_done,
-        sql_work_done: !tombstones.is_empty(),
-        purge_names_subject: tombstones
-            .iter()
-            .any(|tombstone| tombstone.subject_hash == subject_hash),
-    })
-}
+// The durable step state and its probes live in `erasure_step_probe` and are
+// re-exported here so the retry's callers keep one path.
+pub(crate) use crate::erasure_step_probe::{ErasureStepStatus, probe_erasure_steps};
 
 /// Erase a confirmed request through its durable record, one durable intent,
 /// and only the steps that are still pending.
 ///
 /// The caller's actor is authorized before anything durable is written, so an
-/// unprivileged call leaves no intent, no denial, and no key loss; the record
-/// is then loaded from the durable store and preflighted before any write, and
-/// a missing row or a refusal changes nothing. One durable intent is
+/// unprivileged call leaves no intent, no denial, and no key loss; an
+/// unconfirmed call is refused just as early, before any intent is recorded.
+/// The record is then loaded from the durable store and preflighted before any
+/// write, and a missing row or a refusal changes nothing. One durable intent is
 /// recorded under the request's erasure action id; an event that already
 /// exists for that id with this erasure's kind in a non-denied state is a
 /// resume, so a retry never rewrites the intent, while a same-id row of
@@ -163,8 +114,9 @@ pub(crate) fn probe_erasure_steps(
 /// own settle, and only when no effect was observed.
 ///
 /// # Errors
-/// A refused actor, a missing or undecodable row, a preflight refusal, a failed
-/// intent or outcome write, or an erasure workflow failure.
+/// A refused actor, an unconfirmed call, a missing or undecodable row, a
+/// preflight refusal, a failed intent or outcome write, or an erasure workflow
+/// failure.
 pub fn erase_confirmed_request(
     durable: &dyn DurableRequestStore,
     events: &dyn LocalEventStore,
@@ -174,6 +126,12 @@ pub fn erase_confirmed_request(
     live_banks: &[String],
 ) -> Result<EraseOutcome, AmError> {
     authorize(args.ctx.actor)?;
+    if !args.confirm {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "erase_confirmed_request requires confirm=true; unconfirmed calls never mutate",
+        ));
+    }
     let row = durable.load(request_id)?.ok_or_else(|| {
         AmError::new(
             ErrorCode::NotFound,

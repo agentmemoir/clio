@@ -29,7 +29,8 @@
 //! Keep this module focused on the Postgres erasure transaction.
 
 use crate::compliance_store::{
-    ComplianceStore, ComplianceTombstoneView, SubjectEraseOutcome, SubjectEraseSpec, validate_spec,
+    BankScopeStore, ComplianceStore, ComplianceTombstoneView, SubjectEraseOutcome,
+    SubjectEraseSpec, validate_spec,
 };
 use crate::erase_hash::sha256_hex;
 use crate::migrate::IntoAmError;
@@ -278,5 +279,11 @@ impl PostgresStore {
             }
             Ok(banks)
         })
+    }
+}
+
+impl BankScopeStore for PostgresStore {
+    fn erase_bank_set(&self, bank_id: &str, subject_id: &str) -> Result<Vec<String>, AmError> {
+        PostgresStore::erase_bank_set(self, bank_id, subject_id)
     }
 }

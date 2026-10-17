@@ -9,9 +9,11 @@
 //!
 //! ## Owns
 //! - `RequestState`, `FinalOutcome`, `StateCategory`, and the state table
-//! - `RequestCommand` and the total, idempotent `transition` function
+//! - `RequestCommand` and the total, idempotent `transition` function,
+//!   declared in `subject_request_transition.rs` and re-exported here
 //! - The `SubjectRequestLedger` register/apply contracts, including the
-//!   id-kind-scope binding and the enablement fact recorded at open
+//!   id-kind-scope binding, the enablement fact, and the operator terms
+//!   recorded at open
 //!
 //! ## Does not own
 //! - The durable record, its frozen field vocabulary, and the immutable
@@ -125,111 +127,9 @@ impl RequestState {
     }
 }
 
-/// A local command on one request. Data only; a ledger applies it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RequestCommand {
-    /// Start the work: `Received` to `InProgress`.
-    Begin,
-    /// Record that the technical work is done: `InProgress` to
-    /// `TechnicalComplete`.
-    MarkTechnicalComplete,
-    /// Hand the result to the operator: `TechnicalComplete` to
-    /// `AwaitingOperator`.
-    AwaitOperator,
-    /// Record the final outcome: `AwaitingOperator` to `Final`.
-    Finalize {
-        /// The outcome the operator recorded.
-        outcome: FinalOutcome,
-    },
-    /// Deny the request.
-    Refuse {
-        /// Why the request is denied; must stay generic.
-        rationale: String,
-    },
-    /// Record an exception: `InProgress` to `Blocked`.
-    Block {
-        /// What stopped the work; must stay generic.
-        reason: String,
-    },
-    /// Clear the exception: `Blocked` to `InProgress`.
-    Resume,
-}
-
-impl RequestCommand {
-    /// Every command, one per variant. Tests consume this so a new command
-    /// fails the completeness guard instead of passing silently.
-    #[must_use]
-    pub fn all() -> [Self; 8] {
-        [
-            Self::Begin,
-            Self::MarkTechnicalComplete,
-            Self::AwaitOperator,
-            Self::Finalize {
-                outcome: FinalOutcome::Completed,
-            },
-            Self::Finalize {
-                outcome: FinalOutcome::PartiallyCompleted,
-            },
-            Self::Refuse {
-                rationale: "refused".into(),
-            },
-            Self::Block {
-                reason: "blocked".into(),
-            },
-            Self::Resume,
-        ]
-    }
-}
-
-/// The total transition table: pure and idempotent, so a repeated input
-/// never produces a second transition.
-pub fn transition(state: &RequestState, command: &RequestCommand) -> Result<RequestState, AmError> {
-    fn refuse(state_kind: &str) -> Result<RequestState, AmError> {
-        Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            format!("command not applicable to a {state_kind} request"),
-        ))
-    }
-    match state {
-        RequestState::Received => match command {
-            RequestCommand::Begin => Ok(RequestState::InProgress),
-            RequestCommand::Refuse { rationale } => Ok(RequestState::Refused {
-                rationale: rationale.clone(),
-            }),
-            _ => refuse("received"),
-        },
-        RequestState::InProgress => match command {
-            RequestCommand::MarkTechnicalComplete => Ok(RequestState::TechnicalComplete),
-            RequestCommand::Block { reason } => Ok(RequestState::Blocked {
-                reason: reason.clone(),
-            }),
-            RequestCommand::Refuse { rationale } => Ok(RequestState::Refused {
-                rationale: rationale.clone(),
-            }),
-            _ => refuse("in-progress"),
-        },
-        RequestState::Blocked { .. } => match command {
-            RequestCommand::Resume => Ok(RequestState::InProgress),
-            RequestCommand::Refuse { rationale } => Ok(RequestState::Refused {
-                rationale: rationale.clone(),
-            }),
-            _ => refuse("blocked"),
-        },
-        RequestState::TechnicalComplete => match command {
-            RequestCommand::AwaitOperator => Ok(RequestState::AwaitingOperator),
-            _ => refuse("technically-complete"),
-        },
-        RequestState::AwaitingOperator => match command {
-            RequestCommand::Finalize { outcome } => Ok(RequestState::Final(*outcome)),
-            RequestCommand::Refuse { rationale } => Ok(RequestState::Refused {
-                rationale: rationale.clone(),
-            }),
-            _ => refuse("awaiting-operator"),
-        },
-        RequestState::Final(_) => refuse("final"),
-        RequestState::Refused { .. } => refuse("refused"),
-    }
-}
+// The command set and its transition table live in `subject_request_transition`
+// and are re-exported here so the crate's request vocabulary keeps one path.
+pub use crate::subject_request_transition::{RequestCommand, transition};
 
 /// What [`SubjectRequestLedger::register`] did with a request id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,14 +206,15 @@ impl SubjectRequestLedger {
         self.register_with_enablement(request_id, kind, scope, enablement, peers, &[])
     }
 
-    /// Open a request under an explicit enablement fact, or replay its stored
-    /// result.
+    /// Open a request under an explicit enablement fact and operator terms, or
+    /// replay its stored result.
     ///
     /// The request id is durable and its kind and scope are immutable: the
     /// same id and scope replays the stored record and applies nothing,
-    /// ignoring the incoming fact, peer list, and bank set; a changed kind or
-    /// scope is refused and no state changes. A new request persists the
-    /// fact, the frozen peer snapshot, and the deduplicated peer-bank union
+    /// ignoring the incoming fact, peer list, bank set, and operator terms; a
+    /// changed kind or scope is refused and no state changes. A new request
+    /// persists the fact, the frozen peer snapshot, the deduplicated peer-bank
+    /// union, and the operator's verification decision and optional deadline
     /// before any effect: [`PeerEnablement::Required`] needs at least one
     /// enabled peer label and [`PeerEnablement::NotApplicable`] none, so the
     /// stored fact never contradicts the stored set.
@@ -322,7 +223,9 @@ impl SubjectRequestLedger {
     /// A blank id, an invalid scope, an enablement fact the labels
     /// contradict, a blank peer label, or a reused id bound to a different
     /// kind or scope.
-    pub fn register_with_enablement(
+    // The parameters mirror the bound scope, peer set, and terms a caller holds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_with_terms(
         &mut self,
         request_id: &str,
         kind: RequestKind,
@@ -330,6 +233,8 @@ impl SubjectRequestLedger {
         enablement: PeerEnablement,
         peers: &[&str],
         peer_banks: &[&str],
+        verification: Option<VerificationResult>,
+        deadline: Option<String>,
     ) -> Result<RegisterOutcome, AmError> {
         if request_id.trim().is_empty() {
             return Err(AmError::new(
@@ -357,8 +262,8 @@ impl SubjectRequestLedger {
                         kind,
                         scope: scope.clone(),
                         state: RequestState::Received,
-                        verification: None,
-                        deadline: None,
+                        verification,
+                        deadline,
                         actions: BTreeMap::new(),
                         paths: BTreeMap::new(),
                         peers: peer_slots,
@@ -370,6 +275,25 @@ impl SubjectRequestLedger {
                 Ok(RegisterOutcome::Opened)
             }
         }
+    }
+
+    /// Open a request under an explicit enablement fact, or replay its stored
+    /// result, recording no operator terms.
+    ///
+    /// # Errors
+    /// As [`Self::register_with_terms`].
+    pub fn register_with_enablement(
+        &mut self,
+        request_id: &str,
+        kind: RequestKind,
+        scope: &RequestScope,
+        enablement: PeerEnablement,
+        peers: &[&str],
+        peer_banks: &[&str],
+    ) -> Result<RegisterOutcome, AmError> {
+        self.register_with_terms(
+            request_id, kind, scope, enablement, peers, peer_banks, None, None,
+        )
     }
 
     /// Apply a command to the stored request and record the next state.

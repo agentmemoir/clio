@@ -118,6 +118,7 @@ mod cli_write_source_type;
 mod cli_write_workspace;
 mod command_catalog;
 mod compliance_cli;
+mod compliance_request_cli;
 mod compose_assets;
 mod compose_cli;
 mod compose_docker;

@@ -245,12 +245,16 @@ fn a_failed_journal_write_refuses_the_erasure_before_any_store_effect() {
 
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(bank.clone()), Actor::Harness);
-    // The journal's parent directory is deterministically absent (a fresh
-    // per-test directory the call itself creates nothing under): the read
-    // classifies the path as missing and the write cannot create its temp
-    // sibling, which is the `Internal` refusal this probe is about.
+    // The journal's parent is deterministically obstructed (a fresh per-test
+    // directory holds a regular file where the journal's directory should
+    // be, and the call itself creates nothing under): the read classifies
+    // the path as missing and neither the journal lock nor the write can
+    // create the parent, which is the `Internal` refusal this probe is
+    // about.
     let dir = FixtureDir::create(&unique("erase-journal-unwritable"));
-    let journal = dir.path().join("absent").join("erasure-journal.json");
+    let obstruction = dir.path().join("absent");
+    std::fs::write(&obstruction, b"not a directory").expect("plant the obstructing file");
+    let journal = obstruction.join("erasure-journal.json");
     let salt = rand::random::<[u8; 16]>();
     let err = erase_request(&EraseArgs {
         store: &store,
