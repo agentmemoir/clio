@@ -105,6 +105,49 @@ fn want(result: Result<(), AmError>, what: &str) {
     result.unwrap_or_else(|err| panic!("{what} failed: {err}"));
 }
 
+/// The `local_events` shape the assertions read: the column names in ordinal
+/// order, whether the legacy `id` column is nullable, and the index names.
+fn shape(store: &PostgresStore) -> (Vec<String>, bool, Vec<String>) {
+    store
+        .with_client(|client| {
+            let columns = client
+                .query(
+                    "SELECT column_name FROM information_schema.columns
+                     WHERE table_schema = current_schema()
+                       AND table_name = 'local_events'
+                     ORDER BY ordinal_position",
+                    &[],
+                )
+                .am("local events columns")?
+                .iter()
+                .map(|row| row.get::<_, String>(0))
+                .collect::<Vec<_>>();
+            let legacy_nullable = client
+                .query_one(
+                    "SELECT is_nullable = 'YES' FROM information_schema.columns
+                     WHERE table_schema = current_schema()
+                       AND table_name = 'local_events'
+                       AND column_name = 'id'",
+                    &[],
+                )
+                .am("local events legacy key nullability")?
+                .get::<_, bool>(0);
+            let indexes = client
+                .query(
+                    "SELECT indexname FROM pg_indexes
+                     WHERE schemaname = current_schema()
+                       AND tablename = 'local_events'",
+                    &[],
+                )
+                .am("local events indexes")?
+                .iter()
+                .map(|row| row.get::<_, String>(0))
+                .collect::<Vec<_>>();
+            Ok((columns, legacy_nullable, indexes))
+        })
+        .expect("read the local_events shape")
+}
+
 /// A database created under the old placeholder shape converges when the store
 /// opens: the writer's own insert and update name the event columns, and the
 /// legacy key keeps its column but loses the NOT NULL that refused every row.
@@ -149,52 +192,14 @@ fn a_pre_existing_placeholder_table_converges_on_open() {
     );
     assert!(events[0].seq >= 1, "the store assigns an order position");
 
-    let (columns, legacy_nullable, unique) = store
-        .with_client(|client| {
-            let columns = client
-                .query(
-                    "SELECT column_name FROM information_schema.columns
-                     WHERE table_schema = current_schema()
-                       AND table_name = 'local_events'
-                     ORDER BY ordinal_position",
-                    &[],
-                )
-                .am("local events columns")?
+    let expected: Vec<String> = std::iter::once("id".to_owned())
+        .chain(
+            super::EVENT_COLUMNS
                 .iter()
-                .map(|row| row.get::<_, String>(0))
-                .collect::<Vec<_>>();
-            let legacy_nullable = client
-                .query_one(
-                    "SELECT is_nullable = 'YES' FROM information_schema.columns
-                     WHERE table_schema = current_schema()
-                       AND table_name = 'local_events'
-                       AND column_name = 'id'",
-                    &[],
-                )
-                .am("local events legacy key nullability")?
-                .get::<_, bool>(0);
-            let unique = client
-                .query_one(
-                    "SELECT EXISTS (
-                         SELECT 1 FROM pg_indexes
-                         WHERE schemaname = current_schema()
-                           AND tablename = 'local_events'
-                           AND indexname = 'local_events_action_id_uidx'
-                     )",
-                    &[],
-                )
-                .am("local events unique index")?
-                .get::<_, bool>(0);
-            Ok((columns, legacy_nullable, unique))
-        })
-        .expect("read the converged shape");
-
-    let mut expected = vec!["id".to_owned()];
-    expected.extend(
-        super::EVENT_COLUMNS
-            .iter()
-            .map(|(column, _)| (*column).to_owned()),
-    );
+                .map(|(column, _)| (*column).to_owned()),
+        )
+        .collect();
+    let (columns, legacy_nullable, indexes) = shape(&store);
     assert_eq!(
         columns, expected,
         "the placeholder table converges onto the event columns"
@@ -203,8 +208,45 @@ fn a_pre_existing_placeholder_table_converges_on_open() {
         legacy_nullable,
         "the legacy key keeps its column and drops NOT NULL"
     );
+    let wanted = ["local_events_action_id_uidx", "local_events_seq_uidx"];
+    for index in wanted {
+        assert!(
+            indexes.iter().any(|name| name == index),
+            "the converged table backs {index}: {indexes:?}"
+        );
+    }
+
+    let duplicate = store.with_client(|client| {
+        client
+            .batch_execute(
+                "INSERT INTO local_events
+                    (action_id, seq, actor, scope, kind, event_time, outcome_state)
+                 VALUES ('act-dup', 1, 'tester', 'scope-opaque', 'erase_request',
+                         '2026-03-01T00:00:01Z', 'allowed')",
+            )
+            .am("duplicate order position insert")
+    });
+    let refused = duplicate.expect_err("the repaired table refuses a duplicate order position");
     assert!(
-        unique,
-        "the converged table backs action_id with a unique index"
+        refused.to_string().contains("local_events_seq_uidx"),
+        "the seq index refuses the order position: {refused}"
     );
+
+    drop(store);
+    let reopened = open_pg(&db_url);
+    let (columns, legacy_nullable, indexes) = shape(&reopened);
+    assert_eq!(
+        columns, expected,
+        "a second open leaves the converged columns in place and in order"
+    );
+    assert!(
+        legacy_nullable,
+        "a second open leaves the legacy key nullable"
+    );
+    for index in wanted {
+        assert!(
+            indexes.iter().any(|name| name == index),
+            "a second open keeps {index}: {indexes:?}"
+        );
+    }
 }

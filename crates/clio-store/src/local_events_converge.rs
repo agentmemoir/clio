@@ -10,7 +10,7 @@
 //! ## Owns
 //! - The placeholder-shape detection for both backends
 //! - The additive event-column repair and the legacy `id` NOT NULL repair
-//! - The unique guarantee on `action_id` a repaired table needs
+//! - The unique guarantee on `action_id` and `seq` a repaired table needs
 //!
 //! ## Does not own
 //! - The `local_events` slot DDL text (loaded through `migrate`)
@@ -41,29 +41,40 @@ const EVENT_COLUMNS: [(&str, &str); 8] = [
     ("result", "text"),
 ];
 
-/// The legacy key a placeholder `local_events` table carries, and the index
-/// that replaces the uniqueness its primary key took with it.
+/// The legacy key a placeholder `local_events` table carries, and the column
+/// names the current shape must hold instead.
 const LEGACY_KEY: &str = "id";
 
-/// Add the event columns to a pre-existing `local_events` table.
+/// Add the event columns to a pre-existing `local_events` table and back the
+/// two columns the store deduplicates and orders on with unique indexes.
 ///
-/// The guarded helper no-ops on a table that is absent or that already holds a
-/// column, so a fresh database, whose portable DDL declares the columns itself,
-/// and a repaired table both run no DDL against their shape. The added columns
-/// stay nullable because SQLite only accepts a `NOT NULL` added column with a
-/// constant default: the store always writes every field, so a row written
-/// after this holds real values. A placeholder's `id` primary key is nullable
-/// on SQLite — it is not an `INTEGER` key — so the insert that never names it
-/// stores NULL, and the column stays in place. Because that key was the table's
-/// only unique guarantee, a table that still carries it also gets a unique
-/// index over `action_id`. Placeholder tables hold no event rows by contract,
-/// so converged rows start empty and fill on write.
+/// The column list is read once. A database whose table is absent runs no DDL:
+/// the portable DDL that follows declares the whole shape. A table that already
+/// holds all eight event columns and no legacy `id` column runs no DDL either.
+/// Every other table gets the columns it lacks plus both unique indexes. Those
+/// index statements are idempotent, so they re-run on each open of a table that
+/// still carries the legacy key.
+///
+/// The added columns stay nullable because SQLite only accepts a `NOT NULL`
+/// added column with a constant default. A placeholder's `id` primary key is not
+/// an `INTEGER` key, so SQLite already allows NULL there: the insert that never
+/// names it stores NULL and the column stays in place. The DDL's `NOT NULL` and
+/// `CHECK` constraints therefore remain accepted drift, while uniqueness on
+/// `action_id` and `seq` is restored. Placeholder tables hold no event rows by
+/// contract, so converged rows start empty and fill on write.
 pub(crate) fn converge_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError> {
+    let Some(columns) = sqlite_columns(conn)? else {
+        return Ok(());
+    };
+    let current = !columns.iter().any(|name| name == LEGACY_KEY)
+        && EVENT_COLUMNS
+            .iter()
+            .all(|(column, _)| columns.iter().any(|name| name == column));
+    if current {
+        return Ok(());
+    }
     for (column, sql_type) in EVENT_COLUMNS {
         crate::schema_converge::converge_column_sqlite(conn, "local_events", column, sql_type)?;
-    }
-    if !sqlite_has_legacy_key(conn)? {
-        return Ok(());
     }
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS local_events_action_id_uidx
@@ -71,13 +82,18 @@ pub(crate) fn converge_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError
         [],
     )
     .am("local events action-id index")?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS local_events_seq_uidx
+         ON local_events (seq)",
+        [],
+    )
+    .am("local events order-position index")?;
     Ok(())
 }
 
-/// Whether a `local_events` table exists and still carries the legacy `id`
-/// column. `false` covers both a fresh database, whose table the portable DDL
-/// creates whole, and an already repaired table.
-fn sqlite_has_legacy_key(conn: &rusqlite::Connection) -> Result<bool, AmError> {
+/// The column names of a `local_events` table, or `None` when the table is
+/// absent.
+fn sqlite_columns(conn: &rusqlite::Connection) -> Result<Option<Vec<String>>, AmError> {
     let exists: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_events'",
@@ -86,7 +102,7 @@ fn sqlite_has_legacy_key(conn: &rusqlite::Connection) -> Result<bool, AmError> {
         )
         .am("local events table exists for convergence")?;
     if exists == 0 {
-        return Ok(false);
+        return Ok(None);
     }
     let mut stmt = conn
         .prepare("PRAGMA table_info(local_events)")
@@ -96,8 +112,7 @@ fn sqlite_has_legacy_key(conn: &rusqlite::Connection) -> Result<bool, AmError> {
         .am("local events table_info rows for convergence")?
         .collect::<Result<Vec<_>, _>>()
         .am("local events table_info rows for convergence")?;
-    drop(stmt);
-    Ok(present.iter().any(|name| name == LEGACY_KEY))
+    Ok(Some(present))
 }
 
 /// The shape facts the Postgres convergence decision needs: how many columns
@@ -126,18 +141,32 @@ fn pg_shape(client: &mut postgres::Client) -> Result<Option<(i64, bool)>, AmErro
     Ok(Some((row.get::<_, i64>(1), row.get::<_, i64>(2) > 0)))
 }
 
+/// The name of the `local_events` primary key, or `None` when the table has
+/// none. The name is read from the catalog because a placeholder may have been
+/// created with any key name.
+fn pg_primary_key(client: &mut postgres::Client) -> Result<Option<String>, AmError> {
+    let rows = client
+        .query(
+            "SELECT conname FROM pg_constraint
+             WHERE conrelid = to_regclass('local_events') AND contype = 'p'",
+            &[],
+        )
+        .am("local events primary key name")?;
+    Ok(rows.first().map(|row| row.get::<_, String>(0)))
+}
+
 /// Bring a pre-existing placeholder `local_events` table onto the event
 /// columns.
 ///
-/// The shape is read first, so a fresh database, whose table does not exist
-/// yet, and an already repaired table both run no DDL. A placeholder also
-/// carries `id text PRIMARY KEY`, which Postgres makes `NOT NULL`: the repair
-/// drops that key and its `NOT NULL`, keeping the column optional so no
-/// placeholder value is destroyed, and backs `action_id` with a unique index.
-/// The unique and check constraints the slot DDL declares cannot be regained by
-/// an added column, so a repaired table keeps them as accepted drift. The slot
-/// DDL is portable across both backends, so Postgres cannot carry these repairs
-/// in the shared slot file.
+/// The shape is read first, so a database with no table and a table that already
+/// holds all eight event columns and no legacy `id` key both run no DDL. A
+/// placeholder also carries `id text PRIMARY KEY`, which Postgres makes
+/// `NOT NULL`: the repair drops that key — by the name read from the catalog,
+/// and only when a primary key exists — then drops the column's `NOT NULL`,
+/// keeping the column and any value it holds. Uniqueness on `action_id` and
+/// `seq` is restored with unique indexes. The DDL's `NOT NULL` and `CHECK`
+/// constraints remain accepted drift. The slot DDL is portable across both
+/// backends, so Postgres cannot carry these repairs in the shared slot file.
 pub(crate) fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> {
     let Some((event_columns, legacy_key)) = pg_shape(client)? else {
         return Ok(());
@@ -147,13 +176,15 @@ pub(crate) fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> 
     }
     let mut statements: Vec<String> = Vec::new();
     if legacy_key {
-        // `ALTER COLUMN` errors when the column is absent, so this statement
-        // runs only on the column state just read.
-        statements.push(
-            "ALTER TABLE local_events DROP CONSTRAINT IF EXISTS local_events_pkey;
-             ALTER TABLE local_events ALTER COLUMN id DROP NOT NULL;"
-                .to_owned(),
-        );
+        // `ALTER COLUMN` errors when the column is absent, so these statements
+        // run only on the column state just read.
+        if let Some(name) = pg_primary_key(client)? {
+            statements.push(format!(
+                "ALTER TABLE local_events DROP CONSTRAINT IF EXISTS \"{}\";",
+                name.replace('"', "\"\"")
+            ));
+        }
+        statements.push("ALTER TABLE local_events ALTER COLUMN id DROP NOT NULL;".to_owned());
     }
     for (column, sql_type) in EVENT_COLUMNS {
         statements.push(format!(
@@ -163,6 +194,11 @@ pub(crate) fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> 
     statements.push(
         "CREATE UNIQUE INDEX IF NOT EXISTS local_events_action_id_uidx
          ON local_events (action_id);"
+            .to_owned(),
+    );
+    statements.push(
+        "CREATE UNIQUE INDEX IF NOT EXISTS local_events_seq_uidx
+         ON local_events (seq);"
             .to_owned(),
     );
     client

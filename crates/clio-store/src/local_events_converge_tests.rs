@@ -152,10 +152,11 @@ fn a_pre_existing_placeholder_table_converges_on_open() {
         expected,
         "the placeholder table converges onto the event columns"
     );
-    assert!(
-        index_names(&store)
-            .iter()
-            .any(|name| name == "local_events_action_id_uidx"),
-        "the converged table backs action_id with a unique index"
-    );
+    let indexes = index_names(&store);
+    for index in ["local_events_action_id_uidx", "local_events_seq_uidx"] {
+        assert!(
+            indexes.iter().any(|name| name == index),
+            "the converged table backs {index}: {indexes:?}"
+        );
+    }
 }
