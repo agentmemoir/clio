@@ -124,8 +124,12 @@ mod tests {
     #[test]
     fn a_second_holder_waits_until_the_first_releases() {
         let url = postgres_url_or_default(clio_config::db_url_env::database_url_from_process_env());
-        let Ok(mut holder) = crate::pg_tls::connect(&url) else {
-            return;
+        let mut holder = match crate::pg_tls::connect(&url) {
+            Ok(holder) => holder,
+            Err(err) => {
+                crate::pg_skip::unreachable_pg_or_skip("postgres test lock tests", &err);
+                return;
+            }
         };
         holder
             .query_one("SELECT pg_advisory_lock($1)", &[&PG_TEST_PROBE_KEY])
@@ -173,8 +177,8 @@ mod tests {
     #[test]
     fn a_guard_handed_to_the_caller_stays_held_for_the_whole_test() {
         let url = postgres_url_or_default(clio_config::db_url_env::database_url_from_process_env());
-        if crate::pg_tls::connect(&url).is_err() {
-            eprintln!("skip: shared Postgres unreachable");
+        if let Err(err) = crate::pg_tls::connect(&url) {
+            crate::pg_skip::unreachable_pg_or_skip("postgres test lock tests", &err);
             return;
         }
         let (tx, rx) = mpsc::channel();
