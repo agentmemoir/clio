@@ -27,7 +27,9 @@ use crate::export_subject_scenarios_tests::{
 use crate::export_tests::{Scratch, seed_pending, staging_entries};
 use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::OTHER;
-use crate::inventory_pg_support_tests::{PgLedgerFixture, open_pg_ledger_fixture, pg_skip_note};
+use crate::inventory_pg_support_tests::{
+    PgLedgerFixture, open_pg_ledger_fixture, pg_gate_or_panic,
+};
 use crate::test_unique::unique;
 use clio_store::{
     DekProvider, DestinationCustodyRow, DestinationCustodyStore, LocalDevKms, LocalEventIntent,
@@ -38,11 +40,10 @@ use std::sync::Arc;
 
 /// The live fixture, or a printed credential-safe skip note plus `None`.
 fn pg_fixture_or_skip() -> Option<(PgTestGuard, PgLedgerFixture)> {
-    let pair = open_pg_ledger_fixture();
-    if let Err(err) = &pair {
-        eprintln!("{}", pg_skip_note("subject export Postgres scenarios", err));
-    }
-    pair.ok()
+    pg_gate_or_panic(
+        "subject export Postgres scenarios",
+        open_pg_ledger_fixture(),
+    )
 }
 
 /// A reopened store handle over the fixture's scoped schema: a fresh handle,

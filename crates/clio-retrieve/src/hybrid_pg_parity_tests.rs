@@ -56,20 +56,20 @@ fn sorted_ids(out: &crate::types::RetrieveOutcome) -> Vec<String> {
 
 #[test]
 fn postgres_and_sqlite_hit_id_parity() {
-    let Ok(url) = std::env::var("CLIO_DATABASE_URL") else {
-        eprintln!("skip postgres retrieve parity: CLIO_DATABASE_URL unset");
-        return;
-    };
     if std::env::var("CLIO_PG_RETRIEVE_PARITY").as_deref() != Ok("1") {
         eprintln!("skip postgres retrieve parity: set CLIO_PG_RETRIEVE_PARITY=1 to run");
         return;
     }
+    // The opt-in means run the parity test: a missing URL or a store that will
+    // not open is a failure, never a silent skip, and the message never prints
+    // the URL's userinfo.
+    let url = std::env::var("CLIO_DATABASE_URL")
+        .expect("CLIO_PG_RETRIEVE_PARITY=1 needs CLIO_DATABASE_URL");
     let _guard = lock_pg_test();
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
-    let Ok(pg) = PostgresStore::open(&url, kms) else {
-        eprintln!("skip postgres retrieve parity: cannot open {url}");
-        return;
-    };
+    let pg = PostgresStore::open(&url, kms).unwrap_or_else(|err| {
+        panic!("CLIO_PG_RETRIEVE_PARITY=1 but the Postgres retrieve store will not open: {err}")
+    });
     let bank = unique("retrieve-parity");
     let pg = Arc::new(pg);
     let sqlite = fx::store();

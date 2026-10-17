@@ -35,16 +35,6 @@ use crate::batch_test_support_tests::{
 };
 use crate::test_unique::unique;
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-/// Without this opt-out an unreachable Postgres fails the parity test instead
-/// of silently reporting green.
-fn skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
-}
-
 #[test]
 fn batch_subject_locks_are_sorted_and_deduplicated() {
     let bank = "lock-order-bank";
@@ -119,11 +109,10 @@ fn postgres_batch_parity() {
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
     let pg = match PostgresStore::open(&url, kms) {
         Ok(pg) => pg,
-        Err(err) if skip_requested() => {
-            eprintln!("skipping postgres batch parity (CLIO_SKIP_PG_TESTS): {err}");
+        Err(err) => {
+            crate::pg_skip::unreachable_pg_or_skip("postgres batch parity", &err);
             return;
         }
-        Err(err) => panic!("postgres batch parity requires Postgres at {url}: {err}"),
     };
     assert_all_or_nothing(&pg);
 

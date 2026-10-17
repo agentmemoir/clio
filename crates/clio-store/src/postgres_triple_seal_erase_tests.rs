@@ -69,11 +69,13 @@ pub(crate) fn url() -> String {
 
 pub(crate) fn open_pg() -> Option<PostgresStore> {
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
-    let store = PostgresStore::open(&url(), kms);
-    if store.is_err() {
-        eprintln!("skipping postgres triple seal tests: cannot open the database");
+    match PostgresStore::open(&url(), kms) {
+        Ok(store) => Some(store),
+        Err(err) => {
+            crate::pg_skip::unreachable_pg_or_skip("postgres triple seal tests", &err);
+            None
+        }
     }
-    store.ok()
 }
 
 pub(crate) fn carrier(bank: &str, subject: &str, ids: &Ids) -> MemoryItem {

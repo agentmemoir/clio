@@ -9,9 +9,13 @@
 //! operator explicitly opted out.
 //!
 //! ## Owns
-//! - `pg_skip_note`, the only way a Postgres test reports "could not open"
+//! - `pg_skip_note`, the credential-safe wording for an unreachable store
 //! - `skip_requested` and `unreachable_pg_or_skip`: the strict default and the
 //!   sole `CLIO_SKIP_PG_TESTS` opt-out that turns it into a printed note
+//!
+//! `unreachable_pg_or_skip` is the only way a Postgres test may skip: it reads
+//! `CLIO_SKIP_PG_TESTS` itself and fails closed otherwise, so a suite cannot
+//! reach the opt-out path by formatting a note and then returning.
 //!
 //! ## Does not own
 //! - Whether a test probes for a skippable failure at all (each test's own
@@ -31,6 +35,9 @@ use clio_types::AmError;
 
 /// The line a Postgres test prints when it cannot open the store.
 ///
+/// Private so a test cannot gate a skip on the note alone: the opt-out read
+/// lives in [`unreachable_pg_or_skip`], and only [`fail_or_skip`] calls this.
+///
 /// The signature is the guarantee, and it is deliberate: this function takes
 /// the suite name and the driver's error, and has no parameter a connection
 /// string could arrive through. `CLIO_DATABASE_URL` routinely carries a
@@ -41,7 +48,7 @@ use clio_types::AmError;
 /// authentication failed for user "clio"`), never the address it was dialled
 /// with.
 #[must_use]
-pub(crate) fn pg_skip_note(suite: &str, err: &AmError) -> String {
+fn pg_skip_note(suite: &str, err: &AmError) -> String {
     format!("skipping {suite}: cannot open the Postgres store: {err}")
 }
 
@@ -63,8 +70,12 @@ fn opted_out(value: Option<&str>) -> bool {
 
 /// Fail closed on an unreachable Postgres for `suite`: panic with the reason
 /// unless the operator set `CLIO_SKIP_PG_TESTS`, which prints the
-/// credential-safe skip note and lets the caller return early. The panic
-/// carries the driver's error, never the connection string.
+/// credential-safe skip note and lets the caller return early.
+///
+/// This is the only way a Postgres test may skip. The function owns the
+/// `CLIO_SKIP_PG_TESTS` read, so a caller cannot skip without the operator's
+/// opt-out; absent it, an unreachable store is a failure and never a pass. The
+/// panic carries the driver's error, never the connection string.
 pub(crate) fn unreachable_pg_or_skip(suite: &str, err: &AmError) {
     fail_or_skip(suite, err, skip_requested());
 }

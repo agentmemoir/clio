@@ -81,6 +81,15 @@ fn postgres_reachable(url: &str) -> bool {
         .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok())
 }
 
+/// True only when the operator explicitly opted out of Postgres-backed tests;
+/// without the opt-out an unreachable Postgres fails the harness, not a skip.
+fn skip_requested() -> bool {
+    matches!(
+        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
 /// Unique temp directory for one scenario.
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(unique(tag));
@@ -168,6 +177,10 @@ fn seed_backlog(db: &str, bank: &str, count: usize) {
 fn a_remember_behind_a_full_backlog_is_recallable_by_the_next_command() {
     let base = pg_url();
     if !postgres_reachable(&base) {
+        assert!(
+            skip_requested(),
+            "write-lag harness needs Postgres at the configured URL"
+        );
         eprintln!("skip write-lag harness: no Postgres at the configured URL");
         return;
     }
@@ -266,6 +279,10 @@ fn a_batch_behind_a_full_backlog_is_recallable_by_the_next_command() {
     // searchable by the next command, not only the first.
     let base = pg_url();
     if !postgres_reachable(&base) {
+        assert!(
+            skip_requested(),
+            "write-lag harness needs Postgres at the configured URL"
+        );
         eprintln!("skip write-lag harness: no Postgres at the configured URL");
         return;
     }

@@ -3,15 +3,16 @@
 //
 //! # Responsibility
 //!
-//! This module tests the local event writer on both backends: intent
+//! This module tests the local event writer on the SQLite backend: intent
 //! persistence before a protected effect, refusal on a failed or repeated
 //! intent, outcome completion with duplicate tolerance, pending
 //! reconciliation by action id after a reopen, ordered reads across a reopen,
-//! and pruning that keeps request and denial state.
+//! and pruning that keeps request and denial state. The Postgres reopen,
+//! ordering, and prune assertions live in `local_events_pg_tests`.
 //!
 //! ## Owns
 //! - The scratch SQLite directory fixture the file-backed reopen tests use
-//! - The shared-Postgres open helper and its skip wording
+//! - The `local_events_pg_tests` submodule declaration
 //!
 //! ## Does not own
 //! - The writer implementation (`local_events`)
@@ -22,22 +23,17 @@
 //!
 //! Tests here break when the intent/outcome flow, ordering, reconciliation, or
 //! prune behavior changes. Slot table presence is pinned by the
-//! `migrate_compliance_slots_tests`.
+//! `migrate_compliance_slots_tests`, and the Postgres path by
+//! `local_events_pg_tests`.
 //!
 //! Test-only. Never compiled into production builds.
 
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::erase_test_support::local_kms;
 use crate::local_events::{LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView};
-use crate::postgres::PostgresStore;
 use crate::sqlite::SqliteStore;
-use crate::test_unique::unique;
 use clio_types::{AmError, ErrorCode};
 use std::sync::Arc;
-
-/// Event time the prune cutoff can never reach, so a parallel prune test on
-/// the shared Postgres database cannot touch another test's rows.
-const LATE_TIME: &str = "2026-12-31T00:00:00Z";
 
 /// In-memory SQLite store (the `sqlite_window_tests` fixture shape).
 fn open_sqlite() -> SqliteStore {
@@ -301,150 +297,5 @@ fn pruning_keeps_request_and_denial_state() {
     assert_eq!(state_of("deny-old"), LocalEventState::Denied);
 }
 
-// ---------------------------------------------------------------------------
-// Postgres (shared database; skips when it cannot be opened)
-// ---------------------------------------------------------------------------
-
-/// The shared Postgres store, or `None` when it cannot be opened (the
-/// `compliance_store_pg_export_read_tests` fixture shape).
-fn open_pg() -> Option<PostgresStore> {
-    let url = crate::db_url::postgres_url_or_default(std::env::var("CLIO_DATABASE_URL"));
-    let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
-    PostgresStore::open(&url, kms)
-        .inspect_err(|err| {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres local event tests", err)
-            );
-        })
-        .ok()
-}
-
-/// Postgres events keep their order positions across a reopen.
-#[test]
-fn postgres_events_keep_their_order_across_a_reopen() {
-    let _guard = crate::lock_pg_test();
-    let Some(store) = open_pg() else { return };
-    let tag = unique("pg-le-order");
-    let id = |n: char| format!("{tag}-{n}");
-    for name in ['a', 'b', 'c'] {
-        let action = id(name);
-        want(
-            store.record_intent(&intent(&action, LATE_TIME)),
-            &format!("intent {action}"),
-        );
-    }
-    drop(store);
-    let events: Vec<_> = open_pg()
-        .expect("reopen the shared postgres store")
-        .list_events()
-        .expect("list events")
-        .into_iter()
-        .filter(|e| e.action_id.starts_with(&tag))
-        .collect();
-    let ids: Vec<_> = events.iter().map(|e| e.action_id.as_str()).collect();
-    assert_eq!(
-        ids,
-        vec![id('a'), id('b'), id('c')],
-        "order positions survive the reopen"
-    );
-}
-
-/// A Postgres pending record survives a reopen and reconciles by action id,
-/// and a repeated outcome write on the reconciled row changes nothing.
-#[test]
-fn postgres_a_pending_record_reconciles_by_action_id_after_a_reopen() {
-    let _guard = crate::lock_pg_test();
-    let Some(store) = open_pg() else { return };
-    let action = unique("pg-le-pending");
-    want(store.record_intent(&intent(&action, LATE_TIME)), "intent");
-    drop(store);
-    let store = open_pg().expect("reopen the shared postgres store");
-    let pending = store.pending_actions().expect("pending actions");
-    assert!(
-        pending.iter().any(|id| id == &action),
-        "pending must stay durable"
-    );
-    want(
-        store.record_outcome(&action, false, "reconciled after restart"),
-        "fix",
-    );
-    want(
-        store.record_outcome(&action, true, "second try"),
-        "repeat outcome",
-    );
-    let pending = store.pending_actions().expect("pending actions");
-    assert!(
-        !pending.iter().any(|id| id == &action),
-        "reconciled, not pending"
-    );
-    let events: Vec<_> = store
-        .list_events()
-        .expect("list events")
-        .into_iter()
-        .filter(|e| e.action_id == action)
-        .collect();
-    assert_eq!(events.len(), 1, "no duplicate row from the outcome write");
-    assert_eq!(events[0].state, LocalEventState::Allowed, "state kept");
-    assert_eq!(
-        events[0].result.as_deref(),
-        Some("reconciled after restart"),
-        "the first outcome wins"
-    );
-}
-
-/// Postgres pruning deletes only completed allowed rows before the cutoff:
-/// request (pending) and denial rows always stay.
-#[test]
-fn postgres_pruning_keeps_request_and_denial_state() {
-    let _guard = crate::lock_pg_test();
-    let Some(store) = open_pg() else { return };
-    let tag = unique("pg-le-prune");
-    let id = |n: &str| format!("{tag}-{n}");
-    for (name, time) in [
-        ("req-old", "2026-01-01T00:00:00Z"),
-        ("deny-old", "2026-01-01T00:00:00Z"),
-        ("allow-old", "2026-01-01T00:00:00Z"),
-        ("allow-new", "2026-01-09T00:00:00Z"),
-    ] {
-        want(
-            store.record_intent(&intent(&id(name), time)),
-            &format!("intent {name}"),
-        );
-    }
-    want(
-        store.record_outcome(&id("deny-old"), true, "refused by policy"),
-        "deny",
-    );
-    want(
-        store.record_outcome(&id("allow-old"), false, "erased"),
-        "old allowed",
-    );
-    want(
-        store.record_outcome(&id("allow-new"), false, "erased"),
-        "new allowed",
-    );
-    let pruned = store
-        .prune_completed_before("2026-01-05T00:00:00Z")
-        .expect("prune");
-    // The cutoff cannot be exact on a shared database that earlier runs may
-    // have left completed rows in: this run's old allowed rows must all go.
-    assert!(pruned >= 1, "the old allowed row must be pruned");
-    let events: Vec<_> = store
-        .list_events()
-        .expect("list events")
-        .into_iter()
-        .filter(|e| e.action_id.starts_with(&tag))
-        .collect();
-    let prefix = format!("{tag}-");
-    let mut names: Vec<&str> = events
-        .iter()
-        .map(|e| e.action_id.strip_prefix(&prefix).expect("tagged id"))
-        .collect();
-    names.sort_unstable();
-    assert_eq!(
-        names,
-        vec!["allow-new", "deny-old", "req-old"],
-        "request and denial rows must survive pruning"
-    );
-}
+#[path = "local_events_pg_tests.rs"]
+mod local_events_pg_tests;
