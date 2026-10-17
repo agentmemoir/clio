@@ -412,6 +412,9 @@ impl MemoryItem {
         if let Some(context) = &self.context {
             validate_context(context)?;
         }
+        if let Some(gist) = &self.gist {
+            crate::validate_gist(gist)?;
+        }
         Ok(())
     }
 }

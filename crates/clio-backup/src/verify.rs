@@ -32,6 +32,7 @@
 
 use crate::container::ArchiveReader;
 use crate::dump_meta::{DUMP_TABLES_PREFIX, DumpMeta};
+use crate::free_space;
 use crate::inventory::read_manifest;
 use crate::manifest::BackupManifest;
 use crate::staging::{self, StagedFile};
@@ -108,13 +109,33 @@ impl VerifyReport {
 ///
 /// A manifest this build refuses — wrong kind, unknown format version, wrong
 /// compression — comes back as an error with its own message rather than a
-/// report: there is nothing to compare against. A member that disagrees with
-/// the manifest is a report with `ok = false` naming the member.
+/// report: there is nothing to compare against. A payload member whose header
+/// declares a size the manifest does not record is refused before it is
+/// inflated, and a payload that does not fit on the staging filesystem is
+/// refused before staging starts. A member that otherwise disagrees with the
+/// manifest is a report with `ok = false` naming the member.
 ///
 /// # Errors
-/// The archive is missing, unreadable, truncated, carries no manifest, or
-/// carries a manifest this build refuses.
+/// The archive is missing, unreadable, truncated, carries no manifest, carries
+/// a manifest this build refuses, declares a payload size that disagrees with
+/// its header, or cannot fit on the staging filesystem.
 pub fn verify_archive<F>(path: &Path, integrity: &mut F) -> Result<VerifyReport, AmError>
+where
+    F: FnMut(&Path) -> Result<(), AmError>,
+{
+    verify_archive_with_space(path, integrity, &free_space::require_room)
+}
+
+/// The verify pass with its free-space gate injected.
+///
+/// Production passes [`free_space::require_room`]. A test passes its own gate
+/// so both the refusal and the order against the header-size check are
+/// exercised without filling a filesystem.
+fn verify_archive_with_space<F>(
+    path: &Path,
+    integrity: &mut F,
+    space: &dyn Fn(&Path, u64) -> Result<(), AmError>,
+) -> Result<VerifyReport, AmError>
 where
     F: FnMut(&Path) -> Result<(), AmError>,
 {
@@ -144,6 +165,21 @@ where
             seen.members.push(manifest_check(&mut reader)?);
         } else if name == manifest.payload.member {
             seen.payload = true;
+            // The header is the only size the container trusts before it reads
+            // a byte, so a header that disagrees with the manifest is refused
+            // here rather than after the whole stream lands on disk.
+            if header.size != manifest.payload.bytes {
+                return Err(AmError::new(
+                    ErrorCode::ArchiveCorrupt,
+                    format!(
+                        "archive member {:?}: the archive header declares {} bytes, but the \
+                         manifest records {} bytes for the payload, so the member cannot be the \
+                         one the manifest describes",
+                        header.name, header.size, manifest.payload.bytes
+                    ),
+                ));
+            }
+            space(staging_dir, manifest.payload.bytes)?;
             let staged = stage_payload(&mut reader, staging_dir, name)?;
             seen.members.push(payload_check(&manifest, &staged));
             if postgres {

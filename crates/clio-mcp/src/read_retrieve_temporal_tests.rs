@@ -75,13 +75,14 @@ const PLAIN_TOP_LEVEL_KEYS: [&str; 11] = [
 
 /// Every serialized key of the seeded snapshot-carrying fact on a no-anchor
 /// call: the shape the parameter must not change.
-const PLAIN_HIT_KEYS: [&str; 12] = [
+const PLAIN_HIT_KEYS: [&str; 13] = [
     "item_id",
     "bank_id",
     "kind",
     "category",
     "epistemic_kind",
     "gist",
+    "gist_unverified",
     "requires_confidence_check",
     "score",
     "scores",
@@ -208,9 +209,8 @@ fn args(extra: &Value) -> Value {
     base
 }
 
-/// A plain call without an anchor keeps the exact top-level and per-hit key
-/// sets it had before the parameter existed: no `temporal_candidates`, no
-/// `temporal_rank`, and no other key that merely names the arm.
+/// A plain call keeps the exact top-level and per-hit key sets it had before
+/// the anchor existed: no `temporal_candidates` and no `temporal_rank`.
 #[test]
 fn a_plain_call_keeps_the_pre_anchor_shape() {
     let state = seeded_state();
