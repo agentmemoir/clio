@@ -155,6 +155,14 @@ pub trait DekProvider: Send + Sync {
 
     /// Destroy the subject's DEK (crypto-shred). Irreversible for that subject.
     ///
+    /// Implementations must be idempotent, or report
+    /// [`clio_types::ErrorCode::ErasedSubject`] for a key that is already
+    /// destroyed: an erasure tolerates a destroy error only when the subject was
+    /// already marked shredded by an earlier attempt and the key then reports
+    /// `ErasedSubject`. No read path consults the shred marker, so reads depend
+    /// on this call; a crash between the marker commit and the destroy leaves
+    /// the content readable until the destroy completes or the retry runs.
+    ///
     /// # Errors
     /// Provider failures.
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError>;

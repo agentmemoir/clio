@@ -10,7 +10,9 @@
 //! ## Owns
 //! - The probe that reads the shred marker from a second connection at the
 //!   destroy call
-//! - The refused-destroy retry scenario and its marker and tombstone claims
+//! - The refused-destroy and failed-destroy scenarios and their marker and
+//!   tombstone claims, including which attempts may read a destroy error as a
+//!   retry
 //!
 //! ## Does not own
 //! - The erasure transaction under test (`sqlite_erase`)
@@ -63,13 +65,16 @@ impl Drop for Scratch {
 /// With `store_path` set, the destroy reads the subject's shred marker from a
 /// second connection on that file and checks it is already committed: under an
 /// ordering that destroys the key before the marker commits, the marker is not
-/// yet visible to another connection. With `refuse_once` set, the first
-/// destroy fails without destroying the key, which is the shape of a provider
-/// that refuses a second destroy after a crash.
+/// yet visible to another connection. With `refuse_once` set, the next destroy
+/// fails without destroying the key, which is the shape of a provider that
+/// refuses a second destroy after a crash. `fail_after` names the 1-based call
+/// whose destroy runs and then reports a failure, the shape of a provider that
+/// destroys the key and then loses the acknowledgement.
 struct DestroyWindow {
     inner: Arc<dyn DekProvider>,
     store_path: Option<PathBuf>,
     refuse_once: AtomicBool,
+    fail_after: AtomicUsize,
     destroy_calls: AtomicUsize,
 }
 
@@ -79,6 +84,7 @@ impl DestroyWindow {
             inner: local_kms(),
             store_path: Some(path.to_path_buf()),
             refuse_once: AtomicBool::new(false),
+            fail_after: AtomicUsize::new(0),
             destroy_calls: AtomicUsize::new(0),
         })
     }
@@ -88,6 +94,20 @@ impl DestroyWindow {
             inner: local_kms(),
             store_path: None,
             refuse_once: AtomicBool::new(true),
+            fail_after: AtomicUsize::new(0),
+            destroy_calls: AtomicUsize::new(0),
+        })
+    }
+
+    /// A destroy that refuses without destroying until its `fail_on_call`-th
+    /// call, then destroys the key and reports a failure; later calls succeed.
+    /// Call 1 is a first attempt, call 2 a retry over the committed marker.
+    fn failing_after_once(fail_on_call: usize) -> Arc<Self> {
+        Arc::new(Self {
+            inner: local_kms(),
+            store_path: None,
+            refuse_once: AtomicBool::new(fail_on_call > 1),
+            fail_after: AtomicUsize::new(fail_on_call),
             destroy_calls: AtomicUsize::new(0),
         })
     }
@@ -119,7 +139,7 @@ impl DekProvider for DestroyWindow {
     }
 
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError> {
-        self.destroy_calls.fetch_add(1, Ordering::SeqCst);
+        let call = self.destroy_calls.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(path) = &self.store_path {
             // The marker must be durable before this irreversible call, so a
             // crash cannot leave a destroyed key with no marker behind it. The
@@ -150,7 +170,14 @@ impl DekProvider for DestroyWindow {
                 "the provider refused this destroy",
             ));
         }
-        self.inner.destroy_dek(subject_id)
+        self.inner.destroy_dek(subject_id)?;
+        if call == self.fail_after.load(Ordering::SeqCst) {
+            return Err(AmError::new(
+                ErrorCode::Internal,
+                "the provider failed after destroying the key",
+            ));
+        }
+        Ok(())
     }
 
     fn diagnose_masked(&self, subject_id: &str) -> String {
@@ -246,4 +273,96 @@ fn sqlite_a_refused_destroy_leaves_the_subject_closed_and_the_request_retryable(
             .is_none(),
         "the refused write left no item row"
     );
+}
+
+/// A first attempt whose destroy destroys the key and then reports a failure
+/// must not be read as a retry: the marker was not shredded when the attempt
+/// began, so the error surfaces, and only the next attempt completes the
+/// erasure.
+#[test]
+fn sqlite_a_first_attempt_does_not_tolerate_a_destroy_error() {
+    let window = DestroyWindow::failing_after_once(1);
+    let store =
+        SqliteStore::open_in_memory(window.as_provider()).expect("open the in-memory store");
+    let bank = unique("crash-bank");
+    let subject = unique("crash-subject");
+    seed(&store, &bank, &subject);
+    let request = unique("crash-request");
+
+    let err = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect_err("a first-attempt destroy error fails the erasure");
+    assert_eq!(err.code, ErrorCode::Internal, "{err:?}");
+    assert_eq!(
+        window.destroy_calls.load(Ordering::SeqCst),
+        1,
+        "the destroy was attempted once"
+    );
+    // The marker committed before the failed destroy, so the subject is
+    // closed for writes, and the failure kept the ledger empty.
+    assert!(store.subject_is_shredded(&subject).unwrap());
+    assert!(
+        store.read_tombstones(&bank, &request).unwrap().is_empty(),
+        "the failed attempt writes no tombstone"
+    );
+
+    // The marker is shredded now and the key is gone, so this attempt is the
+    // retry the tolerance exists for, even though the destroy reports Ok.
+    let outcome = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect("the retried erasure completes");
+    assert_eq!(outcome.tombstones_written, 2, "{outcome:?}");
+    assert_eq!(
+        window.destroy_calls.load(Ordering::SeqCst),
+        2,
+        "the retry attempts the destroy again"
+    );
+    assert!(store.subject_dek_destroyed(&subject).unwrap());
+    assert_eq!(store.read_tombstones(&bank, &request).unwrap().len(), 2);
+}
+
+/// A retry that meets a destroy error over the marker an earlier attempt
+/// committed belongs to the same erasure, so it completes: the key is gone and
+/// the tombstones land.
+#[test]
+fn sqlite_a_retry_tolerates_a_destroy_error_over_the_committed_marker() {
+    // The first attempt refuses before destroying; the second destroys the key
+    // and then reports a failure.
+    let window = DestroyWindow::failing_after_once(2);
+    let store =
+        SqliteStore::open_in_memory(window.as_provider()).expect("open the in-memory store");
+    let bank = unique("crash-bank");
+    let subject = unique("crash-subject");
+    seed(&store, &bank, &subject);
+    let request = unique("crash-request");
+
+    let err = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect_err("a refused destroy fails the erasure");
+    assert_eq!(err.code, ErrorCode::Internal, "{err:?}");
+    assert_eq!(
+        window.destroy_calls.load(Ordering::SeqCst),
+        1,
+        "the destroy was attempted once"
+    );
+    assert!(store.subject_is_shredded(&subject).unwrap());
+    assert!(!store.subject_dek_destroyed(&subject).unwrap());
+    assert!(
+        store.read_tombstones(&bank, &request).unwrap().is_empty(),
+        "the failed attempt writes no tombstone"
+    );
+
+    // The marker was already shredded by the first attempt, so the destroy
+    // error cannot hide a first-attempt failure and the erasure completes.
+    let outcome = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect("the retry completes although the destroy reported an error");
+    assert_eq!(outcome.tombstones_written, 2, "{outcome:?}");
+    assert_eq!(
+        window.destroy_calls.load(Ordering::SeqCst),
+        2,
+        "the retry attempted the destroy again"
+    );
+    assert!(store.subject_dek_destroyed(&subject).unwrap());
+    assert_eq!(store.read_tombstones(&bank, &request).unwrap().len(), 2);
 }

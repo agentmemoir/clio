@@ -220,15 +220,19 @@ fn erase_subject_tx(
     let tx = conn.transaction().am("erase begin")?;
     let items = select_items(&tx, spec.bank_id, spec.subject_id)?;
     let subject_banks = select_subject_banks(&tx, spec.subject_id)?;
-    let key_exists = tx
+    let key_row = tx
         .query_row(
-            "SELECT 1 FROM subject_keys WHERE subject_id = ?1",
+            "SELECT shredded_at IS NOT NULL FROM subject_keys WHERE subject_id = ?1",
             params![spec.subject_id],
             |r| r.get::<_, i64>(0),
         )
         .optional()
-        .am("erase key check")?
-        .is_some();
+        .am("erase key check")?;
+    let key_exists = key_row.is_some();
+    // A marker already marked shredded belongs to an earlier attempt of this
+    // erasure, so only that retry may read a destroy error as "the key is
+    // already gone". A missing row means false: this is a first attempt.
+    let already_shredded = key_row.is_some_and(|shredded| shredded != 0);
     // Persona context is bank-scoped and carries no subject
     // attribution: when the subject has neither items nor a key, its
     // bank's persona context rows are still erasable content (fail
@@ -292,13 +296,14 @@ fn erase_subject_tx(
     tx.commit().am("erase purge commit")?;
 
     // A retry that reaches this point after a crash can meet a KMS that refuses
-    // to destroy an already destroyed key, so the destroy error is tolerated
-    // only when the probe still proves the key is gone.
+    // to destroy an already destroyed key, so a destroy error is tolerated only
+    // when an earlier attempt of this erasure already marked the subject
+    // shredded and the probe proves the key is gone.
     let destroyed = store.kms.destroy_dek(spec.subject_id);
     let probe = store.kms.ensure_dek(spec.subject_id);
     let key_gone = matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject);
     if let Err(err) = destroyed {
-        if !key_gone {
+        if !(already_shredded && key_gone) {
             return Err(err);
         }
     } else if !key_gone {
