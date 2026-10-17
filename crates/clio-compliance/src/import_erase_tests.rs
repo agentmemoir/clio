@@ -42,7 +42,7 @@ fn ciphertext_backup_import_rejects_erased_subject() {
     h.store
         .create_memory_item(&seed, "test")
         .expect("seed subject before erasure");
-    let salt = [19; 16];
+    let salt = rand::random::<[u8; 16]>();
     h.store
         .erase_subject(&SubjectEraseSpec {
             bank_id: &h.bank,
