@@ -164,6 +164,7 @@ fn spawn_http_session_server() -> SocketAddr {
     std::thread::spawn(move || {
         let cfg = clio_mcp::http::HttpConfig {
             sessions_enabled: true,
+            insecure_no_auth: true,
             ..clio_mcp::http::HttpConfig::default()
         };
         let _ = clio_mcp::http::serve_with_listener(state, cfg, listener);

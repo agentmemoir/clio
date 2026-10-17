@@ -38,8 +38,8 @@ use std::time::{Duration, Instant};
 /// Generous trigger ceilings, in milliseconds, one per measurement.
 pub struct TriggerBounds {
     /// One sweeper-side trigger tick (`evaluate_maintenance_trigger`) over
-    /// the fixture's banks: the bank list, three pressure reads per bank, and
-    /// the decision.
+    /// the fixture's active banks: three pressure reads per bank, and the
+    /// decision.
     pub trigger_tick: f64,
     /// One fired maintenance wave: `refresh_bank` plus the budgeted hub wave.
     pub trigger_wave: f64,
@@ -147,6 +147,11 @@ pub fn run(backend: &str, fx: &Fixture, bounds: &TriggerBounds) {
     let state: &McpState = &fx.state;
     let budget =
         usize::try_from(state.env.maintenance_triggers.hub_budget_per_wave).unwrap_or(usize::MAX);
+    // Mark the fixture's banks active, as the runtime's per-call resolution
+    // does, so a timed tick evaluates all of them and not only the default.
+    for bank in &fx.banks {
+        state.maintenance_trigger.note_bank(bank);
+    }
 
     // One fired wave with real work in front of it, as two cold one-shot
     // samples plus a derived total: a wave's fresh work cannot be warmed up
@@ -213,9 +218,9 @@ pub fn run(backend: &str, fx: &Fixture, bounds: &TriggerBounds) {
         bounds.trigger_tick,
     );
 
-    // The declined ticks: the steady state between waves. Each one still
-    // reads the bank list and all three pressure sources for every watched
-    // bank, so this is the per-cycle cost the trigger cadence pays.
+    // The declined ticks: the steady state between waves. Each one still reads
+    // all three pressure sources for every active bank, so this is the
+    // per-cycle cost the trigger cadence pays.
     let tick = time(|| {
         state.evaluate_maintenance_trigger(Instant::now());
         0

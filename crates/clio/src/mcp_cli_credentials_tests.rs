@@ -25,14 +25,17 @@
 //!
 //! Keep this module focused on the credential-store load.
 
-use super::tests::{Scratch, absent_path, config_with, flags_of, lookup, record, token_file};
+use crate::mcp_cli::tests::{Scratch, absent_path, config_with, flags_of, lookup, record, token_file};
 use super::*;
 
 #[test]
-fn an_absent_token_file_flag_keeps_the_credential_free_default() {
+fn an_absent_token_file_flag_loads_no_store() {
     let store =
         load_http_credentials(&flags_of(&["--sessions"]), &lookup(&[])).expect("no flag is fine");
-    assert!(store.is_none(), "no flag must not name a store");
+    assert!(
+        store.is_none(),
+        "no flag names no store; the loopback token is minted by the caller"
+    );
 }
 
 #[test]
