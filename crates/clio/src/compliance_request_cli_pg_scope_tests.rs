@@ -245,8 +245,8 @@ fn begin_peer_row(state: &McpState, request_id: &str, peer: &str) {
         .expect("begin peer row");
 }
 
-/// the refusal arm on Postgres: a scope that does not cover every bank sharing the
-/// subject key refuses through the CLI before the intent or any effect.
+/// The same refusal on Postgres: a scope that does not cover every bank sharing
+/// the subject key refuses through the CLI before the intent or any effect.
 #[test]
 fn compliance_cli_pg_partial_bank_scope_refuses_before_effects() {
     let fixture = PgFixture::open();
@@ -275,9 +275,9 @@ fn compliance_cli_pg_partial_bank_scope_refuses_before_effects() {
     );
 }
 
-/// the acceptance arm on Postgres: the exact authorized scope with an offline peer
-/// runs the effect but stays pending; status, retry, and peer-disposition use
-/// the same request.
+/// The same pending-offline-peer behavior on Postgres: the exact authorized
+/// scope with an offline peer runs the effect but stays pending; status, retry,
+/// and peer-disposition use the same request.
 #[test]
 fn compliance_cli_pg_authorized_scope_with_offline_peer_stays_pending() {
     let fixture = PgFixture::open();

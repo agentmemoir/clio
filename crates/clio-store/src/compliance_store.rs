@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - `ComplianceStore` trait and its request/outcome types
+//! - `BankScopeStore` trait (the live erasure bank set) and its test module
 //! - The atomic purge + tombstone transaction contract (backend SQL per driver)
 //! - Shared erasure input validation and the per-item purge record type
 //!

@@ -57,6 +57,17 @@ fn start_def() -> ToolDef {
                 "subject_id",
                 s("One data subject; omit for a whole-bank scope."),
             ),
+            (
+                "verification",
+                en(
+                    "Operator identity-verification decision; omit when none is recorded.",
+                    &["verified", "unverified"],
+                ),
+            ),
+            (
+                "deadline",
+                s("Operator-supplied deadline, recorded as given; omit when none."),
+            ),
         ]),
     }
 }

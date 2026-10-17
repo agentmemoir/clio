@@ -53,6 +53,7 @@ mod erasure_journal;
 mod erasure_journal_file;
 mod erasure_reconcile;
 mod erasure_retry;
+mod erasure_step_probe;
 mod export;
 mod export_custody;
 mod export_mask;
@@ -76,6 +77,7 @@ mod subject_request_manifest;
 mod subject_request_report;
 pub mod subject_request_service;
 pub mod subject_request_store_wiring;
+mod subject_request_transition;
 mod validate;
 
 pub use action_event_log::{ActionEventLog, RecordOutcome};

@@ -74,13 +74,11 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// The shared `CLIO_DATABASE_URL` when it names Postgres, else the loopback
-/// Postgres the test environment exposes under the shared lock.
-pub fn database_url() -> String {
-    match std::env::var("CLIO_DATABASE_URL") {
-        Ok(url) if url.starts_with("postgres://") || url.starts_with("postgresql://") => url,
-        _ => "postgres://clio:clio@127.0.0.1:34310/clio".to_owned(),
-    }
+/// The shared `CLIO_DATABASE_URL`, but only when it points at a Postgres
+/// backend. Any other value (unset, SQLite) makes the caller return early.
+pub fn postgres_url() -> Option<String> {
+    let url = std::env::var("CLIO_DATABASE_URL").ok()?;
+    (url.starts_with("postgres://") || url.starts_with("postgresql://")).then_some(url)
 }
 
 /// Open a Postgres state over `url`, with `kms` as its persistent key store.
@@ -112,22 +110,25 @@ pub struct PgFixture {
 }
 
 impl PgFixture {
-    /// Open the live private-schema fixture under the shared Postgres lock.
-    pub fn open() -> Self {
+    /// Open the live private-schema fixture under the shared Postgres lock, or
+    /// `None` when no Postgres `CLIO_DATABASE_URL` is configured so the caller
+    /// returns early instead of failing.
+    pub fn open() -> Option<Self> {
+        let url = postgres_url()?;
         let guard = clio_store::lock_pg_test();
-        let schema = clio_store::ScopedSchema::new(&database_url());
+        let schema = clio_store::ScopedSchema::new(&url);
         let url = schema.url().to_owned();
         let dir = scratch_dir("pg-kms");
         let kms = dir.join("clio.kms.json");
         let state = open_pg_state(&url, &kms);
-        Self {
+        Some(Self {
             state,
             url,
             kms,
             dir,
             _schema: schema,
             _guard: guard,
-        }
+        })
     }
 
     /// Open a second state over the same private schema and key store, a
