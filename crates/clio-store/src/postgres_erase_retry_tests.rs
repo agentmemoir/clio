@@ -37,11 +37,10 @@ use crate::erase_test_support::{assert_erased, memory_item, seed, spec, unique};
 use crate::migrate::IntoAmError;
 use crate::pg_lock::{PgTestGuard, lock_pg_test};
 use crate::pg_scoped_schema::ScopedSchema;
-use crate::pg_skip::pg_skip_note;
 use crate::postgres::PostgresStore;
 use crate::store::Store;
 use crate::sync_store::SyncStore;
-use clio_types::ErrorCode;
+use clio_types::{AmError, ErrorCode};
 use std::sync::Arc;
 
 /// Every `subject_keys` row for one subject as `(status, dek_ref, shredded_at)`,
@@ -90,19 +89,12 @@ pub(crate) fn second_store(scoped: &ScopedSchema, kms: &Arc<dyn DekProvider>) ->
     PostgresStore::open(scoped.url(), Arc::clone(kms)).expect("open second scoped store")
 }
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-fn skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
-}
-
 /// Probe the shared server and build a private-schema environment.
 ///
 /// `None` only when the operator opted out in `CLIO_SKIP_PG_TESTS`, so a run
 /// without Postgres stays green; otherwise an unreachable server panics so the
-/// suite cannot pass with zero assertions.
+/// suite cannot pass with zero assertions. Both the probe and the open report
+/// through the shared fail-closed helper, which owns the opt-out read.
 pub(crate) fn open_pg() -> Option<PgEnv> {
     open_pg_with(|_, kms| kms)
 }
@@ -117,11 +109,11 @@ pub(crate) fn open_pg_with(
     let guard = lock_pg_test();
     let base = postgres_url_from_env();
     if let Err(err) = crate::probe_postgres(&base) {
-        if skip_requested() {
-            eprintln!("skipping postgres erasure tests: shared Postgres unreachable");
-            return None;
-        }
-        panic!("postgres erasure tests require a reachable Postgres: {err}");
+        crate::pg_skip::unreachable_pg_or_skip(
+            "postgres erasure tests",
+            &AmError::new(ErrorCode::Internal, err),
+        );
+        return None;
     }
     let scoped = ScopedSchema::new(&base);
     let fixture_kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
@@ -133,11 +125,10 @@ pub(crate) fn open_pg_with(
             kms,
             _guard: guard,
         }),
-        Err(err) if skip_requested() => {
-            eprintln!("{}", pg_skip_note("postgres erasure tests", &err));
+        Err(err) => {
+            crate::pg_skip::unreachable_pg_or_skip("postgres erasure tests", &err);
             None
         }
-        Err(err) => panic!("postgres erasure tests cannot open the store: {err}"),
     }
 }
 
