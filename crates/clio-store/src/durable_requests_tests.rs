@@ -29,6 +29,7 @@
 
 use crate::durable_requests::{DurableRequestRow, DurableRequestStore};
 use crate::erase_test_support::local_kms;
+use crate::migrate::IntoAmError;
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode};
 
@@ -275,6 +276,60 @@ fn two_writers_racing_on_one_id_leave_one_winner() {
     );
 }
 
+/// The six request columns a converged table holds, in DDL order.
+fn expected_columns() -> Vec<String> {
+    ["request_id", "kind", "state", "scope", "deadline", "record"]
+        .iter()
+        .map(|column| (*column).to_owned())
+        .collect()
+}
+
+/// The `durable_requests` columns, in the table's own order.
+fn columns(store: &SqliteStore) -> Vec<String> {
+    store
+        .with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(durable_requests)")
+                .am("durable request table_info")?;
+            let names = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .am("durable request table_info rows")?
+                .collect::<Result<Vec<_>, _>>()
+                .am("durable request table_info rows")?;
+            Ok(names)
+        })
+        .expect("read the durable_requests columns")
+}
+
+/// The `durable_requests` index names.
+fn index_names(store: &SqliteStore) -> Vec<String> {
+    store
+        .with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("PRAGMA index_list(durable_requests)")
+                .am("durable request index list")?;
+            let names = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .am("durable request index list rows")?
+                .collect::<Result<Vec<_>, _>>()
+                .am("durable request index list rows")?;
+            Ok(names)
+        })
+        .expect("read the durable_requests indexes")
+}
+
+/// The row count of `durable_requests`.
+fn row_count(store: &SqliteStore) -> i64 {
+    store
+        .with_conn(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM durable_requests", [], |row| {
+                row.get(0)
+            })
+            .am("count the durable request rows")
+        })
+        .expect("count the durable request rows")
+}
+
 /// A database created under the single-key placeholder shape still saves and
 /// loads: the first use converges the stale table onto the request columns.
 #[test]
@@ -283,8 +338,11 @@ fn a_pre_existing_placeholder_table_converges_on_first_use() {
     let path = scratch.0.join("store.db");
     {
         let raw = rusqlite::Connection::open(&path).expect("raw open");
-        raw.execute_batch("CREATE TABLE durable_requests (id text PRIMARY KEY);")
-            .expect("the old single-key shape");
+        raw.execute_batch(
+            "CREATE TABLE durable_requests (id text PRIMARY KEY);
+             INSERT INTO durable_requests VALUES ('legacy');",
+        )
+        .expect("the old single-key shape");
     }
     let store = SqliteStore::open(&path, local_kms()).expect("open a pre-existing store");
     want(
@@ -313,6 +371,69 @@ fn a_pre_existing_placeholder_table_converges_on_first_use() {
         reopened.load_all().expect("load all"),
         vec![row("req-1", BANK_SCOPE)],
         "one converged row, unchanged"
+    );
+    let repaired = columns(&reopened);
+    assert_eq!(
+        repaired,
+        expected_columns(),
+        "the rebuilt table holds exactly the request columns, in DDL order"
+    );
+    assert!(
+        !repaired.iter().any(|name| name == "id"),
+        "the legacy key is gone: {repaired:?}"
+    );
+    assert!(
+        index_names(&reopened)
+            .iter()
+            .any(|name| name == "durable_requests_request_id_uidx"),
+        "the converged table backs the request-id index"
+    );
+    assert_eq!(
+        row_count(&reopened),
+        1,
+        "the row that carries no request is gone and only the saved row is left"
+    );
+}
+
+/// Only a row whose six request columns are all NULL is removed. A row that
+/// already holds a request value is copied, so the repair never deletes one.
+#[test]
+fn a_placeholder_row_with_a_request_value_is_kept() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("store.db");
+    {
+        let raw = rusqlite::Connection::open(&path).expect("raw open");
+        raw.execute_batch(
+            "CREATE TABLE durable_requests (id text PRIMARY KEY);
+             ALTER TABLE durable_requests ADD COLUMN request_id text;
+             INSERT INTO durable_requests (id, request_id) VALUES ('legacy', 'req-kept');",
+        )
+        .expect("the placeholder rows");
+    }
+    let store = SqliteStore::open(&path, local_kms()).expect("open a pre-existing store");
+    assert_eq!(
+        store.load("absent").expect("converge"),
+        None,
+        "the read converges the table"
+    );
+    assert_eq!(row_count(&store), 1, "the row with a request value is kept");
+    let kept: Option<String> = store
+        .with_conn(|conn| {
+            conn.query_row("SELECT request_id FROM durable_requests", [], |row| {
+                row.get(0)
+            })
+            .am("read the kept row")
+        })
+        .expect("read the kept row");
+    assert_eq!(
+        kept.as_deref(),
+        Some("req-kept"),
+        "the copied request value round-trips"
+    );
+    assert_eq!(
+        columns(&store),
+        expected_columns(),
+        "the rebuilt table holds exactly the request columns, in DDL order"
     );
 }
 
