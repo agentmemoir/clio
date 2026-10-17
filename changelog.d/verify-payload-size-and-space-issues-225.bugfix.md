@@ -1,0 +1,1 @@
+Archive verification refuses a payload member whose tar header size disagrees with the manifest's recorded bytes before inflating it, and checks free space in the staging directory before staging, so a crafted archive can no longer exhaust the host's disk.
