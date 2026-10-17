@@ -177,10 +177,9 @@ impl ComplianceStore for PostgresStore {
             // no advisory lock of its own.
             tx.commit().am("erase purge commit")?;
 
-            // A retry that reaches this point after a crash can meet a KMS that
-            // refuses to destroy an already destroyed key, so a destroy error is
-            // tolerated only when an earlier attempt of this erasure already
-            // marked the subject shredded and the probe proves the key is gone.
+            // A KMS may refuse an already destroyed key, so a destroy error is
+            // tolerated only when the subject was marked shredded by an earlier
+            // attempt or by another bank's erasure, and the probe finds no key.
             let destroyed = self.kms.destroy_dek(spec.subject_id);
             let probe = self.kms.ensure_dek(spec.subject_id);
             let key_gone = matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject);

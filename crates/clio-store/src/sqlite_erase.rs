@@ -295,10 +295,9 @@ fn erase_subject_tx(
     // for writes instead of leaving a destroyed key and no marker.
     tx.commit().am("erase purge commit")?;
 
-    // A retry that reaches this point after a crash can meet a KMS that refuses
-    // to destroy an already destroyed key, so a destroy error is tolerated only
-    // when an earlier attempt of this erasure already marked the subject
-    // shredded and the probe proves the key is gone.
+    // A KMS may refuse an already destroyed key, so a destroy error is
+    // tolerated only when the subject was marked shredded by an earlier
+    // attempt or by another bank's erasure, and the probe finds no key.
     let destroyed = store.kms.destroy_dek(spec.subject_id);
     let probe = store.kms.ensure_dek(spec.subject_id);
     let key_gone = matches!(&probe, Err(e) if e.code == ErrorCode::ErasedSubject);
