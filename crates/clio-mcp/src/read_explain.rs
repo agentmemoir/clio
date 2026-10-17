@@ -97,7 +97,7 @@ pub const CONTENT_EXCLUDED_HIT_KEYS: [&str; 4] = ["gist", "context", "entities",
 /// `scores` is the whole nested score object, so `scores.trust_factor` and
 /// every other nested key are covered by that one entry and are not classified
 /// separately.
-pub const SAFE_EXCLUDED_HIT_KEYS: [&str; 12] = [
+pub const SAFE_EXCLUDED_HIT_KEYS: [&str; 13] = [
     "bank_id",
     "kind",
     "category",
@@ -106,6 +106,7 @@ pub const SAFE_EXCLUDED_HIT_KEYS: [&str; 12] = [
     "source_type",
     "confidence",
     "requires_confidence_check",
+    "gist_unverified",
     "scores",
     "snapshot_ref",
     "entity_match",

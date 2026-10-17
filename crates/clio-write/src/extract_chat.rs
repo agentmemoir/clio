@@ -34,7 +34,7 @@
 
 use crate::extract::{ExtractCandidate, ExtractRequest, Extractor, Transport};
 use clio_config::secret::{masked_clone, scrub_inline_secrets};
-use clio_types::{AmError, ErrorCode};
+use clio_types::{AmError, ErrorCode, validate_gist};
 use serde_json::{Value, json};
 
 /// Cap on the assistant-message content the validator will accept.
@@ -224,6 +224,9 @@ pub fn parse_chat_response(resp: &Value) -> Result<ExtractCandidate, AmError> {
         Some(Value::String(s)) => Some(s.clone()),
         Some(_) => return Err(bad("chat extract gist must be a string")),
     };
+    if let Some(gist) = &gist {
+        validate_gist(gist)?;
+    }
     let diagnostic = parsed.get("diagnostic").cloned().filter(|d| !d.is_null());
     let source_ref = parsed
         .get("source_ref")

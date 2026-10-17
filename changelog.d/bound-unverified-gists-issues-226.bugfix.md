@@ -1,0 +1,1 @@
+A stored item refuses a gist longer than 250 characters on every write path, including extraction, direct adds, and distillation, and each retrieval hit marks a present gist as unverified summary prose, so an agent can tell it apart from a span-verified fact.
