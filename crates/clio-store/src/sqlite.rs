@@ -105,7 +105,7 @@ impl SqliteStore {
         Self::from_connection(conn, kms)
     }
 
-    fn from_connection(conn: Connection, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
+    fn from_connection(mut conn: Connection, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
         // Validate the MemTree table shape BEFORE core DDL stamps schema_version:
         // a refused reshape must never leave version metadata ahead of the real schema.
         crate::memtree_schema::ensure_memtree_shape_sqlite(&conn)?;
@@ -124,7 +124,7 @@ impl SqliteStore {
         // The local-event table convergence must run BEFORE portable DDL: an
         // existing placeholder table lacks the columns the event writer names,
         // and the slot DDL only declares a fresh table.
-        crate::local_events_converge::converge_sqlite(&conn)?;
+        crate::local_events_converge::converge_sqlite(&mut conn)?;
         let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;
