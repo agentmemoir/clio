@@ -33,26 +33,24 @@ use crate::pg_lock::lock_pg_test;
 /// statement the server must refuse, and reading a table that does not exist
 /// needs no setup at all: it fails before it can touch a row, so it cannot
 /// disturb the rows another test owns even though they share one database.
-fn servers_own_refusal() -> AmError {
+///
+/// `None` means the fail-closed skip line ran under `CLIO_SKIP_PG_TESTS`; the
+/// caller returns without asserting. Without the opt-out an unreachable server
+/// fails the suite.
+fn servers_own_refusal() -> Option<AmError> {
     let _guard = lock_pg_test();
     let url = postgres_url_or_default(std::env::var("CLIO_DATABASE_URL"));
     let mut client = match crate::pg_tls::connect(&url) {
         Ok(client) => client,
-        // No server means the mapping was never reached, so there is nothing to
-        // assert. Printing the error rather than the URL keeps any credential in
-        // `CLIO_DATABASE_URL` out of the log.
         Err(error) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("driver error reason", &error)
-            );
-            return AmError::new(ErrorCode::NotImplemented, "no postgres to ask");
+            crate::pg_skip::unreachable_pg_or_skip("driver error reason", &error);
+            return None;
         }
     };
     let error = client
         .query_one("SELECT 1 FROM a_table_that_does_not_exist", &[])
         .expect_err("a missing table must be refused");
-    map_db_err("probe", error)
+    Some(map_db_err("probe", error))
 }
 
 /// Regression cover for issue #63: the mapping took the driver's `Display`,
@@ -62,10 +60,9 @@ fn servers_own_refusal() -> AmError {
 /// and the `HINT` were all dropped.
 #[test]
 fn a_server_refusal_reaches_the_operator_with_the_servers_reason() {
-    let error = servers_own_refusal();
-    if error.code == ErrorCode::NotImplemented {
-        return; // no Postgres on this host; nothing was exercised
-    }
+    let Some(error) = servers_own_refusal() else {
+        return; // explicit CLIO_SKIP_PG_TESTS opt-out only
+    };
     let message = &error.message;
     assert!(
         !message.ends_with("db error"),
