@@ -173,3 +173,7 @@ pub(crate) fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> 
 #[cfg(test)]
 #[path = "local_events_converge_tests.rs"]
 mod local_events_converge_tests;
+
+#[cfg(test)]
+#[path = "local_events_converge_pg_tests.rs"]
+mod local_events_converge_pg_tests;
