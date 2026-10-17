@@ -33,6 +33,11 @@ use std::path::Path;
 ///
 /// `PATH` is deliberately absent. The check is a gate, so the program that
 /// answers it is fixed here rather than searched for.
+///
+/// The restore pre-flight in `clio-store` (`restore_space`) holds the same
+/// path list and report parser. The copy stays here so the backup container
+/// crate does not depend on the store crate; keep the two in step, and change
+/// both when a host layout or the report shape changes.
 const DF_PATHS: [&str; 4] = ["/bin/df", "/usr/bin/df", "/usr/sbin/df", "/sbin/df"];
 
 /// Refuse when `dir` cannot hold `bytes` of payload.
