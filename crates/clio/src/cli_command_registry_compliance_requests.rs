@@ -54,6 +54,17 @@ const REQUEST_SUBJECT: Flag = Flag::text(
     "SUBJECT",
     "The covered data subject; omit for a whole bank.",
 );
+const REQUEST_VERIFICATION: Flag = Flag::choice(
+    "verification",
+    "verified|unverified",
+    "The operator identity-verification decision; omit when none is recorded.",
+    &["verified", "unverified"],
+);
+const REQUEST_DEADLINE: Flag = Flag::text(
+    "deadline",
+    "TIME",
+    "The operator-supplied deadline, recorded as given; omit when none.",
+);
 const REQUEST_BASIS: Flag =
     Flag::text("legal-basis", "BASIS", "The legal basis a request records.");
 const RETRY_SUBJECT: Flag = Flag {
@@ -186,6 +197,8 @@ pub(crate) const COMPLIANCE_REQUEST_START: CommandSpec = request_spec(
         REQUEST_ID,
         REQUEST_KIND,
         REQUEST_SUBJECT,
+        REQUEST_VERIFICATION,
+        REQUEST_DEADLINE,
         GLOBAL_BANK,
         GLOBAL_ACTOR,
         GLOBAL_OUTPUT,

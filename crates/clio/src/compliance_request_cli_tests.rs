@@ -220,3 +220,56 @@ fn compliance_request_start_then_status_reports_the_separated_fields() {
         "{text}"
     );
 }
+
+/// `request-start` round-trips the operator verification decision and the
+/// optional deadline, and the stored terms are reported by start and status.
+#[test]
+fn compliance_request_start_records_verification_and_deadline() {
+    let s = state();
+    let (code, out, err) = run_injected(
+        "request-start",
+        &[
+            "--request-id",
+            "r-terms",
+            "--kind",
+            "erasure",
+            "--verification",
+            "verified",
+            "--deadline",
+            "2026-03-01T00:00:00Z",
+            "-o",
+            "json",
+        ],
+        &s,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let started = json_of(&out);
+    assert_eq!(
+        started["verification"],
+        serde_json::json!("verified"),
+        "{started}"
+    );
+    assert_eq!(
+        started["deadline"],
+        serde_json::json!("2026-03-01T00:00:00Z"),
+        "{started}"
+    );
+
+    let (code, out, err) = run_injected(
+        "request-status",
+        &["--request-id", "r-terms", "-o", "json"],
+        &s,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let reported = json_of(&out);
+    assert_eq!(
+        reported["verification"],
+        serde_json::json!("verified"),
+        "{reported}"
+    );
+    assert_eq!(
+        reported["deadline"],
+        serde_json::json!("2026-03-01T00:00:00Z"),
+        "{reported}"
+    );
+}

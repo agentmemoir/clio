@@ -30,11 +30,11 @@
 
 use crate::read_tools::opt_usize;
 use crate::runtime::{McpState, StderrSinks};
-use crate::write_tools::{opt_bool, opt_str, req_str};
+use crate::write_tools::{opt_bool, opt_str, req_str, strict_opt_str};
 use clio_compliance::subject_request_service as svc;
 use clio_compliance::{
     DEFAULT_REVIEW_LIMIT, EraseArgs, ErasureRetryEnv, JournalHold, PeerEnablement, RequestKind,
-    RequestScope, SubjectRequestEnv, tombstone_salt,
+    RequestScope, SubjectRequestEnv, VerificationResult, tombstone_salt,
 };
 use clio_store::{CopyInventoryRow, LocalEventState, PeerActionDisposition};
 use clio_types::{AmError, ErrorCode};
@@ -75,6 +75,8 @@ fn start(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let request_id = req_str(args, "request_id")?;
     let kind = parse_kind(req_str(args, "kind")?)?;
     let scope = request_scope(&ctx, args);
+    let verification = parse_verification(strict_opt_str(args, "verification")?)?;
+    let deadline = strict_opt_str(args, "deadline")?.map(str::to_owned);
     let (enablement, peers, banks) = deployment_enablement(state)?;
     let peer_refs: Vec<&str> = peers.iter().map(String::as_str).collect();
     let bank_refs: Vec<&str> = banks.iter().map(String::as_str).collect();
@@ -87,6 +89,8 @@ fn start(state: &McpState, args: &Value) -> Result<Value, AmError> {
         enablement,
         &peer_refs,
         &bank_refs,
+        verification,
+        deadline,
     )?;
     Ok(serde_json::to_value(&report).expect("serialize request report"))
 }
@@ -108,7 +112,7 @@ fn retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
     if !confirm {
         return Err(AmError::new(
             ErrorCode::Forbidden,
-            "erase_request requires confirm=true; unconfirmed calls never mutate",
+            "subject_request_retry requires confirm=true; unconfirmed calls never mutate",
         ));
     }
     let timestamp = state.resolve_timestamp(args);
@@ -307,6 +311,18 @@ fn parse_kind(raw: &str) -> Result<RequestKind, AmError> {
         other => Err(AmError::new(
             ErrorCode::InvalidArgument,
             format!("unknown request kind `{other}`"),
+        )),
+    }
+}
+
+fn parse_verification(raw: Option<&str>) -> Result<Option<VerificationResult>, AmError> {
+    match raw {
+        None => Ok(None),
+        Some("verified") => Ok(Some(VerificationResult::Verified)),
+        Some("unverified") => Ok(Some(VerificationResult::Unverified)),
+        Some(other) => Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("unknown verification result `{other}`"),
         )),
     }
 }

@@ -344,6 +344,8 @@ fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
         enablement,
         &peer_refs,
         &bank_refs,
+        None,
+        None,
     )?;
     let live_banks = state
         .bank_scope

@@ -32,11 +32,11 @@
 
 use crate::erase::EraseArgs;
 use crate::erasure_reconcile::{ErasureRetryEnv, reconcile_erasure_actions};
-use crate::local_review::{LocalReviewPage, LocalReviewQuery, review_local_events};
+use crate::local_review::{LocalReviewPage, LocalReviewQuery, authorize, review_local_events};
 use crate::subject_peer::{derived_peer_states, record_disposition, snapshot_peers};
 use crate::subject_request::{
     PeerEnablement, PeerState, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
-    SubjectRequestLedger, SubjectRequestRecord,
+    SubjectRequestLedger, SubjectRequestRecord, VerificationResult,
 };
 use crate::subject_request_events::{ClosureBlock, accept_closure};
 use crate::subject_request_report::report_of;
@@ -70,7 +70,10 @@ pub struct SubjectRequestEnv<'a> {
 }
 
 /// Open a request, or replay its stored result, then report it.
-// Eight inputs mirror the bound scope and peer set the caller already holds.
+///
+/// The operator's verification decision and optional deadline are recorded on
+/// a new request; a replayed id keeps its stored terms.
+// Ten inputs mirror the bound scope, peer set, and terms the caller holds.
 #[allow(clippy::too_many_arguments)]
 pub fn open(
     env: &SubjectRequestEnv<'_>,
@@ -81,10 +84,20 @@ pub fn open(
     enablement: PeerEnablement,
     peers: &[&str],
     peer_banks: &[&str],
+    verification: Option<VerificationResult>,
+    deadline: Option<String>,
 ) -> Result<RequestStatusReport, AmError> {
     let mut ledger = reload_ledger(env.durable)?;
-    let outcome =
-        ledger.register_with_enablement(request_id, kind, scope, enablement, peers, peer_banks)?;
+    let outcome = ledger.register_with_terms(
+        request_id,
+        kind,
+        scope,
+        enablement,
+        peers,
+        peer_banks,
+        verification,
+        deadline,
+    )?;
     save_record(env, &ledger, request_id)?;
     let record = load_record(env, request_id)?;
     snapshot_peers(env.peers, &record)?;
@@ -242,14 +255,18 @@ pub fn peer_report(
 }
 
 /// Record one peer disposition and report the request it names.
+///
+/// Only a harness or system actor may record a peer disposition, the same
+/// privileged-actor gate the copy-disposition path enforces.
 pub fn peer_disposition(
     env: &SubjectRequestEnv<'_>,
-    _ctx: &OpContext,
+    ctx: &OpContext,
     request_id: &str,
     peer_id: &str,
     disposition: PeerActionDisposition,
     proof_ref: Option<&str>,
 ) -> Result<RequestStatusReport, AmError> {
+    authorize(ctx.actor)?;
     record_disposition(env.peers, request_id, peer_id, disposition, proof_ref)?;
     report_of(env, &load_record(env, request_id)?)
 }
@@ -326,3 +343,7 @@ mod subject_request_service_tests;
 #[cfg(test)]
 #[path = "subject_request_service_pg_tests.rs"]
 mod subject_request_service_pg_tests;
+
+#[cfg(test)]
+#[path = "subject_request_service_facade_tests.rs"]
+mod subject_request_service_facade_tests;

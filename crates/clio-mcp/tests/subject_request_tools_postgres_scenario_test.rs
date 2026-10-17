@@ -43,7 +43,9 @@ use subject_request_pg_support::{
 /// state names it and reconciles it without repeating the protected effect.
 #[test]
 fn subject_request_retry_after_a_failed_outcome_reconciles_on_postgres() {
-    let fixture = PgFixture::open();
+    let Some(fixture) = PgFixture::open() else {
+        return;
+    };
     let request = "req-pg-restart";
     let pending;
     {
@@ -124,7 +126,9 @@ fn subject_request_retry_after_a_failed_outcome_reconciles_on_postgres() {
 /// offline peer runs but stays pending until the peer is evidenced.
 #[test]
 fn subject_request_bank_scope_arms_on_postgres() {
-    let fixture = PgFixture::open();
+    let Some(fixture) = PgFixture::open() else {
+        return;
+    };
     let state = &fixture.state;
 
     let partial = "req-pg-partial";

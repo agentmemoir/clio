@@ -169,3 +169,26 @@ fn the_fold_reads_the_durable_rows_not_the_records_peer_slots() {
         Err(ClosureBlock::OpenCopyAction)
     );
 }
+
+/// A frozen peer slot with no durable row folds to an open removal action: a
+/// missing row is never evidence of completion.
+#[test]
+fn a_frozen_peer_with_no_row_folds_to_an_open_action() {
+    let attempt = Attempt::new();
+    let peer = unique("peer-missing");
+    let store = open_sqlite(&attempt.store_path());
+    let record = record_with_peers(&attempt, &[&peer]);
+    persist(&store, &record);
+    let rows = store.load_for_request(&attempt.request_id).expect("list");
+    assert!(rows.is_empty(), "no durable row exists for the frozen peer");
+    let facts = peer_row_closure_facts(&record, &rows, "product-path");
+    assert_eq!(
+        facts.inputs.open_copy_actions, 1,
+        "a missing peer row leaves an open removal action"
+    );
+    assert_eq!(facts.outcome, CopyDispositionOutcome::Partial);
+    assert_eq!(
+        accept_closure(&facts.inputs),
+        Err(ClosureBlock::OpenCopyAction)
+    );
+}

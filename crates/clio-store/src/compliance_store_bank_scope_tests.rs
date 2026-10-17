@@ -68,3 +68,38 @@ fn postgres_bank_scope_lists_every_affected_bank() {
     let store = PostgresStore::open(&url, kms).unwrap_or_else(|e| panic!("postgres required: {e}"));
     run_bank_scope(&store);
 }
+
+/// A requesting bank that already holds a subject item is kept once, and a bank
+/// holding only another subject stays out of the set.
+fn run_bank_scope_duplicate_and_other_subject<T: Store + BankScopeStore>(store: &T) {
+    let subject = unique("bank-scope-subject");
+    let bank_a = unique("bank-scope-a");
+    let requesting = unique("bank-scope-req");
+    let other_subject = unique("bank-scope-subject-other");
+    let bank_other = unique("bank-scope-other");
+    seed_subject_items(store, &[bank_a.clone(), requesting.clone()], &subject);
+    seed_subject_items(store, std::slice::from_ref(&bank_other), &other_subject);
+
+    let scoped: &dyn BankScopeStore = store;
+    let mut expected = vec![bank_a, requesting.clone()];
+    expected.sort();
+    assert_eq!(
+        scoped.erase_bank_set(&requesting, &subject).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn sqlite_bank_scope_keeps_requesting_bank_once_and_excludes_other_subject() {
+    let store = SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).unwrap();
+    run_bank_scope_duplicate_and_other_subject(&store);
+}
+
+#[test]
+fn postgres_bank_scope_keeps_requesting_bank_once_and_excludes_other_subject() {
+    let _guard = crate::lock_pg_test();
+    let url = crate::db_url::postgres_url_from_env();
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = PostgresStore::open(&url, kms).unwrap_or_else(|e| panic!("postgres required: {e}"));
+    run_bank_scope_duplicate_and_other_subject(&store);
+}

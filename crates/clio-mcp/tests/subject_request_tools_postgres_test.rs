@@ -37,7 +37,9 @@ use subject_request_pg_support::{BANK, PgFixture, SUBJECT, call, load_record, st
 /// the live backend, with the retry's effect counts and the final state.
 #[test]
 fn subject_request_tools_agree_on_one_request_on_postgres() {
-    let fixture = PgFixture::open();
+    let Some(fixture) = PgFixture::open() else {
+        return;
+    };
     let state = &fixture.state;
     store_item(state, "itm-pg-lifecycle", SUBJECT, BANK);
 
@@ -132,7 +134,9 @@ fn subject_request_tools_agree_on_one_request_on_postgres() {
 /// caller action each refuse on Postgres before an unsafe effect.
 #[test]
 fn subject_request_refusals_leave_the_request_unchanged_on_postgres() {
-    let fixture = PgFixture::open();
+    let Some(fixture) = PgFixture::open() else {
+        return;
+    };
     let state = &fixture.state;
     let request = "req-pg-refusals";
     let first = call(

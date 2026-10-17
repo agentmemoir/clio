@@ -35,7 +35,9 @@
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::write_tools::dispatch;
 use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
-use clio_compliance::{PathOwner, PathSlot, PathState, RequestKind, RequestScope};
+use clio_compliance::{
+    PathOwner, PathSlot, PathState, RequestKind, RequestScope, VerificationResult,
+};
 use clio_types::Actor;
 use serde_json::{Value, json};
 
@@ -204,6 +206,58 @@ fn subject_request_start_status_copy_retry_events_close_agree_on_one_request() {
     );
     assert_eq!(final_status["request_id"], json!(request));
     assert_eq!(final_status["request_outcome"], json!("completed"));
+}
+
+#[test]
+fn subject_request_start_records_operator_verification_and_deadline() {
+    let s = state();
+    let request = "req-verification";
+    let started = call(
+        &s,
+        "subject_request_start",
+        json!({"bank": BANK, "kind": "erasure", "subject_id": SUBJECT, "request_id": request,
+               "verification": "verified", "deadline": "2026-01-01T00:00:00Z"}),
+    );
+    assert_eq!(started["ok"], json!(true), "{started}");
+    assert_eq!(started["verification"], json!("verified"), "{started}");
+    assert_eq!(
+        started["deadline"],
+        json!("2026-01-01T00:00:00Z"),
+        "{started}"
+    );
+    let record = load_record(&s, request);
+    assert_eq!(record.verification, Some(VerificationResult::Verified));
+    assert_eq!(record.deadline.as_deref(), Some("2026-01-01T00:00:00Z"));
+}
+
+#[test]
+fn subject_request_start_defaults_absent_verification_and_refuses_an_unknown_value() {
+    let s = state();
+    let started = call(
+        &s,
+        "subject_request_start",
+        json!({"bank": BANK, "kind": "erasure", "subject_id": SUBJECT,
+               "request_id": "req-absent-verification"}),
+    );
+    assert_eq!(started["ok"], json!(true), "{started}");
+    assert!(started["verification"].is_null(), "{started}");
+    assert!(started["deadline"].is_null(), "{started}");
+
+    let refused = call(
+        &s,
+        "subject_request_start",
+        json!({"bank": BANK, "kind": "erasure", "subject_id": SUBJECT,
+               "request_id": "req-bad-verification", "verification": "maybe"}),
+    );
+    assert_eq!(refused["ok"], json!(false), "{refused}");
+    assert_eq!(refused["code"], json!("invalid_argument"), "{refused}");
+    assert!(
+        s.durable
+            .load("req-bad-verification")
+            .expect("load request")
+            .is_none(),
+        "a refused verification opens no request"
+    );
 }
 
 #[test]

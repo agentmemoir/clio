@@ -150,6 +150,8 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
             args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("kind".into(), Value::from(kind));
             insert_opt(&mut args, parsed, "subject-id", "subject_id");
+            insert_opt(&mut args, parsed, "verification", "verification");
+            insert_opt(&mut args, parsed, "deadline", "deadline");
             Ok(("subject_request_start", Value::Object(args)))
         }
         "request-status" => {
