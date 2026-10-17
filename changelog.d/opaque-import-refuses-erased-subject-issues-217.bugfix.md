@@ -1,0 +1,1 @@
+Importing an opaque `ciphertext_backup` item for a subject that has been erased is now refused with `erased_subject` on both SQLite and Postgres, matching the ordinary item write path, so a bundle import can no longer re-create an item identity row for a subject the store has been told to forget. [Issue #217](https://github.com/agentmemoir/clio/issues/217)

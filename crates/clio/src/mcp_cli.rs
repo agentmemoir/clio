@@ -29,6 +29,9 @@ use super::cli_top_level::database_help_block;
 use super::cli_top_level::parse_flags;
 use std::process::ExitCode;
 
+#[path = "mcp_cli_credentials.rs"]
+mod mcp_cli_credentials;
+
 /// `clio mcp` subcommands: schema export, stdio server, Streamable HTTP server.
 pub(crate) fn mcp(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut args = args.into_iter();
@@ -255,13 +258,14 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     // an unusable path refuses the start instead of serving a 401 for every
     // request. Fail closed on every unusable state, including a store with no
     // record: it would authorize nobody.
-    let credentials = match load_http_credentials(&flags, &|key| std::env::var(key).ok()) {
-        Ok(credentials) => credentials,
-        Err(reason) => {
-            eprintln!("mcp http error: {reason}");
-            return ExitCode::from(1);
-        }
-    };
+    let credentials =
+        match mcp_cli_credentials::load_http_credentials(&flags, &|key| std::env::var(key).ok()) {
+            Ok(credentials) => credentials,
+            Err(reason) => {
+                eprintln!("mcp http error: {reason}");
+                return ExitCode::from(1);
+            }
+        };
     let mut cfg = http_config(&flags);
     cfg.credentials = credentials;
     // As for the stdio transport: the server must outlive one client going away.
@@ -275,14 +279,18 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
                     let addr = listener
                         .local_addr()
                         .expect("bound listener has an address");
-                    if !addr.ip().is_loopback() && !clio_mcp::http::has_credential_source(&cfg) {
-                        // Mirrors the transport guard so a rejected bind is not
-                        // announced as listening. The first clause keeps the
-                        // wording every existing deployment has seen; the rest
-                        // names the one way to satisfy it.
+                    // `--insecure-no-auth` is the one opt-out. Without it every
+                    // bind needs a credential: a token store named by
+                    // `--token-file`. A loopback bind with no token store is
+                    // refused here, so the operator creates a credential with
+                    // `clio auth token add` rather than receiving a secret on
+                    // stderr, and a rejected bind is not announced as listening.
+                    if !clio_mcp::http::has_credential_source(&cfg) && !cfg.insecure_no_auth {
                         eprintln!(
-                            "mcp http error: non-loopback bind requires an auth token: \
-                             point --token-file at a store holding at least one record"
+                            "mcp http error: bind requires an auth token: point \
+                             --token-file at a store holding at least one record \
+                             (see `clio auth token add`), or pass --insecure-no-auth \
+                             to serve without authentication"
                         );
                         return ExitCode::from(1);
                     }
@@ -327,13 +335,16 @@ fn mcp_http_serve(
 ///
 /// `bind` is set later in [`mcp_http`] to the address actually bound, so the
 /// config handed to the transport always names the served address. The
-/// credential store is not assembled here because loading it can fail; see
-/// [`load_http_credentials`].
+/// credential store is not assembled here because loading it can fail; see the
+/// `mcp_cli_credentials` module's `load_http_credentials`.
 pub(crate) fn http_config(
     flags: &std::collections::HashMap<String, String>,
 ) -> clio_mcp::http::HttpConfig {
     clio_mcp::http::HttpConfig {
         sessions_enabled: flags.contains_key("sessions"),
+        insecure_no_auth: flags
+            .get("insecure-no-auth")
+            .is_some_and(|value| value == "true"),
         ..clio_mcp::http::HttpConfig::default()
     }
 }
@@ -354,41 +365,6 @@ fn refuse_sessions_value(
     }
 }
 
-/// Load the credential store `--token-file` names.
-///
-/// `None` when the flag is absent, which keeps the loopback dev default. An
-/// explicit flag whose path is absent, unreadable, malformed, not owner-only, or
-/// holds no record refuses the start: an operator who named a store asked for
-/// that identity, and an unusable one would answer every request with a 401.
-///
-/// The environment lookup is a parameter so a test never reads the host
-/// environment and the production caller and the tests drive the same code.
-pub(crate) fn load_http_credentials<F>(
-    flags: &std::collections::HashMap<String, String>,
-    get: &F,
-) -> Result<Option<std::sync::Arc<clio_mcp::http_auth::CredentialStore>>, String>
-where
-    F: Fn(&str) -> Option<String>,
-{
-    let Some(explicit) = flags.get("token-file") else {
-        return Ok(None);
-    };
-    let Some(path) = clio_config::auth_tokens::resolve_token_store_path_with(
-        Some(std::path::PathBuf::from(explicit)),
-        get,
-    ) else {
-        return Err("--token-file named a path that cannot be resolved".into());
-    };
-    let store = clio_mcp::http_auth::CredentialStore::load(&path).map_err(|e| e.message)?;
-    if store.is_empty() {
-        return Err(format!(
-            "credential store {} holds no record; add one with `clio auth token add`",
-            path.display()
-        ));
-    }
-    Ok(Some(std::sync::Arc::new(store)))
-}
-
 /// `clio mcp http` usage text, including the auto-bind rule.
 pub(crate) fn mcp_http_help() -> String {
     let range = format!(
@@ -405,7 +381,13 @@ pub(crate) fn mcp_http_help() -> String {
              Credential store whose records name an actor and the banks it may reach
              (see `clio auth token add`). Loaded once at start; a path that is
              absent, unreadable, malformed, or holds no record refuses the start.
-             Omit it (or keep a loopback bind) for the credential-free local default.
+             Required on every bind unless --insecure-no-auth is given.
+
+--insecure-no-auth
+             Permit a bind with no credential. Without it a credential is
+             required everywhere, including loopback: name a --token-file store,
+             or the start is refused. A --token-file store, when given, is still
+             enforced.
 
 {}",
         crate::cli_help_usage::usage_line("mcp http")
@@ -423,9 +405,9 @@ pub(crate) mod tests;
 mod dispatch_tests;
 
 #[cfg(test)]
-#[path = "mcp_cli_credentials_tests.rs"]
-mod credentials_tests;
-
-#[cfg(test)]
 #[path = "mcp_cli_sessions_tests.rs"]
 mod sessions_tests;
+
+#[cfg(test)]
+#[path = "mcp_cli_insecure_tests.rs"]
+mod insecure_tests;

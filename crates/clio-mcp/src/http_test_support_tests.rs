@@ -28,6 +28,11 @@ use std::sync::Arc;
 
 /// Serve through the real `serve_with_listener` in a background thread; the
 /// tests drive the production accept loop, not a test-local re-implementation.
+///
+/// The harness opts out of the start-time auth requirement (`insecure_no_auth`)
+/// so a scenario that is not about the credential edge keeps the pre-existing
+/// credential-free loopback server. Per-request auth still applies when the
+/// caller's config carries a credential store.
 pub(crate) fn spawn_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
     let state = McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
         .expect("state");
@@ -35,6 +40,8 @@ pub(crate) fn spawn_server(cfg: HttpConfig) -> (u16, Arc<McpHandler>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
+        let mut cfg = cfg;
+        cfg.insecure_no_auth = true;
         let _ = serve_with_listener(state, cfg, listener);
     });
     (port, handler)
