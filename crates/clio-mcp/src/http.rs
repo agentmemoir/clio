@@ -99,9 +99,9 @@ pub struct HttpConfig {
     pub sessions_enabled: bool,
     /// Serve without requiring any credential, even on loopback.
     ///
-    /// Off by default: every bind requires a credential source unless this is
+    /// Off by default: every bind requires a credential store unless this is
     /// set. It is the explicit operator opt-out behind `--insecure-no-auth`; a
-    /// loopback bind with no `--token-file` otherwise gets a one-time token.
+    /// loopback bind with no `--token-file` is otherwise refused at start.
     pub insecure_no_auth: bool,
     /// Extra allowed Origin hosts (localhost is always allowed).
     pub allowed_origins: Vec<String>,

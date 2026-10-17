@@ -26,8 +26,9 @@
 
 /// Load the credential store `--token-file` names.
 ///
-/// `None` when the flag is absent; the loopback default is then a minted
-/// one-time token (see `mcp_cli`), not an unauthenticated server. An explicit
+/// `None` when the flag is absent; the caller (`mcp_cli`) then refuses the
+/// start unless `--insecure-no-auth` was given, so no bind serves
+/// unauthenticated by default. An explicit
 /// flag whose path is absent, unreadable, malformed, not owner-only, or holds
 /// no record refuses the start: an operator who named a store asked for that
 /// identity, and an unusable one would answer every request with a 401.

@@ -9,8 +9,6 @@
 //!
 //! ## Owns
 //! - `CredentialStore::load`: the fail-closed read of an operator-named store
-//! - `CredentialStore::for_local_owner`: the one-credential store a loopback
-//!   server mints for itself when no `--token-file` was given
 //! - The request-shaped check over one request's `Authorization` header
 //! - `AuthOutcome`: the credential that matched, or the unbound dev-mode answer
 //!
@@ -45,15 +43,8 @@
 
 use crate::principal::Principal;
 use clio_config::auth_tokens::{AuthTokenRecord, ct_eq, digest_hex, load_auth_tokens};
-use clio_types::{Actor, AmError};
+use clio_types::AmError;
 use std::path::Path;
-
-/// The label the auto-generated local-owner credential is recorded under.
-///
-/// Fixed so the loopback server's one principal is nameable in an audit row
-/// without leaking anything secret, and so a minted credential never carries a
-/// label an operator record could hold.
-const LOCAL_OWNER_LABEL: &str = "local-owner";
 
 /// One loaded record: the principal it names plus the only secret-derived value
 /// that exists on disk.
@@ -111,26 +102,6 @@ impl CredentialStore {
                     digest: record.secret_sha256,
                 })
                 .collect(),
-        }
-    }
-
-    /// Build the one-credential store a loopback server mints for itself.
-    ///
-    /// Used when `clio mcp http` runs on loopback with no `--token-file`: the
-    /// owner still has to present a bearer secret, and this store resolves the
-    /// generated one to the local-owner principal. That principal is
-    /// administrative and reaches every bank, matching the authority the owner
-    /// already has over the store. Built exactly as [`Self::from_records`]
-    /// builds a loaded record — the same `StoredCredential` with the same
-    /// digest — so [`Self::resolve`] keeps its constant-time scan and discloses
-    /// nothing new.
-    #[must_use]
-    pub fn for_local_owner(secret: &str) -> Self {
-        Self {
-            credentials: vec![StoredCredential {
-                principal: Principal::local_owner(LOCAL_OWNER_LABEL.to_owned(), Actor::System),
-                digest: digest_hex(secret),
-            }],
         }
     }
 

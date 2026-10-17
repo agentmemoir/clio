@@ -6,8 +6,8 @@
 //! This module is responsible for the live credential contract of `clio mcp
 //! http`: which credential class a real served process answers under, that a
 //! credential dropped from the store is refused at the next start, that a
-//! loopback start with no token file mints and requires a one-time token, and
-//! that `--insecure-no-auth` restores the credential-free local server.
+//! loopback start with no token file refuses rather than serving, and that
+//! `--insecure-no-auth` restores the credential-free local server.
 //!
 //! ## Owns
 //! - The two- and one-record store writers
@@ -35,7 +35,7 @@ mod common;
 mod mcp_http_token_file_support;
 
 use mcp_http_token_file_support::{
-    Server, Store, bearer, call, digests_on_disk, forbidden, minted_token, ok, post,
+    Server, Store, bearer, call, digests_on_disk, forbidden, minted_token, ok, post, run_to_end,
 };
 use serde_json::json;
 // Only the store writers tighten a file's mode, so the import is gated with them.
@@ -304,11 +304,11 @@ fn a_credential_removed_from_the_store_is_401_at_the_next_start() {
     let _ = second.stop();
 }
 
-/// A loopback server with no `--token-file` mints a one-time token, requires it,
-/// and serves only the client that presents it.
+/// A loopback server with no `--token-file` refuses to start unless the
+/// operator opts out: it never mints or prints a credential.
 #[test]
-fn a_loopback_server_mints_a_token_and_requires_it() {
-    let server = Server::start(&[
+fn a_loopback_server_with_no_token_file_refuses_to_start() {
+    let out = run_to_end(&[
         "mcp",
         "http",
         "--db",
@@ -316,50 +316,14 @@ fn a_loopback_server_mints_a_token_and_requires_it() {
         "--bind",
         "127.0.0.1:0",
     ]);
-    assert_ne!(server.port, 0, "the server must announce a port");
-    let token = minted_token(&server.stderr_text())
-        .expect("a loopback server with no --token-file must mint a token");
-    let port = server.port;
-    let body = call(
-        "store",
-        json!({
-            "bank": "default",
-            "item": {"id": "minted-1", "gist": "the owner may write here"},
-            "category": "task_spec", "epistemic_kind": "fact"
-        }),
-    );
-
-    // No credential: the minted server refuses, unlike the old dev default.
-    let (status, response) = post(port, &body, "");
-    assert_eq!(status, 401, "{response}");
+    assert!(!out.status.success(), "a loopback bind must fail closed");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--token-file"), "{stderr}");
+    assert!(stderr.contains("--insecure-no-auth"), "{stderr}");
     assert!(
-        !response.contains("structuredContent"),
-        "an unauthenticated request reached a tool: {response}"
+        minted_token(&stderr).is_none(),
+        "no token may be printed: {stderr}"
     );
-
-    // Only the minted token serves, and nothing echoes it back.
-    let (status, response) = post(port, &body, &bearer(&token));
-    assert_eq!(status, 200, "{response}");
-    assert!(ok(&response), "{response}");
-    assert!(
-        !response.contains(&token),
-        "the response leaked the minted token"
-    );
-
-    // The minted owner reaches a bank outside the configured default, matching
-    // the authority the process already has over the store.
-    let other = call(
-        "store",
-        json!({
-            "bank": "minted-other-bank",
-            "item": {"id": "minted-2", "gist": "the owner reaches another bank"},
-            "category": "task_spec", "epistemic_kind": "fact"
-        }),
-    );
-    let (status, response) = post(port, &other, &bearer(&token));
-    assert_eq!(status, 200, "{response}");
-    assert!(ok(&response), "{response}");
-    let _ = server.stop();
 }
 
 /// `--insecure-no-auth` restores the credential-free loopback server: the old

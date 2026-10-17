@@ -279,33 +279,20 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
                     let addr = listener
                         .local_addr()
                         .expect("bound listener has an address");
-                    // `--insecure-no-auth` is the one opt-out; without it every
-                    // bind needs a credential, and a loopback bind with no
-                    // `--token-file` gets the one-time token minted below.
-                    let needs_auth =
-                        !clio_mcp::http::has_credential_source(&cfg) && !cfg.insecure_no_auth;
-                    if needs_auth && !addr.ip().is_loopback() {
-                        // Mirrors the transport guard so a rejected bind is not
-                        // announced as listening.
+                    // `--insecure-no-auth` is the one opt-out. Without it every
+                    // bind needs a credential: a token store named by
+                    // `--token-file`. A loopback bind with no token store is
+                    // refused here, so the operator creates a credential with
+                    // `clio auth token add` rather than receiving a secret on
+                    // stderr, and a rejected bind is not announced as listening.
+                    if !clio_mcp::http::has_credential_source(&cfg) && !cfg.insecure_no_auth {
                         eprintln!(
-                            "mcp http error: non-loopback bind requires an auth token: \
-                             point --token-file at a store holding at least one record"
+                            "mcp http error: bind requires an auth token: point \
+                             --token-file at a store holding at least one record \
+                             (see `clio auth token add`), or pass --insecure-no-auth \
+                             to serve without authentication"
                         );
                         return ExitCode::from(1);
-                    }
-                    if needs_auth {
-                        // Mint a one-time bearer for the loopback dev default, so
-                        // a local client still authenticates. Printed once; the
-                        // clear secret is never stored.
-                        let secret = clio_config::auth_tokens::generate_secret();
-                        cfg.credentials = Some(std::sync::Arc::new(
-                            clio_mcp::http_auth::CredentialStore::for_local_owner(&secret),
-                        ));
-                        // Deliberate: the operator prints the one-time token once
-                        // so a local client can use it. It is never stored, and
-                        // the server refuses without it.
-                        // codeql[rust/cleartext-logging]
-                        eprintln!("mcp http auth token: {secret}");
                     }
                     cfg.bind = addr.to_string();
                     eprintln!("mcp http listening on {addr}");
@@ -394,13 +381,12 @@ pub(crate) fn mcp_http_help() -> String {
              Credential store whose records name an actor and the banks it may reach
              (see `clio auth token add`). Loaded once at start; a path that is
              absent, unreadable, malformed, or holds no record refuses the start.
-             Omit it on loopback and the server mints a one-time bearer token,
-             printed here once, that every request must present.
+             Required on every bind unless --insecure-no-auth is given.
 
 --insecure-no-auth
              Serve without a credential on any bind. Without it a credential is
-             required everywhere: --token-file, or the token minted for a loopback
-             bind with no --token-file.
+             required everywhere, including loopback: name a --token-file store,
+             or this flag refuses the start.
 
 {}",
         crate::cli_help_usage::usage_line("mcp http")

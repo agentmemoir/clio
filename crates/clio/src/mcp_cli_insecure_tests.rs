@@ -8,7 +8,7 @@
 //!
 //! ## Owns
 //! - The `http_config` decoding of the toggle
-//! - The help text's promise of the minted token and the opt-out flag
+//! - The help text's promise of the token store and the opt-out flag
 //!
 //! ## Does not own
 //! - The `--sessions` value rule (`mcp_cli_sessions_tests`)
@@ -37,17 +37,17 @@ fn the_insecure_toggle_defaults_off_and_only_a_bare_flag_turns_it_on() {
     );
 }
 
-/// The help names the opt-out and the minted token, and still advertises
-/// neither removed source.
+/// The help names the opt-out and the required token store, and advertises
+/// neither a minted token nor a removed source.
 #[test]
-fn the_help_names_the_minted_token_and_the_opt_out_flag() {
+fn the_help_names_the_required_token_store_and_the_opt_out_flag() {
     let help = mcp_http_help();
     assert!(help.contains("--insecure-no-auth"), "{help}");
-    assert!(help.contains("one-time bearer token"), "{help}");
-    for removed in ["--auth-token", "CLIO_MCP_TOKEN"] {
+    assert!(help.contains("--token-file"), "{help}");
+    for removed in ["--auth-token", "CLIO_MCP_TOKEN", "one-time bearer token"] {
         assert!(
             !help.contains(removed),
-            "the removed source {removed} is advertised: {help}"
+            "the help still advertises {removed}: {help}"
         );
     }
 }

@@ -36,7 +36,7 @@ fn an_absent_token_file_flag_loads_no_store() {
         load_http_credentials(&flags_of(&["--sessions"]), &lookup(&[])).expect("no flag is fine");
     assert!(
         store.is_none(),
-        "no flag names no store; the loopback token is minted by the caller"
+        "no flag names no store; the caller then requires a token or refuses"
     );
 }
 
