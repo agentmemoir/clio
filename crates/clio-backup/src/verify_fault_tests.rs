@@ -170,7 +170,9 @@ fn archive_with_payload_header(scratch: &Scratch, declared: u64) -> PathBuf {
         .unwrap();
     encoder.write_all(&manifest).unwrap();
     encoder.write_all(&pad(&manifest)).unwrap();
-    encoder.write_all(&build_header("store.db", declared).unwrap()).unwrap();
+    encoder
+        .write_all(&build_header("store.db", declared).unwrap())
+        .unwrap();
     encoder.write_all(PAYLOAD).unwrap();
     encoder.write_all(&pad(PAYLOAD)).unwrap();
     encoder.write_all(&[0u8; 2 * HEADER_SIZE]).unwrap();
@@ -187,7 +189,10 @@ fn no_staged_payload(scratch: &Scratch) {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .filter(|name| name.contains("verify-payload"))
         .collect();
-    assert!(temporaries.is_empty(), "no payload was staged: {temporaries:?}");
+    assert!(
+        temporaries.is_empty(),
+        "no payload was staged: {temporaries:?}"
+    );
 }
 
 #[test]
@@ -196,18 +201,24 @@ fn a_payload_header_size_the_manifest_does_not_record_is_refused_before_staging(
     let declared = crate::verify::verify_hostile_manifest_tests::PAYLOAD.len() as u64 + 4096;
     let path = archive_with_payload_header(&scratch, declared);
 
-    let error = verify_archive_with_space(
-        &path,
-        &mut always_ok,
-        &|_, _| panic!("the space check must not run for a header-size lie"),
-    )
+    let error = verify_archive_with_space(&path, &mut always_ok, &|_, _| {
+        panic!("the space check must not run for a header-size lie")
+    })
     .expect_err("a header size the manifest does not record is refused");
 
     assert_eq!(error.code, ErrorCode::ArchiveCorrupt);
     assert!(error.message.contains("store.db"), "{}", error.message);
-    assert!(error.message.contains(&declared.to_string()), "{}", error.message);
     assert!(
-        error.message.contains(&crate::verify::verify_hostile_manifest_tests::PAYLOAD.len().to_string()),
+        error.message.contains(&declared.to_string()),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains(
+            &crate::verify::verify_hostile_manifest_tests::PAYLOAD
+                .len()
+                .to_string()
+        ),
         "{}",
         error.message
     );
