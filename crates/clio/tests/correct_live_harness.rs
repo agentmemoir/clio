@@ -76,6 +76,27 @@ fn postgres_reachable(url: &str) -> bool {
         .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok())
 }
 
+/// True only when the operator explicitly opted out of Postgres-backed tests;
+/// without the opt-out an unreachable Postgres fails the harness, not a skip.
+fn skip_requested() -> bool {
+    matches!(
+        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
+/// `url` with any userinfo removed, so a printed message names where the server
+/// should be without ever printing credentials; a schemeless value is a fixed
+/// placeholder.
+fn redacted_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<redacted>".to_owned();
+    };
+    let authority = rest.split(['/', '?']).next().unwrap_or("");
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
+    format!("{scheme}://{host_port}")
+}
+
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(unique(tag));
     fs::create_dir_all(&dir).expect("temp dir");
@@ -224,7 +245,15 @@ fn live_correct_mints_a_fresh_revision_id_each_process() {
 fn live_correct_mints_a_fresh_revision_id_each_process_on_postgres() {
     let url = pg_url();
     if !postgres_reachable(&url) {
-        eprintln!("no Postgres at {url}: skipping the Postgres correction scenario");
+        assert!(
+            skip_requested(),
+            "the Postgres correction scenario needs Postgres at {}",
+            redacted_url(&url)
+        );
+        eprintln!(
+            "skipping the Postgres correction scenario: no Postgres at {}",
+            redacted_url(&url)
+        );
         return;
     }
     let _guard = lock_pg_test();
