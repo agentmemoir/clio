@@ -118,6 +118,7 @@ pub(crate) fn profile_set(state: &McpState, args: &Value) -> Result<Value, AmErr
         }));
     }
     let persisted = if scope == "deployment" {
+        state.authorize_admin()?;
         state.set_retention_deployment(profile.clone())?
     } else {
         state.set_retention(ctx.bank.as_str(), profile.clone())?

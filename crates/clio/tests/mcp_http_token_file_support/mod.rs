@@ -11,7 +11,8 @@
 //! ## Owns
 //! - `Store`: one owner-only credential store per test, removed on drop
 //! - `clio`, `run_to_end`, and `Server`: the real binary, started and reaped
-//! - `post`, `bearer`, `call`, `tool_code`, `forbidden`, and `ok`
+//! - `post`, `bearer`, `call`, `tool_code`, `forbidden`, `ok`, and the
+//!   minted-token reader (`TOKEN_PREFIX`, `minted_token`)
 //! - `digests_on_disk`, the read-back the leak assertions use
 //!
 //! ## Does not own
@@ -225,6 +226,17 @@ impl Drop for Server {
 
 /// The stderr prefix the transport announces its bound address with.
 pub const PREFIX: &str = "mcp http listening on ";
+
+/// The stderr prefix the transport prints its one-time minted bearer token with.
+pub const TOKEN_PREFIX: &str = "mcp http auth token: ";
+
+/// The one minted token a server printed, or `None` when it printed none.
+pub fn minted_token(stderr: &str) -> Option<String> {
+    stderr
+        .lines()
+        .find_map(|line| line.strip_prefix(TOKEN_PREFIX))
+        .map(str::to_owned)
+}
 
 /// One `POST /mcp` and the status plus body that came back.
 ///

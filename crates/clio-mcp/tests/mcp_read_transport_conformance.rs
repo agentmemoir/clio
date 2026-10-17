@@ -109,6 +109,8 @@ fn spawn_http(state: Arc<McpState>, cfg: clio_mcp::http::HttpConfig) -> SocketAd
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr");
     std::thread::spawn(move || {
+        let mut cfg = cfg;
+        cfg.insecure_no_auth = true;
         let _ = clio_mcp::http::serve_with_listener(state, cfg, listener);
     });
     addr

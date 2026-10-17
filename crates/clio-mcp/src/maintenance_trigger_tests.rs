@@ -32,10 +32,16 @@ use serde_json::json;
 use std::time::Duration;
 
 pub(super) const BANK: &str = "trigger-bank";
+/// A bank seeded in the store but never resolved, so no sweep should evaluate it.
+const UNRESOLVED_BANK: &str = "trigger-unresolved-bank";
 const CREATED: &str = "2026-10-01T00:00:00Z";
 
 pub(super) fn state() -> RetentionStoreFixture {
-    RetentionStoreFixture::open_with_effective(&McpOpenOptions::default(), &json!({}))
+    let state = RetentionStoreFixture::open_with_effective(&McpOpenOptions::default(), &json!({}));
+    // Mark the fixture bank active, as a resolved call would, so the sweeps in
+    // these tests evaluate it.
+    state.maintenance_trigger.note_bank(BANK);
+    state
 }
 
 /// One real instant as the base; every other instant is derived from it, so
@@ -408,23 +414,22 @@ fn a_disabled_profile_declines_with_trigger_disabled() {
 }
 
 #[test]
-fn evaluation_refreshes_the_watched_bank_list() {
+fn evaluation_covers_only_the_active_bank_list() {
     let state = state();
     state.evaluate_maintenance_trigger(base());
     assert!(
-        state
-            .maintenance_trigger
-            .status("never-evaluated")
-            .is_none(),
-        "an empty store watches no banks"
+        state.maintenance_trigger.status(BANK).is_some(),
+        "the active bank was evaluated"
     );
+    // A bank seeded in the store but never resolved is not active, so the tick
+    // must not list the store's banks and evaluate it.
     state
         .store
-        .create_memory_item(&item("later-1"), "agent")
+        .create_memory_item(&item_in("later-1", UNRESOLVED_BANK), "agent")
         .expect("seed item");
     state.evaluate_maintenance_trigger(base() + Duration::from_secs(5));
     assert!(
-        state.maintenance_trigger.status(BANK).is_some(),
-        "the new bank became watched and was evaluated"
+        state.maintenance_trigger.status(UNRESOLVED_BANK).is_none(),
+        "an unresolved bank was not swept"
     );
 }
