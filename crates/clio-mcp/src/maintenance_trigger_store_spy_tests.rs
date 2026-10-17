@@ -156,7 +156,7 @@ fn an_idle_tick_reads_only_the_tick_banks_not_the_stored_bank_list() {
         .maintenance_trigger
         .tick_banks(&scoped.default_bank, scoped.shared_enabled);
     tick_banks.sort_unstable();
-    let mut expected_banks = vec![BANK.to_owned(), scoped.default_bank.clone()];
+    let mut expected_banks = vec![BANK.to_owned(), scoped.default_bank];
     expected_banks.sort_unstable();
     assert_eq!(
         tick_banks, expected_banks,
