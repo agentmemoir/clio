@@ -38,7 +38,7 @@ use crate::sync_store::SyncStore;
 use clio_types::{AmError, ErrorCode};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A scratch directory that is removed when the test ends, including on panic.
 struct Scratch(PathBuf);
@@ -65,15 +65,15 @@ impl Drop for Scratch {
 /// With `store_path` set, the destroy reads the subject's shred marker from a
 /// second connection on that file and checks it is already committed: under an
 /// ordering that destroys the key before the marker commits, the marker is not
-/// yet visible to another connection. With `refuse_once` set, the next destroy
-/// fails without destroying the key, which is the shape of a provider that
-/// refuses a second destroy after a crash. `fail_after` names the 1-based call
-/// whose destroy runs and then reports a failure, the shape of a provider that
-/// destroys the key and then loses the acknowledgement.
+/// yet visible to another connection. `refuse_until` names the last 1-based
+/// call that fails without touching the key, the shape of a provider that
+/// refuses a destroy while the key is still live. `fail_after` names the
+/// 1-based call whose destroy runs and then reports a failure, the shape of a
+/// provider that destroys the key and then loses the acknowledgement.
 struct DestroyWindow {
     inner: Arc<dyn DekProvider>,
     store_path: Option<PathBuf>,
-    refuse_once: AtomicBool,
+    refuse_until: AtomicUsize,
     fail_after: AtomicUsize,
     destroy_calls: AtomicUsize,
 }
@@ -83,17 +83,19 @@ impl DestroyWindow {
         Arc::new(Self {
             inner: local_kms(),
             store_path: Some(path.to_path_buf()),
-            refuse_once: AtomicBool::new(false),
+            refuse_until: AtomicUsize::new(0),
             fail_after: AtomicUsize::new(0),
             destroy_calls: AtomicUsize::new(0),
         })
     }
 
-    fn refusing_once() -> Arc<Self> {
+    /// A destroy that refuses without destroying the key up to and including
+    /// its `refuse_calls`-th call, then destroys it; later calls succeed.
+    fn refusing_until(refuse_calls: usize) -> Arc<Self> {
         Arc::new(Self {
             inner: local_kms(),
             store_path: None,
-            refuse_once: AtomicBool::new(true),
+            refuse_until: AtomicUsize::new(refuse_calls),
             fail_after: AtomicUsize::new(0),
             destroy_calls: AtomicUsize::new(0),
         })
@@ -106,7 +108,7 @@ impl DestroyWindow {
         Arc::new(Self {
             inner: local_kms(),
             store_path: None,
-            refuse_once: AtomicBool::new(fail_on_call > 1),
+            refuse_until: AtomicUsize::new(fail_on_call.saturating_sub(1)),
             fail_after: AtomicUsize::new(fail_on_call),
             destroy_calls: AtomicUsize::new(0),
         })
@@ -164,7 +166,7 @@ impl DekProvider for DestroyWindow {
                 "the committed marker carries shredded_at"
             );
         }
-        if self.refuse_once.swap(false, Ordering::SeqCst) {
+        if call <= self.refuse_until.load(Ordering::SeqCst) {
             return Err(AmError::new(
                 ErrorCode::Internal,
                 "the provider refused this destroy",
@@ -222,7 +224,7 @@ fn sqlite_the_shred_marker_is_durable_before_the_dek_destroy() {
 /// destroy.
 #[test]
 fn sqlite_a_refused_destroy_leaves_the_subject_closed_and_the_request_retryable() {
-    let window = DestroyWindow::refusing_once();
+    let window = DestroyWindow::refusing_until(1);
     let store =
         SqliteStore::open_in_memory(window.as_provider()).expect("open the in-memory store");
     let bank = unique("crash-bank");
@@ -362,6 +364,63 @@ fn sqlite_a_retry_tolerates_a_destroy_error_over_the_committed_marker() {
         window.destroy_calls.load(Ordering::SeqCst),
         2,
         "the retry attempted the destroy again"
+    );
+    assert!(store.subject_dek_destroyed(&subject).unwrap());
+    assert_eq!(store.read_tombstones(&bank, &request).unwrap().len(), 2);
+}
+
+/// A retry over the committed marker whose destroy fails while the key survives
+/// must not be read as the tolerated case: the marker being shredded is not
+/// enough, so the destroy error surfaces, the marker stays committed, no
+/// tombstone is written, and only a later attempt with a working destroy
+/// completes the erasure.
+#[test]
+fn sqlite_a_retry_with_a_live_key_still_reports_the_destroy_error() {
+    // Both attempts refuse before destroying, so the second one meets a
+    // committed marker and a key that is still live.
+    let window = DestroyWindow::refusing_until(2);
+    let store =
+        SqliteStore::open_in_memory(window.as_provider()).expect("open the in-memory store");
+    let bank = unique("crash-bank");
+    let subject = unique("crash-subject");
+    seed(&store, &bank, &subject);
+    let request = unique("crash-request");
+
+    // The first attempt commits the marker and then refuses the destroy.
+    let first = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect_err("a refused destroy fails the first attempt");
+    assert_eq!(first.code, ErrorCode::Internal, "{first:?}");
+    assert!(store.subject_is_shredded(&subject).unwrap());
+
+    let err = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect_err("a retry over a live key still reports the destroy error");
+    assert_eq!(err.code, ErrorCode::Internal, "{err:?}");
+    assert_eq!(
+        window.destroy_calls.load(Ordering::SeqCst),
+        2,
+        "the retry attempted the destroy again"
+    );
+    assert!(store.subject_is_shredded(&subject).unwrap());
+    assert!(
+        !store.subject_dek_destroyed(&subject).unwrap(),
+        "the refused destroy left the key alive"
+    );
+    assert!(
+        store.read_tombstones(&bank, &request).unwrap().is_empty(),
+        "neither failed attempt writes a tombstone"
+    );
+
+    // The provider accepts the destroy now: the third attempt completes.
+    let outcome = store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect("the third attempt completes");
+    assert_eq!(outcome.tombstones_written, 2, "{outcome:?}");
+    assert_eq!(
+        window.destroy_calls.load(Ordering::SeqCst),
+        3,
+        "the third attempt attempts the destroy"
     );
     assert!(store.subject_dek_destroyed(&subject).unwrap());
     assert_eq!(store.read_tombstones(&bank, &request).unwrap().len(), 2);

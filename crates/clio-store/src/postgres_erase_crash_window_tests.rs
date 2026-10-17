@@ -42,7 +42,7 @@ use crate::store::Store;
 use crate::sync_store::SyncStore;
 use clio_types::{AmError, ErrorCode};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// DEK provider that wraps the fixture KMS and reports what the erasure has
 /// made durable when it asks for the key destruction.
@@ -51,15 +51,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 /// that was opened before the erasure and asserts it is already committed: under
 /// an ordering that destroys the key before the marker commits, that store reads
 /// the pre-commit snapshot, sees no shredded marker, and the assertion fails.
-/// With `refuse_once` set, the next destroy fails without touching the key, the
-/// shape of a provider that refuses a second destroy after a crash.
-/// `fail_after` names the 1-based call whose destroy runs and then reports a
-/// failure, the shape of a provider that destroys the key and then loses the
-/// acknowledgement.
+/// `refuse_until` names the last 1-based call that fails without touching the
+/// key, the shape of a provider that refuses a destroy while the key is still
+/// live. `fail_after` names the 1-based call whose destroy runs and then
+/// reports a failure, the shape of a provider that destroys the key and then
+/// loses the acknowledgement.
 struct DestroyWindow {
     inner: Arc<dyn DekProvider>,
     witness: Option<PostgresStore>,
-    refuse_once: AtomicBool,
+    refuse_until: AtomicUsize,
     fail_after: AtomicUsize,
     destroy_calls: AtomicUsize,
 }
@@ -71,7 +71,19 @@ impl DestroyWindow {
         Arc::new(Self {
             inner,
             witness: Some(witness),
-            refuse_once: AtomicBool::new(false),
+            refuse_until: AtomicUsize::new(0),
+            fail_after: AtomicUsize::new(0),
+            destroy_calls: AtomicUsize::new(0),
+        })
+    }
+
+    /// A destroy that refuses without destroying the key up to and including
+    /// its `refuse_calls`-th call, then destroys it; later calls succeed.
+    fn refusing_until(inner: Arc<dyn DekProvider>, refuse_calls: usize) -> Arc<dyn DekProvider> {
+        Arc::new(Self {
+            inner,
+            witness: None,
+            refuse_until: AtomicUsize::new(refuse_calls),
             fail_after: AtomicUsize::new(0),
             destroy_calls: AtomicUsize::new(0),
         })
@@ -87,7 +99,7 @@ impl DestroyWindow {
         Arc::new(Self {
             inner,
             witness: None,
-            refuse_once: AtomicBool::new(fail_on_call > 1),
+            refuse_until: AtomicUsize::new(fail_on_call.saturating_sub(1)),
             fail_after: AtomicUsize::new(fail_on_call),
             destroy_calls: AtomicUsize::new(0),
         })
@@ -127,8 +139,24 @@ impl DekProvider for DestroyWindow {
                     .expect("witness shred marker read"),
                 "the shred marker is committed before the destroy"
             );
+            // That predicate reads `status`; the write guard reads
+            // `shredded_at`, so assert the guard's own column as well.
+            let guard_marker: bool = witness
+                .with_client(|client| {
+                    let sql = "SELECT shredded_at IS NOT NULL FROM subject_keys \
+                               WHERE subject_id = $1";
+                    let row = client
+                        .query_one(sql, &[&subject_id])
+                        .am("witness shredded_at read")?;
+                    Ok(row.get(0))
+                })
+                .expect("witness shredded_at read");
+            assert!(
+                guard_marker,
+                "the guard's shredded_at column is set before the destroy"
+            );
         }
-        if self.refuse_once.swap(false, Ordering::SeqCst) {
+        if call <= self.refuse_until.load(Ordering::SeqCst) {
             return Err(AmError::new(
                 ErrorCode::Internal,
                 "the provider refused this destroy",
@@ -328,6 +356,59 @@ fn postgres_a_retry_tolerates_a_destroy_error_over_the_committed_marker() {
         .store
         .erase_subject(&spec(&bank, &subject, &request))
         .expect("the retry completes although the destroy reported an error");
+    assert_eq!(outcome.tombstones_written, 2, "{outcome:?}");
+    assert!(env.store.subject_dek_destroyed(&subject).unwrap());
+    assert_eq!(env.store.read_tombstones(&bank, &request).unwrap().len(), 2);
+}
+
+/// A retry over the committed marker whose destroy fails while the key survives
+/// must not be read as the tolerated case: the marker being shredded is not
+/// enough, so the destroy error surfaces, the marker stays committed, no
+/// tombstone is written, and only a later attempt with a working destroy
+/// completes the erasure.
+#[test]
+fn postgres_a_retry_with_a_live_key_still_reports_the_destroy_error() {
+    // Both attempts refuse before destroying, so the second one meets a
+    // committed marker and a key that is still live.
+    let Some(env) = open_pg_with(|_, inner| DestroyWindow::refusing_until(inner, 2)) else {
+        return;
+    };
+    let bank = unique("pg-crash-bank");
+    let subject = unique("pg-subject");
+    seed(&env.store, &bank, &subject);
+    let request = unique("pg-req");
+
+    // The first attempt commits the marker and then refuses the destroy.
+    let first = env
+        .store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect_err("a refused destroy fails the first attempt");
+    assert_eq!(first.code, ErrorCode::Internal, "{first:?}");
+    assert!(env.store.subject_is_shredded(&subject).unwrap());
+
+    let err = env
+        .store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect_err("a retry over a live key still reports the destroy error");
+    assert_eq!(err.code, ErrorCode::Internal, "{err:?}");
+    assert!(env.store.subject_is_shredded(&subject).unwrap());
+    assert!(
+        !env.store.subject_dek_destroyed(&subject).unwrap(),
+        "the refused destroy left the key alive"
+    );
+    assert!(
+        env.store
+            .read_tombstones(&bank, &request)
+            .unwrap()
+            .is_empty(),
+        "neither failed attempt writes a tombstone"
+    );
+
+    // The provider accepts the destroy now: the third attempt completes.
+    let outcome = env
+        .store
+        .erase_subject(&spec(&bank, &subject, &request))
+        .expect("the third attempt completes");
     assert_eq!(outcome.tombstones_written, 2, "{outcome:?}");
     assert!(env.store.subject_dek_destroyed(&subject).unwrap());
     assert_eq!(env.store.read_tombstones(&bank, &request).unwrap().len(), 2);
