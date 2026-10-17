@@ -93,10 +93,7 @@ fn the_single_statement_sink_also_keeps_the_servers_reason() {
     let mut client = match crate::pg_tls::connect(&url) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("driver error reason", &error)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("driver error reason", &error);
             return;
         }
     };

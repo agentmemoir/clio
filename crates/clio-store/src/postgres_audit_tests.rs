@@ -277,10 +277,7 @@ fn pg_correct_insert_error_keeps_the_servers_reason() {
     let mut client = match crate::pg_tls::connect(&url) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("correct insert error reason", &error)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("correct insert error reason", &error);
             return;
         }
     };

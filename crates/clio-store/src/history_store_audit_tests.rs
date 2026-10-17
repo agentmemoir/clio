@@ -328,10 +328,7 @@ fn pg_history_audit_rows_carry_context_stats() {
     let store = match PostgresStore::open(url.as_str(), kms) {
         Ok(store) => store,
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres history audit tests", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("postgres history audit tests", &err);
             return;
         }
     };
@@ -383,10 +380,7 @@ fn pg_triple_audit_rows_carry_context_stats() {
     let store = match PostgresStore::open(url.as_str(), kms) {
         Ok(store) => store,
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres triple audit tests", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("postgres triple audit tests", &err);
             return;
         }
     };
