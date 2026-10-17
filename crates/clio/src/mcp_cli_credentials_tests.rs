@@ -25,8 +25,10 @@
 //!
 //! Keep this module focused on the credential-store load.
 
-use crate::mcp_cli::tests::{Scratch, absent_path, config_with, flags_of, lookup, record, token_file};
 use super::*;
+use crate::mcp_cli::tests::{
+    Scratch, absent_path, config_with, flags_of, lookup, record, token_file,
+};
 
 #[test]
 fn an_absent_token_file_flag_loads_no_store() {
