@@ -33,11 +33,9 @@ use clio_compliance::{
     load_journal, sha256_hex_bytes,
 };
 use rusqlite::Connection;
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 /// The Postgres URL used when the environment names none, matching the
 /// Makefile and the other loopback-Postgres harnesses.
@@ -305,41 +303,11 @@ pub fn pg_url() -> String {
 
 /// True when a Postgres server answers at `url`'s host and port within a short
 /// budget.
-pub fn postgres_reachable(url: &str) -> bool {
-    let Some(rest) = url
-        .strip_prefix("postgres://")
-        .or_else(|| url.strip_prefix("postgresql://"))
-    else {
-        return false;
-    };
-    let authority = rest.split(['/', '?']).next().unwrap_or("");
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((host, port)) => (host, port.parse::<u16>().unwrap_or(5432)),
-        None => (host_port, 5432),
-    };
-    let Ok(addresses) = (host, port).to_socket_addrs() else {
-        return false;
-    };
-    addresses
-        .into_iter()
-        .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok())
-}
-
-/// The explicit opt-out from the required Postgres backend.
 ///
-/// A developer with no database sets this to run the rest of the workspace
-/// suite; without it an unreachable Postgres fails the measurement instead of
-/// passing as a no-op. The name and the truthy values match the Postgres tests
-/// in `clio-store`.
-const SKIP_PG_TESTS: &str = "CLIO_SKIP_PG_TESTS";
-
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-fn postgres_skip_requested() -> bool {
-    matches!(
-        std::env::var(SKIP_PG_TESTS).as_deref(),
-        Ok("1" | "true" | "yes")
-    )
+/// Delegates to the store's test-support probe, so every harness reads the URL
+/// the same way.
+pub fn postgres_reachable(url: &str) -> bool {
+    clio::store::pg_test_target::postgres_reachable(url)
 }
 
 /// Require a reachable Postgres server for a server-backed scenario.
@@ -356,16 +324,10 @@ pub fn require_postgres() -> Option<String> {
     if postgres_reachable(&url) {
         return Some(url);
     }
-    if postgres_skip_requested() {
-        eprintln!(
-            "skip durable-erasure-authority postgres: {SKIP_PG_TESTS} is set and no \
-             Postgres answers at the configured CLIO_DATABASE_URL"
-        );
-        return None;
-    }
-    panic!(
-        "the durable-erasure-authority postgres scenarios require a reachable Postgres at \
-         CLIO_DATABASE_URL; start the database, or set {SKIP_PG_TESTS}=1 to run the rest \
-         of the suite without it"
+    clio::store::pg_skip::pg_required_or_skip(
+        "the durable-erasure-authority postgres scenarios",
+        "no Postgres answers at CLIO_DATABASE_URL (start the database, or set \
+         CLIO_SKIP_PG_TESTS=1 to run the rest of the suite without it)",
     );
+    None
 }

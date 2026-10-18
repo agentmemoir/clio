@@ -125,13 +125,19 @@ fn opaque_item_write_for_erased_subject_returns_error_without_creating_row() {
 fn postgres_subject_write_lock_is_exclusive_while_held() {
     let _guard = lock_pg_test();
     let url = postgres_url_from_env();
-    let Ok(mut holder) = crate::pg_tls::connect(&url) else {
-        eprintln!("skip: shared Postgres unreachable");
-        return;
+    let mut holder = match crate::pg_tls::connect(&url) {
+        Ok(holder) => holder,
+        Err(err) => {
+            crate::pg_skip::unreachable_pg_or_skip("postgres subject write lock tests", &err);
+            return;
+        }
     };
-    let Ok(mut probe) = crate::pg_tls::connect(&url) else {
-        eprintln!("skip: shared Postgres unreachable");
-        return;
+    let mut probe = match crate::pg_tls::connect(&url) {
+        Ok(probe) => probe,
+        Err(err) => {
+            crate::pg_skip::unreachable_pg_or_skip("postgres subject write lock tests", &err);
+            return;
+        }
     };
     let subject = unique("pg-lock-subject");
 

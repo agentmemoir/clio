@@ -31,8 +31,8 @@ use super::{
 use crate::inventory::{InventoryBackend, InventoryFacts};
 use crate::inventory_fixture::{OTHER, SELECTED, fixture_id};
 use crate::inventory_pg_support_tests::{
-    pg_checked_url, pg_skip_note, semantic_item, write_direct_link_class, write_hashed_link_class,
-    write_shared_class,
+    pg_checked_url, pg_gate_or_panic, semantic_item, write_direct_link_class,
+    write_hashed_link_class, write_shared_class,
 };
 use crate::test_unique::unique;
 use clio_store::{
@@ -85,11 +85,7 @@ const PINNED: &[(&str, FamilyClass, u64, u64, u64, bool)] = &[
 
 /// The live fixture, or a printed credential-safe skip note plus `None`.
 fn map_fixture_or_skip() -> Option<(PgTestGuard, MapPgFixture)> {
-    let pair = open_map_pg_fixture();
-    if let Err(err) = &pair {
-        eprintln!("{}", pg_skip_note("inventory map Postgres tests", err));
-    }
-    pair.ok()
+    pg_gate_or_panic("inventory map Postgres tests", open_map_pg_fixture())
 }
 
 /// One mapping over the fixture's live scoped target.
@@ -179,9 +175,10 @@ impl MapPgFixture {
 /// schema and a store holding one row class per subject-link class, sealed
 /// under a KMS this fixture owns so a restart reopens with the same Arc.
 /// The guard goes to the caller so the lock spans the caller's whole test;
-/// an unreachable database yields `Err` for [`pg_skip_note`], a misconfigured
-/// URL panics as a harness fault, a reachable database that cannot hold the
-/// fixture rows panics, and the live marker line is what a skip never prints.
+/// an unreachable database yields an `Err` the caller routes through the
+/// fail-closed gate, a misconfigured URL panics as a harness fault, a reachable
+/// database that cannot hold the fixture rows panics, and the live marker line
+/// is what a skip never prints.
 pub(crate) fn open_map_pg_fixture() -> Result<(PgTestGuard, MapPgFixture), AmError> {
     let guard = lock_pg_test();
     let base = pg_checked_url();

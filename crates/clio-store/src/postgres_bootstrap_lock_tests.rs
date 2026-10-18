@@ -30,10 +30,16 @@ use clio_types::{AmError, ErrorCode};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// The shared Postgres URL, or `None` when the database is unreachable.
+/// The shared Postgres URL, or `None` after the fail-closed skip line. Only the
+/// explicit `CLIO_SKIP_PG_TESTS` opt-out reaches that line: without it an
+/// unreachable server fails the suite.
 fn shared_url() -> Option<String> {
     let url = postgres_url_from_env();
-    crate::pg_tls::connect(&url).ok().map(|_| url)
+    if let Err(err) = crate::pg_tls::connect(&url) {
+        crate::pg_skip::unreachable_pg_or_skip("postgres bootstrap lock tests", &err);
+        return None;
+    }
+    Some(url)
 }
 
 /// An open waits while another session holds the bootstrap lock, then finishes
@@ -49,7 +55,6 @@ fn shared_url() -> Option<String> {
 fn an_open_waits_for_the_bootstrap_lock() {
     let _shared = crate::lock_pg_test();
     let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
         return;
     };
     let mut probe = crate::pg_tls::connect(&url).expect("probe connect");
@@ -88,7 +93,6 @@ fn an_open_waits_for_the_bootstrap_lock() {
 fn overlapping_opens_all_finish() {
     let _shared = crate::lock_pg_test();
     let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
         return;
     };
     let openers: Vec<_> = (0..4)
@@ -122,7 +126,6 @@ fn overlapping_opens_all_finish() {
 fn concurrent_opens_of_a_fresh_database_all_finish() {
     let _shared = crate::lock_pg_test();
     let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
         return;
     };
     let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
@@ -196,7 +199,6 @@ fn url_for_database(name: &str) -> String {
 fn a_refused_bootstrap_releases_the_lock() {
     let _shared = crate::lock_pg_test();
     let Some(url) = shared_url() else {
-        eprintln!("skip: shared Postgres unreachable");
         return;
     };
     let mut client = crate::pg_tls::connect(&url).expect("connect");

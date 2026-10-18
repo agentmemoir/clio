@@ -65,6 +65,10 @@ The tests and the coverage step are both scoped to the files you changed. Format
 
 Prose stays one paragraph per line: `make scripts-check-prose` fails on hard-wrapped paragraphs outside fenced code blocks, HTML comments, and YAML frontmatter.
 
+### Postgres tests
+
+A Postgres-backed test fails closed when the database cannot be opened: without an opt-out an unreachable store panics the test, so a green suite proves the Postgres path actually ran. Set `CLIO_SKIP_PG_TESTS` to `1`, `true`, or `yes` to turn that into a printed skip note and an early return instead. Unset, or any other value, keeps the strict default. The opt-out is read once, so a test that asserts on the skip branch and the gate that acts on it share the same decision.
+
 ### Pre-commit checks
 
 Run them before you commit:

@@ -180,6 +180,8 @@ mod inventory_fixture;
 #[cfg(test)]
 mod inventory_map_fixtures;
 #[cfg(test)]
+mod inventory_pg_credentials_tests;
+#[cfg(test)]
 mod inventory_pg_support_tests;
 #[cfg(test)]
 #[path = "inventory_pg_tests.rs"]

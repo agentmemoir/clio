@@ -22,7 +22,9 @@
 
 use crate::export_custody::reconcile_open_destinations;
 use crate::export_tests::{Scratch, staging_entries};
-use crate::inventory_pg_support_tests::{PgLedgerFixture, open_pg_ledger_fixture, pg_skip_note};
+use crate::inventory_pg_support_tests::{
+    PgLedgerFixture, open_pg_ledger_fixture, pg_gate_or_panic,
+};
 use crate::review_export_scenarios_tests::{
     Fault, MARKER, accepted_controls, harness_ctx, intent, query, spec,
 };
@@ -33,11 +35,7 @@ use clio_types::ErrorCode;
 
 /// The live fixture, or a printed credential-safe skip note plus `None`.
 fn pg_fixture_or_skip() -> Option<(clio_store::PgTestGuard, PgLedgerFixture)> {
-    let pair = open_pg_ledger_fixture();
-    if let Err(err) = &pair {
-        eprintln!("{}", pg_skip_note("review export Postgres scenarios", err));
-    }
-    pair.ok()
+    pg_gate_or_panic("review export Postgres scenarios", open_pg_ledger_fixture())
 }
 
 /// An accepted Postgres export writes the ordered content-free rows under

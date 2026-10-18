@@ -29,11 +29,9 @@ use clio::store::lock_pg_test;
 use common::seed_key;
 use serde_json::Value;
 use std::fs;
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 /// Local Compose Postgres, the same URL the Makefile exports for parity.
 const COMPOSE_PG: &str = "postgres://clio:clio@127.0.0.1:34310/clio";
@@ -51,29 +49,6 @@ fn unique(tag: &str) -> String {
 /// falling back to local Compose.
 fn pg_url() -> String {
     std::env::var("CLIO_DATABASE_URL").unwrap_or_else(|_| COMPOSE_PG.to_owned())
-}
-
-/// True when a Postgres server answers at `url`'s host and port within a short
-/// budget, so the harness skips instead of failing where none is running.
-fn postgres_reachable(url: &str) -> bool {
-    let Some(rest) = url
-        .strip_prefix("postgres://")
-        .or_else(|| url.strip_prefix("postgresql://"))
-    else {
-        return false;
-    };
-    let authority = rest.split(['/', '?']).next().unwrap_or("");
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((host, port)) => (host, port.parse::<u16>().unwrap_or(5432)),
-        None => (host_port, 5432),
-    };
-    let Ok(addresses) = (host, port).to_socket_addrs() else {
-        return false;
-    };
-    addresses
-        .into_iter()
-        .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok())
 }
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -218,13 +193,20 @@ fn live_correct_mints_a_fresh_revision_id_each_process() {
     fs::remove_dir_all(&dir).expect("remove the scenario directory");
 }
 
-/// The same scenario on Postgres, where the issue was reported. Skipped with a
-/// note when no server answers, so the harness never fails where none runs.
+/// The same scenario on Postgres, where the issue was reported. Fails closed
+/// when no server answers: the gate panics unless `CLIO_SKIP_PG_TESTS` opted
+/// out, in which case it prints the credential-safe note and returns.
 #[test]
 fn live_correct_mints_a_fresh_revision_id_each_process_on_postgres() {
     let url = pg_url();
-    if !postgres_reachable(&url) {
-        eprintln!("no Postgres at {url}: skipping the Postgres correction scenario");
+    if !clio::store::pg_test_target::postgres_reachable(&url) {
+        clio::store::pg_skip::pg_required_or_skip(
+            "the Postgres correction scenario",
+            &format!(
+                "no Postgres at {}",
+                clio::store::pg_test_target::redacted_endpoint(&url)
+            ),
+        );
         return;
     }
     let _guard = lock_pg_test();

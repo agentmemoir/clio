@@ -7,6 +7,14 @@ license.workspace = true
 publish.workspace = true
 description = "Dual-backend persistence, DEK interface, and vector storage hooks"
 
+[features]
+# Compiles the test-only Postgres test-support seam into the library: the one
+# `CLIO_SKIP_PG_TESTS` reader, the fail-closed gate every suite routes through,
+# and the credential-safe target description. Only a dev-dependency turns it
+# on, so no shipped build carries the seam; a dependent crate that needs it
+# lists `clio-store` in `[dev-dependencies]` with this feature.
+test-support = []
+
 [dependencies]
 clio-types = { workspace = true }
 clio-config = { workspace = true }

@@ -35,9 +35,7 @@ use clio_backup::dump_meta::{
 use clio_backup::manifest::ManifestAuthority;
 use clio_backup::staging;
 use clio_backup::{CreateRequest, StagedMember, create_archive};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// The Postgres URL used when the environment names none, matching the Makefile.
 const COMPOSE_PG: &str = "postgres://clio:clio@127.0.0.1:34310/clio";
@@ -48,43 +46,11 @@ pub fn pg_url() -> String {
 }
 
 /// True when a Postgres server answers at `url` within a short budget.
-pub fn postgres_reachable(url: &str) -> bool {
-    // The host/port extraction is the one `index_write_lag_harness.rs` uses, so
-    // the skip decision matches the other Postgres integration harnesses.
-    let Some(rest) = url
-        .strip_prefix("postgres://")
-        .or_else(|| url.strip_prefix("postgresql://"))
-    else {
-        return false;
-    };
-    let authority = rest.split(['/', '?']).next().unwrap_or("");
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((host, port)) => (host, port.parse::<u16>().unwrap_or(5432)),
-        None => (host_port, 5432),
-    };
-    let Ok(addresses) = (host, port).to_socket_addrs() else {
-        return false;
-    };
-    addresses
-        .into_iter()
-        .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok())
-}
-
-/// The explicit opt-out from the required Postgres backend.
 ///
-/// A developer with no database sets this to run the rest of the workspace
-/// suite; without it an unreachable Postgres fails the measurement instead of
-/// passing as a no-op. The name and the truthy values match the Postgres tests
-/// in `clio-store`.
-const SKIP_PG_TESTS: &str = "CLIO_SKIP_PG_TESTS";
-
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-fn postgres_skip_requested() -> bool {
-    matches!(
-        std::env::var(SKIP_PG_TESTS).as_deref(),
-        Ok("1" | "true" | "yes")
-    )
+/// Delegates to the store's test-support probe, so this harness, the other
+/// command harnesses, and the redacted endpoint all read the URL the same way.
+pub fn postgres_reachable(url: &str) -> bool {
+    clio::store::pg_test_target::postgres_reachable(url)
 }
 
 /// Require a reachable Postgres server for a Postgres measurement.
@@ -100,18 +66,12 @@ pub fn require_postgres(reachable: bool) -> bool {
     if reachable {
         return true;
     }
-    if postgres_skip_requested() {
-        eprintln!(
-            "skip postgres old-archive measurement: {SKIP_PG_TESTS} is set and no \
-             Postgres answers at the configured URL"
-        );
-        return false;
-    }
-    panic!(
-        "the postgres old-archive measurement requires a reachable Postgres at \
-         CLIO_DATABASE_URL; start the database, or set {SKIP_PG_TESTS}=1 to run the \
-         rest of the suite without it"
+    clio::store::pg_skip::pg_required_or_skip(
+        "the postgres old-archive measurement",
+        "no Postgres answers at CLIO_DATABASE_URL (start the database, or set \
+         CLIO_SKIP_PG_TESTS=1 to run the rest of the suite without it)",
     );
+    false
 }
 
 /// Assemble a Postgres archive from the live store at `url`, carrying `kms_path`.

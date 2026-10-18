@@ -343,6 +343,13 @@ jobs:
         if: always()
         run: make scripts-check-prose
 
+      # Whether a Rust source file mutates the process-global environment. Its
+      # subject is every crate, like the gate-boundary tripwires, so it runs on
+      # every change; a `set_var` in a test races every test beside it.
+      - name: Env mutation check
+        if: always()
+        run: make scripts-check-env-mutation
+
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
       - name: Owned lookup acceptance

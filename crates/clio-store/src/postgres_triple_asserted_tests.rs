@@ -38,10 +38,7 @@ fn open_pg() -> Option<PostgresStore> {
     match PostgresStore::open(&url, kms) {
         Ok(store) => Some(store),
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres ever-asserted tests", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("postgres ever-asserted tests", &err);
             None
         }
     }

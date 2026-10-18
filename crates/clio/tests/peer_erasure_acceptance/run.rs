@@ -49,9 +49,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::support::{
-    AcceptanceStore, BANK, SUBJECT, fingerprint, local_kms, postgres_skip_requested, postgres_url,
-};
+use super::support::{AcceptanceStore, BANK, SUBJECT, fingerprint, local_kms, postgres_url};
 
 /// One extra node store beside the coordinator: a stale writer or a reader,
 /// kept alive with the backend resources it needs.
@@ -157,17 +155,11 @@ impl Run<PostgresStore> {
         let guard = lock_pg_test();
         let base = postgres_url();
         if let Err(detail) = probe_postgres(&base) {
-            if postgres_skip_requested() {
-                eprintln!(
-                    "skip peer erasure acceptance postgres scenario `{tag}`: the explicit \
-                     skip is set and no Postgres answers at the configured URL ({detail})"
-                );
-                return None;
-            }
-            panic!(
-                "the peer erasure acceptance Postgres scenarios require a reachable Postgres: \
-                 {detail}"
+            clio::store::pg_skip::pg_required_or_skip(
+                &format!("peer erasure acceptance postgres scenario `{tag}`"),
+                &detail,
             );
+            return None;
         }
         let schema = ScopedSchema::new(&base);
         let url = schema.url().to_owned();

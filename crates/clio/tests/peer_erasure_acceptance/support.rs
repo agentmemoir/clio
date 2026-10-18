@@ -326,15 +326,6 @@ pub fn postgres_url() -> String {
     std::env::var("CLIO_DATABASE_URL").unwrap_or_else(|_| COMPOSE_PG.to_owned())
 }
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-#[must_use]
-pub fn postgres_skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
-}
-
 /// A process-local key provider for every fixture store.
 #[must_use]
 pub fn local_kms() -> Arc<dyn DekProvider> {

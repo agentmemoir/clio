@@ -75,10 +75,14 @@ fn scratch_dir(tag: &str) -> PathBuf {
 }
 
 /// The shared `CLIO_DATABASE_URL`, but only when it points at a Postgres
-/// backend. Any other value (unset, SQLite) makes the caller return early.
+/// backend. A missing or non-Postgres value fails closed unless the operator
+/// opted out, which prints a note and makes the caller return early.
+///
+/// The opt-out is `CLIO_SKIP_PG_TESTS` set to `1`, `true`, or `yes`; unset, or
+/// any other value, keeps the strict default, so a green suite proves the
+/// Postgres path ran.
 pub fn postgres_url() -> Option<String> {
-    let url = std::env::var("CLIO_DATABASE_URL").ok()?;
-    (url.starts_with("postgres://") || url.starts_with("postgresql://")).then_some(url)
+    clio_store::pg_skip::pg_url_or_skip("the subject-request Postgres fixtures")
 }
 
 /// Open a Postgres state over `url`, with `kms` as its persistent key store.

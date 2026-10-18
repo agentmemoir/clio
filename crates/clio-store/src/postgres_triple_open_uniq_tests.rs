@@ -36,10 +36,7 @@ fn open_pg() -> Option<PostgresStore> {
     match PostgresStore::open(&url, kms()) {
         Ok(store) => Some(store),
         Err(err) => {
-            eprintln!(
-                "{}",
-                crate::pg_skip::pg_skip_note("postgres open-edge invariant tests", &err)
-            );
+            crate::pg_skip::unreachable_pg_or_skip("postgres open-edge invariant tests", &err);
             None
         }
     }
@@ -98,8 +95,8 @@ impl PrivateSchema {
         let name = unique(prefix).replace('-', "_");
         let mut client = match crate::pg_tls::connect(url.as_str()) {
             Ok(client) => client,
-            Err(e) => {
-                eprintln!("skipping postgres open-edge invariant tests: cannot connect: {e}");
+            Err(err) => {
+                crate::pg_skip::unreachable_pg_or_skip("postgres open-edge invariant tests", &err);
                 return None;
             }
         };
