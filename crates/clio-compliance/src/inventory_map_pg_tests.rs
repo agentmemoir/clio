@@ -175,9 +175,10 @@ impl MapPgFixture {
 /// schema and a store holding one row class per subject-link class, sealed
 /// under a KMS this fixture owns so a restart reopens with the same Arc.
 /// The guard goes to the caller so the lock spans the caller's whole test;
-/// an unreachable database yields `Err` for [`pg_skip_note`], a misconfigured
-/// URL panics as a harness fault, a reachable database that cannot hold the
-/// fixture rows panics, and the live marker line is what a skip never prints.
+/// an unreachable database yields an `Err` the caller routes through the
+/// fail-closed gate, a misconfigured URL panics as a harness fault, a reachable
+/// database that cannot hold the fixture rows panics, and the live marker line
+/// is what a skip never prints.
 pub(crate) fn open_map_pg_fixture() -> Result<(PgTestGuard, MapPgFixture), AmError> {
     let guard = lock_pg_test();
     let base = pg_checked_url();

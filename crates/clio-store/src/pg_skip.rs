@@ -19,9 +19,9 @@
 //!
 //! The public gates are the only way a Postgres test may skip: each reads
 //! `CLIO_SKIP_PG_TESTS` itself and fails closed otherwise, so a suite cannot
-//! reach the opt-out path by formatting a note and then returning. The `_with`
-//! seam is crate-private and test-only, so a dependent crate still has no entry
-//! that skips without the environment's opt-out.
+//! reach the opt-out path by formatting a note and then returning. The note and
+//! the `_with` seam are crate-private, so a dependent crate has no entry that
+//! renders the note or skips without the environment's opt-out.
 //!
 //! The seam is compiled only under `cfg(test)` or the `test-support` feature,
 //! which a dependent crate turns on from `[dev-dependencies]`; no shipped build
@@ -64,7 +64,7 @@ const PG_SCHEMES: [&str; 2] = ["postgres://", "postgresql://"];
 /// authentication failed for user "clio"`), never the address it was dialled
 /// with.
 #[must_use]
-pub fn pg_skip_note(suite: &str, err: &AmError) -> String {
+pub(crate) fn pg_skip_note(suite: &str, err: &AmError) -> String {
     format!("skipping {suite}: cannot open the Postgres store: {err}")
 }
 
@@ -74,7 +74,7 @@ pub fn pg_skip_note(suite: &str, err: &AmError) -> String {
 /// is not a pass, so the store's Postgres suites cannot report green without
 /// touching a database.
 #[must_use]
-pub fn skip_requested() -> bool {
+pub(crate) fn skip_requested() -> bool {
     opted_out(std::env::var("CLIO_SKIP_PG_TESTS").ok().as_deref())
 }
 

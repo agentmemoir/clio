@@ -84,9 +84,10 @@ impl PgBundleFixture {
 /// schema and a store holding one row class per subject-link class.
 ///
 /// # Errors
-/// The shared database is unreachable; the caller prints [`pg_skip_note`] and
-/// returns. Fixture-write failures panic, because a reachable database that
-/// cannot hold the fixture rows is a test failure, not a skip.
+/// The shared database is unreachable; the caller routes the error through the
+/// fail-closed gate, which prints the credential-safe note under the opt-out and
+/// panics otherwise. Fixture-write failures panic, because a reachable database
+/// that cannot hold the fixture rows is a test failure, not a skip.
 pub(crate) fn open_bundle_pg_fixture() -> Result<(PgTestGuard, PgBundleFixture), AmError> {
     let guard = lock_pg_test();
     let base = pg_checked_url();

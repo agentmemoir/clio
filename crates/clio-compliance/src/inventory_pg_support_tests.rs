@@ -4,9 +4,8 @@
 //! # Responsibility
 //!
 //! This module is responsible for the test-only Postgres half of the
-//! scope-ledger tests: the shared test-database address, a search-path-scoped
-//! store holding one row class per subject-link class, and the skip note that
-//! can never carry the connection string.
+//! scope-ledger tests: the shared test-database address and a
+//! search-path-scoped store holding one row class per subject-link class.
 //!
 //! ## Owns
 //! - `open_pg_ledger_fixture`: the shared-Postgres lock, the scoped schema, the
@@ -14,8 +13,8 @@
 //! - `pg_base_url` and `pg_checked_url`, the shared-database address readers
 //!
 //! The credential readers and the fail-closed gate live in
-//! `inventory_pg_credentials_tests`, and the skip wording and opt-out decision
-//! live in `clio_store::pg_skip`; this module re-exports them for the callers
+//! `inventory_pg_credentials_tests`, and the opt-out decision lives in
+//! `clio_store::pg_skip`; this module re-exports the pair gate for the callers
 //! that already import through it.
 //!
 //! ## Does not own
@@ -54,9 +53,6 @@ use std::path::{Path, PathBuf};
 pub(crate) use crate::inventory_pg_credentials_tests::{
     pg_gate_or_panic, url_password, url_userinfo,
 };
-/// The one skip wording, re-exported from the store's test-support seam so
-/// every suite in the crate shares it.
-pub(crate) use clio_store::pg_skip::pg_skip_note;
 
 /// The actor label every fixture write is stamped with.
 const ACTOR: &str = "harness";
@@ -178,9 +174,10 @@ impl PgLedgerFixture {
 /// then run unguarded.
 ///
 /// # Errors
-/// The shared database is unreachable; the caller prints [`pg_skip_note`] and
-/// returns. Fixture-write failures panic, because a reachable database that
-/// cannot hold the fixture rows is a test failure, not a skip.
+/// The shared database is unreachable; the caller routes the error through the
+/// fail-closed gate, which prints the credential-safe note under the opt-out and
+/// panics otherwise. Fixture-write failures panic, because a reachable database
+/// that cannot hold the fixture rows is a test failure, not a skip.
 pub(crate) fn open_pg_ledger_fixture() -> Result<(PgTestGuard, PgLedgerFixture), AmError> {
     let guard = lock_pg_test();
     let base = pg_base_url();

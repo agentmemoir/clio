@@ -27,14 +27,14 @@ use crate::inventory::{
 };
 use crate::inventory_fixture::{LedgerFixture, OTHER, SELECTED, SHARED, UNKNOWN, fixture_id};
 use crate::inventory_pg_support_tests::{
-    PgLedgerFixture, open_pg_ledger_fixture, pg_base_url, pg_skip_note, url_password, url_userinfo,
+    PgLedgerFixture, open_pg_ledger_fixture, pg_base_url, url_password, url_userinfo,
 };
 use crate::subject_peer::{begin_denial, mark_acknowledged};
 use crate::test_unique::unique;
 use clio_store::{
     BeliefStore, ComplianceStore, HistoryStore, PeerActionStore, PersonaStore, Store,
 };
-use clio_types::{AmError, ErrorCode};
+use clio_types::ErrorCode;
 #[path = "inventory_pg_triples_tests.rs"]
 pub(crate) mod triples;
 
@@ -318,31 +318,6 @@ fn inventory_pg_rows_carry_no_database_credential() {
         ledger.rows.len(),
         password.is_some()
     );
-}
-
-/// A skip note must never carry the connection string or its userinfo.
-#[test]
-fn inventory_pg_skip_note_carries_no_connection_string() {
-    let err = AmError::new(
-        ErrorCode::Internal,
-        "postgres connect: FATAL: password authentication failed for user \"clio\"",
-    );
-    let note = pg_skip_note(SUITE, &err);
-    assert!(!note.contains("://"), "a skip note has a URL: {note}");
-    assert!(!note.contains('@'), "a skip note has userinfo: {note}");
-}
-
-/// Dropping the URL is only worth it if the line still says why the test
-/// skipped, so the suite and the server's own words have to survive.
-#[test]
-fn inventory_pg_skip_note_names_the_suite_and_the_servers_reason() {
-    let err = AmError::new(
-        ErrorCode::Internal,
-        "postgres connect: FATAL: password authentication failed for user \"clio\"",
-    );
-    let note = pg_skip_note(SUITE, &err);
-    assert!(note.contains(SUITE), "{note}");
-    assert!(note.contains("password authentication failed"), "{note}");
 }
 
 /// The peer fact renders over Postgres facts too: a durable acknowledgement

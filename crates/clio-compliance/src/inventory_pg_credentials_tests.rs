@@ -13,8 +13,9 @@
 //! - `pg_gate_or_panic`: the pair gate over the store's fail-closed helper
 //!
 //! ## Does not own
-//! - The URL resolution and the skip wording (`inventory_pg_support_tests`)
-//! - The opt-out read and the strict default (`clio_store::pg_skip`)
+//! - The URL resolution (`inventory_pg_support_tests`)
+//! - The skip wording, the opt-out read, and the strict default
+//!   (`clio_store::pg_skip`)
 //! - The ledger and its rows (`inventory.rs`, `inventory_rows.rs`)
 //!
 //! ## Boundary
