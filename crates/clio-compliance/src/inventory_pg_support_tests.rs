@@ -11,7 +11,12 @@
 //! ## Owns
 //! - `open_pg_ledger_fixture`: the shared-Postgres lock, the scoped schema, the
 //!   store, and the selected, other, shared, and hashed link-class writes
-//! - `pg_base_url`, `pg_checked_url`, the local `pg_skip_note`, and the credential readers
+//! - `pg_base_url` and `pg_checked_url`, the shared-database address readers
+//!
+//! The credential readers and the fail-closed gate live in
+//! `inventory_pg_credentials_tests`, and the skip wording and opt-out decision
+//! live in `clio_store::pg_skip`; this module re-exports them for the callers
+//! that already import through it.
 //!
 //! ## Does not own
 //! - The ledger and its row plan (`inventory.rs`, `inventory_rows.rs`)
@@ -44,6 +49,15 @@ use clio_types::{
 };
 use std::path::{Path, PathBuf};
 
+/// The credential readers and gate, re-exported so the ledger suites keep
+/// importing their helpers through this module.
+pub(crate) use crate::inventory_pg_credentials_tests::{
+    pg_gate_or_panic, url_password, url_userinfo,
+};
+/// The one skip wording, re-exported from the store's test-support seam so
+/// every suite in the crate shares it.
+pub(crate) use clio_store::pg_skip::pg_skip_note;
+
 /// The actor label every fixture write is stamped with.
 const ACTOR: &str = "harness";
 /// Timestamp every fixture row is written with.
@@ -68,52 +82,6 @@ pub(crate) fn pg_checked_url() -> String {
         "CLIO_DATABASE_URL is misconfigured (bad URL or no password; a harness fault)"
     );
     url
-}
-
-/// The line a Postgres test prints when it cannot open the store.
-///
-/// The same shape and guarantee as the store's own skip note: it takes the
-/// suite name and the driver's error, and has no parameter a connection string
-/// could arrive through, so `CLIO_DATABASE_URL`'s userinfo can never reach the
-/// test log.
-#[must_use]
-pub(crate) fn pg_skip_note(suite: &str, err: &AmError) -> String {
-    format!("skipping {suite}: cannot open the Postgres store: {err}")
-}
-
-/// The fail-closed gate every fixture helper routes through: the pair on
-/// success, or a panic unless `CLIO_SKIP_PG_TESTS` opted out, in which case the
-/// credential-safe [`pg_skip_note`] prints and this yields `None`.
-pub(crate) fn pg_gate_or_panic<T>(suite: &str, pair: Result<T, AmError>) -> Option<T> {
-    match pair {
-        Ok(value) => Some(value),
-        Err(err) => {
-            let opted_out = matches!(
-                std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-                Ok("1" | "true" | "yes")
-            );
-            assert!(opted_out, "{suite} needs Postgres: {err}");
-            eprintln!("{}", pg_skip_note(suite, &err));
-            None
-        }
-    }
-}
-
-/// The userinfo (`user:password`) a connection URL carries, read in memory and
-/// never printed.
-#[must_use]
-pub(crate) fn url_userinfo(url: &str) -> Option<String> {
-    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let (userinfo, _host) = after_scheme.split_once('@')?;
-    (!userinfo.is_empty()).then(|| userinfo.to_owned())
-}
-
-/// The password half of a connection URL's userinfo, read in memory and never printed.
-#[must_use]
-pub(crate) fn url_password(url: &str) -> Option<String> {
-    url_userinfo(url)?
-        .split_once(':')
-        .map(|(_, password)| password.to_owned())
 }
 
 /// The ledger paths one Postgres fixture reports, under `dir`.
@@ -431,20 +399,4 @@ pub(crate) fn write_hashed_link_class(store: &PostgresStore, bank: &str) {
         tombstones.iter().any(|row| !row.subject_hash.is_empty()),
         "the erase path must leave a hashed-link tombstone: {tombstones:?}"
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{url_password, url_userinfo};
-
-    /// The credential readers split the userinfo half only, and an address
-    /// without one yields nothing to check against.
-    #[test]
-    fn inventory_pg_url_credential_readers_split_only_the_userinfo() {
-        let url = "postgres://user:secret@127.0.0.1:34310/clio?options=x";
-        assert_eq!(url_userinfo(url).as_deref(), Some("user:secret"));
-        assert_eq!(url_password(url).as_deref(), Some("secret"));
-        assert_eq!(url_userinfo("postgres://127.0.0.1:34310/clio"), None);
-        assert_eq!(url_password("postgres://127.0.0.1:34310/clio"), None);
-    }
 }

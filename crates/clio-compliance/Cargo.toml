@@ -20,6 +20,9 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
+# The Postgres test suites route their opt-out and fail-closed decision through
+# the store's test-support seam, which only a dev-dependency turns on.
+clio-store = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

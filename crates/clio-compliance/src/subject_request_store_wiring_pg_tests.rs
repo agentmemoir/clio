@@ -26,7 +26,7 @@
 use super::subject_request_store_wiring_tests::{
     kms, persist, started_record, subject_scope, wiring_item,
 };
-use crate::inventory_pg_support_tests::{pg_checked_url, pg_skip_note};
+use crate::inventory_pg_support_tests::pg_checked_url;
 use crate::subject_request::{
     PathOwner, PathSlot, PathState, RegisterOutcome, RequestKind, RequestScope, RequestState,
 };
@@ -65,16 +65,6 @@ impl PgFixture {
 /// The suite name every skip note in this module carries.
 const SUITE: &str = "subject request wiring Postgres tests";
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-/// Without this opt-out an unreachable Postgres fails the caller instead of
-/// silently reporting green.
-fn skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
-}
-
 /// Open the live Postgres fixture. An unreachable Postgres panics unless the
 /// operator set `CLIO_SKIP_PG_TESTS`, which prints the skip note and returns
 /// `None`. Neither the skip note nor the panic carries a connection string.
@@ -83,11 +73,8 @@ pub(super) fn pg_fixture_or_skip() -> Option<PgFixture> {
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
         let err = AmError::new(ErrorCode::Internal, format!("postgres probe: {detail}"));
-        if skip_requested() {
-            eprintln!("{}", pg_skip_note(SUITE, &err));
-            return None;
-        }
-        panic!("{SUITE} require a reachable Postgres: {err}");
+        clio_store::pg_skip::unreachable_pg_or_skip(SUITE, &err);
+        return None;
     }
     let schema = ScopedSchema::new(&base);
     let store = PostgresStore::open(schema.url(), kms()).expect("open the scoped fixture store");

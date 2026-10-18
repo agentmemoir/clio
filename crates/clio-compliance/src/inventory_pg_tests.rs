@@ -41,14 +41,6 @@ pub(crate) mod triples;
 /// The suite name every skip note in this module carries.
 const SUITE: &str = "inventory Postgres ledger tests";
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-/// Without the opt-out an unreachable Postgres fails the suite: a skipped
-/// backend is not a pass.
-fn skip_requested() -> bool {
-    let opted_out = std::env::var("CLIO_SKIP_PG_TESTS");
-    matches!(opted_out.as_deref(), Ok("1" | "true" | "yes"))
-}
-
 /// The live fixture, or a printed credential-safe skip note plus `None` — but
 /// only under the explicit opt-out: without it an unreachable Postgres fails
 /// the suite instead of reporting green.
@@ -56,8 +48,7 @@ fn pg_fixture_or_skip() -> Option<(clio_store::PgTestGuard, PgLedgerFixture)> {
     match open_pg_ledger_fixture() {
         Ok(pair) => Some(pair),
         Err(err) => {
-            assert!(skip_requested(), "{SUITE} needs Postgres: {err}");
-            eprintln!("{}", pg_skip_note(SUITE, &err));
+            clio_store::pg_skip::unreachable_pg_or_skip(SUITE, &err);
             None
         }
     }

@@ -27,7 +27,7 @@
 //! Test-only. Never compiled into production builds.
 
 use super::subject_peer_fixtures::{Scratch, kms, open_sqlite};
-use crate::inventory_pg_support_tests::{pg_checked_url, pg_skip_note};
+use crate::inventory_pg_support_tests::pg_checked_url;
 use crate::subject_peer::{
     derived_peer_states, mark_acknowledged, mark_delivered, mark_refused, peer_action_id,
     record_disposition, snapshot_peers,
@@ -107,14 +107,8 @@ fn pg_fixture_or_skip() -> Option<(PgTestGuard, ScopedSchema, PostgresStore)> {
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
         let err = AmError::new(ErrorCode::Internal, format!("postgres probe: {detail}"));
-        if matches!(
-            std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-            Ok("1" | "true" | "yes")
-        ) {
-            eprintln!("{}", pg_skip_note("subject peer Postgres tests", &err));
-            return None;
-        }
-        panic!("subject peer Postgres tests require a reachable Postgres: {err}");
+        clio_store::pg_skip::unreachable_pg_or_skip("subject peer Postgres tests", &err);
+        return None;
     }
     let schema = ScopedSchema::new(&base);
     let store = PostgresStore::open(schema.url(), kms()).expect("open the scoped fixture store");

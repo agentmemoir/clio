@@ -30,7 +30,7 @@ use crate::erasure_reconcile::ErasureRetryEnv;
 use crate::erasure_retry::erasure_action_id;
 use crate::export_subject_scenarios_tests::FaultEvents;
 use crate::inventory_fixture::FixtureDir;
-use crate::inventory_pg_support_tests::{pg_checked_url, pg_skip_note};
+use crate::inventory_pg_support_tests::pg_checked_url;
 use crate::subject_peer::{begin_denial, mark_acknowledged};
 use crate::subject_request::{PeerState, RequestState};
 use crate::subject_request_events::record_peer_denial_intent;
@@ -54,14 +54,6 @@ struct PgFixture {
     _guard: PgTestGuard,
 }
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-fn skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
-}
-
 /// Open the live Postgres fixture. An unreachable Postgres panics unless the
 /// operator set `CLIO_SKIP_PG_TESTS`, which prints the skip note and returns
 /// `None`. Neither the note nor the panic carries a connection string.
@@ -70,11 +62,8 @@ fn pg_fixture_or_skip() -> Option<PgFixture> {
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
         let err = AmError::new(ErrorCode::Internal, format!("postgres probe: {detail}"));
-        if skip_requested() {
-            eprintln!("{}", pg_skip_note(SUITE, &err));
-            return None;
-        }
-        panic!("{SUITE} require a reachable Postgres: {err}");
+        clio_store::pg_skip::unreachable_pg_or_skip(SUITE, &err);
+        return None;
     }
     let schema = ScopedSchema::new(&base);
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());

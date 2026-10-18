@@ -27,7 +27,7 @@
 
 use crate::erase::{EraseArgs, EraseVecSink};
 use crate::inventory_fixture::FixtureDir;
-use crate::inventory_pg_support_tests::{pg_checked_url, pg_skip_note};
+use crate::inventory_pg_support_tests::pg_checked_url;
 use crate::subject_bank_coordination::coordinated_erase_request;
 use crate::subject_request::{
     PeerEnablement, PeerState, RequestKind, RequestScope, RequestState, SubjectRequestRecord,
@@ -68,16 +68,6 @@ impl PgStore {
     }
 }
 
-/// True only when the operator explicitly opted out of Postgres-backed tests.
-/// Without this opt-out an unreachable Postgres fails the test instead of
-/// silently reporting green.
-fn skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
-}
-
 /// Open the live Postgres fixture. An unreachable Postgres fails the test
 /// unless the operator set `CLIO_SKIP_PG_TESTS`, which prints the skip note and
 /// returns `None`.
@@ -86,14 +76,11 @@ fn pg_store_or_skip() -> Option<PgStore> {
     let base = pg_checked_url();
     if let Err(detail) = probe_postgres(&base) {
         let err = AmError::new(ErrorCode::Internal, format!("postgres probe: {detail}"));
-        if skip_requested() {
-            eprintln!(
-                "{}",
-                pg_skip_note("subject bank coordination Postgres tests", &err)
-            );
-            return None;
-        }
-        panic!("subject bank coordination Postgres tests require Postgres: {err}");
+        clio_store::pg_skip::unreachable_pg_or_skip(
+            "subject bank coordination Postgres tests",
+            &err,
+        );
+        return None;
     }
     let schema = ScopedSchema::new(&base);
     let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
