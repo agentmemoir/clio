@@ -14,6 +14,7 @@
 //!   the archive-band weights
 //! - `build`, which seeds a base state and returns a hub-wired `Fixture`
 //! - `open_sqlite`, `open_postgres`, and `postgres_url` for the two backends
+//! - The local regression test for the shared gate's fail-closed contract
 //!
 //! ## Does not own
 //! - Measurement and the p95 ceilings (`measure`)
@@ -132,6 +133,15 @@ pub fn open_sqlite() -> Arc<McpState> {
 
 /// The shared `CLIO_DATABASE_URL` when it points at Postgres, else a fail-closed
 /// skip through the store's shared gate.
+///
+/// The contract this crate's Postgres suites run under: with no Postgres
+/// `CLIO_DATABASE_URL` configured the gate panics, so a green suite proves the
+/// Postgres path actually dialled a database instead of skipping it. The sole
+/// opt-out is `CLIO_SKIP_PG_TESTS` set to `1`, `true`, or `yes`, which prints a
+/// credential-safe note naming the suite and the server's own refusal and
+/// yields `None` so the caller returns early. Any other value, or none, keeps
+/// the strict default. The choice is deliberate: this crate takes no Compose
+/// fallback, so a run either has a URL or must ask to skip.
 pub fn postgres_url() -> Option<String> {
     clio_store::pg_skip::pg_url_or_skip("the read-tools Postgres pressure measurement")
 }
@@ -324,4 +334,76 @@ fn attach_forest(state: &McpState) {
     tree.node_mut(&refreshing)
         .expect("dirty fixture node is mutable")
         .refreshing = true;
+}
+
+/// The environment variable that arms the child probe below. The parent sets it
+/// on a child `Command` only, so no test in this binary mutates the process
+/// environment it shares with every other test in the run.
+const PG_GATE_CHILD_ENV: &str = "CLIO_MCP_PG_GATE_CHILD";
+
+/// The child half of [`the_postgres_gate_fails_closed_without_a_url_and_skips_only_when_opted_out`].
+///
+/// Harmless in an ordinary run: it returns before touching the gate unless the
+/// parent armed it, so `cargo test -p clio-mcp` never calls the gate here.
+#[test]
+fn postgres_gate_child_probe() {
+    if std::env::var_os(PG_GATE_CHILD_ENV).is_none() {
+        return;
+    }
+    let _url = postgres_url();
+}
+
+/// The clio-mcp Postgres gate fails closed when `CLIO_DATABASE_URL` is unset and
+/// skips only when `CLIO_SKIP_PG_TESTS` asked for it.
+///
+/// The gate reads the process environment, and every test in this binary shares
+/// one process, so this test re-execs its own binary and sets the two variables
+/// on the child's `Command` only — the pattern `runtime_index_hardening_tests`
+/// already uses. The parent environment, and every peer test, is untouched, so
+/// the check is deterministic under a parallel run.
+#[test]
+fn the_postgres_gate_fails_closed_without_a_url_and_skips_only_when_opted_out() {
+    let gate_child = || {
+        let mut command = std::process::Command::new(
+            std::env::current_exe().expect("locate the read-tools test binary"),
+        );
+        command
+            .args([
+                "--exact",
+                "fixture::postgres_gate_child_probe",
+                "--nocapture",
+            ])
+            .env(PG_GATE_CHILD_ENV, "1")
+            .env_remove("CLIO_DATABASE_URL");
+        command
+    };
+
+    let strict = gate_child()
+        .env_remove("CLIO_SKIP_PG_TESTS")
+        .output()
+        .expect("run the strict gate child");
+    assert!(
+        !strict.status.success(),
+        "the gate must fail closed with no URL and no opt-out"
+    );
+    let strict_stderr = String::from_utf8_lossy(&strict.stderr);
+    assert!(
+        strict_stderr.contains("CLIO_DATABASE_URL is not set"),
+        "the failure must name the missing URL: {strict_stderr}"
+    );
+
+    let opted_out = gate_child()
+        .env("CLIO_SKIP_PG_TESTS", "1")
+        .output()
+        .expect("run the opted-out gate child");
+    assert!(
+        opted_out.status.success(),
+        "the opt-out must turn the failure into a skip: {}",
+        String::from_utf8_lossy(&opted_out.stderr)
+    );
+    let opted_out_stderr = String::from_utf8_lossy(&opted_out.stderr);
+    assert!(
+        opted_out_stderr.contains("skipping the read-tools Postgres pressure measurement"),
+        "the skip note must name the suite and stay credential-free: {opted_out_stderr}"
+    );
 }

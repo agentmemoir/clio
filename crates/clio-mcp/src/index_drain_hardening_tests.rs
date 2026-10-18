@@ -44,7 +44,9 @@ fn unique_id(prefix: &str) -> String {
 
 /// The shared `CLIO_DATABASE_URL`, but only when it points at a Postgres
 /// backend. A missing or non-Postgres value fails closed unless the operator
-/// opted out, which prints a note and makes the caller return early.
+/// opted out, which prints a note and makes the caller return early. The
+/// opt-out is `CLIO_SKIP_PG_TESTS` set to `1`, `true`, or `yes`; unset, or any
+/// other value, keeps the strict default.
 fn postgres_url() -> Option<String> {
     clio_store::pg_skip::pg_url_or_skip("the mcp Postgres drain-hardening test")
 }
