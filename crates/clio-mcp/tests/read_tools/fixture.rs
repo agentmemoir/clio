@@ -341,10 +341,18 @@ fn attach_forest(state: &McpState) {
 /// environment it shares with every other test in the run.
 const PG_GATE_CHILD_ENV: &str = "CLIO_MCP_PG_GATE_CHILD";
 
+/// The child test the parent re-execs, as libtest names it. `#[test]` cannot
+/// take a `const` for the function name, so a rename of
+/// `postgres_gate_child_probe` must update this string with it.
+const POSTGRES_GATE_CHILD_TEST: &str = "fixture::postgres_gate_child_probe";
+
 /// The child half of [`the_postgres_gate_fails_closed_without_a_url_and_skips_only_when_opted_out`].
 ///
 /// Harmless in an ordinary run: it returns before touching the gate unless the
 /// parent armed it, so `cargo test -p clio-mcp` never calls the gate here.
+// The filter in `POSTGRES_GATE_CHILD_TEST` must name this function and its
+// `fixture` module; `#[test]` cannot take a const, so a rename here must
+// update that constant.
 #[test]
 fn postgres_gate_child_probe() {
     if std::env::var_os(PG_GATE_CHILD_ENV).is_none() {
@@ -368,11 +376,7 @@ fn the_postgres_gate_fails_closed_without_a_url_and_skips_only_when_opted_out() 
             std::env::current_exe().expect("locate the read-tools test binary"),
         );
         command
-            .args([
-                "--exact",
-                "fixture::postgres_gate_child_probe",
-                "--nocapture",
-            ])
+            .args(["--exact", POSTGRES_GATE_CHILD_TEST, "--nocapture"])
             .env(PG_GATE_CHILD_ENV, "1")
             .env_remove("CLIO_DATABASE_URL");
         command
