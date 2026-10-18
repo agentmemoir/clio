@@ -8,16 +8,23 @@ variable after a peer wrote it can pass or fail on scheduling alone. The rule
 for tests is to pass configuration as a parameter or through a fixture.
 
 This is the tripwire for that rule. It scans every `.rs` file under `crates/`
-for a `set_var(` or `remove_var(` call and reports each one, because the
-repository has no legitimate call site to preserve. The match is the bare
-function name at a word boundary, so `std::env::set_var(`, an aliased
-`e::set_var(`, and a bare `set_var(` after `use std::env::set_var;` all count.
-The scan runs on source with string and character literals and comments blanked,
-so a needle that only appears inside a literal or a comment is not a call and is
-not reported. A production call that is genuinely needed (for example, setting a
-variable for a child process is done on the child's `Command`, not on the
-parent) gets its file named in ALLOWED, in the same change that adds it, with a
-comment saying why.
+and reports each use of one of the two names, not only a direct call, because a
+function pointer (`let f = set_var`), a rebound binding, and a macro argument
+(`probe!(set_var)`) name the function without calling it. A bare name counts
+only when a `use` bound it into scope. A `::` path name counts when its
+qualifier is `std::env` or a module alias for it (`use std::env as e`), or when
+it is a path call on any module. A method call `receiver.set_var(..)` counts
+only when `receiver` is `std::env` or such an alias, so an unrelated method
+named `set_var` is left alone.
+
+The match is name-based over a masked token stream: string and character
+literals and comments are blanked, so a needle inside them is not a use. The
+residual gap is a rebind (`use std::env::set_var as f;` then `f(..)`) whose new
+name is not matched; the backstop is the compiler, because edition 2024 makes
+both functions `unsafe` and `unsafe_code = "deny"` refuses the call. A
+production use that is genuinely needed (setting a variable for a child process
+is done on the child's `Command`, not the parent) gets its file named in
+ALLOWED, in the same change that adds it, with a comment saying why.
 
 It is a script, not a `#[test]`, because its subject is every crate while a
 scoped run selects packages from the diff: a test inside `clio-store` would not
@@ -51,16 +58,28 @@ USAGE = "usage: env_mutation_check.py | --self-test"
 
 CRATES = "crates"
 
-#: A process-global mutator call, by the bare function name at a word boundary.
-#: It catches `std::env::set_var(`, a path alias `e::set_var(`, and a bare
-#: `set_var(` after a `use`, without matching `foo_set_var(`.
-MUTATOR = re.compile(r"\b(set_var|remove_var)\s*\(")
-
-#: A function definition named like a mutator is not a call to the std one.
+#: A process-global mutator named in source, call or not. Matching runs on the
+#: masked token stream, so the qualifier and any call parens are still visible.
+NAME = re.compile(r"\b(set_var|remove_var)\b")
+#: A function definition named like a mutator is not a reference to the std one.
 FN_PREFIX = re.compile(r"\bfn\s+$")
-
+#: A call follows the name (whitespace allowed).
+CALL_AFTER = re.compile(r"^\s*\(")
+#: The receiver before a method call, e.g. `std::env` in `std::env.set_var`.
+METHOD_TAIL = re.compile(r"([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\.\s*$")
+#: The module path before a `::` name, e.g. `std::env` in `std::env::set_var`.
+PATH_TAIL = re.compile(r"([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*::\s*$")
+#: A `use` statement binds names but is neither a call nor a value reference, so
+#: it is blanked before matching; the scope it binds is parsed first.
+USE_STMT = re.compile(r"\buse\b[^;]*;", re.S)
+USE_ENV_ALIAS = re.compile(r"\buse\s+std::env\s+as\s+([A-Za-z_]\w*)")
+USE_ENV_MODULE = re.compile(r"\buse\s+std::env\s*;")
+USE_ENV_GLOB = re.compile(r"\buse\s+std::env::\*\s*;")
+USE_ENV_FN = re.compile(
+    r"\buse\s+std::env::(set_var|remove_var)\s*(?:as\s+([A-Za-z_]\w*))?\s*;"
+)
+USE_ENV_GROUP = re.compile(r"\buse\s+std::env::\{([^}]*)\}\s*;")
 GUIDANCE = "pass configuration as a parameter; do not mutate the process environment"
-
 #: Repository-relative files allowed to mutate the process environment. A file
 #: added here needs a comment giving the reason.
 ALLOWED: frozenset[str] = frozenset()
@@ -163,7 +182,7 @@ def _mask_code(content: str) -> str:
     """Blank string/char literal and comment text, preserving line breaks.
 
     Matching runs on the masked text so a needle that only appears inside a
-    literal or a comment is not a call. Newlines are left in place so a reported
+    literal or a comment is not a use. Newlines are left in place so a reported
     line number still points at the original source.
     """
     out = list(content)
@@ -207,6 +226,61 @@ def _mask_code(content: str) -> str:
     return "".join(out)
 
 
+def env_scope(masked: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The env-module qualifiers and bare mutator names a file's `use` binds.
+
+    `std::env` always names the module. An `as` alias and a plain `use
+    std::env;` add a second qualifier. A glob or a named import binds the
+    mutator names themselves, including a renamed import. Anything else is not
+    the std function and is left alone.
+    """
+    modules = {"std::env"}
+    bare: set[str] = set()
+    for match in USE_ENV_ALIAS.finditer(masked):
+        modules.add(match.group(1))
+    if USE_ENV_MODULE.search(masked):
+        modules.add("env")
+    if USE_ENV_GLOB.search(masked):
+        bare.update(("set_var", "remove_var"))
+    for match in USE_ENV_FN.finditer(masked):
+        bare.add(match.group(2) or match.group(1))
+    for match in USE_ENV_GROUP.finditer(masked):
+        for item in (part.strip() for part in match.group(1).split(",")):
+            if item.startswith("self"):
+                alias = item[4:].strip()
+                modules.add(alias[3:].strip() if alias.startswith("as ") else "env")
+            elif item.startswith(("set_var", "remove_var")):
+                head, _, tail = item.partition(" as ")
+                bare.add(tail.strip() if tail else head)
+    return frozenset(modules), frozenset(bare)
+
+
+def _offender(
+    masked: str,
+    match: re.Match[str],
+    modules: frozenset[str],
+    bare: frozenset[str],
+) -> str | None:
+    """The needle to report for `match`, or None when it is not the std function.
+
+    The text before the name decides: a definition, a method on a non-env
+    receiver, or a bare name no `use` bound is not the std mutator.
+    """
+    name = match.group(1)
+    pre = masked[: match.start(1)]
+    if FN_PREFIX.search(pre):
+        return None
+    method = METHOD_TAIL.search(pre)
+    if method:
+        return name if method.group(1) in modules else None
+    path = PATH_TAIL.search(pre)
+    if path:
+        if path.group(1) in modules:
+            return name
+        return name if CALL_AFTER.match(masked[match.end(1) :]) else None
+    return name if name in bare else None
+
+
 def scan(root: Path, allowed: frozenset[str] | None = None) -> Surface:
     allowed = ALLOWED if allowed is None else allowed
     surface = Surface()
@@ -235,16 +309,18 @@ def scan(root: Path, allowed: frozenset[str] | None = None) -> Surface:
         if relative in allowed:
             continue
         # The name has to appear; skip the masking pass for files that cannot
-        # carry a call, which is nearly all of them.
+        # carry a use, which is nearly all of them.
         if "set_var" not in content and "remove_var" not in content:
             continue
         masked = _mask_code(content)
-        for match in MUTATOR.finditer(masked):
-            name_at = match.start(1)
-            if FN_PREFIX.search(masked[:name_at]):
+        modules, bare = env_scope(masked)
+        matchable = USE_STMT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), masked)
+        for match in NAME.finditer(matchable):
+            needle = _offender(matchable, match, modules, bare)
+            if needle is None:
                 continue
-            line = masked.count("\n", 0, name_at) + 1
-            surface.findings.append(Finding(relative, line, f"{match.group(1)}("))
+            line = matchable.count("\n", 0, match.start(1)) + 1
+            surface.findings.append(Finding(relative, line, needle))
     return surface
 
 
@@ -283,74 +359,28 @@ def _fixture(base: Path, label: str, files: dict[str, str]) -> Path:
 
 
 def _cases(base: Path) -> list[tuple[str, int, Path]]:
-    plain = "crates/clio-store/src/leaf.rs"
+    leaf = "crates/clio-store/src/leaf.rs"
+
+    def one(name: str, want: int, label: str, text: str) -> tuple[str, int, Path]:
+        return (name, want, _fixture(base, label, {leaf: text}))
+
     return [
-        (
-            "a clean file passes",
-            EXIT_OK,
-            _fixture(base, "clean", {plain: 'fn r() { let _ = std::env::var("X"); }\n'}),
-        ),
-        (
-            "a set_var call is a finding",
-            EXIT_FINDINGS,
-            _fixture(base, "set", {plain: 'fn t() { std::env::set_var("X", "1"); }\n'}),
-        ),
-        (
-            "a remove_var call is a finding",
-            EXIT_FINDINGS,
-            _fixture(base, "remove", {plain: 'fn t() { env::remove_var("X"); }\n'}),
-        ),
-        (
-            "a line comment naming set_var passes",
-            EXIT_OK,
-            _fixture(base, "comment", {plain: "// never std::env::set_var here\nfn r() {}\n"}),
-        ),
-        (
-            "a block comment naming set_var passes",
-            EXIT_OK,
-            _fixture(
-                base,
-                "block-comment",
-                {plain: "/* set_var(\"X\", \"1\") lives in the docs */\nfn r() {}\n"},
-            ),
-        ),
-        (
-            "a string literal naming set_var passes",
-            EXIT_OK,
-            _fixture(
-                base,
-                "string",
-                {plain: 'fn r() { let _ = "std::env::set_var(\\"X\\")"; }\n'},
-            ),
-        ),
-        (
-            "an aliased env call is a finding",
-            EXIT_FINDINGS,
-            _fixture(
-                base,
-                "alias",
-                {plain: 'use std::env as e;\nfn t() { e::set_var("X", "1"); }\n'},
-            ),
-        ),
-        (
-            "a bare imported call is a finding",
-            EXIT_FINDINGS,
-            _fixture(
-                base,
-                "import",
-                {plain: 'use std::env::set_var;\nfn t() { set_var("X", "1"); }\n'},
-            ),
-        ),
-        (
-            "a missing crates directory is not a pass",
-            EXIT_UNREADABLE,
-            _fixture(base, "no-crates", {"README.md": "no crates here\n"}),
-        ),
-        (
-            "an empty crates directory is not a pass",
-            EXIT_UNREADABLE,
-            _fixture(base, "empty", {"crates/.keep": ""}),
-        ),
+        one("a clean file passes", EXIT_OK, "clean", 'fn r() { let _ = std::env::var("X"); }\n'),
+        one("a set_var call is a finding", EXIT_FINDINGS, "set", 'fn t() { std::env::set_var("X", "1"); }\n'),
+        one("a remove_var call is a finding", EXIT_FINDINGS, "remove", 'fn t() { env::remove_var("X"); }\n'),
+        one("an import alone is not a use", EXIT_OK, "import-only", "use std::env::set_var;\nfn r() {}\n"),
+        one("a line comment naming set_var passes", EXIT_OK, "comment", "// never std::env::set_var here\nfn r() {}\n"),
+        one("a block comment naming set_var passes", EXIT_OK, "block-comment", '/* set_var("X", "1") lives in the docs */\nfn r() {}\n'),
+        one("a string literal naming set_var passes", EXIT_OK, "string", 'fn r() { let _ = "std::env::set_var(\\"X\\")"; }\n'),
+        one("an aliased env call is a finding", EXIT_FINDINGS, "alias", 'use std::env as e;\nfn t() { e::set_var("X", "1"); }\n'),
+        one("a bare imported call is a finding", EXIT_FINDINGS, "import", 'use std::env::set_var;\nfn t() { set_var("X", "1"); }\n'),
+        one("a function pointer to set_var is a finding", EXIT_FINDINGS, "fn-pointer", "use std::env::{set_var, remove_var};\nfn t() { let _f = set_var; let _g = remove_var; }\n"),
+        one("a rebound let of set_var is a finding", EXIT_FINDINGS, "rebind", 'use std::env::set_var;\nfn t() { let f = set_var; f("X", "1"); }\n'),
+        one("a macro argument naming set_var is a finding", EXIT_FINDINGS, "macro-arg", "use std::env::set_var;\nfn t() { probe!(set_var); }\n"),
+        one("a fully qualified name is a finding", EXIT_FINDINGS, "qualified-name", "fn t() { let _f = std::env::remove_var; }\n"),
+        one("a method named set_var on a non-std receiver passes", EXIT_OK, "method", "struct S;\nimpl S { fn set_var(&self) {} }\nfn t() { S.set_var(); }\n"),
+        ("a missing crates directory is not a pass", EXIT_UNREADABLE, _fixture(base, "no-crates", {"README.md": "no crates here\n"})),
+        ("an empty crates directory is not a pass", EXIT_UNREADABLE, _fixture(base, "empty", {"crates/.keep": ""})),
     ]
 
 
