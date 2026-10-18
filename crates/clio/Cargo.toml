@@ -66,3 +66,6 @@ workspace = true
 # compiles in the test-only injection seam; without it such a test would fall
 # through to the machine's real key store.
 clio-config = { workspace = true, features = ["test-key-injection"] }
+# The Postgres integration harnesses route their opt-out and target description
+# through the store's test-support seam, which only a dev-dependency turns on.
+clio-store = { workspace = true, features = ["test-support"] }

@@ -34,12 +34,10 @@ mod common;
 use clio::store::{DekProvider, LocalDevKms, PostgresStore, ScopedSchema, Store, lock_pg_test};
 use clio::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use serde_json::{Value, json};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 /// Local Compose Postgres, the same URL the Makefile exports for parity.
 const COMPOSE_PG: &str = "postgres://clio:clio@127.0.0.1:34310/clio";
@@ -56,38 +54,6 @@ fn unique(tag: &str) -> String {
 /// service), falling back to local Compose.
 fn pg_url() -> String {
     std::env::var("CLIO_DATABASE_URL").unwrap_or_else(|_| COMPOSE_PG.to_owned())
-}
-
-/// True when a Postgres server answers at `url`'s host and port within a short
-/// budget, so the harness skips instead of failing where none is running.
-fn postgres_reachable(url: &str) -> bool {
-    let Some(rest) = url
-        .strip_prefix("postgres://")
-        .or_else(|| url.strip_prefix("postgresql://"))
-    else {
-        return false;
-    };
-    let authority = rest.split(['/', '?']).next().unwrap_or("");
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((host, port)) => (host, port.parse::<u16>().unwrap_or(5432)),
-        None => (host_port, 5432),
-    };
-    let Ok(addresses) = (host, port).to_socket_addrs() else {
-        return false;
-    };
-    addresses
-        .into_iter()
-        .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok())
-}
-
-/// True only when the operator explicitly opted out of Postgres-backed tests;
-/// without the opt-out an unreachable Postgres fails the harness, not a skip.
-fn skip_requested() -> bool {
-    matches!(
-        std::env::var("CLIO_SKIP_PG_TESTS").as_deref(),
-        Ok("1" | "true" | "yes")
-    )
 }
 
 /// Unique temp directory for one scenario.
@@ -176,12 +142,11 @@ fn seed_backlog(db: &str, bank: &str, count: usize) {
 #[test]
 fn a_remember_behind_a_full_backlog_is_recallable_by_the_next_command() {
     let base = pg_url();
-    if !postgres_reachable(&base) {
-        assert!(
-            skip_requested(),
-            "write-lag harness needs Postgres at the configured URL"
+    if !clio::store::pg_test_target::postgres_reachable(&base) {
+        clio::store::pg_skip::pg_required_or_skip(
+            "the write-lag harness",
+            "no Postgres at the configured URL",
         );
-        eprintln!("skip write-lag harness: no Postgres at the configured URL");
         return;
     }
     let _guard = lock_pg_test();
@@ -278,12 +243,11 @@ fn a_batch_behind_a_full_backlog_is_recallable_by_the_next_command() {
     // A multi-item write reports every id it created, so all of them must be
     // searchable by the next command, not only the first.
     let base = pg_url();
-    if !postgres_reachable(&base) {
-        assert!(
-            skip_requested(),
-            "write-lag harness needs Postgres at the configured URL"
+    if !clio::store::pg_test_target::postgres_reachable(&base) {
+        clio::store::pg_skip::pg_required_or_skip(
+            "the write-lag harness",
+            "no Postgres at the configured URL",
         );
-        eprintln!("skip write-lag harness: no Postgres at the configured URL");
         return;
     }
     let _guard = lock_pg_test();
