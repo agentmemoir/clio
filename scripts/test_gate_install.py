@@ -14,9 +14,10 @@ These tests pin the correction: the installer resolves each name, reports
 NOT ACTIVE and exits non-zero when a name lands outside its directory, and
 exits zero when both names resolve to the shim. It also asks the login and
 interactive profile shells, keeps a killed (slow) probe from reading as
-inactive, and names a login/interactive divergence instead of hiding it. Each
-test builds a controlled PATH and sets SHELL, so the answer does not depend on
-what the host has installed.
+inactive, and names a login/interactive divergence instead of hiding it. Most
+tests build a controlled PATH and set SHELL, so their answer does not depend on
+what the host has installed. The login-shell tests instead ask the host's
+account login shell and skip when it cannot be determined.
 """
 
 from __future__ import annotations
@@ -41,6 +42,52 @@ ZSH = shutil.which("zsh")
 #: (`dirname`, `mkdir`, `ln`, `chmod`, `readlink`). They are kept on PATH so the
 #: controlled PATH does not also hide the tools the script needs to run.
 SYSTEM_PATH = os.pathsep.join(("/usr/bin", "/bin"))
+
+
+def account_login_shell() -> str | None:
+    """The account's login shell, as the installer resolves it when SHELL is unset.
+
+    The installer falls back to the account's login shell, so a test that
+    exercises that path must resolve the same shell to know which profile it
+    reads. The lookup runs with the installer's PATH, so the helper and the
+    installer see the same `id`, `getent`, and `dscl`. `getent` is the Linux
+    query and `dscl` the macOS one. Returns None when neither can answer.
+    """
+    env = dict(os.environ)
+    env["PATH"] = SYSTEM_PATH
+    done = subprocess.run(
+        ["id", "-un"], capture_output=True, text=True, check=False, env=env
+    )
+    account = done.stdout.strip()
+    if done.returncode != 0 or not account:
+        return None
+    getent = shutil.which("getent", path=SYSTEM_PATH)
+    if getent is not None:
+        done = subprocess.run(
+            [getent, "passwd", account],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        fields = done.stdout.strip().split(":")
+        if done.returncode == 0 and len(fields) >= 7 and fields[6]:
+            return fields[6]
+        return None
+    dscl = shutil.which("dscl", path=SYSTEM_PATH)
+    if dscl is not None:
+        done = subprocess.run(
+            [dscl, ".", "-read", f"/Users/{account}", "UserShell"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        if done.returncode == 0:
+            for line in done.stdout.splitlines():
+                if line.startswith("UserShell:"):
+                    return line.split(":", 1)[1].strip()
+    return None
 
 
 def run_installer(
@@ -259,11 +306,23 @@ class GateInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
 
-    def test_a_bogus_shell_falls_back_to_bin_sh(self) -> None:
-        # A SHELL path that is not executable must not stop the check; the
-        # installer falls back to /bin/sh and still finds the shim by reading
-        # ~/.profile in a login shell.
-        (self.home / ".profile").write_text(
+    def test_a_bogus_shell_resolves_the_account_login_shell(self) -> None:
+        # A SHELL path that is not executable must not stop the check. The
+        # installer falls back to the account's login shell and reads the
+        # profile that shell runs at login.
+        shell = account_login_shell()
+        if shell is None:
+            self.skipTest("could not determine the account login shell")
+        name = Path(shell).name
+        if not os.access(shell, os.X_OK):
+            self.skipTest(f"login shell {shell!r} is not executable")
+        if name == "zsh":
+            profile = ".zprofile"
+        elif name in ("bash", "sh", "dash", "ksh"):
+            profile = ".profile"
+        else:
+            self.skipTest(f"login shell {shell!r} reads an unknown profile")
+        (self.home / profile).write_text(
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
         result = run_installer(
@@ -272,6 +331,70 @@ class GateInstallTests(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
+
+    def test_an_unresolvable_login_shell_falls_back_to_bin_sh(self) -> None:
+        # Force the account lookup to fail: `id`, `getent`, and `dscl` are
+        # stubs that exit 1, and SHELL is unusable. The last resort is /bin/sh;
+        # no profile on its PATH adds `dest`, so the install must report
+        # NOT ACTIVE and exit non-zero instead of reading the shim as active.
+        fakebin = Path(self._tmp.name) / "noid"
+        fakebin.mkdir()
+        for tool in ("id", "getent", "dscl"):
+            stub = fakebin / tool
+            stub.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            stub.chmod(0o755)
+        result = run_installer(
+            self.dest,
+            os.pathsep.join((str(fakebin), SYSTEM_PATH)),
+            home=self.home,
+            shell="/no/such/shell",
+        )
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("NOT ACTIVE", output)
+
+    def test_an_unset_shell_reads_the_login_shell_interactive_profile(self) -> None:
+        # SHELL may be absent. The old fallback was /bin/sh, and on most Linux
+        # hosts that is dash, which reads neither ~/.bashrc nor ~/.zshrc. A
+        # machine whose install wrote the PATH line there therefore read as
+        # inactive. The installer must resolve the account's login shell instead
+        # and ask the profile that shell reads interactively. Only the
+        # interactive profile is written here: ~/.profile would let the old
+        # fallback pass and hide the regression.
+        shell = account_login_shell()
+        if shell is None:
+            self.skipTest("could not determine the account login shell")
+        name = Path(shell).name
+        if name not in ("bash", "zsh"):
+            self.skipTest(f"login shell {shell!r} is neither bash nor zsh")
+        if shutil.which(name) is None:
+            self.skipTest(f"login shell {shell!r} is not installed")
+        profile = ".bashrc" if name == "bash" else ".zshrc"
+        (self.home / profile).write_text(
+            f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
+        )
+        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, drop_shell=True)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("shim is active", output)
+
+    def test_a_regular_file_at_dest_make_is_reported_and_fails(self) -> None:
+        # A foreign regular file placed directly at dest/<name>, not a symlink,
+        # must not be clobbered or read as the shim. The installer reports the
+        # existing file and exits non-zero.
+        foreign = self.dest / "make"
+        content = "#!/bin/sh\nexit 0\n"
+        foreign.write_text(content, encoding="utf-8")
+        foreign.chmod(0o755)
+        result = run_installer(
+            self.dest,
+            os.pathsep.join((str(self.dest), SYSTEM_PATH, str(self.earlier))),
+            home=self.home,
+        )
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertEqual(foreign.read_text(encoding="utf-8"), content)
+        self.assertIn("exists and is not a symlink", output)
 
 
 if __name__ == "__main__":

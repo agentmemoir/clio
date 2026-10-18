@@ -1,0 +1,1 @@
+The gate shim installer now checks the account's login shell when `SHELL` is unset or not executable, so a machine that adds the shim directory to the PATH in `~/.bashrc` or `~/.zshrc` is no longer reported as not active and no longer fails the install.
