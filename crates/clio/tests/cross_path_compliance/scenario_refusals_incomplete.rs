@@ -28,6 +28,7 @@ use crate::fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
     DENIED_SUBJECT, backup_dir, journal_file, open_sqlite, scratch, seed_sqlite,
 };
+use crate::peer_support::{Peer, live_then_offline};
 use crate::support::{Readback, archive_sqlite_with_authority, readback};
 use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
 use clio::store::{DurableRequestStore, ScopedSchema};
@@ -40,7 +41,7 @@ use clio_compliance::{
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 const DENIED: [(&str, &str, &str); 1] = [(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)];
 const CONTROL: [(&str, &str, &str); 1] = [(CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER)];
@@ -289,17 +290,22 @@ fn scenario_refusals_incomplete_offline_peer() {
     let env = Env::new("refusals-peer");
     seed_sqlite(env.path(), &env.kms, &DENIED);
     let request = "req-offline-peer";
-    let peer = "peer-offline-a";
-    register_required_peer(env.path(), &env.kms, request, peer);
+    let peer_label = "peer-offline-a";
+    register_required_peer(env.path(), &env.kms, request, peer_label);
 
-    // A real local peer, stopped so its endpoint answers nothing: the offline
-    // window. No CLI verb enables a peer, so the frozen set is registered here
-    // over the same durable store the CLI reads.
-    let peer_dir = env.scratch.join("peer");
-    std::fs::create_dir_all(&peer_dir).expect("create the peer directory");
-    let _offline = OfflinePeer::start(&peer_dir, &env);
+    // A real local peer process, spawned and bound, then taken offline: the
+    // offline window. The live peer answers the wire; once offline it refuses
+    // it. No CLI verb enables a peer, so the frozen set is registered here over
+    // the same durable store the CLI reads.
+    let mut live = Peer::start(
+        &env.scratch.join("peer"),
+        &env.journal,
+        &env.backups,
+        &[BANK],
+    );
+    live_then_offline(&mut live, &env.scratch, BANK);
     assert_eq!(
-        env.peer_status(request)[peer],
+        env.peer_status(request)[peer_label],
         json!("pending"),
         "peer stays pending"
     );
@@ -315,7 +321,7 @@ fn scenario_refusals_incomplete_offline_peer() {
         "peer-retry",
     );
     assert_eq!(
-        env.peer_status(request)[peer],
+        env.peer_status(request)[peer_label],
         json!("pending"),
         "still pending"
     );
@@ -368,68 +374,4 @@ fn register_required_peer(db: &Path, kms: &Path, request: &str, peer: &str) {
         .save(&record_to_row(&record))
         .expect("persist the request");
     snapshot_peers(&store, &record).expect("snapshot the peer rows");
-}
-
-struct OfflinePeer {
-    child: Child,
-}
-
-impl OfflinePeer {
-    /// Start one local peer over its own scratch directory and stop it; a stop
-    /// that succeeds is the proof it was a live process.
-    fn start(dir: &Path, env: &Env) -> Self {
-        let credentials = dir.join("auth_tokens.json");
-        write_credential_store(&credentials, &[BANK]);
-        let child = cli::clio_command(&env.journal, &env.kms, &env.backups)
-            .env("CLIO_DEPLOYMENT_CONFIG", &env.deployment)
-            .env("CLIO_ERASURE_JOURNAL_FILE", dir.join("peer-journal.json"))
-            .args(["sync", "serve", "--bind", "127.0.0.1:0", "--token-file"])
-            .arg(&credentials)
-            .args([
-                "--banks",
-                BANK,
-                "--ttl-secs",
-                "600",
-                "--output",
-                "json",
-                "--db",
-            ])
-            .arg(dir.join("peer.db"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn the local peer");
-        stop(child.id()).expect("stop the live local peer so it is offline");
-        Self { child }
-    }
-}
-
-impl Drop for OfflinePeer {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// Send one job-control signal to `pid` through the shell's own `kill`.
-fn stop(pid: u32) -> std::io::Result<()> {
-    let stopped = Command::new("sh")
-        .args(["-c", &format!("kill -STOP {pid}")])
-        .status()?
-        .success();
-    if stopped {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!("kill -STOP {pid} failed")))
-    }
-}
-
-/// Write one owner-only credential store whose one record reaches `banks`.
-fn write_credential_store(path: &Path, banks: &[&str]) {
-    use clio_config::auth_tokens::{digest_hex, new_auth_token, save_auth_tokens};
-    let owned: Vec<String> = banks.iter().map(|bank| (*bank).to_owned()).collect();
-    let (mut record, _) = new_auth_token("refusals-peer", "harness", &owned).expect("credential");
-    record.secret_sha256 = digest_hex("refusals-peer-token");
-    save_auth_tokens(path, &[record]).expect("write the credential store");
 }

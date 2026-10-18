@@ -283,20 +283,23 @@ fn drive_claim(claim: &Claim) {
         "export --out {export} --subject {DENIED_SUBJECT} --content-mode dsar_plaintext"
     ));
     let manifest = &exported["manifest"];
-    let items = manifest["counts_by_type"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|e| e[0] == json!("items"))
-        .and_then(|e| e[1].as_u64())
-        .unwrap_or_else(|| panic!("no items count: {manifest}"));
     let ledger = claim
         .backend
         .open()
         .list_subject_items(BANK, DENIED_SUBJECT)
         .expect("list items")
         .len() as u64;
-    assert_eq!(items, ledger, "{manifest}");
+    // Every G0 family is reported, not only items: this fixture seeds only
+    // items, so each family's count equals the live ledger or zero.
+    let counts = manifest["counts_by_type"]
+        .as_array()
+        .expect("counts_by_type");
+    assert_eq!(counts.len(), 9, "every G0 family is reported: {manifest}");
+    for entry in counts {
+        let label = entry[0].as_str().expect("a family label");
+        let want = u64::from(label == "items") * ledger;
+        assert_eq!(entry[1].as_u64(), Some(want), "family {label}: {manifest}");
+    }
     let subject = &manifest["filter"]["subject_id"];
     assert_eq!(subject, &json!(DENIED_SUBJECT), "{manifest}");
     let omissions = manifest["omissions"].as_array().map_or(0, Vec::len);
@@ -387,9 +390,9 @@ fn drive_claim(claim: &Claim) {
 }
 
 /// Seed one backend, cut its pre-erasure archive, and drive the claim.
-fn run_backend(backend: Backend, scratch: crate::common::Scratch, name: &'static str, tag: &str) {
-    let backups = fixtures::backup_dir(&scratch);
-    let journal = fixtures::journal_file(&scratch, "journal/erasure-journal.json");
+fn run_backend(backend: Backend, scratch: &crate::common::Scratch, name: &'static str, tag: &str) {
+    let backups = fixtures::backup_dir(scratch);
+    let journal = fixtures::journal_file(scratch, "journal/erasure-journal.json");
     install_key(&journal);
     backend.seed();
     initialize_new_empty(&journal).expect("initialize the deployment journal");
@@ -416,7 +419,7 @@ fn sqlite_export_erase_then_every_restore_route_refuses() {
         target: scratch.join("target/clio.db"),
         kms: scratch.join("clio.kms.json"),
     };
-    run_backend(backend, scratch, "sqlite", "scenario-export-erase-sqlite");
+    run_backend(backend, &scratch, "sqlite", "scenario-export-erase-sqlite");
 }
 
 /// The loopback-Postgres arm: the same claim against isolated schemas.
@@ -437,7 +440,7 @@ fn postgres_export_erase_then_every_restore_route_refuses() {
     };
     run_backend(
         backend,
-        scratch,
+        &scratch,
         "postgres",
         "scenario-export-erase-postgres",
     );

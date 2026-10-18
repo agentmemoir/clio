@@ -5,13 +5,12 @@
 //!
 //! This module is responsible for the Postgres side of the cross-path
 //! compliance proof: the target URL, its reachability probe and required-
-//! backend gate, the shared-database test lock, the dump archive assembly, and
-//! the row-load restore.
+//! backend gate, the shared-database test lock, and the dump archive assembly.
 //!
 //! ## Owns
 //! - `COMPOSE_PG`, `pg_url`, `postgres_reachable`, and `require_postgres`
 //! - `lock_pg`, the shared `PG_TEST_LOCK` hold
-//! - `archive_postgres`, `archive_postgres_with_authority`, and `restore_pg`
+//! - `archive_postgres_with_authority`
 //!
 //! ## Does not own
 //! - The synthetic subjects and seeded stores (see `fixtures`)
@@ -25,12 +24,9 @@
 //!
 //! Keep this module focused on the Postgres fixtures.
 
-use crate::support::{Archive, extract_into, key_source, publish};
+use crate::support::{Archive, key_source, publish};
 use clio::AmError;
-use clio::store::{
-    PgTable, PgTestGuard, PostgresRestoreReport, PostgresRestoreRequest, RestoreTable, ScopedSchema,
-    lock_pg_test, place_staged_key, postgres_target_state, restore_postgres,
-};
+use clio::store::{PgTable, PgTestGuard, lock_pg_test};
 use clio_backup::dump_meta::{
     DUMP_FORMAT_VERSION, DUMP_KIND, DUMP_META_MEMBER, DumpColumn, DumpMeta, DumpTable,
 };
@@ -80,11 +76,6 @@ pub fn require_postgres(reachable: bool) -> bool {
 /// Postgres database, serializing it against the other Postgres tests.
 pub fn lock_pg() -> PgTestGuard {
     lock_pg_test()
-}
-
-/// Assemble a Postgres archive from the live store at `url`, carrying `kms_path`.
-pub fn archive_postgres(backup_dir: &Path, url: &str, kms_path: &Path, slug: &str) -> Archive {
-    archive_postgres_with_authority(backup_dir, url, kms_path, slug, None)
 }
 
 /// Assemble a Postgres archive that records the erasure `authority` it was made
@@ -171,40 +162,4 @@ pub fn archive_postgres_with_authority(
         tool_version: clio::version().to_owned(),
     };
     publish(create_archive(&request).expect("create the postgres archive"))
-}
-
-/// Load a Postgres archive into `target`'s schema, then place the key member
-/// when `with_key`. Returns the load report.
-pub fn restore_pg(
-    archive: &Archive,
-    target: &ScopedSchema,
-    target_kms: &Path,
-    extract_dir: &Path,
-    with_key: bool,
-) -> PostgresRestoreReport {
-    std::fs::create_dir_all(extract_dir).expect("create the extract directory");
-    let extracted = extract_into(archive, extract_dir);
-    let meta = DumpMeta::read_from_archive(&archive.path).expect("read the dump meta");
-    let state = postgres_target_state(target.url()).expect("measure the target schema");
-    let tables = meta
-        .tables
-        .iter()
-        .zip(extracted.dump_tables.iter())
-        .map(|(table, member)| RestoreTable {
-            table: table.table.clone(),
-            columns: table.columns.iter().map(|c| c.name.clone()).collect(),
-            member_path: member.file.path().to_path_buf(),
-            rows: table.rows,
-        })
-        .collect();
-    let report = restore_postgres(&PostgresRestoreRequest {
-        url: target.url().to_owned(),
-        schema: state.schema,
-        tables,
-    })
-    .expect("load the postgres archive");
-    if with_key && let Some(member) = &extracted.key {
-        place_staged_key(member.file.path(), target_kms);
-    }
-    report
 }

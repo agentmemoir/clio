@@ -10,8 +10,7 @@
 //!
 //! ## Owns
 //! - `Archive`, `archive_sqlite`, and `archive_sqlite_with_authority`
-//! - `restore_sqlite`, `restore_key_only`, `extract_into`, `key_source`, and
-//!   `publish`
+//! - `restore_sqlite`, `extract_into`, `key_source`, and `publish`
 //! - `erase_subject`, `Readback`, `readback`, and `subject_key_destroyed`
 //!
 //! ## Does not own
@@ -30,8 +29,7 @@
 
 use crate::fixtures::{BANK, scratch};
 use clio::store::{
-    ComplianceStore, KeyPlacement, KeySwapReport, Store, SwapReport, SwapRequest, place_staged_key,
-    swap_sqlite_store,
+    ComplianceStore, KeyPlacement, Store, SwapReport, SwapRequest, swap_sqlite_store,
 };
 use clio::{Actor, Bank, ErrorCode, OpContext};
 use clio_backup::manifest::ManifestAuthority;
@@ -145,18 +143,6 @@ pub fn restore_sqlite(
         key,
     })
     .expect("swap the sqlite store")
-}
-
-/// Place the archive's key member over the live key store, with no payload swap.
-pub fn restore_key_only(archive: &Archive, target_kms: &Path) -> KeySwapReport {
-    let dir = target_kms.parent().expect("the target has a parent");
-    std::fs::create_dir_all(dir).expect("create the target directory");
-    let extracted = extract_into(archive, dir);
-    let member = extracted
-        .key
-        .as_ref()
-        .expect("the archive carries a key member");
-    place_staged_key(member.file.path(), target_kms)
 }
 
 /// Extract an archive's declared members into `dir`.

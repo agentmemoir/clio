@@ -30,9 +30,7 @@ use crate::fixtures::{
     BANK, CONTROL_ITEM, CONTROL_SUBJECT, DENIED_ITEM, DENIED_SUBJECT, backup_dir, journal_file,
     open_pg, open_sqlite, scratch, seed_pg, seed_sqlite,
 };
-use crate::support::{
-    Archive, Readback, archive_sqlite_with_authority, erase_subject, readback,
-};
+use crate::support::{Archive, Readback, archive_sqlite_with_authority, erase_subject, readback};
 use crate::support_pg::{
     archive_postgres_with_authority, lock_pg, pg_url, postgres_reachable, require_postgres,
 };
@@ -304,6 +302,30 @@ fn sqlite_strict_presence_and_unknown_member_refuse_the_whole_archive() {
         file_sha256(&journal),
         journal_before,
         "the unclassifiable-member refusal changed the journal"
+    );
+
+    // The archive carrying both the denied subject's presence and an
+    // unclassifiable member refuses as a whole too.
+    let combined = format!("{}-combined", presence.id);
+    let raw = raw_with_unclassifiable(&presence, &scratch.join("raw-combined"));
+    place_raw(&backups, &combined, &raw);
+    let output = run_restore(
+        &journal,
+        &target_kms,
+        &backups,
+        target,
+        &[combined.as_str()],
+    );
+    assert_eq!(
+        output.code,
+        Some(2),
+        "the combined archive must refuse: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("cannot be classified") || output.stderr.contains("denied subject"),
+        "the combined refusal is presence or unknown: {}",
+        output.stderr
     );
 
     // After both refusals the live permitted subject is still readable and the

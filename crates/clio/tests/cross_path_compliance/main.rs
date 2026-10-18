@@ -35,6 +35,7 @@ mod common;
 
 mod cli;
 mod fixtures;
+mod peer_support;
 mod support;
 mod support_pg;
 
@@ -42,5 +43,6 @@ mod scenario_all_bank_peer;
 mod scenario_archive_presence;
 mod scenario_export_erase_restore;
 mod scenario_intent_outcome_faults;
+mod scenario_intent_outcome_faults_reconcile;
 mod scenario_refusals_incomplete;
 mod scenario_review_export;
