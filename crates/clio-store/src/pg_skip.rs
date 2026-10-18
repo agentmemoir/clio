@@ -13,10 +13,15 @@
 //! - `skip_requested` and the fail-closed gates `unreachable_pg_or_skip`,
 //!   `pg_required_or_skip`, and `pg_url_or_skip`: the strict default and the
 //!   sole `CLIO_SKIP_PG_TESTS` opt-out that turns it into a printed note
+//! - `unreachable_pg_or_skip_with`, the crate-private seam that takes the
+//!   opt-out decision already read, so a test can hold one decision across its
+//!   own assertion and the gate instead of reading the environment twice
 //!
-//! The gates are the only way a Postgres test may skip: each reads
+//! The public gates are the only way a Postgres test may skip: each reads
 //! `CLIO_SKIP_PG_TESTS` itself and fails closed otherwise, so a suite cannot
-//! reach the opt-out path by formatting a note and then returning.
+//! reach the opt-out path by formatting a note and then returning. The `_with`
+//! seam is crate-private and test-only, so a dependent crate still has no entry
+//! that skips without the environment's opt-out.
 //!
 //! The seam is compiled only under `cfg(test)` or the `test-support` feature,
 //! which a dependent crate turns on from `[dev-dependencies]`; no shipped build
@@ -88,7 +93,20 @@ fn opted_out(value: Option<&str>) -> bool {
 /// opt-out; absent it, an unreachable store is a failure and never a pass. The
 /// panic carries the driver's error, never the connection string.
 pub fn unreachable_pg_or_skip(suite: &str, err: &AmError) {
-    fail_or_skip(suite, err, skip_requested());
+    unreachable_pg_or_skip_with(suite, err, skip_requested());
+}
+
+/// [`unreachable_pg_or_skip`] with the opt-out decision already read.
+///
+/// The public gate reads `CLIO_SKIP_PG_TESTS` exactly once, but a test that
+/// asserts on which branch it took would otherwise read the variable a second
+/// time to choose its own expectation. A concurrent `set_var` between the two
+/// reads could make them disagree and the test could false-pass or false-fail.
+/// This seam lets that test read the decision once and thread the same value
+/// through both its assertion and the gate. Crate-private on purpose: a
+/// dependent crate keeps the entry that reads the environment.
+pub(crate) fn unreachable_pg_or_skip_with(suite: &str, err: &AmError, skip: bool) {
+    fail_or_skip(suite, err, skip);
 }
 
 /// Fail closed on a missing Postgres for `suite`, with `detail` naming what is

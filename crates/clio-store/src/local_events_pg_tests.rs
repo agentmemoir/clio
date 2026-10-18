@@ -59,10 +59,17 @@ fn want(result: Result<(), AmError>, what: &str) {
 /// unreachable: the open panics unless `CLIO_SKIP_PG_TESTS` opts out, in which
 /// case the credential-safe skip note is printed and `None` is returned.
 fn open_pg_at(url: &str) -> Option<PostgresStore> {
+    open_pg_at_with_skip(url, crate::pg_skip::skip_requested())
+}
+
+/// [`open_pg_at`] with the opt-out decision already read, so a caller can hold
+/// ONE decision across its own assertion and the gate's behaviour instead of
+/// reading the process environment a second time.
+fn open_pg_at_with_skip(url: &str, skip: bool) -> Option<PostgresStore> {
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
     PostgresStore::open(url, kms)
         .inspect_err(|err| {
-            crate::pg_skip::unreachable_pg_or_skip("postgres local event tests", err);
+            crate::pg_skip::unreachable_pg_or_skip_with("postgres local event tests", err, skip);
         })
         .ok()
 }
@@ -95,8 +102,11 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 /// set `CLIO_SKIP_PG_TESTS`, which is the only path that returns `None`.
 #[test]
 fn an_unreachable_postgres_fails_closed_unless_opted_out() {
-    let opened = std::panic::catch_unwind(|| open_pg_at(UNREACHABLE_URL));
-    if crate::pg_skip::skip_requested() {
+    // One decision, threaded through the open and this assertion: reading the
+    // opt-out twice could let a concurrent set_var make the two reads disagree.
+    let skip = crate::pg_skip::skip_requested();
+    let opened = std::panic::catch_unwind(|| open_pg_at_with_skip(UNREACHABLE_URL, skip));
+    if skip {
         let store = opened.unwrap_or_else(|_| panic!("an opted-out skip must not panic"));
         assert!(
             store.is_none(),
