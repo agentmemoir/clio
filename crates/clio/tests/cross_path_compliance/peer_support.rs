@@ -28,8 +28,6 @@
 //!
 //! Keep this module focused on the real deployment and the real peer beside it.
 
-#![allow(dead_code)]
-
 use crate::cli::clio_command;
 use crate::fixtures::{BANK, DENIED_SUBJECT};
 use clio::AmError;
@@ -145,7 +143,6 @@ impl Deployment {
 pub struct Peer {
     child: Option<Child>,
     addr: String,
-    device_id: String,
     dir: PathBuf,
     db: PathBuf,
     journal: PathBuf,
@@ -168,7 +165,6 @@ impl Peer {
         let mut peer = Self {
             child: None,
             addr: String::new(),
-            device_id: String::new(),
             dir: dir.to_path_buf(),
             db: dir.join("peer.db"),
             journal: journal.to_path_buf(),
@@ -214,7 +210,6 @@ impl Peer {
             "the peer never reported a bound address; log:\n{}",
             self.logs()
         );
-        self.device_id = format!("device-{}", child.id());
         self.addr = addr;
         self.child = Some(child);
     }
@@ -223,13 +218,6 @@ impl Peer {
     #[must_use]
     pub fn remote(&self) -> &str {
         &self.addr
-    }
-
-    /// The peer deployment's device identity, the value its denial proofs
-    /// carry.
-    #[must_use]
-    pub fn device_id(&self) -> &str {
-        &self.device_id
     }
 
     /// Take the peer offline: kill and reap it so its endpoint answers nothing.

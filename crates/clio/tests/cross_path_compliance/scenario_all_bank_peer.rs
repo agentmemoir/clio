@@ -110,7 +110,7 @@ fn seed<S: Store>(store: &S) {
 }
 
 /// Write this process's key file and install the same key on this thread.
-fn install_key(path: PathBuf) -> PathBuf {
+pub(crate) fn install_key(path: PathBuf) -> PathBuf {
     clio_config::secret_seal::test_key::use_key(KEY);
     std::fs::write(&path, KEY).expect("write the harness key file");
     path
@@ -268,6 +268,10 @@ fn all_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
             Readback::Absent | Readback::DestroyedKey | Readback::KeyMissing
         ),
         "the denied item is never readable again: {erased:?}"
+    );
+    assert!(
+        !matches!(store.get_memory_item(PEER_BANK, PEER_ITEM), Ok(Some(_))),
+        "the second bank sharing the subject key is erased too"
     );
     assert_eq!(
         readback(&store, CONTROL_ITEM),

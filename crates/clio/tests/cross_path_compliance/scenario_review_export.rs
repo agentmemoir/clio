@@ -6,8 +6,7 @@
 //! This module is responsible for proving every real review-file export binding
 //! on both backends: that the review export writes its custody row and its
 //! redacted ordered output, that a failed intent refuses before the effect and a
-//! failed outcome reconciles to one terminal result after a restart, and that no
-//! redelivery follows.
+//! failed outcome reconciles to one terminal result without redelivery.
 //!
 //! ## Owns
 //! - The review-export binding matrix on SQLite and Postgres
@@ -141,7 +140,8 @@ fn write(
         copy_controls_accepted: true,
         ..BindingControls::default()
     };
-    let staging = std::env::temp_dir().join("clio-review-staging");
+    // Unique per destination and under the test's `Scratch`, which removes it.
+    let staging = destination.with_extension("staging");
     write_review_export(
         &ctx,
         events,

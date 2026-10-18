@@ -25,11 +25,6 @@
 //! Keep this target focused on proving the paths agree, not on the primitives it
 //! drives.
 
-// The scenario modules are filled in one at a time. Until a scenario runs, the
-// helper it will need is defined but unused. This target is one binary, so an
-// unused-in-one-scenario helper is not dead.
-#![allow(dead_code)]
-
 #[path = "../common/mod.rs"]
 mod common;
 
