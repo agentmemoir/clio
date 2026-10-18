@@ -96,6 +96,7 @@ def run_installer(
     home: Path | None = None,
     shell: str | None = SH,
     drop_shell: bool = False,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["PATH"] = path
@@ -113,6 +114,7 @@ def run_installer(
         text=True,
         env=env,
         check=False,
+        timeout=timeout,
     )
 
 
@@ -271,6 +273,31 @@ class GateInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, output)
         self.assertNotIn("NOT ACTIVE", output)
         self.assertIn("did not finish within the 5s probe budget", output)
+
+    def test_a_probe_without_timeout_is_not_run(self) -> None:
+        # There is no portable profile watchdog. If `timeout` is unavailable,
+        # the installer must leave a blocking profile unprobed.
+        toolbin = Path(self._tmp.name) / "toolbin"
+        toolbin.mkdir()
+        for name in ("chmod", "dirname", "ln", "mkdir", "readlink"):
+            source = shutil.which(name, path=SYSTEM_PATH)
+            self.assertIsNotNone(source)
+            os.symlink(source, toolbin / name)
+        blocking_shell = Path(self._tmp.name) / "blocking-shell"
+        blocking_shell.write_text("#!/bin/sh\n/bin/sleep 60\n", encoding="utf-8")
+        blocking_shell.chmod(0o755)
+        self.stub_tool("cargo")
+        self.stub_tool("make")
+        result = run_installer(
+            self.dest,
+            os.pathsep.join((str(toolbin), str(self.earlier), str(self.dest))),
+            home=self.home,
+            shell=str(blocking_shell),
+            timeout=1,
+        )
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("profile verification is unavailable", output)
 
     def test_a_login_hit_with_an_interactive_shadow_names_the_divergence(self) -> None:
         # A login profile can add `dest` while the interactive profile puts a

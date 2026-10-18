@@ -85,7 +85,9 @@ probe_shell() {
     if command -v timeout >/dev/null 2>&1; then
         out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
     else
-        out=$("$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
+        # Without a portable wall-clock limit, do not run profile code.
+        # Keep this distinct from a real timeout, which returns 124.
+        return 125
     fi
     if [ "$rc" = 124 ]; then
         return 124
@@ -166,6 +168,11 @@ if [ "$mode" = install ]; then
         login=$(probe_shell -lc) || login_rc=$?
         interactive_rc=0
         interactive=$(probe_shell -ic) || interactive_rc=$?
+        if [ "$login_rc" = 125 ] || [ "$interactive_rc" = 125 ]; then
+            echo "gate-install: $name: profile verification is unavailable because timeout is not installed; cannot confirm the shim is active"
+            inactive=1
+            continue
+        fi
         if [ -n "$login" ] || [ -n "$interactive" ]; then
             where="the login and interactive shells"
             [ -n "$login" ] || where="the interactive shell"
