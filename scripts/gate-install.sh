@@ -98,21 +98,31 @@ probe_shell() {
     done
 }
 
+# Run a lookup under the same 5s budget as the profile probes when the host
+# has `timeout`, so a slow NSS backend cannot hang the install.
+lookup() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 5 "$@"
+    else
+        "$@"
+    fi
+}
+
 # The account's login shell: the shell the machine runs for the user, and the
 # shell whose profile carries the PATH line. getent is the Linux query, dscl
 # the macOS one. Prints nothing and fails when neither can answer.
 login_shell() {
     account=$(id -un 2>/dev/null) || return 1
     [ -n "$account" ] || return 1
+    found=
     if command -v getent >/dev/null 2>&1; then
-        getent passwd "$account" 2>/dev/null | cut -d: -f7
-        return 0
+        found=$(lookup getent passwd "$account" 2>/dev/null | cut -d: -f7 | head -n 1)
     fi
-    if command -v dscl >/dev/null 2>&1; then
-        dscl . -read "/Users/$account" UserShell 2>/dev/null | awk 'NR == 1 { print $2 }'
-        return 0
+    if [ -z "$found" ] && command -v dscl >/dev/null 2>&1; then
+        found=$(lookup dscl . -read "/Users/$account" UserShell 2>/dev/null | awk 'NR == 1 { sub(/^UserShell:[[:space:]]*/, ""); print }')
     fi
-    return 1
+    [ -n "$found" ] || return 1
+    printf '%s\n' "$found"
 }
 
 if [ "$mode" = install ]; then
