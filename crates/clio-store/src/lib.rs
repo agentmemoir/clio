@@ -311,8 +311,10 @@ mod pg_advisory_keys;
 mod pg_lock;
 mod pg_probe;
 mod pg_scoped_schema;
-#[cfg(test)]
-mod pg_skip;
+#[cfg(any(test, feature = "test-support"))]
+pub mod pg_skip;
+#[cfg(any(test, feature = "test-support"))]
+pub mod pg_test_target;
 mod pg_tls;
 mod pg_url;
 mod tls_trust;

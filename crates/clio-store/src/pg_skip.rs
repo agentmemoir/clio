@@ -10,17 +10,23 @@
 //!
 //! ## Owns
 //! - `pg_skip_note`, the credential-safe wording for an unreachable store
-//! - `skip_requested` and `unreachable_pg_or_skip`: the strict default and the
+//! - `skip_requested` and the fail-closed gates `unreachable_pg_or_skip`,
+//!   `pg_required_or_skip`, and `pg_url_or_skip`: the strict default and the
 //!   sole `CLIO_SKIP_PG_TESTS` opt-out that turns it into a printed note
 //!
-//! `unreachable_pg_or_skip` is the only way a Postgres test may skip: it reads
+//! The gates are the only way a Postgres test may skip: each reads
 //! `CLIO_SKIP_PG_TESTS` itself and fails closed otherwise, so a suite cannot
 //! reach the opt-out path by formatting a note and then returning.
+//!
+//! The seam is compiled only under `cfg(test)` or the `test-support` feature,
+//! which a dependent crate turns on from `[dev-dependencies]`; no shipped build
+//! carries it.
 //!
 //! ## Does not own
 //! - Whether a test probes for a skippable failure at all (each test's own
 //!   `open_pg`)
-//! - The connection itself, and any redaction of a URL an operator typed
+//! - The connection itself, and the credential-safe description of a target
+//!   (`pg_test_target`)
 //!
 //! ## Boundary
 //!
@@ -31,12 +37,17 @@
 //! Test-only: the skip note is a test diagnostic and is never compiled into a
 //! production build.
 
-use clio_types::AmError;
+use clio_config::db_url_env::database_url_from_process_env;
+use clio_types::{AmError, ErrorCode};
+
+/// The scheme prefixes a Postgres connection URL may carry.
+const PG_SCHEMES: [&str; 2] = ["postgres://", "postgresql://"];
 
 /// The line a Postgres test prints when it cannot open the store.
 ///
-/// Private so a test cannot gate a skip on the note alone: the opt-out read
-/// lives in [`unreachable_pg_or_skip`], and only [`fail_or_skip`] calls this.
+/// Callers may format this note, but must not gate a skip on it alone: the
+/// opt-out read lives in the gates below, and only [`fail_or_skip`] reaches the
+/// note after the decision.
 ///
 /// The signature is the guarantee, and it is deliberate: this function takes
 /// the suite name and the driver's error, and has no parameter a connection
@@ -48,7 +59,7 @@ use clio_types::AmError;
 /// authentication failed for user "clio"`), never the address it was dialled
 /// with.
 #[must_use]
-fn pg_skip_note(suite: &str, err: &AmError) -> String {
+pub fn pg_skip_note(suite: &str, err: &AmError) -> String {
     format!("skipping {suite}: cannot open the Postgres store: {err}")
 }
 
@@ -58,7 +69,7 @@ fn pg_skip_note(suite: &str, err: &AmError) -> String {
 /// is not a pass, so the store's Postgres suites cannot report green without
 /// touching a database.
 #[must_use]
-pub(crate) fn skip_requested() -> bool {
+pub fn skip_requested() -> bool {
     opted_out(std::env::var("CLIO_SKIP_PG_TESTS").ok().as_deref())
 }
 
@@ -76,8 +87,42 @@ fn opted_out(value: Option<&str>) -> bool {
 /// `CLIO_SKIP_PG_TESTS` read, so a caller cannot skip without the operator's
 /// opt-out; absent it, an unreachable store is a failure and never a pass. The
 /// panic carries the driver's error, never the connection string.
-pub(crate) fn unreachable_pg_or_skip(suite: &str, err: &AmError) {
+pub fn unreachable_pg_or_skip(suite: &str, err: &AmError) {
     fail_or_skip(suite, err, skip_requested());
+}
+
+/// Fail closed on a missing Postgres for `suite`, with `detail` naming what is
+/// missing in place of a driver error.
+///
+/// The reachability half of [`unreachable_pg_or_skip`], for a suite that probes
+/// with a plain reason string rather than an [`AmError`]. It owns the same
+/// `CLIO_SKIP_PG_TESTS` read and the same strict default, so the two entries
+/// cannot drift into two policies.
+pub fn pg_required_or_skip(suite: &str, detail: &str) {
+    let err = AmError::new(ErrorCode::Internal, detail.to_owned());
+    fail_or_skip(suite, &err, skip_requested());
+}
+
+/// The configured Postgres URL, or a skip: a suite that runs only against a
+/// configured database requests it here.
+///
+/// Returns the URL verbatim for the caller to dial, and never prints it. When
+/// `CLIO_DATABASE_URL` is unset or names no Postgres database this fails closed
+/// unless the operator opted out; the opt-out prints the credential-safe note
+/// and yields `None`.
+#[must_use]
+pub fn pg_url_or_skip(suite: &str) -> Option<String> {
+    match database_url_from_process_env() {
+        Ok(url) if PG_SCHEMES.iter().any(|prefix| url.starts_with(prefix)) => Some(url),
+        Ok(_) => {
+            pg_required_or_skip(suite, "CLIO_DATABASE_URL is not a postgres:// URL");
+            None
+        }
+        Err(_) => {
+            pg_required_or_skip(suite, "CLIO_DATABASE_URL is not set");
+            None
+        }
+    }
 }
 
 /// The decision, split from the environment read so both branches are
