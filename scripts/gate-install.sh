@@ -85,7 +85,9 @@ probe_shell() {
     if command -v timeout >/dev/null 2>&1; then
         out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
     else
-        out=$("$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
+        # Without a portable wall-clock limit, do not run profile code.
+        # Report the existing unprobed status instead.
+        return 124
     fi
     if [ "$rc" = 124 ]; then
         return 124
