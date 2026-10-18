@@ -98,6 +98,23 @@ probe_shell() {
     done
 }
 
+# The account's login shell: the shell the machine runs for the user, and the
+# shell whose profile carries the PATH line. getent is the Linux query, dscl
+# the macOS one. Prints nothing and fails when neither can answer.
+login_shell() {
+    account=$(id -un 2>/dev/null) || return 1
+    [ -n "$account" ] || return 1
+    if command -v getent >/dev/null 2>&1; then
+        getent passwd "$account" 2>/dev/null | cut -d: -f7
+        return 0
+    fi
+    if command -v dscl >/dev/null 2>&1; then
+        dscl . -read "/Users/$account" UserShell 2>/dev/null | awk 'NR == 1 { print $2 }'
+        return 0
+    fi
+    return 1
+}
+
 if [ "$mode" = install ]; then
     # A symlink in a directory that comes *after* the real tool on PATH never
     # runs, and the old containment test ("PATH contains $dest") reported
@@ -117,8 +134,17 @@ if [ "$mode" = install ]; then
     # 124). That is "could not probe", not "the shim is inactive": a slow
     # profile must not fail an otherwise correct install, the same false FAIL
     # #213 removes.
-    shell=${SHELL:-/bin/sh}
-    [ -x "$shell" ] || shell=/bin/sh
+    #
+    # The bare /bin/sh fallback is dash on most Linux hosts, and dash reads
+    # neither ~/.bashrc nor ~/.zshrc, so it failed a machine set up the way this
+    # install sets one up. Resolve the account's login shell instead: that is the
+    # shell the machine runs for the user and the shell whose profile carries
+    # the PATH line. Keep /bin/sh only as the last resort.
+    shell=${SHELL:-}
+    if [ -z "$shell" ] || [ ! -x "$shell" ]; then
+        shell=$(login_shell) || shell=
+    fi
+    [ -n "$shell" ] && [ -x "$shell" ] || shell=/bin/sh
     inactive=0
     for name in cargo make; do
         here=$(command -v "$name" 2>/dev/null || true)
