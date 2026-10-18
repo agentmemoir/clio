@@ -24,6 +24,7 @@
 //! primitives it measures.
 
 mod guard_cli;
+mod guard_cli_erase_route;
 mod guard_cli_erasure;
 mod guard_cli_pg;
 mod guard_cli_placement;
