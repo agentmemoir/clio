@@ -9,10 +9,15 @@ for tests is to pass configuration as a parameter or through a fixture.
 
 This is the tripwire for that rule. It scans every `.rs` file under `crates/`
 for a `set_var(` or `remove_var(` call and reports each one, because the
-repository has no legitimate call site to preserve. A production call that is
-genuinely needed (for example, setting a variable for a child process is done
-on the child's `Command`, not on the parent) gets its file named in ALLOWED,
-in the same change that adds it, with a comment saying why.
+repository has no legitimate call site to preserve. The match is the bare
+function name at a word boundary, so `std::env::set_var(`, an aliased
+`e::set_var(`, and a bare `set_var(` after `use std::env::set_var;` all count.
+The scan runs on source with string and character literals and comments blanked,
+so a needle that only appears inside a literal or a comment is not a call and is
+not reported. A production call that is genuinely needed (for example, setting a
+variable for a child process is done on the child's `Command`, not on the
+parent) gets its file named in ALLOWED, in the same change that adds it, with a
+comment saying why.
 
 It is a script, not a `#[test]`, because its subject is every crate while a
 scoped run selects packages from the diff: a test inside `clio-store` would not
@@ -32,6 +37,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -45,8 +51,13 @@ USAGE = "usage: env_mutation_check.py | --self-test"
 
 CRATES = "crates"
 
-#: `env::set_var(` matches `std::env::set_var(` and `env::set_var(` alike.
-NEEDLES = ("env::set_var(", "env::remove_var(")
+#: A process-global mutator call, by the bare function name at a word boundary.
+#: It catches `std::env::set_var(`, a path alias `e::set_var(`, and a bare
+#: `set_var(` after a `use`, without matching `foo_set_var(`.
+MUTATOR = re.compile(r"\b(set_var|remove_var)\s*\(")
+
+#: A function definition named like a mutator is not a call to the std one.
+FN_PREFIX = re.compile(r"\bfn\s+$")
 
 GUIDANCE = "pass configuration as a parameter; do not mutate the process environment"
 
@@ -84,6 +95,118 @@ def rs_files(root: Path) -> list[Path]:
     return sorted(path for path in base.rglob("*.rs") if path.is_file())
 
 
+def _quoted_end(content: str, start: int, quote: str) -> int:
+    """The offset just past the string opened by `quote` at `start`."""
+    index = start + 1
+    while index < len(content):
+        char = content[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == quote:
+            return index + 1
+        index += 1
+    return len(content)
+
+
+def _raw_end(content: str, r_at: int) -> int | None:
+    """The offset just past the raw string whose `r` is at `r_at`, or None."""
+    index = r_at + 1
+    hashes = 0
+    while index < len(content) and content[index] == "#":
+        hashes += 1
+        index += 1
+    if index >= len(content) or content[index] != '"':
+        return None
+    closer = '"' + "#" * hashes
+    end = content.find(closer, index + 1)
+    return len(content) if end == -1 else end + len(closer)
+
+
+def _char_end(content: str, start: int) -> int | None:
+    """The offset just past a character literal, or None for a lifetime."""
+    limit = len(content)
+    if start + 1 >= limit:
+        return None
+    if content[start + 1] == "\\":
+        index = start + 2
+        if content[index : index + 2] == "u{" and (brace := content.find("}", index + 2)) != -1:
+            index = brace + 1
+        else:
+            index += 1
+        return index + 1 if index < limit and content[index] == "'" else None
+    if start + 2 < limit and content[start + 2] == "'":
+        return start + 3
+    return None
+
+
+def _literal_end(content: str, start: int) -> int | None:
+    """The offset just past a literal starting at `start`, or None.
+
+    Handles normal and raw strings (with an optional `b`/`c` prefix), and
+    character literals. A lifetime such as `'static` is not a literal.
+    """
+    before = content[start - 1] if start else ""
+    prefixed_raw = content[start] in "bBcC" and content[start + 1 : start + 2] == "r"
+    plain_raw = content[start] in "rR"
+    if (prefixed_raw or plain_raw) and not (before.isalnum() or before == "_"):
+        r_at = start + 1 if prefixed_raw else start
+        return _raw_end(content, r_at)
+    if content[start] == '"':
+        return _quoted_end(content, start, '"')
+    if content[start] == "'":
+        return _char_end(content, start)
+    return None
+
+
+def _mask_code(content: str) -> str:
+    """Blank string/char literal and comment text, preserving line breaks.
+
+    Matching runs on the masked text so a needle that only appears inside a
+    literal or a comment is not a call. Newlines are left in place so a reported
+    line number still points at the original source.
+    """
+    out = list(content)
+    limit = len(content)
+
+    def blank(start: int, end: int) -> None:
+        for index in range(start, end):
+            if out[index] != "\n":
+                out[index] = " "
+
+    index = 0
+    while index < limit:
+        char = content[index]
+        nxt = content[index + 1] if index + 1 < limit else ""
+        if char == "/" and nxt == "/":
+            end = content.find("\n", index)
+            end = limit if end == -1 else end
+            blank(index, end)
+            index = end
+        elif char == "/" and nxt == "*":
+            depth = 1
+            cursor = index + 2
+            while cursor < limit and depth:
+                if content[cursor : cursor + 2] == "/*":
+                    depth += 1
+                    cursor += 2
+                elif content[cursor : cursor + 2] == "*/":
+                    depth -= 1
+                    cursor += 2
+                else:
+                    cursor += 1
+            blank(index, cursor)
+            index = cursor
+        else:
+            end = _literal_end(content, index)
+            if end is None:
+                index += 1
+            else:
+                blank(index, end)
+                index = end
+    return "".join(out)
+
+
 def scan(root: Path, allowed: frozenset[str] | None = None) -> Surface:
     allowed = ALLOWED if allowed is None else allowed
     surface = Surface()
@@ -111,12 +234,17 @@ def scan(root: Path, allowed: frozenset[str] | None = None) -> Surface:
     for relative, content in contents.items():
         if relative in allowed:
             continue
-        for number, line in enumerate(content.splitlines(), start=1):
-            if line.lstrip().startswith("//"):
+        # The name has to appear; skip the masking pass for files that cannot
+        # carry a call, which is nearly all of them.
+        if "set_var" not in content and "remove_var" not in content:
+            continue
+        masked = _mask_code(content)
+        for match in MUTATOR.finditer(masked):
+            name_at = match.start(1)
+            if FN_PREFIX.search(masked[:name_at]):
                 continue
-            for needle in NEEDLES:
-                if needle in line:
-                    surface.findings.append(Finding(relative, number, needle))
+            line = masked.count("\n", 0, name_at) + 1
+            surface.findings.append(Finding(relative, line, f"{match.group(1)}("))
     return surface
 
 
@@ -173,9 +301,45 @@ def _cases(base: Path) -> list[tuple[str, int, Path]]:
             _fixture(base, "remove", {plain: 'fn t() { env::remove_var("X"); }\n'}),
         ),
         (
-            "a comment naming set_var passes",
+            "a line comment naming set_var passes",
             EXIT_OK,
             _fixture(base, "comment", {plain: "// never std::env::set_var here\nfn r() {}\n"}),
+        ),
+        (
+            "a block comment naming set_var passes",
+            EXIT_OK,
+            _fixture(
+                base,
+                "block-comment",
+                {plain: "/* set_var(\"X\", \"1\") lives in the docs */\nfn r() {}\n"},
+            ),
+        ),
+        (
+            "a string literal naming set_var passes",
+            EXIT_OK,
+            _fixture(
+                base,
+                "string",
+                {plain: 'fn r() { let _ = "std::env::set_var(\\"X\\")"; }\n'},
+            ),
+        ),
+        (
+            "an aliased env call is a finding",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "alias",
+                {plain: 'use std::env as e;\nfn t() { e::set_var("X", "1"); }\n'},
+            ),
+        ),
+        (
+            "a bare imported call is a finding",
+            EXIT_FINDINGS,
+            _fixture(
+                base,
+                "import",
+                {plain: 'use std::env::set_var;\nfn t() { set_var("X", "1"); }\n'},
+            ),
         ),
         (
             "a missing crates directory is not a pass",
