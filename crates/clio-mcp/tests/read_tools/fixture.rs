@@ -130,10 +130,10 @@ pub fn open_sqlite() -> Arc<McpState> {
     .expect("open sqlite state")
 }
 
-/// The shared `CLIO_DATABASE_URL` when it points at Postgres, else `None`.
+/// The shared `CLIO_DATABASE_URL` when it points at Postgres, else a fail-closed
+/// skip through the store's shared gate.
 pub fn postgres_url() -> Option<String> {
-    let url = std::env::var("CLIO_DATABASE_URL").ok()?;
-    (url.starts_with("postgres://") || url.starts_with("postgresql://")).then_some(url)
+    clio_store::pg_skip::pg_url_or_skip("the read-tools Postgres pressure measurement")
 }
 
 /// Open the Postgres state over one private schema URL.

@@ -42,9 +42,11 @@ fn unique_id(prefix: &str) -> String {
     format!("{prefix}-{}-{sequence}", std::process::id())
 }
 
+/// The shared `CLIO_DATABASE_URL`, but only when it points at a Postgres
+/// backend. A missing or non-Postgres value fails closed unless the operator
+/// opted out, which prints a note and makes the caller return early.
 fn postgres_url() -> Option<String> {
-    let url = std::env::var("CLIO_DATABASE_URL").ok()?;
-    (url.starts_with("postgres://") || url.starts_with("postgresql://")).then_some(url)
+    clio_store::pg_skip::pg_url_or_skip("the mcp Postgres drain-hardening test")
 }
 
 #[allow(clippy::needless_pass_by_value)]

@@ -32,6 +32,9 @@ serde_json = { workspace = true }
 # machine's real key store; without the feature a developer machine holding both
 # a keystore entry and a key file fails every seal with the two-store refusal.
 clio-config = { workspace = true, features = ["test-key-injection"] }
+# The Postgres suites route their configured-URL gate through the store's
+# test-support seam, which only a dev-dependency turns on.
+clio-store = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

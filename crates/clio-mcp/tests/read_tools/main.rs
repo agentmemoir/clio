@@ -45,17 +45,11 @@ fn pressure_measure_sqlite_latency_is_measured_against_a_generous_bound() {
 }
 
 /// The same measurement over the shared Postgres server, when one is offered
-/// through `CLIO_DATABASE_URL`. A missing URL is an early return, not a
-/// skipped test; the skip line names what to set, and never prints the URL
-/// itself, which can carry a password (the redaction rule behind
-/// `clio-store`'s `pg_skip_note`).
+/// through `CLIO_DATABASE_URL`. A missing URL fails closed unless the operator
+/// opted out; the gate prints its own note, which never prints the URL itself.
 #[test]
 fn pressure_measure_postgres_latency_is_measured_against_a_generous_bound() {
     let Some(database_url) = fixture::postgres_url() else {
-        eprintln!(
-            "skip postgres pressure measurement: no Postgres URL \
-             (set CLIO_DATABASE_URL to a postgres:// URL to run it)"
-        );
         return;
     };
     // The shared database is store-global; run under the process-wide lock and
