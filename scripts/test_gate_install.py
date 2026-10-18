@@ -296,8 +296,8 @@ class GateInstallTests(unittest.TestCase):
             timeout=1,
         )
         output = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 0, output)
-        self.assertIn("did not finish within the 5s probe budget", output)
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("profile verification is unavailable", output)
 
     def test_a_login_hit_with_an_interactive_shadow_names_the_divergence(self) -> None:
         # A login profile can add `dest` while the interactive profile puts a
