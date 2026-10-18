@@ -27,7 +27,9 @@
 //!
 //! The backlog is seeded as real outbox rows in the same store the binary
 //! opens, so the drain order and the batch bound are the ones production runs.
-//! The harness skips when no Postgres answers.
+//! The harness fails closed when no Postgres answers: the gate panics unless
+//! `CLIO_SKIP_PG_TESTS` opted out, in which case it prints the credential-safe
+//! note and returns.
 
 mod common;
 

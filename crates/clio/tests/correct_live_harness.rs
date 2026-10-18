@@ -193,8 +193,9 @@ fn live_correct_mints_a_fresh_revision_id_each_process() {
     fs::remove_dir_all(&dir).expect("remove the scenario directory");
 }
 
-/// The same scenario on Postgres, where the issue was reported. Skipped with a
-/// note when no server answers, so the harness never fails where none runs.
+/// The same scenario on Postgres, where the issue was reported. Fails closed
+/// when no server answers: the gate panics unless `CLIO_SKIP_PG_TESTS` opted
+/// out, in which case it prints the credential-safe note and returns.
 #[test]
 fn live_correct_mints_a_fresh_revision_id_each_process_on_postgres() {
     let url = pg_url();
