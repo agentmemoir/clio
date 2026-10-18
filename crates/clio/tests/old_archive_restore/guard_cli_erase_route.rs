@@ -94,8 +94,18 @@ fn remember(
         kms,
         backups,
         &[
-            "--db", db, "remember", text, "--category", "schema", "--actor", "agent", "--bank",
-            bank, "--output", "json",
+            "--db",
+            db,
+            "remember",
+            text,
+            "--category",
+            "schema",
+            "--actor",
+            "agent",
+            "--bank",
+            bank,
+            "--output",
+            "json",
         ],
     );
     last_json(&out.stdout)["id"]
@@ -171,7 +181,14 @@ fn sqlite_real_erase_refuses_every_pre_erasure_restore_route() {
         .to_owned();
 
     // The real public erasure route records the denial of the target subject.
-    erase(&journal, &source_kms, &backups, source, &denied, "req-denied");
+    erase(
+        &journal,
+        &source_kms,
+        &backups,
+        source,
+        &denied,
+        "req-denied",
+    );
 
     // The target keeps its own readable subject, so a placement changes it and
     // the read-back below catches that.
