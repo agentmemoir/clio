@@ -20,6 +20,8 @@
 //!
 //! Changes to which routes or fault points this claim proves should normally
 //! require changes here. Changes to the durable store contract should not.
+//!
+//! Keep this module focused on the outcome-failure and restart-reconcile arms.
 
 use crate::cli::salt_bytes;
 use crate::fixtures::{
