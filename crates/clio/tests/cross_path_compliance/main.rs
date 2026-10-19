@@ -29,8 +29,12 @@
 mod common;
 
 mod cli;
+mod family_fixtures;
+mod family_ledger;
 mod fixtures;
 mod peer_support;
+mod peer_test_support;
+mod review_export_test_support;
 mod support;
 mod support_pg;
 
@@ -40,4 +44,5 @@ mod scenario_export_erase_restore;
 mod scenario_intent_outcome_faults;
 mod scenario_intent_outcome_faults_reconcile;
 mod scenario_refusals_incomplete;
+mod scenario_refusals_unknown_custody;
 mod scenario_review_export;

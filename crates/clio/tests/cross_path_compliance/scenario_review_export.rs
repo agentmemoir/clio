@@ -15,7 +15,8 @@
 //!
 //! ## Does not own
 //! - The export custody primitive and reconcile (see `clio-compliance`)
-//! - The CLI driver and the Postgres gate (see `cli` and `support_pg`)
+//! - The CLI driver, the Postgres gate, and the two delivery routes (see
+//!   `cli`, `support_pg`, and `review_export_test_support`)
 //!
 //! ## Boundary
 //!
@@ -23,10 +24,10 @@
 //! require changes here. Changes to the custody primitive should not.
 //!
 //! Keep this module focused on the review-export claim.
-use crate::cli::{CliOutput, clio_command, run_cli};
 use crate::fixtures::{
     BANK, DENIED_MARKER, NOW, backup_dir, journal_file, open_pg, open_sqlite, scratch, unique,
 };
+use crate::review_export_test_support::{run_cli_export, run_mcp_export};
 use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
 use clio::store::{
     DestinationCustodyStore, LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView,
@@ -35,24 +36,26 @@ use clio::store::{
 use clio_compliance::{BindingControls, DeliverySpec, LocalReviewQuery, write_review_export};
 use clio_types::{Actor, AmError, Bank, ErrorCode, OpContext};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Stdio};
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
-/// The bounded wait for one MCP response or a clean server exit.
-const MCP_WAIT: Duration = Duration::from_secs(30);
+/// The message the production returns when the destination already exists: the
+/// export is refused because the destination custody is not available. The
+/// message names the refused condition, not the destination path, so the
+/// custody row carries the path and the reason.
+const REFUSAL_MESSAGE: &str = "review file export is refused: destination custody is not available";
+/// The error code the production refusal carries.
+const REFUSAL_CODE: &str = "invalid_argument";
+/// The reason the production records when it refuses an existing destination.
+const DESTINATION_EXISTS: &str = "destination already exists";
 /// The store surface one review-export scenario drives.
 trait Store: LocalEventStore + DestinationCustodyStore {}
 impl<T: LocalEventStore + DestinationCustodyStore> Store for T {}
 /// One isolated deployment: a fresh SQLite file or a private Postgres schema.
-struct Target {
+pub(crate) struct Target {
     postgres: bool,
     db: String,
-    kms: PathBuf,
-    journal: PathBuf,
-    backups: PathBuf,
+    pub(crate) kms: PathBuf,
+    pub(crate) journal: PathBuf,
+    pub(crate) backups: PathBuf,
     scratch: crate::common::Scratch,
 }
 impl Target {
@@ -88,7 +91,7 @@ impl Target {
             Box::new(open_sqlite(Path::new(&self.db), &self.kms))
         }
     }
-    fn args(&self) -> Vec<&str> {
+    pub(crate) fn args(&self) -> Vec<&str> {
         let backend = if self.postgres { "postgres" } else { "sqlite" };
         vec!["--db", &self.db, "--backend", backend]
     }
@@ -218,86 +221,6 @@ impl LocalEventStore for EventWriteFault<'_> {
         self.inner.prune_completed_before(cutoff)
     }
 }
-/// Run the real CLI review export to `destination`.
-fn run_cli_export(target: &Target, destination: &Path) -> CliOutput {
-    let out = destination.display().to_string();
-    let mut args = vec!["compliance", "review-export", "--out", out.as_str()];
-    args.extend(["--actor", "harness", "--limit", "1000", "--output", "json"]);
-    args.extend(target.args());
-    run_cli(&target.journal, &target.kms, &target.backups, &args)
-}
-/// Write one JSON-RPC frame and flush it.
-fn mcp_write(stdin: &mut ChildStdin, frame: &Value) {
-    writeln!(stdin, "{frame}").expect("write frame");
-    stdin.flush().expect("flush frame");
-}
-/// Write one request frame and return its response, skipping other frames.
-fn mcp_exchange(
-    stdin: &mut ChildStdin,
-    responses: &mpsc::Receiver<String>,
-    id: i64,
-    frame: &Value,
-) -> Value {
-    mcp_write(stdin, frame);
-    loop {
-        let line = responses
-            .recv_timeout(MCP_WAIT)
-            .unwrap_or_else(|error| panic!("no MCP response for id {id} in {MCP_WAIT:?}: {error}"));
-        let parsed: Value = serde_json::from_str(&line).expect("JSON-RPC response");
-        if parsed.get("id").and_then(Value::as_i64) == Some(id) {
-            return parsed;
-        }
-    }
-}
-struct Reaper(Child);
-impl Drop for Reaper {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-/// Run the real MCP stdio `review_export` tool to `destination`.
-fn run_mcp_export(target: &Target, destination: &Path) {
-    let mut command = clio_command(&target.journal, &target.kms, &target.backups);
-    command
-        .args(["mcp", "stdio"])
-        .args(target.args())
-        .stdin(Stdio::piped());
-    command.stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = Reaper(command.spawn().expect("spawn clio mcp stdio"));
-    let mut stdin = child.0.stdin.take().expect("mcp stdin");
-    let stdout = child.0.stdout.take().expect("mcp stdout");
-    let (sender, responses) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if sender.send(line).is_err() {
-                break;
-            }
-        }
-    });
-    let init = json!({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25", "capabilities": {},
-                   "clientInfo": {"name": "cross-path", "version": "0"}}
-    });
-    mcp_exchange(&mut stdin, &responses, 1, &init);
-    mcp_write(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-    );
-    let call = json!({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "review_export",
-                   "arguments": {"destination": destination.display().to_string(),
-                                 "limit": 1000, "actor": "harness"}}
-    });
-    let result = mcp_exchange(&mut stdin, &responses, 2, &call)["result"].clone();
-    assert_eq!(result["isError"], json!(false), "{result}");
-    assert_eq!(result["structuredContent"]["ok"], json!(true), "{result}");
-    drop(stdin);
-    let status = child.0.wait().expect("wait for clio mcp stdio");
-    assert!(status.success(), "clio mcp stdio exited {status:?}");
-}
 /// Assert the destination is the redacted, ordered output under one custody row.
 fn assert_export(target: &Target, ids: &[String; 3], destination: &Path) {
     let text = std::fs::read_to_string(destination).expect("read the review export");
@@ -422,11 +345,60 @@ fn outcome_failure(target: &Target) {
         "no redelivery"
     );
     let repeat = run_cli_export(target, &destination);
-    assert_ne!(repeat.code, Some(0), "an existing destination is refused");
+    assert_eq!(
+        repeat.code,
+        Some(1),
+        "an existing destination is refused with the production failure code: {}",
+        repeat.stderr
+    );
+    let envelope: Value = serde_json::from_str(&repeat.stderr)
+        .unwrap_or_else(|error| panic!("the refusal envelope: {error}: {}", repeat.stderr));
+    assert_eq!(envelope["ok"], json!(false), "{}", repeat.stderr);
+    assert_eq!(
+        envelope["code"],
+        json!(REFUSAL_CODE),
+        "the production refusal code: {}",
+        repeat.stderr
+    );
+    assert_eq!(
+        envelope["message"],
+        json!(REFUSAL_MESSAGE),
+        "the production refusal message: {}",
+        repeat.stderr
+    );
     assert_eq!(
         std::fs::read(&destination).expect("copy"),
         before,
         "no overwrite"
+    );
+    // The refusal names the existing destination in the records the refused
+    // attempt leaves: the custody row failed because the destination already
+    // exists, and the event outcome is denied with the same reason.
+    let refused = target.open();
+    let rows: Vec<_> = refused
+        .load_all()
+        .expect("custody rows")
+        .into_iter()
+        .filter(|row| row.destination_path == destination.display().to_string())
+        .collect();
+    let failed: Vec<_> = rows.iter().filter(|row| row.state == "failed").collect();
+    assert_eq!(
+        failed.len(),
+        1,
+        "one refused delivery for the existing destination: {rows:?}"
+    );
+    assert_eq!(
+        failed[0].exception_reason.as_deref(),
+        Some(DESTINATION_EXISTS),
+        "the refusal names the existing destination: {rows:?}"
+    );
+    let refused_events = read_events(refused.as_ref(), &failed[0].action_id);
+    assert_eq!(refused_events.len(), 1, "one event row for the refusal");
+    assert_eq!(refused_events[0].state, LocalEventState::Denied);
+    assert_eq!(
+        refused_events[0].result.as_deref(),
+        Some(DESTINATION_EXISTS),
+        "the denied outcome names the existing destination"
     );
     assert_eq!(read_events(store.as_ref(), &action_id).len(), 1);
     assert!(!pending(store.as_ref()).contains(&action_id));

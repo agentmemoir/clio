@@ -26,9 +26,11 @@
 //! Keep this module focused on the one export-erase-restore claim.
 
 use crate::cli::clio_command;
+use crate::family_fixtures;
+use crate::family_ledger::{self, FamilyFixture};
 use crate::fixtures::{
-    self, BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
-    DENIED_SUBJECT, unique,
+    self, BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_MARKER, DENIED_SUBJECT,
+    unique,
 };
 use crate::support::{self, Readback};
 use crate::support_pg::{
@@ -43,12 +45,6 @@ use clio_compliance::{
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-
-/// The two-subject source every arm seeds.
-const SUBJECTS: &[(&str, &str, &str)] = &[
-    (DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER),
-    (CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER),
-];
 
 /// The control-only target every arm seeds.
 const CONTROL_ONLY: &[(&str, &str, &str)] = &[(CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER)];
@@ -111,15 +107,17 @@ impl Backend {
     }
 
     /// Seed the two-subject source and the control-only target.
-    fn seed(&self) {
+    fn seed(&self) -> FamilyFixture {
         match self {
             Self::Sqlite { .. } => {
-                fixtures::seed_sqlite(Path::new(self.source()), self.kms(), SUBJECTS);
+                let fixture = family_fixtures::seed_sqlite(Path::new(self.source()), self.kms());
                 fixtures::seed_sqlite(Path::new(self.target()), self.kms(), CONTROL_ONLY);
+                fixture
             }
             Self::Pg { .. } => {
-                fixtures::seed_pg(self.source(), self.kms(), SUBJECTS);
+                let fixture = family_fixtures::seed_pg(self.source(), self.kms());
                 fixtures::seed_pg(self.target(), self.kms(), CONTROL_ONLY);
+                fixture
             }
         }
     }
@@ -228,6 +226,7 @@ struct Claim {
     backups: PathBuf,
     export_path: PathBuf,
     archive_id: String,
+    fixture: FamilyFixture,
 }
 
 impl Claim {
@@ -277,29 +276,15 @@ fn drive_claim(claim: &Claim) {
     let open_copy = unique("copy-open");
     let export = claim.export_path.to_str().expect("UTF-8 export path");
 
-    // 1. Export one subject: the manifest counts must match the ledger and the
-    //    other subject's marker must be absent from the delivered file.
+    // 1. Export one subject: the manifest must carry every family the ledger
+    //    names, with the counts the every-family fixture seeded and the
+    //    ledger's own omissions, and the other subject's marker must be absent
+    //    from the delivered file.
     let exported = claim.ok(&format!(
         "export --out {export} --subject {DENIED_SUBJECT} --content-mode dsar_plaintext"
     ));
     let manifest = &exported["manifest"];
-    let ledger = claim
-        .backend
-        .open()
-        .list_subject_items(BANK, DENIED_SUBJECT)
-        .expect("list items")
-        .len() as u64;
-    // Every G0 family is reported, not only items: this fixture seeds only
-    // items, so each family's count equals the live ledger or zero.
-    let counts = manifest["counts_by_type"]
-        .as_array()
-        .expect("counts_by_type");
-    assert_eq!(counts.len(), 9, "every G0 family is reported: {manifest}");
-    for entry in counts {
-        let label = entry[0].as_str().expect("a family label");
-        let want = u64::from(label == "items") * ledger;
-        assert_eq!(entry[1].as_u64(), Some(want), "family {label}: {manifest}");
-    }
+    family_ledger::assert_every_family(manifest, &claim.fixture);
     let subject = &manifest["filter"]["subject_id"];
     assert_eq!(subject, &json!(DENIED_SUBJECT), "{manifest}");
     let omissions = manifest["omissions"].as_array().map_or(0, Vec::len);
@@ -394,7 +379,7 @@ fn run_backend(backend: Backend, scratch: &crate::common::Scratch, name: &'stati
     let backups = fixtures::backup_dir(scratch);
     let journal = fixtures::journal_file(scratch, "journal/erasure-journal.json");
     install_key(&journal);
-    backend.seed();
+    let fixture = backend.seed();
     initialize_new_empty(&journal).expect("initialize the deployment journal");
     let archive_id = backend.archive(&backups, &journal, &unique(tag));
     let export_path = scratch.join("export/bundle.json");
@@ -407,6 +392,7 @@ fn run_backend(backend: Backend, scratch: &crate::common::Scratch, name: &'stati
         backups,
         export_path,
         archive_id,
+        fixture,
     });
 }
 

@@ -31,6 +31,7 @@ use crate::fixtures::{
     write_item,
 };
 use crate::peer_support::{Peer, live_then_offline};
+use crate::peer_test_support::{assert_no_peer_named, assert_peer_slots};
 use crate::scenario_all_bank_peer::install_key;
 use crate::support::{Readback, archive_sqlite_with_authority, readback};
 use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
@@ -53,17 +54,17 @@ const DAMAGED: &[u8] = b"{\"schema_version\":1,\"deployment_id\":\"truncated\"}"
 trait PeerStore: Store + DurableRequestStore + PeerActionStore {}
 impl<T: Store + DurableRequestStore + PeerActionStore> PeerStore for T {}
 
-struct Env {
+pub(crate) struct Env {
     scratch: crate::common::Scratch,
     deployment: PathBuf,
-    kms: PathBuf,
+    pub(crate) kms: PathBuf,
     journal: PathBuf,
     backups: PathBuf,
     db: String,
     key: Option<PathBuf>,
 }
 impl Env {
-    fn new(tag: &str) -> Self {
+    pub(crate) fn new(tag: &str) -> Self {
         let scratch = scratch(tag);
         Self {
             deployment: scratch.join("no-such-deployment.json"),
@@ -76,11 +77,11 @@ impl Env {
         }
     }
 
-    fn db(&self) -> &str {
+    pub(crate) fn db(&self) -> &str {
         &self.db
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         Path::new(&self.db)
     }
 
@@ -96,22 +97,22 @@ impl Env {
             .expect("run clio")
     }
 
-    fn command(&self, sub: &str, rest: &str) -> Output {
+    pub(crate) fn command(&self, sub: &str, rest: &str) -> Output {
         let line = format!("compliance {sub} {rest} --db {} -o json", self.db());
         let args: Vec<&str> = line.split_whitespace().collect();
         self.spawn(&self.kms, &args)
     }
 
-    fn value(&self, sub: &str, rest: &str) -> Value {
+    pub(crate) fn value(&self, sub: &str, rest: &str) -> Value {
         stdout_of(&self.command(sub, rest))
     }
 
-    fn start(&self, request: &str, subject: &str) -> Output {
+    pub(crate) fn start(&self, request: &str, subject: &str) -> Output {
         let rest = format!("--request-id {request} --kind erasure --subject-id {subject}");
         self.command("request-start", &rest)
     }
 
-    fn status(&self, request: &str) -> Value {
+    pub(crate) fn status(&self, request: &str) -> Value {
         self.value("request-status", &format!("--request-id {request}"))
     }
 
@@ -139,7 +140,7 @@ fn stdout_of(out: &Output) -> Value {
         )
     })
 }
-fn ok(out: &Output, what: &str) {
+pub(crate) fn ok(out: &Output, what: &str) {
     let (out_text, err_text) = streams(out);
     assert!(out.status.success(), "{what} failed: {out_text}{err_text}");
 }
@@ -152,7 +153,7 @@ fn streams(out: &Output) -> (String, String) {
 fn envelope(out: &Output) -> Value {
     serde_json::from_slice(&out.stderr).unwrap_or_else(|error| panic!("refusal not JSON: {error}"))
 }
-fn assert_forbidden(out: &Output) {
+pub(crate) fn assert_forbidden(out: &Output) {
     let (_, stderr) = streams(out);
     assert_eq!(out.status.code(), Some(1), "must refuse (exit 1): {stderr}");
     assert_eq!(
@@ -167,14 +168,14 @@ fn assert_refused_exit2(out: &Output, needle: &str) {
     assert!(stderr.contains(needle), "the refusal must name {needle:?}");
 }
 /// The open copy action's own refusal, the named state the closure gate reports.
-fn assert_open_copy(out: &Output) {
+pub(crate) fn assert_open_copy(out: &Output) {
     let (_, stderr) = streams(out);
     assert!(
         stderr.contains("OpenCopyAction"),
         "the named action is open"
     );
 }
-fn seed_done_path(store: &dyn DurableRequestStore, request_id: &str, path: &str) {
+pub(crate) fn seed_done_path(store: &dyn DurableRequestStore, request_id: &str, path: &str) {
     let row = store.load(request_id).expect("load").expect("the row");
     let mut record = row_to_record(&row).expect("decode the request row");
     let done = PathSlot {
@@ -276,6 +277,7 @@ fn two_live_peers<S: PeerStore>(env: &Env, request: &str, open: impl Fn() -> S) 
         "{first}"
     );
     let peers = env.peer_status(request);
+    assert_peer_slots(&peers, &["peer-a", "peer-b"]);
     assert_eq!(peers["peer-a"], json!("pending"), "peer a holds a copy");
     assert_eq!(peers["peer-b"], json!("pending"), "peer b holds a copy");
     let store = open();
@@ -318,12 +320,7 @@ fn scenario_refusals_incomplete_peers_disabled_sqlite() {
     );
 
     let peers = env.peer_status("req-core");
-    let no_peer = peers
-        .as_object()
-        .expect("peer object")
-        .keys()
-        .all(|k| k.as_str() == "ok");
-    assert!(no_peer, "a peers-disabled deployment names no peer");
+    assert_no_peer_named(&peers);
 }
 #[test]
 fn scenario_refusals_incomplete_peers_disabled_postgres() {
@@ -342,12 +339,7 @@ fn scenario_refusals_incomplete_peers_disabled_postgres() {
     let store = open_pg(env.db(), &env.kms);
     refuse_scope_copy_close(&env, "req-core-pg", &store);
     let peers = env.peer_status("req-core-pg");
-    let no_peer = peers
-        .as_object()
-        .expect("peer object")
-        .keys()
-        .all(|k| k.as_str() == "ok");
-    assert!(no_peer, "a peers-disabled deployment names no peer");
+    assert_no_peer_named(&peers);
 }
 fn current_authority(journal: &Path) -> ManifestAuthority {
     let JournalState::Current(j) = load_journal(journal) else {
