@@ -152,6 +152,8 @@ impl FamilyFixture {
 /// equal the seeded count, and each family must carry exactly the omission the
 /// ledger names for it: none for a family the ledger selects completely, and
 /// the ledger's own reason for every family it cannot attribute to the subject.
+/// The manifest also names omissions for the store slots the ledger does not
+/// count, so only the nine counted families are checked here.
 pub fn assert_every_family(manifest: &Value, fixture: &FamilyFixture) {
     let counts = manifest["counts_by_type"]
         .as_array()

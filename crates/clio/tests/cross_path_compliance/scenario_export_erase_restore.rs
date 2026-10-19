@@ -27,7 +27,7 @@
 
 use crate::cli::clio_command;
 use crate::family_fixtures;
-use crate::family_ledger::{self, FamilyFixture};
+use crate::family_test_support::{self, FamilyFixture};
 use crate::fixtures::{
     self, BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_MARKER, DENIED_SUBJECT,
     unique,
@@ -284,7 +284,7 @@ fn drive_claim(claim: &Claim) {
         "export --out {export} --subject {DENIED_SUBJECT} --content-mode dsar_plaintext"
     ));
     let manifest = &exported["manifest"];
-    family_ledger::assert_every_family(manifest, &claim.fixture);
+    family_test_support::assert_every_family(manifest, &claim.fixture);
     let subject = &manifest["filter"]["subject_id"];
     assert_eq!(subject, &json!(DENIED_SUBJECT), "{manifest}");
     let omissions = manifest["omissions"].as_array().map_or(0, Vec::len);

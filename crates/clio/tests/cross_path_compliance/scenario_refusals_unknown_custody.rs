@@ -11,11 +11,12 @@
 //! ## Owns
 //! - The unknown-custody copy case and the named refusal it returns
 //! - The assertion that the request outcome stays open
+//! - The same case on SQLite and on loopback Postgres
 //!
 //! ## Does not own
 //! - The request ledger and the copy-disposition fold (see `clio-compliance`)
 //! - The CLI driver, the fixtures, and the shared request environment (see
-//!   `cli`, `fixtures`, and `scenario_refusals_incomplete`)
+//!   `cli`, `fixtures`, and `refusals_test_support`)
 //!
 //! ## Boundary
 //!
@@ -24,14 +25,19 @@
 //!
 //! Keep this module focused on the unknown-custody refusal.
 
-use crate::fixtures::{DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, open_sqlite, seed_sqlite};
-use crate::scenario_refusals_incomplete::{
-    Env, assert_forbidden, assert_open_copy, ok, seed_done_path,
+use crate::fixtures::{
+    DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, open_pg, open_sqlite, seed_pg, seed_sqlite,
 };
-use clio::store::CopyInventoryStore;
+use crate::refusals_test_support::{Env, assert_forbidden, assert_open_copy, ok, seed_done_path};
+use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use clio::store::{CopyInventoryStore, DurableRequestStore, ScopedSchema};
 use clio_compliance::subject_request_store_wiring::copy_row_disposition;
 use clio_compliance::{CopyDispositionOutcome, copy_closure_facts};
 use serde_json::json;
+
+/// The store surface the unknown-custody arm drives on either backend.
+trait CustodyStore: CopyInventoryStore + DurableRequestStore {}
+impl<T: CopyInventoryStore + DurableRequestStore> CustodyStore for T {}
 
 /// The flags of one copy disposition: the copy, the class naming its holder,
 /// the action it still owes, and its technical state.
@@ -42,22 +48,13 @@ fn copy_rest(request: &str, copy_id: &str, custody: &str, action: &str, state: &
     )
 }
 
-/// Unknown copy custody: the holder of a copy is not known.
+/// The unknown-custody refusal on one deployment.
 ///
 /// The copy's technical state is done, so the only thing it still owes is its
 /// classification. The production fold refuses any completion claim for an
-/// unknown holder, the closure gate refuses the open action, and the request
-/// stays open.
-#[test]
-fn scenario_refusals_unknown_custody_refuses_closure() {
-    let env = Env::new("refusals-unknown-custody");
-    seed_sqlite(
-        env.path(),
-        &env.kms,
-        &[(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)],
-    );
-    let store = open_sqlite(env.path(), &env.kms);
-    let request = "req-unknown-custody";
+/// unknown holder, the closure gate refuses the open action with the
+/// production's own message, and the request stays open.
+fn unknown_custody_refuses_closure<S: CustodyStore>(env: &Env, store: &S, request: &str) {
     ok(&env.start(request, DENIED_SUBJECT), "request-start");
 
     // A delivered copy under a known holder: it is closed, so it is not what
@@ -82,7 +79,7 @@ fn scenario_refusals_unknown_custody_refuses_closure() {
     );
 
     // The stored row carries the unknown custody the fold reads.
-    let rows = store.load_all().expect("load the copy rows");
+    let rows = CopyInventoryStore::load_all(store).expect("load the copy rows");
     let unknown = rows
         .iter()
         .find(|row| row.copy_id == unknown_id)
@@ -115,7 +112,7 @@ fn scenario_refusals_unknown_custody_refuses_closure() {
     );
 
     // The product path is done, so the closure's only blocker is the copy.
-    seed_done_path(&store, request, "erasure");
+    seed_done_path(store, request, "erasure");
     let close = env.command(
         "request-close",
         &format!("--request-id {request} --product-path erasure"),
@@ -135,4 +132,36 @@ fn scenario_refusals_unknown_custody_refuses_closure() {
         json!("open"),
         "the request closes nothing: {status}"
     );
+}
+
+/// The unknown-custody refusal on SQLite.
+#[test]
+fn scenario_refusals_unknown_custody_refuses_closure() {
+    let env = Env::new("refusals-unknown-custody");
+    seed_sqlite(
+        env.path(),
+        &env.kms,
+        &[(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)],
+    );
+    let store = open_sqlite(env.path(), &env.kms);
+    unknown_custody_refuses_closure(&env, &store, "req-unknown-custody");
+}
+
+/// The same unknown-custody refusal on loopback Postgres.
+#[test]
+fn scenario_refusals_unknown_custody_refuses_closure_postgres() {
+    let base = pg_url();
+    if !require_postgres(postgres_reachable(&base)) {
+        return;
+    }
+    let _guard = lock_pg();
+    let target = ScopedSchema::new(&base);
+    let env = Env::postgres("refusals-unknown-custody-pg", target.url());
+    seed_pg(
+        env.db(),
+        &env.kms,
+        &[(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)],
+    );
+    let store = open_pg(env.db(), &env.kms);
+    unknown_custody_refuses_closure(&env, &store, "req-unknown-custody-pg");
 }

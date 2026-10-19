@@ -13,7 +13,7 @@
 //!
 //! ## Does not own
 //! - The ledger's per-family expectations and the manifest check (see
-//!   `family_ledger`)
+//!   `family_test_support`)
 //! - The plain item fixture, the scratch directory, and the store openers (see
 //!   `fixtures`)
 //!
@@ -24,7 +24,7 @@
 //!
 //! Keep this module focused on the every-family rows the fixture writes.
 
-use crate::family_ledger::FamilyFixture;
+use crate::family_test_support::FamilyFixture;
 use crate::fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
     DENIED_SUBJECT, NOW, open_pg, open_sqlite, write_item,

@@ -15,6 +15,8 @@
 //!
 //! ## Does not own
 //! - The request ledger and journal state model (see `clio-compliance`)
+//! - The shared request environment and the refusal assertions (see
+//!   `refusals_test_support`)
 //! - The CLI driver and the Postgres gate (see `cli` and `support_pg`)
 //!
 //! ## Boundary
@@ -24,28 +26,27 @@
 //!
 //! Keep this module focused on the refused-and-incomplete claim.
 
-use crate::cli;
 use crate::fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
-    DENIED_SUBJECT, backup_dir, journal_file, open_pg, open_sqlite, scratch, seed_pg, seed_sqlite,
-    write_item,
+    DENIED_SUBJECT, open_pg, open_sqlite, seed_pg, seed_sqlite, write_item,
 };
 use crate::peer_support::{Peer, live_then_offline};
 use crate::peer_test_support::{assert_no_peer_named, assert_peer_slots};
+use crate::refusals_test_support::{
+    Env, assert_forbidden, assert_open_copy, assert_refused_exit2, ok, seed_done_path,
+};
 use crate::scenario_all_bank_peer::install_key;
 use crate::support::{Readback, archive_sqlite_with_authority, readback};
 use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
 use clio::store::{DurableRequestStore, PeerActionStore, ScopedSchema, Store};
 use clio_backup::manifest::ManifestAuthority;
-use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
+use clio_compliance::subject_request_store_wiring::record_to_row;
 use clio_compliance::{
-    JournalState, PathOwner, PathSlot, PathState, PeerEnablement, RegisterOutcome, RequestCommand,
-    RequestKind, RequestScope, SubjectRequestLedger, initialize_new_empty, load_journal,
-    snapshot_peers,
+    JournalState, PeerEnablement, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
+    SubjectRequestLedger, initialize_new_empty, load_journal, snapshot_peers,
 };
-use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
+use serde_json::json;
+use std::path::Path;
 
 const DENIED: [(&str, &str, &str); 1] = [(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)];
 const CONTROL: [(&str, &str, &str); 1] = [(CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER)];
@@ -54,137 +55,6 @@ const DAMAGED: &[u8] = b"{\"schema_version\":1,\"deployment_id\":\"truncated\"}"
 trait PeerStore: Store + DurableRequestStore + PeerActionStore {}
 impl<T: Store + DurableRequestStore + PeerActionStore> PeerStore for T {}
 
-pub(crate) struct Env {
-    scratch: crate::common::Scratch,
-    deployment: PathBuf,
-    pub(crate) kms: PathBuf,
-    journal: PathBuf,
-    backups: PathBuf,
-    db: String,
-    key: Option<PathBuf>,
-}
-impl Env {
-    pub(crate) fn new(tag: &str) -> Self {
-        let scratch = scratch(tag);
-        Self {
-            deployment: scratch.join("no-such-deployment.json"),
-            kms: scratch.join("clio.kms.json"),
-            journal: journal_file(&scratch, "journal/erasure-journal.json"),
-            backups: backup_dir(&scratch),
-            db: scratch.join("clio.db").to_string_lossy().into_owned(),
-            key: None,
-            scratch,
-        }
-    }
-
-    pub(crate) fn db(&self) -> &str {
-        &self.db
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        Path::new(&self.db)
-    }
-
-    fn spawn(&self, kms: &Path, args: &[&str]) -> Output {
-        let mut cmd = cli::clio_command(&self.journal, kms, &self.backups);
-        cmd.env("CLIO_DEPLOYMENT_CONFIG", &self.deployment);
-        if let Some(key) = &self.key {
-            cmd.env("CLIO_KEY_FILE", key).env("CLIO_KEY_FILE_ONLY", "1");
-        }
-        cmd.args(args)
-            .stdin(Stdio::null())
-            .output()
-            .expect("run clio")
-    }
-
-    pub(crate) fn command(&self, sub: &str, rest: &str) -> Output {
-        let line = format!("compliance {sub} {rest} --db {} -o json", self.db());
-        let args: Vec<&str> = line.split_whitespace().collect();
-        self.spawn(&self.kms, &args)
-    }
-
-    pub(crate) fn value(&self, sub: &str, rest: &str) -> Value {
-        stdout_of(&self.command(sub, rest))
-    }
-
-    pub(crate) fn start(&self, request: &str, subject: &str) -> Output {
-        let rest = format!("--request-id {request} --kind erasure --subject-id {subject}");
-        self.command("request-start", &rest)
-    }
-
-    pub(crate) fn status(&self, request: &str) -> Value {
-        self.value("request-status", &format!("--request-id {request}"))
-    }
-
-    fn peer_status(&self, request: &str) -> Value {
-        self.value("peer-status", &format!("--request-id {request}"))
-    }
-
-    fn inventory(&self) -> Value {
-        self.value("inventory", "")
-    }
-
-    fn restore(&self, kms: &Path, id: &str) -> Output {
-        let line = format!("backup restore {id} --yes --db {} -o json", self.db());
-        let args: Vec<&str> = line.split_whitespace().collect();
-        self.spawn(kms, &args)
-    }
-}
-fn stdout_of(out: &Output) -> Value {
-    let bytes = &out.stdout;
-    serde_json::from_slice(bytes).unwrap_or_else(|error| {
-        panic!(
-            "stdout is not JSON ({error}): out={} err={}",
-            String::from_utf8_lossy(bytes),
-            String::from_utf8_lossy(&out.stderr)
-        )
-    })
-}
-pub(crate) fn ok(out: &Output, what: &str) {
-    let (out_text, err_text) = streams(out);
-    assert!(out.status.success(), "{what} failed: {out_text}{err_text}");
-}
-fn streams(out: &Output) -> (String, String) {
-    (
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
-}
-fn envelope(out: &Output) -> Value {
-    serde_json::from_slice(&out.stderr).unwrap_or_else(|error| panic!("refusal not JSON: {error}"))
-}
-pub(crate) fn assert_forbidden(out: &Output) {
-    let (_, stderr) = streams(out);
-    assert_eq!(out.status.code(), Some(1), "must refuse (exit 1): {stderr}");
-    assert_eq!(
-        envelope(out)["code"],
-        json!("forbidden"),
-        "must be forbidden"
-    );
-}
-fn assert_refused_exit2(out: &Output, needle: &str) {
-    let (_, stderr) = streams(out);
-    assert_eq!(out.status.code(), Some(2), "must refuse (exit 2): {stderr}");
-    assert!(stderr.contains(needle), "the refusal must name {needle:?}");
-}
-/// The open copy action's own refusal, the named state the closure gate reports.
-pub(crate) fn assert_open_copy(out: &Output) {
-    let (_, stderr) = streams(out);
-    assert!(
-        stderr.contains("OpenCopyAction"),
-        "the named action is open"
-    );
-}
-pub(crate) fn seed_done_path(store: &dyn DurableRequestStore, request_id: &str, path: &str) {
-    let row = store.load(request_id).expect("load").expect("the row");
-    let mut record = row_to_record(&row).expect("decode the request row");
-    let done = PathSlot {
-        owner: PathOwner::Clio,
-        state: PathState::Done,
-    };
-    record.paths.insert(path.to_owned(), done);
-    store.save(&record_to_row(&record)).expect("save the row");
-}
 /// The changed-scope, open-copy, and unknown-family-link refusals: the request
 /// closes nothing and its stored state stays open.
 fn refuse_scope_copy_close(env: &Env, request: &str, store: &dyn DurableRequestStore) {
@@ -330,10 +200,7 @@ fn scenario_refusals_incomplete_peers_disabled_postgres() {
     }
     let _guard = lock_pg();
     let target = ScopedSchema::new(&base);
-    let env = Env {
-        db: target.url().to_owned(),
-        ..Env::new("refusals-core-pg")
-    };
+    let env = Env::postgres("refusals-core-pg", target.url());
     seed_pg(env.db(), &env.kms, &DENIED);
     seed_pg(env.db(), &env.kms, &CONTROL);
     let store = open_pg(env.db(), &env.kms);
@@ -405,10 +272,7 @@ fn scenario_refusals_incomplete_postgres() {
     }
     let _guard = lock_pg();
     let target = ScopedSchema::new(&base);
-    let env = Env {
-        db: target.url().to_owned(),
-        ..Env::new("refusals-pg")
-    };
+    let env = Env::postgres("refusals-pg", target.url());
     ok(&env.start("req-pg", DENIED_SUBJECT), "request-start");
     assert_forbidden(&env.start("req-pg", CONTROL_SUBJECT));
     assert_eq!(
@@ -433,10 +297,7 @@ fn scenario_refusals_incomplete_two_live_peers_postgres() {
     }
     let _guard = lock_pg();
     let target = ScopedSchema::new(&base);
-    let mut env = Env {
-        db: target.url().to_owned(),
-        ..Env::new("refusals-two-peer-pg")
-    };
+    let mut env = Env::postgres("refusals-two-peer-pg", target.url());
     env.key = Some(install_key(env.scratch.join("clio.key")));
     two_live_peers(&env, "req-two-peer-pg", || open_pg(env.db(), &env.kms));
 }

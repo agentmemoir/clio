@@ -10,11 +10,11 @@
 //!
 //! ## Owns
 //! - The module tree of the cross-path compliance proof
-//! - The six scenario modules, one per acceptance claim
+//! - The scenario modules, one per proven cross-path claim
 //!
 //! ## Does not own
-//! - The shared fixtures, the CLI driver, and the Postgres gate (see `fixtures`,
-//!   `cli`, and `support_pg`)
+//! - The shared fixtures, the CLI driver, the refusal harness, and the Postgres
+//!   gate (see `fixtures`, `cli`, `refusals_test_support`, and `support_pg`)
 //! - The production export, erase, and restore primitives (see `clio-compliance`)
 //!
 //! ## Boundary
@@ -30,10 +30,11 @@ mod common;
 
 mod cli;
 mod family_fixtures;
-mod family_ledger;
+mod family_test_support;
 mod fixtures;
 mod peer_support;
 mod peer_test_support;
+mod refusals_test_support;
 mod review_export_test_support;
 mod support;
 mod support_pg;
