@@ -11,7 +11,8 @@
 //!
 //! ## Owns
 //! - `Env`, the one deployment the refusal scenarios drive
-//! - `ok`, `assert_forbidden`, `assert_refused_exit2`, and `assert_open_copy`
+//! - `ok`, `assert_forbidden`, `assert_scope_change_refusal`,
+//!   `assert_damaged_journal_refusal`, and `assert_open_copy`
 //! - `seed_done_path`, the done product path a refusal is measured against
 //!
 //! ## Does not own
@@ -44,6 +45,23 @@ const OPEN_COPY_REFUSAL_MESSAGE: &str = "request closure refused: OpenCopyAction
 const OPEN_COPY_REFUSAL_CODE: &str = "forbidden";
 /// The process exit code the production refusal maps to.
 const OPEN_COPY_REFUSAL_EXIT: i32 = 1;
+
+/// The exact refusal the production returns when a restore reads a damaged
+/// live erasure journal: the authority refusal the restore flow builds.
+const DAMAGED_JOURNAL_REFUSAL_MESSAGE: &str = "the erasure journal is damaged";
+/// The error code the production refusal carries.
+const DAMAGED_JOURNAL_REFUSAL_CODE: &str = "config_corrupt";
+/// The process exit code the production refusal maps to.
+const DAMAGED_JOURNAL_REFUSAL_EXIT: i32 = 2;
+
+/// The exact refusal the production returns when a request id is opened again
+/// under a different kind or scope: the ledger's binding refusal.
+const SCOPE_CHANGE_REFUSAL_MESSAGE: &str =
+    "request id is already bound to a different kind or scope";
+/// The error code the production refusal carries.
+const SCOPE_CHANGE_REFUSAL_CODE: &str = "forbidden";
+/// The process exit code the production refusal maps to.
+const SCOPE_CHANGE_REFUSAL_EXIT: i32 = 1;
 
 /// One deployment: a scratch directory, the journal and backup paths the
 /// binary reads, the key store, and the store the commands address.
@@ -153,7 +171,11 @@ fn streams(out: &Output) -> (String, String) {
     )
 }
 fn envelope(out: &Output) -> Value {
-    serde_json::from_slice(&out.stderr).unwrap_or_else(|error| panic!("refusal not JSON: {error}"))
+    envelope_text(&String::from_utf8_lossy(&out.stderr))
+}
+/// The refusal envelope the CLI wrote to its stderr.
+fn envelope_text(stderr: &str) -> Value {
+    serde_json::from_str(stderr).unwrap_or_else(|error| panic!("refusal not JSON: {error}"))
 }
 pub(crate) fn assert_forbidden(out: &Output) {
     let (_, stderr) = streams(out);
@@ -164,10 +186,55 @@ pub(crate) fn assert_forbidden(out: &Output) {
         "must be forbidden"
     );
 }
-pub(crate) fn assert_refused_exit2(out: &Output, needle: &str) {
+/// The changed-scope refusal, pinned to the production's exact message, error
+/// code, and exit code.
+///
+/// The message, the code, and the exit are the production's own, so a refusal
+/// that changes in any of them fails this check instead of still matching on a
+/// fragment of the old text.
+pub(crate) fn assert_scope_change_refusal(out: &Output) {
     let (_, stderr) = streams(out);
-    assert_eq!(out.status.code(), Some(2), "must refuse (exit 2): {stderr}");
-    assert!(stderr.contains(needle), "the refusal must name {needle:?}");
+    assert_eq!(
+        out.status.code(),
+        Some(SCOPE_CHANGE_REFUSAL_EXIT),
+        "must refuse (exit {SCOPE_CHANGE_REFUSAL_EXIT}): {stderr}"
+    );
+    let refused = envelope(out);
+    assert_eq!(
+        refused["code"],
+        json!(SCOPE_CHANGE_REFUSAL_CODE),
+        "must carry the production's error code: {stderr}"
+    );
+    assert_eq!(
+        refused["message"],
+        json!(SCOPE_CHANGE_REFUSAL_MESSAGE),
+        "must carry the production's exact refusal: {stderr}"
+    );
+}
+/// The damaged journal's own refusal, pinned to the production's exact
+/// message, error code, and exit code.
+///
+/// The message, the code, and the exit are the production's own, so a refusal
+/// that changes in any of them fails this check instead of still matching on a
+/// fragment of the old text.
+pub(crate) fn assert_damaged_journal_refusal(out: &Output) {
+    let (_, stderr) = streams(out);
+    assert_eq!(
+        out.status.code(),
+        Some(DAMAGED_JOURNAL_REFUSAL_EXIT),
+        "must refuse (exit {DAMAGED_JOURNAL_REFUSAL_EXIT}): {stderr}"
+    );
+    let refused = envelope(out);
+    assert_eq!(
+        refused["code"],
+        json!(DAMAGED_JOURNAL_REFUSAL_CODE),
+        "must carry the production's error code: {stderr}"
+    );
+    assert_eq!(
+        refused["message"],
+        json!(DAMAGED_JOURNAL_REFUSAL_MESSAGE),
+        "must carry the production's exact refusal: {stderr}"
+    );
 }
 /// The open copy action's own refusal, pinned to the production's exact
 /// message, error code, and exit code.
@@ -177,12 +244,17 @@ pub(crate) fn assert_refused_exit2(out: &Output, needle: &str) {
 /// fragment of the old text.
 pub(crate) fn assert_open_copy(out: &Output) {
     let (_, stderr) = streams(out);
+    assert_open_copy_refusal(out.status.code(), &stderr);
+}
+/// The same open-copy refusal for a run whose exit code and stderr are
+/// already captured.
+pub(crate) fn assert_open_copy_refusal(code: Option<i32>, stderr: &str) {
     assert_eq!(
-        out.status.code(),
+        code,
         Some(OPEN_COPY_REFUSAL_EXIT),
         "must refuse (exit {OPEN_COPY_REFUSAL_EXIT}): {stderr}"
     );
-    let refused = envelope(out);
+    let refused = envelope_text(stderr);
     assert_eq!(
         refused["code"],
         json!(OPEN_COPY_REFUSAL_CODE),

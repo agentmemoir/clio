@@ -23,6 +23,7 @@
 //!
 //! Keep this module focused on the all-bank-and-peer claim.
 
+use crate::cli::{PARTIAL_BANK_REFUSAL, assert_refusal};
 use crate::fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
     DENIED_SUBJECT, backup_dir, journal_file, open_pg, open_sqlite, scratch, unique, write_item,
@@ -342,15 +343,10 @@ fn partial_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
     drop(store);
 
     let refused = deployment.retry(&request_id);
-    let stderr = String::from_utf8_lossy(&refused.stderr);
-    assert_eq!(
+    assert_refusal(
         refused.status.code(),
-        Some(1),
-        "a partial-bank confirmation refuses: {stderr}"
-    );
-    assert!(
-        stderr.contains("forbidden"),
-        "the refusal names the coordination refusal: {stderr}"
+        &String::from_utf8_lossy(&refused.stderr),
+        &PARTIAL_BANK_REFUSAL,
     );
 
     // No irreversible effect: the key is intact, no intent is durable, and the

@@ -41,6 +41,9 @@ use clio_compliance::{
 };
 use std::path::Path;
 
+/// The message the injected outcome-write failure carries.
+pub(crate) const INJECTED_OUTCOME_FAILURE: &str = "injected outcome-write failure";
+
 /// The event write the injected fault breaks over the real durable store.
 #[derive(Clone, Copy)]
 pub(crate) enum Fault {
@@ -69,10 +72,7 @@ impl LocalEventStore for FaultStore<'_> {
     fn record_outcome(&self, _id: &str, _denied: bool, _result: &str) -> Result<(), AmError> {
         match self.fault {
             Fault::Intent => Err(AmError::new(ErrorCode::NotFound, "no intent can exist")),
-            Fault::Outcome => Err(AmError::new(
-                ErrorCode::Internal,
-                "injected outcome-write failure",
-            )),
+            Fault::Outcome => Err(AmError::new(ErrorCode::Internal, INJECTED_OUTCOME_FAILURE)),
         }
     }
     fn pending_actions(&self) -> Result<Vec<String>, AmError> {

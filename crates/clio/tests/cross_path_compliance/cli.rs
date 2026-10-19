@@ -12,6 +12,7 @@
 //! ## Owns
 //! - `salt_bytes`, `salt_text`, `subject_hash`, and `denied_hash`
 //! - `clio_command`, `run_cli`, `CliOutput`, and `assert_refused`
+//! - `Refusal` and the production refusals the CLI returns
 //!
 //! ## Does not own
 //! - The seeded stores and the archive assembly (see `fixtures` and `support`)
@@ -25,6 +26,7 @@
 //! Keep this module focused on the CLI driver, with no tests.
 
 use crate::fixtures::DENIED_SUBJECT;
+use serde_json::{Value, json};
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -126,17 +128,70 @@ fn drain<R: Read>(mut reader: R) -> String {
     text
 }
 
-/// Assert one CLI run refused with the named reason, as a usage refusal.
-pub fn assert_refused(output: &CliOutput, needle: &str) {
+/// One production refusal: the exit code it maps to, the machine-readable
+/// error code it carries, and the whole refusal message.
+pub struct Refusal {
+    /// The process exit code the refusal maps to.
+    pub exit: i32,
+    /// The machine-readable error code the refusal carries.
+    pub code: &'static str,
+    /// The whole refusal message, compared by equality.
+    pub message: &'static str,
+}
+
+/// The production's refusal when an archive member references a subject the
+/// live authority denies.
+pub const DENIED_SUBJECT_REFUSAL: Refusal = Refusal {
+    exit: 2,
+    code: "forbidden",
+    message: "an archive member references a currently denied subject",
+};
+
+/// The production's refusal when an archive member cannot be classified.
+pub const UNCLASSIFIED_MEMBER_REFUSAL: Refusal = Refusal {
+    exit: 2,
+    code: "config_corrupt",
+    message: "an archive member cannot be classified",
+};
+
+/// The production's refusal when a one-bank confirmation meets a subject key
+/// that another bank also holds: the coordination set changed after the
+/// confirmation.
+pub const PARTIAL_BANK_REFUSAL: Refusal = Refusal {
+    exit: 1,
+    code: "forbidden",
+    message: "the banks sharing the subject key changed after confirmation",
+};
+
+/// Assert one CLI run refused with the production's exact exit code, error
+/// code, and message.
+///
+/// Every value is compared by equality, so a refusal that changes in any of
+/// them fails this check instead of still matching on a fragment of the old
+/// text.
+pub fn assert_refused(output: &CliOutput, refusal: &Refusal) {
+    assert_refusal(output.code, &output.stderr, refusal);
+}
+
+/// The same refusal check for a run whose exit code and stderr are already
+/// captured.
+pub fn assert_refusal(code: Option<i32>, stderr: &str, refusal: &Refusal) {
     assert_eq!(
-        output.code,
-        Some(2),
-        "the command must refuse (exit 2): {}",
-        output.stderr
+        code,
+        Some(refusal.exit),
+        "the command must refuse (exit {}): {stderr}",
+        refusal.exit
     );
-    assert!(
-        output.stderr.contains(needle),
-        "the refusal must name {needle:?}: {}",
-        output.stderr
+    let envelope: Value = serde_json::from_str(stderr)
+        .unwrap_or_else(|error| panic!("the refusal envelope is not JSON ({error}): {stderr}"));
+    assert_eq!(
+        envelope["code"],
+        json!(refusal.code),
+        "the refusal's error code: {stderr}"
+    );
+    assert_eq!(
+        envelope["message"],
+        json!(refusal.message),
+        "the refusal's message: {stderr}"
     );
 }

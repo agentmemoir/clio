@@ -33,7 +33,8 @@ use crate::fixtures::{
 use crate::peer_support::{Peer, live_then_offline};
 use crate::peer_test_support::{assert_no_peer_named, assert_peer_slots};
 use crate::refusals_test_support::{
-    Env, assert_forbidden, assert_open_copy, assert_refused_exit2, ok, seed_done_path,
+    Env, assert_damaged_journal_refusal, assert_forbidden, assert_open_copy,
+    assert_scope_change_refusal, ok, seed_done_path,
 };
 use crate::scenario_all_bank_peer::install_key;
 use crate::support::{Readback, archive_sqlite_with_authority, readback};
@@ -59,7 +60,7 @@ impl<T: Store + DurableRequestStore + PeerActionStore> PeerStore for T {}
 /// closes nothing and its stored state stays open.
 fn refuse_scope_copy_close(env: &Env, request: &str, store: &dyn DurableRequestStore) {
     ok(&env.start(request, DENIED_SUBJECT), "request-start");
-    assert_forbidden(&env.start(request, CONTROL_SUBJECT));
+    assert_scope_change_refusal(&env.start(request, CONTROL_SUBJECT));
     assert_eq!(env.status(request)["state"], json!("InProgress"), "open");
     seed_done_path(store, request, "erasure");
     let copy = env.command("request-copy", &copy_rest(request));
@@ -176,7 +177,7 @@ fn scenario_refusals_incomplete_peers_disabled_sqlite() {
     let tkms = env.scratch.join("target/clio.kms.json");
     seed_sqlite(&tdb, &tkms, &CONTROL);
     std::fs::write(&env.journal, DAMAGED).expect("plant the damaged journal");
-    assert_refused_exit2(&env.restore(&tkms, &a.id), "journal is damaged");
+    assert_damaged_journal_refusal(&env.restore(&tkms, &a.id));
     let target = open_sqlite(&tdb, &tkms);
     assert_eq!(
         readback(&target, CONTROL_ITEM),
@@ -274,7 +275,7 @@ fn scenario_refusals_incomplete_postgres() {
     let target = ScopedSchema::new(&base);
     let env = Env::postgres("refusals-pg", target.url());
     ok(&env.start("req-pg", DENIED_SUBJECT), "request-start");
-    assert_forbidden(&env.start("req-pg", CONTROL_SUBJECT));
+    assert_scope_change_refusal(&env.start("req-pg", CONTROL_SUBJECT));
     assert_eq!(
         env.inventory()["complete"],
         json!(false),

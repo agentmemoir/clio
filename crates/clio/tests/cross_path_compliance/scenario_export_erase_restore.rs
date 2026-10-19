@@ -17,6 +17,7 @@
 //! ## Does not own
 //! - The archive assembly and read-back probes, and the Postgres gate (see
 //!   `support` and `support_pg`)
+//! - The shared refusal assertions (see `refusals_test_support` and `cli`)
 //!
 //! ## Boundary
 //!
@@ -25,13 +26,14 @@
 //!
 //! Keep this module focused on the one export-erase-restore claim.
 
-use crate::cli::clio_command;
+use crate::cli::{DENIED_SUBJECT_REFUSAL, assert_refusal, clio_command};
 use crate::family_fixtures;
 use crate::family_test_support::{self, FamilyFixture};
 use crate::fixtures::{
     self, BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_MARKER, DENIED_SUBJECT,
     unique,
 };
+use crate::refusals_test_support::assert_open_copy_refusal;
 use crate::support::{self, Readback};
 use crate::support_pg::{
     archive_postgres_with_authority, lock_pg, pg_url, postgres_reachable, require_postgres,
@@ -332,9 +334,7 @@ fn drive_claim(claim: &Claim) {
     let refused = claim.raw(&format!(
         "compliance request-close --request-id {request} --product-path erasure"
     ));
-    assert_eq!(refused.code, Some(1), "close refused: {}", refused.stderr);
-    let stderr = &refused.stderr;
-    assert!(stderr.contains("OpenCopyAction"), "{stderr}");
+    assert_open_copy_refusal(refused.code, &refused.stderr);
     claim.copy(&request, &open_copy, "caller", "erase", "done");
     let closed = claim.ok(&format!(
         "compliance request-close --request-id {request} --product-path erasure"
@@ -350,17 +350,7 @@ fn drive_claim(claim: &Claim) {
         "--latest".to_owned(),
     ] {
         let out = claim.restore(&selector);
-        assert_eq!(
-            out.code,
-            Some(2),
-            "restore {selector:?} must refuse: {}",
-            out.stderr
-        );
-        assert!(
-            out.stderr.contains("denied subject"),
-            "restore denial: {}",
-            out.stderr
-        );
+        assert_refusal(out.code, &out.stderr, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
             support::readback(&*claim.backend.open(), CONTROL_ITEM),
             Readback::Readable,

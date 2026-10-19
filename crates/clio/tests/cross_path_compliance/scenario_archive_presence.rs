@@ -24,7 +24,10 @@
 //!
 //! Keep this module focused on the archive-presence claim.
 
-use crate::cli::{CliOutput, assert_refused, denied_hash, run_cli};
+use crate::cli::{
+    CliOutput, DENIED_SUBJECT_REFUSAL, UNCLASSIFIED_MEMBER_REFUSAL, assert_refused, denied_hash,
+    run_cli,
+};
 use crate::common;
 use crate::fixtures::{
     BANK, CONTROL_ITEM, CONTROL_SUBJECT, DENIED_ITEM, DENIED_SUBJECT, backup_dir, journal_file,
@@ -265,7 +268,7 @@ fn sqlite_strict_presence_and_unknown_member_refuse_the_whole_archive() {
         vec!["--latest"],
     ] {
         let output = run_restore(&journal, &target_kms, &backups, target, &selector);
-        assert_refused(&output, "denied subject");
+        assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
             file_sha256(&presence.path),
             archive_before,
@@ -292,7 +295,7 @@ fn sqlite_strict_presence_and_unknown_member_refuse_the_whole_archive() {
         target,
         &[unknown.id.as_str()],
     );
-    assert_refused(&output, "cannot be classified");
+    assert_refused(&output, &UNCLASSIFIED_MEMBER_REFUSAL);
     assert_eq!(
         file_sha256(&target_db),
         target_before,
@@ -316,17 +319,7 @@ fn sqlite_strict_presence_and_unknown_member_refuse_the_whole_archive() {
         target,
         &[combined.as_str()],
     );
-    assert_eq!(
-        output.code,
-        Some(2),
-        "the combined archive must refuse: {}",
-        output.stderr
-    );
-    assert!(
-        output.stderr.contains("cannot be classified") || output.stderr.contains("denied subject"),
-        "the combined refusal is presence or unknown: {}",
-        output.stderr
-    );
+    assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
 
     // After both refusals the live permitted subject is still readable and the
     // denied subject never became active. The store is opened only here, so its
@@ -383,7 +376,7 @@ fn postgres_strict_presence_and_unknown_member_refuse_the_whole_archive() {
         vec!["--latest"],
     ] {
         let output = run_restore(&journal, &target_kms, &backups, &target_db, &selector);
-        assert_refused(&output, "denied subject");
+        assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
             items(&target_db),
             items_before,
@@ -423,7 +416,7 @@ fn postgres_strict_presence_and_unknown_member_refuse_the_whole_archive() {
         &target_db,
         &[unknown.id.as_str()],
     );
-    assert_refused(&output, "cannot be classified");
+    assert_refused(&output, &UNCLASSIFIED_MEMBER_REFUSAL);
     assert_eq!(
         items(&target_db),
         items_before,

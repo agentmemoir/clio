@@ -46,6 +46,8 @@ const REFUSAL_MESSAGE: &str = "review file export is refused: destination custod
 const REFUSAL_CODE: &str = "invalid_argument";
 /// The reason the production records when it refuses an existing destination.
 const DESTINATION_EXISTS: &str = "destination already exists";
+/// The message the injected outcome-write failure carries.
+const INJECTED_OUTCOME_FAILURE: &str = "injected outcome failure";
 /// The store surface one review-export scenario drives.
 trait Store: LocalEventStore + DestinationCustodyStore {}
 impl<T: LocalEventStore + DestinationCustodyStore> Store for T {}
@@ -204,10 +206,7 @@ impl LocalEventStore for EventWriteFault<'_> {
     }
     fn record_outcome(&self, action_id: &str, denied: bool, result: &str) -> Result<(), AmError> {
         if self.fail_outcome {
-            return Err(AmError::new(
-                ErrorCode::Internal,
-                "injected outcome failure",
-            ));
+            return Err(AmError::new(ErrorCode::Internal, INJECTED_OUTCOME_FAILURE));
         }
         self.inner.record_outcome(action_id, denied, result)
     }
@@ -286,6 +285,10 @@ fn intent_failure(target: &Target) {
     let error = write(&fault, store.as_ref(), &action_id, &destination)
         .expect_err("an intent failure refuses");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        error.message, REFUSAL_MESSAGE,
+        "the production refusal message"
+    );
     assert!(!destination.exists(), "no destination write");
     assert!(store.load(&action_id).expect("load").is_none(), "no row");
     assert_eq!(store.list_events().expect("events").len(), before);
@@ -312,6 +315,14 @@ fn outcome_failure(target: &Target) {
         let error = write(&fault, store.as_ref(), &action_id, &destination)
             .expect_err("an outcome failure is reported");
         assert_eq!(error.code, ErrorCode::Internal);
+        assert_eq!(
+            error.message,
+            format!(
+                "review export delivery failed: delivered but not settled: internal: \
+                 {INJECTED_OUTCOME_FAILURE}"
+            ),
+            "the production failure message"
+        );
         assert!(
             pending(store.as_ref()).contains(&action_id),
             "the failed action waits"
@@ -344,7 +355,14 @@ fn outcome_failure(target: &Target) {
         before,
         "no redelivery"
     );
-    let repeat = run_cli_export(target, &destination);
+    repeat_is_refused(target, &destination, &action_id, &before);
+}
+
+/// A repeat call onto the delivered destination is refused with the
+/// production's exact error code and message, and the refusal names the
+/// existing destination in the records it leaves.
+fn repeat_is_refused(target: &Target, destination: &Path, action_id: &str, before: &[u8]) {
+    let repeat = run_cli_export(target, destination);
     assert_eq!(
         repeat.code,
         Some(1),
@@ -367,7 +385,7 @@ fn outcome_failure(target: &Target) {
         repeat.stderr
     );
     assert_eq!(
-        std::fs::read(&destination).expect("copy"),
+        std::fs::read(destination).expect("copy"),
         before,
         "no overwrite"
     );
@@ -400,8 +418,9 @@ fn outcome_failure(target: &Target) {
         Some(DESTINATION_EXISTS),
         "the denied outcome names the existing destination"
     );
-    assert_eq!(read_events(store.as_ref(), &action_id).len(), 1);
-    assert!(!pending(store.as_ref()).contains(&action_id));
+    let store = target.open();
+    assert_eq!(read_events(store.as_ref(), action_id).len(), 1);
+    assert!(!pending(store.as_ref()).contains(&action_id.to_owned()));
 }
 /// Run the full review-export matrix for one deployment.
 fn matrix(target: &Target) {

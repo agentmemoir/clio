@@ -27,12 +27,12 @@ use crate::fixtures::{
     seed_sqlite,
 };
 use crate::scenario_intent_outcome_faults::{
-    Fault, FaultStore, accepted, ctx, erase_args, event_rows, pg_or_skip, restore_claim,
-    restore_request, seeded_erasure_store, spec,
+    Fault, FaultStore, INJECTED_OUTCOME_FAILURE, accepted, ctx, erase_args, event_rows, pg_or_skip,
+    restore_claim, restore_request, seeded_erasure_store, spec,
 };
 use crate::support::{Readback, archive_sqlite, readback, restore_sqlite};
 use clio::store::{ComplianceStore, LocalEventState, LocalEventStore};
-use clio::{Actor, Bank, ErrorCode, OpContext};
+use clio::{Actor, AmError, Bank, ErrorCode, OpContext};
 use clio_compliance::{
     DeliveryRefusal, DeliveryResult, EraseVecSink, ErasureResume, ErasureRetryEnv,
     LocalReviewQuery, SubjectRequestRecord, begin_restore, deliver_export, erase_confirmed_request,
@@ -40,6 +40,14 @@ use clio_compliance::{
     record_denial, write_review_export,
 };
 use std::path::Path;
+
+/// The exact reason the production reports when the delivery landed and the
+/// outcome write that settles it failed: the delivery's own text, then the
+/// failed write's error code and message.
+fn outcome_fault_reason() -> String {
+    let failure = AmError::new(ErrorCode::Internal, INJECTED_OUTCOME_FAILURE);
+    format!("delivered but not settled: {failure}")
+}
 
 /// A failed export outcome leaves one effect and one pending action; a restart
 /// reconciles it, and a repeat before reconcile never adds a second effect.
@@ -63,7 +71,7 @@ fn an_export_outcome_failure_reconciles_without_a_second_effect() {
             b"payload",
         );
         assert!(
-            matches!(&result, DeliveryResult::Failed(reason) if reason.contains("not settled")),
+            matches!(&result, DeliveryResult::Failed(reason) if *reason == outcome_fault_reason()),
             "the outcome fault is reported: {result:?}"
         );
         assert_eq!(
@@ -386,7 +394,7 @@ fn a_postgres_export_outcome_failure_reconciles_without_a_second_effect() {
             b"payload",
         );
         assert!(
-            matches!(&result, DeliveryResult::Failed(reason) if reason.contains("not settled")),
+            matches!(&result, DeliveryResult::Failed(reason) if *reason == outcome_fault_reason()),
             "the outcome fault is reported: {result:?}"
         );
     }
