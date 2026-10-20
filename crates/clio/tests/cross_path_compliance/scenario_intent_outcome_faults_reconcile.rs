@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module is responsible for the outcome-failure arm of each export,
-//! erasure, review-export, restore, and Postgres export route, and for the
+//! erasure, restore, and Postgres export route, and for the
 //! restart-and-reconcile assertions that settle the pending action without
 //! repeating an irreversible effect.
 //!
@@ -12,9 +12,13 @@
 //! - The outcome-failure and restart-reconcile arm for each route
 //!
 //! ## Does not own
-//! - The shared `Fault`/`FaultStore` doubles and the intent-failure arms (see
-//!   `scenario_intent_outcome_faults`)
-//! - The seeded stores and read-back probes (see `fixtures` and `support`)
+//! - The shared `Fault` and `FaultStore` doubles and the intent-failure arms
+//!   (see `scenario_intent_outcome_faults`)
+//! - The review-export outcome arm (see
+//!   `scenario_intent_outcome_faults_review_outcome`)
+//! - The pending-restore reconcile under the intent fault (see
+//!   `scenario_intent_outcome_faults_pending_restore`)
+//! - The seeded stores and read-back probes (see `case_fixtures` and `support_test_support`)
 //!
 //! ## Boundary
 //!
@@ -23,23 +27,23 @@
 //!
 //! Keep this module focused on the outcome-failure and restart-reconcile arms.
 
-use crate::cli::salt_bytes;
-use crate::fixtures::{
+use crate::case_fixtures::{
     BANK, DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, NOW, backup_dir, open_sqlite, scratch,
     seed_sqlite,
 };
+use crate::cli_test_support::salt_bytes;
 use crate::scenario_intent_outcome_faults::{
     Fault, FaultStore, INJECTED_OUTCOME_FAILURE, accepted, ctx, erase_args, event_rows, pg_or_skip,
     restore_claim, restore_request, seeded_erasure_store, spec,
 };
-use crate::support::{Readback, archive_sqlite, readback, restore_sqlite};
+use crate::support_test_support::{Readback, archive_sqlite, readback, restore_sqlite};
 use clio::store::{ComplianceStore, LocalEventState, LocalEventStore};
 use clio::{Actor, AmError, Bank, ErrorCode, OpContext};
 use clio_compliance::{
     DeliveryRefusal, DeliveryResult, EraseVecSink, ErasureResume, ErasureRetryEnv,
-    LocalReviewQuery, SubjectRequestRecord, begin_restore, deliver_export, erase_confirmed_request,
-    reconcile_erasure_actions, reconcile_open_destinations, reconcile_restore_actions,
-    record_denial, write_review_export,
+    RestoreGuardRefusal, SubjectRequestRecord, begin_restore, deliver_export,
+    erase_confirmed_request, reconcile_erasure_actions, reconcile_open_destinations,
+    reconcile_restore_actions, record_denial,
 };
 use std::path::Path;
 
@@ -119,59 +123,6 @@ fn an_export_outcome_failure_reconciles_without_a_second_effect() {
     assert_eq!(
         std::fs::read(&destination).expect("destination"),
         b"payload"
-    );
-}
-
-/// A failed review-export outcome leaves one file effect and one pending
-/// action that reconciles after a restart without redelivering.
-#[test]
-fn a_review_export_outcome_failure_reconciles_without_redelivery() {
-    let dir = scratch("review-outcome");
-    let db = dir.join("store.db");
-    let (destination, staging) = (dir.join("review.txt"), dir.join("staging"));
-    let query = LocalReviewQuery {
-        limit: 100,
-        cursor: None,
-        request_id: None,
-    };
-    {
-        let store = open_sqlite(&db, &dir.join("kms"));
-        let events = FaultStore {
-            inner: &store,
-            fault: Fault::Outcome,
-        };
-        let err = write_review_export(
-            &ctx(),
-            &events,
-            &store,
-            &query,
-            &accepted(),
-            &spec("review-act", &destination, &staging),
-        )
-        .expect_err("the outcome fault is reported");
-        assert_eq!(err.code, ErrorCode::Internal);
-        assert!(destination.exists(), "the file effect landed once");
-        assert_eq!(
-            event_rows(&store, "review-act")[0].state,
-            LocalEventState::Pending
-        );
-        assert_eq!(
-            store.pending_actions().expect("pending"),
-            vec!["review-act".to_owned()]
-        );
-    }
-    let store = open_sqlite(&db, &dir.join("kms"));
-    reconcile_open_destinations(&store, &store).expect("reconcile");
-    let rows = event_rows(&store, "review-act");
-    assert_eq!(rows.len(), 1, "one terminal outcome");
-    assert_eq!(rows[0].state, LocalEventState::Allowed);
-    assert!(
-        store.pending_actions().expect("pending").is_empty(),
-        "the queue empties"
-    );
-    assert!(
-        destination.exists(),
-        "the file is never redelivered or removed"
     );
 }
 
@@ -362,9 +313,17 @@ fn a_restore_outcome_failure_reconciles_without_repeating_placement() {
         inner: &store,
         fault: Fault::Outcome,
     };
-    assert!(
-        begin_restore(&events, &restore_request(&journal, &claim)).is_err(),
-        "the denied action never resumes"
+    // The denied action never resumes: its action id already carries an intent
+    // record, so the durable intent write is refused as a duplicate.
+    let Err(RestoreGuardRefusal::Event(refusal)) =
+        begin_restore(&events, &restore_request(&journal, &claim))
+    else {
+        panic!("the denied action never resumes");
+    };
+    assert_eq!(refusal.code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        refusal.message,
+        "local event action `restore-act` already has an intent record"
     );
     assert_eq!(
         readback(&open_sqlite(&target_db, &target_kms), DENIED_ITEM),

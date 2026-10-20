@@ -16,7 +16,7 @@
 //! ## Does not own
 //! - The request ledger and the copy-disposition fold (see `clio-compliance`)
 //! - The CLI driver, the fixtures, and the shared request environment (see
-//!   `cli`, `fixtures`, and `refusals_test_support`)
+//!   `cli_test_support`, `case_fixtures`, and `refusals_test_support`)
 //!
 //! ## Boundary
 //!
@@ -25,11 +25,11 @@
 //!
 //! Keep this module focused on the unknown-custody refusal.
 
-use crate::fixtures::{
+use crate::case_fixtures::{
     DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, open_pg, open_sqlite, seed_pg, seed_sqlite,
 };
 use crate::refusals_test_support::{Env, assert_forbidden, assert_open_copy, ok, seed_done_path};
-use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use crate::support_pg_test_support::{lock_pg, pg_url, postgres_reachable, require_postgres};
 use clio::store::{CopyInventoryStore, DurableRequestStore, ScopedSchema};
 use clio_compliance::subject_request_store_wiring::copy_row_disposition;
 use clio_compliance::{CopyDispositionOutcome, copy_closure_facts};

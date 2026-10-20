@@ -13,10 +13,11 @@
 //! - `Deployment`, the deployment paths and the real `clio` command driver
 //! - `Peer`, one spawned serve process with its logs, address, and lifecycle
 //! - `Peer::push`, `Peer::pull`, `Peer::offline`, and `Peer::restart`
+//! - `Peer::credential_store` and `CREDENTIAL_STORE_FILE`, the store the peer writes
 //! - `PeerProbe`, the read-only view of the peer's store and quarantine rows
 //!
 //! ## Does not own
-//! - The synthetic fixtures and read-back probes (see `fixtures` and `support`)
+//! - The synthetic fixtures and read-back probes (see `case_fixtures` and `support_test_support`)
 //! - The incomplete-state scenarios (`scenario_refusals_incomplete`)
 //! - The store, request ledger, and erasure primitives (see `clio-store` and
 //!   `clio-compliance`)
@@ -28,8 +29,8 @@
 //!
 //! Keep this module focused on the real deployment and the real peer beside it.
 
-use crate::cli::clio_command;
-use crate::fixtures::{BANK, DENIED_SUBJECT};
+use crate::case_fixtures::{BANK, DENIED_SUBJECT};
+use crate::cli_test_support::{clio_command, run_captured};
 use clio::AmError;
 use clio::store::{Store, SyncStore};
 use clio_sync::client::{SyncClientConfig, pull, push};
@@ -40,11 +41,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Output, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 /// The one bearer the spawned peer is configured with and every client here
 /// presents, so one synthetic constant configures both sides.
 pub const PEER_TOKEN: &str = "cross-path-peer-token";
+/// The credential store the peer writes and the production reads the peer set from.
+pub const CREDENTIAL_STORE_FILE: &str = "auth_tokens.json";
 /// How long a spawned peer may take to report its bound address. Generous
 /// because the serve bootstrap runs before it binds.
 const ANNOUNCE_BOUND: Duration = Duration::from_secs(90);
@@ -68,15 +72,17 @@ pub struct Deployment {
 impl Deployment {
     /// Run one `clio` command against this deployment's store, capturing both
     /// streams so a refusal's envelope is readable.
+    ///
+    /// The wait is bounded: a command that does not exit before the driver's
+    /// deadline is killed and reaped, and the run fails instead of hanging.
     pub fn run(&self, args: &[&str]) -> Output {
-        clio_command(&self.journal, &self.kms, &self.backups)
+        let mut command = clio_command(&self.journal, &self.kms, &self.backups);
+        command
             .env("CLIO_KEY_FILE", &self.keys)
             .env("CLIO_KEY_FILE_ONLY", "1")
             .args(args)
-            .args(["--db", self.db.as_str()])
-            .stdin(Stdio::null())
-            .output()
-            .expect("spawn clio")
+            .args(["--db", self.db.as_str()]);
+        run_captured(&mut command)
     }
 
     /// Run one confirmed erasure through the real command.
@@ -139,9 +145,12 @@ impl Deployment {
 /// The peer reports the address it bound on stdout, which the reader thread
 /// reads back: a bound, non-empty address is the proof the process started and
 /// is live. `offline` kills and reaps it; `restart` starts a new process over
-/// the same journal and store, the offline peer's stale rejoin.
+/// the same journal and store, the offline peer's stale rejoin. The reader
+/// thread is joined once the peer is gone, so no thread outlives the process
+/// whose stream it reads.
 pub struct Peer {
     child: Option<Child>,
+    reader: Option<JoinHandle<()>>,
     addr: String,
     dir: PathBuf,
     db: PathBuf,
@@ -164,6 +173,7 @@ impl Peer {
         std::fs::create_dir_all(dir).expect("create the peer directory");
         let mut peer = Self {
             child: None,
+            reader: None,
             addr: String::new(),
             dir: dir.to_path_buf(),
             db: dir.join("peer.db"),
@@ -179,10 +189,7 @@ impl Peer {
 
     /// Spawn one serve process and read the address it bound.
     fn spawn(&mut self) {
-        if let Some(mut old) = self.child.take() {
-            let _ = old.kill();
-            let _ = old.wait();
-        }
+        self.stop();
         let credentials = write_credential_store(&self.dir, &self.banks);
         // The peer's store needs its own key store: a file-backed key store
         // seals each DEK under the process key, and this child's process key
@@ -204,14 +211,15 @@ impl Peer {
             .stdout(Stdio::piped())
             .stderr(Stdio::from(stderr));
         let mut child = command.spawn().expect("spawn clio sync serve");
-        let addr = drain_stdout(&mut child, &self.stdout_log);
+        let (addr, reader) = drain_stdout(&mut child, &self.stdout_log);
+        self.reader = Some(reader);
+        self.child = Some(child);
         assert!(
             !addr.is_empty(),
             "the peer never reported a bound address; log:\n{}",
             self.logs()
         );
         self.addr = addr;
-        self.child = Some(child);
     }
 
     /// The endpoint a client connects to: a bare `host:port`.
@@ -220,13 +228,31 @@ impl Peer {
         &self.addr
     }
 
+    /// The credential store this peer wrote: the production derives the peer set from it.
+    #[must_use]
+    pub fn credential_store(&self) -> PathBuf {
+        self.dir.join(CREDENTIAL_STORE_FILE)
+    }
+
     /// Take the peer offline: kill and reap it so its endpoint answers nothing.
     /// The last address is kept so a client call still targets the dead
     /// endpoint rather than a blank one.
     pub fn offline(&mut self) {
+        self.stop();
+    }
+
+    /// Kill and reap the peer, then join its stdout reader.
+    ///
+    /// The reader ends when the peer's stream closes, so the peer is killed
+    /// first: joining a reader whose process still runs would wait for a
+    /// process that never exits.
+    fn stop(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
+        }
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
         }
     }
 
@@ -275,10 +301,7 @@ impl Peer {
 
 impl Drop for Peer {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self.stop();
     }
 }
 
@@ -287,7 +310,7 @@ impl Drop for Peer {
 pub fn live_then_offline(peer: &mut Peer, scratch: &Path, bank: &str) {
     let reader_dir = scratch.join("reader");
     std::fs::create_dir_all(&reader_dir).expect("create the reader directory");
-    let reader = Arc::new(crate::fixtures::open_sqlite(
+    let reader = Arc::new(crate::case_fixtures::open_sqlite(
         &reader_dir.join("reader.db"),
         &reader_dir.join("reader.kms.json"),
     ));
@@ -358,18 +381,22 @@ fn write_credential_store(dir: &Path, banks: &[String]) -> PathBuf {
     let (mut record, _) = new_auth_token("cross-path-peer", "harness", banks)
         .expect("build the peer credential record");
     record.secret_sha256 = digest_hex(PEER_TOKEN);
-    let path = dir.join("auth_tokens.json");
+    let path = dir.join(CREDENTIAL_STORE_FILE);
     save_auth_tokens(&path, &[record]).expect("write the peer credential store");
     path
 }
 
 /// Drain a peer's stdout into its log file on a reader thread, send the first
 /// parsed address back, and keep draining until the stream closes.
-fn drain_stdout(child: &mut Child, log: &Path) -> String {
+///
+/// The reader handle comes back with the address, so the caller joins it: a
+/// reader thread that outlives its peer keeps writing into state a later test
+/// reads.
+fn drain_stdout(child: &mut Child, log: &Path) -> (String, JoinHandle<()>) {
     let stdout = child.stdout.take().expect("peer stdout piped");
     let log = log.to_path_buf();
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let reader = std::thread::spawn(move || {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -395,7 +422,8 @@ fn drain_stdout(child: &mut Child, log: &Path) -> String {
         }
         let _ = writer.flush();
     });
-    rx.recv_timeout(ANNOUNCE_BOUND).unwrap_or_default()
+    let addr = rx.recv_timeout(ANNOUNCE_BOUND).unwrap_or_default();
+    (addr, reader)
 }
 
 /// The one sync client configuration every wire call here shares.

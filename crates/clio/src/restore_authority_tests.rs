@@ -406,12 +406,13 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
                 &["subject_hash", "reason_code"],
                 tombstone_copy.as_bytes(),
             ),
-            ("items", &["id"], b"item-1\n"),
+            ("items", &["id", "subject_id"], b"item-1\tsubject-0009\n"),
             (
                 "subject_keys",
                 &["subject_id", "dek_ref", "status"],
                 subject_copy.as_bytes(),
             ),
+            ("triples", &["id"], b"triple-1\n"),
         ],
     );
     let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), subject_id);
@@ -432,14 +433,15 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
         "{:?}",
         classified.members
     );
-    // The items table is content, never a content-free subject record.
+    // The subject key and the item row name the same subject, so one hash
+    // covers both, and the content table names no subject.
     assert!(
         classified
             .members
             .iter()
             .filter(|member| matches!(member, MemberFacts::None))
             .count()
-            >= 2,
+            >= 3,
         "{:?}",
         classified.members
     );

@@ -16,7 +16,7 @@
 //! ## Does not own
 //! - The export custody primitive and reconcile (see `clio-compliance`)
 //! - The CLI driver, the Postgres gate, and the two delivery routes (see
-//!   `cli`, `support_pg`, and `review_export_test_support`)
+//!   `cli_test_support`, `support_pg_test_support`, and `review_export_test_support`)
 //!
 //! ## Boundary
 //!
@@ -24,11 +24,12 @@
 //! require changes here. Changes to the custody primitive should not.
 //!
 //! Keep this module focused on the review-export claim.
-use crate::fixtures::{
+use crate::case_fixtures::{
     BANK, DENIED_MARKER, NOW, backup_dir, journal_file, open_pg, open_sqlite, scratch, unique,
 };
+use crate::cli_test_support::{Refusal, assert_refusal};
 use crate::review_export_test_support::{run_cli_export, run_mcp_export};
-use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use crate::support_pg_test_support::{lock_pg, pg_url, postgres_reachable, require_postgres};
 use clio::store::{
     DestinationCustodyStore, LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView,
     PgTestGuard, ScopedSchema,
@@ -42,8 +43,17 @@ use std::path::{Path, PathBuf};
 /// message names the refused condition, not the destination path, so the
 /// custody row carries the path and the reason.
 const REFUSAL_MESSAGE: &str = "review file export is refused: destination custody is not available";
-/// The error code the production refusal carries.
-const REFUSAL_CODE: &str = "invalid_argument";
+/// The production's refusal when the destination custody is not available: the
+/// exit code the command maps it to, the error code it carries, and the whole
+/// message.
+///
+/// The error code is the public enum's own string, so a rename of the code
+/// fails this check here instead of leaving a copied string behind.
+const REFUSAL: Refusal = Refusal {
+    exit: 1,
+    code: ErrorCode::InvalidArgument.as_str(),
+    message: REFUSAL_MESSAGE,
+};
 /// The reason the production records when it refuses an existing destination.
 const DESTINATION_EXISTS: &str = "destination already exists";
 /// The message the injected outcome-write failure carries.
@@ -318,8 +328,9 @@ fn outcome_failure(target: &Target) {
         assert_eq!(
             error.message,
             format!(
-                "review export delivery failed: delivered but not settled: internal: \
-                 {INJECTED_OUTCOME_FAILURE}"
+                "review export delivery failed: delivered but not settled: {}: \
+                 {INJECTED_OUTCOME_FAILURE}",
+                ErrorCode::Internal.as_str()
             ),
             "the production failure message"
         );
@@ -363,27 +374,10 @@ fn outcome_failure(target: &Target) {
 /// existing destination in the records it leaves.
 fn repeat_is_refused(target: &Target, destination: &Path, action_id: &str, before: &[u8]) {
     let repeat = run_cli_export(target, destination);
-    assert_eq!(
-        repeat.code,
-        Some(1),
-        "an existing destination is refused with the production failure code: {}",
-        repeat.stderr
-    );
     let envelope: Value = serde_json::from_str(&repeat.stderr)
         .unwrap_or_else(|error| panic!("the refusal envelope: {error}: {}", repeat.stderr));
     assert_eq!(envelope["ok"], json!(false), "{}", repeat.stderr);
-    assert_eq!(
-        envelope["code"],
-        json!(REFUSAL_CODE),
-        "the production refusal code: {}",
-        repeat.stderr
-    );
-    assert_eq!(
-        envelope["message"],
-        json!(REFUSAL_MESSAGE),
-        "the production refusal message: {}",
-        repeat.stderr
-    );
+    assert_refusal(repeat.code, &repeat.stderr, &REFUSAL);
     assert_eq!(
         std::fs::read(destination).expect("copy"),
         before,

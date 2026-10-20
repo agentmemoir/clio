@@ -10,7 +10,8 @@
 //!
 //! ## Owns
 //! - The CLI review-export invocation and the MCP stdio exchange
-//! - The MCP frame writer, the response reader, and the child process reaper
+//! - The MCP frame writer, the response reader and its bounded thread join,
+//!   the bounded exit wait, and the child process reaper
 //!
 //! ## Does not own
 //! - The deployment fixture and the claims the routes prove (see
@@ -25,18 +26,21 @@
 //!
 //! Keep this module focused on the two delivery routes, with no tests.
 
-use crate::cli::{CliOutput, clio_command, run_cli};
+use crate::cli_test_support::{CliOutput, clio_command, run_cli};
 use crate::scenario_review_export::Target;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Stdio};
+use std::process::{Child, ChildStdin, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The bounded wait for one MCP response or a clean server exit.
 const MCP_WAIT: Duration = Duration::from_secs(30);
+
+/// The bounded wait for the stdout reader thread to finish.
+const READER_JOIN: Duration = Duration::from_secs(10);
 
 /// Run the real CLI review export to `destination`.
 pub(crate) fn run_cli_export(target: &Target, destination: &Path) -> CliOutput {
@@ -80,6 +84,45 @@ impl Drop for Reaper {
     }
 }
 
+/// Join the MCP stdout reader thread under a bounded wait.
+///
+/// The reader ends when the child's stdout closes, and the child has already
+/// exited and been reaped, so the wait ends. The bound turns a pipe that stays
+/// open into a failure instead of a hang.
+fn join_reader(handle: thread::JoinHandle<()>) {
+    let deadline = Instant::now() + READER_JOIN;
+    while !handle.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "the MCP stdout reader thread did not finish within {READER_JOIN:?}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    handle
+        .join()
+        .expect("the MCP stdout reader thread panicked");
+}
+
+/// Wait for the MCP server to exit after its stdin is closed, killing and
+/// reaping it when it does not exit before the deadline.
+///
+/// The wait is bounded: a server that hangs is killed and reaped, and the run
+/// fails instead of waiting forever. `None` reports that the deadline passed.
+fn wait_for_exit(child: &mut Child) -> Option<ExitStatus> {
+    let deadline = Instant::now() + MCP_WAIT;
+    loop {
+        match child.try_wait().expect("reap the clio mcp stdio child") {
+            Some(status) => return Some(status),
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
 /// Run the real MCP stdio `review_export` tool to `destination`.
 pub(crate) fn run_mcp_export(target: &Target, destination: &Path) {
     let mut command = clio_command(&target.journal, &target.kms, &target.backups);
@@ -92,7 +135,7 @@ pub(crate) fn run_mcp_export(target: &Target, destination: &Path) {
     let mut stdin = child.0.stdin.take().expect("mcp stdin");
     let stdout = child.0.stdout.take().expect("mcp stdout");
     let (sender, responses) = mpsc::channel::<String>();
-    thread::spawn(move || {
+    let reader = thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if sender.send(line).is_err() {
                 break;
@@ -119,6 +162,10 @@ pub(crate) fn run_mcp_export(target: &Target, destination: &Path) {
     assert_eq!(result["isError"], json!(false), "{result}");
     assert_eq!(result["structuredContent"]["ok"], json!(true), "{result}");
     drop(stdin);
-    let status = child.0.wait().expect("wait for clio mcp stdio");
+    let exit = wait_for_exit(&mut child.0);
+    join_reader(reader);
+    let Some(status) = exit else {
+        panic!("clio mcp stdio did not exit within {MCP_WAIT:?} and was killed");
+    };
     assert!(status.success(), "clio mcp stdio exited {status:?}");
 }

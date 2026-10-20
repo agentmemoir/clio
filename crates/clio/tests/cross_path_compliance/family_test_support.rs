@@ -3,20 +3,21 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the ledger expectations of the cross-path
-//! compliance proof: the stored families the scope ledger names, the count each
-//! family holds for the subject under test, and the named omission the ledger
-//! gives every family it cannot attribute to that subject.
+//! This module is responsible for the export-manifest expectations of the
+//! cross-path compliance proof: the nine families the export manifest counts,
+//! the count each family holds for the subject under test, and the named
+//! omission the scope ledger gives every family it cannot attribute to that
+//! subject.
 //!
 //! ## Owns
-//! - `LEDGER_FAMILIES`, the stored families the ledger names
+//! - `EXPORT_MANIFEST_FAMILIES`, the nine families the export manifest counts
 //! - `FamilyFixture`, the seeded counts and the expected ledger omissions
 //! - `assert_every_family`, the manifest check the export scenario runs
 //!
 //! ## Does not own
 //! - The rows the every-family fixture writes (see `family_fixtures`)
 //! - The plain item fixture, the scratch directory, and the store openers (see
-//!   `fixtures`)
+//!   `case_fixtures`)
 //! - The export route and the scenario that drives it (see
 //!   `scenario_export_erase_restore`)
 //!
@@ -31,9 +32,11 @@
 
 use serde_json::Value;
 
-/// The stored families the scope ledger names, in its report order. The export
-/// manifest names the same nine.
-pub const LEDGER_FAMILIES: [&str; 9] = [
+/// The nine families the export manifest counts, in its report order.
+///
+/// These are the export manifest's own families, not the scope ledger's: the
+/// ledger names many more families than the manifest counts.
+pub const EXPORT_MANIFEST_FAMILIES: [&str; 9] = [
     "items",
     "triples",
     "assoc_edges",
@@ -63,7 +66,7 @@ const BELIEF_ROWS: u64 = 2;
 /// expects the export manifest to report for the subject under test.
 #[derive(Debug, Clone)]
 pub struct FamilyFixture {
-    /// The subject's row count per family, in the ledger's report order.
+    /// The subject's row count per family, in the export manifest's order.
     counts: Vec<(&'static str, u64)>,
     /// The named ledger omission per family, when the ledger carries one.
     omissions: Vec<(&'static str, Option<String>)>,
@@ -145,8 +148,8 @@ impl FamilyFixture {
     }
 }
 
-/// Assert the export manifest carries every family the ledger names, with the
-/// count the fixture seeded, and the ledger's own omission for each family.
+/// Assert the export manifest carries every family it counts, with the count
+/// the fixture seeded, and the ledger's own omission for each family.
 ///
 /// The manifest must name the nine families and no other, every count must
 /// equal the seeded count, and each family must carry exactly the omission the
@@ -164,8 +167,8 @@ pub fn assert_every_family(manifest: &Value, fixture: &FamilyFixture) {
         .collect();
     assert_eq!(
         labels,
-        LEDGER_FAMILIES.to_vec(),
-        "the manifest names the ledger's families: {manifest}"
+        EXPORT_MANIFEST_FAMILIES.to_vec(),
+        "the manifest names the export manifest families: {manifest}"
     );
     for (family, want) in &fixture.counts {
         let entry = counts

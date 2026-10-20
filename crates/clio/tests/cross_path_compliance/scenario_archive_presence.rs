@@ -16,6 +16,8 @@
 //! ## Does not own
 //! - The archive format and member extraction (see `clio-backup`)
 //! - The guarded restore admission (see `clio-compliance`)
+//! - The one-artifact-at-a-time isolation (see
+//!   `scenario_archive_artifact_isolation`)
 //!
 //! ## Boundary
 //!
@@ -24,18 +26,20 @@
 //!
 //! Keep this module focused on the archive-presence claim.
 
-use crate::cli::{
+use crate::case_fixtures::{
+    BANK, CONTROL_ITEM, CONTROL_SUBJECT, DENIED_ITEM, DENIED_SUBJECT, backup_dir, journal_file,
+    open_pg, open_sqlite, scratch, seed_pg, seed_sqlite,
+};
+use crate::cli_test_support::{
     CliOutput, DENIED_SUBJECT_REFUSAL, UNCLASSIFIED_MEMBER_REFUSAL, assert_refused, denied_hash,
     run_cli,
 };
 use crate::common;
-use crate::fixtures::{
-    BANK, CONTROL_ITEM, CONTROL_SUBJECT, DENIED_ITEM, DENIED_SUBJECT, backup_dir, journal_file,
-    open_pg, open_sqlite, scratch, seed_pg, seed_sqlite,
-};
-use crate::support::{Archive, Readback, archive_sqlite_with_authority, erase_subject, readback};
-use crate::support_pg::{
+use crate::support_pg_test_support::{
     archive_postgres_with_authority, lock_pg, pg_url, postgres_reachable, require_postgres,
+};
+use crate::support_test_support::{
+    Archive, Readback, archive_sqlite_with_authority, erase_subject, readback,
 };
 use clio::store::{ScopedSchema, postgres_target_state};
 use clio_backup::manifest::ManifestAuthority;

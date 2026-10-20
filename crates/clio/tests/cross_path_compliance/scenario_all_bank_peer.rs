@@ -9,12 +9,14 @@
 //!
 //! ## Owns
 //! - The all-bank erase command run and its reconcile with the peer
-//! - The stale-replay, unrelated-subject, and partial-bank assertions
+//! - The erased-state, peer-slot, stale-replay, and partial-bank assertions
 //!
 //! ## Does not own
-//! - The real deployment driver and spawned peer process (see `peer_support`)
-//! - The synthetic stores, probes, and Postgres gate (see `fixtures`,
-//!   `support`, and `support_pg`)
+//! - The real deployment driver and spawned peer process (see `peer_process_test_support`)
+//! - The synthetic stores, probes, and Postgres gate (see `case_fixtures`,
+//!   `support_test_support`, and `support_pg_test_support`)
+//! - The seeded items, the frozen peer set, and the read-back probes (see
+//!   `scenario_all_bank_peer_test_support`)
 //!
 //! ## Boundary
 //!
@@ -23,33 +25,27 @@
 //!
 //! Keep this module focused on the all-bank-and-peer claim.
 
-use crate::cli::{PARTIAL_BANK_REFUSAL, assert_refusal};
-use crate::fixtures::{
+use crate::case_fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
     DENIED_SUBJECT, backup_dir, journal_file, open_pg, open_sqlite, scratch, unique, write_item,
 };
-use crate::peer_support::{Deployment, Peer, PeerProbe};
-use crate::support::{Readback, readback, subject_key_destroyed};
-use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
-use clio::store::{
-    ComplianceStore, DurableRequestStore, LocalEventStore, PeerActionStore, ScopedSchema, Store,
+use crate::cli_test_support::{PARTIAL_BANK_REFUSAL, assert_refusal};
+use crate::peer_process_test_support::{CREDENTIAL_STORE_FILE, Deployment, Peer, PeerProbe};
+use crate::scenario_all_bank_peer_test_support::{
+    PEER_BANK, PEER_ITEM, assert_recorded_peer_set, derive_peer_set, erased_item_hashes, item_hash,
+    item_read, seed, seed_request,
 };
-use clio::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
-use clio_compliance::subject_request_store_wiring::record_to_row;
-use clio_compliance::{
-    PeerEnablement, RequestCommand, RequestKind, RequestScope, SubjectRequestLedger, snapshot_peers,
+use crate::support_pg_test_support::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use crate::support_test_support::{Readback, readback, subject_key_destroyed};
+use clio::store::{
+    BankScopeStore, ComplianceStore, DurableRequestStore, LocalEventStore, PeerActionStore,
+    ScopedSchema, Store,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
 
-/// The second bank that shares the denied subject's DEK.
-const PEER_BANK: &str = "cross-path-peer-bank";
-/// The denied subject's item in [`PEER_BANK`].
-const PEER_ITEM: &str = "cross-path-peer-item";
-/// The frozen peer label of the all-bank arm.
-const PEER_LABEL: &str = "cross-path-peer";
 /// The one deployment key both this process and every spawned command use, so a
 /// store written here and a store the command rewrites share their key slots.
 const KEY: [u8; 32] = [0x11; 32];
@@ -57,57 +53,18 @@ const KEY: [u8; 32] = [0x11; 32];
 /// The store surface both arms drive. Every backend implements all of these, so
 /// one body runs on SQLite and Postgres.
 trait CrossStore:
-    Store + ComplianceStore + DurableRequestStore + PeerActionStore + LocalEventStore
+    Store + ComplianceStore + DurableRequestStore + PeerActionStore + LocalEventStore + BankScopeStore
 {
 }
 
 impl<T> CrossStore for T where
-    T: Store + ComplianceStore + DurableRequestStore + PeerActionStore + LocalEventStore
+    T: Store
+        + ComplianceStore
+        + DurableRequestStore
+        + PeerActionStore
+        + LocalEventStore
+        + BankScopeStore
 {
-}
-
-/// One synthetic item carrying `subject` in `bank`.
-fn item_in(bank: &str, id: &str, subject: &str, gist: &str) -> MemoryItem {
-    MemoryItem {
-        id: id.to_owned(),
-        bank_id: bank.to_owned(),
-        subject_id: subject.to_owned(),
-        kind: ItemKind::Semantic,
-        category: Some(SemanticCategory::Schema),
-        episodic_type: None,
-        epistemic_kind: EpistemicKind::Fact,
-        source_type: None,
-        confidence: None,
-        admission_score: None,
-        source_ref: None,
-        snapshot: Some(json!({"entity": "synthetic cross-path subject"})),
-        gist: Some(gist.to_owned()),
-        valid_from: "2026-01-01T00:00:00Z".into(),
-        valid_until: None,
-        tx_from: "2026-01-01T00:00:00Z".into(),
-        tx_until: None,
-        created_at: "2026-01-01T00:00:00Z".into(),
-        updated_at: "2026-01-01T00:00:00Z".into(),
-        context: None,
-    }
-}
-
-/// Seed the denied subject's item in each sharing bank, and the control item.
-fn seed<S: Store>(store: &S) {
-    for (bank, id, subject, gist) in [
-        (BANK, DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER),
-        (
-            PEER_BANK,
-            PEER_ITEM,
-            DENIED_SUBJECT,
-            "marker-peer-cross-path",
-        ),
-        (BANK, CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER),
-    ] {
-        store
-            .create_memory_item(&item_in(bank, id, subject, gist), "harness")
-            .expect("write the synthetic item");
-    }
 }
 
 /// Write this process's key file and install the same key on this thread.
@@ -115,47 +72,6 @@ pub(crate) fn install_key(path: PathBuf) -> PathBuf {
     clio_config::secret_seal::test_key::use_key(KEY);
     std::fs::write(&path, KEY).expect("write the harness key file");
     path
-}
-
-/// Persist an in-progress erasure request over the denied subject, with the
-/// given frozen peer labels and sharing banks, and snapshot its peer rows.
-fn seed_request<S: DurableRequestStore + PeerActionStore>(
-    store: &S,
-    request_id: &str,
-    peers: &[&str],
-    peer_banks: &[&str],
-) {
-    let scope = RequestScope::Subject {
-        bank_id: BANK.to_owned(),
-        subject_id: DENIED_SUBJECT.to_owned(),
-    };
-    let enablement = if peers.is_empty() {
-        PeerEnablement::NotApplicable
-    } else {
-        PeerEnablement::Required
-    };
-    let mut ledger = SubjectRequestLedger::new();
-    ledger
-        .register_with_enablement(
-            request_id,
-            RequestKind::Erasure,
-            &scope,
-            enablement,
-            peers,
-            peer_banks,
-        )
-        .expect("the erasure request registers");
-    ledger
-        .apply(request_id, &RequestCommand::Begin)
-        .expect("the request starts");
-    let record = ledger
-        .record(request_id)
-        .expect("the record exists")
-        .clone();
-    store
-        .save(&record_to_row(&record))
-        .expect("the record persists");
-    snapshot_peers(store, &record).expect("the peer rows snapshot");
 }
 
 /// A successful run's JSON payload, or a panic quoting both streams.
@@ -236,6 +152,53 @@ fn assert_restarted_peer_quarantines_the_stale_replay(deployment: &Deployment, p
     peer.offline();
 }
 
+/// The erased state of every bank that holds the subject's data: the purge's
+/// own tombstone covers the item in each of them, and the shredded key makes
+/// each content unreadable.
+fn assert_every_bank_erased<S: CrossStore>(store: &S, request_id: &str) {
+    // The purge: the erasure tombstone covers the item in every bank that holds
+    // the subject's data, so the fan-out reached the second bank. A shredded key
+    // alone writes no tombstone.
+    assert_eq!(
+        erased_item_hashes(store, BANK, request_id),
+        [item_hash(DENIED_ITEM), item_hash(PEER_ITEM)]
+            .into_iter()
+            .collect(),
+        "the erasure covers the item in every bank that shares the subject key"
+    );
+    // The shred: the content of both items is unreadable, with the production's
+    // exact error code.
+    assert_eq!(
+        item_read(store, BANK, DENIED_ITEM),
+        Err("erased_subject".to_owned()),
+        "the denied item is unreadable: the subject key is shredded"
+    );
+    assert_eq!(
+        item_read(store, PEER_BANK, PEER_ITEM),
+        Err("erased_subject".to_owned()),
+        "the second bank's item is unreadable: the subject key is shredded"
+    );
+}
+
+/// The peer's slot after the disposition, and the request outcome it leaves.
+fn assert_disposition_settles_the_peer(
+    deployment: &Deployment,
+    request_id: &str,
+    peer_label: &str,
+) {
+    let disposed = ok_json(&deployment.disposition(request_id, peer_label, "deletion-1"));
+    assert_eq!(
+        disposed["peers"][peer_label],
+        json!("disposed"),
+        "the disposition settles the peer slot: {disposed}"
+    );
+    assert_eq!(
+        disposed["request_outcome"],
+        json!("open"),
+        "the settled peer leaves the request open: {disposed}"
+    );
+}
+
 /// T04 all-bank arm: the exact all-bank erasure runs through the command, a real
 /// peer process is offline across it and rejoins stale, the erased marker never
 /// returns, and peer reconciliation plus the peer copy disposition control
@@ -244,36 +207,44 @@ fn all_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
     let request_id = unique("all-bank");
     let store = open();
     seed(&store);
-    seed_request(&store, &request_id, &[PEER_LABEL], &[PEER_BANK]);
+    // The production derives the banks that share the subject key from the live
+    // items. The peer serves exactly those banks, so the credential store the
+    // production reads names every bank the erasure has to cover.
+    let live = store
+        .erase_bank_set(BANK, DENIED_SUBJECT)
+        .expect("read the live bank set");
     drop(store);
 
-    // A real peer process holds the denied bank. It is offline across the
+    // A real peer process holds the denied banks. It is offline across the
     // erasure and rejoins stale: its journal learns the denial on restart.
+    let bank_refs: Vec<&str> = live.iter().map(String::as_str).collect();
     let mut peer = Peer::start(
         &deployment.peer_dir,
         &deployment.journal,
         &deployment.backups,
-        &[BANK],
+        &bank_refs,
     );
     peer.offline();
+
+    // The production derives the peer set and the peer banks from the peer's
+    // credential store, and the request freezes exactly that set.
+    let derived = derive_peer_set(&peer.credential_store());
+    let peer_label = derived
+        .labels
+        .first()
+        .expect("the credential store names the peer")
+        .clone();
+    let store = open();
+    seed_request(&store, &request_id, &derived);
+    assert_recorded_peer_set(&store, &request_id, &derived);
+    drop(store);
 
     // The exact all-bank erasure: the live set is both sharing banks.
     assert_first_erasure_pending(deployment, &request_id);
 
     // The erased marker never returns; the unrelated control still works.
     let store = open();
-    let erased = readback(&store, DENIED_ITEM);
-    assert!(
-        matches!(
-            erased,
-            Readback::Absent | Readback::DestroyedKey | Readback::KeyMissing
-        ),
-        "the denied item is never readable again: {erased:?}"
-    );
-    assert!(
-        !matches!(store.get_memory_item(PEER_BANK, PEER_ITEM), Ok(Some(_))),
-        "the second bank sharing the subject key is erased too"
-    );
+    assert_every_bank_erased(&store, &request_id);
     assert_eq!(
         readback(&store, CONTROL_ITEM),
         Readback::Readable,
@@ -288,11 +259,13 @@ fn all_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
     // The frozen peer stays pending until it is reconciled.
     let status = ok_json(&deployment.verb("request-status", &request_id));
     assert_eq!(
-        status["peers"][PEER_LABEL],
+        status["peers"][peer_label.as_str()],
         json!("pending"),
         "the offline peer holds the copy open: {status}"
     );
-    ok_json(&deployment.disposition(&request_id, PEER_LABEL, "deletion-1"));
+    // The disposition settles the peer slot, and the request stays open: the
+    // operator has not closed it.
+    assert_disposition_settles_the_peer(deployment, &request_id, &peer_label);
 
     // Reconciliation without a resume proves nothing: the action stays pending.
     let reconciled = ok_json(&deployment.verb("peer-retry", &request_id));
@@ -322,6 +295,18 @@ fn all_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
         settled["effects_before"], settled["effects_after"],
         "the closure repeats no protected effect: {settled}"
     );
+    assert_eq!(
+        settled["request_outcome"],
+        json!("open"),
+        "the closed technical work leaves the request open: {settled}"
+    );
+    assert!(
+        settled["pending_operator_actions"]
+            .as_array()
+            .expect("operator actions")
+            .is_empty(),
+        "the settled request owes no operator action: {settled}"
+    );
     let store = open();
     assert!(
         !store.pending_actions().expect("pending").contains(&action),
@@ -339,7 +324,10 @@ fn partial_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
     let request_id = unique("partial-bank");
     let store = open();
     seed(&store);
-    seed_request(&store, &request_id, &[], &[]);
+    // This deployment runs no peer, so the production derives no peer set from
+    // its empty credential store.
+    let derived = derive_peer_set(&deployment.peer_dir.join(CREDENTIAL_STORE_FILE));
+    seed_request(&store, &request_id, &derived);
     drop(store);
 
     let refused = deployment.retry(&request_id);
@@ -364,6 +352,11 @@ fn partial_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
         readback(&store, DENIED_ITEM),
         Readback::Readable,
         "the denied item survives a refused partial-bank erasure"
+    );
+    assert_eq!(
+        item_read(&store, PEER_BANK, PEER_ITEM),
+        Ok(Some(PEER_ITEM.to_owned())),
+        "the second bank's item survives a refused partial-bank erasure"
     );
     assert_eq!(
         readback(&store, CONTROL_ITEM),

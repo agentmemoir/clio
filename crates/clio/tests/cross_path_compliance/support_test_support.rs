@@ -15,8 +15,8 @@
 //!
 //! ## Does not own
 //! - The synthetic subjects, scratch directory, and seeded stores (see
-//!   `fixtures`)
-//! - The Postgres archive and restore (see `support_pg`)
+//!   `case_fixtures`)
+//! - The Postgres archive and restore (see `support_pg_test_support`)
 //! - The scenarios and their assertions (see the `scenario_*` modules)
 //!
 //! ## Boundary
@@ -27,7 +27,7 @@
 //! Keep this module focused on archive assembly and measurement, not on
 //! scenario logic.
 
-use crate::fixtures::{BANK, scratch};
+use crate::case_fixtures::{BANK, scratch};
 use clio::store::{
     ComplianceStore, KeyPlacement, Store, SwapReport, SwapRequest, swap_sqlite_store,
 };

@@ -17,7 +17,7 @@
 //! - The request ledger and journal state model (see `clio-compliance`)
 //! - The shared request environment and the refusal assertions (see
 //!   `refusals_test_support`)
-//! - The CLI driver and the Postgres gate (see `cli` and `support_pg`)
+//! - The CLI driver and the Postgres gate (see `cli_test_support` and `support_pg_test_support`)
 //!
 //! ## Boundary
 //!
@@ -26,19 +26,19 @@
 //!
 //! Keep this module focused on the refused-and-incomplete claim.
 
-use crate::fixtures::{
+use crate::case_fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
     DENIED_SUBJECT, open_pg, open_sqlite, seed_pg, seed_sqlite, write_item,
 };
-use crate::peer_support::{Peer, live_then_offline};
+use crate::peer_process_test_support::{Peer, live_then_offline};
 use crate::peer_test_support::{assert_no_peer_named, assert_peer_slots};
 use crate::refusals_test_support::{
     Env, assert_damaged_journal_refusal, assert_forbidden, assert_open_copy,
     assert_scope_change_refusal, ok, seed_done_path,
 };
 use crate::scenario_all_bank_peer::install_key;
-use crate::support::{Readback, archive_sqlite_with_authority, readback};
-use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use crate::support_pg_test_support::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use crate::support_test_support::{Readback, archive_sqlite_with_authority, readback};
 use clio::store::{DurableRequestStore, PeerActionStore, ScopedSchema, Store};
 use clio_backup::manifest::ManifestAuthority;
 use clio_compliance::subject_request_store_wiring::record_to_row;
@@ -60,8 +60,21 @@ impl<T: Store + DurableRequestStore + PeerActionStore> PeerStore for T {}
 /// closes nothing and its stored state stays open.
 fn refuse_scope_copy_close(env: &Env, request: &str, store: &dyn DurableRequestStore) {
     ok(&env.start(request, DENIED_SUBJECT), "request-start");
+    // The scope the request is bound to: the scope the refusal is measured
+    // against.
+    let bound = env.status(request);
+    assert_eq!(
+        bound["scope"]["Subject"]["subject_id"],
+        json!(DENIED_SUBJECT),
+        "the request is bound to the denied subject: {bound}"
+    );
     assert_scope_change_refusal(&env.start(request, CONTROL_SUBJECT));
-    assert_eq!(env.status(request)["state"], json!("InProgress"), "open");
+    let status = env.status(request);
+    assert_eq!(status["state"], json!("InProgress"), "open");
+    assert_eq!(
+        status["scope"], bound["scope"],
+        "the refused scope change left the stored scope alone: {status}"
+    );
     seed_done_path(store, request, "erasure");
     let copy = env.command("request-copy", &copy_rest(request));
     ok(&copy, "request-copy");
@@ -72,8 +85,28 @@ fn refuse_scope_copy_close(env: &Env, request: &str, store: &dyn DurableRequestS
     let inventory = env.inventory();
     assert_eq!(inventory["complete"], json!(false), "incomplete scope");
     let rows = inventory["rows"].as_array().expect("the inventory rows");
-    let unknown = rows.iter().any(|row| row["subject_link"].is_null());
-    assert!(unknown, "one family link stays open and unknown");
+    // The production's unknown case: a family with no subject link, the named
+    // gap that says the link is unknown, and the open state that gap forces.
+    let unknown = rows
+        .iter()
+        .find(|row| row["subject_link"].is_null() && !row["gap"].is_null())
+        .expect("one family link is unknown");
+    assert_eq!(
+        unknown["open"],
+        json!(true),
+        "the unknown family link stays open: {unknown}"
+    );
+    // The link the ledger does know, so the unknown row above is a real
+    // unknown and not a link the ledger never reports at all.
+    let linked = rows
+        .iter()
+        .find(|row| row["family"] == json!("items"))
+        .expect("the ledger names the items family");
+    assert_eq!(
+        linked["subject_link"],
+        json!("items.subject_id"),
+        "the items family carries its subject link: {linked}"
+    );
 }
 fn copy_rest(request: &str) -> String {
     format!(
@@ -151,6 +184,26 @@ fn two_live_peers<S: PeerStore>(env: &Env, request: &str, open: impl Fn() -> S) 
     assert_peer_slots(&peers, &["peer-a", "peer-b"]);
     assert_eq!(peers["peer-a"], json!("pending"), "peer a holds a copy");
     assert_eq!(peers["peer-b"], json!("pending"), "peer b holds a copy");
+    // The closure this arm is named for: the product path is done, so the two
+    // live peers are what hold the closure open.
+    {
+        let store = open();
+        seed_done_path(&store, request, "erasure");
+    }
+    let close = env.command("request-close", &close_rest(request));
+    assert_forbidden(&close);
+    assert_open_copy(&close);
+    let status = env.status(request);
+    assert_eq!(
+        status["request_outcome"],
+        json!("open"),
+        "the two live peers hold the closure open: {status}"
+    );
+    assert_eq!(
+        status["state"],
+        json!("InProgress"),
+        "the request stays open"
+    );
     let store = open();
     assert_eq!(
         readback(&store, CONTROL_ITEM),
@@ -177,7 +230,9 @@ fn scenario_refusals_incomplete_peers_disabled_sqlite() {
     let tkms = env.scratch.join("target/clio.kms.json");
     seed_sqlite(&tdb, &tkms, &CONTROL);
     std::fs::write(&env.journal, DAMAGED).expect("plant the damaged journal");
-    assert_damaged_journal_refusal(&env.restore(&tkms, &a.id));
+    // The restore targets the store the assertions below read, so the refusal
+    // is measured against the store the restore would have placed into.
+    assert_damaged_journal_refusal(&env.restore(&tkms, &a.id, &tdb));
     let target = open_sqlite(&tdb, &tkms);
     assert_eq!(
         readback(&target, CONTROL_ITEM),

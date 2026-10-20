@@ -16,9 +16,9 @@
 //! - `journal_file` and `backup_dir`, the CLI-visible paths
 //!
 //! ## Does not own
-//! - Archive assembly and the read-back probes (see `support`)
-//! - The Postgres gate and dump restore (see `support_pg`)
-//! - The CLI driver (see `cli`)
+//! - Archive assembly and the read-back probes (see `support_test_support`)
+//! - The Postgres gate and dump restore (see `support_pg_test_support`)
+//! - The CLI driver (see `cli_test_support`)
 //!
 //! ## Boundary
 //!

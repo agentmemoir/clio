@@ -13,8 +13,8 @@
 //! - `archive_postgres_with_authority`
 //!
 //! ## Does not own
-//! - The synthetic subjects and seeded stores (see `fixtures`)
-//! - The SQLite archive and the read-back probes (see `support`)
+//! - The synthetic subjects and seeded stores (see `case_fixtures`)
+//! - The SQLite archive and the read-back probes (see `support_test_support`)
 //! - The Postgres scenarios and their assertions (see the `scenario_*` modules)
 //!
 //! ## Boundary
@@ -24,7 +24,7 @@
 //!
 //! Keep this module focused on the Postgres fixtures.
 
-use crate::support::{Archive, key_source, publish};
+use crate::support_test_support::{Archive, key_source, publish};
 use clio::AmError;
 use clio::store::{PgTable, PgTestGuard, lock_pg_test};
 use clio_backup::dump_meta::{
@@ -38,9 +38,25 @@ use std::path::{Path, PathBuf};
 /// The Postgres URL used when the environment names none, matching the Makefile.
 const COMPOSE_PG: &str = "postgres://clio:clio@127.0.0.1:34310/clio";
 
-/// The Postgres URL to use: the environment's, or local Compose.
+/// The scheme prefixes a Postgres connection URL may carry.
+const PG_SCHEMES: [&str; 2] = ["postgres://", "postgresql://"];
+
+/// The Postgres URL to use: the environment's, when it names a Postgres
+/// database, or the local Compose stack.
+///
+/// The one canonical reader names the one variable the production reads, so
+/// the test and the store never read two different databases out of one shell.
+/// A value that names another backend is refused here: dialling it would
+/// report an unreachable Postgres for a URL that never named one.
 pub fn pg_url() -> String {
-    std::env::var("CLIO_DATABASE_URL").unwrap_or_else(|_| COMPOSE_PG.to_owned())
+    match clio_config::db_url_env::database_url_from_process_env() {
+        Ok(url) if PG_SCHEMES.iter().any(|prefix| url.starts_with(prefix)) => url,
+        Ok(url) => panic!(
+            "CLIO_DATABASE_URL does not name a Postgres database: {}",
+            clio::store::pg_test_target::redacted_endpoint(&url)
+        ),
+        Err(_) => COMPOSE_PG.to_owned(),
+    }
 }
 
 /// True when a Postgres server answers at `url` within a short budget.

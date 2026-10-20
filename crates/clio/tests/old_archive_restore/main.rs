@@ -3,9 +3,10 @@
 //
 //! # Responsibility
 //!
-//! This integration target is responsible for measuring whether an archive
-//! taken before a synthetic compliance erasure re-exposes the denied subject
-//! when a supported restore route runs afterwards, on SQLite and Postgres.
+//! This integration target is responsible for measuring whether a guarded
+//! restore refuses an archive that carries a denied subject: an archive cut
+//! before a real compliance erasure, and archives the erasure journal denies
+//! synthetically, on SQLite and Postgres.
 //!
 //! ## Owns
 //! - The module tree of the old-archive restore measurement

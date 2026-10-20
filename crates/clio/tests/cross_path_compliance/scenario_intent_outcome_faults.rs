@@ -8,13 +8,18 @@
 //! intent write refuses before any effect.
 //!
 //! ## Owns
-//! - The `Fault`/`FaultStore` doubles the sibling reconcile module reuses
+//! - The `Fault` and `FaultStore` doubles, and the injected failure messages
+//!   `INJECTED_OUTCOME_FAILURE` and `INJECTED_INTENT_OUTCOME_FAILURE`
 //! - The intent-failure arm for each route
+//! - The shared items the sibling modules import: `accepted`, `ctx`,
+//!   `erase_args`, `event_rows`, `pg_or_skip`, `restore_claim`,
+//!   `restore_request`, `seeded_erasure_store`, and `spec`
 //!
 //! ## Does not own
 //! - The outcome-failure and restart-reconcile arms (see
-//!   `scenario_intent_outcome_faults_reconcile`)
-//! - The seeded stores and read-back probes (see `fixtures` and `support`)
+//!   `scenario_intent_outcome_faults_reconcile` and
+//!   `scenario_intent_outcome_faults_review_outcome`)
+//! - The seeded stores and read-back probes (see `case_fixtures` and `support_test_support`)
 //!
 //! ## Boundary
 //!
@@ -24,11 +29,11 @@
 //! Keep this module focused on the shared fault doubles and the intent-failure
 //! arm.
 
-use crate::cli::salt_bytes;
-use crate::fixtures::{
+use crate::case_fixtures::{
     BANK, DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, NOW, open_sqlite, scratch, write_item,
 };
-use crate::support_pg::{lock_pg, pg_url, postgres_reachable, require_postgres};
+use crate::cli_test_support::salt_bytes;
+use crate::support_pg_test_support::{lock_pg, pg_url, postgres_reachable, require_postgres};
 use clio::AmError;
 use clio::store::{
     ComplianceStore, DestinationCustodyStore, DurableRequestStore, LocalEventIntent,
@@ -46,6 +51,14 @@ use std::path::Path;
 
 /// The message the injected outcome-write failure carries.
 pub(crate) const INJECTED_OUTCOME_FAILURE: &str = "injected outcome-write failure";
+
+/// The message the injected intent-fault outcome-write failure carries.
+///
+/// The intent fault refuses every write while it is active, so the outcome
+/// write fails because of the fault and not because an intent is missing: a
+/// reconcile settles a pending action that does have an intent.
+pub(crate) const INJECTED_INTENT_OUTCOME_FAILURE: &str =
+    "injected outcome-write failure under the intent fault";
 
 /// The event write the injected fault breaks over the real durable store.
 #[derive(Clone, Copy)]
@@ -74,7 +87,10 @@ impl LocalEventStore for FaultStore<'_> {
     }
     fn record_outcome(&self, _id: &str, _denied: bool, _result: &str) -> Result<(), AmError> {
         match self.fault {
-            Fault::Intent => Err(AmError::new(ErrorCode::NotFound, "no intent can exist")),
+            Fault::Intent => Err(AmError::new(
+                ErrorCode::Internal,
+                INJECTED_INTENT_OUTCOME_FAILURE,
+            )),
             Fault::Outcome => Err(AmError::new(ErrorCode::Internal, INJECTED_OUTCOME_FAILURE)),
         }
     }
@@ -301,7 +317,11 @@ fn a_restore_intent_failure_refuses_before_placement() {
     };
     assert!(matches!(refusal, RestoreGuardRefusal::Event(_)));
     assert!(
-        !dir.join("target.db").exists(),
-        "no guard means no placement can happen"
+        event_rows(&store, "restore-act").is_empty(),
+        "the refused intent writes no durable event row"
+    );
+    assert!(
+        store.pending_actions().expect("pending").is_empty(),
+        "the refused intent leaves no pending action"
     );
 }

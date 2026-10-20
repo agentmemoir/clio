@@ -4,15 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for driving a composed SQLite compliance flow
-//! through real `clio` commands: seed two subjects, open the deployment journal,
-//! cut an archive, erase one subject through the public route, then prove every
-//! real `clio backup restore` route refuses that pre-erasure archive while the
-//! unrelated subject stays readable.
+//! through real `clio` commands: seed the denied and the control subject, open
+//! the deployment journal, cut an archive, erase the denied subject through the
+//! public route, then prove every real `clio backup restore` route refuses that
+//! pre-erasure archive, and refuses it because it carries the erased subject's
+//! keys, while the unrelated subject stays readable.
 //!
 //! ## Owns
 //! - The SQLite composed remember/create/erase/restore refusal and its evidence
 //!   line
-//! - The small CLI invocation and JSON-line helpers the composed flow uses
+//! - The attribution of that refusal to the erased subject
+//! - The per-route refusal check and the target's readable control subject
 //!
 //! ## Does not own
 //! - The restore refusals after a synthetic denial (see `guard_cli`)
@@ -29,16 +31,13 @@
 //! Keep this module focused on the composed real-command SQLite refusal.
 
 use crate::guard_fixtures::{
-    assert_refused, backup_dir, clio_command, file_sha256, journal_file, run_restore,
+    CliOutput, DENIED_SUBJECT_REFUSAL, assert_refused_exactly, backup_dir, file_sha256,
+    journal_file, run_cli, run_restore, subject_hash,
 };
 use crate::support::{BANK, Scratch};
+use clio_compliance::{JournalState, initialize_new_empty, load_journal};
 use serde_json::Value;
 use std::path::Path;
-use std::process::Stdio;
-
-/// The marker text of the throwaway subject whose erasure opens the deployment
-/// journal, so the archive cut next records a live erasure authority.
-const SEED_TEXT: &str = "seed sentinel note";
 
 /// The marker text of the subject the composed flow erases.
 const DENIED_TEXT: &str = "denied sentinel note";
@@ -46,31 +45,21 @@ const DENIED_TEXT: &str = "denied sentinel note";
 /// The marker text of the subject that must stay readable in the target.
 const CONTROL_TEXT: &str = "control sentinel note";
 
-/// Run one real `clio` command to completion, draining both streams.
-fn run(journal: &Path, kms: &Path, backups: &Path, args: &[&str]) -> std::process::Output {
-    clio_command(journal, kms, backups)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .unwrap_or_else(|err| panic!("run clio {}: {err}", args.join(" ")))
-}
-
 /// Assert one real `clio` command succeeded, naming its stderr on failure.
-fn run_ok(journal: &Path, kms: &Path, backups: &Path, args: &[&str]) -> std::process::Output {
-    let out = run(journal, kms, backups, args);
+fn run_ok(journal: &Path, kms: &Path, backups: &Path, args: &[&str]) -> CliOutput {
+    let out = run_cli(journal, kms, backups, args);
     assert!(
-        out.status.success(),
+        out.code == Some(0),
         "`clio {}` failed: {}",
         args.join(" "),
-        String::from_utf8_lossy(&out.stderr)
+        out.stderr
     );
     out
 }
 
 /// The last non-empty stdout line parsed as JSON: the command's report.
-fn last_json(stdout: &[u8]) -> Value {
-    let text = String::from_utf8_lossy(stdout);
-    let line = text
+fn last_json(stdout: &str) -> Value {
+    let line = stdout
         .lines()
         .rev()
         .find(|line| !line.trim().is_empty())
@@ -141,6 +130,57 @@ fn erase(journal: &Path, kms: &Path, backups: &Path, db: &str, subject: &str, re
     );
 }
 
+/// The subject ids the archive's payload member records for its keys.
+///
+/// This is the table the restore authority check reads to find a member's
+/// subject references, so what it holds is what the refusal is made of.
+fn archived_subject_ids(archive: &Path, dir: &Path) -> Vec<String> {
+    let manifest = clio_backup::read_manifest(archive).expect("read the archive manifest");
+    std::fs::create_dir_all(dir).expect("create the extraction directory");
+    let extracted =
+        clio_backup::extract_members(archive, &manifest, dir).expect("extract the archive members");
+    let connection = rusqlite::Connection::open(extracted.payload.file.path())
+        .expect("open the archived payload");
+    connection
+        .execute_batch("PRAGMA query_only = ON")
+        .expect("keep the archived payload read-only");
+    let mut statement = connection
+        .prepare("SELECT subject_id FROM subject_keys")
+        .expect("prepare the subject keys read");
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("read the archived subject keys")
+        .map(|row| row.expect("a subject key row"))
+        .collect()
+}
+
+/// Assert the target's own subject is still readable after one refused route.
+///
+/// The target keeps its own subject, so a placement changes it and this check
+/// catches that.
+fn assert_control_readable(
+    journal: &Path,
+    target_kms: &Path,
+    backups: &Path,
+    target: &str,
+    control: &str,
+    selector: &[&str],
+) {
+    let readback = run_cli(
+        journal,
+        target_kms,
+        backups,
+        &[
+            "--db", target, "get", control, "--bank", BANK, "--output", "json",
+        ],
+    );
+    assert!(
+        readback.code == Some(0),
+        "the target subject must stay readable after {selector:?}: {}",
+        readback.stderr
+    );
+}
+
 #[test]
 fn sqlite_real_erase_refuses_every_pre_erasure_restore_route() {
     let scratch = Scratch::new("guard-cli-erase-route");
@@ -150,13 +190,13 @@ fn sqlite_real_erase_refuses_every_pre_erasure_restore_route() {
     let source_db = scratch.join("source/clio.db");
     let source = source_db.to_str().expect("the source path is UTF-8");
 
-    let seed = remember(&journal, &source_kms, &backups, source, BANK, SEED_TEXT);
+    // The deployment journal starts empty, so the archive cut next records a
+    // live authority and the only denial the journal holds afterwards is the
+    // erased subject's.
+    initialize_new_empty(&journal).expect("initialize the deployment journal");
+
     let denied = remember(&journal, &source_kms, &backups, source, BANK, DENIED_TEXT);
     remember(&journal, &source_kms, &backups, source, BANK, CONTROL_TEXT);
-
-    // The throwaway erasure opens the deployment journal, so the archive cut
-    // next records a live authority every restore route can classify.
-    erase(&journal, &source_kms, &backups, source, &seed, "req-seed");
 
     let created = last_json(
         &run_ok(
@@ -190,6 +230,31 @@ fn sqlite_real_erase_refuses_every_pre_erasure_restore_route() {
         "req-denied",
     );
 
+    // The archive was cut before the erasure, so it still carries the erased
+    // subject's key: that is what the restore authority check reads, and what
+    // makes the refusal below attributable to the erased subject.
+    let subject_ids = archived_subject_ids(Path::new(&archive_path), &scratch.join("classified"));
+    assert!(
+        subject_ids.contains(&denied),
+        "the archive must record the erased subject's key: {subject_ids:?}"
+    );
+
+    // The live journal denies the erased subject alone, so no other denial can
+    // explain the refusal the routes produce.
+    let JournalState::Current(live) = load_journal(&journal) else {
+        panic!("the live journal must be current");
+    };
+    assert_eq!(
+        live.denials.len(),
+        1,
+        "the journal must deny the erased subject alone: {live:?}"
+    );
+    assert_eq!(
+        live.denials[0].subject_hash,
+        subject_hash(&denied),
+        "the journal must deny the erased subject"
+    );
+
     // The target keeps its own readable subject, so a placement changes it and
     // the read-back below catches that.
     let target_kms = scratch.join("target/clio.kms.json");
@@ -207,7 +272,7 @@ fn sqlite_real_erase_refuses_every_pre_erasure_restore_route() {
         vec!["--latest"],
     ] {
         let refused = run_restore(&journal, &target_kms, &backups, target, &selector);
-        assert_refused(&refused, "denied subject");
+        assert_refused_exactly(&refused, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
             file_sha256(&journal),
             journal_before,
@@ -218,25 +283,13 @@ fn sqlite_real_erase_refuses_every_pre_erasure_restore_route() {
             archive_before,
             "selector {selector:?} sanitized the archive"
         );
-        let readback = run(
+        assert_control_readable(
             &journal,
             &target_kms,
             &backups,
-            &[
-                "--db",
-                target,
-                "get",
-                &target_control,
-                "--bank",
-                BANK,
-                "--output",
-                "json",
-            ],
-        );
-        assert!(
-            readback.status.success(),
-            "the target subject must stay readable after {selector:?}: {}",
-            String::from_utf8_lossy(&readback.stderr)
+            target,
+            &target_control,
+            &selector,
         );
     }
 

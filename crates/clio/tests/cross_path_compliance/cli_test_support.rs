@@ -7,15 +7,17 @@
 //! cross-path compliance proof: the deployment salt and subject hashes the
 //! journal denial and the member classification share, the cleared-environment
 //! command with the scenario's key store, journal, backup directory, and salt,
-//! and the bounded run that captures the exit and stderr of a refusal.
+//! and the bounded run that captures the exit and both streams of a refusal.
 //!
 //! ## Owns
 //! - `salt_bytes`, `salt_text`, `subject_hash`, and `denied_hash`
-//! - `clio_command`, `run_cli`, `CliOutput`, and `assert_refused`
+//! - `clio_command`, `run_captured`, `run_cli`, `CliOutput`, `assert_refused`,
+//!   and `assert_refusal`
 //! - `Refusal` and the production refusals the CLI returns
 //!
 //! ## Does not own
-//! - The seeded stores and the archive assembly (see `fixtures` and `support`)
+//! - The seeded stores and the archive assembly (see `case_fixtures` and
+//!   `support_test_support`)
 //! - The scenarios and their assertions (see the `scenario_*` modules)
 //!
 //! ## Boundary
@@ -25,16 +27,12 @@
 //!
 //! Keep this module focused on the CLI driver, with no tests.
 
-use crate::fixtures::DENIED_SUBJECT;
+use crate::case_fixtures::DENIED_SUBJECT;
 use serde_json::{Value, json};
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
-
-/// The key seeding every spawned `clio` receives, re-exported so a scenario
-/// points its own extra command at the same key file.
-pub use crate::common::seed_key;
 
 /// The generous bound every spawned `clio` is waited for: a refusal exits in
 /// milliseconds, so this only turns a hang into a failure.
@@ -83,16 +81,32 @@ pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     cmd.env("CLIO_ERASURE_JOURNAL_FILE", journal);
     cmd.env("CLIO_COMPLIANCE_SALT", salt_text());
     cmd.env("CLIO_BACKUP_DIR", backups);
-    seed_key(&mut cmd);
+    crate::common::seed_key(&mut cmd);
     cmd
 }
 
-/// Run `clio` with `args` to completion under a bounded wait, capturing its exit
-/// and stderr. Both streams are drained on worker threads, so a child that
+/// Run `clio` with `args` to completion under a bounded wait, capturing its
+/// exit and stderr. Both streams are drained on worker threads, so a child that
 /// prints more than a pipe buffer holds still exits.
 pub fn run_cli(journal: &Path, kms: &Path, backups: &Path, args: &[&str]) -> CliOutput {
-    let mut child = clio_command(journal, kms, backups)
-        .args(args)
+    let mut command = clio_command(journal, kms, backups);
+    command.args(args);
+    let output = run_captured(&mut command);
+    CliOutput {
+        code: output.status.code(),
+        stderr: String::from_utf8(output.stderr).expect("the clio stderr is UTF-8"),
+    }
+}
+
+/// Run one `clio` command to completion under a bounded wait, capturing its
+/// exit status and both output streams.
+///
+/// The wait is bounded: a command that does not exit before [`CLI_WAIT`] is
+/// killed and reaped, and the run fails instead of hanging. Both streams are
+/// drained on worker threads, so a child that prints more than a pipe buffer
+/// holds still exits.
+pub fn run_captured(command: &mut Command) -> Output {
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -102,30 +116,49 @@ pub fn run_cli(journal: &Path, kms: &Path, backups: &Path, args: &[&str]) -> Cli
     let stderr = child.stderr.take().expect("stderr is piped");
     let stdout_reader = std::thread::spawn(move || drain(stdout));
     let stderr_reader = std::thread::spawn(move || drain(stderr));
-    let deadline = Instant::now() + CLI_WAIT;
-    let status = loop {
-        match child.try_wait().expect("reap the clio child") {
-            Some(status) => break status,
-            None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            None => {
-                let _ = child.kill();
-                panic!("clio did not exit before the deadline");
-            }
-        }
-    };
-    let stderr = stderr_reader.join().unwrap_or_default();
-    let _ = stdout_reader.join();
-    CliOutput {
-        code: status.code(),
+    let status = wait_for_exit(&mut child);
+    let stdout = join_reader(stdout_reader, "stdout");
+    let stderr = join_reader(stderr_reader, "stderr");
+    Output {
+        status,
+        stdout,
         stderr,
     }
 }
 
-/// Read a child's stream to a string, discarding the result on error.
-fn drain<R: Read>(mut reader: R) -> String {
-    let mut text = String::new();
-    let _ = reader.read_to_string(&mut text);
-    text
+/// Wait for the child to exit, killing and reaping it when it does not exit
+/// before the deadline.
+fn wait_for_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
+    let deadline = Instant::now() + CLI_WAIT;
+    loop {
+        match child.try_wait().expect("reap the clio child") {
+            Some(status) => return status,
+            None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("clio did not exit before the deadline");
+            }
+        }
+    }
+}
+
+/// Join one reader thread, surfacing its read failure and its panic where the
+/// stream was read, instead of leaving the cause to surface later as a parse
+/// failure.
+fn join_reader(handle: std::thread::JoinHandle<std::io::Result<Vec<u8>>>, stream: &str) -> Vec<u8> {
+    match handle.join() {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(error)) => panic!("read the clio {stream}: {error}"),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Read a child's stream to bytes, reporting a read failure to the caller.
+fn drain<R: Read>(mut reader: R) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// One production refusal: the exit code it maps to, the machine-readable

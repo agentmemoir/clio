@@ -6,14 +6,16 @@
 //! This module is responsible for the fixtures the guarded-restore CLI
 //! scenarios share: the deployment salt and subject hashes the journal denial
 //! and the member classification both use, the file hash, the journal and
-//! backup directories, the seeded store, the refusal assertion, and the real
-//! `clio` binary driver.
+//! backup directories, the seeded store, the refusal assertions, the bounded
+//! `clio` drivers, and the real `clio` binary driver.
 //!
 //! ## Owns
 //! - `salt_text`, `subject_hash`, and `denied_hash`
 //! - `file_sha256`, `journal_file`, `backup_dir`, and `seed_sqlite`
 //! - `clio_command`, `spawn_restore`, `run_restore`, `RestoreChild`, `RestoreOutput`, and
 //!   `assert_refused`
+//! - `Refusal`, `DENIED_SUBJECT_REFUSAL`, and `assert_refused_exactly`
+//! - `CliOutput` and `run_cli`
 //! - `current_authority`
 //!
 //! ## Does not own
@@ -31,7 +33,8 @@
 use crate::support::{DENIED_SUBJECT, Scratch, open_sqlite, write_item};
 use clio_backup::manifest::ManifestAuthority;
 use clio_compliance::{JournalState, load_journal, sha256_hex_bytes, tombstone_salt};
-use std::io::{BufRead, BufReader};
+use serde_json::{Value, json};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -39,8 +42,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-/// The generous bound every spawned `clio backup restore` is waited for: a
-/// refusal exits in milliseconds, so this only turns a hang into a failure.
+/// The generous bound every spawned `clio` command is waited for: a refusal
+/// exits in milliseconds, so this only turns a hang into a failure.
 pub const RESTORE_WAIT: Duration = Duration::from_secs(120);
 
 /// The one deployment salt the journal denial and the member classification
@@ -124,6 +127,85 @@ pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     cmd
 }
 
+/// The exit, stdout, and stderr of one finished `clio` run.
+#[derive(Debug)]
+pub struct CliOutput {
+    /// The process exit code, or `None` when it was killed by a signal.
+    pub code: Option<i32>,
+    /// Everything the child wrote to stdout.
+    pub stdout: String,
+    /// Everything the child wrote to stderr.
+    pub stderr: String,
+}
+
+/// Run one real `clio` command with `args` to completion under a bounded wait,
+/// capturing its exit, stdout, and stderr.
+///
+/// The wait is bounded: a command that does not exit before [`RESTORE_WAIT`] is
+/// killed and reaped, and the run fails instead of hanging. Both streams are
+/// drained on worker threads, so a child that prints more than a pipe buffer
+/// holds still exits.
+pub fn run_cli(journal: &Path, kms: &Path, backups: &Path, args: &[&str]) -> CliOutput {
+    let mut guard = ChildGuard(
+        clio_command(journal, kms, backups)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn clio"),
+    );
+    let stdout = guard.0.stdout.take().expect("stdout is piped");
+    let stderr = guard.0.stderr.take().expect("stderr is piped");
+    let stdout_reader = thread::spawn(move || drain(stdout));
+    let stderr_reader = thread::spawn(move || drain(stderr));
+    let status = wait_for_exit(&mut guard.0);
+    let stdout = stdout_reader.join().expect("join the stdout reader");
+    let stderr = stderr_reader.join().expect("join the stderr reader");
+    CliOutput {
+        code: status.code(),
+        stdout,
+        stderr,
+    }
+}
+
+/// The spawned child, killed and reaped when this guard drops, so a panic
+/// before the wait leaves no process behind.
+struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Wait for the child to exit, killing and reaping it when it does not exit
+/// before the deadline.
+fn wait_for_exit(child: &mut Child) -> std::process::ExitStatus {
+    let deadline = Instant::now() + RESTORE_WAIT;
+    loop {
+        match child.try_wait().expect("reap the clio child") {
+            Some(status) => return status,
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("clio did not exit before the deadline");
+            }
+        }
+    }
+}
+
+/// Read a child's stream to a string, so a pipe nobody drains cannot fill.
+fn drain<R: Read>(mut reader: R) -> String {
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .expect("read the clio stream");
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 /// The exit and captured stderr of one finished `clio backup restore`.
 #[derive(Debug)]
 pub struct RestoreOutput {
@@ -144,6 +226,59 @@ pub fn assert_refused(output: &RestoreOutput, needle: &str) {
     assert!(
         output.stderr.contains(needle),
         "the refusal must name {needle:?}: {}",
+        output.stderr
+    );
+}
+
+/// One production refusal: the exit code it maps to, the machine-readable
+/// error code it carries, and the whole refusal message.
+pub struct Refusal {
+    /// The process exit code the refusal maps to.
+    pub exit: i32,
+    /// The machine-readable error code the refusal carries.
+    pub code: &'static str,
+    /// The whole refusal message, compared by equality.
+    pub message: &'static str,
+}
+
+/// The production's refusal when an archive member references a subject the
+/// live authority denies.
+pub const DENIED_SUBJECT_REFUSAL: Refusal = Refusal {
+    exit: 2,
+    code: "forbidden",
+    message: "an archive member references a currently denied subject",
+};
+
+/// Assert one CLI restore refused with the production's exact exit code, error
+/// code, and message.
+///
+/// Every value is compared by equality, so a refusal that changes in any of
+/// them fails this check instead of still matching on a fragment of the old
+/// text.
+pub fn assert_refused_exactly(output: &RestoreOutput, refusal: &Refusal) {
+    assert_eq!(
+        output.code,
+        Some(refusal.exit),
+        "the restore must refuse (exit {}): {}",
+        refusal.exit,
+        output.stderr
+    );
+    let envelope: Value = serde_json::from_str(&output.stderr).unwrap_or_else(|error| {
+        panic!(
+            "the refusal envelope is not JSON ({error}): {}",
+            output.stderr
+        )
+    });
+    assert_eq!(
+        envelope["code"],
+        json!(refusal.code),
+        "the refusal's error code: {}",
+        output.stderr
+    );
+    assert_eq!(
+        envelope["message"],
+        json!(refusal.message),
+        "the refusal's message: {}",
         output.stderr
     );
 }

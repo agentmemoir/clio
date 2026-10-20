@@ -15,7 +15,7 @@
 //! - The ledger's per-family expectations and the manifest check (see
 //!   `family_test_support`)
 //! - The plain item fixture, the scratch directory, and the store openers (see
-//!   `fixtures`)
+//!   `case_fixtures`)
 //!
 //! ## Boundary
 //!
@@ -24,11 +24,11 @@
 //!
 //! Keep this module focused on the every-family rows the fixture writes.
 
-use crate::family_test_support::FamilyFixture;
-use crate::fixtures::{
+use crate::case_fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
     DENIED_SUBJECT, NOW, open_pg, open_sqlite, write_item,
 };
+use crate::family_test_support::FamilyFixture;
 use clio::store::{AssocEdgeRecord, AssocKind, BeliefStore, HistoryStore, PersonaStore, Store};
 use clio::{
     BeliefObject, ConfidenceEntry, EpisodicType, EpistemicKind, ItemKind, MemoryItem,

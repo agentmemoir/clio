@@ -16,8 +16,8 @@
 //!
 //! ## Does not own
 //! - The archive assembly and read-back probes, and the Postgres gate (see
-//!   `support` and `support_pg`)
-//! - The shared refusal assertions (see `refusals_test_support` and `cli`)
+//!   `support_test_support` and `support_pg_test_support`)
+//! - The shared refusal assertions (see `refusals_test_support` and `cli_test_support`)
 //!
 //! ## Boundary
 //!
@@ -26,27 +26,23 @@
 //!
 //! Keep this module focused on the one export-erase-restore claim.
 
-use crate::cli::{DENIED_SUBJECT_REFUSAL, assert_refusal, clio_command};
-use crate::family_fixtures;
-use crate::family_test_support::{self, FamilyFixture};
-use crate::fixtures::{
+use crate::case_fixtures::{
     self, BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_MARKER, DENIED_SUBJECT,
     unique,
 };
-use crate::refusals_test_support::assert_open_copy_refusal;
-use crate::support::{self, Readback};
-use crate::support_pg::{
+use crate::cli_test_support::{DENIED_SUBJECT_REFUSAL, assert_refusal, clio_command, run_captured};
+use crate::family_fixtures;
+use crate::family_test_support::{self, FamilyFixture};
+use crate::refusals_test_support::{assert_open_copy_refusal, seed_done_path};
+use crate::support_pg_test_support::{
     archive_postgres_with_authority, lock_pg, pg_url, postgres_reachable, require_postgres,
 };
+use crate::support_test_support::{self, Readback};
 use clio::store::{ComplianceStore, DurableRequestStore, ScopedSchema, Store};
 use clio_backup::manifest::ManifestAuthority;
-use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
-use clio_compliance::{
-    JournalState, PathOwner, PathSlot, PathState, initialize_new_empty, load_journal,
-};
+use clio_compliance::{JournalState, initialize_new_empty, load_journal};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 /// The control-only target every arm seeds.
 const CONTROL_ONLY: &[(&str, &str, &str)] = &[(CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER)];
@@ -80,8 +76,8 @@ impl Backend {
     /// Open the source store for one read; it drops before any child runs.
     fn open(&self) -> Box<dyn Live> {
         match self {
-            Self::Sqlite { source, kms, .. } => Box::new(fixtures::open_sqlite(source, kms)),
-            Self::Pg { source, kms, .. } => Box::new(fixtures::open_pg(source, kms)),
+            Self::Sqlite { source, kms, .. } => Box::new(case_fixtures::open_sqlite(source, kms)),
+            Self::Pg { source, kms, .. } => Box::new(case_fixtures::open_pg(source, kms)),
         }
     }
 
@@ -113,12 +109,12 @@ impl Backend {
         match self {
             Self::Sqlite { .. } => {
                 let fixture = family_fixtures::seed_sqlite(Path::new(self.source()), self.kms());
-                fixtures::seed_sqlite(Path::new(self.target()), self.kms(), CONTROL_ONLY);
+                case_fixtures::seed_sqlite(Path::new(self.target()), self.kms(), CONTROL_ONLY);
                 fixture
             }
             Self::Pg { .. } => {
                 let fixture = family_fixtures::seed_pg(self.source(), self.kms());
-                fixtures::seed_pg(self.target(), self.kms(), CONTROL_ONLY);
+                case_fixtures::seed_pg(self.target(), self.kms(), CONTROL_ONLY);
                 fixture
             }
         }
@@ -136,7 +132,7 @@ impl Backend {
         };
         match self {
             Self::Sqlite { .. } => {
-                support::archive_sqlite_with_authority(
+                support_test_support::archive_sqlite_with_authority(
                     backups,
                     Path::new(self.source()),
                     self.kms(),
@@ -151,20 +147,6 @@ impl Backend {
             }
         }
     }
-}
-
-/// Mark the named product path done on the stored request.
-fn seed_erasure_path(store: &dyn Live, request_id: &str) {
-    let row = store.load(request_id).expect("load the request");
-    let mut record = row_to_record(&row.expect("request row")).expect("decode the stored request");
-    let slot = PathSlot {
-        owner: PathOwner::Clio,
-        state: PathState::Done,
-    };
-    record.paths.insert("erasure".to_owned(), slot);
-    store
-        .save(&record_to_row(&record))
-        .expect("save the request");
 }
 
 /// The common `clio` frame: the deployment database, the command's own
@@ -198,21 +180,45 @@ fn key_path(journal: &Path) -> PathBuf {
         .join("clio.key")
 }
 
+/// The thread-local key this scenario installs, cleared when the guard drops.
+///
+/// The key is a thread-local, so a scenario that leaves it installed hands it
+/// to the next test the harness runs on the same thread.
+struct ThreadKeyGuard;
+
+impl Drop for ThreadKeyGuard {
+    fn drop(&mut self) {
+        clio_config::secret_seal::test_key::clear_thread_key();
+    }
+}
+
 /// Write this process's key file and install the same key on this thread.
-fn install_key(journal: &Path) {
+///
+/// The returned guard clears the thread-local key when it drops, so the key
+/// never outlives the scenario that installed it.
+fn install_key(journal: &Path) -> ThreadKeyGuard {
     clio_config::secret_seal::test_key::use_key(KEY);
     std::fs::write(key_path(journal), KEY).expect("write the scenario key file");
+    ThreadKeyGuard
 }
 
 /// Run one real `clio` command, draining both streams while it waits.
+///
+/// The wait is bounded: the shared driver kills and reaps a child that does
+/// not exit before its deadline, so a hung command fails the run instead of
+/// stalling it.
 fn run(journal: &Path, kms: &Path, backups: &Path, args: &[String]) -> CliRun {
-    let out = clio_command(journal, kms, backups)
+    let mut command = clio_command(journal, kms, backups);
+    command
         .env("CLIO_KEY_FILE", key_path(journal))
         .env("CLIO_KEY_FILE_ONLY", "1")
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .unwrap_or_else(|error| panic!("run clio {}: {error}", args.join(" ")));
+        .args(args);
+    let out = run_captured(&mut command);
+    assert!(
+        out.status.code().is_some(),
+        "clio {} was killed by a signal",
+        args.join(" ")
+    );
     CliRun {
         code: out.status.code(),
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -330,7 +336,7 @@ fn drive_claim(claim: &Claim) {
 
     // 4. The request closes only after its required actions: the open copy
     //    refuses the close; recording it done lets the close land.
-    seed_erasure_path(&*claim.backend.open(), &request);
+    seed_done_path(&*claim.backend.open(), &request, "erasure");
     let refused = claim.raw(&format!(
         "compliance request-close --request-id {request} --product-path erasure"
     ));
@@ -352,7 +358,7 @@ fn drive_claim(claim: &Claim) {
         let out = claim.restore(&selector);
         assert_refusal(out.code, &out.stderr, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
-            support::readback(&*claim.backend.open(), CONTROL_ITEM),
+            support_test_support::readback(&*claim.backend.open(), CONTROL_ITEM),
             Readback::Readable,
             "the control subject stays readable after restore {selector:?}"
         );
@@ -366,9 +372,9 @@ fn drive_claim(claim: &Claim) {
 
 /// Seed one backend, cut its pre-erasure archive, and drive the claim.
 fn run_backend(backend: Backend, scratch: &crate::common::Scratch, name: &'static str, tag: &str) {
-    let backups = fixtures::backup_dir(scratch);
-    let journal = fixtures::journal_file(scratch, "journal/erasure-journal.json");
-    install_key(&journal);
+    let backups = case_fixtures::backup_dir(scratch);
+    let journal = case_fixtures::journal_file(scratch, "journal/erasure-journal.json");
+    let _key_guard = install_key(&journal);
     let fixture = backend.seed();
     initialize_new_empty(&journal).expect("initialize the deployment journal");
     let archive_id = backend.archive(&backups, &journal, &unique(tag));
@@ -389,7 +395,7 @@ fn run_backend(backend: Backend, scratch: &crate::common::Scratch, name: &'stati
 /// The SQLite arm: a real export, erase, and retry, then every restore route.
 #[test]
 fn sqlite_export_erase_then_every_restore_route_refuses() {
-    let scratch = fixtures::scratch("scenario-export-erase-sqlite");
+    let scratch = case_fixtures::scratch("scenario-export-erase-sqlite");
     let backend = Backend::Sqlite {
         source: scratch.join("source/clio.db"),
         target: scratch.join("target/clio.db"),
@@ -408,7 +414,7 @@ fn postgres_export_erase_then_every_restore_route_refuses() {
     let _guard = lock_pg();
     let source = ScopedSchema::new(&base);
     let target = ScopedSchema::new(&base);
-    let scratch = fixtures::scratch("scenario-export-erase-postgres");
+    let scratch = case_fixtures::scratch("scenario-export-erase-postgres");
     let backend = Backend::Pg {
         source: source.url().to_owned(),
         target: target.url().to_owned(),

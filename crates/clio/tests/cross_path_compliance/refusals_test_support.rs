@@ -12,12 +12,14 @@
 //! ## Owns
 //! - `Env`, the one deployment the refusal scenarios drive
 //! - `ok`, `assert_forbidden`, `assert_scope_change_refusal`,
-//!   `assert_damaged_journal_refusal`, and `assert_open_copy`
-//! - `seed_done_path`, the done product path a refusal is measured against
+//!   `assert_damaged_journal_refusal`, `assert_open_copy`, and
+//!   `assert_unknown_product_path_refusal`
+//! - `seed_done_path`, the shared done product path a refusal is measured
+//!   against
 //!
 //! ## Does not own
-//! - The CLI driver and the scratch, journal, and backup paths (see `cli` and
-//!   `fixtures`)
+//! - The CLI driver and the scratch, journal, and backup paths (see `cli_test_support` and
+//!   `case_fixtures`)
 //! - The refusal scenarios and the claims they prove (see the `scenario_*`
 //!   modules)
 //!
@@ -29,39 +31,51 @@
 //!
 //! Keep this module focused on the shared refusal harness.
 
-use crate::cli;
-use crate::fixtures::{backup_dir, journal_file, scratch};
+use crate::case_fixtures::{backup_dir, journal_file, scratch};
+use crate::cli_test_support::{self, Refusal, assert_refusal};
+use clio::ErrorCode;
 use clio::store::DurableRequestStore;
 use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
 use clio_compliance::{PathOwner, PathSlot, PathState};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
+use std::process::Output;
 
 /// The exact refusal the production returns when a required action of the
 /// request is still open: the closure refusal the request service builds.
-const OPEN_COPY_REFUSAL_MESSAGE: &str = "request closure refused: OpenCopyAction";
-/// The error code the production refusal carries.
-const OPEN_COPY_REFUSAL_CODE: &str = "forbidden";
-/// The process exit code the production refusal maps to.
-const OPEN_COPY_REFUSAL_EXIT: i32 = 1;
+///
+/// The error code is the public enum's own string, so a rename of the code
+/// fails this check here instead of leaving a copied string behind.
+const OPEN_COPY_REFUSAL: Refusal = Refusal {
+    exit: 1,
+    code: ErrorCode::Forbidden.as_str(),
+    message: "request closure refused: OpenCopyAction",
+};
 
 /// The exact refusal the production returns when a restore reads a damaged
 /// live erasure journal: the authority refusal the restore flow builds.
-const DAMAGED_JOURNAL_REFUSAL_MESSAGE: &str = "the erasure journal is damaged";
-/// The error code the production refusal carries.
-const DAMAGED_JOURNAL_REFUSAL_CODE: &str = "config_corrupt";
-/// The process exit code the production refusal maps to.
-const DAMAGED_JOURNAL_REFUSAL_EXIT: i32 = 2;
+const DAMAGED_JOURNAL_REFUSAL: Refusal = Refusal {
+    exit: 2,
+    code: ErrorCode::ConfigCorrupt.as_str(),
+    message: "the erasure journal is damaged",
+};
 
 /// The exact refusal the production returns when a request id is opened again
 /// under a different kind or scope: the ledger's binding refusal.
-const SCOPE_CHANGE_REFUSAL_MESSAGE: &str =
-    "request id is already bound to a different kind or scope";
-/// The error code the production refusal carries.
-const SCOPE_CHANGE_REFUSAL_CODE: &str = "forbidden";
-/// The process exit code the production refusal maps to.
-const SCOPE_CHANGE_REFUSAL_EXIT: i32 = 1;
+const SCOPE_CHANGE_REFUSAL: Refusal = Refusal {
+    exit: 1,
+    code: ErrorCode::Forbidden.as_str(),
+    message: "request id is already bound to a different kind or scope",
+};
+
+/// The exact refusal the production returns when the closure names a product
+/// path this build does not know: the closure refusal the request service
+/// builds.
+const UNKNOWN_PRODUCT_PATH_REFUSAL: Refusal = Refusal {
+    exit: 1,
+    code: ErrorCode::Forbidden.as_str(),
+    message: "request closure refused: UnknownProductPath",
+};
 
 /// One deployment: a scratch directory, the journal and backup paths the
 /// binary reads, the key store, and the store the commands address.
@@ -105,16 +119,18 @@ impl Env {
         Path::new(&self.db)
     }
 
+    /// Run one `clio` command to completion under a bounded wait.
+    ///
+    /// The wait is bounded: a command that does not exit before the driver's
+    /// deadline is killed and reaped, and the run fails instead of hanging.
     fn spawn(&self, kms: &Path, args: &[&str]) -> Output {
-        let mut cmd = cli::clio_command(&self.journal, kms, &self.backups);
+        let mut cmd = cli_test_support::clio_command(&self.journal, kms, &self.backups);
         cmd.env("CLIO_DEPLOYMENT_CONFIG", &self.deployment);
         if let Some(key) = &self.key {
             cmd.env("CLIO_KEY_FILE", key).env("CLIO_KEY_FILE_ONLY", "1");
         }
-        cmd.args(args)
-            .stdin(Stdio::null())
-            .output()
-            .expect("run clio")
+        cmd.args(args);
+        cli_test_support::run_captured(&mut cmd)
     }
 
     pub(crate) fn command(&self, sub: &str, rest: &str) -> Output {
@@ -144,8 +160,16 @@ impl Env {
         self.value("inventory", "")
     }
 
-    pub(crate) fn restore(&self, kms: &Path, id: &str) -> Output {
-        let line = format!("backup restore {id} --yes --db {} -o json", self.db());
+    /// Run one `backup restore` into `target`, the store the restore would
+    /// place the archive into.
+    ///
+    /// The target is named by the caller, so the store a refusal is measured
+    /// against is the store the restore would have written to.
+    pub(crate) fn restore(&self, kms: &Path, id: &str, target: &Path) -> Output {
+        let line = format!(
+            "backup restore {id} --yes --db {} -o json",
+            target.to_string_lossy()
+        );
         let args: Vec<&str> = line.split_whitespace().collect();
         self.spawn(kms, &args)
     }
@@ -182,7 +206,7 @@ pub(crate) fn assert_forbidden(out: &Output) {
     assert_eq!(out.status.code(), Some(1), "must refuse (exit 1): {stderr}");
     assert_eq!(
         envelope(out)["code"],
-        json!("forbidden"),
+        json!(ErrorCode::Forbidden.as_str()),
         "must be forbidden"
     );
 }
@@ -194,22 +218,7 @@ pub(crate) fn assert_forbidden(out: &Output) {
 /// fragment of the old text.
 pub(crate) fn assert_scope_change_refusal(out: &Output) {
     let (_, stderr) = streams(out);
-    assert_eq!(
-        out.status.code(),
-        Some(SCOPE_CHANGE_REFUSAL_EXIT),
-        "must refuse (exit {SCOPE_CHANGE_REFUSAL_EXIT}): {stderr}"
-    );
-    let refused = envelope(out);
-    assert_eq!(
-        refused["code"],
-        json!(SCOPE_CHANGE_REFUSAL_CODE),
-        "must carry the production's error code: {stderr}"
-    );
-    assert_eq!(
-        refused["message"],
-        json!(SCOPE_CHANGE_REFUSAL_MESSAGE),
-        "must carry the production's exact refusal: {stderr}"
-    );
+    assert_refusal(out.status.code(), &stderr, &SCOPE_CHANGE_REFUSAL);
 }
 /// The damaged journal's own refusal, pinned to the production's exact
 /// message, error code, and exit code.
@@ -219,22 +228,7 @@ pub(crate) fn assert_scope_change_refusal(out: &Output) {
 /// fragment of the old text.
 pub(crate) fn assert_damaged_journal_refusal(out: &Output) {
     let (_, stderr) = streams(out);
-    assert_eq!(
-        out.status.code(),
-        Some(DAMAGED_JOURNAL_REFUSAL_EXIT),
-        "must refuse (exit {DAMAGED_JOURNAL_REFUSAL_EXIT}): {stderr}"
-    );
-    let refused = envelope(out);
-    assert_eq!(
-        refused["code"],
-        json!(DAMAGED_JOURNAL_REFUSAL_CODE),
-        "must carry the production's error code: {stderr}"
-    );
-    assert_eq!(
-        refused["message"],
-        json!(DAMAGED_JOURNAL_REFUSAL_MESSAGE),
-        "must carry the production's exact refusal: {stderr}"
-    );
+    assert_refusal(out.status.code(), &stderr, &DAMAGED_JOURNAL_REFUSAL);
 }
 /// The open copy action's own refusal, pinned to the production's exact
 /// message, error code, and exit code.
@@ -249,30 +243,37 @@ pub(crate) fn assert_open_copy(out: &Output) {
 /// The same open-copy refusal for a run whose exit code and stderr are
 /// already captured.
 pub(crate) fn assert_open_copy_refusal(code: Option<i32>, stderr: &str) {
-    assert_eq!(
-        code,
-        Some(OPEN_COPY_REFUSAL_EXIT),
-        "must refuse (exit {OPEN_COPY_REFUSAL_EXIT}): {stderr}"
-    );
-    let refused = envelope_text(stderr);
-    assert_eq!(
-        refused["code"],
-        json!(OPEN_COPY_REFUSAL_CODE),
-        "must carry the production's error code: {stderr}"
-    );
-    assert_eq!(
-        refused["message"],
-        json!(OPEN_COPY_REFUSAL_MESSAGE),
-        "must carry the production's exact refusal: {stderr}"
-    );
+    assert_refusal(code, stderr, &OPEN_COPY_REFUSAL);
 }
+/// The unknown product path's own refusal, pinned to the production's exact
+/// message, error code, and exit code.
+///
+/// The message, the code, and the exit are the production's own, so a refusal
+/// that changes in any of them fails this check instead of still matching on a
+/// fragment of the old text.
+pub(crate) fn assert_unknown_product_path_refusal(out: &Output) {
+    let (_, stderr) = streams(out);
+    assert_refusal(out.status.code(), &stderr, &UNKNOWN_PRODUCT_PATH_REFUSAL);
+}
+/// Mark one named product path done on a stored request.
+///
+/// This is the shared helper every scenario uses: a scenario that needs a done
+/// path calls it here, so the target carries no second copy of this behaviour.
+/// The path is named by the caller, and every failure names the request and
+/// the path it is about.
 pub(crate) fn seed_done_path(store: &dyn DurableRequestStore, request_id: &str, path: &str) {
-    let row = store.load(request_id).expect("load").expect("the row");
-    let mut record = row_to_record(&row).expect("decode the request row");
+    let row = store
+        .load(request_id)
+        .unwrap_or_else(|error| panic!("load the request {request_id}: {error}"))
+        .unwrap_or_else(|| panic!("the request {request_id} has no stored row"));
+    let mut record = row_to_record(&row)
+        .unwrap_or_else(|error| panic!("decode the stored request {request_id}: {error}"));
     let done = PathSlot {
         owner: PathOwner::Clio,
         state: PathState::Done,
     };
     record.paths.insert(path.to_owned(), done);
-    store.save(&record_to_row(&record)).expect("save the row");
+    store
+        .save(&record_to_row(&record))
+        .unwrap_or_else(|error| panic!("save the request {request_id}: {error}"));
 }
