@@ -120,17 +120,24 @@ jobs:
           out="$RUNNER_TEMP/coverage-summary"
           mkdir -p "$out"
           printf '%s\n' "$GITHUB_SHA" > "$out/commit.txt"
+          # nextest status lines: `<STATUS> [ <secs>s] [(<n>/<total>) ]<binary> <test>`.
+          # Failing statuses: FAIL, FAIL + LEAK, LEAK-FAIL, TIMEOUT, SIG<name>, ABORT,
+          # XFAIL. The optional counter differs between the live line and the final
+          # summary line, so it is cut before the names are deduplicated.
           sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' "$RUNNER_TEMP/coverage.log" \
-            | grep -E '^ *FAIL \[' \
-            | sed -E 's/^ *FAIL \[[^]]*\] *//' \
+            | grep -E '^ *(FAIL( \+ LEAK)?|LEAK-FAIL|TIMEOUT|SIG[A-Z0-9]+|ABORT( SIG [0-9]+)?|XFAIL) \[ *[0-9.]+s\] ' \
+            | sed -E 's/^ *[^[]*\[ *[0-9.]+s\] (\([^)]*\) )?//' \
             | sort -u > "$out/failing-tests.txt"
           report=target/coverage/coverage.json
           if [ -s "$report" ]; then
+            # The same test `--fail-under-file-lines 80` applies: a file passes only
+            # above 80, and llvm-cov gives a file with no lines 0 percent. Rounded
+            # down, so a failing file never prints as 80%.
             jq -r --arg root "$GITHUB_WORKSPACE/" '
-              [.data[0].files[] | select(.summary.lines.count > 0 and .summary.lines.percent < 80)]
+              [.data[].files[] | select(.summary.lines.percent <= 80)]
               | sort_by(.summary.lines.percent)
               | .[]
-              | "\((.summary.lines.percent * 10 | round) / 10)% \(.filename | sub("^" + $root; ""))"
+              | "\((.summary.lines.percent * 10 | floor) / 10)% (\(.summary.lines.covered)/\(.summary.lines.count) lines) \(.filename | ltrimstr($root))"
             ' "$report" > "$out/low-files.txt"
           else
             : > "$out/low-files.txt"
@@ -144,6 +151,12 @@ jobs:
         with:
           name: coverage-summary
           path: ${{ runner.temp }}/coverage-summary
+
+      # Last, so it can report on whichever step failed: a test binary killed
+      # from outside prints nothing. The same check as ci.yml.
+      - name: Out-of-memory check
+        if: failure()
+        run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
 
   # One open issue, labelled coverage-full, holds the result of these runs.
   report:
@@ -193,7 +206,7 @@ jobs:
             else
               echo '- none named in the run log'
             fi
-            printf '\nFiles below 80%% lines:\n'
+            printf '\nFiles at or below 80%% lines (the tool passes a file only above 80%%):\n'
             if [ -s "$dir/low-files.txt" ]; then
               head -n 200 "$dir/low-files.txt" | sed 's/^/- /'
               total=$(wc -l < "$dir/low-files.txt")
@@ -202,6 +215,9 @@ jobs:
               fi
             else
               echo '- none listed'
+            fi
+            if [ ! -s "$dir/failing-tests.txt" ] && [ ! -s "$dir/low-files.txt" ]; then
+              printf '\nNo test or file is named, so the run failed for another reason. The run log has the error.\n'
             fi
             printf '\nThe failing tests and the files above must be fixed.\n'
           } > "$body"
