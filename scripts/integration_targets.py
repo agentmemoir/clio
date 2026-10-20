@@ -70,9 +70,10 @@ def modules_in_target(entry: Path) -> list[str]:
 
     A target's entry point is its own module root, so module paths are built the
     same way as for a crate: start at the entry file with an empty path and follow
-    its declarations.
+    its declarations. Every file of the target is a test file, so every module in
+    it that holds a test is a test module, with or without `cfg(test)`.
     """
-    return test_modules_in(read_text(entry), "", entry, [])
+    return test_modules_in(read_text(entry), "", entry, [], gated=True)
 
 
 def declared_targets(crates: dict[str, Path]) -> dict[str, set[str]]:

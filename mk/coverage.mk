@@ -7,14 +7,18 @@ export PHASE_TIMER_JSON ?= $(CURDIR)/target/phase-timing-$(shell date +%Y%m%d-%H
 #
 # No --summary-only, even though nothing here judges the report by machine: the full JSON is what makes the per-file rows available to a reader, and that flag would strip them. The export is about 70 MB.
 #
-# On the tool's own `--fail-under-*` family: it does have a per-file line gate, `--fail-under-file-lines`, and it is deliberately unused. It gates every file the report holds, which is the workspace on this target, so a change would fail on a file it never touched. `scripts/scoped_runner.py` gates only the files a change touched, names each offender in its log, and fails closed when the report does not hold a changed file at all. That is the whole reason the judgement is written in Python, and it is a reason about scope and reporting, not about what the tool can do.
+# On the tool's own `--fail-under-*` family: it does have a per-file line gate, `--fail-under-file-lines`, and this target leaves it off by default. It gates every file the report holds, which is the workspace on this target, so a change would fail on a file it never touched. Only the scheduled whole-workspace workflow turns it on, through COV_TOOL_ARGS, because judging every file is that workflow's purpose. `scripts/scoped_runner.py` gates only the files a change touched, names each offender in its log, and fails closed when the report does not hold a changed file at all. That is the whole reason the judgement is written in Python, and it is a reason about scope and reporting, not about what the tool can do.
+# Extra arguments for the one run `coverage` makes, given as `make coverage COV_TOOL_ARGS=...`.
+# Empty unless a caller passes some. The scheduled whole-workspace workflow passes its per-file line gate here.
+COV_TOOL_ARGS ?=
+
 coverage cov:
 	$(HERMETIC_OVERLAY_CLEAN)
 	@command -v cargo-llvm-cov >/dev/null || { \
 		echo 'error: cargo-llvm-cov not found; run: cargo install cargo-llvm-cov'; exit 1; }
 	@mkdir -p $(COV_DIR)
 	$(LLVM_COV_CLEAN_PROFRAW)
-	@status=0; if $(LLVM_COV_CMD) --json --output-path $(COV_JSON); then \
+	@status=0; if $(LLVM_COV_CMD) $(COV_TOOL_ARGS) --json --output-path $(COV_JSON); then \
 		printf 'JSON report: %s\n' '$(COV_JSON)'; \
 	else \
 		status=$$?; \
@@ -30,7 +34,7 @@ coverage cov:
 #
 # Through the gate shim, a run with no terminal attached exits 3 and runs nothing when this worktree already ran it on this branch, or when `python3 scripts/quick.py --base <ref> --plan --closure` shows it will not fit in 180 s or cannot be made. CI runs this target without the shim.
 #
-# Scoped by package, because that is the only unit cargo-llvm-cov supports, and by dependency closure, because the tests that cover a changed crate live in the crates that depend on it. What it does not establish is in the script's own docstring: it is not a workspace verdict, and a green run is "no problem in the files you touched".
+# It selects what `make quick` selects: the test modules each changed Rust file declares, and the integration target of a changed file under `tests/`. All of them run together in one instrumented nextest run over only the packages that hold them. A changed file fails when it owns no test module of its own, is below 80% lines, or is not in the report. Files under `tests/`, declared test modules, `build.rs`, and files that hold only module declarations and re-exports are not judged. Function and region percentages are printed and compared against nothing.
 COVERAGE_FAST_FLAGS := $(if $(PLAN),--plan )
 coverage-fast:
 	@python3 scripts/scoped_runner.py --self-test
@@ -42,7 +46,7 @@ coverage-fast:
 #  make test-fast PLAN=1
 #  make test-fast BASE=<ref>
 #
-# It shares the coverage gate's package closure, so the two can never disagree about what a change touches, and that closure is also what pulls in every crate that depends on the one you edited, which is where a signature change shows up as a compile error rather than a test failure. `make test` scopes the same way but stops at the changed crates; this one goes all the way down the closure.
+# The same selection as `make coverage-fast`, run once without instrumentation. It judges nothing: its exit code is the test run's exit code.
 #
 # Compare `make coverage-fast` on the same change: the two are close once a build exists, because what dominates is the test run rather than the instrumentation; test-fast wins on a cold tree and on a change that does not need a coverage verdict. Measured times are in the CI timing record, not in this file.
 test-fast:

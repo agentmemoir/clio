@@ -5,7 +5,7 @@
 "no changed Rust file" and exited 0. A reader took that for a pass. This module takes the
 other changed paths from `scoped_runner.changed_paths` so Quick can widen to the package
 that owns one, or say plainly that it tested nothing for it. The scoped runner treats the
-same files as build inputs (`scoped_select.build_inputs`) and runs every package a lock
+same files as build inputs (`scoped_select.widens_to_every_package`) and runs every package a lock
 file reaches; Quick keeps to the 60 s budget and lists those instead.
 
     in a package folder        -> the whole package (the file can change what its tests read)

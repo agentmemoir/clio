@@ -64,7 +64,6 @@ from owned_scanner import (  # noqa: E402
     holds_tests_text,
     read_text,
     resolve_child,
-    looks_like_test_file,
     test_modules_in,
     without_inline_bodies,
 )

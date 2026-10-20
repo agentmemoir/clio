@@ -1,0 +1,1 @@
+`make quick` selects only the test modules each changed Rust file declares, and a changed file that owns no test module selects no test; the plan prints `no test selected: <file> owns no test module` instead of widening to the tests that use the file or to its whole package.

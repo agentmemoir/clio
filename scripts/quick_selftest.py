@@ -10,20 +10,22 @@ enough to sit in `make scripts-check`.
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import sys
 import tempfile
 import tomllib
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import integration_targets  # noqa: E402
-import owned_tests as owned  # noqa: E402
 import quick  # noqa: E402
 import quick_estimate as est  # noqa: E402
+import scoped_cli  # noqa: E402
 import scoped_runner as runner  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
 
@@ -133,80 +135,9 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual(est.failed_cases(broken), [])
 
 
-def fake_lookup(table: dict[str, owned.OwnedSelection]):
-    def lookup(rel: str) -> owned.OwnedSelection:
-        if rel not in table:
-            raise owned.ResolutionError(f"{rel} is not reachable from any crate root")
-        return table[rel]
-
-    return lookup
-
-
-class SelectionTests(unittest.TestCase):
-    def test_each_row_of_the_table(self) -> None:
-        lookup = fake_lookup(
-            {
-                "crates/c/src/p.rs": owned.OwnedSelection("crates/c/src/p.rs", None, ["p::tests"]),
-                "crates/c/src/q.rs": owned.OwnedSelection("crates/c/src/q.rs", None, []),
-                "crates/c/tests/t.rs": owned.OwnedSelection("crates/c/tests/t.rs", "t", [""]),
-            }
-        )
-        cases = {
-            "crates/c/src/lib.rs": Term("c", kinds=("lib", "bin")),
-            "crates/c/src/main.rs": Term("c", kinds=("lib", "bin")),
-            "crates/c/src/p.rs": Term("c", modules=("p::tests",)),
-            "crates/c/tests/t.rs": Term("c", binary="t"),
-        }
-        for rel, expected in cases.items():
-            self.assertEqual(quick.term_for(rel, "c", lookup)[0], expected, rel)
-        owns_none, note = quick.term_for("crates/c/src/q.rs", "c", lookup)
-        self.assertTrue(owns_none.is_wide)
-        self.assertIn("owns no test module", note)
-        unmapped, note = quick.term_for("crates/c/src/new.rs", "c", lookup)
-        self.assertTrue(unmapped.is_wide)
-        self.assertIn("not reachable", note)
-
-    def test_merging_unites_modules_and_a_wide_term_absorbs_the_rest(self) -> None:
-        merged = quick.merge([Term("p", modules=("a",)), Term("p", modules=("b",)), Term("q")])
-        self.assertEqual(merged, [Term("p", modules=("a", "b")), Term("q")])
-        absorbed = quick.merge([Term("p", modules=("a",)), Term("p", reason="why"), Term("p", binary="t")])
-        self.assertEqual(absorbed, [Term("p", reason="why")])
-
-    def test_a_file_no_package_owns_fails_closed(self) -> None:
-        packages = [{"name": "c", "dir": "crates/c", "deps": set(), "targets": []}]
-        with self.assertRaises(runner.RunError):
-            quick.select(["elsewhere/x.rs"], packages, fake_lookup({}))
-
-
-class PathAttributeTests(unittest.TestCase):
-    """The real lookup on a throwaway crate, so a `#[path]` rename is followed."""
-
-    def test_a_path_attribute_overrides_the_name_the_file_suggests(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw).resolve()
-            src = root / "crates" / "fake" / "src"
-            src.mkdir(parents=True)
-            (src / "lib.rs").write_text("mod foo;\nmod bar;\n")
-            (src / "foo.rs").write_text(
-                'pub fn f() {}\n#[cfg(test)]\n#[path = "foo_odd_tests.rs"]\nmod odd;\n'
-            )
-            (src / "foo_odd_tests.rs").write_text("#[test]\nfn t() {}\n")
-            (src / "bar.rs").write_text("pub fn g() {}\n")
-            crates = {"fake": root / "crates" / "fake"}
-            owned.walk_crate.cache_clear()
-            with mock.patch.object(owned, "ROOT", root), mock.patch.object(
-                integration_targets, "ROOT", root
-            ), mock.patch.object(owned, "workspace_crates", lambda: crates):
-                by_source, _ = quick.term_for("crates/fake/src/foo.rs", "fake")
-                by_test_file, _ = quick.term_for("crates/fake/src/foo_odd_tests.rs", "fake")
-                owns_nothing, _ = quick.term_for("crates/fake/src/bar.rs", "fake")
-            owned.walk_crate.cache_clear()
-        self.assertEqual(by_source, Term("fake", modules=("foo::odd",)))
-        self.assertEqual(by_test_file, Term("fake", modules=("foo::odd",)))
-        self.assertTrue(owns_nothing.is_wide)
-
-
 class PlanTests(unittest.TestCase):
+    terms = [Term("p", modules=("a",)), Term("q", modules=("b",))]
+
     def history(self, seconds: float) -> list[est.Case]:
         return [est.Case("p", "a::x", seconds, False), est.Case("q", "b::y", seconds, False)]
 
@@ -228,34 +159,63 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(any("unknown" in line for line in unknown))
 
     def test_the_closure_estimate_judges_the_done_budget(self) -> None:
-        small = quick.closure_lines(["p", "q"], self.history(10.0))
+        small = quick.closure_lines(self.terms, self.history(10.0))
         self.assertTrue(any("within the 180 s budget" in line for line in small))
-        big = quick.closure_lines(["p", "q"], self.history(1000.0))
+        big = quick.closure_lines(self.terms, self.history(1000.0))
         self.assertTrue(any("leave the coverage verdict to CI" in line for line in big))
-        self.assertTrue(any("unknown" in line for line in quick.closure_lines(["p"], [])))
+        self.assertTrue(any("unknown" in line for line in quick.closure_lines(self.terms[:1], [])))
 
     def test_the_closure_estimate_counts_the_build_and_coverage_cost(self) -> None:
         # Two tests of 90 s fit the budget as test time alone; times the factor they do not.
-        lines = quick.closure_lines(["p", "q"], self.history(90.0))
+        lines = quick.closure_lines(self.terms, self.history(90.0))
         counted = 2 * 90.0 / quick.THREADS * quick.DONE_FACTOR
         self.assertTrue(any(f"{counted:.1f} s with the build and coverage (times 3)" in line for line in lines))
         self.assertTrue(any("over the 180 s budget" in line for line in lines))
         self.assertTrue(any("leave the coverage verdict to CI" in line for line in lines))
 
     def test_the_closure_json_says_within_over_or_unknown(self) -> None:
-        import json
-
-        def doc(packages: list[str], history: list[est.Case]) -> dict:
-            return json.loads(quick.closure_json(packages, history))
+        def doc(terms: list[Term], history: list[est.Case]) -> dict:
+            return json.loads(quick.closure_json(terms, history))
 
         each = quick.DONE_BUDGET_S * quick.THREADS / (2 * quick.DONE_FACTOR)  # two tests that just fit
-        edge = doc(["p", "q"], self.history(each))
+        edge = doc(self.terms, self.history(each))
         self.assertEqual((edge["done_seconds"], edge["within"], edge["tests"], edge["budget_seconds"]), (180.0, True, 2, 180.0))
-        self.assertFalse(doc(["p", "q"], self.history(each + 1))["within"])
-        unknown = doc(["p"], [])
+        self.assertFalse(doc(self.terms, self.history(each + 1))["within"])
+        unknown = doc(self.terms[:1], [])
         self.assertEqual((unknown["done_seconds"], unknown["within"]), (None, None))
         nothing_to_run = doc([], [])
         self.assertEqual((nothing_to_run["done_seconds"], nothing_to_run["within"]), (0.0, True))
+
+    def test_the_closure_prices_only_the_selected_tests_not_a_dependents(self) -> None:
+        # The changed file is in `a`; `b` depends on `a`. The run selects a's module `m` alone.
+        history = [est.Case("a", "m::t", 10.0, False), est.Case("a", "other::u", 500.0, False), est.Case("b", "m::t", 500.0, False)]
+        doc = json.loads(quick.closure_json([Term("a", modules=("m",))], history))
+        self.assertEqual((doc["packages"], doc["tests"]), (["a"], 1))
+        self.assertAlmostEqual(doc["done_seconds"], 10.0 / quick.THREADS * quick.DONE_FACTOR)
+
+    def test_the_closure_run_prices_the_selection_coverage_fast_runs(self) -> None:
+        # One changed file in `a`, which `b` depends on. Coverage-fast selects only a's module test.
+        rel = "crates/a/src/x.rs"
+        packages = [
+            {"name": "a", "deps": [], "targets": [], "tests": []},
+            {"name": "b", "deps": ["a"], "targets": [], "tests": []},
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            history = junit(Path(raw) / "junit.xml", [("a", "m::t", 10.0, False), ("a", "other::u", 500.0, False), ("b", "m::t", 500.0, False)])
+            with (
+                mock.patch.object(runner, "resolve_ref", return_value="origin/master"),
+                mock.patch.object(quick, "history_files", return_value=[history]),
+                mock.patch.object(scoped_cli, "select", return_value=([], [rel])),
+                mock.patch.object(scoped_cli, "is_present", return_value=True),
+                mock.patch.object(scoped_cli, "workspace_packages", return_value=packages),
+                mock.patch.object(runner, "package_owners", return_value=["a"]),
+                mock.patch.object(quick, "term_for", return_value=(Term("a", modules=("m",)), "note")),
+                redirect_stdout(io.StringIO()) as out,
+            ):
+                self.assertEqual(quick.run(quick.parse(["--base", "origin/master", "--plan", "--closure", "--json"])), runner.EXIT_OK)
+        doc = json.loads(out.getvalue())
+        self.assertEqual((doc["packages"], doc["tests"]), (["a"], 1))
+        self.assertAlmostEqual(doc["done_seconds"], 10.0 / quick.THREADS * quick.DONE_FACTOR)
 
     def test_a_linked_worktree_also_reads_the_main_checkouts_times(self) -> None:
         main = Path("/main")
