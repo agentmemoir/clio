@@ -4,7 +4,7 @@ One self-hosted operator runs a subject request to an honest result with local C
 
 ## Status
 
-This document covers the full local walk: scope inventory, verification, request start, status, copy custody, subject export and delivery, erasure retry, retention exception, event review, peer requests, archive custody, erasure journal backup and handoff, the guarded restore drill, and closure. Every command and refusal below was run and observed on a fresh local fixture unless the text names shipped tests as the evidence.
+This document covers the full local walk: scope inventory, verification, request start, status, copy custody, subject export and delivery, erasure retry, retention exception, event review, peer requests, archive custody, erasure journal backup and handoff, the guarded restore drill, and closure. Every command and refusal below was run and observed on a fresh local sample database unless the text names shipped tests as the evidence.
 
 ## Before you start
 
@@ -28,7 +28,7 @@ Store commands accept these connection flags. The archive commands `backup list`
 
 The `--backend` and `--db` flags work before or after the subcommand.
 
-Five compliance commands need a compliance-privilege actor: `request-copy`, `request-exception`, `peer-disposition`, `request-events`, and `review-export`. Without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` on those commands. The other commands in this runbook, such as `request-start`, `request-retry`, and `request-close`, run without this gate.
+Five compliance commands need a compliance-privilege actor: `request-copy`, `request-exception`, `peer-disposition`, `request-events`, and `review-export`. Without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` on those commands. The other commands in this runbook, `request-start` and `request-close`, run without this gate. `request-retry` and a direct `clio erase` still reach this same authorization gate, and the CLI's default actor is an agent, so pass `--actor harness` or `--actor system` on those commands too.
 
 ## Where the evidence lives
 
@@ -187,7 +187,7 @@ Attempt closure for one request only when it is eligible:
 clio compliance request-close --request-id r1 --product-path ./product.db
 ```
 
-As shipped, every close attempt refuses with `request closure refused: UnknownProductPath`, on every fixture and on both backends. No shipped command records a product path into the request, so the closure gate never sees a recorded path. A future release owns the fix. Until then the documented final outcome for closure is this refusal, so keep the request open and keep treating it as open.
+As shipped, every close attempt refuses with `request closure refused: UnknownProductPath`, on every sample database and on both backends. No shipped command records a product path into the request, so the closure gate never sees a recorded path. A future release owns the fix. Until then the documented final outcome for closure is this refusal, so keep the request open and keep treating it as open.
 
 ## Archive custody
 
@@ -278,15 +278,15 @@ Caveat: supported Clio restore refuses old or missing authority, but an operator
 
 With peers disabled, the core path still runs. The request reports `peer_enablement:"not_applicable"` at start, `peer-status` returns the bare report `{"ok":true}` because there are no peer slots, and `peer-disposition` for a peer id refuses with ``no peer action row exists for request `r1` peer `p1` `` because the peers-disabled store has no peer rows.
 
-When a request requires enabled peers, the shipped behavior is that an offline peer stays pending, a reconnecting peer is denied before it can read or replay, and a removed peer needs an explicit disposition. The shipped acceptance tests document the delivery and replay parts; the CLI walk below proves the rest on a fresh local fixture.
+When a request requires enabled peers, the shipped behavior is that an offline peer stays pending, a reconnecting peer is denied before it can read or replay, and a removed peer needs an explicit disposition. The shipped acceptance tests document the delivery and replay parts; the CLI walk below proves the rest on a fresh local sample database.
 
 ### Two-peer drill
 
-A two-peer drill is reachable from the shipped CLI. Two shipped commands create the enabled peer records, both run and observed on a fresh local fixture: `clio auth token add --label peer-a --actor user --bank default -o json` once per peer (each credential record becomes one enabled peer, and the verb refuses `--db` because it manages the token file, not a store), and `clio config set sync.omit false --scope deployment -o json` (which brings sync into play, the condition the request opener checks before treating records as peers). Then `clio auth token list -o json` shows both records.
+A two-peer drill is reachable from the shipped CLI. Two shipped commands create the enabled peer records, both run and observed on a fresh local sample database: `clio auth token add --label peer-a --actor user --bank default -o json` once per peer (each credential record becomes one enabled peer, and the verb refuses `--db` because it manages the token file, not a store), and `clio config set sync.omit false --scope deployment -o json` (which brings sync into play, the condition the request opener checks before treating records as peers). Then `clio auth token list -o json` shows both records.
 
-The request then opens with peers required, run and observed on the same fixture: `clio compliance request-start --request-id r1 --kind erasure --subject-id s1 --verification verified --actor harness -o json` returns `"peer_enablement":"required"` with one pending slot per record, `"peers":{"peer-a":"pending","peer-b":"pending"}`, frozen at start.
+The request then opens with peers required, run and observed on the same sample database: `clio compliance request-start --request-id r1 --kind erasure --subject-id s1 --verification verified --actor harness -o json` returns `"peer_enablement":"required"` with one pending slot per record, `"peers":{"peer-a":"pending","peer-b":"pending"}`, frozen at start.
 
-Per-peer behavior from the same walk, each observed in command output: `clio compliance peer-status --request-id r1 --actor harness -o json` returns `{"ok":true,"peer-a":"pending","peer-b":"pending"}`, the offline default. `clio compliance peer-retry --request-id r1 --legal-basis gdpr-art17 --actor harness -o json` succeeds but changes no CLI-visible slot. `clio compliance peer-disposition --request-id r1 --peer-id peer-a --disposition removal_evidence --actor harness -o json` accepts `removal_evidence`, `retention_approved`, or `unknown` for an existing peer row (the `removed` spelling refuses as a usage error), and an unknown peer id refuses with ``no peer action row exists for request `r1` peer `p9` ``. After both dispositions, `peer-status` and `request-status` still show the slots `pending` and `technical_completion` `pending`, so do not read closure progress from a disposition alone. `clio compliance request-events --request-id r1 --actor harness -o json` returned zero rows for this walk, and `clio compliance request-close --product-path prod/x` still refuses with `request closure refused: UnknownProductPath`, unchanged by the two-peer setup.
+Per-peer behavior from the same walk, each observed in command output: `clio compliance peer-status --request-id r1 --actor harness -o json` returns `{"ok":true,"peer-a":"pending","peer-b":"pending"}`, the offline default. `clio compliance peer-retry --request-id r1 --legal-basis gdpr-art17 --actor harness -o json` succeeds but changes no CLI-visible slot. `clio compliance peer-disposition --request-id r1 --peer-id peer-a --disposition removal_evidence --actor harness -o json` accepts `removal_evidence`, `retention_approved`, or `unknown` for an existing peer row (the `removed` spelling refuses as a usage error), and an unknown peer id refuses with ``no peer action row exists for request `r1` peer `p9` ``. Both dispositions in this walk recorded no `--proof-ref`, and a `removal_evidence` disposition without a proof reference does not settle the peer slot. A proof-bearing disposition does settle it; the shipped test `crates/clio/tests/cross_path_compliance/scenario_all_bank_peer.rs` walks that case. After both dispositions, `peer-status` and `request-status` still show the slots `pending` and `technical_completion` `pending`, so do not read closure progress from a disposition alone. `clio compliance request-events --request-id r1 --actor harness -o json` returned zero rows for this walk, and `clio compliance request-close --product-path prod/x` still refuses with `request closure refused: UnknownProductPath`, unchanged by the two-peer setup.
 
 Three behaviors stay outside this CLI walk, and the shipped tests in `crates/clio/tests/peer_erasure_acceptance/` carry them: peer delivery and replay denial (no CLI command delivers to a peer or replays a peer result; `scenarios_peer.rs` and `scenarios_replay.rs` cover it), visibility of a recorded disposition in a CLI read (`scenarios_disposition.rs`), and per-peer event rows (none appeared in `request-events` during the walk).
 
@@ -300,4 +300,4 @@ A direct confirmed `clio erase` can refuse with `the banks sharing the subject k
 
 ## What is next
 
-This runbook grows a section only after that section is walked on a fresh local fixture. The walk now covers the full subject request, archive custody, journal backup and handoff, and the guarded restore drill. Where a behavior was documented from the shipped tests instead of a local run, the text says so.
+This runbook grows a section only after that section is walked on a fresh local sample database. The walk now covers the full subject request, archive custody, journal backup and handoff, and the guarded restore drill. Where a behavior was documented from the shipped tests instead of a local run, the text says so.
