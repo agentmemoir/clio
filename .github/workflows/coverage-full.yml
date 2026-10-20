@@ -1,0 +1,220 @@
+# Whole-workspace coverage on the default branch, twice a day.
+#
+# GitHub starts scheduled workflows only on the default branch. GitHub disables
+# scheduled workflows in a public repository after 60 days without repository
+# activity.
+name: coverage-full
+
+on:
+  schedule:
+    - cron: "7 3,15 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-full
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CLIO_DATABASE_URL: postgres://clio:clio@127.0.0.1:5432/clio
+  # One compiler at a time, the same cap as ci.yml: the instrumented build is
+  # OOM-killed on a small runner otherwise.
+  CARGO_BUILD_JOBS: "1"
+
+jobs:
+  coverage:
+    name: whole workspace (80% lines on each file)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: clio
+          POSTGRES_PASSWORD: clio
+          POSTGRES_DB: clio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clio -d clio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    outputs:
+      # Set only by the run step, after the coverage command has returned.
+      finished: ${{ steps.run.outputs.finished }}
+      verdict: ${{ steps.run.outputs.verdict }}
+    steps:
+      - name: Mount temporary storage
+        run: |
+          sudo mkdir -p /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /mnt/noexec
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
+          echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The same pin the other jobs use.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Fail if the runner and the pin disagree
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          if [ "$pinned" != "$actual" ]; then
+            echo "::error::runner has rustc $actual but rust-toolchain.toml pins $pinned"
+            exit 1
+          fi
+          echo "rustc $actual matches the pin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # One instrumented run of the whole workspace: it is the test run and the
+      # coverage run. The per-file line gate is passed to the tool here and nowhere
+      # else. `finished` is written only after the command returns, pass or fail, so
+      # a timeout or a cancel leaves it unset.
+      - name: Whole-workspace coverage (80% lines on each file)
+        id: run
+        shell: bash
+        run: |
+          set +e
+          set +o pipefail
+          make coverage COV_TOOL_ARGS="--fail-under-file-lines 80" 2>&1 | tee "$RUNNER_TEMP/coverage.log"
+          status=${PIPESTATUS[0]}
+          echo "finished=true" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 0 ]; then
+            echo "verdict=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "verdict=fail" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      # Turns the run log and the report into the small files the report job reads.
+      - name: Summarise the run for the report job
+        if: always() && steps.run.outputs.finished == 'true'
+        shell: bash
+        run: |
+          set +e
+          set +o pipefail
+          out="$RUNNER_TEMP/coverage-summary"
+          mkdir -p "$out"
+          printf '%s\n' "$GITHUB_SHA" > "$out/commit.txt"
+          sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' "$RUNNER_TEMP/coverage.log" \
+            | grep -E '^ *FAIL \[' \
+            | sed -E 's/^ *FAIL \[[^]]*\] *//' \
+            | sort -u > "$out/failing-tests.txt"
+          report=target/coverage/coverage.json
+          if [ -s "$report" ]; then
+            jq -r --arg root "$GITHUB_WORKSPACE/" '
+              [.data[0].files[] | select(.summary.lines.count > 0 and .summary.lines.percent < 80)]
+              | sort_by(.summary.lines.percent)
+              | .[]
+              | "\((.summary.lines.percent * 10 | round) / 10)% \(.filename | sub("^" + $root; ""))"
+            ' "$report" > "$out/low-files.txt"
+          else
+            : > "$out/low-files.txt"
+            echo "::warning::no coverage report was written"
+          fi
+          echo "failing tests: $(wc -l < "$out/failing-tests.txt"); files below 80%: $(wc -l < "$out/low-files.txt")"
+
+      - name: Upload the run summary
+        if: always() && steps.run.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: ${{ runner.temp }}/coverage-summary
+
+  # One open issue, labelled coverage-full, holds the result of these runs.
+  report:
+    name: report the result
+    needs: coverage
+    if: always() && needs.coverage.outputs.finished == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - name: Download the run summary
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage-summary
+
+      - name: Record the result on the open coverage issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERDICT: ${{ needs.coverage.outputs.verdict }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          dir=coverage-summary
+          sha=$(cat "$dir/commit.txt")
+          # The oldest open issue, if one exists. Scheduled runs queue, so one run acts at a time.
+          issue=$(gh issue list -R "$REPO" --label coverage-full --state open --limit 100 \
+            --json number --jq 'sort_by(.number) | .[0].number // empty')
+
+          if [ "$VERDICT" = "pass" ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" -R "$REPO" \
+                --body "The full workspace coverage suite is green at $sha. Run: $RUN_URL"
+              gh issue close "$issue" -R "$REPO"
+            fi
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/coverage-body.md"
+          {
+            printf 'Run: %s\n\nCommit: %s\n\nFailing tests:\n' "$RUN_URL" "$sha"
+            if [ -s "$dir/failing-tests.txt" ]; then
+              sed 's/^/- /' "$dir/failing-tests.txt"
+            else
+              echo '- none named in the run log'
+            fi
+            printf '\nFiles below 80%% lines:\n'
+            if [ -s "$dir/low-files.txt" ]; then
+              head -n 200 "$dir/low-files.txt" | sed 's/^/- /'
+              total=$(wc -l < "$dir/low-files.txt")
+              if [ "$total" -gt 200 ]; then
+                echo "- and $((total - 200)) more, in the coverage-summary artifact of the run"
+              fi
+            else
+              echo '- none listed'
+            fi
+            printf '\nThe failing tests and the files above must be fixed.\n'
+          } > "$body"
+
+          if [ -z "$issue" ]; then
+            gh issue create -R "$REPO" --title "Full workspace coverage suite failed on master" \
+              --label coverage-full --label bug --label area:tooling --label difficulty:medium \
+              --body-file "$body"
+            exit 0
+          fi
+          last=$(gh issue view "$issue" -R "$REPO" --json comments --jq '.comments | last | .body // ""')
+          if [[ "$last" == *"$sha"* ]]; then
+            echo "The latest comment on the open issue already names $sha."
+          else
+            gh issue comment "$issue" -R "$REPO" --body-file "$body"
+          fi

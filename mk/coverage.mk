@@ -8,13 +8,17 @@ export PHASE_TIMER_JSON ?= $(CURDIR)/target/phase-timing-$(shell date +%Y%m%d-%H
 # No --summary-only, even though nothing here judges the report by machine: the full JSON is what makes the per-file rows available to a reader, and that flag would strip them. The export is about 70 MB.
 #
 # On the tool's own `--fail-under-*` family: it does have a per-file line gate, `--fail-under-file-lines`, and it is deliberately unused. It gates every file the report holds, which is the workspace on this target, so a change would fail on a file it never touched. `scripts/scoped_runner.py` gates only the files a change touched, names each offender in its log, and fails closed when the report does not hold a changed file at all. That is the whole reason the judgement is written in Python, and it is a reason about scope and reporting, not about what the tool can do.
+# Extra arguments for the one run `coverage` makes, given as `make coverage COV_TOOL_ARGS=...`.
+# Empty unless a caller passes some. The scheduled whole-workspace workflow passes its per-file line gate here.
+COV_TOOL_ARGS ?=
+
 coverage cov:
 	$(HERMETIC_OVERLAY_CLEAN)
 	@command -v cargo-llvm-cov >/dev/null || { \
 		echo 'error: cargo-llvm-cov not found; run: cargo install cargo-llvm-cov'; exit 1; }
 	@mkdir -p $(COV_DIR)
 	$(LLVM_COV_CLEAN_PROFRAW)
-	@status=0; if $(LLVM_COV_CMD) --json --output-path $(COV_JSON); then \
+	@status=0; if $(LLVM_COV_CMD) $(COV_TOOL_ARGS) --json --output-path $(COV_JSON); then \
 		printf 'JSON report: %s\n' '$(COV_JSON)'; \
 	else \
 		status=$$?; \

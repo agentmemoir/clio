@@ -15,7 +15,8 @@ prose as prose:
 
 1. **A threshold flag passed to the coverage tool.** Any `--fail-under-*` or
    `--fail-uncovered-*` argument in a Makefile, a workflow or a script is a
-   finding. The tool has those flags, including a per-file one, and every one of
+   finding, except the per-file line gate in the scheduled whole-workspace workflow and
+   nowhere else. The tool has those flags, including a per-file one, and every one of
    them gates something other than this rule: a total, or every file in a report
    rather than the files a change touched.
 
@@ -124,6 +125,12 @@ class Finding(NamedTuple):
 #: version of the same one.
 THRESHOLD_FLAG = re.compile(r"--fail-(?:under|uncovered)-[a-z-]+")
 
+#: The one per-file line gate the tool may be handed, and the one file that hands it.
+#: The scheduled whole-workspace run is the only place it is written. The pull-request
+#: path and every other file still refuse it.
+PER_FILE_GATE_FLAG = "--fail-under-file-lines"
+PER_FILE_GATE_HOME = ".github/workflows/coverage-full.yml"
+
 # --- 2. a removed mechanism, by name ----------------------------------------------
 
 #: Closed list. A path is a finding because it exists at all.
@@ -203,6 +210,17 @@ def candidate_paths(root: Path = ROOT) -> list[Path]:
     return sorted(out)
 
 
+def text_to_scan(rel: str, text: str) -> str:
+    """The text the flag and phrase scans read for one file.
+
+    The per-file gate is taken out of the scheduled workflow's text and out of no other
+    file, so that one file is still held to every other shape this check looks for.
+    """
+    if rel == PER_FILE_GATE_HOME:
+        return text.replace(PER_FILE_GATE_FLAG, "")
+    return text
+
+
 def scan_text(rule: str, rel: str, text: str, patterns: Iterable[tuple[str, str]]) -> list[Finding]:
     """Every match of `patterns` in `text` that is not describing a withdrawal.
 
@@ -274,6 +292,7 @@ def scan(root: Path = ROOT) -> tuple[list[Finding], list[str]]:
         except (OSError, UnicodeDecodeError) as error:
             unreadable.append(f"{rel}: {error}")
             continue
+        text = text_to_scan(rel, text)
         findings += scan_text(
             "a threshold flag handed to the tool",
             rel,
