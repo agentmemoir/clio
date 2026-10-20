@@ -17,6 +17,7 @@
 //! - The outcome-failure and restart-reconcile arms (see
 //!   `scenario_intent_outcome_faults_reconcile` and
 //!   `scenario_intent_outcome_faults_review_outcome`)
+//! - The seeded stores and the scratch directory (see `case_fixtures`)
 //!
 //! ## Boundary
 //!

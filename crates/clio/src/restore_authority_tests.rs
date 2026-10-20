@@ -4,10 +4,10 @@
 //! # Responsibility
 //!
 //! This module is responsible for the tests of `restore_authority`: an archive
-//! with no recorded authority, a SQLite payload whose tombstone hash or subject
-//! key becomes a reference, a key store whose slot id becomes a reference, an
-//! undeclared member that stays unknown, a Postgres dump whose subject tables
-//! become references, and a clean archive that yields no reference.
+//! recording no authority, a SQLite payload whose tombstone hash or subject key
+//! becomes a reference, a key store slot id becomes a reference, an undeclared
+//! member stays unknown, a Postgres dump whose tombstone, subject key and item
+//! subject tables become references, and a clean archive yields no reference.
 //!
 //! ## Owns
 //! - The SQLite and Postgres archive fixtures these cases build

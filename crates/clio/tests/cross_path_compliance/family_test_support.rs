@@ -27,8 +27,8 @@
 //! it expects, should normally require changes here. Changes to a scenario's
 //! assertions should not.
 //!
-//! Keep this module focused on the ledger expectations and the check that
-//! pins them.
+//! Keep this module focused on the export-manifest expectations and the check
+//! that pins them.
 
 use serde_json::Value;
 
@@ -62,8 +62,9 @@ const CONTROL_ITEMS: u64 = 1;
 /// confidence entry. The ledger measures both tables as one family.
 const BELIEF_ROWS: u64 = 2;
 
-/// What the every-family fixture wrote, and what the scope ledger therefore
-/// expects the export manifest to report for the subject under test.
+/// What the every-family fixture wrote: the count each export family holds
+/// for the subject under test, and the named ledger omission the export
+/// manifest then carries.
 #[derive(Debug, Clone)]
 pub struct FamilyFixture {
     /// The subject's row count per family, in the export manifest's order.
@@ -78,8 +79,8 @@ impl FamilyFixture {
     /// The item family is measured store-wide, so the other subject's item is
     /// the remainder the subject's own selection leaves out. The belief family
     /// is measured over the belief and its confidence-entry tables, so the one
-    /// seeded belief leaves its confidence entry out. The three families the
-    /// ledger links by a stored subject column select every row they hold.
+    /// seeded belief leaves its confidence entry out. The three export
+    /// families with a subject column select every row they hold.
     pub(crate) fn expected() -> Self {
         let measured_items = SUBJECT_ITEMS + CONTROL_ITEMS;
         let counts = vec![
@@ -155,8 +156,8 @@ impl FamilyFixture {
 /// equal the seeded count, and each family must carry exactly the omission the
 /// ledger names for it: none for a family the ledger selects completely, and
 /// the ledger's own reason for every family it cannot attribute to the subject.
-/// The manifest also names omissions for the store slots the ledger does not
-/// count, so only the nine counted families are checked here.
+/// The manifest also names omissions for the store slots it does not count,
+/// so only the nine counted families are checked here.
 pub fn assert_every_family(manifest: &Value, fixture: &FamilyFixture) {
     let counts = manifest["counts_by_type"]
         .as_array()

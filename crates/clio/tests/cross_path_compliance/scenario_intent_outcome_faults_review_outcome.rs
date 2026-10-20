@@ -18,6 +18,7 @@
 //!   `scenario_intent_outcome_faults_reconcile`)
 //! - The pending-restore reconcile under the intent fault (see
 //!   `scenario_intent_outcome_faults_pending_restore`)
+//! - The seeded stores and the scratch directory (see `case_fixtures`)
 //!
 //! ## Boundary
 //!

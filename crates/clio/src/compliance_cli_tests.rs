@@ -28,8 +28,11 @@
 use super::*;
 use serde_json::{Value, json};
 
-/// The nine export family names the ledger must always name, in the order the
-/// export set declares them.
+/// The nine export families the export manifest counts, in the order the
+/// manifest declares them.
+///
+/// The scope ledger names many more families than the manifest counts, but it
+/// always names these nine.
 const EXPORT_FAMILIES: &[&str] = &[
     "items",
     "triples",

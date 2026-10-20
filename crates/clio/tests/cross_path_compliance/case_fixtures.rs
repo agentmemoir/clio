@@ -14,6 +14,7 @@
 //! - `unique`, `scratch`, `item`, `write_item`, `open_sqlite`, `open_pg`,
 //!   `seed_sqlite`, and `seed_pg`
 //! - `journal_file` and `backup_dir`, the CLI-visible paths
+//! - `ThreadKeyGuard`, the thread-local key guard a scenario installs
 //!
 //! ## Does not own
 //! - Archive assembly and the read-back probes (see `support_test_support`)
@@ -155,4 +156,16 @@ pub fn backup_dir(scratch: &common::Scratch) -> PathBuf {
     let path = scratch.join("backups");
     std::fs::create_dir_all(&path).expect("create the backup directory");
     path
+}
+
+/// The thread-local key this scenario installs, cleared when the guard drops.
+///
+/// The key is a thread-local, so a scenario that leaves it installed hands it
+/// to the next test the harness runs on the same thread.
+pub struct ThreadKeyGuard;
+
+impl Drop for ThreadKeyGuard {
+    fn drop(&mut self) {
+        clio_config::secret_seal::test_key::clear_thread_key();
+    }
 }

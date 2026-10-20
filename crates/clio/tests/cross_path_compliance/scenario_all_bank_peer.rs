@@ -17,6 +17,8 @@
 //!   `support_test_support`, and `support_pg_test_support`)
 //! - The seeded items, the frozen peer set, and the read-back probes (see
 //!   `scenario_all_bank_peer_test_support`)
+//! - The shared thread-key guard (see `case_fixtures`)
+//! - The shared refusal helper and the partial-bank refusal (see `cli_test_support`)
 //!
 //! ## Boundary
 //!
@@ -27,7 +29,8 @@
 
 use crate::case_fixtures::{
     BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_ITEM, DENIED_MARKER,
-    DENIED_SUBJECT, backup_dir, journal_file, open_pg, open_sqlite, scratch, unique, write_item,
+    DENIED_SUBJECT, ThreadKeyGuard, backup_dir, journal_file, open_pg, open_sqlite, scratch,
+    unique, write_item,
 };
 use crate::cli_test_support::{PARTIAL_BANK_REFUSAL, assert_refusal};
 use crate::peer_process_test_support::{CREDENTIAL_STORE_FILE, Deployment, Peer, PeerProbe};
@@ -65,18 +68,6 @@ impl<T> CrossStore for T where
         + LocalEventStore
         + BankScopeStore
 {
-}
-
-/// The thread-local key this scenario installs, cleared when the guard drops.
-///
-/// The key is a thread-local, so a scenario that leaves it installed hands it
-/// to the next test the harness runs on the same thread.
-pub(crate) struct ThreadKeyGuard;
-
-impl Drop for ThreadKeyGuard {
-    fn drop(&mut self) {
-        clio_config::secret_seal::test_key::clear_thread_key();
-    }
 }
 
 /// Write this process's key file and install the same key on this thread.

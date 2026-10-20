@@ -4,10 +4,10 @@
 //! # Responsibility
 //!
 //! This module is responsible for proving the export-then-erase-then-restore
-//! cross-path claim for one subject: that every family is exported, the
-//! delivered copy is recorded, the erasure completes with retry, every
-//! pre-erasure archive restore route refuses, and the other subject stays
-//! readable.
+//! cross-path claim for one subject: that every export family the manifest
+//! counts is exported, the delivered copy is recorded, the erasure completes
+//! with retry, every pre-erasure archive restore route refuses, and the other
+//! subject stays readable.
 //!
 //! ## Owns
 //! - The export, delivered-copy, erase, and restore-route steps of this claim
@@ -18,6 +18,7 @@
 //! - The archive assembly and read-back probes, and the Postgres gate (see
 //!   `support_test_support` and `support_pg_test_support`)
 //! - The shared refusal assertions (see `refusals_test_support` and `cli_test_support`)
+//! - The seeded stores and the shared thread-key guard (see `case_fixtures`)
 //!
 //! ## Boundary
 //!
@@ -28,7 +29,7 @@
 
 use crate::case_fixtures::{
     self, BANK, CONTROL_ITEM, CONTROL_MARKER, CONTROL_SUBJECT, DENIED_MARKER, DENIED_SUBJECT,
-    unique,
+    ThreadKeyGuard, unique,
 };
 use crate::cli_test_support::{DENIED_SUBJECT_REFUSAL, assert_refusal, clio_command, run_captured};
 use crate::family_fixtures;
@@ -180,18 +181,6 @@ fn key_path(journal: &Path) -> PathBuf {
         .join("clio.key")
 }
 
-/// The thread-local key this scenario installs, cleared when the guard drops.
-///
-/// The key is a thread-local, so a scenario that leaves it installed hands it
-/// to the next test the harness runs on the same thread.
-struct ThreadKeyGuard;
-
-impl Drop for ThreadKeyGuard {
-    fn drop(&mut self) {
-        clio_config::secret_seal::test_key::clear_thread_key();
-    }
-}
-
 /// Write this process's key file and install the same key on this thread.
 ///
 /// The returned guard clears the thread-local key when it drops, so the key
@@ -284,10 +273,12 @@ fn drive_claim(claim: &Claim) {
     let open_copy = unique("copy-open");
     let export = claim.export_path.to_str().expect("UTF-8 export path");
 
-    // 1. Export one subject: the manifest must carry every family the ledger
-    //    names, with the counts the every-family fixture seeded and the
-    //    ledger's own omissions, and the other subject's marker must be absent
-    //    from the delivered file.
+    // 1. Export one subject: the manifest must carry every export family the
+    //    manifest counts, with the counts the every-family fixture seeded
+    //    and the ledger omissions the export must then carry, and the other
+    //    subject's marker must be absent from the delivered file.
+    //    The scope ledger names more families than the manifest counts, and
+    //    the families the manifest omits are named in that omission list.
     let exported = claim.ok(&format!(
         "export --out {export} --subject {DENIED_SUBJECT} --content-mode dsar_plaintext"
     ));

@@ -16,6 +16,7 @@
 //!   `refusals_test_support`)
 //! - The seeded stores and the Postgres gate (see `case_fixtures` and
 //!   `support_pg_test_support`)
+//! - The shared thread-key guard (see `case_fixtures`)
 //! - The event contract and the request state machine (see `clio-compliance`)
 //!
 //! ## Boundary
@@ -26,7 +27,7 @@
 //! Keep this module focused on the event-review claim.
 
 use crate::case_fixtures::{
-    BANK, DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, seed_pg, seed_sqlite,
+    BANK, DENIED_ITEM, DENIED_MARKER, DENIED_SUBJECT, ThreadKeyGuard, seed_pg, seed_sqlite,
 };
 use crate::cli_test_support::{clio_command, run_captured};
 use crate::refusals_test_support::Env;
@@ -49,18 +50,6 @@ const KEY: [u8; 32] = [0x3c; 32];
 /// production writes instead of a spelling this test invents.
 fn erasure_action_id(request: &str) -> String {
     format!("{}:{request}", ProtectedAction::Erasure.producer_id())
-}
-
-/// The thread-local key this scenario installs, cleared when the guard drops.
-///
-/// The key is a thread-local, so a scenario that leaves it installed hands it
-/// to the next test the harness runs on the same thread.
-struct ThreadKeyGuard;
-
-impl Drop for ThreadKeyGuard {
-    fn drop(&mut self) {
-        clio_config::secret_seal::test_key::clear_thread_key();
-    }
 }
 
 /// Install the shared Clio encryption key on this thread and write it to the

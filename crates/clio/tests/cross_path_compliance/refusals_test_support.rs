@@ -14,6 +14,8 @@
 //! - `ok`, `assert_forbidden`, `assert_scope_change_refusal`,
 //!   `assert_damaged_journal_refusal`, `assert_open_copy`, and
 //!   `assert_unknown_product_path_refusal`
+//! - `assert_open_copy_refusal`, the open-copy refusal check for a run whose
+//!   exit code and stderr are already captured
 //! - `seed_done_path`, the shared done product path a refusal is measured
 //!   against
 //!

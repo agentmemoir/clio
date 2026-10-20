@@ -4,16 +4,16 @@
 //! # Responsibility
 //!
 //! This module is responsible for the every-family fixture of the cross-path
-//! compliance proof: one row of each stored family the scope ledger names,
-//! written through the production write paths of the store.
+//! compliance proof: one row of each of the nine export families, written
+//! through the production write paths of the store.
 //!
 //! ## Owns
 //! - `seed_sqlite`, `seed_pg`, and `seed_every_family`
 //! - The one row of each family the subject under test carries
 //!
 //! ## Does not own
-//! - The ledger's per-family expectations and the manifest check (see
-//!   `family_test_support`)
+//! - The export manifest's per-family expectations, the ledger's omissions,
+//!   and the manifest check (see `family_test_support`)
 //! - The plain item fixture, the scratch directory, and the store openers (see
 //!   `case_fixtures`)
 //!
@@ -56,13 +56,13 @@ pub fn seed_pg(url: &str, kms: &Path) -> FamilyFixture {
     seed_every_family(&store, BANK)
 }
 
-/// Seed one row of every stored family the ledger names, and report the counts
-/// and the ledger omissions the export must then carry.
+/// Seed one row of every export family the manifest counts, and report the
+/// counts and the ledger omissions the export must then carry.
 ///
-/// The subject under test gets one row of every family the ledger links by a
-/// stored subject column. The other subject gets the one item the readability
-/// control reads back. The two families the ledger reports as inseparable get
-/// their bank-scoped row too, so the store holds a row in them as well. The
+/// The subject under test gets one row of every export family with a subject
+/// column. The other subject gets the one item the readability control reads
+/// back. The two families the ledger reports as inseparable get their
+/// bank-scoped row too, so the store holds a row in them as well. The
 /// tombstone family stores only a one-way subject hash, so it holds no row
 /// until the erasure writes one.
 pub fn seed_every_family<S>(store: &S, bank: &str) -> FamilyFixture
@@ -80,8 +80,8 @@ where
     FamilyFixture::expected()
 }
 
-/// The subject's one semantic item: the family the ledger links by its own
-/// stored subject column.
+/// The subject's one semantic item: the export family with its own stored
+/// subject column.
 fn write_subject_item<S: Store>(store: &S, bank: &str, subject: &str, id: &str, gist: &str) {
     store
         .create_memory_item(
@@ -236,8 +236,8 @@ fn write_failure<S: HistoryStore>(store: &S, bank: &str, subject: &str) {
         .expect("write the fixture failure");
 }
 
-/// One belief object with its first confidence entry: the family the ledger
-/// links by the belief's own stored subject column.
+/// One belief object with its first confidence entry: the export family with
+/// the belief's own stored subject column.
 fn write_belief<S: BeliefStore>(store: &S, bank: &str, subject: &str) {
     let entry = ConfidenceEntry::new(NOW, 0.7, "cross-path-evidence", SourceType::UserStated)
         .expect("build the confidence entry");

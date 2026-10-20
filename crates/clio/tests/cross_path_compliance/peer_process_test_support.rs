@@ -17,10 +17,10 @@
 //! - `PeerProbe`, the read-only view of the peer's store and quarantine rows
 //!
 //! ## Does not own
-//! - The synthetic fixtures and read-back probes (see `case_fixtures` and `support_test_support`)
+//! - The synthetic fixtures, read-back probes, and the CLI driver (see
+//!   `case_fixtures`, `support_test_support`, and `cli_test_support`)
 //! - The incomplete-state scenarios (`scenario_refusals_incomplete`)
-//! - The store, request ledger, and erasure primitives (see `clio-store` and
-//!   `clio-compliance`)
+//! - The store, request ledger, and erasure primitives (see `clio-store` and `clio-compliance`)
 //!
 //! ## Boundary
 //!
@@ -252,7 +252,9 @@ impl Peer {
             let _ = child.wait();
         }
         if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+            reader
+                .join()
+                .expect("the peer stdout reader thread panicked");
         }
     }
 

@@ -16,6 +16,7 @@
 //! ## Does not own
 //! - The deployment fixture and the claims the routes prove (see
 //!   `scenario_review_export`)
+//! - The CLI driver and the captured run it returns (see `cli_test_support`)
 //! - The export writer and the destination custody boundary (see
 //!   `clio-compliance`)
 //!

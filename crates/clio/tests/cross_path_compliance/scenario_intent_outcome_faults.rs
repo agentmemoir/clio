@@ -19,7 +19,10 @@
 //! - The outcome-failure and restart-reconcile arms (see
 //!   `scenario_intent_outcome_faults_reconcile` and
 //!   `scenario_intent_outcome_faults_review_outcome`)
-//! - The seeded stores and read-back probes (see `case_fixtures` and `support_test_support`)
+//! - The pending-restore reconcile under the intent fault (see
+//!   `scenario_intent_outcome_faults_pending_restore`)
+//! - The seeded stores and read-back probes (see `case_fixtures` and
+//!   `support_pg_test_support`)
 //!
 //! ## Boundary
 //!
