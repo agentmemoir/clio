@@ -1,13 +1,13 @@
-"""The Done check at the gate: a program's `make coverage-fast` runs once, and only when it fits.
+"""The Done check at the gate: a program's `make coverage-fast` runs only when it fits, and a few times per branch.
 
 `make coverage-fast` is an optional local check of the changed files' coverage; CI judges the
 same files on every pull request. Before a run starts, this module decides whether a run with
 no terminal attached may go on.
 
 A person at a terminal is never refused. Without a terminal, the run is refused when this
-worktree already ran it on this branch, when Quick's closure estimate is over the budget, and
-when no estimate can be made. A replay of a stored verdict costs nothing, and the gate allows
-it before this module is asked.
+worktree already made `FRESH_RUNS_CAP` fresh runs on this branch, when Quick's closure estimate
+is over the budget, and when no estimate can be made. A replay of a stored verdict costs nothing,
+and the gate allows it before this module is asked.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from gate_tree import cache_root
 
 EXIT_REFUSED = 3
 KIND = "coverage-fast"
+FRESH_RUNS_CAP = 3
 ESTIMATE_TIMEOUT_S = 60
 LEFT_TO_CI = "CI decides the coverage verdict; report it as left to CI."
 
@@ -62,13 +63,14 @@ def _estimate(root: str, base: str) -> tuple[dict | None, str]:
     return (doc, "") if isinstance(doc, dict) else (None, "unreadable answer")
 
 
-def _ran_before(root: str, branch: str | None) -> bool:
-    """True when this worktree already ran the check for real on this branch."""
+def _fresh_runs(root: str, branch: str | None) -> int:
+    """How many real coverage-fast runs this worktree made on this branch; replays and plans do not count."""
     here = str(Path(root).resolve())
     try:
         text = (cache_root() / RUNS_FILE).read_text()
     except OSError:
-        return False
+        return 0
+    count = 0
     for line in text.splitlines():
         try:
             run = json.loads(line)
@@ -79,8 +81,8 @@ def _ran_before(root: str, branch: str | None) -> bool:
         argv = run.get("argv")
         if isinstance(argv, list) and not _is_plan([str(arg) for arg in argv]):
             if run.get("root") == here and run.get("branch") == branch:
-                return True
-    return False
+                count += 1
+    return count
 
 
 def decide(kind: str, argv: list[str], root: str) -> Decision:
@@ -88,8 +90,9 @@ def decide(kind: str, argv: list[str], root: str) -> Decision:
     if kind != KIND or _is_plan(argv) or _terminal_attached():
         return ALLOW
     branch = _rev_parse(root, "--abbrev-ref", "HEAD")
-    if _ran_before(root, branch):
-        return Decision(f"it already ran once on branch {branch} in this worktree. {LEFT_TO_CI}", None)
+    if _fresh_runs(root, branch) >= FRESH_RUNS_CAP:
+        cap = f"it already ran {FRESH_RUNS_CAP} times on branch {branch} in this worktree, the most allowed."
+        return Decision(f"{cap} {LEFT_TO_CI}", None)
     doc, why = _estimate(root, _base(argv))
     if doc is None:
         return Decision(f"its length cannot be estimated ({why}). {LEFT_TO_CI}", None)

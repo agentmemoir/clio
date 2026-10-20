@@ -32,7 +32,7 @@ coverage cov:
 #  make coverage-fast PLAN=1       # print the selection, run nothing
 #  make coverage-fast BASE=<ref>   # measure against a ref other than master
 #
-# Through the gate shim, a run with no terminal attached exits 3 and runs nothing when this worktree already ran it on this branch, or when `python3 scripts/quick.py --base <ref> --plan --closure` shows it will not fit in 180 s or cannot be made. CI runs this target without the shim.
+# Through the gate shim, a run with no terminal attached exits 3 and runs nothing when this worktree already made three fresh runs on this branch, or when `python3 scripts/quick.py --base <ref> --plan --closure` shows it will not fit in 180 s or cannot be made. CI runs this target without the shim.
 #
 # It selects what `make quick` selects: the test modules each changed Rust file declares, and the integration target of a changed file under `tests/`. All of them run together in one instrumented nextest run over only the packages that hold them. A changed file fails when it owns no test module of its own, is below 80% lines, or is not in the report. Files under `tests/`, declared test modules, `build.rs`, and files that hold only module declarations and re-exports are not judged. Function and region percentages are printed and compared against nothing.
 COVERAGE_FAST_FLAGS := $(if $(PLAN),--plan )

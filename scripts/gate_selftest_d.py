@@ -19,6 +19,7 @@ from gate_tree import TreeState, cache_root
 
 FIELDS = {
     "root", "common_dir", "branch", "kind", "started", "finished", "exit", "argv", "replayed", "interactive", "estimate_s",
+    "tree", "load",
 }
 TREE = TreeState("h1", (("crates/a/src/lib.rs", "one"),), ("crates/a/src/lib.rs",))
 
