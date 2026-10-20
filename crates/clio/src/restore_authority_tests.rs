@@ -20,6 +20,8 @@
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
+//!
+//! Keep this module focused on the tests of `restore_authority`.
 
 use super::{ClassifyRefusal, classify_archive};
 use clio_backup::manifest::ManifestAuthority;
