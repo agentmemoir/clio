@@ -150,14 +150,14 @@ def run(check) -> tuple:
         globals()["is_present"] = lambda path: True
         globals()["is_measureable"] = lambda path: True
         globals()["exemption"] = lambda path: None
-        globals()["owned_terms"] = lambda files: ([], [])
+        globals()["owned_terms"] = lambda files: ([], [], [])
         owned.owned_selection = lambda path: owned.OwnedSelection(path, None, [])
         sys.stderr = io.StringIO()
         check("test-fast with no selected test runs nothing and passes", main(["--tests-only"]), EXIT_OK)
         check("coverage-fast with no selected test still judges", main([]), EXIT_FAIL)
         check("a file with no test module of its own fails", f"FAIL {rel} owns no test module" in sys.stderr.getvalue(), True)
 
-        globals()["owned_terms"] = lambda files: ([term], ["--lib", "--bins"])
+        globals()["owned_terms"] = lambda files: ([term], ["--lib", "--bins"], [])
         globals()["run_tests"] = lambda packages, expression, targets: calls.append((packages, targets)) or 4
         check("test-fast returns the test run's own exit code", main(["--tests-only"]), 4)
         check("test-fast runs only the packages that hold selected tests", calls, [(["a"], ["--lib", "--bins"])])

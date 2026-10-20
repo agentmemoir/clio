@@ -57,13 +57,14 @@ def main(argv: list[str]) -> int:
         return coverage_package_mode(args.coverage_package)
 
     try:
-        _, _, changed = select(args.base, False)
+        changed, terms, targets, notes = coverage_selection(args.base)
         present = [rel for rel in changed if is_present(rel)]
-        terms, targets = owned_terms(present)
         exempt = {rel: exemption(rel) for rel in present}
     except (RunError, OwnedLookupError) as error:
         print(f"scoped-runner: error: {error}", file=sys.stderr)
         return EXIT_RUN_ERROR
+    for note in notes:
+        print(f"scoped-runner: {note}")
     files = [rel for rel, reason in exempt.items() if reason is None]
     packages = sorted({term.package for term in terms})
     expression = union_expression(terms) if terms else ""
@@ -115,12 +116,23 @@ def main(argv: list[str]) -> int:
     return EXIT_OK
 
 
-def owned_terms(files: list[str]) -> tuple[list, list[str]]:
-    """The selection `make quick` uses: each file's own test modules, or its integration target."""
+def coverage_selection(base: str) -> tuple[list[str], list, list[str], list[str]]:
+    """What `make coverage-fast` runs for `base`: the changed files, the terms, the cargo targets and the notes.
+
+    The coverage-fast closure estimate calls this too, so it prices the tests the run executes.
+    """
+    _, _, changed = select(base, False)
+    terms, targets, notes = owned_terms([rel for rel in changed if is_present(rel)])
+    return changed, terms, targets, notes
+
+
+def owned_terms(files: list[str]) -> tuple[list, list[str], list[str]]:
+    """The selection `make quick` uses: each file's own test modules, or its integration target.
+
+    Returns the terms, the cargo targets and the notes. It prints nothing.
+    """
     import quick
 
     packages = workspace_packages()
     selection = quick.select([rel for rel in files if rel.endswith(".rs")], packages)
-    for note in selection.notes:
-        print(f"scoped-runner: {note}")
-    return selection.terms, quick.target_flags(selection.terms, packages)
+    return selection.terms, quick.target_flags(selection.terms, packages), selection.notes

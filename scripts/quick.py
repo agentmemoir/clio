@@ -19,7 +19,7 @@ reads the module declarations the compiler obeys, so a `#[path]` rename is
 followed. A file selects only the test modules it declares; a file that owns
 no test module selects no test, and the plan says so. The plan prints the estimate from the last run's per-test times, read
 from this checkout and from the main checkout when this is a linked worktree;
-it builds nothing and runs nothing. `--closure` estimates the packages `make
+it builds nothing and runs nothing. `--closure` estimates the tests `make
 coverage-fast` would run, with the build and coverage cost counted, which is how
 an agent decides whether the optional Done check fits its 3 minute budget. The
 gate asks for the same estimate with `--json` and refuses an agent's run that
@@ -160,11 +160,10 @@ def plan_lines(selection: Selection, history: list[Case], packages: Sequence[dic
     targets = target_flags(selection.terms, packages)
     if targets:
         lines.append(f"quick: cargo targets: {' '.join(targets)}")
-    keep = lambda terms: (lambda case: any(t.matches(case.binary_id, case.name) for t in terms))  # noqa: E731
-    total = estimate(history, keep(selection.terms))
+    total = estimate(history, keeps(selection.terms))
     lines += estimate_line(total, QUICK_BUDGET_S, "estimate")
     if total is not None and wall_seconds(total.seconds, THREADS) > QUICK_BUDGET_S:
-        priced = [(estimate(history, keep([term])), term) for term in selection.terms]
+        priced = [(estimate(history, keeps([term])), term) for term in selection.terms]
         priced = sorted(((e.seconds, t) for e, t in priced if e), key=lambda pair: -pair[0])
         for seconds, term in priced[:3]:
             lines.append(f"quick:   {seconds:.1f} s  {term.expression()}")
@@ -186,9 +185,13 @@ def plan_json(selection: Selection, files: Sequence[str], left_out: Sequence[str
     )
 
 
-def closure_estimate(packages: Sequence[str], history: list[Case]) -> Estimate | None:
-    names = set(packages)
-    return estimate(history, lambda case: case.binary_id.split("::")[0] in names)
+def keeps(terms: Sequence[Term]) -> Callable[[Case], bool]:
+    """The history predicate for the tests `terms` select: the rule the run's filter applies."""
+    return lambda case: any(term.matches(case.binary_id, case.name) for term in terms)
+
+
+def closure_estimate(terms: Sequence[Term], history: list[Case]) -> Estimate | None:
+    return estimate(history, keeps(terms))
 
 
 def done_seconds(found: Estimate | None) -> float | None:
@@ -196,8 +199,9 @@ def done_seconds(found: Estimate | None) -> float | None:
     return None if found is None else wall_seconds(found.seconds, THREADS) * DONE_FACTOR
 
 
-def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
-    found = closure_estimate(packages, history)
+def closure_lines(terms: Sequence[Term], history: list[Case]) -> list[str]:
+    found = closure_estimate(terms, history)
+    packages = sorted({term.package for term in terms})
     lines = [f"quick: closure: {len(packages)} package(s): {', '.join(packages)}"]
     lines += estimate_line(found, DONE_BUDGET_S, "closure estimate", DONE_FACTOR)
     seconds = done_seconds(found)
@@ -206,16 +210,16 @@ def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
     return lines
 
 
-def closure_json(packages: Sequence[str], history: list[Case]) -> str:
+def closure_json(terms: Sequence[Term], history: list[Case]) -> str:
     """The closure estimate for a program: `within` is null when there is no history to judge by.
 
-    With no package there is nothing to run, so the run takes no time.
+    With no test selected there is nothing to run, so the run takes no time.
     """
-    found = closure_estimate(packages, history)
-    seconds = done_seconds(found) if packages else 0.0
+    found = closure_estimate(terms, history)
+    seconds = done_seconds(found) if terms else 0.0
     return json.dumps(
         {
-            "packages": list(packages),
+            "packages": sorted({term.package for term in terms}),
             "tests": found.tests if found else 0,
             "done_seconds": seconds,
             "budget_seconds": DONE_BUDGET_S,
@@ -322,14 +326,14 @@ def run(args: argparse.Namespace) -> int:
         raise runner.RunError(f"base ref {args.base!r} resolves to no commit, so the changed files cannot be determined")
     history = newest_history(history_files())
     if args.closure:
-        packages = runner.select(args.base, False)[0]
+        _, terms, _, _ = runner.coverage_selection(args.base)
         if args.json:
-            print(closure_json(packages, history))
+            print(closure_json(terms, history))
             return runner.EXIT_OK
-        if not packages:
-            print(NO_CHANGE)
+        if not terms:
+            print(NO_TEST)
             return runner.EXIT_OK
-        print("\n".join(closure_lines(packages, history)))
+        print("\n".join(closure_lines(terms, history)))
         return runner.EXIT_OK
     changed = runner.changed_files(args.base)
     files = [rel for rel in changed if runner.is_present(rel)]

@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import sys
 
-from scoped_cli import main
+from scoped_cli import coverage_selection, main
 from scoped_core import EXIT_OK, EXIT_RUN_ERROR, ROOT, RunError
 from scoped_run import TEST_THREADS, hermetic_env
 from scoped_select import (
@@ -59,7 +59,6 @@ from scoped_select import (
     merge_base,
     package_owners,
     resolve_ref,
-    select,
     workspace_packages,
 )
 
@@ -72,6 +71,7 @@ __all__ = [
     "RunError",
     "changed_files",
     "changed_paths",
+    "coverage_selection",
     "embedders",
     "git",
     "hermetic_env",
@@ -80,7 +80,6 @@ __all__ = [
     "merge_base",
     "package_owners",
     "resolve_ref",
-    "select",
     "workspace_packages",
 ]
 
