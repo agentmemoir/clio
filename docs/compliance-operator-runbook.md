@@ -216,6 +216,10 @@ The live journal file is the erasure authority. If a stale handoff copy is swapp
 
 Each erasure appends a denial entry to the journal and bumps its generation. Copy the journal again after every erasure so the copy matches the store.
 
+Before you make a handoff copy or attempt a restore, record the live journal's `generation` and `salt_fingerprint` from the journal file. Compare them against the handoff copy's values, and compare the generation against the archive's claimed generation, before you go on. Stop on any mismatch instead of restoring. This check is yours to run: the tooling does not do it for you today, and a future priced phase owns turning it into an enforced one.
+
+Before you restore, run the journal check from the Erasure journal backup and handoff section: record the live journal's `generation` and `salt_fingerprint`, compare them against your handoff copy and the archive's claimed generation, and stop on any mismatch instead of restoring.
+
 ## Guarded restore drill
 
 The restore guard keeps erased subjects from coming back through an archive. Take an archive while the journal is current, then run the drill:
