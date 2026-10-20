@@ -18,11 +18,7 @@ HYGIENE_STEPS = {
         "the merge unions the objects this run did not build, so a file's line "
         "set and function count move with the directory rather than with the file"
     ),
-}
-
-#: Selected binaries must be removed before tests can rebuild them.
-PRE_TEST_STEPS = {
-    "drop_selected_objects": (
+    "drop_stale_objects": (
         "a selected package's earlier executable can keep its old line mapping "
         "beside the one this run builds"
     ),
@@ -203,7 +199,7 @@ def enclosing_functions(text: str) -> dict[int, str]:
 def _hygiene_problem(text: str) -> list[tuple[int, str, str]]:
     """Rule 4's findings, as (line, rule, message).
 
-    Each run must remove old selected objects before tests, then drop unreadable buffers and foreign objects before the report; a function that only writes the report is not a run.
+    Each run must drop unreadable buffers, stale selected objects, and foreign objects before the report; a function that only writes the report is not a run.
     """
     owners = enclosing_functions(text)
     runs = {
@@ -220,38 +216,6 @@ def _hygiene_problem(text: str) -> list[tuple[int, str, str]]:
                 report_sites.setdefault(owner, number)
     problems: list[tuple[int, str, str]] = []
     for owner, line in sorted(report_sites.items(), key=lambda item: item[1]):
-        test_sites = [
-            number
-            for name in TEST_STEP_CALLS
-            for number, _ in calls_in(text, name)
-            if owners.get(number, "") == owner
-        ]
-        for name, cost in PRE_TEST_STEPS.items():
-            sites = [
-                number
-                for number, _ in calls_in(text, name)
-                if owners.get(number, "") == owner
-            ]
-            if not sites:
-                problems.append(
-                    (
-                        min(test_sites),
-                        "hygiene",
-                        f"`{owner}` runs instrumented tests but never calls `{name}`, "
-                        f"so {cost}. The old object must be removed before the test "
-                        "step builds a new one.",
-                    )
-                )
-            elif min(sites) > min(test_sites):
-                problems.append(
-                    (
-                        min(sites),
-                        "hygiene",
-                        f"`{owner}` runs instrumented tests on line {min(test_sites)} "
-                        f"but calls `{name}` on line {min(sites)}, after them. The "
-                        "old object can then remain beside the new build.",
-                    )
-                )
         for name, cost in HYGIENE_STEPS.items():
             sites = [number for number, _ in calls_in(text, name) if owners.get(number, "") == owner]
             if not sites:

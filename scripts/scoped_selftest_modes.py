@@ -31,8 +31,7 @@ def run(check, name, prune_packages) -> None:
         for name in (
             "workspace_packages",
             "clear_profile_buffers",
-            "resolved_instrumented_dir",
-            "drop_selected_objects",
+            "drop_stale_objects",
             "run_coverage_tests",
             "instrumented_dir",
             "drop_invalid_profraws",
@@ -72,15 +71,12 @@ def run(check, name, prune_packages) -> None:
     try:
         globals()["workspace_packages"] = lambda: prune_packages
         globals()["clear_profile_buffers"] = lambda env: calls.append(("clear", env))
-        globals()["resolved_instrumented_dir"] = lambda env=None: (
-            calls.append(("resolve", expected_directory, env)) or expected_directory
-        )
-        globals()["drop_selected_objects"] = lambda directory, selected: calls.append(
-            ("selected", Path(directory), tuple(selected))
+        globals()["drop_stale_objects"] = lambda directory, selected, produced: calls.append(
+            ("stale", Path(directory), tuple(selected), tuple(produced))
         )
         globals()["run_coverage_tests"] = lambda pkgs, filt=None, env=None, targets=(): calls.append(
             ("test", tuple(pkgs), dict(env or {}))
-        )
+        ) or [Path("built")]
         # The real one refuses a directory that does not exist, which is the
         # right behaviour and impossible here, so it is replaced by its own
         # resolution: what is under test is WHICH directory the mode picked, and
@@ -108,37 +104,32 @@ def run(check, name, prune_packages) -> None:
         check(
             "it runs the same steps in the same order",
             [call[0] for call in calls],
-            ["clear", "resolve", "selected", "test", "dir", "buffers", "prune", "report"],
+            ["clear", "test", "dir", "buffers", "stale", "prune", "report"],
         )
-        check("its test step names exactly this package", calls[3][1], ("clio-store",))
+        check("its test step names exactly this package", calls[1][1], ("clio-store",))
         check(
-            "it resolves the package's own instrumented directory before the test run",
-            (calls[1][1], calls[1][2]),
-            (expected_directory, calls[3][2]),
-        )
-        check(
-            "it removes old objects for exactly this package before the test run",
-            (calls[2][1], calls[2][2]),
-            (expected_directory, ("clio-store",)),
+            "it removes this package's objects the build did not produce, after the build",
+            calls[4][1:],
+            (expected_directory, ("clio-store",), (Path("built"),)),
         )
         check(
             "its hygiene steps run against that directory, not the shared one",
-            (calls[5][1], calls[6][1]),
+            (calls[3][1], calls[5][1]),
             (expected_directory, expected_directory),
         )
         check(
             "its report path is the package's own, not the gate's",
-            calls[7][1],
+            calls[6][1],
             package_report_path("clio-store"),
         )
         check(
             "its tools build into that directory, not the shared one",
-            calls[3][2].get(CARGO_LLVM_COV_TARGET_KEY),
+            calls[1][2].get(CARGO_LLVM_COV_TARGET_KEY),
             package_target_override("clio-store"),
         )
         check(
             "it prunes the object list rather than trusting the directory",
-            calls[6][2],
+            calls[5][2],
             ("clio-store",),
         )
         check(
@@ -171,8 +162,7 @@ def run(check, name, prune_packages) -> None:
         for name in (
             "workspace_packages",
             "clear_profile_buffers",
-            "resolved_instrumented_dir",
-            "drop_selected_objects",
+            "drop_stale_objects",
             "run_coverage_tests",
             "instrumented_dir",
             "drop_invalid_profraws",
@@ -184,16 +174,15 @@ def run(check, name, prune_packages) -> None:
 
     def _failing_test_step(pkgs, filt=None, env=None, targets=()) -> None:
         red_calls.append(("test", tuple(pkgs)))
-        raise RunError("the instrumented test run failed (exit 100)")
+        error = RunError("the instrumented test run failed (exit 100)")
+        error.stdout = '{"reason":"compiler-artifact","executable":"/built/clio_store-1"}\n'
+        raise error
 
     try:
         globals()["workspace_packages"] = lambda: prune_packages
         globals()["clear_profile_buffers"] = lambda env: red_calls.append(("clear", env))
-        globals()["resolved_instrumented_dir"] = lambda env=None: (
-            red_calls.append(("resolve", expected_directory, env)) or expected_directory
-        )
-        globals()["drop_selected_objects"] = lambda directory, selected: red_calls.append(
-            ("selected", Path(directory), tuple(selected))
+        globals()["drop_stale_objects"] = lambda directory, selected, produced: red_calls.append(
+            ("stale", Path(directory), tuple(selected), tuple(produced))
         )
         globals()["run_coverage_tests"] = _failing_test_step
         globals()["instrumented_dir"] = lambda env=None: (
@@ -222,7 +211,12 @@ def run(check, name, prune_packages) -> None:
         check(
             "a red suite runs the same steps in the same order",
             [call[0] for call in red_calls],
-            ["clear", "resolve", "selected", "test", "dir", "buffers", "prune", "report"],
+            ["clear", "test", "dir", "buffers", "stale", "prune", "report"],
+        )
+        check(
+            "a red suite keeps the executables its build reported",
+            red_calls[4][3],
+            (Path("/built/clio_store-1"),),
         )
         check(
             "a red suite still writes the package's own report",

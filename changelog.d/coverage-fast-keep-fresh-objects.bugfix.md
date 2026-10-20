@@ -1,0 +1,1 @@
+`make coverage-fast` now removes a selected package's stale instrumented executables after its build rather than every one of them before it, so a rerun recompiles only the crates that changed and the report still sees no old line mappings.

@@ -255,18 +255,65 @@ def _object_pattern(names: Collection[str]) -> re.Pattern[str]:
     return re.compile(rf"^(lib)?({alternates})(-[0-9a-f]+)?$")
 
 
-def drop_selected_objects(directory: Path, selected: Sequence[str]) -> int:
-    """Delete old executables of packages this run will rebuild."""
+def produced_executables(cargo_stdout: str) -> list[Path]:
+    """The executables cargo reports for this build, fresh or rebuilt.
+
+    Read from cargo's `compiler-artifact` JSON messages, whose `executable` field
+    names the binary a unit produced (https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages).
+    Cargo emits the message for a unit it did not rebuild too, so a warm build
+    still lists every current executable.
+    """
+    produced = []
+    for line in cargo_stdout.splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if message.get("reason") == "compiler-artifact" and message.get("executable"):
+            produced.append(Path(message["executable"]))
+    return produced
+
+
+def drop_stale_objects(
+    directory: Path, selected: Sequence[str], produced: Collection[Path]
+) -> int:
+    """Delete executables of selected packages that this build did not produce.
+
+    An old binary of a selected package carries old line mappings, and the report
+    merges them with the current ones, which inflates a changed file's line count.
+    Deleting before the build fixed that but forced cargo to recompile every
+    selected crate, so the check runs after the build and keeps what it produced.
+    Files are compared by inode, because cargo hard-links an uplifted binary to
+    its copy under `deps`.
+    """
+    if not produced:
+        raise RunError(
+            "the instrumented build reported no executables, so its current "
+            "objects cannot be told from stale ones. Refusing to delete them all."
+        )
     packages = workspace_packages()
     selected_names = set(selected)
-    names = _object_names([p for p in packages if p["name"] in selected_names])
-    selected_pattern = _object_pattern(names)
+    selected_pattern = _object_pattern(
+        _object_names([p for p in packages if p["name"] in selected_names])
+    )
+    keep = set()
+    for path in produced:
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        keep.add((info.st_dev, info.st_ino))
     dropped = 0
     checked = 0
     for path in _instrumented_files(directory):
         if not selected_pattern.match(path.stem):
             continue
         checked += 1
+        info = path.stat()
+        if (info.st_dev, info.st_ino) in keep:
+            continue
         if not _inside(path, directory):
             raise RunError(
                 f"refusing to delete {path}: it does not resolve inside the "
@@ -276,7 +323,7 @@ def drop_selected_objects(directory: Path, selected: Sequence[str]) -> int:
         dropped += 1
     print(
         f"scoped-runner: selected package objects checked {checked}, deleted "
-        f"{dropped} (before the instrumented test run)"
+        f"{dropped} (not produced by this build)"
     )
     return dropped
 

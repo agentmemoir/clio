@@ -3,7 +3,7 @@
 
 Each cached command is keyed by the changed tree, relevant environment, kind, and effective arguments; it runs once per fingerprint and replays its pass or failure until the tree changes or `--force` is used. A failure from a different `PATH` is rerun.
 
-The cache holds up to 50 entries per worktree and removes lookup entries first. Every run and replay is appended to `runs.jsonl` beside the cache with its worktree and branch, so gate wait time can be measured after pruning.
+The cache holds up to 50 entries per worktree and removes lookup entries first. Every run and replay is appended to `runs.jsonl` beside the cache with its worktree, branch, tree fingerprint and machine load, so gate wait time can be measured after pruning.
 
 Each published log names the command kind and starts with a fresh-run or replay marker. Cargo check, clippy, lint, and ritual logs report package work Cargo showed, or say when its status was absent. Nextest and llvm-cov lookups publish to separate log names without using cache verdict slots; nextest benchmarks have their own cached kind.
 
@@ -150,7 +150,8 @@ from gate_classify import (
 )
 
 
-from gate_runlog import append_run
+from gate_runlog import append_run, machine_load
+from phase_parse import SUMMARY
 from gate_done_check import EXIT_REFUSED, decide as done_check
 from gate_cache import (
     _artifact_rel_paths,
@@ -176,7 +177,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
     if root is None:
         raise GateError("not inside a git checkout")
     lock_fd = acquire_lock(root)
-    ran: dict[str, object] = {"replayed": False}
+    ran: dict[str, object] = {"replayed": False, "load": machine_load()}
     try:
         log_dir = log_dir or str(cache_root() / repo_key(root) / "logs")
         kind = command_kind(argv)
@@ -246,6 +247,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         scoped_argv, scope = scope_command(kind, argv, root, state.changed)
         ran.update(argv=scoped_argv)
         fp = fingerprint(state, os.environ, kind, scoped_argv)
+        ran["tree"] = fp
         entry = entry_dir(root, fp)
         meta_path = entry / "meta.json"
         if meta_path.is_file() and not force:
@@ -281,7 +283,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         with open(log_path, "wb") as log:
             code = subprocess.call(scoped_argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
         finished = time.time()
-        ran.update(started=started, finished=finished, exit=code)
+        ran.update(started=started, finished=finished, exit=code, test_s=_nextest_seconds(log_path))
         try:
             evidence = _cargo_checking_evidence(log_path, kind)
         except OSError as error:
@@ -353,6 +355,20 @@ def _run_line(root: str, tree: str, finished: float | None) -> bytes:
     if finished:
         when = datetime.fromtimestamp(finished, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return f"{RUN_RECORD_PREFIX.decode()}worktree={root} tree={tree[:12] or '-'} finished={when}\n".encode()
+
+
+def _nextest_seconds(log_path: Path) -> float | None:
+    """The test seconds on nextest's Summary line in a run's log, the last one if there are several."""
+    seconds = None
+    try:
+        with log_path.open("r", errors="replace") as output:
+            for line in output:
+                match = SUMMARY.match(ANSI_ESCAPE.sub("", line))
+                if match:
+                    seconds = float(match.group("seconds"))
+    except OSError:
+        return None
+    return seconds
 
 
 def _cargo_checking_evidence(log_path: Path, kind: str) -> bytes:

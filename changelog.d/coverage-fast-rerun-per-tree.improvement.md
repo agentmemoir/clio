@@ -1,0 +1,1 @@
+`make coverage-fast` with no terminal attached may run again on a changed tree. A worktree may make up to three fresh runs on a branch, and a repeat on a tree with a stored verdict replays that verdict. Each gate run record now names its tree fingerprint and the machine load when the run started.
