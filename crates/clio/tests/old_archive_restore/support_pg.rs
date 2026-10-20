@@ -40,9 +40,25 @@ use std::path::{Path, PathBuf};
 /// The Postgres URL used when the environment names none, matching the Makefile.
 const COMPOSE_PG: &str = "postgres://clio:clio@127.0.0.1:34310/clio";
 
-/// The Postgres URL to use: the environment's, or local Compose.
+/// The name the skip note carries for this measurement.
+const SUITE: &str = "the postgres old-archive measurement";
+
+/// The Postgres URL to use: the environment's, when it names a Postgres
+/// database, or the local Compose stack.
+///
+/// The store's gate owns the refusal of a value that names another backend:
+/// dialling it would report an unreachable Postgres for a URL that never named
+/// one. The gate reads the operator's opt-out before it refuses, so a machine
+/// that set `CLIO_SKIP_PG_TESTS` skips instead of failing. The refused value
+/// is kept unchanged in that case, so its probe fails and the arm skips.
 pub fn pg_url() -> String {
-    std::env::var("CLIO_DATABASE_URL").unwrap_or_else(|_| COMPOSE_PG.to_owned())
+    match clio_config::db_url_env::database_url_from_process_env() {
+        Ok(url) => match clio::store::pg_skip::pg_url_or_skip(SUITE) {
+            Some(accepted) => accepted,
+            None => url,
+        },
+        Err(_) => COMPOSE_PG.to_owned(),
+    }
 }
 
 /// True when a Postgres server answers at `url` within a short budget.
@@ -67,7 +83,7 @@ pub fn require_postgres(reachable: bool) -> bool {
         return true;
     }
     clio::store::pg_skip::pg_required_or_skip(
-        "the postgres old-archive measurement",
+        SUITE,
         "no Postgres answers at CLIO_DATABASE_URL (start the database, or set \
          CLIO_SKIP_PG_TESTS=1 to run the rest of the suite without it)",
     );

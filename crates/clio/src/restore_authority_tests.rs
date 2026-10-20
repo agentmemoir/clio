@@ -4,10 +4,10 @@
 //! # Responsibility
 //!
 //! This module is responsible for the tests of `restore_authority`: an archive
-//! with no recorded authority, a SQLite payload whose tombstone hash or subject
-//! key becomes a reference, a key store whose slot id becomes a reference, an
-//! undeclared member that stays unknown, a Postgres dump whose subject tables
-//! become references, and a clean archive that yields no reference.
+//! recording no authority, a SQLite payload whose tombstone hash or subject key
+//! becomes a reference, a key store slot id becomes a reference, an undeclared
+//! member stays unknown, a Postgres dump whose tombstone, subject key and item
+//! subject tables become references, and a clean archive yields no reference.
 //!
 //! ## Owns
 //! - The SQLite and Postgres archive fixtures these cases build
@@ -20,6 +20,8 @@
 //! ## Boundary
 //!
 //! Test-only. Never compiled into production builds.
+//!
+//! Keep this module focused on the tests of `restore_authority`.
 
 use super::{ClassifyRefusal, classify_archive};
 use clio_backup::manifest::ManifestAuthority;
@@ -406,12 +408,13 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
                 &["subject_hash", "reason_code"],
                 tombstone_copy.as_bytes(),
             ),
-            ("items", &["id"], b"item-1\n"),
+            ("items", &["id", "subject_id"], b"item-1\tsubject-0009\n"),
             (
                 "subject_keys",
                 &["subject_id", "dek_ref", "status"],
                 subject_copy.as_bytes(),
             ),
+            ("triples", &["id"], b"triple-1\n"),
         ],
     );
     let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), subject_id);
@@ -432,14 +435,15 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
         "{:?}",
         classified.members
     );
-    // The items table is content, never a content-free subject record.
+    // The subject key and the item row name the same subject, so one hash
+    // covers both, and the content table names no subject.
     assert!(
         classified
             .members
             .iter()
             .filter(|member| matches!(member, MemberFacts::None))
             .count()
-            >= 2,
+            >= 3,
         "{:?}",
         classified.members
     );

@@ -3,12 +3,14 @@
 //
 //! # Responsibility
 //!
-//! This integration target is responsible for measuring whether an archive
-//! taken before a synthetic compliance erasure re-exposes the denied subject
-//! when a supported restore route runs afterwards, on SQLite and Postgres.
+//! This integration target is responsible for measuring what a restore does
+//! with a denied subject on SQLite and Postgres: a pre-erasure archive
+//! re-exposes the denied subject through each supported route, while a
+//! guarded restore refuses one cut before a real or a synthetic denial.
 //!
 //! ## Owns
-//! - The module tree of the old-archive restore measurement
+//! - The module tree of the old-archive restore measurement: its
+//!   re-exposure, refusal, erase-call and member scenarios
 //! - The per-route observation log the scenarios print
 //!
 //! ## Does not own
@@ -24,6 +26,7 @@
 //! primitives it measures.
 
 mod guard_cli;
+mod guard_cli_erase_route;
 mod guard_cli_erasure;
 mod guard_cli_pg;
 mod guard_cli_placement;

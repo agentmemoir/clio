@@ -45,6 +45,10 @@ const TOMBSTONE_TABLE: &str = "compliance_tombstones";
 /// The payload table linking a subject id to its data key.
 const SUBJECT_KEYS_TABLE: &str = "subject_keys";
 
+/// The payload table holding one row per item, each row keeping its subject
+/// link after the subject's key was destroyed.
+const ITEMS_TABLE: &str = "items";
+
 /// The key-store table holding one row per subject key slot.
 const KEY_SLOTS_TABLE: &str = "slots";
 
@@ -134,9 +138,9 @@ impl From<AmError> for ClassifyRefusal {
 ///
 /// - the manifest member proves no subject reference;
 /// - a SQLite payload yields a reference for every `compliance_tombstones`
-///   hash and every hashed `subject_keys` id;
+///   hash and every hashed `subject_keys` and `items` subject id;
 /// - a Postgres payload is the dump meta, and its `dump/tables` members yield a
-///   reference for the subject columns of the two subject tables;
+///   reference for the subject columns of the three subject tables;
 /// - the key member yields a reference for every hashed `slots` subject id;
 /// - any other member is [`MemberFacts::Unknown`] and is never skipped.
 ///
@@ -226,7 +230,10 @@ fn read_dump_meta(payload: &Path) -> Result<clio_backup::dump_meta::DumpMeta, Cl
     Ok(clio_backup::dump_meta::DumpMeta::from_json_bytes(&bytes)?)
 }
 
-/// Classify a SQLite payload: its tombstones and subject keys.
+/// Classify a SQLite payload: its tombstones, subject keys, and item subjects.
+///
+/// An item row keeps its subject link after the subject's key was destroyed,
+/// so the item's subject id is a presence the archive carries.
 fn classify_sqlite_payload(payload: &Path) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
     let mut hashes = BTreeSet::new();
     for hash in sqlite_column(payload, TOMBSTONE_TABLE, TOMBSTONE_HASH_COLUMN)? {
@@ -236,6 +243,9 @@ fn classify_sqlite_payload(payload: &Path) -> Result<Vec<MemberFacts>, ClassifyR
     }
     let salt = tombstone_salt();
     for id in sqlite_column(payload, SUBJECT_KEYS_TABLE, SUBJECT_ID_COLUMN)? {
+        hashes.insert(sha256_hex(&salt, &id));
+    }
+    for id in sqlite_column(payload, ITEMS_TABLE, SUBJECT_ID_COLUMN)? {
         hashes.insert(sha256_hex(&salt, &id));
     }
     Ok(facts_from_hashes(hashes))
@@ -256,17 +266,19 @@ fn classify_key_store(key: Option<&ExtractedMember>) -> Result<Vec<MemberFacts>,
 
 /// Classify one Postgres dump table member from its `COPY` text.
 ///
-/// Only the two subject tables carry a subject reference; every other table is
-/// content and proves no content-free subject record. A subject table whose
-/// subject column is absent cannot be classified, so the archive is refused
-/// rather than passing one whose membership is unknown.
+/// Only the three subject tables carry a subject reference; every other table
+/// is content and proves no content-free subject record. The item table is one
+/// of them: an item row keeps its subject link after the subject's key was
+/// destroyed, so the archive names the subject. A subject table whose subject
+/// column is absent cannot be classified, so the archive is refused rather than
+/// passing one whose membership is unknown.
 fn classify_dump_table(
     table: &clio_backup::dump_meta::DumpTable,
     extracted: &ExtractedArchive,
 ) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
     let column = match table.table.as_str() {
         TOMBSTONE_TABLE => Some((TOMBSTONE_HASH_COLUMN, false)),
-        SUBJECT_KEYS_TABLE => Some((SUBJECT_ID_COLUMN, true)),
+        SUBJECT_KEYS_TABLE | ITEMS_TABLE => Some((SUBJECT_ID_COLUMN, true)),
         _ => None,
     };
     let Some((column, hash_the_id)) = column else {
@@ -310,9 +322,10 @@ fn facts_from_hashes(hashes: BTreeSet<String>) -> Vec<MemberFacts> {
 /// Every value of `column` in `table`, read from the SQLite database at `path`.
 ///
 /// A missing table or column yields no values: the store simply holds no such
-/// record. The connection is opened read-write with `query_only` set, the
-/// pattern that lets a store recover a hot journal while a statement still
-/// cannot write.
+/// record. A NULL value is skipped: it names no subject, which is what the
+/// `COPY` text reader does with its `\N` marker. The connection is opened
+/// read-write with `query_only` set, the pattern that lets a store recover a
+/// hot journal while a statement still cannot write.
 fn sqlite_column(path: &Path, table: &str, column: &str) -> Result<Vec<String>, ClassifyRefusal> {
     let connection =
         rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
@@ -329,11 +342,13 @@ fn sqlite_column(path: &Path, table: &str, column: &str) -> Result<Vec<String>, 
         .prepare(&sql)
         .map_err(|error| sqlite_error(path, table, &error))?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| row.get::<_, Option<String>>(0))
         .map_err(|error| sqlite_error(path, table, &error))?;
     let mut values = Vec::new();
     for row in rows {
-        values.push(row.map_err(|error| sqlite_error(path, table, &error))?);
+        if let Some(value) = row.map_err(|error| sqlite_error(path, table, &error))? {
+            values.push(value);
+        }
     }
     Ok(values)
 }
