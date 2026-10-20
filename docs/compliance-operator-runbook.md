@@ -124,7 +124,7 @@ Write the ordered review events to a file under destination custody:
 clio compliance review-export --out ./review.txt --actor harness
 ```
 
-Only a `harness` or `system` actor may export. `--out` needs a path with a parent directory: `./review.txt` works, and a bare name like `review.txt` refuses with `destination has no parent directory`. The tool records the destination as pending before any bytes land, and a second export to the same path refuses with `review file export is refused: destination custody is not available`.
+Only a `harness` or `system` actor may export. `--out` needs a path with a parent directory: `./review.txt` works, and a bare name like `review.txt` refuses with `destination has no parent directory`. An export to a path whose parent exists writes the file with mode `0600` and one `action_id<TAB>state` line per row, and a second export to an existing destination refuses with `review file export is refused: destination custody is not available`; record that exported file in your custody list.
 
 ## Step 8: Reconcile peer requests
 
