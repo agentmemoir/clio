@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from scoped_core import CoverageRow, RunError, owned
 from scoped_judge import judge
 from scoped_run import TEST_THREADS, coverage_report_command, coverage_test_command
-from scoped_select import build_inputs, embedders, resolve_ref, select
+from scoped_select import embedders, resolve_ref, select, widens_to_every_package
 
 from scoped_selftest_support import shared as globals
 
@@ -34,7 +34,7 @@ def run(check) -> tuple:
     try:
         globals()["_ref_exists"] = lambda ref: False
         globals()["merge_base"] = lambda base: None
-        check("a ref that does not exist is an error", raises(select, "no-such-ref", False), True)
+        check("a ref that does not exist is an error", raises(select, "no-such-ref"), True)
 
         # The case that broke CI. A checkout in detached HEAD mode has no local
         # branch for the base, only refs/remotes/origin/<base>, so the bare name
@@ -49,7 +49,7 @@ def run(check) -> tuple:
         )
         check(
             "the remote fallback makes select() succeed where the bare name fails",
-            raises(select, "master", False),
+            raises(select, "master"),
             False,
         )
 
@@ -59,61 +59,54 @@ def run(check) -> tuple:
         globals()["changed_paths"] = lambda base: ["stray/tool.rs"]
         check(
             "a changed Rust file no package owns is an error",
-            raises(select, "master", False),
+            raises(select, "master"),
             True,
         )
 
         # A change with no Rust file at all is a legitimate all-clear: docs, a
         # Makefile, or a Python script cannot move a Rust line count.
         globals()["changed_paths"] = lambda base: []
-        globals()["workspace_packages"] = lambda: [{"name": "a", "deps": set()}]
-        packages, files, changed = select("master", False)
-        check("a change with no Rust file selects nothing", (packages, files, changed), ([], [], []))
+        globals()["workspace_packages"] = lambda: [{"name": "a"}]
+        judgeable, changed = select("master")
+        check("a change with no Rust file selects nothing", (judgeable, changed), ([], []))
 
         # A change that touches ONLY test-named files. llvm-cov path-excludes
-        # those, so nothing is judgeable, but the tests still have to run: seeding
-        # the closure from judgeable files alone selected no package here and the
-        # gate would have passed a commit that added a test without ever running
-        # it. Measured over 26 past bug-fix commits, this was one of two commits
-        # the scoping would not have covered, and the other was a fixed one.
-        globals()["workspace_packages"] = lambda: [
-            {"name": "a", "dir": "crates/a", "deps": set()},
-            {"name": "b", "dir": "crates/b", "deps": {"a"}},
-        ]
+        # those, so nothing is judgeable, but the caller must still receive them,
+        # or the tests would never run. The gate would have passed a commit that
+        # added a test without ever running it.
+        globals()["workspace_packages"] = lambda: [{"name": "a", "dir": "crates/a"}]
         globals()["changed_paths"] = lambda base: ["crates/a/src/thing_tests.rs"]
-        packages, files, changed = select("master", False)
+        judgeable, changed = select("master")
         check(
-            "a test-only change still selects its package and its dependents",
-            (packages, files),
-            (["a", "b"], []),
+            "a test-only change is not judged but still reaches the caller",
+            (judgeable, changed),
+            ([], ["crates/a/src/thing_tests.rs"]),
         )
         # The same must hold for an integration test, which the suffix half alone
         # let through into the judged list. It is path-excluded, so it can never
-        # be measured, but it still has to select its package so the test runs.
+        # be measured, but it still has to reach the caller so the test runs.
         globals()["changed_paths"] = lambda base: ["crates/a/tests/harness.rs"]
-        packages, files, changed = select("master", False)
+        judgeable, changed = select("master")
         check(
-            "an integration-test change selects its package and is not judged",
-            (packages, files, changed),
-            (["a", "b"], [], ["crates/a/tests/harness.rs"]),
+            "an integration-test change is not judged and is still reported",
+            (judgeable, changed),
+            ([], ["crates/a/tests/harness.rs"]),
         )
 
         # A file the change deleted still selects its package, so the crate's tests
         # run, but it is not judged: nothing is left in it for a report to hold. The
         # presence test reads the real tree, so the surviving half of the pair is a
         # path that exists and the other is one that cannot.
-        globals()["workspace_packages"] = lambda: [
-            {"name": "clio-types", "dir": "crates/clio-types", "deps": set()},
-        ]
+        globals()["workspace_packages"] = lambda: [{"name": "clio-types", "dir": "crates/clio-types"}]
         globals()["changed_paths"] = lambda base: [
             "crates/clio-types/src/civil.rs",
             "crates/clio-types/src/retired.rs",
         ]
-        packages, files, changed = select("master", False)
+        judgeable, changed = select("master")
         check(
-            "a deleted file still selects its package but is not judged",
-            (packages, files),
-            (["clio-types"], ["crates/clio-types/src/civil.rs"]),
+            "a deleted file is left out of the judged list",
+            judgeable,
+            ["crates/clio-types/src/civil.rs"],
         )
         check(
             "a deleted file is still reported as changed",
@@ -123,14 +116,13 @@ def run(check) -> tuple:
 
         # A change to a file that is not Rust source but decides what a crate compiles or
         # reads (issue #69). Before, none of these selected a package, and the gate called
-        # the tree clean. The lock file reaches every package; a file in a package folder
-        # reaches that package and its dependents; a sql file reaches the packages that
-        # embed it, or every package when none does; Markdown, a script, a workflow and the
-        # Makefile reach none.
+        # the tree clean. The lock file and the manifests widen to every package. A sql file
+        # widens only when no package embeds it. A file in a package folder, Markdown, a
+        # script, a workflow and the Makefile do not widen.
         globals()["workspace_packages"] = lambda: [
-            {"name": "a", "dir": "crates/a", "deps": set()},
-            {"name": "b", "dir": "crates/b", "deps": {"a"}},
-            {"name": "c", "dir": "crates/c", "deps": set()},
+            {"name": "a", "dir": "crates/a"},
+            {"name": "b", "dir": "crates/b"},
+            {"name": "c", "dir": "crates/c"},
         ]
         # The embedding packages come from the Rust files that name the sql file. A search
         # that finds nothing is an empty answer, not an error.
@@ -149,24 +141,16 @@ def run(check) -> tuple:
             globals()["git"] = original_git_for_embedders
         globals()["embedders"] = lambda rel, packages: {"c"}
         for label, paths, want in (
-            ("the lock file selects every package", ["Cargo.lock"], ["a", "b", "c"]),
-            ("a root manifest selects every package", ["Cargo.toml"], ["a", "b", "c"]),
-            ("a fixture in a package folder selects that package and its dependents", ["crates/a/data/x.json"], ["a", "b"]),
-            ("a sql file selects the packages that embed it", ["sql/001_core.sql"], ["c"]),
-            ("markdown selects nothing", ["README.md", "crates/a/NOTES.md"], []),
-            ("a script, a workflow and the Makefile select nothing", ["scripts/x.py", ".github/workflows/ci.yml", "Makefile"], []),
+            ("the lock file widens to every package", ["Cargo.lock"], True),
+            ("a root manifest widens to every package", ["Cargo.toml"], True),
+            ("a fixture in a package folder does not widen", ["crates/a/data/x.json"], False),
+            ("a sql file that a package embeds does not widen", ["sql/001_core.sql"], False),
+            ("markdown does not widen", ["README.md", "crates/a/NOTES.md"], False),
+            ("a script, a workflow and the Makefile do not widen", ["scripts/x.py", ".github/workflows/ci.yml", "Makefile"], False),
         ):
-            globals()["changed_paths"] = lambda base, paths=paths: paths
-            packages, files, changed = select("master", False)
-            check(label, (packages, files), (want, []))
+            check(label, widens_to_every_package(paths, pk), want)
         globals()["embedders"] = lambda rel, packages: set()
-        globals()["changed_paths"] = lambda base: ["sql/unused.sql"]
-        check("a sql file nothing embeds selects every package", select("master", False)[0], ["a", "b", "c"])
-        check(
-            "build_inputs names the files that reach packages and skips the rest",
-            build_inputs(["Cargo.lock", "README.md", "scripts/x.py", "crates/a/src/lib.rs"], globals()["workspace_packages"]()),
-            (None, ["Cargo.lock"]),
-        )
+        check("a sql file nothing embeds widens to every package", widens_to_every_package(["sql/unused.sql"], pk), True)
     finally:
         globals()["_ref_exists"] = original_ref_exists
         globals()["merge_base"] = original_merge_base

@@ -32,8 +32,8 @@ def run(check) -> tuple:
     # synthetic. The dirs are repository-relative because that is the form
     # `workspace_packages` stores and the form git reports.
     fake = [
-        {"name": "example-crate", "deps": set(), "dir": "crates/mismatched-dir"},
-        {"name": "clio-store", "deps": set(), "dir": "crates/clio-store"},
+        {"name": "example-crate", "dir": "crates/mismatched-dir"},
+        {"name": "clio-store", "dir": "crates/clio-store"},
     ]
     check(
         "a leaf file belongs to its crate",
@@ -146,7 +146,7 @@ def run(check) -> tuple:
     rel = "crates/a/src/x.rs"
     term = Term("a", modules=("x::tests",))
     try:
-        globals()["select"] = lambda base, everything: (["a", "dependent"], [rel], [rel])
+        globals()["select"] = lambda base: ([rel], [rel])
         globals()["is_present"] = lambda path: True
         globals()["is_measureable"] = lambda path: True
         globals()["exemption"] = lambda path: None

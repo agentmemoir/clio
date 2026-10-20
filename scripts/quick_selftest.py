@@ -205,7 +205,7 @@ class PlanTests(unittest.TestCase):
             with (
                 mock.patch.object(runner, "resolve_ref", return_value="origin/master"),
                 mock.patch.object(quick, "history_files", return_value=[history]),
-                mock.patch.object(scoped_cli, "select", return_value=([], [], [rel])),
+                mock.patch.object(scoped_cli, "select", return_value=([], [rel])),
                 mock.patch.object(scoped_cli, "is_present", return_value=True),
                 mock.patch.object(scoped_cli, "workspace_packages", return_value=packages),
                 mock.patch.object(runner, "package_owners", return_value=["a"]),

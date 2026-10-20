@@ -121,7 +121,7 @@ def coverage_selection(base: str) -> tuple[list[str], list, list[str], list[str]
 
     The coverage-fast closure estimate calls this too, so it prices the tests the run executes.
     """
-    _, _, changed = select(base, False)
+    _, changed = select(base)
     terms, targets, notes = owned_terms([rel for rel in changed if is_present(rel)])
     return changed, terms, targets, notes
 

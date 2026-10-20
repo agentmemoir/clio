@@ -1,4 +1,4 @@
-"""Selecting what to measure: the changed files, the packages that own them, and the closure that depends on them."""
+"""Selecting what to measure: the changed files, and the packages that own them."""
 
 from __future__ import annotations
 
@@ -171,35 +171,24 @@ def embedders(rel: str, packages: Sequence[dict[str, Any]]) -> set[str]:
     return {owner for path in found for owner in package_owners(path, packages)}
 
 
-def build_inputs(paths: Iterable[str], packages: Sequence[dict[str, Any]]) -> tuple[set[str] | None, list[str]]:
-    """(the packages the changed non-Rust files reach, or None for all of them, and those files).
+def widens_to_every_package(paths: Iterable[str], packages: Sequence[dict[str, Any]]) -> bool:
+    """True when a changed non-Rust file could change any package, because its owner is unclear.
 
     `changed_files` keeps only `.rs` paths, so a change to `Cargo.lock`, a manifest, or a `sql/`
     file a crate embeds selected no package and the gate called the tree clean (issue #69). A file
-    inside a package folder reaches that package. A `sql/` file reaches the packages that embed
-    it. The files in `WORKSPACE_WIDE`, and a `sql/` file nothing embeds, reach every package,
-    because the owner is unclear. Markdown, and files elsewhere (scripts, workflows), reach none.
+    inside a package folder belongs to that package and does not widen. A `sql/` file belongs to
+    the packages that embed it. The files in `WORKSPACE_WIDE`, and a `sql/` file nothing embeds,
+    widen, because the owner is unclear. Markdown, and files elsewhere (scripts, workflows), never widen.
     """
-    reached: set[str] | None = set()
-    files: list[str] = []
     for rel in paths:
-        if rel.endswith((".rs", ".md")):
+        if rel.endswith((".rs", ".md")) or package_owners(rel, packages):
             continue
-        owners = set(package_owners(rel, packages))
-        wide = False
-        if not owners and rel.startswith("sql/"):
-            owners = embedders(rel, packages)
-            wide = not owners
-        elif not owners:
-            wide = rel in WORKSPACE_WIDE or rel.startswith(WORKSPACE_WIDE_DIRS)
-        if not owners and not wide:
-            continue
-        files.append(rel)
-        if wide:
-            reached = None
-        elif reached is not None:
-            reached |= owners
-    return reached, files
+        if rel.startswith("sql/"):
+            if not embedders(rel, packages):
+                return True
+        elif rel in WORKSPACE_WIDE or rel.startswith(WORKSPACE_WIDE_DIRS):
+            return True
+    return False
 
 
 def is_measureable(rel: str) -> bool:
@@ -281,10 +270,9 @@ def package_owners(rel: str, packages: Sequence[dict[str, Any]] | None = None) -
 
 
 def workspace_packages() -> list[dict[str, Any]]:
-    """Every workspace member and its path dependencies, from cargo metadata.
+    """Every workspace member, from cargo metadata.
 
-    `--no-deps` keeps the graph to workspace members, so the closure below is
-    over local packages only and cannot wander into the registry.
+    `--no-deps` keeps the list to workspace members, so it never reaches the registry.
     """
     env = dict(os.environ, GATE_ACTIVE="1")
     proc = subprocess.run(
@@ -300,16 +288,8 @@ def workspace_packages() -> list[dict[str, Any]]:
         packages = json.loads(proc.stdout)["packages"]
     except (ValueError, KeyError, TypeError) as error:
         raise RunError(f"cargo metadata is not usable: {error}") from error
-    by_dir: dict[str, str] = {}
-    for package in packages:
-        by_dir[str(Path(package["manifest_path"]).parent)] = package["name"]
     out = []
     for package in packages:
-        deps = set()
-        for dep in package.get("dependencies", []):
-            path = dep.get("path")
-            if path and str(Path(path)) in by_dir:
-                deps.add(by_dir[str(Path(path))])
         manifest_dir = Path(package["manifest_path"]).parent
         try:
             # Git reports repository-relative paths and cargo reports absolute
@@ -321,7 +301,6 @@ def workspace_packages() -> list[dict[str, Any]]:
         out.append(
             {
                 "name": package["name"],
-                "deps": deps,
                 # Directory-to-package mapping, because they are not always equal.
                 "dir": directory,
                 # Every target name, because a package's executables are named
@@ -336,40 +315,17 @@ def workspace_packages() -> list[dict[str, Any]]:
     return out
 
 
-def package_closure(seeds: Iterable[str], packages: Sequence[dict[str, Any]]) -> list[str]:
-    """`seeds` plus every package that transitively depends on one of them.
-
-    Dependents are included because a change to a crate they call can change how
-    many of their own lines run. Measuring only the edited crate would report the
-    edited crate's coverage and say nothing about the caller that a reviewer will
-    actually look at next.
-    """
-    dependents: dict[str, set[str]] = {}
-    for package in packages:
-        for dep in package["deps"]:
-            dependents.setdefault(dep, set()).add(package["name"])
-    out = set(seeds)
-    stack = list(seeds)
-    while stack:
-        for name in dependents.get(stack.pop(), ()):
-            if name not in out:
-                out.add(name)
-                stack.append(name)
-    return sorted(out)
-
-
-def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]]:
-    """The packages to run, the changed files to judge, and every changed file.
+def select(base: str) -> tuple[list[str], list[str]]:
+    """The changed files to judge, and every changed Rust file.
 
     The two file lists differ on purpose. `judgeable` is what a coverage report
     could ever contain; `changed` is everything the commit touched, including
-    the files llvm-cov path-excludes. Selection reads `changed`, because a test
-    you just wrote has to run even though it can never be measured.
+    the files llvm-cov path-excludes. The caller selects from `changed`, because
+    a test you just wrote has to run even though it can never be measured.
 
-    Fails closed. An unresolvable base, or a dirty tree that yields no Rust file
-    to judge, raises rather than returning an empty scope, because an empty
-    scope is indistinguishable from a pass in the output and would report a
-    clean run over work that was never measured.
+    Fails closed. An unresolvable base raises, and so does a changed Rust file
+    that no package owns, because such a file can never appear in a report. A
+    changed build input that could change any package skips that check.
     """
     if resolve_ref(base) is None:
         raise RunError(
@@ -387,40 +343,18 @@ def select(base: str, everything: bool) -> tuple[list[str], list[str], list[str]
     codeless = parse_codeless(files)
     judgeable = [f for f in files if is_judgeable(f, codeless) and is_present(f)]
     packages = workspace_packages()
-    if everything:
-        return [p["name"] for p in packages], judgeable, files
-    reached, build_files = build_inputs(paths, packages)
-    if reached is None:
-        return [p["name"] for p in packages], judgeable, files
-    if not files and not build_files:
-        # A genuinely clean tree: no changed file of any type that can move a build.
-        return [], judgeable, files
-    # Every file a report could hold, codeless ones included. The check is about
-    # belonging to a package at all, which has nothing to do with whether the file
-    # has code, so it must not lose the codeless files the judging set just dropped.
-    unowned = [f for f in files if is_measureable(f) and not package_owners(f, packages)]
-    if unowned:
-        # A changed Rust file no package owns can never appear in a report, so it
-        # cannot be judged. Refusing here is the whole point of the check: the
-        # alternative is a clean-looking run that never measured the file.
-        raise RunError(
-            "changed Rust file(s) belong to no workspace package and can never "
-            f"appear in a coverage report: {', '.join(unowned)}; refusing to "
-            "report a verdict over files that cannot be measured"
-        )
-    owners: set[str] = set()
-    for rel in files:
-        # Every changed Rust file seeds the selection, including the ones llvm-cov
-        # path-excludes. Judging still uses `judgeable`, because an excluded file
-        # can never appear in a report, but SELECTION cannot ignore it: a commit
-        # that only adds or edits a test file changes nothing in `judgeable`, and
-        # seeding from `judgeable` alone left the closure empty, so the gate
-        # selected no package and ran no tests at all for exactly the commits that
-        # added a test. A test you just wrote has to be run.
-        owners.update(package_owners(rel, packages))
-    owners |= reached
-    if not owners:
-        # Only non-Rust files changed: docs, a Makefile, or a Python script.
-        # Nothing there can move a Rust line count.
-        return [], judgeable, files
-    return package_closure(owners, packages), judgeable, files
+    if not widens_to_every_package(paths, packages):
+        # Every file a report could hold, codeless ones included. The check is about
+        # belonging to a package at all, which has nothing to do with whether the file
+        # has code, so it must not lose the codeless files the judging set just dropped.
+        unowned = [f for f in files if is_measureable(f) and not package_owners(f, packages)]
+        if unowned:
+            # A changed Rust file no package owns can never appear in a report, so it
+            # cannot be judged. Refusing here is the whole point of the check: the
+            # alternative is a clean-looking run that never measured the file.
+            raise RunError(
+                "changed Rust file(s) belong to no workspace package and can never "
+                f"appear in a coverage report: {', '.join(unowned)}; refusing to "
+                "report a verdict over files that cannot be measured"
+            )
+    return judgeable, files
