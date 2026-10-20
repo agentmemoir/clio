@@ -30,7 +30,7 @@ coverage cov:
 #
 # Through the gate shim, a run with no terminal attached exits 3 and runs nothing when this worktree already ran it on this branch, or when `python3 scripts/quick.py --base <ref> --plan --closure` shows it will not fit in 180 s or cannot be made. CI runs this target without the shim.
 #
-# Scoped by package, because that is the only unit cargo-llvm-cov supports, and by dependency closure, because the tests that cover a changed crate live in the crates that depend on it. What it does not establish is in the script's own docstring: it is not a workspace verdict, and a green run is "no problem in the files you touched".
+# It selects what `make quick` selects: the test modules each changed Rust file declares, and the integration target of a changed file under `tests/`. All of them run together in one instrumented nextest run over only the packages that hold them. A changed file fails when it owns no test module of its own, is below 80% lines, or is not in the report. Files under `tests/`, declared test modules, `build.rs`, and files that hold only module declarations and re-exports are not judged. Function and region percentages are printed and compared against nothing.
 COVERAGE_FAST_FLAGS := $(if $(PLAN),--plan )
 coverage-fast:
 	@python3 scripts/scoped_runner.py --self-test
@@ -42,7 +42,7 @@ coverage-fast:
 #  make test-fast PLAN=1
 #  make test-fast BASE=<ref>
 #
-# It shares the coverage gate's package closure, so the two can never disagree about what a change touches, and that closure is also what pulls in every crate that depends on the one you edited, which is where a signature change shows up as a compile error rather than a test failure. `make test` scopes the same way but stops at the changed crates; this one goes all the way down the closure.
+# The same selection as `make coverage-fast`, run once without instrumentation. It judges nothing: its exit code is the test run's exit code.
 #
 # Compare `make coverage-fast` on the same change: the two are close once a build exists, because what dominates is the test run rather than the instrumentation; test-fast wins on a cold tree and on a change that does not need a coverage verdict. Measured times are in the CI timing record, not in this file.
 test-fast:

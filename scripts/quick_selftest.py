@@ -262,6 +262,9 @@ class OwnershipTests(unittest.TestCase):
     def test_a_test_gate_with_an_operating_system_is_a_test_gate(self) -> None:
         self.assertTrue(owned_scanner._is_gated('cfg(all(test, target_os = "linux"))'))
         self.assertFalse(owned_scanner._is_gated("cfg(not(test))"))
+        self.assertTrue(owned_scanner._is_gated('cfg(all(feature = "x", test))'))
+        self.assertFalse(owned_scanner._is_gated("cfg(all(unix, not(test)))"))
+        self.assertFalse(owned_scanner._is_gated('cfg(all(feature = "test"))'))
 
 
 class PlanTests(unittest.TestCase):

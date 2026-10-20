@@ -1,0 +1,1 @@
+`make test-fast` and `make coverage-fast` now run only the test modules each changed Rust file declares, in one test run over only the packages that hold them. `make coverage-fast` fails a changed file that owns no test module, is below 80% of lines, or is missing from the report.

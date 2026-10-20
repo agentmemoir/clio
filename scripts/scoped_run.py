@@ -58,6 +58,7 @@ and buys a build that fails for real reasons only.
 def run_tests(
     packages: Sequence[str],
     filter_expression: str | None = None,
+    targets: Sequence[str] = (),
 ) -> int:
     """Run tests without instrumentation, and return nextest's exit code.
 
@@ -80,6 +81,7 @@ def run_tests(
         *[flag for name in packages for flag in ("-p", name)],
         "--locked", "--profile", "ci",
         "--test-threads", TEST_THREADS,
+        *targets,
     ]
     if filter_expression:
         command += ["-E", filter_expression]
@@ -90,6 +92,7 @@ def run_tests(
 def coverage_test_command(
     packages: Sequence[str],
     filter_expression: str | None = None,
+    targets: Sequence[str] = (),
 ) -> list[str]:
     """Build and run the selected tests instrumented, and write no report.
 
@@ -111,6 +114,7 @@ def coverage_test_command(
         "--locked", "--profile", "ci",
         "--test-threads", TEST_THREADS,
         "--no-report",
+        *targets,
     ]
     if filter_expression:
         command += ["-E", filter_expression]
@@ -142,9 +146,10 @@ def run_coverage_tests(
     packages: Sequence[str],
     filter_expression: str | None = None,
     env: dict[str, str] | None = None,
+    targets: Sequence[str] = (),
 ) -> None:
     """Build and run the selected tests instrumented, writing no report."""
-    command = coverage_test_command(packages, filter_expression)
+    command = coverage_test_command(packages, filter_expression, targets)
     _run_or_raise(command, env or hermetic_env(), "the instrumented test run failed")
 
 
@@ -161,6 +166,7 @@ def run_coverage(
     packages: Sequence[str],
     filter_expression: str | None = None,
     report_path: Path | None = None,
+    targets: Sequence[str] = (),
 ) -> None:
     """One instrumented pass, writing the scoped report path.
 
@@ -179,7 +185,7 @@ def run_coverage(
     env = hermetic_env()
     clear_profile_buffers(env)
     drop_selected_objects(resolved_instrumented_dir(env), packages)
-    run_coverage_tests(packages, filter_expression, env)
+    run_coverage_tests(packages, filter_expression, env, targets)
 
     # The boundary the gate owns. Everything below acts on the instrumented build
     # the test step just produced and the report step is about to read.

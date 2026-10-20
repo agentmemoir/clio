@@ -78,7 +78,7 @@ def run(check, name, prune_packages) -> None:
         globals()["drop_selected_objects"] = lambda directory, selected: calls.append(
             ("selected", Path(directory), tuple(selected))
         )
-        globals()["run_coverage_tests"] = lambda pkgs, filt=None, env=None: calls.append(
+        globals()["run_coverage_tests"] = lambda pkgs, filt=None, env=None, targets=(): calls.append(
             ("test", tuple(pkgs), dict(env or {}))
         )
         # The real one refuses a directory that does not exist, which is the
@@ -182,7 +182,7 @@ def run(check, name, prune_packages) -> None:
         )
     }
 
-    def _failing_test_step(pkgs, filt=None, env=None) -> None:
+    def _failing_test_step(pkgs, filt=None, env=None, targets=()) -> None:
         red_calls.append(("test", tuple(pkgs)))
         raise RunError("the instrumented test run failed (exit 100)")
 

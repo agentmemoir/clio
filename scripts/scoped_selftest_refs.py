@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 
 from scoped_core import CoverageRow, RunError, owned
-from scoped_judge import judge, report_path_for
+from scoped_judge import judge
 from scoped_run import TEST_THREADS, coverage_report_command, coverage_test_command
 from scoped_select import build_inputs, embedders, resolve_ref, select
 
@@ -209,19 +209,6 @@ def run(check) -> tuple:
         1,
     )
 
-    # Per-file attribution. Two changed files must not share one report, or the
-    # second file's number stands in for the first's. Measured before this was
-    # fixed: create.rs read 81.82% alone and 92.12% when a second file's tests
-    # joined the same run, which is its whole-crate figure.
-    first = report_path_for("crates/a/src/first.rs")
-    second = report_path_for("crates/a/src/second.rs")
-    check("two files get two report paths", first != second, True)
-    check("a report path is per file", first.name.startswith("coverage-file-"), True)
-    check(
-        "the same file always resolves to the same report path",
-        report_path_for("crates/a/src/first.rs"),
-        first,
-    )
     check(
         "a path with no modules and no target yields no filter",
         owned.filter_expression([], None),

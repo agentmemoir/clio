@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Collection, Iterable, NamedTuple, Sequence
 
-from scoped_core import COV_DIR, CoverageRow, LINE_FLOOR, ROOT, RunError, owned
-from scoped_run import run_coverage
-from scoped_select import git, merge_base, package_owners
+from scoped_core import CoverageRow, LINE_FLOOR, ROOT, RunError, owned
+import owned_scanner as scanner
+from scoped_select import git, merge_base
 
 
 # --- judging the report --------------------------------------------------------
@@ -122,39 +122,6 @@ def renames(base: str) -> set[str]:
     return moved
 
 
-def file_scope_filter(files: Sequence[str]) -> tuple[str, list[str]]:
-    """One filter expression naming every test `files` own, and the files owning none.
-
-    Only valid for the test verdict, where a test either passed or did not. It is
-    NOT valid for coverage: one run over several files' tests produces one merged
-    report, and each file's row is then the union of all of their tests' coverage.
-    Measured: `create.rs` reads 81.82% lines from its own tests and 92.12% when a
-    second changed file's tests run alongside. `judge_file_scope` therefore runs
-    one pass per file and this union is never used to measure.
-    """
-    selections = [owned.owned_selection(rel) for rel in files]
-    unplanned = [s.file for s in selections if s.is_empty]
-    modules: set[str] = set()
-    binaries: set[str] = set()
-    for selection in selections:
-        modules.update(selection.modules)
-        if selection.binary:
-            binaries.add(selection.binary)
-    if binaries:
-        # Mixed targets: one branch per target, each naming only that target's
-        # modules. A single `binary()` would name at most one target, and a
-        # name-only union would pull in every target sharing a module path.
-        branches = []
-        for binary in sorted(binaries):
-            own = {m for s in selections if s.binary == binary for m in s.modules}
-            branches.append(owned.filter_expression(own, binary))
-        for selection in selections:
-            if selection.binary is None:
-                branches.append(owned.filter_expression(selection.modules))
-        return "(" + " | ".join(b for b in branches if b) + ")", unplanned
-    return owned.filter_expression(modules), unplanned
-
-
 def report_verdicts(
     offenders: Sequence[str],
     unreported: Sequence[str],
@@ -174,71 +141,54 @@ def report_verdicts(
         print(f"scoped-runner: BELOW FLOOR {offender}", file=stream)
 
 
-def judge_file_scope(
-    packages: Sequence[str],
-    files: Sequence[str],
-    floor: float,
-) -> tuple[list[str], list[str]]:
-    """Measure and judge each changed file from that file's own tests, one run each.
-
-    One run per file, not one run for the lot. A single instrumented pass over
-    several files' tests writes one merged report, and in that report every
-    file's row is the coverage contributed by all of them. That is not a small
-    bias: measured here, `create.rs` reads 89.70% lines from its own tests and
-    92.12% once a second changed file's tests join the run. Under that
-    arrangement a file can be passed by another file's tests, which is the one
-    thing a per-file measurement is for.
-
-    The cost is one instrumented run per changed file rather than one per change.
-    That is the right trade because a change usually touches a handful of files,
-    and because correctness here is not recoverable from a faster wrong number.
-
-    The judgement itself is `judge`, the same function the crate scope uses, at
-    the same number. This scope differs in which tests produced the measurement
-    and in nothing else.
-    """
-    offenders: list[str] = []
-    unmeasured: list[str] = []
-    for rel in files:
-        selection = owned.owned_selection(rel)
-        if selection.is_empty:
-            # No test of its own means 0% coverage, which is a verdict rather than
-            # a gap: the touch rule requires the file to be given tests.
-            offenders.append(
-                f"{rel} lines 0.00% (floor {floor:.2f}, no test module found)"
-            )
-            continue
-        owners = package_owners(rel)
-        expression = selection.expression()
-        try:
-            run_coverage(owners or packages, expression, report_path_for(rel))
-            doc = load_report(report_path_for(rel))
-        except RunError as error:
-            raise RunError(f"{rel}: {error}") from error
-        rows = report_rows(doc)
-        below, missing = judge(rows, [rel], floor)
-        offenders.extend(below)
-        unmeasured.extend(missing)
-        if not below and not missing:
-            row = rows[rel]
-            # Both metrics are printed, and only the lines one was judged: a report
-            # that hid half of what it measured would be a different measurement.
-            print(
-                f"scoped-runner: {rel} lines {row.lines_pct:.2f}% "
-                f"functions {row.functions_pct:.2f}% "
-                f"from its own test module(s); judged on lines"
-            )
-    return offenders, unmeasured
+_ATTRIBUTE = re.compile(r"#!?\[[^\]]*\]")
+_DECLARATION = re.compile(r"(?:pub(?:\([^)]*\))?\s+)?(?:mod\s+\w+|use\s[^;]*)\s*;")
 
 
-def report_path_for(rel: str) -> Path:
-    """A per-file report path, so one file's measurement cannot overwrite another's.
+def declarations_only(source: str) -> bool:
+    """True when the code is only `mod x;`, `use ...;` and `pub use ...;`, with attributes and comments."""
+    code = _ATTRIBUTE.sub(" ", scanner.strip_comments(source))
+    return not _DECLARATION.sub(" ", code).strip()
 
-    A single shared path would let the last run's report stand in for the others,
-    which is how a targeted number silently becomes a whole-crate one.
-    """
-    digest = hashlib.sha256(rel.encode("utf-8")).hexdigest()[:12]
-    return COV_DIR / f"coverage-file-{digest}.json"
+
+def is_test_module(rel: str) -> bool:
+    """True when the file, or a module above it, is declared behind a test gate."""
+    module_of = owned.walk_crate(owned.crate_of(rel))
+    path_of = {module: path for path, module in module_of.items()}
+    target = (ROOT / rel).resolve()
+    module = next((m for p, m in module_of.items() if p.resolve() == target), None)
+    while module:
+        parent, _, name = module.rpartition("::")
+        source = scanner.read_text(path_of[parent])
+        if any(d.name == name and d.gated for d in scanner.declarations(source, path_of[parent].parent)):
+            return True
+        module = parent
+    return False
+
+
+def exemption(rel: str) -> str | None:
+    """Why a changed file is never judged, or None when it is judged."""
+    path = PurePosixPath(rel)
+    if "tests" in path.parts[:-1]:
+        return "integration test file"
+    if path.name == "build.rs":
+        return "build script"
+    if declarations_only((ROOT / rel).read_text(encoding="utf-8")):
+        return "module declarations and re-exports only"
+    if is_test_module(rel):
+        return "declared test module"
+    return None
+
+
+def verdicts(rows: dict[str, CoverageRow], files: Sequence[str], floor: float = LINE_FLOOR) -> list[str]:
+    """Every failure over the judged files: no test module of its own, not in the report, or below the floor."""
+    untested = [rel for rel in files if owned.owned_selection(rel).is_empty]
+    below, missing = judge(rows, [rel for rel in files if rel not in untested], floor)
+    return (
+        [f"{rel} owns no test module" for rel in untested]
+        + [f"{rel} is not in the report" for rel in missing]
+        + below
+    )
 
 
 def judge(

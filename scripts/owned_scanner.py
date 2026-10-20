@@ -39,7 +39,7 @@ TEST_FUNCTION_MARKERS = ("#[test]", "#[tokio::test]", "#[rstest", "#[test_case]"
 SUPPORT_SUFFIXES = ("_test_support.rs", "_fixtures.rs", "_seam.rs")
 
 _ATTR = re.compile(r"#\s*\[([^\]]*)\]", re.S)
-_TEST_GATE = re.compile(r"cfg\(\s*(?:all\(\s*)?test\s*[,)]")
+_TEST_GATE = re.compile(r"cfg\(\s*(?:all\((?:(?:[^()]|\([^()]*\))*?,)?\s*)?test\s*[,)]")
 _MOD = re.compile(r"(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z_0-9]*)\s*(\{|;)")
 _PATH_ATTR = re.compile(r'path\s*=\s*"([^"]+)"')
 _WORD = re.compile(r"[A-Za-z_0-9]")
@@ -131,7 +131,7 @@ def attr_text(attrs: str) -> str:
 
 
 def _is_gated(attrs: str) -> bool:
-    """True for `cfg(test)` and for `cfg(all(test, ...))`.
+    """True for `cfg(test)` and for `cfg(all(..., test, ...))`, in any argument position.
 
     `cfg(all(test, target_os = "linux"))` is compiled only under test too. Its
     operating system is read separately, so on another platform the module is
