@@ -4,7 +4,7 @@ One self-hosted operator runs a subject request to an honest result with local C
 
 ## Status
 
-This document covers the full local walk: scope inventory, verification, request start, status, copy custody, erasure retry, retention exception, event review, peer requests, archive custody, erasure journal backup and handoff, the guarded restore drill, and closure. Every command and refusal below was run and observed on a fresh local fixture unless the text names shipped tests as the evidence.
+This document covers the full local walk: scope inventory, verification, request start, status, copy custody, subject export and delivery, erasure retry, retention exception, event review, peer requests, archive custody, erasure journal backup and handoff, the guarded restore drill, and closure. Every command and refusal below was run and observed on a fresh local fixture unless the text names shipped tests as the evidence.
 
 ## Before you start
 
@@ -18,7 +18,7 @@ The software records your identity-verification decision, your deadline, and you
 
 ## Store connection flags
 
-Every command in this runbook accepts the same connection flags:
+Store commands accept these connection flags. The archive commands `backup list` and `backup verify` do not: they read archives, not a store, and refuse `--db`.
 
 - `--db PATH` opens this store instead of the configured one.
 - `--backend sqlite|postgres` selects the store backend.
@@ -28,7 +28,20 @@ Every command in this runbook accepts the same connection flags:
 
 The `--backend` and `--db` flags work before or after the subcommand.
 
-Commands that write request records or read the event review need a compliance-privilege actor: without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` where it is required.
+Five compliance commands need a compliance-privilege actor: `request-copy`, `request-exception`, `peer-disposition`, `request-events`, and `review-export`. Without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` on those commands. The other commands in this runbook, such as `request-start`, `request-retry`, and `request-close`, run without this gate.
+
+## Where the evidence lives
+
+Each step leaves evidence in a place you can name:
+
+- Step 1: the inventory rows and the declared-copy rows live in the store you open with `--db`; `clio compliance inventory` reads them back.
+- Step 2 and Step 3: the durable request record lives in the same store; `clio compliance request-status` reads it back.
+- Step 4: the copy-inventory row and the event-review entry live in the store; `clio compliance request-events --request-id r1 --actor harness` reads the entry back.
+- Step 5: the bundle file at your `--out` path, plus the `complete` flag and the content hash the command prints.
+- Step 6 and Step 10: refusals and erasure counts print on your terminal with a nonzero exit code, and a retry's counts also land in the store's event rows.
+- Step 7 and Step 8: the event rows live in the store; `request-events` reads them, and `review-export` writes the ordered copy to the `--out` file you record in custody.
+- Step 9: the peer report prints in the command output, and a recorded disposition lives in the store.
+- The archive steps: the archive files under the path `clio backup dir` shows, the per-member digests `backup verify` prints, and the journal file at the path named in the Erasure journal section.
 
 ## Step 1: Record the scope and known copies
 
@@ -84,7 +97,25 @@ This command writes into the request's event review, so it needs a compliance-pr
 
 `--exception-reason` records why a copy has no request result yet. Record every copy you find, including the ones you keep.
 
-## Step 5: Run a confirmed erasure retry
+## Step 5: Export and deliver the subject copy
+
+Deliver the subject's stored content as one bundle file:
+
+```sh
+clio export --out ./exports/s1-bundle.json --subject s1 --actor harness
+```
+
+The command writes one bundle file plus its completeness manifest, and refuses any actor except `harness` or `system`. `--subject` bounds the bundle to one subject; omit it to export the whole store. `--content-mode dsar_plaintext` is the default, and `--content-mode ciphertext_backup` selects the backup bundle.
+
+The command prints one line with the destination, the content mode, a `complete` flag, the entity count, and the start of the content hash. Check `complete=true` on that line before you deliver the bundle; the manifest behind it also carries the per-type counts and the full hash.
+
+Deliver the bundle through the custody route you recorded in Before you start, then declare the delivered copy so the run records it:
+
+```sh
+clio compliance inventory --copy ./exports/s1-bundle.json
+```
+
+## Step 6: Run a confirmed erasure retry
 
 Retry a confirmed erasure through its durable request id:
 
@@ -94,9 +125,9 @@ clio compliance request-retry --request-id r1 --subject-id s1 --legal-basis gdpr
 
 Without `--confirm` the tool refuses with `subject_request_retry requires confirm=true; unconfirmed calls never mutate` and never mutates. The legal basis is recorded as given; you supply it.
 
-A subject that lives in more than one bank refuses the retry with `the banks sharing the subject key changed after confirmation`, even when nothing changed after the request started. This was observed for the default-bank scope and for a single named bank. A single-bank subject retries cleanly and reports the erasure counts before and after.
+A subject that lives in more than one bank refuses the retry with `the banks sharing the subject key changed after confirmation`, even when nothing changed after the request started. This was observed for the default-bank scope and for a single named bank. A single-bank subject retries cleanly and reports the erasure counts before and after. A future release owns a better wording for this refusal.
 
-## Step 6: Record a retention exception
+## Step 7: Record a retention exception
 
 Record a request-level retention exception when part of the data stays:
 
@@ -108,7 +139,7 @@ This command also writes into the request's event review, so it needs a complian
 
 An open or excepted request yields a partial or refused result, never a full closure. Do not treat a failed event as complete.
 
-## Step 7: Review the events
+## Step 8: Review the events
 
 Read one content-free page of the local events bound to the request:
 
@@ -124,9 +155,9 @@ Write the ordered review events to a file under destination custody:
 clio compliance review-export --out ./review.txt --actor harness
 ```
 
-Only a `harness` or `system` actor may export. `--out` needs a path with a parent directory: `./review.txt` works, and a bare name like `review.txt` refuses with `destination has no parent directory`. An export to a path whose parent exists writes the file with mode `0600` and one `action_id<TAB>state` line per row, and a second export to an existing destination refuses with `review file export is refused: destination custody is not available`; record that exported file in your custody list.
+Only a `harness` or `system` actor may export. `--out` needs a path with a parent directory: `./review.txt` works, and a bare name like `review.txt` refuses with `destination has no parent directory`. An export to a path whose parent exists writes the file with mode `0600` and one `seq<TAB>action_id<TAB>state` line per row, where `seq` is the row's sequence position, and a second export to an existing destination refuses with `review file export is refused: destination custody is not available`; record that exported file in your custody list.
 
-## Step 8: Reconcile peer requests
+## Step 9: Reconcile peer requests
 
 Report the derived peer state slots of one request:
 
@@ -148,7 +179,7 @@ clio compliance peer-disposition --request-id r1 --peer-id p1 --disposition remo
 
 `--disposition` is one of `removal_evidence`, `retention_approved`, or `unknown`. A removed peer needs an explicit disposition before the request can be judged. See the Peers section for what a peers-disabled store returns.
 
-## Step 9: Close only when eligible
+## Step 10: Close only when eligible
 
 Attempt closure for one request only when it is eligible:
 
@@ -156,7 +187,7 @@ Attempt closure for one request only when it is eligible:
 clio compliance request-close --request-id r1 --product-path ./product.db
 ```
 
-As shipped, every close attempt refuses with `request closure refused: UnknownProductPath`, on every fixture and on both backends. No shipped command records a product path into the request, so the closure gate never sees a recorded path. A future priced phase owns the fix. Until then the documented final outcome for closure is this refusal, so keep the request open and keep treating it as open.
+As shipped, every close attempt refuses with `request closure refused: UnknownProductPath`, on every fixture and on both backends. No shipped command records a product path into the request, so the closure gate never sees a recorded path. A future release owns the fix. Until then the documented final outcome for closure is this refusal, so keep the request open and keep treating it as open.
 
 ## Archive custody
 
@@ -210,13 +241,13 @@ The journal holds hashes only, never subject text. Its shape is a schema version
 {"schema_version":1,"deployment_id":"<hex>","generation":1,"salt_fingerprint":"<hex>","denials":[{"subject_hash":"<hex>","banks":["<bank>"]}]}
 ```
 
-No CLI command reads or writes the journal. Its backup and handoff are an owner-held file copy: copy the file to the custody location yourself and record who holds it.
+No CLI command backs up or hands off the journal file. The file copy is yours. Shipped commands do read and write the journal in place: `backup create` reads the live journal to record the archive's erasure authority, every confirmed erasure appends a denial entry to it, and the guarded restore reads it before any content becomes readable.
 
-The live journal file is the erasure authority. If a stale handoff copy is swapped in as the live journal file, a pre-erasure archive can restore and make erased content readable again, so the current journal file must stay in place and handoff copies must never replace it silently. Any stronger pinning is owned by a future priced phase.
+The live journal file is the erasure authority. If a stale handoff copy is swapped in as the live journal file, a pre-erasure archive can restore and make erased content readable again, so the current journal file must stay in place and handoff copies must never replace it silently. Why this gap is yours to guard: the handoff copy is an owner-held file, and no shipped tool watches the live file or pins it in place. A future release owns stronger pinning.
 
 Each erasure appends a denial entry to the journal and bumps its generation. Copy the journal again after every erasure so the copy matches the store.
 
-Before you make a handoff copy or attempt a restore, record the live journal's `generation` and `salt_fingerprint` from the journal file. Compare them against the handoff copy's values, and compare the generation against the archive's claimed generation, before you go on. Stop on any mismatch instead of restoring. This check is yours to run: the tooling does not do it for you today, and a future priced phase owns turning it into an enforced one.
+Before you make a handoff copy or attempt a restore, record the live journal's `generation` and `salt_fingerprint` from the journal file. Compare them against the handoff copy's values, and compare the generation against the archive's claimed generation, before you go on. Stop on any mismatch instead of restoring. The restore guard already enforces part of this check: it refuses an archive that claims a generation newer than the live authority's, and it refuses an archive whose salt fingerprint is missing or differs from the deployment's. What is still yours alone: no tool compares your handoff copy against the live journal file, and no tool checks that the live file is genuine. A future release owns turning the handoff-copy check into an enforced one.
 
 Before you restore, run the journal check from the Erasure journal backup and handoff section: record the live journal's `generation` and `salt_fingerprint`, compare them against your handoff copy and the archive's claimed generation, and stop on any mismatch instead of restoring.
 
@@ -247,11 +278,25 @@ Caveat: supported Clio restore refuses old or missing authority, but an operator
 
 With peers disabled, the core path still runs. The request reports `peer_enablement:"not_applicable"` at start, `peer-status` returns the bare report `{"ok":true}` because there are no peer slots, and `peer-disposition` for a peer id refuses with ``no peer action row exists for request `r1` peer `p1` `` because the peers-disabled store has no peer rows.
 
-When a request requires enabled peers, the shipped behavior is that an offline peer stays pending, a reconnecting peer is denied before it can read or replay, and a removed peer needs an explicit disposition. The shipped subject-peer fixture tests document these behaviors. No shipped command creates enabled peer records, so a two-peer drill from the CLI alone is not reachable; the repo's own tests carry that drill.
+When a request requires enabled peers, the shipped behavior is that an offline peer stays pending, a reconnecting peer is denied before it can read or replay, and a removed peer needs an explicit disposition. The shipped acceptance tests document the delivery and replay parts; the CLI walk below proves the rest on a fresh local fixture.
+
+### Two-peer drill
+
+A two-peer drill is reachable from the shipped CLI. Two shipped commands create the enabled peer records, both run and observed on a fresh local fixture: `clio auth token add --label peer-a --actor user --bank default -o json` once per peer (each credential record becomes one enabled peer, and the verb refuses `--db` because it manages the token file, not a store), and `clio config set sync.omit false --scope deployment -o json` (which brings sync into play, the condition the request opener checks before treating records as peers). Then `clio auth token list -o json` shows both records.
+
+The request then opens with peers required, run and observed on the same fixture: `clio compliance request-start --request-id r1 --kind erasure --subject-id s1 --verification verified --actor harness -o json` returns `"peer_enablement":"required"` with one pending slot per record, `"peers":{"peer-a":"pending","peer-b":"pending"}`, frozen at start.
+
+Per-peer behavior from the same walk, each observed in command output: `clio compliance peer-status --request-id r1 --actor harness -o json` returns `{"ok":true,"peer-a":"pending","peer-b":"pending"}`, the offline default. `clio compliance peer-retry --request-id r1 --legal-basis gdpr-art17 --actor harness -o json` succeeds but changes no CLI-visible slot. `clio compliance peer-disposition --request-id r1 --peer-id peer-a --disposition removal_evidence --actor harness -o json` accepts `removal_evidence`, `retention_approved`, or `unknown` for an existing peer row (the `removed` spelling refuses as a usage error), and an unknown peer id refuses with ``no peer action row exists for request `r1` peer `p9` ``. After both dispositions, `peer-status` and `request-status` still show the slots `pending` and `technical_completion` `pending`, so do not read closure progress from a disposition alone. `clio compliance request-events --request-id r1 --actor harness -o json` returned zero rows for this walk, and `clio compliance request-close --product-path prod/x` still refuses with `request closure refused: UnknownProductPath`, unchanged by the two-peer setup.
+
+Three behaviors stay outside this CLI walk, and the shipped tests in `crates/clio/tests/peer_erasure_acceptance/` carry them: peer delivery and replay denial (no CLI command delivers to a peer or replays a peer result; `scenarios_peer.rs` and `scenarios_replay.rs` cover it), visibility of a recorded disposition in a CLI read (`scenarios_disposition.rs`), and per-peer event rows (none appeared in `request-events` during the walk).
 
 ## Known limitations
 
-`clio compliance request-close` always refuses with `request closure refused: UnknownProductPath`. What is missing: no shipped command records a product path into the request, so the closure gate never sees one. Why: the request record opens with no path slots and nothing fills them. A future priced phase owns the fix. Until then, Step 9 documents the observed refusal as the final closure outcome.
+Each recorded gap names what is missing, why, and who owns the debt.
+
+`clio compliance request-close` always refuses with `request closure refused: UnknownProductPath`. What is missing: no shipped command records a product path into the request, so the closure gate never sees one. Why: the request record opens with no path slots and nothing fills them. A future release owns the fix. Until then, Step 10 documents the observed refusal as the final closure outcome.
+
+A direct confirmed `clio erase` can refuse with `the banks sharing the subject key changed after confirmation` for a subject that lives in more than one bank, even when the bank set has not changed after the request started. What is missing: a refusal that tells the operator what to check next. Why: the preflight reads the live bank list from the store just before the erasure and compares it with the confirmed scope, and the check fails closed on any disagreement, so a stale or separately configured bank list can never widen the erasure. A future release owns a better refusal. Until then, check the subject's banks and retry, as Step 6 records for the retry path.
 
 ## What is next
 
