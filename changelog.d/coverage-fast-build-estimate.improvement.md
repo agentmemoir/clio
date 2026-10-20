@@ -1,0 +1,1 @@
+The `make coverage-fast` Done check now estimates a run as its build and report time plus its test time, not as three times its test time. The build time comes from this worktree's last fresh run that recorded its test time, and falls back to a fixed 53 seconds when there is none. The plan prints both parts and where the build time came from.

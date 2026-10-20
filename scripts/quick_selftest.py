@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import quick  # noqa: E402
 import quick_estimate as est  # noqa: E402
+from gate_runlog import RUNS_FILE  # noqa: E402
+from gate_tree import cache_root  # noqa: E402
 import scoped_cli  # noqa: E402
 import scoped_runner as runner  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
@@ -138,6 +140,30 @@ class EstimateTests(unittest.TestCase):
 class PlanTests(unittest.TestCase):
     terms = [Term("p", modules=("a",)), Term("q", modules=("b",))]
 
+    def setUp(self) -> None:
+        # The gate's run log lives under the cache; each test writes its own, so none reads this machine's.
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.root = self.tmp / "clio"
+        for patch in (
+            mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.tmp / "cache")}),
+            mock.patch.object(runner, "ROOT", self.root),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def write_runs(self, runs: list[dict]) -> None:
+        path = cache_root() / RUNS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(run) + "\n" for run in runs))
+
+    def run_record(self, **changes: object) -> dict:
+        record = {
+            "kind": "coverage-fast", "replayed": False, "argv": ["/usr/bin/make", "coverage-fast"],
+            "root": str(self.root), "branch": "b", "started": 0.0, "finished": 60.0, "test_s": 5.0,
+        }
+        return {**record, **changes}
+
     def history(self, seconds: float) -> list[est.Case]:
         return [est.Case("p", "a::x", seconds, False), est.Case("q", "b::y", seconds, False)]
 
@@ -165,21 +191,54 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(any("leave the coverage verdict to CI" in line for line in big))
         self.assertTrue(any("unknown" in line for line in quick.closure_lines(self.terms[:1], [])))
 
-    def test_the_closure_estimate_counts_the_build_and_coverage_cost(self) -> None:
-        # Two tests of 90 s fit the budget as test time alone; times the factor they do not.
-        lines = quick.closure_lines(self.terms, self.history(90.0))
-        counted = 2 * 90.0 / quick.THREADS * quick.DONE_FACTOR
-        self.assertTrue(any(f"{counted:.1f} s with the build and coverage (times 3)" in line for line in lines))
+    def test_the_closure_estimate_adds_the_build_to_the_test_time(self) -> None:
+        # Two tests that take 150 s at THREADS workers fit 180 s alone; with the 53 s build fallback they do not.
+        lines = quick.closure_lines(self.terms, self.history(75.0 * quick.THREADS))
+        self.assertTrue(any("203.0 s, which is build and report 53.0 s" in line for line in lines))
+        self.assertTrue(any("plus tests 150.0 s over 2 test(s)" in line for line in lines))
         self.assertTrue(any("over the 180 s budget" in line for line in lines))
         self.assertTrue(any("leave the coverage verdict to CI" in line for line in lines))
+
+    def test_the_build_is_learned_from_the_newest_fresh_run_of_this_worktree(self) -> None:
+        self.write_runs([
+            self.run_record(finished=60.0, test_s=5.0),  # build 55 s: the one that counts
+            self.run_record(replayed=True, started=0.0, finished=900.0),
+            self.run_record(root=str(self.tmp / "other"), finished=500.0),
+            self.run_record(test_s=None, finished=999.0),
+            self.run_record(argv=["/usr/bin/make", "coverage-fast", "PLAN=1"], finished=888.0),
+        ])
+        self.assertEqual(quick.build_estimate(), (55.0, "learned from this worktree's last fresh run"))
+        doc = json.loads(quick.closure_json(self.terms, self.history(10.0)))
+        self.assertEqual((doc["build_seconds"], doc["test_seconds"]), (55.0, 10.0 / quick.THREADS * 2))
+        self.assertAlmostEqual(doc["done_seconds"], 55.0 + 10.0 * 2 / quick.THREADS)
+
+    def test_without_a_usable_record_the_build_is_the_53_second_fallback(self) -> None:
+        self.assertEqual(quick.build_estimate()[0], 53.0)
+        self.write_runs([self.run_record(root=str(self.tmp / "other")), self.run_record(replayed=True)])
+        self.assertEqual(quick.build_estimate(), (53.0, "fallback constant, no fresh run here recorded a test time"))
+        doc = json.loads(quick.closure_json(self.terms, self.history(10.0)))
+        self.assertAlmostEqual(doc["done_seconds"], 53.0 + 10.0 * 2 / quick.THREADS)
+
+    def test_the_budget_refuses_when_build_plus_test_is_over_180_not_3_times_the_test(self) -> None:
+        # Test time 60 s at THREADS workers. Build 120 s makes 180 s (fits); build 130 s makes 190 s (over).
+        # Three times the test time would be 180 s both times, so only build plus test tells them apart.
+        history = [est.Case("p", "a::x", 60.0 * quick.THREADS, False)]
+        self.write_runs([self.run_record(finished=130.0, test_s=10.0)])  # build 120 s
+        fits = json.loads(quick.closure_json([Term("p", modules=("a",))], history))
+        self.assertEqual((fits["done_seconds"], fits["within"]), (180.0, True))
+        self.write_runs([self.run_record(finished=140.0, test_s=10.0)])  # build 130 s
+        over = json.loads(quick.closure_json([Term("p", modules=("a",))], history))
+        self.assertEqual((over["done_seconds"], over["within"]), (190.0, False))
+        self.assertTrue(any("over the 180 s budget" in line for line in quick.closure_lines([Term("p", modules=("a",))], history)))
 
     def test_the_closure_json_says_within_over_or_unknown(self) -> None:
         def doc(terms: list[Term], history: list[est.Case]) -> dict:
             return json.loads(quick.closure_json(terms, history))
 
-        each = quick.DONE_BUDGET_S * quick.THREADS / (2 * quick.DONE_FACTOR)  # two tests that just fit
+        each = (quick.DONE_BUDGET_S - quick.BUILD_FALLBACK_S) * quick.THREADS / 2  # two tests that just fit
         edge = doc(self.terms, self.history(each))
-        self.assertEqual((edge["done_seconds"], edge["within"], edge["tests"], edge["budget_seconds"]), (180.0, True, 2, 180.0))
+        self.assertAlmostEqual(edge["done_seconds"], 180.0)
+        self.assertEqual((edge["within"], edge["tests"], edge["budget_seconds"]), (True, 2, 180.0))
         self.assertFalse(doc(self.terms, self.history(each + 1))["within"])
         unknown = doc(self.terms[:1], [])
         self.assertEqual((unknown["done_seconds"], unknown["within"]), (None, None))
@@ -191,7 +250,7 @@ class PlanTests(unittest.TestCase):
         history = [est.Case("a", "m::t", 10.0, False), est.Case("a", "other::u", 500.0, False), est.Case("b", "m::t", 500.0, False)]
         doc = json.loads(quick.closure_json([Term("a", modules=("m",))], history))
         self.assertEqual((doc["packages"], doc["tests"]), (["a"], 1))
-        self.assertAlmostEqual(doc["done_seconds"], 10.0 / quick.THREADS * quick.DONE_FACTOR)
+        self.assertAlmostEqual(doc["done_seconds"], quick.BUILD_FALLBACK_S + 10.0 / quick.THREADS)
 
     def test_the_closure_run_prices_the_selection_coverage_fast_runs(self) -> None:
         # One changed file in `a`, which `b` depends on. Coverage-fast selects only a's module test.
@@ -215,7 +274,7 @@ class PlanTests(unittest.TestCase):
                 self.assertEqual(quick.run(quick.parse(["--base", "origin/master", "--plan", "--closure", "--json"])), runner.EXIT_OK)
         doc = json.loads(out.getvalue())
         self.assertEqual((doc["packages"], doc["tests"]), (["a"], 1))
-        self.assertAlmostEqual(doc["done_seconds"], 10.0 / quick.THREADS * quick.DONE_FACTOR)
+        self.assertAlmostEqual(doc["done_seconds"], quick.BUILD_FALLBACK_S + 10.0 / quick.THREADS)
 
     def test_a_linked_worktree_also_reads_the_main_checkouts_times(self) -> None:
         main = Path("/main")

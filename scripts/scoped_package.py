@@ -13,10 +13,10 @@ from scoped_profiles import (
     CARGO_LLVM_COV_TARGET_KEY,
     clear_profile_buffers,
     drop_invalid_profraws,
-    drop_selected_objects,
+    drop_stale_objects,
     instrumented_dir,
+    produced_executables,
     prune_foreign_objects,
-    resolved_instrumented_dir,
 )
 from scoped_run import hermetic_env, run_coverage_tests, write_coverage_report
 from scoped_select import workspace_packages
@@ -102,11 +102,11 @@ def run_package_coverage(name: str) -> PackageMeasurement:
     env = package_env(name)
     report_path = package_report_path(name)
     clear_profile_buffers(env)
-    drop_selected_objects(resolved_instrumented_dir(env), [name])
     test_status = EXIT_OK
     try:
-        run_coverage_tests([name], None, env)
+        produced = run_coverage_tests([name], None, env)
     except RunError as error:
+        produced = produced_executables(getattr(error, "stdout", ""))
         # `_run_or_raise` already reprinted the run's own output; the message is
         # repeated here so the log still says which step failed, and the buffers
         # the failed run left are this report's input.
@@ -116,6 +116,7 @@ def run_package_coverage(name: str) -> PackageMeasurement:
     # The same boundary the gate owns, against the directory this run built into.
     directory = instrumented_dir(env)
     drop_invalid_profraws(directory)
+    drop_stale_objects(directory, [name], produced)
     prune_foreign_objects(directory, [name])
 
     write_coverage_report(report_path, env)

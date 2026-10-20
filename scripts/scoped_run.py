@@ -12,10 +12,10 @@ from scoped_core import COV_DIR, REPORT, ROOT, RunError
 from scoped_profiles import (
     clear_profile_buffers,
     drop_invalid_profraws,
-    drop_selected_objects,
+    drop_stale_objects,
     instrumented_dir,
+    produced_executables,
     prune_foreign_objects,
-    resolved_instrumented_dir,
 )
 
 
@@ -114,6 +114,8 @@ def coverage_test_command(
         "--locked", "--profile", "ci",
         "--test-threads", TEST_THREADS,
         "--no-report",
+        # Cargo's JSON on stdout names every executable this build produced.
+        "--cargo-message-format", "json-render-diagnostics",
         *targets,
     ]
     if filter_expression:
@@ -147,10 +149,11 @@ def run_coverage_tests(
     filter_expression: str | None = None,
     env: dict[str, str] | None = None,
     targets: Sequence[str] = (),
-) -> None:
-    """Build and run the selected tests instrumented, writing no report."""
+) -> list[Path]:
+    """Build and run the selected tests instrumented; return the executables built."""
     command = coverage_test_command(packages, filter_expression, targets)
-    _run_or_raise(command, env or hermetic_env(), "the instrumented test run failed")
+    stdout = _run_or_raise(command, env or hermetic_env(), "the instrumented test run failed")
+    return produced_executables(stdout)
 
 
 def write_coverage_report(
@@ -170,7 +173,7 @@ def run_coverage(
 ) -> None:
     """One instrumented pass, writing the scoped report path.
 
-    Old profiles and selected executables are cleared first; otherwise the report can merge prior profiles or old line mappings with current binaries.
+    Old profiles are cleared first, and selected executables this build did not produce are deleted after it; otherwise the report can merge prior profiles or old line mappings with current binaries.
 
     The pass is two commands with the gate owning the gap between them, because
     the two things that have to happen in that gap cannot happen inside a single
@@ -184,8 +187,7 @@ def run_coverage(
     """
     env = hermetic_env()
     clear_profile_buffers(env)
-    drop_selected_objects(resolved_instrumented_dir(env), packages)
-    run_coverage_tests(packages, filter_expression, env, targets)
+    produced = run_coverage_tests(packages, filter_expression, env, targets)
 
     # The boundary the gate owns. Everything below acts on the instrumented build
     # the test step just produced and the report step is about to read.
@@ -193,6 +195,7 @@ def run_coverage(
     # steps inspect the directory this run's commands actually built in.
     directory = instrumented_dir(env)
     drop_invalid_profraws(directory)
+    drop_stale_objects(directory, packages, produced)
     prune_foreign_objects(directory, packages)
 
     write_coverage_report(report_path or REPORT, env)
@@ -202,7 +205,7 @@ TAIL_LINES = 20
 """How many lines of a captured run's own output to print on success."""
 
 
-def _run_or_raise(command: Sequence[str], env: dict[str, str], headline: str) -> None:
+def _run_or_raise(command: Sequence[str], env: dict[str, str], headline: str) -> str:
     """Print the command, run it, and raise with its own output on failure.
 
     The captured output is reprinted before the error is raised. A run that ends
@@ -225,13 +228,21 @@ def _run_or_raise(command: Sequence[str], env: dict[str, str], headline: str) ->
         list(command), cwd=ROOT, env=env, capture_output=True, text=True
     )
     if proc.returncode == 0:
-        _print_tail(proc.stdout, proc.stderr)
-        return
-    for stream, text in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+        _print_tail(_human(proc.stdout), proc.stderr)
+        return proc.stdout
+    for stream, text in (("stdout", _human(proc.stdout)), ("stderr", proc.stderr)):
         if text and text.strip():
             print(f"scoped-runner: {headline}: {stream}:", file=sys.stderr)
             print(text.rstrip(), file=sys.stderr)
-    raise RunError(f"{headline} (exit {proc.returncode})")
+    error = RunError(f"{headline} (exit {proc.returncode})")
+    # A red suite still built its executables, and its report needs to know which.
+    error.stdout = proc.stdout
+    raise error
+
+
+def _human(text: str) -> str:
+    """The output without cargo's JSON messages, which are for this tool to parse."""
+    return "\n".join(line for line in (text or "").splitlines() if not line.startswith("{"))
 
 
 def _print_tail(stdout: str, stderr: str) -> None:
