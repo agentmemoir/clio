@@ -51,13 +51,28 @@ fn erasure_action_id(request: &str) -> String {
     format!("{}:{request}", ProtectedAction::Erasure.producer_id())
 }
 
+/// The thread-local key this scenario installs, cleared when the guard drops.
+///
+/// The key is a thread-local, so a scenario that leaves it installed hands it
+/// to the next test the harness runs on the same thread.
+struct ThreadKeyGuard;
+
+impl Drop for ThreadKeyGuard {
+    fn drop(&mut self) {
+        clio_config::secret_seal::test_key::clear_thread_key();
+    }
+}
+
 /// Install the shared Clio encryption key on this thread and write it to the
 /// file the `clio` children open.
-fn install_key(scratch: &Path) -> PathBuf {
+///
+/// The returned guard clears the thread-local key when it drops, so the key
+/// never outlives the scenario that installed it.
+fn install_key(scratch: &Path) -> (PathBuf, ThreadKeyGuard) {
     clio_config::secret_seal::test_key::use_key(KEY);
     let path = scratch.join("clio.key");
     std::fs::write(&path, KEY).expect("write the scenario key file");
-    path
+    (path, ThreadKeyGuard)
 }
 
 /// Run one `compliance` request verb against the deployment and read its JSON
@@ -173,7 +188,7 @@ fn event_review(env: &Env, key: &Path, request: &str) {
 #[test]
 fn scenario_event_review_sqlite_reads_the_rows_the_request_wrote() {
     let env = Env::new("event-review");
-    let key = install_key(&env.scratch);
+    let (key, _key_guard) = install_key(&env.scratch);
     seed_sqlite(
         env.path(),
         &env.kms,
@@ -192,7 +207,7 @@ fn scenario_event_review_postgres_reads_the_rows_the_request_wrote() {
     let _guard = lock_pg();
     let target = ScopedSchema::new(&base);
     let env = Env::postgres("event-review-pg", target.url());
-    let key = install_key(&env.scratch);
+    let (key, _key_guard) = install_key(&env.scratch);
     seed_pg(
         env.db(),
         &env.kms,

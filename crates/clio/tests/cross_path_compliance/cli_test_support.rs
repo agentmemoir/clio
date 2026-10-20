@@ -28,6 +28,7 @@
 //! Keep this module focused on the CLI driver, with no tests.
 
 use crate::case_fixtures::DENIED_SUBJECT;
+use clio::ErrorCode;
 use serde_json::{Value, json};
 use std::io::Read;
 use std::path::Path;
@@ -174,25 +175,34 @@ pub struct Refusal {
 
 /// The production's refusal when an archive member references a subject the
 /// live authority denies.
+///
+/// The error code is the public enum's own string, so a rename of the code
+/// fails this check here instead of leaving a copied string behind.
 pub const DENIED_SUBJECT_REFUSAL: Refusal = Refusal {
     exit: 2,
-    code: "forbidden",
+    code: ErrorCode::Forbidden.as_str(),
     message: "an archive member references a currently denied subject",
 };
 
 /// The production's refusal when an archive member cannot be classified.
+///
+/// The error code is the public enum's own string, so a rename of the code
+/// fails this check here instead of leaving a copied string behind.
 pub const UNCLASSIFIED_MEMBER_REFUSAL: Refusal = Refusal {
     exit: 2,
-    code: "config_corrupt",
+    code: ErrorCode::ConfigCorrupt.as_str(),
     message: "an archive member cannot be classified",
 };
 
 /// The production's refusal when a one-bank confirmation meets a subject key
 /// that another bank also holds: the coordination set changed after the
 /// confirmation.
+///
+/// The error code is the public enum's own string, so a rename of the code
+/// fails this check here instead of leaving a copied string behind.
 pub const PARTIAL_BANK_REFUSAL: Refusal = Refusal {
     exit: 1,
-    code: "forbidden",
+    code: ErrorCode::Forbidden.as_str(),
     message: "the banks sharing the subject key changed after confirmation",
 };
 

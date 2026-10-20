@@ -67,11 +67,26 @@ impl<T> CrossStore for T where
 {
 }
 
+/// The thread-local key this scenario installs, cleared when the guard drops.
+///
+/// The key is a thread-local, so a scenario that leaves it installed hands it
+/// to the next test the harness runs on the same thread.
+pub(crate) struct ThreadKeyGuard;
+
+impl Drop for ThreadKeyGuard {
+    fn drop(&mut self) {
+        clio_config::secret_seal::test_key::clear_thread_key();
+    }
+}
+
 /// Write this process's key file and install the same key on this thread.
-pub(crate) fn install_key(path: PathBuf) -> PathBuf {
+///
+/// The returned guard clears the thread-local key when it drops, so the key
+/// never outlives the scenario that installed it.
+pub(crate) fn install_key(path: PathBuf) -> (PathBuf, ThreadKeyGuard) {
     clio_config::secret_seal::test_key::use_key(KEY);
     std::fs::write(&path, KEY).expect("write the harness key file");
-    path
+    (path, ThreadKeyGuard)
 }
 
 /// A successful run's JSON payload, or a panic quoting both streams.
@@ -367,28 +382,30 @@ fn partial_bank<S: CrossStore>(deployment: &Deployment, open: impl Fn() -> S) {
 
 /// One deployment fixture over `scratch`, whose store is `db`, with the private
 /// peer scratch directory the real-peer arm spawns into.
-fn deployment_for(scratch: &crate::common::Scratch, db: String) -> Deployment {
-    Deployment {
+fn deployment_for(scratch: &crate::common::Scratch, db: String) -> (Deployment, ThreadKeyGuard) {
+    let (keys, key_guard) = install_key(scratch.join("clio.key"));
+    let deployment = Deployment {
         journal: journal_file(scratch, "journal/erasure.json"),
-        keys: install_key(scratch.join("clio.key")),
+        keys,
         kms: scratch.join("clio.kms.json"),
         backups: backup_dir(scratch),
         db,
         peer_dir: scratch.join("peer"),
-    }
+    };
+    (deployment, key_guard)
 }
 
 /// One SQLite deployment whose scratch is also returned for the opener.
-fn sqlite_deployment(tag: &str) -> (crate::common::Scratch, Deployment) {
+fn sqlite_deployment(tag: &str) -> (crate::common::Scratch, Deployment, ThreadKeyGuard) {
     let scratch = scratch(tag);
     let db = scratch.join("clio.db").to_string_lossy().into_owned();
-    let deployment = deployment_for(&scratch, db);
-    (scratch, deployment)
+    let (deployment, key_guard) = deployment_for(&scratch, db);
+    (scratch, deployment, key_guard)
 }
 
 #[test]
 fn sqlite_exact_all_bank_erasure_never_returns_the_marker() {
-    let (_scratch, deployment) = sqlite_deployment("sqlite-all-bank");
+    let (_scratch, deployment, _key_guard) = sqlite_deployment("sqlite-all-bank");
     let db = Path::new(&deployment.db).to_path_buf();
     let kms = deployment.kms.clone();
     all_bank(&deployment, || open_sqlite(&db, &kms));
@@ -396,7 +413,7 @@ fn sqlite_exact_all_bank_erasure_never_returns_the_marker() {
 
 #[test]
 fn sqlite_partial_bank_confirmation_has_no_irreversible_effect() {
-    let (_scratch, deployment) = sqlite_deployment("sqlite-partial-bank");
+    let (_scratch, deployment, _key_guard) = sqlite_deployment("sqlite-partial-bank");
     let db = Path::new(&deployment.db).to_path_buf();
     let kms = deployment.kms.clone();
     partial_bank(&deployment, || open_sqlite(&db, &kms));
@@ -411,7 +428,7 @@ fn postgres_exact_all_bank_erasure_never_returns_the_marker() {
     let _guard = lock_pg();
     let schema = ScopedSchema::new(&base);
     let scratch = scratch("pg-all-bank");
-    let deployment = deployment_for(&scratch, schema.url().to_owned());
+    let (deployment, _key_guard) = deployment_for(&scratch, schema.url().to_owned());
     let db = deployment.db.clone();
     let kms = deployment.kms.clone();
     all_bank(&deployment, || open_pg(&db, &kms));
@@ -426,7 +443,7 @@ fn postgres_partial_bank_confirmation_has_no_irreversible_effect() {
     let _guard = lock_pg();
     let schema = ScopedSchema::new(&base);
     let scratch = scratch("pg-partial-bank");
-    let deployment = deployment_for(&scratch, schema.url().to_owned());
+    let (deployment, _key_guard) = deployment_for(&scratch, schema.url().to_owned());
     let db = deployment.db.clone();
     let kms = deployment.kms.clone();
     partial_bank(&deployment, || open_pg(&db, &kms));

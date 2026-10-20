@@ -31,6 +31,7 @@
 //! Keep this module focused on the shared CLI fixtures, with no tests.
 
 use crate::support::{DENIED_SUBJECT, Scratch, open_sqlite, write_item};
+use clio::ErrorCode;
 use clio_backup::manifest::ManifestAuthority;
 use clio_compliance::{JournalState, load_journal, sha256_hex_bytes, tombstone_salt};
 use serde_json::{Value, json};
@@ -243,9 +244,12 @@ pub struct Refusal {
 
 /// The production's refusal when an archive member references a subject the
 /// live authority denies.
+///
+/// The error code is the public enum's own string, so a rename of the code
+/// fails this check here instead of leaving a copied string behind.
 pub const DENIED_SUBJECT_REFUSAL: Refusal = Refusal {
     exit: 2,
-    code: "forbidden",
+    code: ErrorCode::Forbidden.as_str(),
     message: "an archive member references a currently denied subject",
 };
 

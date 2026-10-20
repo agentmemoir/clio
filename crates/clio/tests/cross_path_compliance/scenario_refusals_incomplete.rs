@@ -341,7 +341,8 @@ fn scenario_refusals_incomplete_postgres() {
 #[test]
 fn scenario_refusals_incomplete_two_live_peers_sqlite() {
     let mut env = Env::new("refusals-two-peer");
-    env.key = Some(install_key(env.scratch.join("clio.key")));
+    let (key, _key_guard) = install_key(env.scratch.join("clio.key"));
+    env.key = Some(key);
     two_live_peers(&env, "req-two-peer", || open_sqlite(env.path(), &env.kms));
 }
 /// The concurrent two-local-peer closure refusal on loopback Postgres.
@@ -354,6 +355,7 @@ fn scenario_refusals_incomplete_two_live_peers_postgres() {
     let _guard = lock_pg();
     let target = ScopedSchema::new(&base);
     let mut env = Env::postgres("refusals-two-peer-pg", target.url());
-    env.key = Some(install_key(env.scratch.join("clio.key")));
+    let (key, _key_guard) = install_key(env.scratch.join("clio.key"));
+    env.key = Some(key);
     two_live_peers(&env, "req-two-peer-pg", || open_pg(env.db(), &env.kms));
 }
