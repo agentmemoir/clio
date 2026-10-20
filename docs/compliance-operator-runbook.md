@@ -28,7 +28,7 @@ Store commands accept these connection flags. The archive commands `backup list`
 
 The `--backend` and `--db` flags work before or after the subcommand.
 
-Five compliance commands need a compliance-privilege actor: `request-copy`, `request-exception`, `peer-disposition`, `request-events`, and `review-export`. Without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` on those commands. The other commands in this runbook, `request-start` and `request-close`, run without this gate. `request-retry` and a direct `clio erase` still reach this same authorization gate, and the CLI's default actor is an agent, so pass `--actor harness` or `--actor system` on those commands too.
+Five compliance commands need a compliance-privilege actor: `request-copy`, `request-exception`, `peer-disposition`, `request-events`, and `review-export`. Without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` on those commands. Other commands such as `request-start`, `request-status`, `peer-status`, `peer-retry`, and `request-close` run without this gate. `request-retry` and a direct `clio erase` still reach this same authorization gate, and the CLI's default actor is an agent, so pass `--actor harness` or `--actor system` on those commands too.
 
 ## Where the evidence lives
 
