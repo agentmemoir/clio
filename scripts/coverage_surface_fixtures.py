@@ -54,15 +54,15 @@ def drop_invalid_profraws(directory):
 def prune_foreign_objects(directory, selected):
     return 0
 
-def drop_selected_objects(directory, selected):
+def drop_stale_objects(directory, selected, produced):
     return 0
 
 
 def run_coverage(packages, report_path, env):
     directory = env["dir"]
-    drop_selected_objects(directory, packages)
-    run_coverage_tests(packages, env)
+    produced = run_coverage_tests(packages, env)
     drop_invalid_profraws(directory)
+    drop_stale_objects(directory, packages, produced)
     prune_foreign_objects(directory, packages)
     write_coverage_report(report_path, env)
 
@@ -78,17 +78,15 @@ NO_OBJECT_DELETE_RUNNER = CLEAN_RUNNER.replace(
     "    prune_foreign_objects(directory, packages)\n", ""
 )
 
-#: The selected binaries have to go before the build, not only before the report.
+#: The selected binaries this build did not produce have to go before the report.
 NO_SELECTED_OBJECT_DROP_RUNNER = CLEAN_RUNNER.replace(
-    "    drop_selected_objects(directory, packages)\n", ""
+    "    drop_stale_objects(directory, packages, produced)\n", ""
 )
 
-LATE_SELECTED_OBJECT_DROP_RUNNER = CLEAN_RUNNER.replace(
-    "    drop_selected_objects(directory, packages)\n", ""
-).replace(
-    "    run_coverage_tests(packages, env)\n",
-    "    run_coverage_tests(packages, env)\n"
-    "    drop_selected_objects(directory, packages)\n",
+LATE_SELECTED_OBJECT_DROP_RUNNER = NO_SELECTED_OBJECT_DROP_RUNNER.replace(
+    "    write_coverage_report(report_path, env)\n",
+    "    write_coverage_report(report_path, env)\n"
+    "    drop_stale_objects(directory, packages, produced)\n",
 )
 
 #: The same run with the buffer scan removed.
@@ -116,10 +114,12 @@ COMMENTED_AND_CALLED_RUNNER = CLEAN_RUNNER.replace(
 #: rather than a deletion and is just as invisible to a reader looking for calls.
 HYGIENE_AFTER_REPORT_RUNNER = CLEAN_RUNNER.replace(
     "    drop_invalid_profraws(directory)\n"
+    "    drop_stale_objects(directory, packages, produced)\n"
     "    prune_foreign_objects(directory, packages)\n"
     "    write_coverage_report(report_path, env)\n",
     "    write_coverage_report(report_path, env)\n"
     "    drop_invalid_profraws(directory)\n"
+    "    drop_stale_objects(directory, packages, produced)\n"
     "    prune_foreign_objects(directory, packages)\n",
 )
 
@@ -169,9 +169,9 @@ CLEAN_PACKAGE_RUNNER = '''"""A fixture one-package mode."""
 
 def run_package_coverage(name, env):
     directory = env["dir"]
-    drop_selected_objects(directory, [name])
-    run_coverage_tests([name], env)
+    produced = run_coverage_tests([name], env)
     drop_invalid_profraws(directory)
+    drop_stale_objects(directory, [name], produced)
     prune_foreign_objects(directory, [name])
     write_coverage_report(env["report"], env)
 '''

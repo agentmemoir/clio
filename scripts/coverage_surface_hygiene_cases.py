@@ -31,7 +31,7 @@ def hygiene_cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             ["hygiene"],
         ),
         (
-            "a run that keeps old selected objects through the rebuild is a finding",
+            "a run that keeps stale selected objects for the report is a finding",
             EXIT_FINDINGS,
             _fixture(
                 base,
@@ -41,7 +41,7 @@ def hygiene_cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             ["hygiene"],
         ),
         (
-            "a run that drops old selected objects after the rebuild is a finding",
+            "a run that drops stale selected objects after the report is a finding",
             EXIT_FINDINGS,
             _fixture(
                 base,
@@ -58,7 +58,7 @@ def hygiene_cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
                 "package-no-selected-object-drop",
                 {
                     PACKAGE_RUNNER: CLEAN_PACKAGE_RUNNER.replace(
-                        "    drop_selected_objects(directory, [name])\n", ""
+                        "    drop_stale_objects(directory, [name], produced)\n", ""
                     )
                 },
             ),
@@ -104,6 +104,6 @@ def hygiene_cases(base: Path) -> list[tuple[str, int, Path, list[str]]]:
             "a run that writes its report before cleaning is a finding",
             EXIT_FINDINGS,
             _fixture(base, "hygiene-after", {RUNNER: HYGIENE_AFTER_REPORT_RUNNER}),
-            ["hygiene", "hygiene"],
+            ["hygiene", "hygiene", "hygiene"],
         ),
     ]

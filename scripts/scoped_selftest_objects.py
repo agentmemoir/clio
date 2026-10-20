@@ -22,7 +22,7 @@ from pathlib import Path, PurePosixPath
 
 from exec_tempdir import exec_tempdir
 
-from scoped_profiles import drop_selected_objects, prune_foreign_objects
+from scoped_profiles import drop_stale_objects, produced_executables, prune_foreign_objects
 
 from scoped_selftest_support import shared as globals
 
@@ -97,7 +97,7 @@ def _stale_mapping_regression(check) -> bool:
     #
     # The other scenarios in this file keep `tempfile.TemporaryDirectory` on
     # purpose, so do not "fix" them: they only write fixture files and let
-    # `prune_foreign_objects` or `drop_selected_objects` delete them by name, and
+    # `prune_foreign_objects` or `drop_stale_objects` delete them by name, and
     # none of them executes anything. The exec bit of the mount is irrelevant to
     # them, and moving them would make this self-test skip on hosts where it can
     # still do its work.
@@ -158,13 +158,12 @@ def _stale_mapping_regression(check) -> bool:
             (True, True),
         )
 
-        deleted = drop_selected_objects(root / "instrumented", ["clio"])
+        deleted = drop_stale_objects(root / "instrumented", ["clio"], [current_object])
         check(
-            "selected stale and current objects are removed before rebuild",
+            "the stale object is removed and the one this build produced is kept",
             (deleted, old_object.exists(), current_object.exists()),
-            (2, False, False),
+            (1, False, True),
         )
-        compile("current", current_object)
         clean = _report_lines(llvm_cov, profile, [current_object], source)
         check(
             "the clean report stays within source lines and clears the floor",
@@ -293,7 +292,7 @@ def run(check, raises) -> tuple:
                 (0, True, True),
             )
 
-        # Old and current selected-package binaries can both match; remove both before rebuilding.
+        # Only selected binaries this build did not produce go; a hard-linked copy of a produced one stays.
         with tempfile.TemporaryDirectory(prefix="scoped-runner-selected-") as scratch:
             selected_root = Path(scratch)
             selected_deps = selected_root / "debug" / "deps"
@@ -305,21 +304,34 @@ def run(check, raises) -> tuple:
             for path in (stale, current, target, foreign):
                 path.write_text("x")
                 os.chmod(path, 0o755)
+            uplifted = selected_root / "debug" / "clio"
+            os.link(current, uplifted)
+            cargo_stdout = "\n".join(
+                [
+                    json.dumps({"reason": "compiler-artifact", "executable": str(uplifted)}),
+                    json.dumps({"reason": "compiler-artifact", "executable": None}),
+                    json.dumps({"reason": "compiler-artifact", "executable": str(target)}),
+                    json.dumps({"reason": "build-finished", "success": True}),
+                    "   Compiling clio v0.1.0",
+                ]
+            )
+            produced = produced_executables(cargo_stdout)
+            check("cargo's artifact messages name the produced executables", produced, [uplifted, target])
             selected_log = io.StringIO()
             original_stdout_for_selected = sys.stdout
             try:
                 sys.stdout = selected_log
-                selected_count = drop_selected_objects(selected_root, ["clio"])
+                selected_count = drop_stale_objects(selected_root, ["clio"], produced)
             finally:
                 sys.stdout = original_stdout_for_selected
             check(
-                "old and current binaries of a selected package are removed",
-                [stale.exists(), current.exists(), target.exists()],
-                [False, False, False],
+                "a stale selected binary goes; produced ones and their hard links stay",
+                [stale.exists(), current.exists(), uplifted.exists(), target.exists()],
+                [False, True, True, True],
             )
             check("a foreign package's binary remains for the later prune", foreign.exists(), True)
-            check("the selected object count is printed", "deleted 3" in selected_log.getvalue(), True)
-            check("the number of selected objects deleted is returned", selected_count, 3)
+            check("the stale object count is printed", "deleted 1" in selected_log.getvalue(), True)
+            check("the number of stale objects deleted is returned", selected_count, 1)
 
         # Reproduce the line-map union that made a doc-comment-only edit fail. Its
         # result says whether it ran: a host with nowhere to run the compiled object
@@ -342,11 +354,16 @@ def run(check, raises) -> tuple:
             )
             check("and the refused run deleted nothing", doomed.exists(), True)
             check(
-                "an empty pre-run selection is also refused",
-                raises(drop_selected_objects, empty_root, []),
+                "an empty stale-object selection is also refused",
+                raises(drop_stale_objects, empty_root, [], [doomed]),
                 True,
             )
-            check("the pre-run refusal leaves the object in place", doomed.exists(), True)
+            check(
+                "a build that reported no executables is refused",
+                raises(drop_stale_objects, empty_root, ["clio-store"], []),
+                True,
+            )
+            check("the stale-object refusals leave the object in place", doomed.exists(), True)
     finally:
         globals()["workspace_packages"] = original_packages_for_prune
     return name, prune_packages, scratch, stale_map_ran
