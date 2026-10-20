@@ -35,15 +35,20 @@ class GateDecisionTests(unittest.TestCase):
         self.cache = self.tmp / "cache"
         self.root = make_repo(self.tmp, "feature/x")
 
-    def attempt(self, argv=MAKE, estimate=FITS, terminal=False, tree=TREE):
+    def attempt(self, argv=MAKE, estimate=FITS, terminal=False, tree=TREE, output=b""):
         """One gate run with no real make and a stand-in estimate; (exit code, stderr, estimate asked, make called)."""
         err = io.StringIO()
+
+        def fake_make(*args, stdout, **kwargs):
+            stdout.write(output)
+            return 0
+
         with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.cache)}), mock.patch(
             "gate.repo_root", return_value=str(self.root)
         ), mock.patch("gate.read_tree_state", return_value=tree), mock.patch.object(
             done, "_estimate", return_value=estimate
         ) as asked, mock.patch.object(done, "_terminal_attached", return_value=terminal), mock.patch(
-            "gate.subprocess.call", return_value=0
+            "gate.subprocess.call", side_effect=fake_make
         ) as ran, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             code = run_gate(argv)
         return code, err.getvalue(), asked, ran
@@ -74,6 +79,11 @@ class GateDecisionTests(unittest.TestCase):
         self.assertEqual(code, done.EXIT_REFUSED)
         self.assertIn("its length cannot be estimated (quick: no such ref)", err)
         ran.assert_not_called()
+
+    def test_a_fresh_run_records_the_test_seconds_nextest_reported(self) -> None:
+        self.assertEqual(self.attempt(output=b"     Summary [   4.932s] 335 tests run: 335 passed, 6616 skipped\n")[0], 0)
+        (line,) = lines(self.cache)
+        self.assertEqual(line["test_s"], 4.932)
 
     def test_a_second_fresh_run_on_a_changed_tree_is_allowed(self) -> None:
         self.assertEqual(self.attempt()[0], 0)

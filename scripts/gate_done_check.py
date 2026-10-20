@@ -63,14 +63,14 @@ def _estimate(root: str, base: str) -> tuple[dict | None, str]:
     return (doc, "") if isinstance(doc, dict) else (None, "unreadable answer")
 
 
-def _fresh_runs(root: str, branch: str | None) -> int:
-    """How many real coverage-fast runs this worktree made on this branch; replays and plans do not count."""
+def fresh_records(root: str) -> list[dict]:
+    """This worktree's real coverage-fast runs, oldest first; replays and plans do not count."""
     here = str(Path(root).resolve())
     try:
         text = (cache_root() / RUNS_FILE).read_text()
     except OSError:
-        return 0
-    count = 0
+        return []
+    runs = []
     for line in text.splitlines():
         try:
             run = json.loads(line)
@@ -79,10 +79,14 @@ def _fresh_runs(root: str, branch: str | None) -> int:
         if not isinstance(run, dict) or run.get("kind") != KIND or run.get("replayed"):
             continue
         argv = run.get("argv")
-        if isinstance(argv, list) and not _is_plan([str(arg) for arg in argv]):
-            if run.get("root") == here and run.get("branch") == branch:
-                count += 1
-    return count
+        if isinstance(argv, list) and not _is_plan([str(arg) for arg in argv]) and run.get("root") == here:
+            runs.append(run)
+    return runs
+
+
+def _fresh_runs(root: str, branch: str | None) -> int:
+    """How many real coverage-fast runs this worktree made on this branch."""
+    return sum(1 for run in fresh_records(root) if run.get("branch") == branch)
 
 
 def decide(kind: str, argv: list[str], root: str) -> Decision:

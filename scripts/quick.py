@@ -43,6 +43,7 @@ import owned_tests as owned  # noqa: E402
 import scoped_runner as runner  # noqa: E402
 from owned_scanner import SourceError  # noqa: E402
 from precommit_hooks import main_checkout  # noqa: E402
+from gate_done_check import fresh_records  # noqa: E402
 from quick_estimate import Case, Estimate, estimate, failed_cases, newest_history, wall_seconds  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
 import quick_untested as untested  # noqa: E402
@@ -55,11 +56,11 @@ owned.workspace_crates = functools.lru_cache(maxsize=None)(owned.workspace_crate
 
 QUICK_BUDGET_S = 60.0
 DONE_BUDGET_S = 180.0
-# A Done run costs more than its tests: it builds the instrumented tree and records coverage.
-# Five runs on two branches (2026-10-12) took 1.7 to 3.1 times the summed test time at
-# THREADS workers (103 to 273 s against 62 to 115 s); 3 is the smallest whole number that
-# covers them. The gate logs each estimate beside the run, so the factor can be checked.
-DONE_FACTOR = 3.0
+# A Done run also builds the instrumented packages and writes the report, and the gate deletes those
+# objects before each run, so that cost repeats. Without a fresh run of this worktree that recorded its
+# test time, the build cost is this constant: the largest gate-clock build and report measured on
+# 2026-10-21 at load 34 on 10 cores.
+BUILD_FALLBACK_S = 53.0
 THREADS = int(runner.TEST_THREADS)
 NEXTEST = runner.ROOT / "target" / "nextest"
 QUICK_JUNIT = NEXTEST / "quick" / "junit.xml"
@@ -137,19 +138,14 @@ def history_files() -> list[Path]:
     return [root / relative for root in roots for relative in HISTORY]
 
 
-def estimate_line(found: Estimate | None, budget: float, label: str, factor: float = 1.0) -> list[str]:
+def estimate_line(found: Estimate | None, budget: float, label: str) -> list[str]:
     if found is None:
         return [f"quick: {label}: unknown (no per-test times under target/nextest yet)"]
     threaded = wall_seconds(found.seconds, THREADS)
-    wall = threaded * factor
-    counted = f"about {threaded:.1f} s at {THREADS} test threads"
-    if factor == 1.0:
-        counted += "; build time and tests never run are not counted"
-    else:
-        counted += f", {wall:.1f} s with the build and coverage (times {factor:g}); tests never run are not counted"
+    counted = f"about {threaded:.1f} s at {THREADS} test threads; build time and tests never run are not counted"
     lines = [f"quick: {label}: {found.seconds:.1f} s of test time over {found.tests} test(s) with history, {counted}"]
     lines.append(
-        f"quick: over the {budget:.0f} s budget" if wall > budget else f"quick: within the {budget:.0f} s budget"
+        f"quick: over the {budget:.0f} s budget" if threaded > budget else f"quick: within the {budget:.0f} s budget"
     )
     return lines
 
@@ -194,19 +190,58 @@ def closure_estimate(terms: Sequence[Term], history: list[Case]) -> Estimate | N
     return estimate(history, keeps(terms))
 
 
-def done_seconds(found: Estimate | None) -> float | None:
-    """What the Done run likely takes: the test time at THREADS workers, times DONE_FACTOR."""
-    return None if found is None else wall_seconds(found.seconds, THREADS) * DONE_FACTOR
+class Done(NamedTuple):
+    """What a Done run likely takes: its build and report, then its tests at THREADS workers."""
+
+    build: float
+    test: float
+    tests: int
+    source: str
+
+    @property
+    def seconds(self) -> float:
+        return self.build + self.test
+
+
+def build_estimate() -> tuple[float, str]:
+    """The build and report seconds of a Done run here, and where that number came from.
+
+    The newest fresh run of this worktree that recorded its test time gives it: the run's wall time
+    less its test time. Without one, BUILD_FALLBACK_S.
+    """
+    for run in reversed(fresh_records(str(runner.ROOT))):
+        started, finished, test_s = run.get("started"), run.get("finished"), run.get("test_s")
+        if all(isinstance(value, (int, float)) for value in (started, finished, test_s)) and finished - started > test_s:
+            return finished - started - test_s, "learned from this worktree's last fresh run"
+    return BUILD_FALLBACK_S, "fallback constant, no fresh run here recorded a test time"
+
+
+def done_run(terms: Sequence[Term], history: list[Case]) -> Done | None:
+    """The Done estimate for these terms, or None when no history says how long their tests take."""
+    if not terms:
+        return Done(0.0, 0.0, 0, "nothing to run")
+    found = closure_estimate(terms, history)
+    if found is None:
+        return None
+    build, source = build_estimate()
+    return Done(build, wall_seconds(found.seconds, THREADS), found.tests, source)
 
 
 def closure_lines(terms: Sequence[Term], history: list[Case]) -> list[str]:
-    found = closure_estimate(terms, history)
+    done = done_run(terms, history)
     packages = sorted({term.package for term in terms})
     lines = [f"quick: closure: {len(packages)} package(s): {', '.join(packages)}"]
-    lines += estimate_line(found, DONE_BUDGET_S, "closure estimate", DONE_FACTOR)
-    seconds = done_seconds(found)
-    if seconds is not None and seconds > DONE_BUDGET_S:
-        lines.append("quick: leave the coverage verdict to CI")
+    if done is None:
+        lines.append("quick: closure estimate: unknown (no per-test times under target/nextest yet)")
+        return lines
+    lines.append(
+        f"quick: closure estimate: {done.seconds:.1f} s, which is build and report {done.build:.1f} s "
+        f"({done.source}) plus tests {done.test:.1f} s over {done.tests} test(s)"
+    )
+    if done.seconds > DONE_BUDGET_S:
+        lines += [f"quick: over the {DONE_BUDGET_S:.0f} s budget", "quick: leave the coverage verdict to CI"]
+    else:
+        lines.append(f"quick: within the {DONE_BUDGET_S:.0f} s budget")
     return lines
 
 
@@ -215,15 +250,17 @@ def closure_json(terms: Sequence[Term], history: list[Case]) -> str:
 
     With no test selected there is nothing to run, so the run takes no time.
     """
-    found = closure_estimate(terms, history)
-    seconds = done_seconds(found) if terms else 0.0
+    done = done_run(terms, history)
     return json.dumps(
         {
             "packages": sorted({term.package for term in terms}),
-            "tests": found.tests if found else 0,
-            "done_seconds": seconds,
+            "tests": done.tests if done is not None else 0,
+            "build_seconds": None if done is None else done.build,
+            "test_seconds": None if done is None else done.test,
+            "build_source": None if done is None else done.source,
+            "done_seconds": None if done is None else done.seconds,
             "budget_seconds": DONE_BUDGET_S,
-            "within": None if seconds is None else seconds <= DONE_BUDGET_S,
+            "within": None if done is None else done.seconds <= DONE_BUDGET_S,
         },
         indent=2,
     )

@@ -5,7 +5,8 @@ how long anyone waited on the gate over a day. This file can. Each line records 
 worktree the gate ran in, the branch, the command, when it started and finished, and whether
 a terminal was attached, which tells a run someone typed from a run a program started. Each
 line also names the tree fingerprint and the machine load when the run started. A
-`coverage-fast` run the Done check let go on also records the seconds it was estimated to take.
+`coverage-fast` run the Done check let go on also records the seconds it was estimated to take,
+and every run records the test seconds nextest reported, when its log has them.
 
 A failed append prints a warning and changes nothing else: the gate's exit code is the
 command's own.
@@ -82,6 +83,7 @@ def append_run(root: str, run: dict[str, Any]) -> None:
             "estimate_s": run.get("estimate_s"),
             "tree": run.get("tree"),
             "load": run.get("load"),
+            "test_s": run.get("test_s"),
         }
         path = cache_root() / RUNS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -151,6 +151,7 @@ from gate_classify import (
 
 
 from gate_runlog import append_run, machine_load
+from phase_parse import SUMMARY
 from gate_done_check import EXIT_REFUSED, decide as done_check
 from gate_cache import (
     _artifact_rel_paths,
@@ -282,7 +283,7 @@ def run_gate(argv: list[str], force: bool = False, log_dir: str = "") -> int:
         with open(log_path, "wb") as log:
             code = subprocess.call(scoped_argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
         finished = time.time()
-        ran.update(started=started, finished=finished, exit=code)
+        ran.update(started=started, finished=finished, exit=code, test_s=_nextest_seconds(log_path))
         try:
             evidence = _cargo_checking_evidence(log_path, kind)
         except OSError as error:
@@ -354,6 +355,20 @@ def _run_line(root: str, tree: str, finished: float | None) -> bytes:
     if finished:
         when = datetime.fromtimestamp(finished, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return f"{RUN_RECORD_PREFIX.decode()}worktree={root} tree={tree[:12] or '-'} finished={when}\n".encode()
+
+
+def _nextest_seconds(log_path: Path) -> float | None:
+    """The test seconds on nextest's Summary line in a run's log, the last one if there are several."""
+    seconds = None
+    try:
+        with log_path.open("r", errors="replace") as output:
+            for line in output:
+                match = SUMMARY.match(ANSI_ESCAPE.sub("", line))
+                if match:
+                    seconds = float(match.group("seconds"))
+    except OSError:
+        return None
+    return seconds
 
 
 def _cargo_checking_evidence(log_path: Path, kind: str) -> bytes:
