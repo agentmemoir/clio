@@ -38,23 +38,25 @@ use std::path::{Path, PathBuf};
 /// The Postgres URL used when the environment names none, matching the Makefile.
 const COMPOSE_PG: &str = "postgres://clio:clio@127.0.0.1:34310/clio";
 
-/// The scheme prefixes a Postgres connection URL may carry.
-const PG_SCHEMES: [&str; 2] = ["postgres://", "postgresql://"];
+/// The name the skip note carries for this proof.
+const SUITE: &str = "the postgres cross-path compliance proof";
 
 /// The Postgres URL to use: the environment's, when it names a Postgres
 /// database, or the local Compose stack.
 ///
 /// The one canonical reader names the one variable the production reads, so
 /// the test and the store never read two different databases out of one shell.
-/// A value that names another backend is refused here: dialling it would
-/// report an unreachable Postgres for a URL that never named one.
+/// The store's gate owns the refusal of a value that names another backend:
+/// dialling it would report an unreachable Postgres for a URL that never named
+/// one. The gate reads the operator's opt-out before it refuses, so a machine
+/// that set `CLIO_SKIP_PG_TESTS` skips instead of failing. The refused value
+/// is kept unchanged in that case, so its probe fails and the arm skips.
 pub fn pg_url() -> String {
     match clio_config::db_url_env::database_url_from_process_env() {
-        Ok(url) if PG_SCHEMES.iter().any(|prefix| url.starts_with(prefix)) => url,
-        Ok(url) => panic!(
-            "CLIO_DATABASE_URL does not name a Postgres database: {}",
-            clio::store::pg_test_target::redacted_endpoint(&url)
-        ),
+        Ok(url) => match clio::store::pg_skip::pg_url_or_skip(SUITE) {
+            Some(accepted) => accepted,
+            None => url,
+        },
         Err(_) => COMPOSE_PG.to_owned(),
     }
 }
@@ -81,7 +83,7 @@ pub fn require_postgres(reachable: bool) -> bool {
         return true;
     }
     clio::store::pg_skip::pg_required_or_skip(
-        "the postgres cross-path compliance proof",
+        SUITE,
         "no Postgres answers at CLIO_DATABASE_URL (start the database, or set \
          CLIO_SKIP_PG_TESTS=1 to run the rest of the suite without it)",
     );
