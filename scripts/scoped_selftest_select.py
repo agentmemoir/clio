@@ -6,8 +6,8 @@ import io
 import sys
 
 from scoped_cli import main
-from scoped_core import CoverageRow, EXIT_FAIL, EXIT_OK, LINE_FLOOR, offenders, owned
-from scoped_judge import judge, report_verdicts
+from scoped_core import CoverageRow, EXIT_FAIL, EXIT_OK, LINE_FLOOR, ROOT, offenders, owned
+from scoped_judge import judge, report_rows, report_verdicts
 from scoped_run import run_tests
 from scoped_select import (
     changed_files,
@@ -55,7 +55,7 @@ def run(check) -> tuple:
         package_owners("scripts/scoped_runner.py", fake),
         [],
     )
-    check("test-only files are not measured", is_measureable("crates/clio/src/a_tests.rs"), False)
+    check("a *_tests.rs name alone does not remove a file from measurement", is_measureable("crates/clio/src/a_tests.rs"), True)
     check("production files are measured", is_measureable("crates/clio/src/a.rs"), True)
     # A file holding no executable code is a third exclusion, and the two halves
     # it could be confused with are pinned here too. `is_measureable` alone cannot
@@ -167,7 +167,7 @@ def run(check) -> tuple:
         globals()["load_report"] = lambda path: {}
         owned.owned_selection = lambda path: owned.OwnedSelection(path, None, ["x::tests"])
         for pct, want in ((79.99, EXIT_FAIL), (80.0, EXIT_OK)):
-            globals()["report_rows"] = lambda doc, pct=pct: {rel: CoverageRow(pct, 0.0)}
+            globals()["report_rows"] = lambda doc, pct=pct: {rel: CoverageRow(pct, 0.0, regions_pct=0.0)}
             check(f"coverage-fast at {pct}% lines", main([]), want)
         check("coverage-fast runs every selected test in one instrumented run", calls, [["a"], ["a"]])
         globals()["report_rows"] = lambda doc: {}
@@ -180,8 +180,22 @@ def run(check) -> tuple:
             globals()[name] = value
 
     # The files the verdict never judges.
-    check("a crate's tests directory is exempt", exemption("crates/a/tests/it.rs"), "integration test file")
+    check("a crate's tests directory is exempt", exemption("crates/clio-mcp/tests/mcp_principal_binding.rs"), "test file")
+    check("an examples directory is exempt", exemption("crates/clio/examples/demo.rs"), "example")
+    check("a benches directory is exempt", exemption("crates/clio/benches/parse.rs"), "benchmark")
     check("a build script is exempt", exemption("crates/clio/build.rs"), "build script")
+    check(
+        "a report row carries its region percentage",
+        report_rows({"data": [{"files": [{
+            "filename": str(ROOT / "crates/a/src/x.rs"),
+            "summary": {
+                "lines": {"percent": 90.0, "count": 10, "covered": 9},
+                "functions": {"percent": 50.0, "count": 2, "covered": 1},
+                "regions": {"percent": 70.0, "count": 5, "covered": 3},
+            },
+        }]}]})["crates/a/src/x.rs"].regions_pct,
+        70.0,
+    )
     check(
         "declarations and re-exports only",
         declarations_only("//! doc\n#[cfg(feature = \"x\")]\npub mod a;\nmod b;\npub(crate) use a::{B, C};\nuse std::fmt;\n"),
@@ -224,28 +238,19 @@ def run(check) -> tuple:
         ),
         (True, True),
     )
-    # The tool hides `tests.rs` and `<word char>[_-]tests.rs`, and nothing whose
-    # name lacks that separator. An `endswith("tests.rs")` test also hid a bare
-    # `_tests.rs`/`-tests.rs` and `mytests.rs`, which the report still holds, so a
-    # changed one was dropped from judgement instead of measured.
+    # No file name exempts a file. The tool's suffix rule is not mirrored here:
+    # every name below is measured, and only a path or a test gate exempts one.
     check(
-        "a name the tool hides by suffix is not measured",
+        "no tests-suffixed name is exempt by its name",
         (
             is_measureable("crates/clio/src/tests.rs"),
             is_measureable("crates/clio/src/word_tests.rs"),
             is_measureable("crates/clio/src/word-tests.rs"),
             is_measureable("crates/clio/src/a_tests.rs"),
-        ),
-        (False, False, False, False),
-    )
-    check(
-        "a name the tool keeps despite its tests suffix is measured",
-        (
             is_measureable("crates/clio/src/_tests.rs"),
-            is_measureable("crates/clio/src/-tests.rs"),
             is_measureable("crates/clio/src/mytests.rs"),
         ),
-        (True, True, True),
+        (True, True, True, True, True, True),
     )
 
     # Untracked files are read with `ls-files`, not `status`, and the reason is

@@ -48,6 +48,7 @@ def report_rows(doc: dict[str, Any]) -> dict[str, CoverageRow]:
                 continue
             lines = summary.get("lines", {})
             functions = summary.get("functions", {})
+            regions = summary.get("regions", {})
             if not isinstance(lines.get("percent"), (int, float)):
                 continue
             if not isinstance(functions.get("percent"), (int, float)):
@@ -63,6 +64,7 @@ def report_rows(doc: dict[str, Any]) -> dict[str, CoverageRow]:
                 _count(functions),
                 _covered(lines),
                 _covered(functions),
+                float(regions["percent"]) if isinstance(regions.get("percent"), (int, float)) else None,
             )
     return rows
 
@@ -166,12 +168,29 @@ def is_test_module(rel: str) -> bool:
     return False
 
 
+def _directly_under(rel: str, name: str) -> bool:
+    """True when the file sits under a `name/` directory at the top of its crate."""
+    try:
+        inside = (ROOT / rel).resolve().relative_to(owned.crate_of(rel))
+    except owned.ResolutionError:
+        return False
+    return inside.parts[:1] == (name,)
+
+
 def exemption(rel: str) -> str | None:
-    """Why a changed file is never judged, or None when it is judged."""
-    path = PurePosixPath(rel)
-    if "tests" in path.parts[:-1]:
-        return "integration test file"
-    if path.name == "build.rs":
+    """Why a changed file is never judged, or None when it is judged.
+
+    A file is exempt by its place (a crate's tests, examples or benches directory),
+    by being build.rs, by holding only declarations, or by being declared behind a
+    test gate. No file name exempts a file.
+    """
+    if _directly_under(rel, "tests"):
+        return "test file"
+    if _directly_under(rel, "examples"):
+        return "example"
+    if _directly_under(rel, "benches"):
+        return "benchmark"
+    if PurePosixPath(rel).name == "build.rs":
         return "build script"
     if declarations_only((ROOT / rel).read_text(encoding="utf-8")):
         return "module declarations and re-exports only"

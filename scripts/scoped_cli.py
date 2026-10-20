@@ -17,7 +17,7 @@ from scoped_core import (
 from scoped_judge import exemption, load_report, report_rows, verdicts
 from scoped_package import coverage_package_mode
 from scoped_run import run_coverage, run_tests
-from scoped_select import is_measureable, is_present, select, workspace_packages
+from scoped_select import is_present, select, workspace_packages
 from quick_terms import union_expression
 
 
@@ -60,7 +60,7 @@ def main(argv: list[str]) -> int:
         _, _, changed = select(args.base, False)
         present = [rel for rel in changed if is_present(rel)]
         terms, targets = owned_terms(present)
-        exempt = {rel: exemption(rel) for rel in present if is_measureable(rel) or "tests" in rel.split("/")}
+        exempt = {rel: exemption(rel) for rel in present}
     except (RunError, OwnedLookupError) as error:
         print(f"scoped-runner: error: {error}", file=sys.stderr)
         return EXIT_RUN_ERROR
@@ -103,7 +103,8 @@ def main(argv: list[str]) -> int:
         row = rows.get(rel)
         if row is not None:
             # Function and region percentages are printed and compared against nothing.
-            print(f"scoped-runner: {rel} lines {row.lines_pct:.2f}% functions {row.functions_pct:.2f}%")
+            regions = "n/a" if row.regions_pct is None else f"{row.regions_pct:.2f}%"
+            print(f"scoped-runner: {rel} lines {row.lines_pct:.2f}% functions {row.functions_pct:.2f}% regions {regions}")
     failures = verdicts(rows, files, LINE_FLOOR)
     for failure in failures:
         print(f"scoped-runner: FAIL {failure}", file=sys.stderr)

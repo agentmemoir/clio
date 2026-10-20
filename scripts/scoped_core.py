@@ -78,3 +78,4 @@ class CoverageRow(NamedTuple):
     functions_count: int | None = None
     lines_covered: int | None = None
     functions_covered: int | None = None
+    regions_pct: float | None = None

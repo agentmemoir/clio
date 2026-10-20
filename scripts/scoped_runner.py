@@ -19,9 +19,9 @@ judges every changed Rust file that is not exempt. Such a file fails when:
 - the report does not hold it, or
 - its line coverage is below `LINE_FLOOR` (80%).
 
-Exempt, never judged: files under a crate's `tests/` directory, files that are
-themselves declared test modules, `build.rs`, and files whose code is only
-module declarations and re-exports. Function and region percentages are printed
+Exempt, never judged: files under a crate's `tests/`, `examples/` or `benches/`
+directory, files that are themselves declared test modules, `build.rs`, and files
+whose code is only module declarations and re-exports. Function and region percentages are printed
 and compared against nothing. 80% of lines is the only number, and no flag,
 variable or file changes it.
 
