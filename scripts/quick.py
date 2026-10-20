@@ -16,10 +16,10 @@ there and not here.
 
 The mapping from a file to its tests is `owned_tests.owned_selection`, which
 reads the module declarations the compiler obeys, so a `#[path]` rename is
-followed. A file that owns no test module selects the tests that use it
-(`owned_users.users_of`), and its whole package only when none is found. The plan prints the estimate from the last run's per-test times, read
+followed. A file selects only the test modules it declares; a file that owns
+no test module selects no test, and the plan says so. The plan prints the estimate from the last run's per-test times, read
 from this checkout and from the main checkout when this is a linked worktree;
-it builds nothing and runs nothing. `--closure` estimates the packages `make
+it builds nothing and runs nothing. `--closure` estimates the tests `make
 coverage-fast` would run, with the build and coverage cost counted, which is how
 an agent decides whether the optional Done check fits its 3 minute budget. The
 gate asks for the same estimate with `--json` and refuses an agent's run that
@@ -46,7 +46,6 @@ from precommit_hooks import main_checkout  # noqa: E402
 from quick_estimate import Case, Estimate, estimate, failed_cases, newest_history, wall_seconds  # noqa: E402
 from quick_terms import Term, failed_expression, union_expression  # noqa: E402
 import quick_untested as untested  # noqa: E402
-from owned_users import Users, users_of  # noqa: E402
 
 # `owned_selection` re-walks the whole crate, and re-runs `cargo metadata`, for
 # every file it is asked about. One of each is enough for one run, and without
@@ -70,10 +69,10 @@ HISTORY = (
     Path("target/nextest/quick/junit.xml"),
 )
 NO_CHANGE = "quick: no changed Rust file"
+NO_TEST = "quick: no test selected, so nothing runs"
 SCHEMA_CHECK = runner.ROOT / "scripts" / "schema_args_check.py"
 
 Lookup = Callable[[str], "owned.OwnedSelection"]
-UsersLookup = Callable[[str], Users]
 
 
 class Selection(NamedTuple):
@@ -81,40 +80,20 @@ class Selection(NamedTuple):
     notes: list[str]
 
 
-def term_for(rel: str, package: str, lookup: Lookup = owned.owned_selection) -> tuple[Term, str]:
-    """The term for one changed file, and the line that explains it."""
-    path = Path(rel)
-    if path.name in ("lib.rs", "main.rs") and path.parent.name == "src":
-        return Term(package, kinds=("lib", "bin")), f"{rel} -> {package}: its lib and bin unit tests"
+def term_for(rel: str, package: str, lookup: Lookup = owned.owned_selection) -> tuple[Term | None, str]:
+    """The term for the test modules one changed file declares, or None, and the line that explains it."""
     try:
         found = lookup(rel)
     except (owned.ResolutionError, SourceError) as error:
-        return Term(package, reason=str(error)), f"{rel} -> {package}: whole package, {error}"
+        return None, f"no test selected: {rel} owns no test module ({error})"
     if found.binary:
         return Term(package, binary=found.binary), f"{rel} -> {package}: test target {found.binary}"
     if found.is_empty:
-        reason = "the file owns no test module"
-        return Term(package, reason=reason), f"{rel} -> {package}: whole package, {reason}"
+        if "tests" in Path(rel).parts:
+            return None, f"no test selected: {rel} is a test file with no test of its own"
+        return None, f"no test selected: {rel} owns no test module"
     modules = tuple(found.modules)
     return Term(package, modules=modules), f"{rel} -> {package}: {len(modules)} test module(s)"
-
-
-def terms_for(rel: str, package: str, lookup: Lookup, users: UsersLookup) -> tuple[list[Term], str]:
-    """`term_for`, except that a file owning no test module selects the tests that use it."""
-    term, note = term_for(rel, package, lookup)
-    if not term.is_wide:
-        return [term], note
-    try:
-        found = users(rel)
-    except (owned.ResolutionError, SourceError) as error:
-        found = Users(reason=str(error))
-    if found.reason:
-        reason = f"{term.reason}, and {found.reason}"
-        return [term._replace(reason=reason)], f"{rel} -> {package}: whole package, {reason}"
-    terms = [Term(package, binary=name) for name in found.binaries]
-    terms += [Term(package, modules=found.modules)] if found.modules else []
-    used = f"{len(found.modules)} test module(s) and {len(found.binaries)} test target(s)"
-    return terms, f"{rel} -> {package}: owns no test module, used by {used}"
 
 
 def merge(terms: Sequence[Term]) -> list[Term]:
@@ -132,9 +111,7 @@ def merge(terms: Sequence[Term]) -> list[Term]:
     return list(merged.values())
 
 
-def select(
-    files: Sequence[str], packages: Sequence[dict], lookup: Lookup = owned.owned_selection, users: UsersLookup = users_of
-) -> Selection:
+def select(files: Sequence[str], packages: Sequence[dict], lookup: Lookup = owned.owned_selection) -> Selection:
     """The terms for `files`; fails closed on a file no workspace package owns."""
     terms: list[Term] = []
     notes: list[str] = []
@@ -142,8 +119,8 @@ def select(
         owners = runner.package_owners(rel, packages)
         if not owners:
             raise runner.RunError(f"{rel} belongs to no workspace package, so Quick cannot select its tests")
-        found, note = terms_for(rel, owners[0], lookup, users)
-        terms.extend(found)
+        term, note = term_for(rel, owners[0], lookup)
+        terms += [term] if term else []
         notes.append(note)
     return Selection(merge(terms), notes)
 
@@ -183,11 +160,10 @@ def plan_lines(selection: Selection, history: list[Case], packages: Sequence[dic
     targets = target_flags(selection.terms, packages)
     if targets:
         lines.append(f"quick: cargo targets: {' '.join(targets)}")
-    keep = lambda terms: (lambda case: any(t.matches(case.binary_id, case.name) for t in terms))  # noqa: E731
-    total = estimate(history, keep(selection.terms))
+    total = estimate(history, keeps(selection.terms))
     lines += estimate_line(total, QUICK_BUDGET_S, "estimate")
     if total is not None and wall_seconds(total.seconds, THREADS) > QUICK_BUDGET_S:
-        priced = [(estimate(history, keep([term])), term) for term in selection.terms]
+        priced = [(estimate(history, keeps([term])), term) for term in selection.terms]
         priced = sorted(((e.seconds, t) for e, t in priced if e), key=lambda pair: -pair[0])
         for seconds, term in priced[:3]:
             lines.append(f"quick:   {seconds:.1f} s  {term.expression()}")
@@ -209,9 +185,13 @@ def plan_json(selection: Selection, files: Sequence[str], left_out: Sequence[str
     )
 
 
-def closure_estimate(packages: Sequence[str], history: list[Case]) -> Estimate | None:
-    names = set(packages)
-    return estimate(history, lambda case: case.binary_id.split("::")[0] in names)
+def keeps(terms: Sequence[Term]) -> Callable[[Case], bool]:
+    """The history predicate for the tests `terms` select: the rule the run's filter applies."""
+    return lambda case: any(term.matches(case.binary_id, case.name) for term in terms)
+
+
+def closure_estimate(terms: Sequence[Term], history: list[Case]) -> Estimate | None:
+    return estimate(history, keeps(terms))
 
 
 def done_seconds(found: Estimate | None) -> float | None:
@@ -219,8 +199,9 @@ def done_seconds(found: Estimate | None) -> float | None:
     return None if found is None else wall_seconds(found.seconds, THREADS) * DONE_FACTOR
 
 
-def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
-    found = closure_estimate(packages, history)
+def closure_lines(terms: Sequence[Term], history: list[Case]) -> list[str]:
+    found = closure_estimate(terms, history)
+    packages = sorted({term.package for term in terms})
     lines = [f"quick: closure: {len(packages)} package(s): {', '.join(packages)}"]
     lines += estimate_line(found, DONE_BUDGET_S, "closure estimate", DONE_FACTOR)
     seconds = done_seconds(found)
@@ -229,16 +210,16 @@ def closure_lines(packages: Sequence[str], history: list[Case]) -> list[str]:
     return lines
 
 
-def closure_json(packages: Sequence[str], history: list[Case]) -> str:
+def closure_json(terms: Sequence[Term], history: list[Case]) -> str:
     """The closure estimate for a program: `within` is null when there is no history to judge by.
 
-    With no package there is nothing to run, so the run takes no time.
+    With no test selected there is nothing to run, so the run takes no time.
     """
-    found = closure_estimate(packages, history)
-    seconds = done_seconds(found) if packages else 0.0
+    found = closure_estimate(terms, history)
+    seconds = done_seconds(found) if terms else 0.0
     return json.dumps(
         {
-            "packages": list(packages),
+            "packages": sorted({term.package for term in terms}),
             "tests": found.tests if found else 0,
             "done_seconds": seconds,
             "budget_seconds": DONE_BUDGET_S,
@@ -345,14 +326,14 @@ def run(args: argparse.Namespace) -> int:
         raise runner.RunError(f"base ref {args.base!r} resolves to no commit, so the changed files cannot be determined")
     history = newest_history(history_files())
     if args.closure:
-        packages = runner.select(args.base, False)[0]
+        _, terms, _, _ = runner.coverage_selection(args.base)
         if args.json:
-            print(closure_json(packages, history))
+            print(closure_json(terms, history))
             return runner.EXIT_OK
-        if not packages:
-            print(NO_CHANGE)
+        if not terms:
+            print(NO_TEST)
             return runner.EXIT_OK
-        print("\n".join(closure_lines(packages, history)))
+        print("\n".join(closure_lines(terms, history)))
         return runner.EXIT_OK
     changed = runner.changed_files(args.base)
     files = [rel for rel in changed if runner.is_present(rel)]
@@ -366,6 +347,9 @@ def run(args: argparse.Namespace) -> int:
     selection = Selection(merge([*found.terms, *extra.terms]), [*found.notes, *extra.notes])
     if args.json:
         print(plan_json(selection, files, extra.left_out))
+        return runner.EXIT_OK
+    if not selection.terms:
+        print("\n".join([*(f"quick: {note}" for note in selection.notes), *left_out, NO_TEST]))
         return runner.EXIT_OK
     print("\n".join([*plan_lines(selection, history, packages), *left_out]), flush=True)
     if args.plan:

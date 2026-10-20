@@ -16,10 +16,10 @@ assumed:
 - **`cfg(test)` is inherited.** A declaration inside `#[cfg(test)] mod inner { }`
   is gated too. Treating it as ungated loses test files whose gate sits on an
   enclosing block.
-- **A gate written as `cfg(all(test, target_os = "linux"))` does not read as a
-  gate.** Only a bare `cfg(test)` matches, so the operating system is read
-  separately and the module is reported as compiled only elsewhere. On a machine
-  where it does not compile, naming it in a filter selects nothing.
+- **A gate written as `cfg(all(test, target_os = "linux"))` is a test gate with an
+  operating system.** The operating system is read separately, and on another
+  platform the module is reported as compiled only elsewhere. On a machine where
+  it does not compile, naming it in a filter selects nothing.
 - **A module may have both `foo.rs` and `foo/`.** Since Rust 2018 that module's
   children live in `foo/`. Four files in this workspace use the shape, and
   assuming one flat directory silently loses their submodules.
@@ -36,10 +36,10 @@ from pathlib import Path
 from typing import Iterator, NamedTuple
 
 TEST_FUNCTION_MARKERS = ("#[test]", "#[tokio::test]", "#[rstest", "#[test_case]")
-TEST_FILE_SUFFIX = "_tests.rs"
 SUPPORT_SUFFIXES = ("_test_support.rs", "_fixtures.rs", "_seam.rs")
 
 _ATTR = re.compile(r"#\s*\[([^\]]*)\]", re.S)
+_TEST_GATE = re.compile(r"cfg\(\s*(?:all\((?:(?:[^()]|\([^()]*\))*?,)?\s*)?test\s*[,)]")
 _MOD = re.compile(r"(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z_0-9]*)\s*(\{|;)")
 _PATH_ATTR = re.compile(r'path\s*=\s*"([^"]+)"')
 _WORD = re.compile(r"[A-Za-z_0-9]")
@@ -131,13 +131,13 @@ def attr_text(attrs: str) -> str:
 
 
 def _is_gated(attrs: str) -> bool:
-    """True for a bare `cfg(test)`.
+    """True for `cfg(test)` and for `cfg(all(..., test, ...))`, in any argument position.
 
-    Only the bare form. `cfg(all(test, target_os = "linux"))` does not contain the
-    substring, which is correct: such a module may not compile here at all, and it
-    is reported as compiled elsewhere instead of selected.
+    `cfg(all(test, target_os = "linux"))` is compiled only under test too. Its
+    operating system is read separately, so on another platform the module is
+    reported as compiled elsewhere instead of selected.
     """
-    return "cfg(test)" in attr_text(attrs)
+    return _TEST_GATE.search(attr_text(attrs)) is not None
 
 
 def _mod_here(text: str, index: int) -> bool:
@@ -326,35 +326,29 @@ def is_support_file(name: str) -> bool:
     return name.endswith(SUPPORT_SUFFIXES)
 
 
-def looks_like_test_file(name: str) -> bool:
-    """True for a `foo*_tests.rs` name, by prefix rather than by stem.
-
-    The prefix is the whole rule. A stem-equality rule is unsatisfiable the moment
-    a file is split by topic, which is how this workspace meets its file size
-    limit: `verify_fault_tests.rs` has the stem `verify_fault`, and there is no
-    `verify_fault.rs`.
-    """
-    return name.endswith(TEST_FILE_SUFFIX) and len(name) > len(TEST_FILE_SUFFIX)
-
-
 def test_modules_in(
     source: str,
     module_path: str,
     file_for_path: Path,
     platform_skipped: list[str] | None = None,
+    gated: bool = False,
 ) -> list[str]:
     """Every test module reachable from `source`, as paths under `module_path`.
 
-    Four shapes, and all four are real in this workspace:
+    `gated` is True when the whole source sits behind `cfg(test)` because its parent
+    declared it so. A module it declares is then compiled only under test too, so a
+    plain declaration inside it counts.
+
+    Three shapes, and all three are real in this workspace:
 
     - the file holds `#[test]` functions at its own level, so its own module is a
       test module.
     - an out-of-line declaration gated `cfg(test)`, which is what finds
-      `batch_tests_persona`.
-    - an out-of-line declaration pointing at a `foo*_tests.rs` file.
-    - an inline `mod tests { ... }` block, which is a test module with no file of
-      its own. Measured as the largest single source of missed modules before
-      inline blocks were handled.
+      `batch_tests_persona`. A plain `mod foo;` is not a test module, even when
+      foo.rs holds tests: foo.rs owns them.
+    - an inline `#[cfg(test)] mod tests { ... }` block, which is a test module with
+      no file of its own. Measured as the largest single source of missed modules
+      before inline blocks were handled.
     """
     found: set[str] = set()
     platform_skipped = platform_skipped if platform_skipped is not None else []
@@ -365,34 +359,30 @@ def test_modules_in(
         found.add(module_path)
     for decl in declarations(source, file_for_path.parent):
         child_path = f"{module_path}::{decl.name}" if module_path else decl.name
+        # Only a declaration behind `cfg(test)` is a test module: its own gate, or the
+        # gate of the block or file it sits in. A plain `mod foo;` belongs to foo's own
+        # file, even when foo.rs holds tests, so a crate root does not claim them.
+        in_test = gated or decl.gated
         if decl.inline:
             body = decl.body or ""
             # Both conditions, not either. The gate alone is not enough: a file
             # here declares `#[cfg(test)] mod support { ... }` holding no test at
             # all, and claiming it produced 67 phantom test modules, measured.
-            if holds_tests_text(without_inline_bodies(body)):
+            if in_test and holds_tests_text(without_inline_bodies(body)):
                 found.add(child_path)
                 found.update(
-                    test_modules_in(body, child_path, file_for_path, platform_skipped)
+                    test_modules_in(body, child_path, file_for_path, platform_skipped, True)
                 )
             continue
         child = resolve_child(children_dir(file_for_path), decl)
-        if child is None:
+        if child is None or not in_test:
             continue
         child_source = read_text(child)
-        # The child must HOLD tests. A gate on the declaration, or a `_tests.rs`
-        # name, is not enough: 67 modules here are declared behind `cfg(test)` or
-        # named `*_tests.rs` while containing no test at all, one of them
-        # `main.rs` mounting `backup_cli_fixtures_tests.rs` as
+        # The child must HOLD tests. A gate on the declaration is not enough: 67
+        # modules here are declared behind `cfg(test)` while containing no test at
+        # all, one of them `main.rs` mounting `backup_cli_fixtures_tests.rs` as
         # `backup_cli_fixtures`, a file of fixtures only.
         if not holds_tests_text(child_source):
-            continue
-        is_test = (
-            decl.gated
-            or looks_like_test_file(child.name)
-            or holds_tests_text(child_source)
-        )
-        if not is_test:
             continue
         if decl.linux_only and sys.platform != "linux":
             # Not compiled here, so no test in it can run or be measured. Reported
@@ -405,7 +395,7 @@ def test_modules_in(
         if holds_tests_text(without_inline_bodies(child_source)):
             found.add(child_path)
         found.update(
-            test_modules_in(child_source, child_path, child, platform_skipped)
+            test_modules_in(child_source, child_path, child, platform_skipped, True)
         )
     PLATFORM_SKIPPED.extend(platform_skipped)
     return sorted(found)

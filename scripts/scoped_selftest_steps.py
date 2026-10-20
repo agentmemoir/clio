@@ -202,7 +202,7 @@ def run(check, raises) -> tuple:
             "selected", (directory, tuple(selected))
         )
         globals()["run_coverage_tests"] = (
-            lambda pkgs, filt=None, env=None: step_envs.__setitem__("test", env)
+            lambda pkgs, filt=None, env=None, targets=(): step_envs.__setitem__("test", env)
         )
         globals()["instrumented_dir"] = record_dir
         globals()["drop_invalid_profraws"] = lambda directory: step_envs.__setitem__(

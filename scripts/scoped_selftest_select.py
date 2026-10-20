@@ -6,8 +6,8 @@ import io
 import sys
 
 from scoped_cli import main
-from scoped_core import CoverageRow, EXIT_FAIL, EXIT_OK, LINE_FLOOR, offenders, owned
-from scoped_judge import judge, report_verdicts
+from scoped_core import CoverageRow, EXIT_FAIL, EXIT_OK, LINE_FLOOR, ROOT, offenders, owned
+from scoped_judge import judge, report_rows, report_verdicts
 from scoped_run import run_tests
 from scoped_select import (
     changed_files,
@@ -19,6 +19,8 @@ from scoped_select import (
     package_owners,
 )
 
+from quick_terms import Term
+from scoped_judge import declarations_only, exemption
 from scoped_selftest_support import shared as globals
 
 
@@ -30,8 +32,8 @@ def run(check) -> tuple:
     # synthetic. The dirs are repository-relative because that is the form
     # `workspace_packages` stores and the form git reports.
     fake = [
-        {"name": "example-crate", "deps": set(), "dir": "crates/mismatched-dir"},
-        {"name": "clio-store", "deps": set(), "dir": "crates/clio-store"},
+        {"name": "example-crate", "dir": "crates/mismatched-dir"},
+        {"name": "clio-store", "dir": "crates/clio-store"},
     ]
     check(
         "a leaf file belongs to its crate",
@@ -53,7 +55,7 @@ def run(check) -> tuple:
         package_owners("scripts/scoped_runner.py", fake),
         [],
     )
-    check("test-only files are not measured", is_measureable("crates/clio/src/a_tests.rs"), False)
+    check("a *_tests.rs name alone does not remove a file from measurement", is_measureable("crates/clio/src/a_tests.rs"), True)
     check("production files are measured", is_measureable("crates/clio/src/a.rs"), True)
     # A file holding no executable code is a third exclusion, and the two halves
     # it could be confused with are pinned here too. `is_measureable` alone cannot
@@ -133,117 +135,74 @@ def run(check) -> tuple:
     check("a failing run names the file below the floor", "crates/a/src/low.rs" in printed, True)
     check("a failing run names the file it could not measure", "gone.rs" in printed, True)
 
-    # Nothing to run and nothing to judge is an all-clear. A change whose only
-    # Rust file was deleted leaves the judged list empty, and failing over it
-    # would report a failure with no file to point at. And a failing file-scoped
-    # run must name its offenders, which it did not: it printed the count alone.
-    original_select = globals()["select"]
-    original_filter = globals()["file_scope_filter"]
-    original_file_judge = globals()["judge_file_scope"]
-    original_build_inputs = globals()["build_inputs"]
-    original_changed_paths = globals()["changed_paths"]
-    original_run_coverage = globals()["run_coverage"]
+    # The selection is `make quick`'s: each changed file's own test modules, all in
+    # ONE run over only the packages that hold them. The verdict reads only the
+    # changed files that are not exempt.
+    names = ("select", "is_present", "is_measureable", "owned_terms", "exemption", "run_tests", "run_coverage", "load_report", "report_rows")
+    saved = {name: globals()[name] for name in names}
+    saved_lookup = owned.owned_selection
     real_stderr = sys.stderr
+    calls: list = []
+    rel = "crates/a/src/x.rs"
+    term = Term("a", modules=("x::tests",))
     try:
-        # The scenarios below mock the selection, so the live tree's own diff must
-        # not reach the run through the build-input scan. `main` reads that scan to
-        # decide whether a changed fixture, lock file, or manifest turns the file
-        # filter off and takes the build-input path instead of the mocked one. On a
-        # branch carrying such a file the run left the mocked branch, these
-        # expectations then read the ambient tree rather than the mocks, and the
-        # self-test failed on every change that added a fixture or touched
-        # Cargo.lock while passing on a clean tree. Reporting no build inputs keeps
-        # the scenario about what it says it is about, whatever the tree holds.
-        globals()["build_inputs"] = lambda paths, packages: (set(), [])
-        # That mock is load-bearing, and the case at the end of this block proves it
-        # by behaviour instead of reading the name back. `changed_paths` reports a
-        # diff carrying a fixture, which is the ambient state that broke this
-        # scenario on PR #83: if the mock is ever removed, the real scan sees that
-        # fixture, turns the file filter off, and main prints BUILD INPUT instead of
-        # the file-scope verdict the case asserts. `run_coverage` is a no-op so that
-        # the failure is a wrong verdict and not a real instrumented run.
-        globals()["changed_paths"] = lambda base: [
-            "crates/clio/tests/fixtures-probe.json",
-            "crates/clio-types/src/civil.rs",
-        ]
-        globals()["run_coverage"] = (
-            lambda packages, filter_expression=None, report_path=None: None
-        )
-        globals()["select"] = lambda base, everything: (
-            [],
-            [],
-            ["crates/clio-types/src/retired.rs"],
-        )
-        globals()["file_scope_filter"] = lambda files: ("", [])
-        check(
-            "no judgeable file left to measure is an all-clear",
-            main(["--scope", "file", "--base", "master"]),
-            EXIT_OK,
-        )
-        globals()["select"] = lambda base, everything: (
-            ["clio-types"],
-            ["crates/clio-types/src/civil.rs"],
-            ["crates/clio-types/src/civil.rs"],
-        )
-        globals()["file_scope_filter"] = lambda files: (
-            "",
-            ["crates/clio-types/src/civil.rs"],
-        )
-        check(
-            "a judgeable file that owns no test is still a failure",
-            main(["--scope", "file", "--base", "master"]),
-            EXIT_FAIL,
-        )
-        globals()["file_scope_filter"] = lambda files: ("test(/^x(::|$)/)", [])
-        globals()["judge_file_scope"] = lambda packages, files, floor: (
-            ["crates/clio-types/src/civil.rs lines 71.00% (floor 80.00)"],
-            ["crates/clio-types/src/vanished.rs"],
-        )
-        captured = io.StringIO()
-        sys.stderr = captured
-        try:
-            code = main(["--scope", "file", "--base", "master"])
-        finally:
-            sys.stderr = real_stderr
-        check("a failing file-scoped run exits non-zero", code, EXIT_FAIL)
-        check(
-            "the offender is named with its percentage",
-            "civil.rs lines 71.00% (floor 80.00)" in captured.getvalue(),
-            True,
-        )
-        check(
-            "the file the report could not hold is named",
-            "NOT MEASURED crates/clio-types/src/vanished.rs" in captured.getvalue(),
-            True,
-        )
-        # The same verdict, with the ambient diff now carrying a fixture. This is
-        # the only case here that would fail if the build-input mock were removed,
-        # so the interaction that broke on PR #83 stays an executable requirement
-        # rather than a comment.
-        globals()["file_scope_filter"] = lambda files: (
-            "",
-            ["crates/clio-types/src/civil.rs"],
-        )
-        printed = io.StringIO()
-        original_stdout = sys.stdout
-        try:
-            sys.stdout = printed
-            code = main(["--scope", "file", "--base", "master"])
-        finally:
-            sys.stdout = original_stdout
-        check(
-            "a build input in the diff does not flip the mocked file scope",
-            (code, "BUILD INPUT" in printed.getvalue()),
-            (EXIT_FAIL, False),
-        )
+        globals()["select"] = lambda base: ([rel], [rel])
+        globals()["is_present"] = lambda path: True
+        globals()["is_measureable"] = lambda path: True
+        globals()["exemption"] = lambda path: None
+        globals()["owned_terms"] = lambda files: ([], [], [])
+        owned.owned_selection = lambda path: owned.OwnedSelection(path, None, [])
+        sys.stderr = io.StringIO()
+        check("test-fast with no selected test runs nothing and passes", main(["--tests-only"]), EXIT_OK)
+        check("coverage-fast with no selected test still judges", main([]), EXIT_FAIL)
+        check("a file with no test module of its own fails", f"FAIL {rel} owns no test module" in sys.stderr.getvalue(), True)
+
+        globals()["owned_terms"] = lambda files: ([term], ["--lib", "--bins"], [])
+        globals()["run_tests"] = lambda packages, expression, targets: calls.append((packages, targets)) or 4
+        check("test-fast returns the test run's own exit code", main(["--tests-only"]), 4)
+        check("test-fast runs only the packages that hold selected tests", calls, [(["a"], ["--lib", "--bins"])])
+
+        calls.clear()
+        globals()["run_coverage"] = lambda packages, expression, targets: calls.append(packages)
+        globals()["load_report"] = lambda path: {}
+        owned.owned_selection = lambda path: owned.OwnedSelection(path, None, ["x::tests"])
+        for pct, want in ((79.99, EXIT_FAIL), (80.0, EXIT_OK)):
+            globals()["report_rows"] = lambda doc, pct=pct: {rel: CoverageRow(pct, 0.0, regions_pct=0.0)}
+            check(f"coverage-fast at {pct}% lines", main([]), want)
+        check("coverage-fast runs every selected test in one instrumented run", calls, [["a"], ["a"]])
+        globals()["report_rows"] = lambda doc: {}
+        check("a judged file the report does not hold fails", main([]), EXIT_FAIL)
+        check("the missing file is named", f"FAIL {rel} is not in the report" in sys.stderr.getvalue(), True)
     finally:
         sys.stderr = real_stderr
-        globals()["select"] = original_select
-        globals()["file_scope_filter"] = original_filter
-        globals()["judge_file_scope"] = original_file_judge
-        globals()["build_inputs"] = original_build_inputs
-        globals()["changed_paths"] = original_changed_paths
-        globals()["run_coverage"] = original_run_coverage
+        owned.owned_selection = saved_lookup
+        for name, value in saved.items():
+            globals()[name] = value
+
+    # The files the verdict never judges.
+    check("a crate's tests directory is exempt", exemption("crates/clio-mcp/tests/mcp_principal_binding.rs"), "test file")
+    check("an examples directory is exempt", exemption("crates/clio/examples/demo.rs"), "example")
+    check("a benches directory is exempt", exemption("crates/clio/benches/parse.rs"), "benchmark")
+    check("a build script is exempt", exemption("crates/clio/build.rs"), "build script")
+    check(
+        "a report row carries its region percentage",
+        report_rows({"data": [{"files": [{
+            "filename": str(ROOT / "crates/a/src/x.rs"),
+            "summary": {
+                "lines": {"percent": 90.0, "count": 10, "covered": 9},
+                "functions": {"percent": 50.0, "count": 2, "covered": 1},
+                "regions": {"percent": 70.0, "count": 5, "covered": 3},
+            },
+        }]}]})["crates/a/src/x.rs"].regions_pct,
+        70.0,
+    )
+    check(
+        "declarations and re-exports only",
+        declarations_only("//! doc\n#[cfg(feature = \"x\")]\npub mod a;\nmod b;\npub(crate) use a::{B, C};\nuse std::fmt;\n"),
+        True,
+    )
+    check("a function is code", declarations_only("pub mod a;\nfn f() {}\n"), False)
+    check("a type is code", declarations_only("pub struct S;\n"), False)
 
     # The two halves of the tool's exclusion, pinned separately. The suffix half
     # alone let every integration test be judged, and llvm-cov can never report
@@ -279,28 +238,19 @@ def run(check) -> tuple:
         ),
         (True, True),
     )
-    # The tool hides `tests.rs` and `<word char>[_-]tests.rs`, and nothing whose
-    # name lacks that separator. An `endswith("tests.rs")` test also hid a bare
-    # `_tests.rs`/`-tests.rs` and `mytests.rs`, which the report still holds, so a
-    # changed one was dropped from judgement instead of measured.
+    # No file name exempts a file. The tool's suffix rule is not mirrored here:
+    # every name below is measured, and only a path or a test gate exempts one.
     check(
-        "a name the tool hides by suffix is not measured",
+        "no tests-suffixed name is exempt by its name",
         (
             is_measureable("crates/clio/src/tests.rs"),
             is_measureable("crates/clio/src/word_tests.rs"),
             is_measureable("crates/clio/src/word-tests.rs"),
             is_measureable("crates/clio/src/a_tests.rs"),
-        ),
-        (False, False, False, False),
-    )
-    check(
-        "a name the tool keeps despite its tests suffix is measured",
-        (
             is_measureable("crates/clio/src/_tests.rs"),
-            is_measureable("crates/clio/src/-tests.rs"),
             is_measureable("crates/clio/src/mytests.rs"),
         ),
-        (True, True, True),
+        (True, True, True, True, True, True),
     )
 
     # Untracked files are read with `ls-files`, not `status`, and the reason is

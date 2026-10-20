@@ -160,7 +160,7 @@ help:
 		'Scripts:  make scripts-check  (the self-tests and suites in scripts/)' \
 		'Disk:     make sweep (report) | sweep-clean (reclaim) | clean (delete all build output) | clean-models' \
 		'Quick:    make quick BASE=origin/master (tests of the changed modules, stops at the first failure)' \
-		'Gates:    make ritual (format+clippy only, no tests) | test-fast (tests the changed files'"'"' packages) | coverage-fast (80%+ lines per changed file)' \
+		'Gates:    make ritual (format+clippy only, no tests) | test-fast (runs the changed files'"'"' own tests) | coverage-fast (80%+ lines per changed file)' \
 		'Reports:  make coverage | coverage-clean | coverage-html | coverage-lcov | coverage-open | coverage-package PACKAGE=<crate>' \
 		'Compose:  make compose up|down mac|linux  [PROFILE=...]' \
 		'Install:  make install  (cargo install to ~/.cargo/bin)'
