@@ -38,16 +38,16 @@ use crate::refusals_test_support::{
 };
 use crate::scenario_all_bank_peer::install_key;
 use crate::support_pg_test_support::{lock_pg, pg_url, postgres_reachable, require_postgres};
-use crate::support_test_support::{Readback, archive_sqlite_with_authority, readback};
+use crate::support_test_support::{
+    Readback, archive_sqlite_with_authority, current_authority, readback,
+};
 use clio::store::{DurableRequestStore, PeerActionStore, ScopedSchema, Store};
-use clio_backup::manifest::ManifestAuthority;
 use clio_compliance::subject_request_store_wiring::record_to_row;
 use clio_compliance::{
-    JournalState, PeerEnablement, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
-    SubjectRequestLedger, initialize_new_empty, load_journal, snapshot_peers,
+    PeerEnablement, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
+    SubjectRequestLedger, initialize_new_empty, snapshot_peers,
 };
 use serde_json::json;
-use std::path::Path;
 
 const DENIED: [(&str, &str, &str); 1] = [(DENIED_ITEM, DENIED_SUBJECT, DENIED_MARKER)];
 const CONTROL: [(&str, &str, &str); 1] = [(CONTROL_ITEM, CONTROL_SUBJECT, CONTROL_MARKER)];
@@ -263,16 +263,6 @@ fn scenario_refusals_incomplete_peers_disabled_postgres() {
     refuse_scope_copy_close(&env, "req-core-pg", &store);
     let peers = env.peer_status("req-core-pg");
     assert_no_peer_named(&peers);
-}
-fn current_authority(journal: &Path) -> ManifestAuthority {
-    let JournalState::Current(j) = load_journal(journal) else {
-        panic!("expected a current journal");
-    };
-    ManifestAuthority {
-        deployment_id: j.deployment_id,
-        generation: j.generation,
-        salt_fingerprint: j.salt_fingerprint,
-    }
 }
 /// The offline required peer stays pending, and the request closes nothing.
 #[test]

@@ -297,8 +297,8 @@ pub struct RestoreChild {
     child: Child,
     lines: Receiver<String>,
     stderr: Arc<Mutex<String>>,
-    stderr_reader: Option<JoinHandle<()>>,
-    stdout_reader: Option<JoinHandle<()>>,
+    stderr_reader: Option<JoinHandle<std::io::Result<()>>>,
+    stdout_reader: Option<JoinHandle<std::io::Result<()>>>,
 }
 
 impl RestoreChild {
@@ -331,10 +331,16 @@ impl RestoreChild {
             }
         };
         if let Some(reader) = self.stderr_reader.take() {
-            let _ = reader.join();
+            reader
+                .join()
+                .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+                .unwrap_or_else(|error| panic!("join the stderr reader: {error}"));
         }
         if let Some(reader) = self.stdout_reader.take() {
-            let _ = reader.join();
+            reader
+                .join()
+                .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+                .unwrap_or_else(|error| panic!("join the stdout reader: {error}"));
         }
         let stderr = self
             .stderr
@@ -385,10 +391,14 @@ pub fn spawn_restore(
     let (sender, lines) = mpsc::channel();
     let stderr_reader = {
         let shared = Arc::clone(&shared);
-        thread::spawn(move || {
+        thread::spawn(move || -> std::io::Result<()> {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
-            while reader.read_line(&mut line).is_ok_and(|read| read > 0) {
+            loop {
+                let read = reader.read_line(&mut line)?;
+                if read == 0 {
+                    return Ok(());
+                }
                 if let Ok(mut text) = shared.lock() {
                     text.push_str(&line);
                 }
@@ -396,10 +406,14 @@ pub fn spawn_restore(
             }
         })
     };
-    let stdout_reader = thread::spawn(move || {
+    let stdout_reader = thread::spawn(move || -> std::io::Result<()> {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
-        while reader.read_line(&mut line).is_ok_and(|read| read > 0) {
+        loop {
+            let read = reader.read_line(&mut line)?;
+            if read == 0 {
+                return Ok(());
+            }
             line.clear();
         }
     });

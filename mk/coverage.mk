@@ -7,9 +7,9 @@ export PHASE_TIMER_JSON ?= $(CURDIR)/target/phase-timing-$(shell date +%Y%m%d-%H
 #
 # No --summary-only, even though nothing here judges the report by machine: the full JSON is what makes the per-file rows available to a reader, and that flag would strip them. The export is about 70 MB.
 #
-# On the tool's own `--fail-under-*` family: it does have a per-file line gate, `--fail-under-file-lines`, and this target leaves it off by default. It gates every file the report holds, which is the workspace on this target, so a change would fail on a file it never touched. Only the scheduled whole-workspace workflow turns it on, through COV_TOOL_ARGS, because judging every file is that workflow's purpose. `scripts/scoped_runner.py` gates only the files a change touched, names each offender in its log, and fails closed when the report does not hold a changed file at all. That is the whole reason the judgement is written in Python, and it is a reason about scope and reporting, not about what the tool can do.
+# On the tool's own `--fail-under-*` family: it does have a per-file line gate, `--fail-under-file-lines`, and this target leaves it off, because that comparison is strict: it fails a file at exactly 80%. It gates every file the report holds, which is the workspace on this target, so a change would fail on a file it never touched. The scheduled whole-workspace workflow judges every file by comparing this report with `>= 80` in the workflow step, because judging every file is that workflow's purpose. `scripts/scoped_runner.py` gates only the files a change touched, names each offender in its log, and fails closed when the report does not hold a changed file at all. That is the whole reason the judgement is written in Python, and it is a reason about scope and reporting, not about what the tool can do.
 # Extra arguments for the one run `coverage` makes, given as `make coverage COV_TOOL_ARGS=...`.
-# Empty unless a caller passes some. The scheduled whole-workspace workflow passes its per-file line gate here.
+# Empty unless a caller passes some. No CI job passes a per-file floor here; the scheduled workflow compares the JSON report.
 COV_TOOL_ARGS ?=
 
 coverage cov:

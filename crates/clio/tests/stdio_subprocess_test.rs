@@ -34,6 +34,12 @@ use std::time::{Duration, Instant};
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest we let the background sweeper take to drain the outbox.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
+/// Longest we wait for the server to exit after its stdin closes.
+const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Shortest pause between exit polls.
+const EXIT_POLL: Duration = Duration::from_millis(20);
+/// Longest we wait for a killed child to be reaped.
+const REAP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Kills the server on drop so a panicking assertion cannot orphan it.
 struct ServerGuard(Child);
@@ -45,13 +51,19 @@ impl Drop for ServerGuard {
     }
 }
 
-/// Launch `clio mcp stdio` over a volatile in-memory database.
-fn spawn_server() -> (
+/// The live parts of a spawned server: process guard, stdin, response channel,
+/// captured stderr, and the stdout and stderr reader threads.
+type ServerParts = (
     ServerGuard,
     ChildStdin,
     Receiver<String>,
     Arc<Mutex<String>>,
-) {
+    thread::JoinHandle<()>,
+    thread::JoinHandle<std::io::Result<()>>,
+);
+
+/// Launch `clio mcp stdio` over a volatile in-memory database.
+fn spawn_server() -> ServerParts {
     let mut child = Command::new(env!("CARGO_BIN_EXE_clio"))
         .args(["mcp", "stdio", "--db", "sqlite::memory:"])
         // Force an empty deployment overlay so the scenario never reads a host
@@ -71,7 +83,7 @@ fn spawn_server() -> (
     let stderr = child.stderr.take().expect("child stderr");
 
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
+    let stdout_reader = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             match line {
                 Ok(line) => {
@@ -85,17 +97,39 @@ fn spawn_server() -> (
     });
     let captured = Arc::new(Mutex::new(String::new()));
     let sink = Arc::clone(&captured);
-    thread::spawn(move || {
+    let stderr_reader = thread::spawn(move || -> std::io::Result<()> {
         let mut reader = BufReader::new(stderr);
         let mut line = String::new();
-        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+        loop {
+            let read = reader.read_line(&mut line)?;
+            if read == 0 {
+                return Ok(());
+            }
             if let Ok(mut guard) = sink.lock() {
                 guard.push_str(&line);
             }
             line.clear();
         }
     });
-    (ServerGuard(child), stdin, receiver, captured)
+    (
+        ServerGuard(child),
+        stdin,
+        receiver,
+        captured,
+        stdout_reader,
+        stderr_reader,
+    )
+}
+
+/// Join one reader thread, surfacing its read failure and its panic where the
+/// stream was read, instead of leaving the cause to surface later as a short
+/// capture.
+fn join_reader(handle: thread::JoinHandle<std::io::Result<()>>, stream: &str) {
+    match handle.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => panic!("read the clio mcp stdio {stream}: {error}"),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }
 
 /// Write one compact JSON-RPC frame and flush it.
@@ -118,6 +152,48 @@ fn recv_response(receiver: &Receiver<String>, stderr: &Arc<Mutex<String>>) -> Va
     }
 }
 
+/// Wait for the server to exit, killing and reaping it when it does not exit
+/// before `budget`. `Err` reports what the termination actually did.
+fn wait_for_exit(child: &mut Child, budget: Duration) -> Result<std::process::ExitStatus, String> {
+    let deadline = Instant::now() + budget;
+    loop {
+        match child.try_wait().expect("reap the clio mcp stdio child") {
+            Some(status) => return Ok(status),
+            None if Instant::now() < deadline => thread::sleep(EXIT_POLL),
+            None => return Err(terminate(child, budget)),
+        }
+    }
+}
+
+/// Kill a child that missed its deadline and reap it within a bound, wording
+/// the outcome from what the calls actually returned.
+fn terminate(child: &mut Child, budget: Duration) -> String {
+    if let Err(error) = child.kill() {
+        return format!(
+            "clio mcp stdio did not exit within {budget:?} and the kill failed: {error}"
+        );
+    }
+    let deadline = Instant::now() + REAP_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return format!("clio mcp stdio did not exit within {budget:?} and was killed");
+            }
+            Ok(None) if Instant::now() < deadline => thread::sleep(EXIT_POLL),
+            Ok(None) => {
+                return format!(
+                    "clio mcp stdio did not exit within {budget:?} and was killed but not reaped within {REAP_TIMEOUT:?}"
+                );
+            }
+            Err(error) => {
+                return format!(
+                    "clio mcp stdio did not exit within {budget:?} and was killed, but the reap failed: {error}"
+                );
+            }
+        }
+    }
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn call(id: i64, name: &str, arguments: Value) -> Value {
     json!({
@@ -132,7 +208,7 @@ fn call(id: i64, name: &str, arguments: Value) -> Value {
 /// background sweeper thread is exercised, not a test-only in-memory reader.
 #[test]
 fn mcp_stdio_subprocess_store_drains_and_retrieves() {
-    let (mut guard, mut stdin, receiver, stderr) = spawn_server();
+    let (mut guard, mut stdin, receiver, stderr, stdout_reader, stderr_reader) = spawn_server();
     let bank = "bank-subprocess";
     let item_id = "itm-subprocess-1";
 
@@ -208,13 +284,39 @@ fn mcp_stdio_subprocess_store_drains_and_retrieves() {
 
     // Closing stdin is EOF for the session; the binary must exit cleanly.
     drop(stdin);
-    let status = guard.0.wait().expect("wait for clio mcp stdio");
+    let exit = wait_for_exit(&mut guard.0, EXIT_TIMEOUT);
+    stdout_reader
+        .join()
+        .expect("the MCP stdout reader thread panicked");
+    join_reader(stderr_reader, "stderr");
     let captured = stderr
         .lock()
         .map(|text| text.to_string())
         .unwrap_or_default();
+    let status = exit.unwrap_or_else(|failure| panic!("{failure}; stderr: {captured}"));
     assert!(
         status.success(),
         "clio mcp stdio exited {status:?}: {captured}"
     );
+}
+
+/// A child that never sees its shutdown frame must hit the exit deadline, and
+/// the wait helper must kill, reap, and say so. The guard reaps it on unwind
+/// even if this test fails before the deadline branch runs.
+#[test]
+#[should_panic(expected = "did not exit within 200ms and was killed")]
+fn mcp_stdio_subprocess_reports_the_exit_deadline_it_enforces() {
+    // `_stdin` stays bound for the whole test, so the child keeps waiting.
+    let (mut guard, _stdin, _receiver, stderr, stdout_reader, stderr_reader) = spawn_server();
+    let failure = wait_for_exit(&mut guard.0, Duration::from_millis(200))
+        .expect_err("a child that never sees shutdown must miss the deadline");
+    stdout_reader
+        .join()
+        .expect("the MCP stdout reader thread panicked");
+    join_reader(stderr_reader, "stderr");
+    let captured = stderr
+        .lock()
+        .map(|text| text.to_string())
+        .unwrap_or_default();
+    panic!("{failure}; stderr: {captured}");
 }
