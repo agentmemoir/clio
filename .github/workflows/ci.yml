@@ -443,3 +443,18 @@ jobs:
         if: failure()
         run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
 
+  # The gate installer on macOS. The installer bounds its profile probes with a
+  # timeout tool, and macOS has none, so a suite that only ever ran on Linux
+  # could not see the installer fail on every Mac while CI stayed green. This
+  # job is the one that sees it, so that class of defect cannot come back
+  # quietly.
+  macos-gate-install:
+    name: gate installer check (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate installer check (macOS)
+        run: make scripts-check-gate-install
+
