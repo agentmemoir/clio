@@ -1,9 +1,8 @@
 # CI: format, clippy, and the tests and coverage of what a change touches.
 #
-# The suite is scoped. `make test-fast` runs the tests of the packages a change
-# can affect, and `make coverage-fast` measures those same packages and judges
-# the changed files against a ≥80% line floor. Neither one measures
-# the workspace, so neither one can report on a file nobody touched.
+# The suite is scoped. `make coverage-fast` runs the tests of the packages a
+# change can affect and judges the changed files against a ≥80% line floor. It
+# does not measure the workspace, so it cannot report on a file nobody touched.
 #
 # What that buys and what it costs are both real, so both are written down here
 # rather than left to be discovered:
@@ -16,15 +15,9 @@
 #          it, which is where a signature change shows up, but a defect that
 #          needs an unrelated crate's tests to surface is no longer CI's job.
 #
-# The gate itself is `scripts/scoped_runner.py`. Both targets share its package
-# selection, so a change cannot pass the tests job and fail the coverage job by
-# disagreeing about what it touched.
-#
-# The tests and the coverage judgement run as two jobs, not two steps of one:
-# on the five green runs from 2026-10-05 to 2026-10-07 the single job took
-# 674 s to 991 s, and the plain and instrumented runs were 533 s to 832 s of
-# that. Running them at the same time removes the shorter run from the
-# critical path; it pays a second runner and a second cache restore per run.
+# The gate itself is `scripts/scoped_runner.py`, and it is the only test run: a
+# plain `make test-fast` over the same selection would put the suite through the
+# runner a second time for one pull request, so CI leaves it to developers.
 #
 # The pinned MCP conformance suite is a workflow of its own,
 # `.github/workflows/mcp-conformance.yml`, gated by a path filter instead of by a
@@ -197,23 +190,12 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # The test gate. Runs the tests of the changed crate and every crate that
-      # depends on it, uninstrumented, and returns nextest's own exit code, so a
-      # failing test fails the step and is named by nextest. The instrumented
-      # re-run and its judgement live in the `scoped-coverage` job, which starts
-      # at the same time as this one.
-      - name: Scoped tests (changed files' packages and their dependents)
-        run: make test-fast BASE="$SCOPED_BASE"
+      # No test step. The instrumented run in the `scoped-coverage` job covers
+      # the same packages, returns the same nextest exit code, and would have
+      # been this job's second pass over one pull request.
 
       # No doctest step. It cost 7 of the 11 minutes of a local full gate and ran
       # 0 tests: the workspace has two doc examples, both marked `ignore`.
-
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nextest-junit
-          path: target/nextest/ci/junit.xml
 
       # The self-tests and the suites that live under `scripts/`. These files
       # decide what a gate reports and whether it reports at all: the wrapper
@@ -443,6 +425,16 @@ jobs:
       # recorded floor is compared anywhere.
       - name: Scoped coverage (≥80% lines on each changed Rust file)
         run: make coverage-fast BASE="$SCOPED_BASE"
+
+      # The only test run a pull request makes, so its JUnit report is the one
+      # the workflow publishes. nextest stores it under `target/nextest/<profile>`
+      # in the workspace, not under the `target/llvm-cov-target` build directory.
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
 
       # Last, so it can report on whichever step failed: a test binary killed
       # from outside prints nothing, which is the case this was added for.
