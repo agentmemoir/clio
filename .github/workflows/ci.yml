@@ -175,6 +175,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked
 
       - name: Install nextest
+        id: install_nextest
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
@@ -334,9 +335,20 @@ jobs:
 
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
+      # It needs the `nextest` tool, which is a cargo subcommand, and the step
+      # that installs it can be skipped when an earlier step fails. This step
+      # runs on every outcome and asks for the tool itself, so the job log
+      # shows why the acceptance did not run instead of the step disappearing.
+      # A tool that is missing is not a failure; a lookup that could run still
+      # fails the job when it finds a real mismatch.
       - name: Owned lookup acceptance
         if: always()
-        run: python3 scripts/owned_tests.py --accept
+        run: |
+          if ! cargo nextest --version >/dev/null 2>&1; then
+            echo "owned lookup acceptance skipped: cargo nextest is not usable, so the runner's test list cannot be read"
+            exit 0
+          fi
+          python3 scripts/owned_tests.py --accept
 
       # Last, so it can report on whichever step failed: a test binary killed
       # from outside prints nothing, which is the case this was added for.
@@ -424,13 +436,31 @@ jobs:
       # reach 80% of its lines. No other metric, no aggregate, and no per-file
       # recorded floor is compared anywhere.
       - name: Scoped coverage (≥80% lines on each changed Rust file)
+        id: scoped_coverage
         run: make coverage-fast BASE="$SCOPED_BASE"
 
       # The only test run a pull request makes, so its JUnit report is the one
       # the workflow publishes. nextest stores it under `target/nextest/<profile>`
       # in the workspace, not under the `target/llvm-cov-target` build directory.
+      #
+      # A change that touches no Rust file selects no test, so the runner runs
+      # no test and writes no report, and there is nothing to publish. The
+      # upload used to fail on that, because `if-no-files-found: error` reads a
+      # missing report as a broken run, and the report was missing because no
+      # run had happened. The report and the gate's own report are the two
+      # things a test run leaves behind, so their presence is what says a run
+      # happened: the JUnit report when the run wrote it, the coverage report
+      # when the run finished and the merge wrote it. A run that wrote the
+      # coverage report but no JUnit report still fails the job, because the
+      # upload runs on the coverage report alone and finds no JUnit file to
+      # publish. A run that wrote neither report selected no test, so the
+      # upload is skipped and the job stays green.
       - name: Upload test report
-        if: always()
+        if: >-
+          always()
+          && steps.scoped_coverage.outcome != 'skipped'
+          && (hashFiles('target/nextest/ci/junit.xml') != ''
+          || hashFiles('target/coverage/coverage-scoped.json') != '')
         uses: actions/upload-artifact@v4
         with:
           name: nextest-junit
@@ -442,4 +472,44 @@ jobs:
       - name: Out-of-memory check
         if: failure()
         run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
+
+  # The gate installer on macOS. The installer bounds its profile probes with a
+  # timeout tool, and macOS ships none by default, so a suite that only ever
+  # ran on Linux could not see the installer fail on a Mac.
+  #
+  # This job runs two things, and they prove two different things. The first is
+  # the self-test suite. It builds its own stand-in timeout tool and its own
+  # PATH, so it proves the suite runs on macOS and does not depend on what the
+  # host has installed. The second is the real installer, run against the
+  # runner's own PATH and a home whose profile carries the PATH line, so the
+  # path a Mac user takes has a witness in CI.
+  macos-gate-install:
+    name: gate installer check (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The suite, run directly. The target in mk/scripts.mk runs these two
+      # commands, so nothing is lost, and the Makefile is not read: reading it
+      # resolves the pinned Rust toolchain, which the runner does not ship and
+      # which this job has no use for. Both files run in one step, so the step
+      # is one step of the suite and the parity check counts it once.
+      - name: Gate installer self-test (macOS)
+        run: |
+          python3 scripts/test_gate_install.py
+          python3 scripts/test_gate_install_profiles.py
+
+      # The real installer, run the way a Mac user runs it. The script builds
+      # a temporary home whose profile adds the install destination to PATH,
+      # runs the installer against it, and accepts only the two outcomes a
+      # host can have: a host with a timeout tool must see the installer
+      # confirm the shim, and a host without one must see the installer report
+      # that profile verification is unavailable. Any other outcome fails.
+      #
+      # The step calls the script directly and does not call `make`: reading
+      # the Makefile resolves the pinned Rust toolchain, which the runner does
+      # not ship and which this job has no use for.
+      - name: Gate installer on the runner (macOS)
+        run: sh scripts/gate_install_runner_check.sh
 
