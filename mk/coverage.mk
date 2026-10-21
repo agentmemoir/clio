@@ -40,7 +40,7 @@ coverage-fast:
 	@python3 scripts/scoped_runner.py --self-test
 	@python3 scripts/scoped_runner.py $(COVERAGE_FAST_FLAGS) --base $(or $(BASE),master)
 
-# THE TEST GATE. The same selection without instrumentation, so it skips the two things that make coverage expensive: the instrumented rebuild and the profile-data merge. It returns nextest's own exit code, so a failing test fails the command, named by nextest.
+# A DEVELOPER TARGET, not the test gate: CI runs the coverage job and nothing here. The same selection without instrumentation, so it skips the two things that make coverage expensive: the instrumented rebuild and the profile-data merge. It returns nextest's own exit code, so a failing test fails the command, named by nextest.
 #
 #  make test-fast
 #  make test-fast PLAN=1
@@ -57,7 +57,7 @@ test-fast:
 #
 # The name is the warning. This target runs no test and judges no coverage, so a green run here says the code is formatted and compiles cleanly, and says nothing at all about whether the tests pass or whether the changed files reach their coverage floor. It was named `verify` until it stopped running the tests, and a command called `verify` that verifies neither is the same kind of lie as a document that says CI runs it. The history has one already: `make check` was fmt, clippy and test wearing one name, a stage swapped it for `make test-fast`, and the formatting and lint checks were dropped without anyone noticing until a pull request said so.
 #
-# The tests and the coverage judgement are the two scoped targets below, and CI runs both of them on every pull request that touches a path in its path filters. That is the gate. This target is what is cheap enough to run before every commit, which is why a pipeline stage runs it and leaves the rest to the runner.
+# The coverage judgement is the only scoped target CI runs on a pull request that touches a path in its path filters. That is the gate. This target is what is cheap enough to run before every commit, which is why a pipeline stage runs it and leaves the rest to the runner.
 #
 # fmt is checked, not written: this target reports, it does not repair. clippy is workspace-wide and takes no PACKAGES, deliberately. A crate you did not touch can still fail to compile against a signature you changed, and --all-targets means the test code is compiled too, so a test file that does not build is caught here even though no test is run.
 #
