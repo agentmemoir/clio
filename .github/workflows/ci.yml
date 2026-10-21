@@ -465,10 +465,15 @@ jobs:
         run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
 
   # The gate installer on macOS. The installer bounds its profile probes with a
-  # timeout tool, and macOS has none, so a suite that only ever ran on Linux
-  # could not see the installer fail on every Mac while CI stayed green. This
-  # job is the one that sees it, so that class of defect cannot come back
-  # quietly.
+  # timeout tool, and macOS ships none by default, so a suite that only ever
+  # ran on Linux could not see the installer fail on a Mac.
+  #
+  # This job runs two things, and they prove two different things. The first is
+  # the self-test suite. It builds its own stand-in timeout tool and its own
+  # PATH, so it proves the suite runs on macOS and does not depend on what the
+  # host has installed. The second is the real installer, run against the
+  # runner's own PATH and a home whose profile carries the PATH line, so the
+  # path a Mac user takes has a witness in CI.
   macos-gate-install:
     name: gate installer check (macOS)
     runs-on: macos-latest
@@ -476,6 +481,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Gate installer check (macOS)
-        run: make scripts-check-gate-install
+      # The suite, run directly. The target in mk/scripts.mk runs these two
+      # commands, so nothing is lost, and the Makefile is not read: reading it
+      # resolves the pinned Rust toolchain, which the runner does not ship and
+      # which this job has no use for. Both files run in one step, so the step
+      # is one step of the suite and the parity check counts it once.
+      - name: Gate installer self-test (macOS)
+        run: |
+          python3 scripts/test_gate_install.py
+          python3 scripts/test_gate_install_profiles.py
+
+      # The real installer, run the way a Mac user runs it. The script builds
+      # a temporary home whose profile adds the install destination to PATH,
+      # runs the installer against it, and accepts only the two outcomes a
+      # host can have: a host with a timeout tool must see the installer
+      # confirm the shim, and a host without one must see the installer report
+      # that profile verification is unavailable. Any other outcome fails.
+      #
+      # The step calls the script directly and does not call `make`: reading
+      # the Makefile resolves the pinned Rust toolchain, which the runner does
+      # not ship and which this job has no use for.
+      - name: Gate installer on the runner (macOS)
+        run: sh scripts/gate_install_runner_check.sh
 
