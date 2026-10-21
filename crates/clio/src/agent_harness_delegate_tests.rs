@@ -7,9 +7,10 @@
 //! temp home directory and, for spawn tests, a stub `claude`, so no test
 //! reads the host's real `PATH`, `HOME`, or Claude config. The stub records
 //! the argument vector it received; the tests assert that vector, never
-//! vendor prose. The stub lives next to the test binary, because a temp
-//! directory can be mounted noexec and a stub there cannot run. Spawn
-//! tests need a Unix shell and are skipped elsewhere.
+//! vendor prose. The stub lives in a directory that already ran a probe, or
+//! under `NOEXEC_EXEC_DIR`, because a temp directory can be mounted noexec
+//! and a stub there cannot run; a directory that refuses the probe is an
+//! error, never a skip. Spawn tests need a Unix shell and exist only there.
 //!
 //! ## Owns
 //! - The assertions over delegate outcomes and recorded arguments, for
@@ -70,11 +71,9 @@ fn uninstall_without_the_binary_refuses_with_the_remove_snippet() {
 fn install_runs_the_registry_argv_and_reports_installed() {
     let mut fixture = Fixture::new("install-clean");
     fixture.write_config(&fixture.exe());
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let message = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect("a clean exit and a matching entry must install");
     assert_eq!(message, "installed");
@@ -89,11 +88,9 @@ fn install_runs_the_registry_argv_and_reports_installed() {
 fn install_reports_already_installed_when_the_entry_survives_a_duplicate_exit() {
     let mut fixture = Fixture::new("install-duplicate");
     fixture.write_config(&fixture.exe());
-    let Some(env) = fixture.stub_env(1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(1)
+        .expect("the stub needs a directory that permits exec");
     let message = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect("an entry already present is a success");
     assert_eq!(message, "already installed");
@@ -107,11 +104,9 @@ fn install_reports_already_installed_when_the_entry_survives_a_duplicate_exit() 
 #[test]
 fn install_verifies_an_entry_the_stub_wrote_itself() {
     let mut fixture = Fixture::new("install-stub-writes");
-    let Some(env) = fixture.stub_env_vendor() else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor()
+        .expect("the stub needs a directory that permits exec");
     let message = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect("an entry the stub wrote itself must verify");
     assert_eq!(message, "installed");
@@ -126,11 +121,9 @@ fn install_verifies_an_entry_the_stub_wrote_itself() {
 fn install_rewrites_a_registration_that_points_elsewhere() {
     let mut fixture = Fixture::new("install-rewrite");
     fixture.write_config(&fixture.root.join("old"));
-    let Some(env) = fixture.stub_env_vendor() else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor()
+        .expect("the stub needs a directory that permits exec");
     let message = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect("a stale registration must be removed and added again");
     assert_eq!(message, "installed");
@@ -150,11 +143,9 @@ fn install_rewrites_a_registration_that_points_elsewhere() {
 #[test]
 fn install_refuses_a_zero_exit_when_no_entry_lands() {
     let mut fixture = Fixture::new("install-zero-lies");
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect_err("the read-back must not trust a zero exit");
     assert!(
@@ -167,11 +158,9 @@ fn install_refuses_a_zero_exit_when_no_entry_lands() {
 #[test]
 fn install_reports_command_failed_when_a_duplicate_exit_leaves_no_entry() {
     let mut fixture = Fixture::new("install-duplicate-refused");
-    let Some(env) = fixture.stub_env(1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(1)
+        .expect("the stub needs a directory that permits exec");
     let err = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect_err("a refused duplicate add with no entry is a failure");
     let DelegateError::CommandFailed { exit_code, .. } = err else {
@@ -185,11 +174,9 @@ fn install_reports_command_failed_when_a_duplicate_exit_leaves_no_entry() {
 fn install_refuses_a_zero_exit_when_the_entry_points_elsewhere() {
     let mut fixture = Fixture::new("install-elsewhere");
     fixture.write_config(&fixture.root.join("other"));
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect_err("an entry under another executable is not installed");
     assert!(
@@ -203,11 +190,9 @@ fn install_refuses_a_zero_exit_when_the_entry_points_elsewhere() {
 fn install_refuses_a_malformed_config_without_panicking() {
     let mut fixture = Fixture::new("install-garbage");
     fixture.write_garbage_config();
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect_err("a malformed config cannot be verified");
     assert!(
@@ -221,11 +206,9 @@ fn install_refuses_a_malformed_config_without_panicking() {
 fn install_lets_the_read_back_decide_an_unknown_exit_code() {
     let mut fixture = Fixture::new("install-unknown-exit");
     fixture.write_config(&fixture.exe());
-    let Some(env) = fixture.stub_env(3) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(3)
+        .expect("the stub needs a directory that permits exec");
     let message = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect("the entry is present, whatever the vendor said");
     assert_eq!(message, "already installed");
@@ -235,11 +218,9 @@ fn install_lets_the_read_back_decide_an_unknown_exit_code() {
 #[test]
 fn uninstall_runs_the_registry_remove_argv() {
     let mut fixture = Fixture::new("uninstall-argv");
-    let Some(env) = fixture.stub_env(1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(1)
+        .expect("the stub needs a directory that permits exec");
     uninstall(record(), SERVER_NAME, &env).expect("an absent entry is a success for uninstall");
     assert_eq!(
         fixture.recorded_args(),
@@ -251,11 +232,9 @@ fn uninstall_runs_the_registry_remove_argv() {
 #[test]
 fn uninstall_reports_removed_after_a_clean_exit() {
     let mut fixture = Fixture::new("uninstall-clean");
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let message = uninstall(record(), SERVER_NAME, &env)
         .expect("an entry gone after a clean exit is removed");
     assert_eq!(message, "removed");
@@ -265,11 +244,9 @@ fn uninstall_reports_removed_after_a_clean_exit() {
 #[test]
 fn uninstall_reports_nothing_to_remove_when_the_vendor_refuses_an_absent_entry() {
     let mut fixture = Fixture::new("uninstall-absent");
-    let Some(env) = fixture.stub_env(1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(1)
+        .expect("the stub needs a directory that permits exec");
     let message = uninstall(record(), SERVER_NAME, &env)
         .expect("a missing-remove exit with no entry is a success");
     assert_eq!(message, "nothing to remove");
@@ -280,11 +257,9 @@ fn uninstall_reports_nothing_to_remove_when_the_vendor_refuses_an_absent_entry()
 fn uninstall_refuses_a_zero_exit_when_the_entry_still_present() {
     let mut fixture = Fixture::new("uninstall-zero-lies");
     fixture.write_config(&fixture.exe());
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let err = uninstall(record(), SERVER_NAME, &env)
         .expect_err("the read-back must not trust a zero exit");
     assert!(
@@ -298,11 +273,9 @@ fn uninstall_refuses_a_zero_exit_when_the_entry_still_present() {
 fn uninstall_reports_command_failed_when_the_vendor_refuses_and_the_entry_stays() {
     let mut fixture = Fixture::new("uninstall-refused");
     fixture.write_config(&fixture.exe());
-    let Some(env) = fixture.stub_env(1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(1)
+        .expect("the stub needs a directory that permits exec");
     let err = uninstall(record(), SERVER_NAME, &env)
         .expect_err("a refused removal with the entry still present is a failure");
     let DelegateError::CommandFailed { exit_code, .. } = err else {
@@ -404,11 +377,9 @@ fn install_refuses_when_the_config_file_cannot_be_read_at_all() {
     let mut fixture = Fixture::new("config-unreadable");
     let config = fixture.root.join("home").join(record().config_file);
     fs::create_dir_all(&config).expect("the config path can become a directory");
-    let Some(env) = fixture.stub_env(0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect_err("an unreadable config cannot be verified");
     assert!(
@@ -422,11 +393,9 @@ fn install_refuses_when_the_config_file_cannot_be_read_at_all() {
 fn install_reports_command_failed_when_a_stale_entry_survives_the_repair() {
     let mut fixture = Fixture::new("repair-remove-stuck");
     fixture.write_config(&fixture.root.join("old"));
-    let Some(env) = fixture.stub_env(1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env(1)
+        .expect("the stub needs a directory that permits exec");
     let err = install(record(), SERVER_NAME, &fixture.exe(), &env)
         .expect_err("a refused add under a foreign entry must attempt the repair");
     let DelegateError::CommandFailed { exit_code, .. } = err else {

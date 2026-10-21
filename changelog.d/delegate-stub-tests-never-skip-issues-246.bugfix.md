@@ -1,0 +1,1 @@
+The delegate spawn tests now fail, naming `NOEXEC_EXEC_DIR` as the remedy, when no directory that permits execution is available, instead of printing a skip and reporting a green run that never started a stub; each stub is written into a directory that already ran a probe, and a negative test pins the refusal rather than a fallback to scratch storage.

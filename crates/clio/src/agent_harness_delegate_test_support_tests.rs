@@ -11,7 +11,7 @@
 //! ## Owns
 //! - `Fixture`: unique temp directories, the per-record config writers in
 //!   each harness's own config shape, and the flat and vendor-like stubs
-//! - The exec probe that decides whether this host can run stubs at all
+//! - The exec directory resolver the stubs are written into, and its probe
 //! - `record`, `record_named`, and `expected_args`
 //!
 //! ## Does not own
@@ -37,9 +37,6 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::process::Command;
 
-#[cfg(unix)]
-use std::sync::OnceLock;
-
 /// Nanoseconds plus a process-global counter: two calls can never get the
 /// same suffix, even when they read the clock in the same nanosecond.
 static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -60,40 +57,64 @@ pub(crate) fn record_named(name: &str) -> &'static HarnessRecord {
     resolve(name).unwrap_or_else(|| panic!("{name} must resolve"))
 }
 
-/// A unique directory for an executable, next to this test binary: the
-/// binary's own directory always permits exec, while a temp directory can
-/// be mounted noexec. `None` when no such directory can be made. A killed
-/// test process cannot clean up here, but cargo owns this directory.
+/// Whether `dir` can run a program at all: write a trivial script there,
+/// make it `0755`, start it, and remove it. Mode bits and mount options
+/// describe policy they do not enforce, so only the start answers this.
 #[cfg(unix)]
-fn exec_dir(label: &str) -> Option<PathBuf> {
-    let dir = std::env::current_exe().ok()?.parent()?.join(format!(
+fn can_execute(dir: &Path) -> bool {
+    let probe = dir.join(format!("exec-probe-{}", unique_suffix()));
+    let prepared = fs::write(&probe, "#!/bin/sh\nexit 0\n")
+        .and_then(|()| fs::set_permissions(&probe, fs::Permissions::from_mode(0o755)));
+    let ran = prepared.is_ok_and(|()| {
+        Command::new(&probe)
+            .output()
+            .is_ok_and(|out| out.status.success())
+    });
+    let _ = fs::remove_file(&probe);
+    ran
+}
+
+/// Where stub executables are created: `NOEXEC_EXEC_DIR` when set, otherwise
+/// the directory of this test binary, which cargo owns and which therefore
+/// permits exec. There is no fallback to a scratch directory, because that
+/// is exactly the placement a program cannot be started from.
+#[cfg(unix)]
+fn exec_dir_base() -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("NOEXEC_EXEC_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            "this test binary has no directory to run stubs from; set NOEXEC_EXEC_DIR".to_owned()
+        })
+}
+
+/// A per-test directory under `base`, named with this process and a unique
+/// suffix, created and then checked by `runs`. A base that refuses the probe
+/// is an error naming the directory and the remedy, never a silent fallback.
+#[cfg(unix)]
+fn exec_dir_in(base: &Path, label: &str, runs: impl Fn(&Path) -> bool) -> Result<PathBuf, String> {
+    let dir = base.join(format!(
         "clio-agent-harness-delegate-{label}-{}-{}",
         std::process::id(),
         unique_suffix()
     ));
-    fs::create_dir_all(&dir).ok()?;
-    Some(dir)
+    fs::create_dir_all(&dir).map_err(|err| format!("{}: {err}", dir.display()))?;
+    if !runs(&dir) {
+        return Err(format!(
+            "{} refuses exec, so no stub can run there; set NOEXEC_EXEC_DIR to a directory that allows it",
+            dir.display()
+        ));
+    }
+    Ok(dir)
 }
 
-/// One probe per process: write a trivial script where the stubs live,
-/// make it executable, and run it. `false` means this host refuses to
-/// run stub executables at all. That is an environment fact, never a
-/// logic fact, so it is the only reason a spawn test may skip.
+/// The directory for one test's stub executables; see [`exec_dir_in`].
 #[cfg(unix)]
-fn exec_available() -> bool {
-    static PROBE: OnceLock<bool> = OnceLock::new();
-    *PROBE.get_or_init(|| {
-        let Some(dir) = exec_dir("exec-probe") else {
-            return false;
-        };
-        let script = dir.join("probe.sh");
-        let probe = fs::write(&script, "#!/bin/sh\nexit 0\n")
-            .and_then(|()| fs::set_permissions(&script, fs::Permissions::from_mode(0o755)))
-            .and_then(|()| Command::new(&script).output())
-            .is_ok_and(|out| out.status.success());
-        let _ = fs::remove_dir_all(&dir);
-        probe
-    })
+fn exec_dir(label: &str) -> Result<PathBuf, String> {
+    exec_dir_in(&exec_dir_base()?, label, can_execute)
 }
 
 /// The stub's redirection target, as a shell word: single-quoted, with an
@@ -184,36 +205,31 @@ impl Fixture {
         self.home().join(record.config_file)
     }
 
-    /// The directory for this test's stub executable, created once and
+    /// The directory for this test's stub executable, resolved once and
     /// removed on drop.
     #[cfg(unix)]
-    fn exec(&mut self) -> PathBuf {
-        self.exec
-            .get_or_insert_with(|| {
-                exec_dir("stub").expect("a stub directory next to this test binary can be created")
-            })
-            .clone()
+    fn exec(&mut self) -> Result<PathBuf, String> {
+        if let Some(dir) = &self.exec {
+            Ok(dir.clone())
+        } else {
+            let dir = exec_dir("stub")?;
+            self.exec = Some(dir.clone());
+            Ok(dir)
+        }
     }
 
     /// Write a stub named `binary` and build an environment that finds it.
-    /// `None` when this host cannot run stub executables at all; a required
-    /// scenario must panic on `None` so a green run always means it ran.
+    /// `Err` when no directory that permits exec exists, so a scenario that
+    /// needs a stub fails with the reason instead of passing without one.
     #[cfg(unix)]
-    fn env_with_stub(&mut self, binary: &str, script: String) -> Option<DelegateEnv> {
-        if !exec_available() {
-            eprintln!(
-                "skipping: stub executables cannot run on this host, so the delegate spawn tests cannot run"
-            );
-            return None;
-        }
-        let exec = self.exec();
+    fn env_with_stub(&mut self, binary: &str, script: String) -> Result<DelegateEnv, String> {
+        let exec = self.exec()?;
         let path = exec.join(binary);
         fs::write(&path, script).expect("stub script can be written");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
             .expect("stub script can be made executable");
-        let dir = exec;
-        Some(DelegateEnv::with(
-            move |name: &str| Some(dir.join(name)),
+        Ok(DelegateEnv::with(
+            move |name: &str| Some(exec.join(name)),
             self.home(),
         ))
     }
@@ -225,7 +241,7 @@ impl Fixture {
         &mut self,
         record: &HarnessRecord,
         code: i32,
-    ) -> Option<DelegateEnv> {
+    ) -> Result<DelegateEnv, String> {
         let binary = vendor_binary(record);
         let script = format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nexit {code}\n",
@@ -237,7 +253,7 @@ impl Fixture {
     /// A stub `claude` that records the arguments it received and exits
     /// with `code`.
     #[cfg(unix)]
-    pub(crate) fn stub_env(&mut self, code: i32) -> Option<DelegateEnv> {
+    pub(crate) fn stub_env(&mut self, code: i32) -> Result<DelegateEnv, String> {
         self.stub_env_for(record(), code)
     }
 
@@ -259,12 +275,15 @@ impl Fixture {
         let args = shell_quote(&self.root.join("args.txt"));
         let contents = config_text(record, &self.exe());
         let drain_stdin = if reads_stdin {
-            format!("cat > {}\n  ", shell_quote(&self.root.join("stdin.txt")))
+            format!(
+                "command -p cat > {}\n  ",
+                shell_quote(&self.root.join("stdin.txt"))
+            )
         } else {
             String::new()
         };
         format!(
-            "#!/bin/sh\nmkdir -p {config_dir}\nprintf '%s\\n' \"$@\" >> {args}\ncase \"$2\" in\nadd)\n  {drain_stdin}if [ -f {config} ]; then exit 1; fi\n  cat > {config} <<'CLIO_CONFIG'\n{contents}\nCLIO_CONFIG\n  exit 0 ;;\nremove)\n  rm -f {config}\n  exit 0 ;;\nesac\nexit 1\n"
+            "#!/bin/sh\nmkdir -p {config_dir}\nprintf '%s\\n' \"$@\" >> {args}\ncase \"$2\" in\nadd)\n  {drain_stdin}if [ -f {config} ]; then exit 1; fi\n  command -p cat > {config} <<'CLIO_CONFIG'\n{contents}\nCLIO_CONFIG\n  exit 0 ;;\nremove)\n  rm -f {config}\n  exit 0 ;;\nesac\nexit 1\n"
         )
     }
 
@@ -274,7 +293,7 @@ impl Fixture {
         &mut self,
         record: &HarnessRecord,
         reads_stdin: bool,
-    ) -> Option<DelegateEnv> {
+    ) -> Result<DelegateEnv, String> {
         let binary = vendor_binary(record);
         let script = self.vendor_stub_script(record, reads_stdin);
         self.env_with_stub(&binary, script)
@@ -282,7 +301,7 @@ impl Fixture {
 
     /// A vendor-like stub `claude`; see [`Fixture::stub_env_vendor_for`].
     #[cfg(unix)]
-    pub(crate) fn stub_env_vendor(&mut self) -> Option<DelegateEnv> {
+    pub(crate) fn stub_env_vendor(&mut self) -> Result<DelegateEnv, String> {
         self.stub_env_vendor_for(record(), false)
     }
 
@@ -294,10 +313,10 @@ impl Fixture {
         &mut self,
         record: &HarnessRecord,
         code: i32,
-    ) -> Option<DelegateEnv> {
+    ) -> Result<DelegateEnv, String> {
         let binary = vendor_binary(record);
         let script = format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\ncat > {}\nexit {code}\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\ncommand -p cat > {}\nexit {code}\n",
             shell_quote(&self.root.join("args.txt")),
             shell_quote(&self.root.join("stdin.txt")),
         );
@@ -403,4 +422,23 @@ pub(crate) fn expected_args(argv: &[std::ffi::OsString]) -> Vec<String> {
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect()
+}
+
+/// A base that cannot run the probe is an error, never a fallback to a
+/// directory that will refuse the stub later. The injected check stands in
+/// for a `noexec` mount, which a test cannot create for itself.
+#[cfg(unix)]
+#[test]
+fn exec_dir_refuses_a_directory_that_cannot_run_its_probe() {
+    let fixture = Fixture::new("refusing-exec");
+    let err = exec_dir_in(&fixture.root, "refusing", |_| false)
+        .expect_err("a directory that cannot run its probe must be refused");
+    assert!(
+        err.contains("refuses exec"),
+        "the refusal names the cause: {err}"
+    );
+    assert!(
+        err.contains("NOEXEC_EXEC_DIR"),
+        "the refusal names the remedy: {err}"
+    );
 }
