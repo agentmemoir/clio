@@ -30,7 +30,7 @@ Prefix the title with `feat:`, `fix:`, `chore:`, or `docs:`, following [Conventi
 
 ### The gate
 
-CI is the gate. It runs on a pull request that touches a path in the filters of `.github/workflows/ci.yml`, and that file is the list of what it runs: the format check, clippy, the scoped tests, the script suites, the scoped coverage judgement, and the MCP conformance job. Nothing about a change is verified until CI says so.
+CI is the gate. It runs on a pull request that touches a path in the filters of `.github/workflows/ci.yml`, and that file is the list of what it runs: the format check, clippy, the script suites, the scoped coverage judgement (the only scoped test run; `make test-fast` is a developer target), and the MCP conformance job. Nothing about a change is verified until CI says so.
 
 What you run before you commit is the cheap half:
 

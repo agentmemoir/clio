@@ -1,0 +1,1 @@
+CI runs a pull request's scoped tests once, in the coverage job, instead of running the same suite a second time uninstrumented. The JUnit report is still published, as the `nextest-junit` artifact of the coverage job.

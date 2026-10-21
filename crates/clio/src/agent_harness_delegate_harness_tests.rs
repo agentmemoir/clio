@@ -78,11 +78,9 @@ fn codex_binary_that_resolves_but_cannot_run_refuses_with_the_snippet() {
 fn codex_install_writes_and_verifies_the_toml_table() {
     let codex = record_named("codex");
     let mut fixture = Fixture::new("codex-install");
-    let Some(env) = fixture.stub_env_vendor_for(codex, false) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor_for(codex, false)
+        .expect("the stub needs a directory that permits exec");
     let message = install(codex, SERVER_NAME, &fixture.exe(), &env)
         .expect("the stub wrote the table the read-back accepts");
     assert_eq!(message, "installed");
@@ -97,11 +95,9 @@ fn codex_install_writes_and_verifies_the_toml_table() {
 fn codex_zero_exit_without_an_entry_is_a_verification_failure() {
     let codex = record_named("codex");
     let mut fixture = Fixture::new("codex-zero-lies");
-    let Some(env) = fixture.stub_env_for(codex, 0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_for(codex, 0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(codex, SERVER_NAME, &fixture.exe(), &env)
         .expect_err("the read-back must not trust a zero exit");
     assert!(
@@ -115,11 +111,9 @@ fn codex_zero_exit_without_an_entry_is_a_verification_failure() {
 fn codex_uninstall_runs_the_remove_argv_and_accepts_an_absent_entry() {
     let codex = record_named("codex");
     let mut fixture = Fixture::new("codex-uninstall");
-    let Some(env) = fixture.stub_env_for(codex, 1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_for(codex, 1)
+        .expect("the stub needs a directory that permits exec");
     let message =
         uninstall(codex, SERVER_NAME, &env).expect("a refused remove with no entry is a success");
     assert_eq!(message, "nothing to remove");
@@ -154,11 +148,9 @@ fn opencode_install_without_the_binary_refuses_with_the_snippet() {
 fn opencode_install_writes_and_verifies_the_v2_entry() {
     let opencode = record_named("opencode");
     let mut fixture = Fixture::new("opencode-install");
-    let Some(env) = fixture.stub_env_vendor_for(opencode, false) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor_for(opencode, false)
+        .expect("the stub needs a directory that permits exec");
     let message = install(opencode, SERVER_NAME, &fixture.exe(), &env)
         .expect("the stub wrote the mcp.servers entry the read-back accepts");
     assert_eq!(message, "installed");
@@ -231,11 +223,9 @@ fn codex_install_ignores_an_exe_under_another_server() {
         exe = fixture.exe().to_string_lossy()
     );
     fixture.write_raw(codex, &raw);
-    let Some(env) = fixture.stub_env_for(codex, 0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_for(codex, 0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(codex, SERVER_NAME, &fixture.exe(), &env)
         .expect_err("an exe under another table must not verify Clio's entry");
     assert!(
@@ -298,11 +288,9 @@ fn opencode_uninstall_without_clio_is_a_clear_no_op() {
 fn antigravity_install_writes_and_verifies_the_mcpservers_entry() {
     let antigravity = record_named("antigravity");
     let mut fixture = Fixture::new("antigravity-install");
-    let Some(env) = fixture.stub_env_vendor_for(antigravity, false) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor_for(antigravity, false)
+        .expect("the stub needs a directory that permits exec");
     let message = install(antigravity, SERVER_NAME, &fixture.exe(), &env)
         .expect("the stub wrote the mcpServers entry the read-back accepts");
     assert_eq!(message, "installed");
@@ -318,11 +306,9 @@ fn antigravity_install_reports_already_installed_on_a_duplicate_exit() {
     let antigravity = record_named("antigravity");
     let mut fixture = Fixture::new("antigravity-duplicate");
     fixture.write_config_for(antigravity, &fixture.exe());
-    let Some(env) = fixture.stub_env_vendor_for(antigravity, false) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor_for(antigravity, false)
+        .expect("the stub needs a directory that permits exec");
     let message = install(antigravity, SERVER_NAME, &fixture.exe(), &env)
         .expect("an entry already present is a success");
     assert_eq!(message, "already installed");
@@ -333,11 +319,9 @@ fn antigravity_install_reports_already_installed_on_a_duplicate_exit() {
 fn antigravity_uninstall_reports_nothing_to_remove_on_a_non_zero_exit() {
     let antigravity = record_named("antigravity");
     let mut fixture = Fixture::new("antigravity-absent");
-    let Some(env) = fixture.stub_env_for(antigravity, 1) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_for(antigravity, 1)
+        .expect("the stub needs a directory that permits exec");
     let message = uninstall(antigravity, SERVER_NAME, &env)
         .expect("a refused remove with no entry is a success");
     assert_eq!(message, "nothing to remove");
@@ -352,11 +336,9 @@ fn antigravity_uninstall_reports_nothing_to_remove_on_a_non_zero_exit() {
 fn hermes_install_pipes_the_confirmation_and_verifies_the_saved_config() {
     let hermes = record_named("hermes");
     let mut fixture = Fixture::new("hermes-install");
-    let Some(env) = fixture.stub_env_vendor_for(hermes, true) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_vendor_for(hermes, true)
+        .expect("the stub needs a directory that permits exec");
     let message = install(hermes, SERVER_NAME, &fixture.exe(), &env)
         .expect("the stub read the confirmation and saved the config");
     assert_eq!(message, "installed");
@@ -376,11 +358,9 @@ fn hermes_install_pipes_the_confirmation_and_verifies_the_saved_config() {
 fn hermes_add_that_exits_zero_without_saving_fails_verification() {
     let hermes = record_named("hermes");
     let mut fixture = Fixture::new("hermes-no-save");
-    let Some(env) = fixture.stub_env_reads_stdin(hermes, 0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_reads_stdin(hermes, 0)
+        .expect("the stub needs a directory that permits exec");
     let err = install(hermes, SERVER_NAME, &fixture.exe(), &env)
         .expect_err("exit 0 without a saved config must not claim success");
     assert!(
@@ -399,11 +379,9 @@ fn hermes_add_that_exits_zero_without_saving_fails_verification() {
 fn hermes_uninstall_accepts_a_clean_absent_exit() {
     let hermes = record_named("hermes");
     let mut fixture = Fixture::new("hermes-uninstall");
-    let Some(env) = fixture.stub_env_for(hermes, 0) else {
-        panic!(
-            "this host cannot run stub executables, so this required spawn test fails instead of passing silently"
-        );
-    };
+    let env = fixture
+        .stub_env_for(hermes, 0)
+        .expect("the stub needs a directory that permits exec");
     let message = uninstall(hermes, SERVER_NAME, &env)
         .expect("a clean exit with no entry is accepted by the mapping");
     assert_eq!(message, "removed");

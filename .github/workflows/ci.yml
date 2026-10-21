@@ -1,9 +1,8 @@
 # CI: format, clippy, and the tests and coverage of what a change touches.
 #
-# The suite is scoped. `make test-fast` runs the tests of the packages a change
-# can affect, and `make coverage-fast` measures those same packages and judges
-# the changed files against a ≥80% line floor. Neither one measures
-# the workspace, so neither one can report on a file nobody touched.
+# The suite is scoped. `make coverage-fast` runs the tests of the packages a
+# change can affect and judges the changed files against a ≥80% line floor. It
+# does not measure the workspace, so it cannot report on a file nobody touched.
 #
 # What that buys and what it costs are both real, so both are written down here
 # rather than left to be discovered:
@@ -16,15 +15,9 @@
 #          it, which is where a signature change shows up, but a defect that
 #          needs an unrelated crate's tests to surface is no longer CI's job.
 #
-# The gate itself is `scripts/scoped_runner.py`. Both targets share its package
-# selection, so a change cannot pass the tests job and fail the coverage job by
-# disagreeing about what it touched.
-#
-# The tests and the coverage judgement run as two jobs, not two steps of one:
-# on the five green runs from 2026-10-05 to 2026-10-07 the single job took
-# 674 s to 991 s, and the plain and instrumented runs were 533 s to 832 s of
-# that. Running them at the same time removes the shorter run from the
-# critical path; it pays a second runner and a second cache restore per run.
+# The gate itself is `scripts/scoped_runner.py`, and it is the only test run: a
+# plain `make test-fast` over the same selection would put the suite through the
+# runner a second time for one pull request, so CI leaves it to developers.
 #
 # The pinned MCP conformance suite is a workflow of its own,
 # `.github/workflows/mcp-conformance.yml`, gated by a path filter instead of by a
@@ -83,7 +76,7 @@ permissions:
 
 jobs:
   check:
-    name: fmt · clippy · scoped tests · script suites
+    name: fmt · clippy · script suites
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -118,17 +111,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # What the two scoped steps measure against, and the exact spelling of it
-      # matters. A pull request is checked out in detached HEAD mode, so there is
-      # no local branch for the base at all -- only refs/remotes/origin/<base>.
-      # Passing the bare name `master` there is an unresolvable ref, and the
-      # runner treats an unresolvable base as an error rather than as an empty
-      # scope, so every pull request would fail on a typo-shaped mistake.
-      # `origin/<base>` is the form that resolves on a runner and on a laptop
-      # alike. A push to master has no base branch, and `origin/HEAD~1` is not a
-      # ref, so that case uses the previous commit directly: it keeps master
-      # honest about what it just merged rather than diffing master against
-      # itself and judging nothing.
+      # What the scoped changelog check measures against, and the exact spelling
+      # of it matters. A pull request is checked out in detached HEAD mode, so
+      # there is no local branch for the base at all -- only
+      # refs/remotes/origin/<base>. Passing the bare name `master` there is an
+      # unresolvable ref, and the runner treats an unresolvable base as an error
+      # rather than as an empty scope, so every pull request would fail on a
+      # typo-shaped mistake. `origin/<base>` is the form that resolves on a
+      # runner and on a laptop alike. A push to master has no base branch, and
+      # `origin/HEAD~1` is not a ref, so that case uses the previous commit
+      # directly: it keeps master honest about what it just merged rather than
+      # diffing master against itself and judging nothing.
       - name: Resolve the diff base
         run: |
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
@@ -197,23 +190,12 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # The test gate. Runs the tests of the changed crate and every crate that
-      # depends on it, uninstrumented, and returns nextest's own exit code, so a
-      # failing test fails the step and is named by nextest. The instrumented
-      # re-run and its judgement live in the `scoped-coverage` job, which starts
-      # at the same time as this one.
-      - name: Scoped tests (changed files' packages and their dependents)
-        run: make test-fast BASE="$SCOPED_BASE"
+      # No test step. The `scoped-coverage` job's instrumented run covers the
+      # same packages and fails on any test failure, reporting the runner's error
+      # code (3) rather than nextest's own. A plain pass here would duplicate it.
 
       # No doctest step. It cost 7 of the 11 minutes of a local full gate and ran
       # 0 tests: the workspace has two doc examples, both marked `ignore`.
-
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nextest-junit
-          path: target/nextest/ci/junit.xml
 
       # The self-tests and the suites that live under `scripts/`. These files
       # decide what a gate reports and whether it reports at all: the wrapper
@@ -281,7 +263,7 @@ jobs:
         run: make scripts-check-precommit
 
       # Whether the coverage surface can still measure one run and report it
-      # once. The Scoped coverage step above is what this protects: its run is
+      # once. The step in the scoped-coverage job is what this protects: its run is
       # split into a test step and a report step so the gate owns a boundary in
       # which to drop a profile buffer it cannot read and an instrumented binary
       # the run did not build, and its report step names a merge failure mode so
@@ -300,10 +282,10 @@ jobs:
         run: make scripts-check-scoped-runner
 
       # Whether the tree still holds exactly one coverage rule. The Scoped
-      # coverage step above is what this protects: the four rules that were not
-      # this one each arrived in a change about something else, and nothing in the
-      # tree would have refused any of them. A lint over a closed list of shapes,
-      # not a proof, and its own header says where it cannot see.
+      # coverage step in `scoped-coverage` protects it: the four rules that were
+      # not this one each arrived in a change about something else, and nothing
+      # in the tree would have refused any of them. A lint over a closed list of
+      # shapes, not a proof, and its own header says where it cannot see.
       - name: One coverage rule check
         if: always()
         run: make scripts-check-coverage-policy
@@ -330,7 +312,7 @@ jobs:
 
       # Whether every changelog fragment is named and written to the rule, and
       # whether a change to product code carries one. The base is the same
-      # scoped base the tests job resolves above, so the presence check judges
+      # scoped base the coverage job resolves, so the presence check judges
       # the same diff.
       - name: Changelog fragments check
         if: always()
@@ -362,8 +344,8 @@ jobs:
         if: failure()
         run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
 
-  # The coverage judgement, beside the tests job so its instrumented pass and
-  # the plain pass overlap instead of adding up. The report lands in
+  # The coverage judgement and the only scoped test run: `test-fast` is a
+  # developer target, not a second job here. The report lands in
   # `target/coverage/coverage-scoped.json`, so the full-workspace report and a
   # targeted one can no longer overwrite each other.
   scoped-coverage:
@@ -396,7 +378,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Same base resolution as the tests job: a detached checkout has no local
+      # Same base resolution the check job uses: a detached checkout has no local
       # base branch for the bare name to resolve.
       - name: Resolve the diff base
         run: |
@@ -443,6 +425,17 @@ jobs:
       # recorded floor is compared anywhere.
       - name: Scoped coverage (≥80% lines on each changed Rust file)
         run: make coverage-fast BASE="$SCOPED_BASE"
+
+      # The only test run a pull request makes, so its JUnit report is the one
+      # the workflow publishes. nextest stores it under `target/nextest/<profile>`
+      # in the workspace, not under the `target/llvm-cov-target` build directory.
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: error
 
       # Last, so it can report on whichever step failed: a test binary killed
       # from outside prints nothing, which is the case this was added for.

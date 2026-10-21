@@ -3,33 +3,22 @@
 //
 //! # Responsibility
 //!
-//! This module is the shared harness of the delegate runner tests: the stub
-//! vendor executables, the fixture directories, and the recorded-argument
-//! helpers. It holds no scenario and no assertion; the sibling test modules
-//! own those.
+//! The shared harness of the delegate runner tests: stub executables, fixture
+//! directories, and recorded-argument helpers; no scenario and no assertion.
+//! How these seams are built belongs here; scenario outcomes do not.
 //!
 //! ## Owns
-//! - `Fixture`: unique temp directories, the per-record config writers in
-//!   each harness's own config shape, and the flat and vendor-like stubs
-//! - The exec probe that decides whether this host can run stubs at all
+//! - `Fixture`: temp dirs, config writers, the stubs, the exec resolver and probe
 //! - `record`, `record_named`, and `expected_args`
 //!
 //! ## Does not own
-//! - Any scenario or assertion (the test modules own those)
-//! - The delegate implementation under test (`agent_harness_delegate`)
-//!
-//! ## Boundary
-//!
-//! Changes to how the shared stubs and fixtures are built should normally
-//! require changes here. Changes to a scenario's outcome assertions should not.
-//!
-//! Keep this module focused on the shared test seams.
+//! - Any scenario or assertion, and `agent_harness_delegate` itself
 
 use super::*;
 use crate::agent_harness::{SERVER_NAME, resolve};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{ffi::OsString, fs};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -37,11 +26,7 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::process::Command;
 
-#[cfg(unix)]
-use std::sync::OnceLock;
-
-/// Nanoseconds plus a process-global counter: two calls can never get the
-/// same suffix, even when they read the clock in the same nanosecond.
+/// Nanoseconds plus a counter: two calls never share a suffix.
 static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn unique_suffix() -> String {
@@ -60,45 +45,77 @@ pub(crate) fn record_named(name: &str) -> &'static HarnessRecord {
     resolve(name).unwrap_or_else(|| panic!("{name} must resolve"))
 }
 
-/// A unique directory for an executable, next to this test binary: the
-/// binary's own directory always permits exec, while a temp directory can
-/// be mounted noexec. `None` when no such directory can be made. A killed
-/// test process cannot clean up here, but cargo owns this directory.
+/// Whether `dir` can run a program: write a `0755` script, start it, remove it.
 #[cfg(unix)]
-fn exec_dir(label: &str) -> Option<PathBuf> {
-    let dir = std::env::current_exe().ok()?.parent()?.join(format!(
+fn can_execute(dir: &Path) -> bool {
+    let probe = dir.join(format!("exec-probe-{}", unique_suffix()));
+    let prepared = fs::write(&probe, "#!/bin/sh\nexit 0\n")
+        .and_then(|()| fs::set_permissions(&probe, fs::Permissions::from_mode(0o755)));
+    let ran = prepared.is_ok_and(|()| {
+        // ETXTBSY (26): a concurrent fork holds the write fd; retry, others final.
+        for attempt in 0..20 {
+            match Command::new(&probe).output() {
+                Ok(out) => return out.status.success(),
+                Err(err) if err.raw_os_error() == Some(26) && attempt < 19 => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(_) => return false,
+            }
+        }
+        false
+    });
+    let _ = fs::remove_file(&probe);
+    ran
+}
+
+/// Stub home: `NOEXEC_EXEC_DIR` when set, else this binary's dir; never scratch.
+#[cfg(unix)]
+fn exec_dir_base() -> Result<PathBuf, String> {
+    exec_dir_base_from(|name| std::env::var_os(name))
+}
+
+/// [`exec_dir_base`] with `lookup` supplying the environment; no process mutation.
+#[cfg(unix)]
+fn exec_dir_base_from(lookup: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, String> {
+    if let Some(dir) = lookup("NOEXEC_EXEC_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            "this test binary has no directory to run stubs from; set NOEXEC_EXEC_DIR".to_owned()
+        })
+}
+
+/// A per-test directory under `base`, created then probed by `runs`; a refusal
+/// names the directory and the remedy. Never scratch storage, which cannot exec.
+#[cfg(unix)]
+fn exec_dir_in(base: &Path, label: &str, runs: impl Fn(&Path) -> bool) -> Result<PathBuf, String> {
+    let dir = base.join(format!(
         "clio-agent-harness-delegate-{label}-{}-{}",
         std::process::id(),
         unique_suffix()
     ));
-    fs::create_dir_all(&dir).ok()?;
-    Some(dir)
-}
-
-/// One probe per process: write a trivial script where the stubs live,
-/// make it executable, and run it. `false` means this host refuses to
-/// run stub executables at all. That is an environment fact, never a
-/// logic fact, so it is the only reason a spawn test may skip.
-#[cfg(unix)]
-fn exec_available() -> bool {
-    static PROBE: OnceLock<bool> = OnceLock::new();
-    *PROBE.get_or_init(|| {
-        let Some(dir) = exec_dir("exec-probe") else {
-            return false;
-        };
-        let script = dir.join("probe.sh");
-        let probe = fs::write(&script, "#!/bin/sh\nexit 0\n")
-            .and_then(|()| fs::set_permissions(&script, fs::Permissions::from_mode(0o755)))
-            .and_then(|()| Command::new(&script).output())
-            .is_ok_and(|out| out.status.success());
+    fs::create_dir_all(&dir).map_err(|err| format!("{}: {err}", dir.display()))?;
+    if !runs(&dir) {
         let _ = fs::remove_dir_all(&dir);
-        probe
-    })
+        return Err(format!(
+            "{} refuses exec, so no stub can run there; set NOEXEC_EXEC_DIR to a directory that allows it",
+            dir.display()
+        ));
+    }
+    Ok(dir)
 }
 
-/// The stub's redirection target, as a shell word: single-quoted, with an
-/// embedded single quote written as `'\''`, so a temp directory containing
-/// spaces or shell metacharacters cannot break the script.
+/// The directory for one test's stub executables; see [`exec_dir_in`].
+#[cfg(unix)]
+fn exec_dir(label: &str) -> Result<PathBuf, String> {
+    exec_dir_in(&exec_dir_base()?, label, can_execute)
+}
+
+/// The stub's redirection target as a shell word: single-quoted, with an
+/// embedded quote written `'\''`, so spaces and metacharacters cannot break it.
 #[cfg(unix)]
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
@@ -114,8 +131,7 @@ fn json_entry(exe: &Path) -> serde_json::Value {
     })
 }
 
-/// The config text this record's vendor writes for `exe`, in that harness's
-/// own shape, so the read-back accepts it.
+/// The config text this record's vendor writes for `exe`, in its own shape.
 fn config_text(record: &HarnessRecord, exe: &Path) -> String {
     match record.name {
         "codex" => format!(
@@ -137,8 +153,7 @@ fn config_text(record: &HarnessRecord, exe: &Path) -> String {
     }
 }
 
-/// The vendor command name of a delegate record: the first element of its
-/// add argv, which is the binary the injected lookup is asked for.
+/// The vendor command of a delegate record: the first element of its add argv.
 #[cfg(unix)]
 fn vendor_binary(record: &HarnessRecord) -> String {
     record
@@ -148,8 +163,7 @@ fn vendor_binary(record: &HarnessRecord) -> String {
         .expect("a delegate record builds an add argv")
 }
 
-/// A unique directory, removed when the guard drops. Files the stub only
-/// writes live in `root`; the stub executable itself lives in `exec`.
+/// A unique directory, removed on drop: files live in `root`, the stub in `exec`.
 pub(crate) struct Fixture {
     pub(crate) root: PathBuf,
     #[cfg(unix)]
@@ -184,48 +198,40 @@ impl Fixture {
         self.home().join(record.config_file)
     }
 
-    /// The directory for this test's stub executable, created once and
-    /// removed on drop.
+    /// This test's stub directory, resolved once and removed on drop.
     #[cfg(unix)]
-    fn exec(&mut self) -> PathBuf {
-        self.exec
-            .get_or_insert_with(|| {
-                exec_dir("stub").expect("a stub directory next to this test binary can be created")
-            })
-            .clone()
+    fn exec(&mut self) -> Result<PathBuf, String> {
+        if let Some(dir) = &self.exec {
+            Ok(dir.clone())
+        } else {
+            let dir = exec_dir("stub")?;
+            self.exec = Some(dir.clone());
+            Ok(dir)
+        }
     }
 
-    /// Write a stub named `binary` and build an environment that finds it.
-    /// `None` when this host cannot run stub executables at all; a required
-    /// scenario must panic on `None` so a green run always means it ran.
+    /// Write a stub named `binary` and an environment that finds it; `Err` when no
+    /// directory permits exec, so a stub-free scenario fails loudly.
     #[cfg(unix)]
-    fn env_with_stub(&mut self, binary: &str, script: String) -> Option<DelegateEnv> {
-        if !exec_available() {
-            eprintln!(
-                "skipping: stub executables cannot run on this host, so the delegate spawn tests cannot run"
-            );
-            return None;
-        }
-        let exec = self.exec();
+    fn env_with_stub(&mut self, binary: &str, script: String) -> Result<DelegateEnv, String> {
+        let exec = self.exec()?;
         let path = exec.join(binary);
         fs::write(&path, script).expect("stub script can be written");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
             .expect("stub script can be made executable");
-        let dir = exec;
-        Some(DelegateEnv::with(
-            move |name: &str| Some(dir.join(name)),
+        Ok(DelegateEnv::with(
+            move |name: &str| Some(exec.join(name)),
             self.home(),
         ))
     }
 
-    /// A stub for `record`'s vendor binary that records the arguments it
-    /// received and exits with `code`.
+    /// A stub for `record`'s vendor binary: records its arguments, exits `code`.
     #[cfg(unix)]
     pub(crate) fn stub_env_for(
         &mut self,
         record: &HarnessRecord,
         code: i32,
-    ) -> Option<DelegateEnv> {
+    ) -> Result<DelegateEnv, String> {
         let binary = vendor_binary(record);
         let script = format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nexit {code}\n",
@@ -234,19 +240,14 @@ impl Fixture {
         self.env_with_stub(&binary, script)
     }
 
-    /// A stub `claude` that records the arguments it received and exits
-    /// with `code`.
+    /// A stub `claude` that records its arguments and exits with `code`.
     #[cfg(unix)]
-    pub(crate) fn stub_env(&mut self, code: i32) -> Option<DelegateEnv> {
+    pub(crate) fn stub_env(&mut self, code: i32) -> Result<DelegateEnv, String> {
         self.stub_env_for(record(), code)
     }
 
-    /// The vendor-like stub script for `record`: `add` refuses with exit 1
-    /// when the config file already exists, otherwise it writes that
-    /// harness's config shape itself and exits 0; `remove` deletes the config
-    /// file and exits 0. When `reads_stdin` is set the stub first drains
-    /// stdin into `stdin.txt`, so a test can assert a piped confirmation
-    /// arrived. Every call appends its argv to the record.
+    /// The vendor-like stub for `record`: `add` writes that harness's own config
+    /// shape (exit 1 if it exists), `remove` deletes it, argv and stdin recorded.
     #[cfg(unix)]
     fn vendor_stub_script(&self, record: &HarnessRecord, reads_stdin: bool) -> String {
         let config_path = self.config_path(record);
@@ -259,12 +260,15 @@ impl Fixture {
         let args = shell_quote(&self.root.join("args.txt"));
         let contents = config_text(record, &self.exe());
         let drain_stdin = if reads_stdin {
-            format!("cat > {}\n  ", shell_quote(&self.root.join("stdin.txt")))
+            format!(
+                "command -p cat > {}\n  ",
+                shell_quote(&self.root.join("stdin.txt"))
+            )
         } else {
             String::new()
         };
         format!(
-            "#!/bin/sh\nmkdir -p {config_dir}\nprintf '%s\\n' \"$@\" >> {args}\ncase \"$2\" in\nadd)\n  {drain_stdin}if [ -f {config} ]; then exit 1; fi\n  cat > {config} <<'CLIO_CONFIG'\n{contents}\nCLIO_CONFIG\n  exit 0 ;;\nremove)\n  rm -f {config}\n  exit 0 ;;\nesac\nexit 1\n"
+            "#!/bin/sh\nmkdir -p {config_dir}\nprintf '%s\\n' \"$@\" >> {args}\ncase \"$2\" in\nadd)\n  {drain_stdin}if [ -f {config} ]; then exit 1; fi\n  command -p cat > {config} <<'CLIO_CONFIG'\n{contents}\nCLIO_CONFIG\n  exit 0 ;;\nremove)\n  rm -f {config}\n  exit 0 ;;\nesac\nexit 1\n"
         )
     }
 
@@ -274,7 +278,7 @@ impl Fixture {
         &mut self,
         record: &HarnessRecord,
         reads_stdin: bool,
-    ) -> Option<DelegateEnv> {
+    ) -> Result<DelegateEnv, String> {
         let binary = vendor_binary(record);
         let script = self.vendor_stub_script(record, reads_stdin);
         self.env_with_stub(&binary, script)
@@ -282,22 +286,20 @@ impl Fixture {
 
     /// A vendor-like stub `claude`; see [`Fixture::stub_env_vendor_for`].
     #[cfg(unix)]
-    pub(crate) fn stub_env_vendor(&mut self) -> Option<DelegateEnv> {
+    pub(crate) fn stub_env_vendor(&mut self) -> Result<DelegateEnv, String> {
         self.stub_env_vendor_for(record(), false)
     }
 
-    /// A stub for `record` that records its arguments and its stdin, writes
-    /// nothing, and exits with `code`. It models a vendor that claims success
-    /// without saving the config.
+    /// A stub for `record` that records argv and stdin, writes nothing, exits `code`.
     #[cfg(unix)]
     pub(crate) fn stub_env_reads_stdin(
         &mut self,
         record: &HarnessRecord,
         code: i32,
-    ) -> Option<DelegateEnv> {
+    ) -> Result<DelegateEnv, String> {
         let binary = vendor_binary(record);
         let script = format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\ncat > {}\nexit {code}\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\ncommand -p cat > {}\nexit {code}\n",
             shell_quote(&self.root.join("args.txt")),
             shell_quote(&self.root.join("stdin.txt")),
         );
@@ -309,8 +311,7 @@ impl Fixture {
         DelegateEnv::with(|_| None, self.home())
     }
 
-    /// An environment with a custom binary lookup and this fixture's home,
-    /// for lookups that resolve to something that cannot be run.
+    /// An environment with a custom lookup and this fixture's home.
     pub(crate) fn env_with_lookup(
         &self,
         lookup: impl Fn(&str) -> Option<PathBuf> + 'static,
@@ -318,8 +319,7 @@ impl Fixture {
         DelegateEnv::with(lookup, self.home())
     }
 
-    /// Write `contents` verbatim as `record`'s config file, creating the
-    /// parent directories.
+    /// Write `contents` verbatim as `record`'s config file, creating parents.
     pub(crate) fn write_raw(&self, record: &HarnessRecord, contents: &str) -> PathBuf {
         let path = self.config_path(record);
         if let Some(parent) = path.parent() {
@@ -364,8 +364,7 @@ impl Fixture {
         fs::read_to_string(self.root.join("stdin.txt")).expect("the stub recorded its stdin")
     }
 
-    /// Every `.clio-backup-` sibling of the config file, sorted. One test's
-    /// fixture owns its directory, so no other test shares it.
+    /// Every `.clio-backup-` sibling of the config file, sorted.
     pub(crate) fn backup_siblings(&self, record: &HarnessRecord) -> Vec<PathBuf> {
         let Some(dir) = self.config_path(record).parent().map(Path::to_path_buf) else {
             return Vec::new();
@@ -396,11 +395,54 @@ impl Drop for Fixture {
     }
 }
 
-/// The argument vector the stub should have received, without argv[0]:
-/// argv[0] is the vendor command itself.
+/// The argument vector the stub should have received, without argv[0].
 pub(crate) fn expected_args(argv: &[std::ffi::OsString]) -> Vec<String> {
     argv.iter()
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect()
+}
+
+/// A base that cannot run the probe is an error, never a fallback to a
+/// directory that will refuse the stub later: a `noexec` mount, injected.
+#[cfg(unix)]
+#[test]
+fn exec_dir_refuses_a_directory_that_cannot_run_its_probe() {
+    let fixture = Fixture::new("refusing-exec");
+    let err = exec_dir_in(&fixture.root, "refusing", |_| false)
+        .expect_err("a directory that cannot run its probe must be refused");
+    assert!(
+        err.contains("refuses exec"),
+        "the refusal names the cause: {err}"
+    );
+    assert!(
+        err.contains("NOEXEC_EXEC_DIR"),
+        "the refusal names the remedy: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn exec_dir_base_returns_the_configured_override() {
+    let fixture = Fixture::new("configured-exec");
+    let base = exec_dir_base_from(|name| {
+        (name == "NOEXEC_EXEC_DIR").then(|| fixture.root.clone().into_os_string())
+    })
+    .expect("a configured override is the base");
+    assert_eq!(base, fixture.root);
+}
+
+#[cfg(unix)]
+#[test]
+fn exec_dir_resolves_a_directory_that_runs_the_probe() {
+    let dir = exec_dir("resolver-positive").expect("the real base runs the probe");
+    assert!(dir.is_dir(), "the resolver created {}", dir.display());
+    fs::remove_dir_all(&dir).expect("the resolved directory is removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn can_execute_refuses_a_directory_that_does_not_exist() {
+    let absent = Fixture::new("absent-exec").root.join("absent");
+    assert!(!can_execute(&absent), "no exec in {}", absent.display());
 }

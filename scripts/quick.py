@@ -65,7 +65,6 @@ THREADS = int(runner.TEST_THREADS)
 NEXTEST = runner.ROOT / "target" / "nextest"
 QUICK_JUNIT = NEXTEST / "quick" / "junit.xml"
 HISTORY = (
-    Path("target/llvm-cov-target/nextest/ci/junit.xml"),
     Path("target/nextest/ci/junit.xml"),
     Path("target/nextest/quick/junit.xml"),
 )
