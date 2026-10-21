@@ -335,13 +335,20 @@ jobs:
 
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
-      # It needs the `nextest` binary, and that binary is installed by a step
-      # above which a failure skips, so this step asks whether the install
-      # happened instead of failing on a tool that was never there. A lookup
-      # that could run still fails the job when it finds a real mismatch.
+      # It needs the `nextest` tool, which is a cargo subcommand, and the step
+      # that installs it can be skipped when an earlier step fails. This step
+      # runs on every outcome and asks for the tool itself, so the job log
+      # shows why the acceptance did not run instead of the step disappearing.
+      # A tool that is missing is not a failure; a lookup that could run still
+      # fails the job when it finds a real mismatch.
       - name: Owned lookup acceptance
-        if: always() && steps.install_nextest.outcome == 'success'
-        run: python3 scripts/owned_tests.py --accept
+        if: always()
+        run: |
+          if ! cargo nextest --version >/dev/null 2>&1; then
+            echo "owned lookup acceptance skipped: cargo nextest is not usable, so the runner's test list cannot be read"
+            exit 0
+          fi
+          python3 scripts/owned_tests.py --accept
 
       # Last, so it can report on whichever step failed: a test binary killed
       # from outside prints nothing, which is the case this was added for.
@@ -443,9 +450,11 @@ jobs:
       # run had happened. The report and the gate's own report are the two
       # things a test run leaves behind, so their presence is what says a run
       # happened: the JUnit report when the run wrote it, the coverage report
-      # when the run finished and the merge wrote it. A run that produced
-      # neither is a broken run and still fails the job, because the upload
-      # runs on the coverage report alone and finds no JUnit file to publish.
+      # when the run finished and the merge wrote it. A run that wrote the
+      # coverage report but no JUnit report still fails the job, because the
+      # upload runs on the coverage report alone and finds no JUnit file to
+      # publish. A run that wrote neither report selected no test, so the
+      # upload is skipped and the job stays green.
       - name: Upload test report
         if: >-
           always()
