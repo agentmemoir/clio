@@ -136,6 +136,31 @@ class GateInstallTests(unittest.TestCase):
         path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         path.chmod(0o755)
 
+    def timeout_bin(self, name: str = "timeout") -> Path:
+        """The directory that holds a stand-in timeout tool named `name`.
+
+        The installer bounds a profile probe with a timeout tool. macOS has no
+        `timeout`, and GNU coreutils installs the same tool as `gtimeout`, so
+        the test builds its own stand-in instead of relying on the host. The
+        stand-in drops the duration argument and runs the rest, so a probe
+        behaves as if the command finished inside the budget.
+        """
+        toolbin = Path(self._tmp.name) / f"{name}bin"
+        toolbin.mkdir(exist_ok=True)
+        tool = toolbin / name
+        tool.write_text('#!/bin/sh\nshift\nexec "$@"\n', encoding="utf-8")
+        tool.chmod(0o755)
+        return toolbin
+
+    def controlled_path(self) -> str:
+        """A PATH with the timeout stand-in and the system tools, and nothing else.
+
+        The host may have no timeout tool at all, so the stand-in goes on the
+        controlled PATH. The answer of a test then depends on the tree under
+        test, not on what the host has installed.
+        """
+        return os.pathsep.join((str(self.timeout_bin()), SYSTEM_PATH))
+
     def test_a_shadowed_shim_reports_not_active_and_exits_non_zero(self) -> None:
         # `earlier` precedes `dest`, so both names resolve to the stand-ins and
         # the shim the installer just linked can never run.
@@ -143,7 +168,14 @@ class GateInstallTests(unittest.TestCase):
         self.stub_tool("make")
         result = run_installer(
             self.dest,
-            os.pathsep.join((str(self.earlier), SYSTEM_PATH, str(self.dest))),
+            os.pathsep.join(
+                (
+                    str(self.timeout_bin()),
+                    str(self.earlier),
+                    SYSTEM_PATH,
+                    str(self.dest),
+                )
+            ),
             home=self.home,
         )
         output = result.stdout + result.stderr
@@ -156,7 +188,14 @@ class GateInstallTests(unittest.TestCase):
     def test_a_shim_first_on_path_is_active_and_exits_zero(self) -> None:
         result = run_installer(
             self.dest,
-            os.pathsep.join((str(self.dest), SYSTEM_PATH, str(self.earlier))),
+            os.pathsep.join(
+                (
+                    str(self.dest),
+                    str(self.timeout_bin()),
+                    SYSTEM_PATH,
+                    str(self.earlier),
+                )
+            ),
             home=self.home,
         )
         output = result.stdout + result.stderr
@@ -175,7 +214,14 @@ class GateInstallTests(unittest.TestCase):
             stub.chmod(0o755)
         result = run_installer(
             self.dest,
-            os.pathsep.join((str(sibling), SYSTEM_PATH, str(self.dest))),
+            os.pathsep.join(
+                (
+                    str(self.timeout_bin()),
+                    str(sibling),
+                    SYSTEM_PATH,
+                    str(self.dest),
+                )
+            ),
             home=self.home,
         )
         output = result.stdout + result.stderr
@@ -191,7 +237,9 @@ class GateInstallTests(unittest.TestCase):
         (self.home / ".profile").write_text(
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=BASH)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, shell=BASH
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
@@ -205,7 +253,9 @@ class GateInstallTests(unittest.TestCase):
         (self.home / ".bashrc").write_text(
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=BASH)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, shell=BASH
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
@@ -219,7 +269,9 @@ class GateInstallTests(unittest.TestCase):
             f'echo "welcome back"\nexport PATH="{self.dest}:$PATH"\n',
             encoding="utf-8",
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=BASH)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, shell=BASH
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
@@ -232,7 +284,9 @@ class GateInstallTests(unittest.TestCase):
         (self.home / ".zprofile").write_text(
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=ZSH)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, shell=ZSH
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
@@ -245,7 +299,9 @@ class GateInstallTests(unittest.TestCase):
         (self.home / ".zshrc").write_text(
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=ZSH)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, shell=ZSH
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)
@@ -273,6 +329,34 @@ class GateInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, output)
         self.assertNotIn("NOT ACTIVE", output)
         self.assertIn("did not finish within the 5s probe budget", output)
+
+    def test_a_gtimeout_alone_still_checks_the_profile(self) -> None:
+        # macOS has no `timeout`; GNU coreutils installs the same tool as
+        # `gtimeout`. The installer must find it there, or every macOS host
+        # reads the shim as unverifiable and the install fails. The PATH here
+        # holds `gtimeout` and the tools the installer itself calls, and no
+        # `timeout`, so the test proves the gtimeout branch and not the
+        # ordinary one.
+        if BASH is None:
+            self.skipTest("no bash to act as the login shell")
+        toolbin = Path(self._tmp.name) / "gtoolbin"
+        toolbin.mkdir()
+        for name in ("chmod", "dirname", "ln", "mkdir", "readlink"):
+            source = shutil.which(name, path=SYSTEM_PATH)
+            self.assertIsNotNone(source)
+            os.symlink(source, toolbin / name)
+        (self.home / ".profile").write_text(
+            f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
+        )
+        result = run_installer(
+            self.dest,
+            os.pathsep.join((str(self.timeout_bin("gtimeout")), str(toolbin))),
+            home=self.home,
+            shell=BASH,
+        )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("shim is active", output)
 
     def test_a_probe_without_timeout_is_not_run(self) -> None:
         # There is no portable profile watchdog. If `timeout` is unavailable,
@@ -314,7 +398,9 @@ class GateInstallTests(unittest.TestCase):
         (self.home / ".bashrc").write_text(
             f'export PATH="{self.earlier}:$PATH"\n', encoding="utf-8"
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, shell=BASH)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, shell=BASH
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("not active in the interactive shell", output)
@@ -325,7 +411,14 @@ class GateInstallTests(unittest.TestCase):
         # is chosen is not observable here; the install must simply succeed.
         result = run_installer(
             self.dest,
-            os.pathsep.join((str(self.dest), SYSTEM_PATH, str(self.earlier))),
+            os.pathsep.join(
+                (
+                    str(self.dest),
+                    str(self.timeout_bin()),
+                    SYSTEM_PATH,
+                    str(self.earlier),
+                )
+            ),
             home=self.home,
             drop_shell=True,
         )
@@ -353,7 +446,7 @@ class GateInstallTests(unittest.TestCase):
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
         result = run_installer(
-            self.dest, SYSTEM_PATH, home=self.home, shell="/no/such/shell"
+            self.dest, self.controlled_path(), home=self.home, shell="/no/such/shell"
         )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
@@ -372,7 +465,7 @@ class GateInstallTests(unittest.TestCase):
             stub.chmod(0o755)
         result = run_installer(
             self.dest,
-            os.pathsep.join((str(fakebin), SYSTEM_PATH)),
+            os.pathsep.join((str(self.timeout_bin()), str(fakebin), SYSTEM_PATH)),
             home=self.home,
             shell="/no/such/shell",
         )
@@ -400,7 +493,9 @@ class GateInstallTests(unittest.TestCase):
         (self.home / profile).write_text(
             f'export PATH="{self.dest}:$PATH"\n', encoding="utf-8"
         )
-        result = run_installer(self.dest, SYSTEM_PATH, home=self.home, drop_shell=True)
+        result = run_installer(
+            self.dest, self.controlled_path(), home=self.home, drop_shell=True
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("shim is active", output)

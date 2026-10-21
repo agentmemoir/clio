@@ -73,17 +73,31 @@ is_shim() {
     return 1
 }
 
+# The wall-clock watchdog for the profile probes. GNU coreutils provides the
+# tool as `timeout` on Linux and as `gtimeout` on macOS, where the plain name
+# does not exist. Resolve it once, in that order, so every probe uses the same
+# tool and the message can name both names. An empty value means the host has
+# neither.
+timeout_cmd=
+for timeout_name in timeout gtimeout; do
+    if command -v "$timeout_name" >/dev/null 2>&1; then
+        timeout_cmd=$timeout_name
+        break
+    fi
+done
+
 # Resolve the current `name` in $shell with the given flags (for example -lc or
 # -ic), printing the first line that is a symlink to the shim. A profile may
 # print to stdout, so each line is tested rather than the whole output; a
 # profile that reads a terminal must not hang the install, so stdin is /dev/null
-# and `timeout` is used when the host has it. A killed probe returns 124, which
-# the caller reads as "could not probe" rather than "the shim is inactive".
+# and the timeout tool is used when the host has one. A killed probe returns
+# 124, which the caller reads as "could not probe" rather than "the shim is
+# inactive".
 probe_shell() {
     flags=$1
     rc=0
-    if command -v timeout >/dev/null 2>&1; then
-        out=$(timeout 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
+    if [ -n "$timeout_cmd" ]; then
+        out=$("$timeout_cmd" 5 "$shell" "$flags" "command -v $name" </dev/null 2>/dev/null) || rc=$?
     else
         # Without a portable wall-clock limit, do not run profile code.
         # Keep this distinct from a real timeout, which returns 124.
@@ -101,10 +115,10 @@ probe_shell() {
 }
 
 # Run a lookup under the same 5s budget as the profile probes when the host
-# has `timeout`, so a slow NSS backend cannot hang the install.
+# has a timeout tool, so a slow NSS backend cannot hang the install.
 lookup() {
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 5 "$@"
+    if [ -n "$timeout_cmd" ]; then
+        "$timeout_cmd" 5 "$@"
     else
         "$@"
     fi
@@ -142,8 +156,8 @@ if [ "$mode" = install ]; then
     # hit with an interactive shadow would otherwise print a bare "active" and
     # hide the shell a user actually runs gates in.
     #
-    # A profile slower than the 5s probe budget is killed by `timeout` (status
-    # 124). That is "could not probe", not "the shim is inactive": a slow
+    # A profile slower than the 5s probe budget is killed by the timeout tool
+    # (status 124). That is "could not probe", not "the shim is inactive": a slow
     # profile must not fail an otherwise correct install, the same false FAIL
     # #213 removes.
     #
@@ -169,7 +183,7 @@ if [ "$mode" = install ]; then
         interactive_rc=0
         interactive=$(probe_shell -ic) || interactive_rc=$?
         if [ "$login_rc" = 125 ] || [ "$interactive_rc" = 125 ]; then
-            echo "gate-install: $name: profile verification is unavailable because timeout is not installed; cannot confirm the shim is active"
+            echo "gate-install: $name: profile verification is unavailable because neither timeout nor gtimeout is installed; install GNU coreutils (on macOS: brew install coreutils) so the installer can confirm the shim is active"
             inactive=1
             continue
         fi
