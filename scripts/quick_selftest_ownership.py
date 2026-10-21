@@ -119,6 +119,50 @@ class AcceptanceScopeTests(unittest.TestCase):
         self.assertIsNone(paths)
         self.assertTrue(owned_accept._needs_runner(paths))
 
+    def test_malformed_ci_event_keeps_the_full_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            event_path = Path(raw) / "event.json"
+            event_path.write_text("not-json", encoding="utf-8")
+            with mock.patch.dict(
+                owned_accept.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_SHA": "a" * 40,
+                },
+                clear=True,
+            ):
+                paths = owned_accept._ci_changed_paths()
+
+        self.assertIsNone(paths)
+        self.assertTrue(owned_accept._needs_runner(paths))
+
+    def test_git_diff_failure_keeps_the_full_lookup(self) -> None:
+        base_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as raw:
+            event_path = Path(raw) / "event.json"
+            event_path.write_text(
+                f'{{"pull_request":{{"base":{{"sha":"{base_sha}"}}}}}}',
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                owned_accept.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_SHA": "b" * 40,
+                },
+                clear=True,
+            ), mock.patch.object(
+                owned_accept.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=1, stdout=b""),
+            ):
+                paths = owned_accept._ci_changed_paths()
+
+        self.assertIsNone(paths)
+        self.assertTrue(owned_accept._needs_runner(paths))
+
     def test_ci_diff_disables_rename_detection(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40
