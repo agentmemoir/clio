@@ -107,6 +107,9 @@ jobs:
             if [ ! -s "$report" ]; then
               echo "::error::no coverage report was written, so the per-file 80% gate could not run"
               status=1
+            elif ! jq -e '([.data[].files[]] | length) > 0' "$report" >/dev/null; then
+              echo "::error::the coverage report has no file rows, so the per-file 80% gate could not run"
+              status=1
             elif ! jq -e 'all(.data[].files[]; .summary.lines.percent >= 80)' "$report" >/dev/null; then
               echo "::error::a file is below 80% lines:"
               jq -r --arg root "$GITHUB_WORKSPACE/" '
