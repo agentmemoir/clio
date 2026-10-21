@@ -62,6 +62,7 @@ scripts-check-coverage-policy:
 # Whether the gate installer tells the truth about a shim it just linked. A symlink that comes after the real tool on PATH never runs, and the installer used to print a success line for it. This pins the NOT ACTIVE message and the non-zero exit, with a controlled PATH so the answer is the same on any host.
 scripts-check-gate-install:
 	python3 scripts/test_gate_install.py
+	python3 scripts/test_gate_install_profiles.py
 
 # Whether CI runs every suite `scripts-check` runs, and nothing else. A suite added here with no step in the workflow runs on a developer's machine and nowhere else, which is how the gate installer check and the Quick check went unrun. Reads this file and the workflow; runs no build.
 .PHONY: scripts-check-ci-parity

@@ -21,23 +21,28 @@ ask the host's account login shell and skip when it cannot be determined.
 
 The helpers here are the part every case needs: the installer path, the shells
 the installer resolves, the account login shell it falls back to, the
-controlled PATH a case runs against, and the stand-in timeout tool macOS lacks.
-They live in their own module so the test file holds the cases and nothing else,
-and so a file that outgrows the 450-line limit is split along a line a reader
-can name.
+controlled PATH a case runs against, the tree a case runs in, and the stand-in
+timeout tools macOS lacks, one of which records the arguments it was given so a
+test can pin the probe budget. They live in their own module so the test files
+hold the cases and nothing else, and so a file that outgrows the 450-line limit
+is split along a line a reader can name.
 
 Run the self-test:
 
     python3 scripts/test_gate_install.py
+    python3 scripts/test_gate_install_profiles.py
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -153,6 +158,38 @@ def make_timeout_bin(base: Path, name: str = "timeout") -> Path:
     return toolbin
 
 
+def make_recording_timeout_bin(
+    base: Path, name: str, record: Path, exec_command: bool = True
+) -> Path:
+    """The directory that holds a stand-in timeout tool that records its arguments.
+
+    The stand-in writes the arguments it was given to `record`, one per line, and then runs the command it was given, so a probe behaves as if the command finished inside the budget. It fails when the first argument is not a number, because that argument is the duration the installer budgets the probe with. A test can then read the record and pin the budget, not only the name of the tool.
+
+    With `exec_command` false the stand-in records the arguments and exits without running the command. That gives a second tool a different behaviour, so a test can tell which of two tools ran.
+    """
+    toolbin = base / f"{name}bin"
+    toolbin.mkdir(exist_ok=True)
+    record.unlink(missing_ok=True)
+    tool = toolbin / name
+    body = [
+        "#!/bin/sh",
+        f"printf '%s\\n' \"$@\" > {shlex.quote(str(record))}",
+        "case \"$1\" in",
+        "  ''|*[!0-9]*) echo 'the stand-in timeout needs a duration in seconds' >&2; exit 64 ;;",
+        "esac",
+        "shift",
+        'exec "$@"' if exec_command else "exit 0",
+    ]
+    tool.write_text("\n".join(body) + "\n", encoding="utf-8")
+    tool.chmod(0o755)
+    return toolbin
+
+
+def write_profile_path_line(home: Path, dest: Path) -> None:
+    """A login profile that puts `dest` on PATH, so a probe can find the shim."""
+    (home / ".profile").write_text(f'export PATH="{dest}:$PATH"\n', encoding="utf-8")
+
+
 def make_controlled_path(base: Path) -> str:
     """A PATH with the timeout stand-in and the system tools, and nothing else.
 
@@ -161,3 +198,26 @@ def make_controlled_path(base: Path) -> str:
     test, not on what the host has installed.
     """
     return os.pathsep.join((str(make_timeout_bin(base)), SYSTEM_PATH))
+
+
+class InstallerCase(Protocol):
+    """What a test case gives the shared fixture: a place to register its cleanup."""
+
+    def addCleanup(self, function: Callable[[], object], /) -> None: ...
+
+
+def install_tree(case: InstallerCase) -> tuple[Path, Path, Path, Path]:
+    """The tree a case runs against: the base, the install target, an earlier tool directory, and a home.
+
+    The install target is where the installer links the shim, the earlier directory holds a stand-in tool that comes first on PATH, and the home holds the profile files. The temporary directory is one the host really runs scripts in, so a stand-in tool written there can be executed. The cleanup is registered on the case, so the tree goes when the case ends.
+    """
+    tmp = exec_tempdir(purpose="the gate shim installer test")
+    case.addCleanup(tmp.cleanup)
+    base = Path(tmp.name)
+    dest = base / "dest"
+    earlier = base / "earlier"
+    home = base / "home"
+    dest.mkdir()
+    earlier.mkdir()
+    home.mkdir()
+    return base, dest, earlier, home
