@@ -34,6 +34,8 @@ use std::time::{Duration, Instant};
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest we let the background sweeper take to drain the outbox.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
+/// Longest we wait for the server to exit after its stdin closes.
+const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Kills the server on drop so a panicking assertion cannot orphan it.
 struct ServerGuard(Child);
@@ -51,6 +53,7 @@ fn spawn_server() -> (
     ChildStdin,
     Receiver<String>,
     Arc<Mutex<String>>,
+    thread::JoinHandle<()>,
 ) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_clio"))
         .args(["mcp", "stdio", "--db", "sqlite::memory:"])
@@ -71,7 +74,7 @@ fn spawn_server() -> (
     let stderr = child.stderr.take().expect("child stderr");
 
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
+    let stdout_reader = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             match line {
                 Ok(line) => {
@@ -95,7 +98,7 @@ fn spawn_server() -> (
             line.clear();
         }
     });
-    (ServerGuard(child), stdin, receiver, captured)
+    (ServerGuard(child), stdin, receiver, captured, stdout_reader)
 }
 
 /// Write one compact JSON-RPC frame and flush it.
@@ -118,6 +121,23 @@ fn recv_response(receiver: &Receiver<String>, stderr: &Arc<Mutex<String>>) -> Va
     }
 }
 
+/// Wait for the server to exit, killing and reaping it when it does not exit
+/// before the deadline. `None` reports that the deadline passed.
+fn wait_for_exit(child: &mut Child) -> Option<std::process::ExitStatus> {
+    let deadline = Instant::now() + EXIT_TIMEOUT;
+    loop {
+        match child.try_wait().expect("reap the clio mcp stdio child") {
+            Some(status) => return Some(status),
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn call(id: i64, name: &str, arguments: Value) -> Value {
     json!({
@@ -132,7 +152,7 @@ fn call(id: i64, name: &str, arguments: Value) -> Value {
 /// background sweeper thread is exercised, not a test-only in-memory reader.
 #[test]
 fn mcp_stdio_subprocess_store_drains_and_retrieves() {
-    let (mut guard, mut stdin, receiver, stderr) = spawn_server();
+    let (mut guard, mut stdin, receiver, stderr, stdout_reader) = spawn_server();
     let bank = "bank-subprocess";
     let item_id = "itm-subprocess-1";
 
@@ -208,11 +228,19 @@ fn mcp_stdio_subprocess_store_drains_and_retrieves() {
 
     // Closing stdin is EOF for the session; the binary must exit cleanly.
     drop(stdin);
-    let status = guard.0.wait().expect("wait for clio mcp stdio");
+    let exit = wait_for_exit(&mut guard.0);
+    stdout_reader
+        .join()
+        .expect("the MCP stdout reader thread panicked");
     let captured = stderr
         .lock()
         .map(|text| text.to_string())
         .unwrap_or_default();
+    let Some(status) = exit else {
+        panic!(
+            "clio mcp stdio did not exit within {EXIT_TIMEOUT:?} and was killed; stderr: {captured}"
+        );
+    };
     assert!(
         status.success(),
         "clio mcp stdio exited {status:?}: {captured}"
