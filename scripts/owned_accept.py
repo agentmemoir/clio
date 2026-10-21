@@ -7,6 +7,7 @@ entry point is accept_against_runner, reached as `owned_tests.py --accept`.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -34,6 +35,72 @@ from owned_tests import (  # noqa: E402
 #: publishes log chatter instead of the test list, and the parser below would
 #: read that chatter as an empty runner and report a vacuous all-clean.
 _LOOKUP_ENV = "GATE_RAW"
+_RELEASE_NOTE_FILE = "CHANGELOG.md"
+_RELEASE_NOTE_DIR = "changelog.d/"
+
+
+def _git_sha(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
+def _ci_changed_paths() -> tuple[str, ...] | None:
+    """Changed paths for this CI event, or None when the diff is unknown."""
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    event_name = os.environ.get("GITHUB_EVENT_NAME")
+    head_sha = os.environ.get("GITHUB_SHA")
+    if not event_path or not head_sha:
+        return None
+    try:
+        event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        if event_name == "pull_request":
+            base_sha = event["pull_request"]["base"]["sha"]
+        elif event_name == "push":
+            base_sha = event["before"]
+        else:
+            return None
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        return None
+    if not _git_sha(base_sha) or not _git_sha(head_sha):
+        return None
+    if base_sha == "0" * len(base_sha):
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                base_sha,
+                head_sha,
+                "--",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return tuple(os.fsdecode(path) for path in proc.stdout.split(b"\0") if path)
+
+
+def _needs_runner(paths: tuple[str, ...] | None) -> bool:
+    """Fail closed unless every changed path is a release note."""
+    if not paths:
+        return True
+    # Keep this allowlist closed; every other path may change the test list or
+    # the ownership check.
+    return any(
+        path != _RELEASE_NOTE_FILE and not path.startswith(_RELEASE_NOTE_DIR)
+        for path in paths
+    )
 
 
 def _lookup_env() -> dict[str, str]:
@@ -98,6 +165,9 @@ def accept_against_runner() -> int:
     holding tests, which breaks the exemption the owner rule depends on; and a
     file holding tests inside a shared tests/ directory that builds no target.
     """
+    if not _needs_runner(_ci_changed_paths()):
+        print("acceptance: skipped (release notes only)")
+        return 0
     unit_real, integration_real = runner_test_modules()
     predicted: dict[str, set[str]] = {}
     crates = workspace_crates()
