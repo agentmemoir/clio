@@ -23,7 +23,6 @@ from coverage_policy_check import (
     RETIRED_PATHS,
     ROOT,
     SELF_FILES,
-    text_to_scan,
     THRESHOLD_FLAG,
     gate_text,
     Finding,
@@ -62,7 +61,6 @@ def self_test() -> int:
         for rel, text in files.items():
             if rel in SELF_FILES:
                 continue
-            text = text_to_scan(rel, text)
             findings += scan_text("flag", rel, text, ((THRESHOLD_FLAG.pattern, "flag"),))
             findings += prose_findings(rel, text)
             if not fnmatch(rel, GATE) and not rel.endswith(".rs"):
@@ -98,17 +96,19 @@ def self_test() -> int:
     expect("a coverage rule described in a Rust comment is still found",
            bool(with_files({"crates/a/src/x.rs": "// every file must reach 80% of its functions\n"})), True)
 
-    # The per-file line gate is written in the scheduled whole-workspace workflow and in
-    # no other file. The pull-request path and every other file still refuse it.
+    # The scheduled workflow checks the report itself, so the tool flag is refused there too.
     per_file = 'run: make coverage COV_TOOL_ARGS="--fail-under-file-lines 80"\n'
-    expect("the per-file gate is a finding in the pull-request workflow",
+    expect("the per-file tool flag is a finding in the pull-request workflow",
            bool(with_files({".github/workflows/ci.yml": per_file})), True)
-    expect("the per-file gate is a finding in another workflow",
+    expect("the per-file tool flag is a finding in another workflow",
            bool(with_files({".github/workflows/coverage-full-copy.yml": per_file})), True)
-    expect("the per-file gate is a finding in a makefile",
+    expect("the per-file tool flag is a finding in a makefile",
            bool(with_files({"Makefile": per_file})), True)
-    expect("the per-file gate is allowed in the scheduled workflow",
-           bool(with_files({".github/workflows/coverage-full.yml": per_file})), False)
+    expect("the per-file tool flag is a finding in the scheduled workflow",
+           bool(with_files({".github/workflows/coverage-full.yml": per_file})), True)
+    scheduled = (ROOT / ".github/workflows/coverage-full.yml").read_text(encoding="utf-8")
+    expect("the current scheduled workflow passes without the tool flag",
+           bool(with_files({".github/workflows/coverage-full.yml": scheduled})), False)
     expect("another threshold flag is a finding in the scheduled workflow",
            bool(with_files({".github/workflows/coverage-full.yml": per_file.replace("file-lines", "lines")})), True)
 
