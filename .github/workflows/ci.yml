@@ -175,6 +175,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked
 
       - name: Install nextest
+        id: install_nextest
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
@@ -334,8 +335,12 @@ jobs:
 
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
+      # It needs the `nextest` binary, and that binary is installed by a step
+      # above which a failure skips, so this step asks whether the install
+      # happened instead of failing on a tool that was never there. A lookup
+      # that could run still fails the job when it finds a real mismatch.
       - name: Owned lookup acceptance
-        if: always()
+        if: always() && steps.install_nextest.outcome == 'success'
         run: python3 scripts/owned_tests.py --accept
 
       # Last, so it can report on whichever step failed: a test binary killed
@@ -424,13 +429,29 @@ jobs:
       # reach 80% of its lines. No other metric, no aggregate, and no per-file
       # recorded floor is compared anywhere.
       - name: Scoped coverage (≥80% lines on each changed Rust file)
+        id: scoped_coverage
         run: make coverage-fast BASE="$SCOPED_BASE"
 
       # The only test run a pull request makes, so its JUnit report is the one
       # the workflow publishes. nextest stores it under `target/nextest/<profile>`
       # in the workspace, not under the `target/llvm-cov-target` build directory.
+      #
+      # A change that touches no Rust file selects no test, so the runner runs
+      # no test and writes no report, and there is nothing to publish. The
+      # upload used to fail on that, because `if-no-files-found: error` reads a
+      # missing report as a broken run, and the report was missing because no
+      # run had happened. The report and the gate's own report are the two
+      # things a test run leaves behind, so their presence is what says a run
+      # happened: the JUnit report when the run wrote it, the coverage report
+      # when the run finished and the merge wrote it. A run that produced
+      # neither is a broken run and still fails the job, because the upload
+      # runs on the coverage report alone and finds no JUnit file to publish.
       - name: Upload test report
-        if: always()
+        if: >-
+          always()
+          && steps.scoped_coverage.outcome != 'skipped'
+          && (hashFiles('target/nextest/ci/junit.xml') != ''
+          || hashFiles('target/coverage/coverage-scoped.json') != '')
         uses: actions/upload-artifact@v4
         with:
           name: nextest-junit
