@@ -1,0 +1,1 @@
+Pull request CI no longer runs the CodeQL Rust analysis on changes that touch no Rust file; the analysis now runs only when a change touches code under `crates/`, the Cargo manifests, or the CodeQL workflow itself, plus a weekly scheduled scan and every push to the default branch.

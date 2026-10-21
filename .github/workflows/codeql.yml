@@ -1,0 +1,61 @@
+# CodeQL code scanning, advanced setup.
+#
+# This file replaces the repository's default setup, whose dynamic workflow
+# (`dynamic/github-code-scanning/codeql`) started an analysis for every pull
+# request commit no matter what the pull request changed: on the runs recorded
+# 2026-10-20 its Rust job alone took 282 to 481 s (mean 412 s over ten runs),
+# beside the 232 to 392 s CI job it duplicated on non-Rust changes.
+#
+# The `pull_request` paths filter decides whether this workflow starts at all,
+# not what the analysis covers: GitHub only evaluates it on push, pull_request
+# and pull_request_target events, so the weekly schedule below runs
+# unfiltered. The workflow file itself is on the list so a change to this
+# file is judged by itself.
+#
+# Switching setups is a settings change, not a commit: while default setup is
+# still enabled a run of this workflow fails with "CodeQL default setup is
+# enabled". Disable default setup first, or at the same time this merges:
+#
+#   gh api -X PATCH repos/agentmemoir/clio/code-scanning/default-setup \
+#     -f state=not-configured
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # build-mode: none needs rustup and cargo, which the GitHub-hosted
+      # ubuntu image ships, so there is no toolchain install here. The
+      # repository's own pin check covers ci.yml, not this file, and CodeQL
+      # builds a database without invoking a full build.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:rust'
