@@ -331,10 +331,10 @@ impl RestoreChild {
             }
         };
         if let Some(reader) = self.stderr_reader.take() {
-            let _ = reader.join();
+            reader.join().expect("join the stderr reader");
         }
         if let Some(reader) = self.stdout_reader.take() {
-            let _ = reader.join();
+            reader.join().expect("join the stdout reader");
         }
         let stderr = self
             .stderr
