@@ -9,6 +9,10 @@ case uses a fixture: a fake lookup, or a throwaway crate in a temporary director
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +22,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import integration_targets  # noqa: E402
+import owned_accept  # noqa: E402
 import owned_scanner  # noqa: E402
 import owned_tests as owned  # noqa: E402
 import quick  # noqa: E402
@@ -83,6 +88,228 @@ class SelectionTests(unittest.TestCase):
         packages = [{"name": "c", "dir": "crates/c", "deps": set(), "targets": []}]
         with self.assertRaises(runner.RunError):
             quick.select(["elsewhere/x.rs"], packages, fake_lookup({}))
+
+
+class AcceptanceScopeTests(unittest.TestCase):
+    def test_only_release_note_paths_skip_the_runner_lookup(self) -> None:
+        self.assertFalse(owned_accept._needs_runner(("CHANGELOG.md",)))
+        self.assertFalse(owned_accept._needs_runner(("changelog.d/issue.md",)))
+        self.assertFalse(
+            owned_accept._needs_runner(("CHANGELOG.md", "changelog.d/issue.md"))
+        )
+
+    def test_rust_config_script_and_workflow_changes_run_the_lookup(self) -> None:
+        for path in (
+            "crates/clio/src/lib.rs",
+            "Cargo.toml",
+            ".config/nextest.toml",
+            "scripts/owned_tests.py",
+            ".github/workflows/ci.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(owned_accept._needs_runner((path,)))
+
+    def test_mixed_unknown_and_empty_diffs_run_the_lookup(self) -> None:
+        self.assertTrue(
+            owned_accept._needs_runner(("CHANGELOG.md", "crates/clio/src/lib.rs"))
+        )
+        self.assertTrue(owned_accept._needs_runner(None))
+        self.assertTrue(owned_accept._needs_runner(()))
+
+    def test_git_event_skips_changelog_only_and_runs_mixed_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+
+            def git(*args: str) -> str:
+                proc = subprocess.run(
+                    ["git", "-C", str(root), *args],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                return proc.stdout.strip()
+
+            git("init", "--quiet")
+            git("config", "user.name", "Owned acceptance test")
+            git("config", "user.email", "owned-acceptance@example.invalid")
+            git("config", "commit.gpgsign", "false")
+            changelog = root / "CHANGELOG.md"
+            changelog.write_text("Release history\n", encoding="utf-8")
+            git("add", "CHANGELOG.md")
+            git("commit", "--quiet", "-m", "base")
+            base_sha = git("rev-parse", "HEAD")
+
+            note = root / "changelog.d" / "issue.md"
+            note.parent.mkdir()
+            note.write_text("Fixed release-note lookup cost.\n", encoding="utf-8")
+            git("add", "changelog.d/issue.md")
+            git("commit", "--quiet", "-m", "changelog only")
+            changelog_head = git("rev-parse", "HEAD")
+
+            event_path = root / "event.json"
+            event_path.write_text(
+                json.dumps({"pull_request": {"base": {"sha": base_sha}}}),
+                encoding="utf-8",
+            )
+            env = {
+                "GITHUB_EVENT_PATH": str(event_path),
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_SHA": changelog_head,
+            }
+            skipped_output = io.StringIO()
+            with mock.patch.object(owned_accept, "ROOT", root), mock.patch.dict(
+                owned_accept.os.environ, env, clear=True
+            ), mock.patch.object(
+                owned_accept,
+                "runner_test_modules",
+                side_effect=AssertionError("changelog-only diff ran the lookup"),
+            ):
+                self.assertEqual(
+                    owned_accept._ci_changed_paths(), ("changelog.d/issue.md",)
+                )
+                with contextlib.redirect_stdout(skipped_output):
+                    self.assertEqual(owned_accept.accept_against_runner(), 0)
+            self.assertIn(
+                "acceptance: skipped (release notes only)", skipped_output.getvalue()
+            )
+
+            rust_source = root / "crates" / "clio" / "src" / "lib.rs"
+            rust_source.parent.mkdir(parents=True)
+            rust_source.write_text("// Rust change\n", encoding="utf-8")
+            git("add", "crates/clio/src/lib.rs")
+            git("commit", "--quiet", "-m", "mixed change")
+            mixed_head = git("rev-parse", "HEAD")
+            env["GITHUB_SHA"] = mixed_head
+            mixed_output = io.StringIO()
+            with mock.patch.object(owned_accept, "ROOT", root), mock.patch.dict(
+                owned_accept.os.environ, env, clear=True
+            ), mock.patch.object(
+                owned_accept, "runner_test_modules", return_value=({}, {})
+            ) as lookup, mock.patch.object(
+                owned_accept, "workspace_crates", return_value={}
+            ), mock.patch.object(owned_accept, "declared_targets", return_value={}):
+                self.assertEqual(
+                    owned_accept._ci_changed_paths(),
+                    ("changelog.d/issue.md", "crates/clio/src/lib.rs"),
+                )
+                with contextlib.redirect_stdout(mixed_output):
+                    self.assertEqual(owned_accept.accept_against_runner(), 0)
+                lookup.assert_called_once_with()
+            self.assertNotIn(
+                "acceptance: skipped (release notes only)", mixed_output.getvalue()
+            )
+
+    def test_missing_ci_event_keeps_the_full_lookup(self) -> None:
+        with mock.patch.dict(owned_accept.os.environ, {}, clear=True):
+            paths = owned_accept._ci_changed_paths()
+
+        self.assertIsNone(paths)
+        self.assertTrue(owned_accept._needs_runner(paths))
+
+    def test_malformed_ci_event_keeps_the_full_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            event_path = Path(raw) / "event.json"
+            event_path.write_text("not-json", encoding="utf-8")
+            with mock.patch.dict(
+                owned_accept.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_SHA": "a" * 40,
+                },
+                clear=True,
+            ):
+                paths = owned_accept._ci_changed_paths()
+
+        self.assertIsNone(paths)
+        self.assertTrue(owned_accept._needs_runner(paths))
+
+    def test_git_diff_failure_keeps_the_full_lookup(self) -> None:
+        base_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as raw:
+            event_path = Path(raw) / "event.json"
+            event_path.write_text(
+                f'{{"pull_request":{{"base":{{"sha":"{base_sha}"}}}}}}',
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                owned_accept.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_SHA": "b" * 40,
+                },
+                clear=True,
+            ), mock.patch.object(
+                owned_accept.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=1, stdout=b""),
+            ):
+                paths = owned_accept._ci_changed_paths()
+
+        self.assertIsNone(paths)
+        self.assertTrue(owned_accept._needs_runner(paths))
+
+    def test_ci_diff_disables_rename_detection(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        with tempfile.TemporaryDirectory() as raw:
+            event_path = Path(raw) / "event.json"
+            event_path.write_text(
+                f'{{"pull_request":{{"base":{{"sha":"{base_sha}"}}}}}}',
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                owned_accept.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_SHA": head_sha,
+                },
+                clear=True,
+            ), mock.patch.object(
+                owned_accept.subprocess,
+                "run",
+                return_value=mock.Mock(
+                    returncode=0,
+                    stdout=b"crates/clio/src/lib.rs\0changelog.d/issue.md\0",
+                ),
+            ) as run:
+                paths = owned_accept._ci_changed_paths()
+
+        self.assertEqual(
+            paths, ("crates/clio/src/lib.rs", "changelog.d/issue.md")
+        )
+        command = run.call_args.args[0]
+        self.assertIn("--no-renames", command)
+        self.assertIn(base_sha, command)
+        self.assertIn(head_sha, command)
+
+    def test_push_event_uses_the_before_sha(self) -> None:
+        base_sha = "c" * 40
+        head_sha = "d" * 40
+        with tempfile.TemporaryDirectory() as raw:
+            event_path = Path(raw) / "event.json"
+            event_path.write_text(f'{{"before":"{base_sha}"}}', encoding="utf-8")
+            with mock.patch.dict(
+                owned_accept.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "GITHUB_EVENT_NAME": "push",
+                    "GITHUB_SHA": head_sha,
+                },
+                clear=True,
+            ), mock.patch.object(
+                owned_accept.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=0, stdout=b"CHANGELOG.md\0"),
+            ) as run:
+                paths = owned_accept._ci_changed_paths()
+
+        self.assertEqual(paths, ("CHANGELOG.md",))
+        command = run.call_args.args[0]
+        self.assertIn(base_sha, command)
+        self.assertIn(head_sha, command)
 
 
 class PathAttributeTests(unittest.TestCase):

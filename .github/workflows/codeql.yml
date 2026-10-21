@@ -29,6 +29,8 @@ on:
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/config.toml'
       - '.github/workflows/codeql.yml'
   schedule:
     - cron: '17 3 * * 1'
