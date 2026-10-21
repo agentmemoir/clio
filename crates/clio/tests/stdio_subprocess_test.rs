@@ -51,15 +51,19 @@ impl Drop for ServerGuard {
     }
 }
 
-/// Launch `clio mcp stdio` over a volatile in-memory database.
-fn spawn_server() -> (
+/// The live parts of a spawned server: process guard, stdin, response channel,
+/// captured stderr, and the stdout and stderr reader threads.
+type ServerParts = (
     ServerGuard,
     ChildStdin,
     Receiver<String>,
     Arc<Mutex<String>>,
     thread::JoinHandle<()>,
     thread::JoinHandle<std::io::Result<()>>,
-) {
+);
+
+/// Launch `clio mcp stdio` over a volatile in-memory database.
+fn spawn_server() -> ServerParts {
     let mut child = Command::new(env!("CARGO_BIN_EXE_clio"))
         .args(["mcp", "stdio", "--db", "sqlite::memory:"])
         // Force an empty deployment overlay so the scenario never reads a host
