@@ -91,17 +91,33 @@ jobs:
           tool: cargo-llvm-cov
 
       # One instrumented run of the whole workspace: it is the test run and the
-      # coverage run. The per-file line gate is passed to the tool here and nowhere
-      # else. `finished` is written only after the command returns, pass or fail, so
-      # a timeout or a cancel leaves it unset.
+      # coverage run. The per-file line gate is checked below from the JSON report,
+      # not passed to the tool. `finished` is written only after the command
+      # returns, pass or fail, so a timeout or a cancel leaves it unset.
       - name: Whole-workspace coverage (80% lines on each file)
         id: run
         shell: bash
         run: |
           set +e
           set +o pipefail
-          make coverage COV_TOOL_ARGS="--fail-under-file-lines 80" 2>&1 | tee "$RUNNER_TEMP/coverage.log"
+          make coverage 2>&1 | tee "$RUNNER_TEMP/coverage.log"
           status=${PIPESTATUS[0]}
+          report=target/coverage/coverage.json
+          if [ "$status" -eq 0 ]; then
+            if [ ! -s "$report" ]; then
+              echo "::error::no coverage report was written, so the per-file 80% gate could not run"
+              status=1
+            elif ! jq -e 'all(.data[].files[]; .summary.lines.percent >= 80)' "$report" >/dev/null; then
+              echo "::error::a file is below 80% lines:"
+              jq -r --arg root "$GITHUB_WORKSPACE/" '
+                [.data[].files[] | select(.summary.lines.percent < 80)]
+                | sort_by(.summary.lines.percent)
+                | .[]
+                | "\((.summary.lines.percent * 10 | floor) / 10)% (\(.summary.lines.covered)/\(.summary.lines.count) lines) \(.filename | ltrimstr($root))"
+              ' "$report"
+              status=1
+            fi
+          fi
           echo "finished=true" >> "$GITHUB_OUTPUT"
           if [ "$status" -eq 0 ]; then
             echo "verdict=pass" >> "$GITHUB_OUTPUT"
@@ -130,11 +146,11 @@ jobs:
             | sort -u > "$out/failing-tests.txt"
           report=target/coverage/coverage.json
           if [ -s "$report" ]; then
-            # The same test `--fail-under-file-lines 80` applies: a file passes only
-            # above 80, and llvm-cov gives a file with no lines 0 percent. Rounded
-            # down, so a failing file never prints as 80%.
+            # The same boundary as the gate above: a file below 80% lines fails and
+            # a file at exactly 80% passes. llvm-cov gives a file with no lines 0
+            # percent. Rounded down, so a failing file never prints as 80.0%.
             jq -r --arg root "$GITHUB_WORKSPACE/" '
-              [.data[].files[] | select(.summary.lines.percent <= 80)]
+              [.data[].files[] | select(.summary.lines.percent < 80)]
               | sort_by(.summary.lines.percent)
               | .[]
               | "\((.summary.lines.percent * 10 | floor) / 10)% (\(.summary.lines.covered)/\(.summary.lines.count) lines) \(.filename | ltrimstr($root))"
@@ -206,7 +222,7 @@ jobs:
             else
               echo '- none named in the run log'
             fi
-            printf '\nFiles at or below 80%% lines (the tool passes a file only above 80%%):\n'
+            printf '\nFiles below 80%% lines (a file at exactly 80%% passes):\n'
             if [ -s "$dir/low-files.txt" ]; then
               head -n 200 "$dir/low-files.txt" | sed 's/^/- /'
               total=$(wc -l < "$dir/low-files.txt")
