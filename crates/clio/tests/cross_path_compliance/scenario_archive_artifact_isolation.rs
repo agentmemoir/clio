@@ -42,12 +42,11 @@ use crate::common;
 use crate::support_pg_test_support::{
     archive_postgres_with_authority, lock_pg, pg_url, postgres_reachable, require_postgres,
 };
-use crate::support_test_support::{Archive, archive_sqlite_with_authority, erase_subject};
-use clio::store::{ScopedSchema, postgres_target_state};
-use clio_backup::manifest::ManifestAuthority;
-use clio_compliance::{
-    JournalState, initialize_new_empty, load_journal, record_denial, sha256_hex_bytes,
+use crate::support_test_support::{
+    Archive, archive_sqlite_with_authority, current_authority, erase_subject, file_sha256, items,
 };
+use clio::store::ScopedSchema;
+use clio_compliance::{initialize_new_empty, record_denial};
 use rusqlite::Connection;
 use std::path::Path;
 
@@ -139,31 +138,6 @@ fn isolate_key_store(kms: &Path, keep: Artifact) {
     connection
         .execute_batch(&drop_sql(Artifact::KeySlot))
         .expect("remove the destroyed key slot");
-}
-
-/// The authority the live journal records, for the archive that names it.
-fn current_authority(journal: &Path) -> ManifestAuthority {
-    match load_journal(journal) {
-        JournalState::Current(current) => ManifestAuthority {
-            deployment_id: current.deployment_id,
-            generation: current.generation,
-            salt_fingerprint: current.salt_fingerprint,
-        },
-        other => panic!("expected a current journal: {other:?}"),
-    }
-}
-
-/// The SHA-256 of a file's bytes.
-fn file_sha256(path: &Path) -> String {
-    let bytes = std::fs::read(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
-    sha256_hex_bytes(&bytes)
-}
-
-/// The target schema's `items` count, the Postgres stand-in for a file hash.
-fn items(url: &str) -> Option<u64> {
-    postgres_target_state(url)
-        .expect("measure the target schema")
-        .count_of("items")
 }
 
 /// Seed one SQLite source store, really erase the denied subject, keep only

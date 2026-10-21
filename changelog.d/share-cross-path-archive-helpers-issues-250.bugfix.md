@@ -1,0 +1,1 @@
+No user-facing change: the cross-path compliance tests now share one copy of the archive authority, file hash, and item-count helpers instead of repeating them. [Issue #250](https://github.com/agentmemoir/clio/issues/250)
