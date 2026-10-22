@@ -228,7 +228,7 @@ fn typed_run(config: &Path) -> Vec<String> {
         "--embed",
         "online",
         "--embed-url",
-        "https://embed.example.test",
+        "https://embed.example.com",
         "--embed-model",
         "text-embedding-3-small",
         "--embed-key",

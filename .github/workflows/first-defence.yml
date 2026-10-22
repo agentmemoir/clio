@@ -1,0 +1,115 @@
+name: First Defence
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  unicode:
+    name: Trojan Source Unicode
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      # Install the established scanner outside the untrusted checkout.
+      # No npm scripts from the pull request or repository are executed.
+      # The version is exact; the reason it is not in a manifest is that the
+      # install runs outside the checkout and must not read it.
+      - name: Install anti-trojan-source CLI
+        run: npm install --prefix "$RUNNER_TEMP/anti-trojan" --ignore-scripts --no-audit --no-fund anti-trojan-source@1.8.1 # zizmor: ignore[adhoc-packages] exact version, no lifecycle scripts, outside the checkout
+      - name: Check source, workflows and agent instructions
+        run: |
+          "$RUNNER_TEMP/anti-trojan/node_modules/.bin/anti-trojan-source" \
+            --files='**/*.{rs,toml,lock,md,yml,yaml,json,sh,py,js,ts}' \
+            --verbose
+
+  secrets:
+    name: TruffleHog credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Upstream-supported action, pinned to an immutable commit SHA.
+      # Only verified results fail the build: a fixture password on example.com
+      # cannot be verified, while a live credential can. See the `--results`
+      # flag in the upstream usage notes.
+      - name: Scan committed secrets
+        uses: trufflesecurity/trufflehog@c85580b712841eda4c53bc28fc6ace6100e8c16c # main
+        with:
+          extra_args: --results=verified
+
+  workflow-security:
+    name: zizmor workflow security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Audit GitHub workflows
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+          online-audits: false
+          inputs: .github/workflows
+
+  diff-sentry:
+    name: Malicious diff scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The scan diffs the change against its base commit.
+          fetch-depth: 0
+          persist-credentials: false
+      # Third-party action. It needs no key and no network write.
+      # Inputs used: fail-on. See its action.yml for the values.
+      - name: Scan the change
+        uses: qazbnm456/diff-sentry@afc88a286e479b1630f8846ab45db4706a562e28 # v0.5.0
+        with:
+          fail-on: high
+
+  url-check:
+    name: New external URL check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The check diffs the change against its base commit.
+          fetch-depth: 0
+          persist-credentials: false
+      # The allow-list holds domains, not full URLs.
+      # The port and the path are ignored, so a new path on a known host passes.
+      # An entry also covers its subdomains, so `example.com` covers `v2.api.example.com`.
+      # The boundary is a dot, so `bar.example.com` does not cover `notbar.example.com`.
+      # A new domain fails CI until someone adds it to .github/domain-allowlist.txt.
+      - name: Compare URL domains against the allow-list
+        run: |
+          set -uo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no base commit; nothing to check"
+            exit 0
+          fi
+          # Added lines only, in the three file types, then the URLs they hold.
+          git diff --unified=0 "$base" HEAD -- '*.rs' '*.toml' '*.yml' \
+            | grep '^+' | grep -v '^+++' \
+            | grep -hoE 'https?://[A-Za-z0-9._~:/?#@!$&*+,;=%-]+' \
+            | sed 's/[.,;:)]*$//' | sort -u > "$RUNNER_TEMP/urls.txt" || true
+          # The reducer and the allow-list match live in scripts/check_new_urls.py,
+          # so the rule is a real file rather than a here-document in this workflow.
+          python3 scripts/check_new_urls.py "$RUNNER_TEMP/urls.txt" .github/domain-allowlist.txt

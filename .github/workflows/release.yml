@@ -46,7 +46,9 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Read the workspace version
         id: check
@@ -101,20 +103,25 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # Same pin as CI. A release should be built by the compiler the tree was
       # linted and tested with, not by whatever `stable` happens to be that day.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: ${{ matrix.target }}
+          # A release build must not write the shared cache: a poisoned entry
+          # could reach the artifact this job publishes. Restoring is enough.
+          lookup-only: true
 
       # musl-tools provides musl-gcc, which is the C compiler the build scripts
       # reach for when the target is *-unknown-linux-musl. Without it the build
@@ -159,10 +166,14 @@ jobs:
       # string print with no database, no key store, and no network, so it is a
       # real smoke test rather than a formality.
       - name: Smoke test
+        env:
+          # The value reaches the shell through the environment, not through
+          # text interpolation, so no expansion of the string can form a command.
+          EXPECTED_VERSION: clio ${{ needs.verify.outputs.version }}
         run: |
           bin="target/${{ matrix.target }}/release/clio"
           "$bin" version
-          test "$("$bin" version)" = "clio ${{ needs.verify.outputs.version }}"
+          test "$("$bin" version)" = "$EXPECTED_VERSION"
 
       # A musl build that picked up the host's glibc would run fine on the runner
       # and fail on a user's older distribution, which is the exact case musl
@@ -196,7 +207,7 @@ jobs:
           rm -rf dist/clio-${{ matrix.target }}
 
       - name: Upload the archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}.tar.gz
@@ -218,10 +229,12 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Download every archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           pattern: clio-*

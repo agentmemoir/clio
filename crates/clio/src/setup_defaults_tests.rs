@@ -111,19 +111,19 @@ fn a_stored_sqlite_path_becomes_the_path_default() {
 #[test]
 fn the_service_values_become_their_defaults() {
     let defaults = Defaults::from_effective(&json!({
-        "embed": { "url": "https://embed.example.test", "model": "m", "provider": "openai" },
-        "rerank": { "url": "https://rerank.example.test", "model": "r", "provider": "cohere" },
+        "embed": { "url": "https://embed.example.com", "model": "m", "provider": "openai" },
+        "rerank": { "url": "https://rerank.example.com", "model": "r", "provider": "cohere" },
         "credentials": { "embed_api_key": "sk-x", "rerank_api_key": "" }
     }));
     assert_eq!(
         defaults.embed_url.as_deref(),
-        Some("https://embed.example.test")
+        Some("https://embed.example.com")
     );
     assert_eq!(defaults.embed_model.as_deref(), Some("m"));
     assert_eq!(defaults.embed_provider.as_deref(), Some("openai"));
     assert_eq!(
         defaults.rerank_url.as_deref(),
-        Some("https://rerank.example.test")
+        Some("https://rerank.example.com")
     );
     assert!(defaults.has_embed_key);
     // An empty string counts as absent: showing a default the operator cannot see

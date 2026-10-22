@@ -174,7 +174,7 @@ fn assert_mock_provider_request(
         .expect("provider calls lock");
     assert_eq!(calls.len(), 1, "one mock response should be consumed");
     let call = &calls[0];
-    assert_eq!(call.url, "https://provider.example/v1/chat/completions");
+    assert_eq!(call.url, "https://provider.example.com/v1/chat/completions");
     assert_eq!(call.bearer.as_deref(), Some("test-token"));
     assert_eq!(call.body["model"], "mock-model");
     assert_eq!(call.body["temperature"], 0.0);
@@ -202,7 +202,7 @@ fn abstract_labels_flow_through_mock_provider_into_admitted_snapshot() {
     });
     let transport = MockProviderTransport::new(provider_response);
     let extractor = ChatExtractor::new(
-        "https://provider.example",
+        "https://provider.example.com",
         "mock-model",
         0.0,
         Some("test-token".into()),

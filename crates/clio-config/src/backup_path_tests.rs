@@ -243,7 +243,7 @@ fn assert_slug_leaks_nothing(url: &str, slug: &str) {
         "pw",
         "hunter2",
         "s3cret",
-        "db.internal",
+        "db.example.com",
         "host",
         "@",
         "/",
@@ -262,7 +262,7 @@ fn slug_from_url_without_a_path_never_carries_userinfo() {
     for url in [
         "postgres://user:pw@host:5432",
         "postgres://user:pw@host",
-        "postgresql://clio:hunter2@db.internal:5432",
+        "postgresql://clio:hunter2@db.example.com:5432",
         "postgres://host:5432",
     ] {
         let slug = store_slug(url, "postgres");

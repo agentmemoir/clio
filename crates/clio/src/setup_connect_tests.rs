@@ -88,7 +88,7 @@ fn a_refusal_never_prints_the_password_it_was_handed() {
     // redacted here rather than at each place that shows it: the same string is
     // printed by this function, and then again by the retry message, the blame
     // line, and the final refusal.
-    let reason = "no probe is wired for postgres://clio:hunter2-secret@db.example.test:5432/clio";
+    let reason = "no probe is wired for postgres://clio:hunter2-secret@db.example.com:5432/clio";
     let mut out = Vec::new();
     let error = run(&mut out, plain(), "the database", || Err(reason.to_owned()))
         .expect_err("the probe failed");
@@ -96,8 +96,8 @@ fn a_refusal_never_prints_the_password_it_was_handed() {
     assert!(!written.contains("hunter2-secret"), "{written}");
     assert!(!error.contains("hunter2-secret"), "{error}");
     // The address itself is what makes the message actionable, so it stays.
-    assert!(written.contains("db.example.test:5432"), "{written}");
-    assert!(error.contains("db.example.test:5432"), "{error}");
+    assert!(written.contains("db.example.com:5432"), "{written}");
+    assert!(error.contains("db.example.com:5432"), "{error}");
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn a_success_detail_never_carries_the_password_either() {
     // is the one thing worth keeping in it.
     let mut out = Vec::new();
     let report = run(&mut out, plain(), "the database", || {
-        Ok("connected to postgres://clio:hunter2-secret@db.example.test:5432/clio".to_owned())
+        Ok("connected to postgres://clio:hunter2-secret@db.example.com:5432/clio".to_owned())
     })
     .expect("the probe succeeded");
     assert!(!report.contains("hunter2-secret"), "{report}");

@@ -66,14 +66,14 @@ fn a_remote_plain_http_request_is_refused_before_any_socket_opens() {
 
 #[test]
 fn a_smuggled_trusted_prefix_does_not_reach_the_real_host() {
-    // The parse gives the host `trusted@evil.example` and the port, and the gate
+    // The parse gives the host `trusted@evil.example.com` and the port, and the gate
     // asks whether *that* host is this machine. A split of the string on `://`
     // and `/` would read `trusted` and wave this through.
     for url in [
-        "http://trusted@evil.example/embed",
-        "http://localhost@evil.example/embed",
-        "http://127.0.0.1@evil.example/embed",
-        "http://box.localhost@evil.example/embed",
+        "http://trusted@evil.example.com/embed",
+        "http://localhost@evil.example.com/embed",
+        "http://127.0.0.1@evil.example.com/embed",
+        "http://box.localhost@evil.example.com/embed",
     ] {
         let err = post_json(url, &json!({}), FAST, None)
             .expect_err("a userinfo prefix must not stand in for the host");

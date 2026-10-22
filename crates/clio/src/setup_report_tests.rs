@@ -53,7 +53,7 @@ fn a_state_prints_the_word_the_plan_uses() {
 
 #[test]
 fn a_planned_entry_the_config_does_not_hold_is_new() {
-    let planned = vec![entry("embed.url", "https://a.example.test")];
+    let planned = vec![entry("embed.url", "https://embed.example.com")];
     let changes = changes(&planned, &[], &from(&json!({})), &plain);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].state, ChangeState::New);
@@ -61,15 +61,15 @@ fn a_planned_entry_the_config_does_not_hold_is_new() {
 
 #[test]
 fn a_planned_entry_the_config_already_holds_is_unchanged() {
-    let planned = vec![entry("embed.url", "https://a.example.test")];
-    let current = json!({ "embed": { "url": "https://a.example.test" } });
+    let planned = vec![entry("embed.url", "https://embed.example.com")];
+    let current = json!({ "embed": { "url": "https://embed.example.com" } });
     let changes = changes(&planned, &[], &from(&current), &plain);
     assert_eq!(changes[0].state, ChangeState::Unchanged);
 }
 
 #[test]
 fn a_watched_path_the_config_holds_and_the_run_drops_is_removed() {
-    let planned = vec![entry("embed.url", "https://a.example.test")];
+    let planned = vec![entry("embed.url", "https://embed.example.com")];
     let current = json!({ "credentials": { "embed_api_key": "sk-old" } });
     let changes = changes(
         &planned,
@@ -100,8 +100,8 @@ fn a_watched_path_the_config_never_held_is_not_shown_at_all() {
 
 #[test]
 fn a_watched_path_the_run_also_writes_is_not_shown_twice() {
-    let planned = vec![entry("embed.url", "https://a.example.test")];
-    let current = json!({ "embed": { "url": "https://old.example.test" } });
+    let planned = vec![entry("embed.url", "https://embed.example.com")];
+    let current = json!({ "embed": { "url": "https://old.example.com" } });
     let changes = changes(&planned, &["embed.url"], &from(&current), &plain);
     assert_eq!(changes.len(), 1, "{changes:?}");
 }

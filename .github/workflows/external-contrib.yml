@@ -1,0 +1,25 @@
+name: External Contrib
+on:
+  # A fork PR needs a write to the target repository to be turned into a draft,
+  # which `pull_request` cannot do. This workflow reads no PR content: it has no
+  # checkout and one step that calls the GitHub API with the event's PR number.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  draft-external:
+    if: >-
+      github.event.pull_request.draft == false &&
+      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # No checkout, no PR-content evaluation, only GitHub API mutation.
+      - name: Convert external PR to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+        run: gh pr ready "$PR_NUMBER" --undo --repo "$GH_REPO"
