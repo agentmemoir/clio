@@ -61,6 +61,7 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "rerank.url",
     "rerank.model",
     "rerank.provider",
+    "rerank.max_client_batch",
     "credentials.embed_api_key",
     "credentials.rerank_api_key",
     "credentials.extract_api_key",
@@ -374,6 +375,20 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 return Err(AmError::new(
                     ErrorCode::OutOfRange,
                     format!("embed.dims must be in 1..={MAX_EMBED_DIMS} (storage ceiling)"),
+                ));
+            }
+        }
+        "rerank.max_client_batch" => {
+            let Some(n) = value.as_u64() else {
+                return Err(AmError::new(
+                    ErrorCode::InvalidType,
+                    "rerank.max_client_batch must be a positive integer",
+                ));
+            };
+            if n == 0 {
+                return Err(AmError::new(
+                    ErrorCode::OutOfRange,
+                    "rerank.max_client_batch must be positive",
                 ));
             }
         }

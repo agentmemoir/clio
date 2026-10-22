@@ -53,6 +53,12 @@ use std::time::Duration;
 /// Default rerank request deadline (a small fraction of the retrieve SLO).
 pub const DEFAULT_RERANK_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Default maximum number of documents accepted by the local rerank service.
+///
+/// The matching `CLIO_RERANK_MAX_CLIENT_BATCH` compose setting is exposed in
+/// the effective config so the client and sidecar use the same deployment cap.
+pub const DEFAULT_RERANK_MAX_CLIENT_BATCH: usize = 32;
+
 /// The provider an unset `rerank.provider` resolves to: the tei sidecar.
 ///
 /// The effective document carries the empty system default for an omitted
@@ -75,6 +81,15 @@ pub trait Reranker: Send + Sync {
         documents: &[String],
         top_k: usize,
     ) -> Result<Vec<RerankedDoc>, AmError>;
+
+    /// Maximum number of documents one request may contain.
+    ///
+    /// Custom rerankers can keep the pre-batching behavior by accepting the
+    /// default unbounded value; the built-in HTTP adapters expose their
+    /// deployment cap here so the orchestrator can split a shortlist safely.
+    fn max_batch_size(&self) -> usize {
+        usize::MAX
+    }
 }
 
 /// HTTP sidecar reranker (`POST {url}/rerank`).
@@ -82,6 +97,7 @@ pub struct HttpReranker {
     url: String,
     bearer: Option<String>,
     timeout: Duration,
+    max_client_batch: usize,
 }
 
 impl fmt::Debug for HttpReranker {
@@ -91,6 +107,7 @@ impl fmt::Debug for HttpReranker {
             .field("url", &self.url)
             .field("bearer", &self.bearer.as_ref().map(|_| "****"))
             .field("timeout", &self.timeout)
+            .field("max_client_batch", &self.max_client_batch)
             .finish()
     }
 }
@@ -113,12 +130,28 @@ impl HttpReranker {
             url,
             bearer,
             timeout: DEFAULT_RERANK_TIMEOUT,
+            max_client_batch: DEFAULT_RERANK_MAX_CLIENT_BATCH,
         })
     }
 
     /// Override the request deadline (tests / tuning).
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout;
+    }
+
+    /// Set the deployment's maximum request batch size.
+    ///
+    /// # Errors
+    /// A zero batch cannot make progress and is rejected.
+    pub fn set_max_client_batch(&mut self, max_client_batch: usize) -> Result<(), AmError> {
+        if max_client_batch == 0 {
+            return Err(AmError::new(
+                ErrorCode::ConfigCorrupt,
+                "rerank.max_client_batch must be positive",
+            ));
+        }
+        self.max_client_batch = max_client_batch;
+        Ok(())
     }
 }
 
@@ -145,6 +178,10 @@ impl Reranker for HttpReranker {
         let value = post_json(&url, &body, self.timeout, self.bearer.as_deref())?;
         parse_rerank_response(&value, documents.len())
     }
+
+    fn max_batch_size(&self) -> usize {
+        self.max_client_batch
+    }
 }
 
 /// Cohere-compatible hosted reranker (`POST {url}/v1/rerank`).
@@ -153,6 +190,7 @@ pub struct CohereReranker {
     model: String,
     bearer: Option<String>,
     timeout: Duration,
+    max_client_batch: usize,
 }
 
 impl fmt::Debug for CohereReranker {
@@ -163,6 +201,7 @@ impl fmt::Debug for CohereReranker {
             .field("model", &self.model)
             .field("bearer", &self.bearer.as_ref().map(|_| "****"))
             .field("timeout", &self.timeout)
+            .field("max_client_batch", &self.max_client_batch)
             .finish()
     }
 }
@@ -197,12 +236,28 @@ impl CohereReranker {
             model,
             bearer,
             timeout: DEFAULT_RERANK_TIMEOUT,
+            max_client_batch: DEFAULT_RERANK_MAX_CLIENT_BATCH,
         })
     }
 
     /// Override the request deadline (tests / tuning).
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout;
+    }
+
+    /// Set the deployment's maximum request batch size.
+    ///
+    /// # Errors
+    /// A zero batch cannot make progress and is rejected.
+    pub fn set_max_client_batch(&mut self, max_client_batch: usize) -> Result<(), AmError> {
+        if max_client_batch == 0 {
+            return Err(AmError::new(
+                ErrorCode::ConfigCorrupt,
+                "rerank.max_client_batch must be positive",
+            ));
+        }
+        self.max_client_batch = max_client_batch;
+        Ok(())
     }
 }
 
@@ -229,6 +284,10 @@ impl Reranker for CohereReranker {
         let url = format!("{base}/v1/rerank");
         let value = post_json(&url, &body, self.timeout, self.bearer.as_deref())?;
         parse_rerank_response(&value, documents.len())
+    }
+
+    fn max_batch_size(&self) -> usize {
+        self.max_client_batch
     }
 }
 
@@ -279,6 +338,24 @@ pub fn build_reranker_from(
         _ => DEFAULT_RERANK_PROVIDER.to_owned(),
     };
     let model = text("/rerank/model");
+    let max_client_batch = match effective.pointer("/rerank/max_client_batch") {
+        None => DEFAULT_RERANK_MAX_CLIENT_BATCH,
+        Some(value) => value
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                AmError::new(
+                    ErrorCode::ConfigCorrupt,
+                    "rerank.max_client_batch must be a positive integer",
+                )
+            })?,
+    };
+    if max_client_batch == 0 {
+        return Err(AmError::new(
+            ErrorCode::ConfigCorrupt,
+            "rerank.max_client_batch must be positive",
+        ));
+    }
     match provider.as_str() {
         "tei" => {
             if model.is_empty() {
@@ -287,7 +364,9 @@ pub fn build_reranker_from(
                     "rerank.model is required when rerank.url is set",
                 ));
             }
-            HttpReranker::new(url, bearer).map(|r| Some(Arc::new(r) as Arc<dyn Reranker>))
+            let mut reranker = HttpReranker::new(url, bearer)?;
+            reranker.set_max_client_batch(max_client_batch)?;
+            Ok(Some(Arc::new(reranker) as Arc<dyn Reranker>))
         }
         "cohere" => {
             let Some(key) = bearer else {
@@ -296,8 +375,9 @@ pub fn build_reranker_from(
                     "rerank.provider = cohere requires credentials.rerank_api_key (or credentials.api_key)",
                 ));
             };
-            CohereReranker::new(url, model, Some(key))
-                .map(|r| Some(Arc::new(r) as Arc<dyn Reranker>))
+            let mut reranker = CohereReranker::new(url, model, Some(key))?;
+            reranker.set_max_client_batch(max_client_batch)?;
+            Ok(Some(Arc::new(reranker) as Arc<dyn Reranker>))
         }
         other => Err(AmError::new(
             ErrorCode::ConfigCorrupt,
