@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - `SubjectRequestEnv` and the request verbs `open`, `report`,
-//!   `apply_command`, `close`, `retry_erasure`, `peer_retry`, `record_copy`,
+//!   `apply_command`, `complete_path`, `close`, `retry_erasure`, `peer_retry`, `record_copy`,
 //!   `record_exception`, `review_events`, `peer_report`, `peer_disposition`,
 //!   `derive_peer_enablement`
 //! - `load_record` and `save_record`
@@ -131,7 +131,6 @@ pub fn apply_command(
     report_of(env, &load_record(env, request_id)?)
 }
 
-/// Close one request: accept the closure, move it to final, and report it.
 /// Record a privileged caller's verified completion of a product-controlled path.
 pub fn complete_path(
     env: &SubjectRequestEnv<'_>,

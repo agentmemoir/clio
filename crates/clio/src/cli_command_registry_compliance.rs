@@ -176,7 +176,42 @@ pub(crate) const COMPLIANCE_REVIEW_EXPORT: CommandSpec = CommandSpec {
     section: Section::Write,
 };
 
-/// The twelve compliance records, in capture order.
+/// The explicit verified completion of one product-controlled path.
+const COMPLIANCE_REQUEST_PATH_COMPLETE: CommandSpec = CommandSpec {
+    name: "compliance request-path-complete",
+    summary: "Record a verified product-path result (requires --actor harness|system)",
+    documented: &[
+        Flag {
+            required: true,
+            ..Flag::text("request-id", "ID", "The durable request id.")
+        },
+        Flag {
+            required: true,
+            ..Flag::text(
+                "product-path",
+                "PATH",
+                "The product-controlled path with a verified result.",
+            )
+        },
+        GLOBAL_BANK,
+        GLOBAL_ACTOR,
+        GLOBAL_OUTPUT,
+    ],
+    examples: &[
+        Example::new(
+            "clio compliance request-path-complete --request-id r1 --product-path erasure --actor harness",
+            None,
+        ),
+        Example::new(
+            "clio compliance request-path-complete --request-id r1 --product-path copy --actor system -o json",
+            None,
+        ),
+    ],
+    tool: Some("subject_request_path_complete"),
+    ..COMPLIANCE_REQUEST_CLOSE
+};
+
+/// The compliance records, in capture order.
 pub(crate) static COMPLIANCE_LEAVES: &[CommandSpec] = &[
     COMPLIANCE_INVENTORY,
     COMPLIANCE_REVIEW_EXPORT,
@@ -186,6 +221,7 @@ pub(crate) static COMPLIANCE_LEAVES: &[CommandSpec] = &[
     COMPLIANCE_REQUEST_COPY,
     COMPLIANCE_REQUEST_EXCEPTION,
     COMPLIANCE_REQUEST_EVENTS,
+    COMPLIANCE_REQUEST_PATH_COMPLETE,
     COMPLIANCE_REQUEST_CLOSE,
     COMPLIANCE_PEER_STATUS,
     COMPLIANCE_PEER_RETRY,

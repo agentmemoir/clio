@@ -5,7 +5,7 @@
 //!
 //! This module is responsible for the unknown-product-path closure refusal of
 //! the cross-path compliance proof: a closure that names a product path no
-//! production code ever marks done refuses the completion claim with its own
+//! caller has recorded as done refuses the completion claim with its own
 //! named refusal, and the request stays open.
 //!
 //! ## Owns
@@ -37,8 +37,8 @@ const PRODUCT_PATH: &str = "erasure";
 /// The unknown-product-path refusal on one deployment.
 ///
 /// The closure gate reads the named product path from the stored request, and
-/// no production code ever writes a path slot, so the gate finds the path
-/// unknown and refuses the completion claim with its own named refusal. The
+/// no path slot has been recorded, so the gate refuses the completion claim
+/// with a message naming the missing recorded product path. The
 /// request stays open.
 fn unknown_product_path_refuses_closure(env: &Env, request: &str) {
     ok(&env.start(request, DENIED_SUBJECT), "request-start");

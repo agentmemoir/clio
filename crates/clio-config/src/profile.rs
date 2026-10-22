@@ -222,7 +222,7 @@ pub fn coding_tool_inventory(omit_sync: bool) -> Vec<ToolInventoryEntry> {
     entries
 }
 
-/// Append the ten `subject_request_*` inventory rows in their canonical order.
+/// Append the `subject_request_*` inventory rows in their canonical order.
 fn push_subject_request_inventory(entries: &mut Vec<ToolInventoryEntry>) {
     for name in [
         "subject_request_start",
@@ -231,6 +231,7 @@ fn push_subject_request_inventory(entries: &mut Vec<ToolInventoryEntry>) {
         "subject_request_copy",
         "subject_request_exception",
         "subject_request_events",
+        "subject_request_path_complete",
         "subject_request_close",
         "subject_request_peer_status",
         "subject_request_peer_retry",

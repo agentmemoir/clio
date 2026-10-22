@@ -4,12 +4,12 @@
 //! # Responsibility
 //!
 //! This module is responsible for the MCP binding of the durable subject-request
-//! verbs: it decodes the ten request/peer tool arguments, calls the shared
+//! verbs: it decodes the request/peer tool arguments, calls the shared
 //! `clio_compliance::subject_request_service` facade, and returns the separated
 //! request status report as JSON.
 //!
 //! ## Owns
-//! - Argument decoding and result shaping for the ten `subject_request_*` tools
+//! - Argument decoding and result shaping for the `subject_request_*` tools
 //! - Deriving the deployment peer-enablement fact from the effective config
 //! - The request-scope, request-kind, request-command, and peer-disposition
 //!   argument parsers
@@ -51,6 +51,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         "subject_request_copy" => copy(state, args),
         "subject_request_exception" => exception(state, args),
         "subject_request_events" => events(state, args),
+        "subject_request_path_complete" => path_complete(state, args),
         "subject_request_close" => close(state, args),
         "subject_request_peer_status" => peer_status(state, args),
         "subject_request_peer_retry" => peer_retry(state, args),
@@ -211,6 +212,18 @@ fn events(state: &McpState, args: &Value) -> Result<Value, AmError> {
         "next_cursor": page.next_cursor,
         "has_more": page.has_more,
     }))
+}
+
+/// Record a privileged caller's verified product-path completion.
+fn path_complete(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    let ctx = state.resolve_ctx(args)?;
+    let report = svc::complete_path(
+        &env(state),
+        &ctx,
+        req_str(args, "request_id")?,
+        req_str(args, "product_path")?,
+    )?;
+    Ok(serde_json::to_value(&report).expect("serialize request report"))
 }
 
 /// `subject_request_close`: accept closure, finalize, and report the request.

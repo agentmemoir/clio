@@ -69,6 +69,7 @@ pub const BOUND_WRITE_TOOLS: &[&str] = &[
     "subject_request_copy",
     "subject_request_exception",
     "subject_request_events",
+    "subject_request_path_complete",
     "subject_request_close",
     "subject_request_peer_status",
     "subject_request_peer_retry",

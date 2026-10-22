@@ -35,6 +35,7 @@ pub fn request_defs() -> Vec<ToolDef> {
         copy_def(),
         exception_def(),
         events_def(),
+        path_complete_def(),
         close_def(),
         peer_status_def(),
         peer_retry_def(),
@@ -173,6 +174,22 @@ fn events_def() -> ToolDef {
                 num("Maximum rows to return (default 100, max 1000)."),
             ),
             ("cursor", s("Resume after this decimal sequence position.")),
+        ]),
+    }
+}
+
+/// Explicitly attest that a product-controlled path has a verified result.
+fn path_complete_def() -> ToolDef {
+    ToolDef {
+        name: "subject_request_path_complete",
+        description: "Record a verified Done result for one product-controlled path and report the request. Requires a harness or system actor in the request bank. Terminal requests cannot change.",
+        required: &["request_id", "product_path"],
+        props: props(vec![
+            ("request_id", s("Durable request id.")),
+            (
+                "product_path",
+                s("Product-controlled path with a verified result."),
+            ),
         ]),
     }
 }

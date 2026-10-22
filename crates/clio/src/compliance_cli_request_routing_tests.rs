@@ -36,6 +36,7 @@ const REQUEST_SUBCOMMANDS: &[&str] = &[
     "request-copy",
     "request-exception",
     "request-events",
+    "request-path-complete",
     "request-close",
     "peer-status",
     "peer-retry",

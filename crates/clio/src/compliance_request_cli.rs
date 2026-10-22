@@ -8,7 +8,7 @@
 //! `subject_request_*` tool, and renders the separated request status.
 //!
 //! ## Owns
-//! - Flag decoding for the ten request and peer-request commands (1:1 with the
+//! - Flag decoding for the request and peer-request commands (1:1 with the
 //!   published `inputSchema`)
 //! - The store open, the in-process tool call, and the exit codes
 //! - The text view of the separated request fields
@@ -208,10 +208,15 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
             insert_opt(&mut args, parsed, "cursor", "cursor");
             Ok(("subject_request_events", Value::Object(args)))
         }
-        "request-close" => {
+        "request-path-complete" | "request-close" => {
             args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("product_path".into(), required(parsed, "product-path"));
-            Ok(("subject_request_close", Value::Object(args)))
+            let tool = if sub == "request-close" {
+                "subject_request_close"
+            } else {
+                "subject_request_path_complete"
+            };
+            Ok((tool, Value::Object(args)))
         }
         "peer-status" => {
             args.insert("request_id".into(), required(parsed, "request-id"));
