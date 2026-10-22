@@ -190,6 +190,7 @@ fn provider_value_validation() {
     validate_set_path("rerank.provider").unwrap();
     validate_set_path("rerank.url").unwrap();
     validate_set_path("rerank.model").unwrap();
+    validate_set_path("rerank.max_client_batch").unwrap();
     validate_set_path("credentials.rerank_api_key").unwrap();
 
     for ok in ["tei", "openai"] {
@@ -230,6 +231,20 @@ fn provider_value_validation() {
     );
     assert_eq!(
         validate_set_value("rerank.provider", &json!(1))
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidType
+    );
+
+    validate_set_value("rerank.max_client_batch", &json!(32)).unwrap();
+    assert_eq!(
+        validate_set_value("rerank.max_client_batch", &json!(0))
+            .unwrap_err()
+            .code,
+        ErrorCode::OutOfRange
+    );
+    assert_eq!(
+        validate_set_value("rerank.max_client_batch", &json!("32"))
             .unwrap_err()
             .code,
         ErrorCode::InvalidType

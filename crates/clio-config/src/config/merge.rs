@@ -58,7 +58,8 @@ where
         "rerank": {
             "url": "",
             "model": "",
-            "provider": ""
+            "provider": "",
+            "max_client_batch": 32
         },
         "log": { "level": "info" },
         "injection": { "budget_tokens": 2048 },

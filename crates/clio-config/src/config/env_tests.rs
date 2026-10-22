@@ -65,6 +65,7 @@ fn all_pairs() -> Vec<(&'static str, &'static str)> {
         ("CLIO_RERANK_URL", "http://127.0.0.1:1/rerank"),
         ("CLIO_RERANK_MODEL", "some/rerank-model"),
         ("CLIO_RERANK_PROVIDER", "cohere"),
+        ("CLIO_RERANK_MAX_CLIENT_BATCH", "17"),
         ("CLIO_RERANK_API_KEY", "rk-rerank-token-0123456789"),
         ("CLIO_EXTRACT_PROVIDER", "template"),
         ("CLIO_EXTRACT_URL", "http://127.0.0.1:1/extract"),
@@ -123,6 +124,16 @@ fn a_dimension_is_folded_in_as_a_number() {
     assert_eq!(rt.env_overlay.get("embed.dims"), Some(&json!(512_u64)));
 }
 
+#[test]
+fn rerank_batch_size_is_folded_in_as_a_number() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.apply_process_env(&mut env(&[("CLIO_RERANK_MAX_CLIENT_BATCH", "17")]));
+    assert_eq!(
+        rt.env_overlay.get("rerank.max_client_batch"),
+        Some(&json!(17_u64))
+    );
+}
+
 /// A dimension that is not a number cannot become one, so the overlay leaves the
 /// path alone and the config default stands.
 #[test]
@@ -166,6 +177,7 @@ fn the_bare_provider_names_are_not_read() {
         ("RERANK_URL", "http://127.0.0.1:1/rerank"),
         ("RERANK_MODEL", "some/rerank-model"),
         ("RERANK_PROVIDER", "cohere"),
+        ("RERANK_MAX_CLIENT_BATCH", "17"),
         ("RERANK_API_KEY", "rk-rerank-token-0123456789"),
         ("EXTRACT_PROVIDER", "template"),
         ("EXTRACT_URL", "http://127.0.0.1:1/extract"),
