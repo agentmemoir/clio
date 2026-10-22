@@ -1,0 +1,4 @@
+# Logins that never need to sign the CLA. One login per line.
+# Text after # is ignored. Matching is case-insensitive.
+dependabot[bot]
+github-actions[bot]

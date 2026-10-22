@@ -2,7 +2,7 @@
 
 This Contributor License Agreement ("Agreement") covers Contributions to `agentmemoir/clio` ("Clio" or "the Project"). It is for individual contributors. If You make Contributions as part of Your job, and Your employer owns or may own the work, then a corporate CLA is needed. Contact the maintainers before You contribute in that case.
 
-CLA Assistant collects these fields when You sign: Your GitHub username, Your name, Your email, and the date. The Project keeps that record with the signed Agreement.
+You sign by commenting the signature sentence on Your first pull request. The Project records Your GitHub username, Your name, Your email, the date, and the commit You signed at in `signatures/cla.json` on the `cla-signatures` branch of this repository. You sign once. Later Contributions are covered by the same record.
 
 You accept and agree to the following terms and conditions for Your present and future Contributions submitted to the Project. In return, the Project will not use Your Contributions in a way that is contrary to the public benefit. Except for the license granted herein to the Project and recipients of software distributed by the Project, You reserve all right, title, and interest in and to Your Contributions.
 
