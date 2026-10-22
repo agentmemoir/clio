@@ -119,9 +119,9 @@ mod tests {
     #[test]
     fn value_is_sealed_under_the_subject_and_opens_back() {
         let kms = LocalDevKms::new();
-        let cipher = seal_object(&kms, "alice", "host:db.internal:5432").unwrap();
-        assert!(!cipher.contains("db.internal"));
-        assert_eq!(open_object(&kms, &cipher).unwrap(), "host:db.internal:5432");
+        let cipher = seal_object(&kms, "alice", "host:db.example.com:5432").unwrap();
+        assert!(!cipher.contains("db.example.com"));
+        assert_eq!(open_object(&kms, &cipher).unwrap(), "host:db.example.com:5432");
     }
 
     #[test]

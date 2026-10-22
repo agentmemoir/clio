@@ -106,11 +106,11 @@ fn canonical_put_rejects_unlisted_snapshot_leaf() {
         json!({
             "item": {"id": "itm-unlisted-canon"},
             "key": "primary_database_host",
-            "value": "db-1.internal",
-            "snapshot": {"entity": "db-1.internal", "owner": "platform team"},
+            "value": "db-1.example.com",
+            "snapshot": {"entity": "db-1.example.com", "owner": "platform team"},
             "category": "tool_config",
             "epistemic_kind": "fact",
-            "source_text": "The host is db-1.internal and the owner is the platform team.",
+            "source_text": "The host is db-1.example.com and the owner is the platform team.",
             "bank": "bank-a",
             "actor": "agent"
         }),

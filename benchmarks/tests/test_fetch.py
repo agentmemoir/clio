@@ -59,7 +59,7 @@ class EnsureDatasetTests(unittest.TestCase):
             path.write_bytes(b"abc")
             pin = {
                 "filename": "data.json",
-                "url": "http://invalid.example/data.json",
+                "url": "http://download.example.com/data.json",
                 "sha256": hashlib.sha256(b"abc").hexdigest(),
             }
             with mock.patch.object(fetch, "_download") as download:
@@ -72,7 +72,7 @@ class EnsureDatasetTests(unittest.TestCase):
             cache = Path(tmp)
             pin = {
                 "filename": "data.json",
-                "url": "http://invalid.example/data.json",
+                "url": "http://download.example.com/data.json",
                 "sha256": hashlib.sha256(b"abc").hexdigest(),
             }
 
@@ -87,7 +87,7 @@ class EnsureDatasetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pin = {
                 "filename": "data.json",
-                "url": "http://invalid.example/data.json",
+                "url": "http://download.example.com/data.json",
                 "sha256": "0" * 64,
             }
             with mock.patch.object(
@@ -98,7 +98,7 @@ class EnsureDatasetTests(unittest.TestCase):
 
     def test_transport_failure_raises_missing_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            pin = {"filename": "x.json", "url": "http://invalid.example/x.json"}
+            pin = {"filename": "x.json", "url": "http://download.example.com/x.json"}
             with mock.patch.object(
                 fetch, "_download", side_effect=OSError("no route")
             ):

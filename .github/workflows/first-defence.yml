@@ -1,0 +1,177 @@
+name: First Defence
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  unicode:
+    name: Trojan Source Unicode
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Install the established scanner outside the untrusted checkout.
+      # No npm scripts from the pull request or repository are executed.
+      - name: Install anti-trojan-source CLI
+        run: npm install --prefix "$RUNNER_TEMP/anti-trojan" --ignore-scripts --no-audit --no-fund anti-trojan-source@1.8.1
+      - name: Check source, workflows and agent instructions
+        run: |
+          "$RUNNER_TEMP/anti-trojan/node_modules/.bin/anti-trojan-source" \
+            --files='**/*.{rs,toml,lock,md,yml,yaml,json,sh,py,js,ts}' \
+            --verbose
+
+  secrets:
+    name: TruffleHog credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Upstream-supported action; pin to a verified immutable commit SHA in production.
+      - name: Scan committed secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --results=verified,unknown
+
+  workflow-security:
+    name: zizmor workflow security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Audit GitHub workflows
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+          online-audits: false
+          inputs: .github/workflows
+
+  diff-sentry:
+    name: Malicious diff scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scan diffs the change against its base commit.
+          fetch-depth: 0
+          persist-credentials: false
+      # Third-party action. It needs no key and no network write.
+      # Inputs used: fail-on. See its action.yml for the values.
+      - name: Scan the change
+        uses: qazbnm456/diff-sentry@v0.5.0
+        with:
+          fail-on: high
+
+  url-check:
+    name: New external URL check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check diffs the change against its base commit.
+          fetch-depth: 0
+          persist-credentials: false
+      # The allow-list holds domains, not full URLs.
+      # The port and the path are ignored, so a new path on a known host passes.
+      # An entry also covers its subdomains, so `example.com` covers `v2.api.example.com`.
+      # The boundary is a dot, so `bar.example.com` does not cover `notbar.example.com`.
+      # A new domain fails CI until someone adds it to .github/domain-allowlist.txt.
+      - name: Compare URL domains against the allow-list
+        run: |
+          set -uo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no base commit; nothing to check"
+            exit 0
+          fi
+          # Added lines only, in the three file types, then the URLs they hold.
+          git diff --unified=0 "$base" HEAD -- '*.rs' '*.toml' '*.yml' \
+            | grep '^+' | grep -v '^+++' \
+            | grep -hoE 'https?://[A-Za-z0-9._~:/?#@!$&*+,;=%-]+' \
+            | sed 's/[.,;:)]*$//' | sort -u > "$RUNNER_TEMP/urls.txt" || true
+          # python3 is on ubuntu-latest. It handles userinfo, port, and IPv6.
+          # It writes one "domain<TAB>url" line per URL. A URL with no host
+          # (for example a bare "https://") has no domain to check and is skipped.
+          python3 - "$RUNNER_TEMP/urls.txt" > "$RUNNER_TEMP/pairs.txt" <<'PY'
+          import sys
+
+          def domain(url):
+              s = url.strip()
+              if "://" in s:
+                  s = s.split("://", 1)[1]
+              s = s.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+              s = s.rsplit("@", 1)[-1]
+              if s.startswith("["):
+                  host = s.split("]", 1)[0] + "]"
+              else:
+                  host = s.split(":", 1)[0]
+              return host.lower()
+
+          for line in open(sys.argv[1]):
+              url = line.strip()
+              if url:
+                  d = domain(url)
+                  if d:
+                      print(f"{d}\t{url}")
+          PY
+          # An entry matches a host, or any host that ends with "." plus the entry.
+          # The dot boundary keeps "notbar.example.com" out when "bar.example.com" is listed.
+          # Case is ignored on both sides. Blank lines and lines starting with "#" are skipped.
+          # A missing or empty list is a hard failure, never a pass.
+          python3 - "$RUNNER_TEMP/pairs.txt" .github/domain-allowlist.txt <<'PY'
+          import sys
+
+          pairs_path, list_path = sys.argv[1], sys.argv[2]
+          try:
+              with open(list_path) as handle:
+                  text = handle.read()
+          except OSError as exc:
+              print(f"::error::cannot read {list_path}: {exc}")
+              sys.exit(1)
+
+          allow = set()
+          for line in text.splitlines():
+              entry = line.strip().lower()
+              if entry and not entry.startswith("#"):
+                  allow.add(entry)
+
+          if not allow:
+              print(f"::error::{list_path} has no entries")
+              sys.exit(1)
+
+          def covered(host):
+              return any(host == e or host.endswith("." + e) for e in allow)
+
+          offenders = []
+          for line in open(pairs_path):
+              line = line.rstrip("\n")
+              if not line:
+                  continue
+              domain, _, url = line.partition("\t")
+              domain = domain.strip().lower()
+              if not covered(domain):
+                  offenders.append((domain, url))
+
+          if offenders:
+              print("::error::URL domains not covered by .github/domain-allowlist.txt:")
+              for domain, url in offenders:
+                  print(f"{domain}  {url}")
+              sys.exit(1)
+          print("all URL domains are covered by .github/domain-allowlist.txt")
+          PY

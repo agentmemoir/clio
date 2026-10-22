@@ -73,7 +73,7 @@ fn t06_session_lifecycle_mint_echo_delete() {
 #[test]
 fn t08_bad_origin_is_403() {
     let (port, _) = spawn_server(HttpConfig::default());
-    let res = post_json(port, INIT, "Origin: http://evil.example\r\n");
+    let res = post_json(port, INIT, "Origin: http://evil.example.com\r\n");
     assert_eq!(res.status, 403);
     let ok = post_json(port, INIT, "Origin: http://localhost:5173\r\n");
     assert_eq!(ok.status, 200);
@@ -285,10 +285,10 @@ fn route_helpers_cover_security_and_status_paths() {
     assert!(origin_host_allowed("http://localhost:8080", &[]));
     assert!(origin_host_allowed("https://127.0.0.1", &[]));
     assert!(origin_host_allowed(
-        "http://custom-host",
-        &["custom-host".into()]
+        "http://custom-host.example.com",
+        &["custom-host.example.com".into()]
     ));
-    assert!(!origin_host_allowed("http://evil.example", &[]));
+    assert!(!origin_host_allowed("http://evil.example.com", &[]));
     // DELETE without session id → 400.
     let del = request(port, "DELETE /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n");
     assert_eq!(del.status, 400);

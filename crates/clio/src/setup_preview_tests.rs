@@ -79,8 +79,8 @@ fn the_blocks_come_in_the_plans_order() {
     let run = Harness::fresh()
         .with_pasted_secrets(&["sk-1", "sk-2"])
         .typing(PASTED)
-        .typing("2\nhttps://embed.example.test\nm\n")
-        .typing("2\nhttps://rerank.example.test\nm\n")
+        .typing("2\nhttps://embed.example.com\nm\n")
+        .typing("2\nhttps://rerank.example.com\nm\n")
         .typing("1\n")
         .run();
     let names: Vec<&str> = run.view().blocks.iter().map(|block| block.name).collect();
@@ -97,7 +97,7 @@ fn a_run_that_skipped_reranking_has_no_reranking_block() {
     let run = Harness::fresh()
         .with_pasted_secrets(&["sk-1"])
         .typing(PASTED)
-        .typing("2\nhttps://embed.example.test\nm\n")
+        .typing("2\nhttps://embed.example.com\nm\n")
         .typing("3\n1\n")
         .run();
     let names: Vec<&str> = run.view().blocks.iter().map(|block| block.name).collect();
@@ -132,13 +132,13 @@ fn an_endpoint_line_says_whether_the_traffic_is_encrypted() {
     let answers = Harness::fresh()
         .with_pasted_secrets(&["sk-1", "sk-2"])
         .typing(PASTED)
-        .typing("2\nhttps://embed.example.test\nm\n")
+        .typing("2\nhttps://embed.example.com\nm\n")
         .typing("2\nhttp://127.0.0.1:8080\nm\n")
         .typing("1\n")
         .run();
     let drawn = render(answers.answers(), &json!({}));
     assert!(
-        drawn.contains("https://embed.example.test (encrypted)"),
+        drawn.contains("https://embed.example.com (encrypted)"),
         "{drawn}"
     );
     assert!(
@@ -212,7 +212,7 @@ fn a_watched_field_the_run_drops_is_shown_as_removed() {
     // going, and the operator has to read that before agreeing.
     let current = json!({
         "credentials": { "rerank_api_key": "sk-old" },
-        "rerank": { "url": "https://old.example.test", "model": "old", "provider": "cohere" }
+        "rerank": { "url": "https://old.example.com", "model": "old", "provider": "cohere" }
     });
     let run = Harness::fresh()
         .with_secrets(&["pw"])
@@ -274,7 +274,7 @@ fn will_start_names_only_the_services_the_answers_need() {
     let hosted = Harness::fresh()
         .with_pasted_secrets(&["sk-1"])
         .typing("3\n1\n")
-        .typing("2\nhttps://embed.example.test\nm\n")
+        .typing("2\nhttps://embed.example.com\nm\n")
         .typing("3\n1\n")
         .run();
 
@@ -345,7 +345,7 @@ fn an_untested_item_is_visibly_different_from_a_tested_one() {
     let run = Harness::fresh()
         .with_secrets(&["pw", "sk-1"])
         .typing(TYPED)
-        .typing("2\nhttps://embed.example.test\nm\n")
+        .typing("2\nhttps://embed.example.com\nm\n")
         // Reranking local, so its container is not up yet and its line has to say
         // so. Declining reranking instead would leave nothing untested to show.
         .typing("1\n1\n")
@@ -354,7 +354,7 @@ fn an_untested_item_is_visibly_different_from_a_tested_one() {
     assert!(drawn.contains("not tested"), "{drawn}");
     // The hosted endpoint was probed, so its line has a real result.
     assert!(
-        drawn.contains("https://embed.example.test answered"),
+        drawn.contains("https://embed.example.com answered"),
         "{drawn}"
     );
 }

@@ -156,3 +156,13 @@ Release notes are the hand-written section rather than a generated list of commi
 A tag whose build failed stays where it is. Do not move it and do not delete it. Bump the version and release again.
 
 Record the abandoned version with a normal heading and a plain sentence saying it published nothing, so the next reader knows there is nothing to install from that tag. Keep a Changelog uses `[YANKED]` for a version that was published and then had to be pulled for a serious bug or a security problem. That is a different situation, so use that word only for it.
+
+## Contributor License Agreement
+
+Every pull request from an external contributor must sign the CLA before it can merge.
+
+The CLA Assistant bot comments on the pull request with a link.
+
+Signing takes one click with a GitHub account. The agreement is in [CLA.md](CLA.md).
+
+If your employer owns your work, the maintainers must arrange a corporate CLA with you first.

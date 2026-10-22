@@ -152,7 +152,7 @@ fn check_origin_allows_loopback_and_refuses_another_host() {
     assert_eq!(
         check_origin(
             &cfg,
-            &request_with("POST", &[("origin", "http://evil.example")])
+            &request_with("POST", &[("origin", "http://evil.example.com")])
         ),
         Some(403),
         "another host must be refused"
@@ -163,11 +163,11 @@ fn check_origin_allows_loopback_and_refuses_another_host() {
 /// the host it names.
 #[test]
 fn check_origin_allows_a_configured_host_and_nothing_more() {
-    let cfg = allowing("custom-host");
+    let cfg = allowing("custom-host.example.com");
     assert_eq!(
         check_origin(
             &cfg,
-            &request_with("POST", &[("origin", "https://custom-host")])
+            &request_with("POST", &[("origin", "https://custom-host.example.com")])
         ),
         None,
         "the configured host must be allowed"
@@ -175,7 +175,7 @@ fn check_origin_allows_a_configured_host_and_nothing_more() {
     assert_eq!(
         check_origin(
             &cfg,
-            &request_with("POST", &[("origin", "https://other-host")])
+            &request_with("POST", &[("origin", "https://other-host.example.com")])
         ),
         Some(403),
         "a host the operator did not name must be refused"
@@ -188,24 +188,24 @@ fn check_origin_allows_a_configured_host_and_nothing_more() {
 /// configured fails.
 #[test]
 fn origin_host_allowed_accepts_loopback_and_configured_hosts_only() {
-    let extra = vec!["custom-host".to_owned(), "[2001:db8::1]".to_owned()];
+    let extra = vec!["custom-host.example.com".to_owned(), "[2001:db8::1]".to_owned()];
     for origin in [
         "http://localhost:8080",
         "https://127.0.0.1",
         "http://127.0.0.1:9000",
         "http://[::1]:38417",
         "http://[::1]",
-        "custom-host",
+        "custom-host.example.com",
         "https://[2001:db8::1]:9000",
     ] {
         assert!(origin_host_allowed(origin, &extra), "must allow {origin}");
     }
     for origin in [
-        "http://evil.example",
-        "https://localhost.evil.example",
+        "http://evil.example.com",
+        "https://localhost.evil.example.com",
         "http://[::1].evil",
         "http://[::1]evil",
-        "http://[::1]:80@evil.example",
+        "http://[::1]:80@evil.example.com",
         "",
     ] {
         assert!(!origin_host_allowed(origin, &extra), "must refuse {origin}");

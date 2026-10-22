@@ -57,7 +57,7 @@ fn t34_09_default_is_template_without_egress() {
     // template provider with a stub transport rides the same shape as before.
     let calls = std::sync::Arc::new(std::sync::Mutex::new(0u32));
     let ex = build_extractor_from(
-        &cfg("template", "http://extract.local", "m"),
+        &cfg("template", "http://extract.example.com", "m"),
         None,
         Counting {
             calls: calls.clone(),

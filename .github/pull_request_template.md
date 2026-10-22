@@ -21,5 +21,6 @@
 
 ## Checklist
 
+- [ ] External contributors have signed the [CLA](CLA.md). The CLA Assistant bot comments on the pull request.
 - [ ] No private file contents or secrets pasted into public files or CI output.
 - [ ] New behavior has tests; updated docs if user-visible.

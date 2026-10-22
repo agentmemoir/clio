@@ -385,7 +385,7 @@ fn tool_errors_mask_credentials() {
     let state = state_with_items();
     let error = call_tool(
         &state,
-        "postgres://user:supersecret@db.internal/x",
+        "postgres://user:supersecret@db.example.com/x",
         &json!({}),
     )
     .expect_err("unknown tool is an error");
