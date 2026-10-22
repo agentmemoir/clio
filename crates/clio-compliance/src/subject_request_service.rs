@@ -43,8 +43,8 @@ use crate::subject_request_events::{ClosureBlock, accept_closure};
 use crate::subject_request_report::report_of;
 use crate::subject_request_store_wiring::{
     closure_inputs, copy_row_closure_facts, erase_from_durable_store, peer_row_closure_facts,
-    record_copy_disposition, record_retention_exception, record_to_row, reload_ledger,
-    row_to_record,
+    record_copy_disposition, record_retention_exception, reload_ledger, row_to_record,
+    save_record_if_current,
 };
 use clio_store::{
     CopyInventoryRow, CopyInventoryStore, DurableRequestStore, LocalEventStore,
@@ -99,12 +99,15 @@ pub fn open(
         verification,
         deadline,
     )?;
-    save_record(env, &ledger, request_id)?;
+    if matches!(outcome, RegisterOutcome::Opened) {
+        save_record(env, &ledger, request_id, None)?;
+    }
     let record = load_record(env, request_id)?;
     snapshot_peers(env.peers, &record)?;
     if matches!(outcome, RegisterOutcome::Opened) {
+        ledger = SubjectRequestLedger::load(vec![record.clone()]);
         ledger.apply(request_id, &RequestCommand::Begin)?;
-        save_record(env, &ledger, request_id)?;
+        save_record(env, &ledger, request_id, Some(&record))?;
     }
     report_of(env, &load_record(env, request_id)?)
 }
@@ -126,8 +129,9 @@ pub fn apply_command(
     command: &RequestCommand,
 ) -> Result<RequestStatusReport, AmError> {
     let mut ledger = reload_ledger(env.durable)?;
+    let expected = ledger.record(request_id).cloned();
     ledger.apply(request_id, command)?;
-    save_record(env, &ledger, request_id)?;
+    save_record(env, &ledger, request_id, expected.as_ref())?;
     report_of(env, &load_record(env, request_id)?)
 }
 
@@ -145,7 +149,8 @@ pub fn complete_path(
             "a product path is required",
         ));
     }
-    let mut record = load_record(env, request_id)?;
+    let expected = load_record(env, request_id)?;
+    let mut record = expected.clone();
     let (RequestScope::Bank { bank_id } | RequestScope::Subject { bank_id, .. }) = &record.scope;
     if bank_id != ctx.bank.as_str() {
         return Err(AmError::new(
@@ -179,7 +184,7 @@ pub fn complete_path(
             state: PathState::Done,
         },
     );
-    env.durable.save(&record_to_row(&record))?;
+    save_record_if_current(env.durable, Some(&expected), &record)?;
     report_of(env, &record)
 }
 
@@ -208,11 +213,11 @@ pub fn close(
         .open_copy_actions
         .saturating_sub(base.open_copy_actions);
     let outcome = accept_closure(&inputs).map_err(closure_refusal)?;
-    let mut ledger = reload_ledger(env.durable)?;
+    let mut ledger = SubjectRequestLedger::load(vec![record.clone()]);
     ledger.apply(request_id, &RequestCommand::MarkTechnicalComplete)?;
     ledger.apply(request_id, &RequestCommand::AwaitOperator)?;
     ledger.apply(request_id, &RequestCommand::Finalize { outcome })?;
-    save_record(env, &ledger, request_id)?;
+    save_record(env, &ledger, request_id, Some(&record))?;
     report_of(env, &load_record(env, request_id)?)
 }
 
@@ -377,11 +382,12 @@ fn save_record(
     env: &SubjectRequestEnv<'_>,
     ledger: &SubjectRequestLedger,
     request_id: &str,
+    expected: Option<&SubjectRequestRecord>,
 ) -> Result<(), AmError> {
     let record = ledger
         .record(request_id)
         .ok_or_else(|| AmError::new(ErrorCode::NotFound, format!("no request {request_id}")))?;
-    env.durable.save(&record_to_row(record))
+    save_record_if_current(env.durable, expected, record)
 }
 
 fn closure_refusal(block: ClosureBlock) -> AmError {

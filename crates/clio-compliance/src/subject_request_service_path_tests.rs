@@ -90,3 +90,127 @@ fn completion_refuses_unauthorized_invalid_and_terminal_calls_without_writes() {
         assert_eq!(store.load("request").unwrap(), before);
     }
 }
+
+/// Return a captured snapshot only after a competing service call commits.
+struct InterleavedStore<'a> {
+    store: &'a clio_store::SqliteStore,
+    first_load: std::sync::atomic::AtomicBool,
+    competing_close: bool,
+}
+
+impl DurableRequestStore for InterleavedStore<'_> {
+    fn compare_and_save(
+        &self,
+        expected: Option<&clio_store::DurableRequestRow>,
+        row: &clio_store::DurableRequestRow,
+    ) -> Result<bool, clio_types::AmError> {
+        self.store.compare_and_save(expected, row)
+    }
+    fn save(&self, row: &clio_store::DurableRequestRow) -> Result<(), clio_types::AmError> {
+        self.store.save(row)
+    }
+
+    fn load(
+        &self,
+        request_id: &str,
+    ) -> Result<Option<clio_store::DurableRequestRow>, clio_types::AmError> {
+        let snapshot = self.store.load(request_id)?;
+        if self
+            .first_load
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            if self.competing_close {
+                close(&env(self.store), &ctx("bank-a"), request_id, "product")?;
+            } else {
+                complete_path(&env(self.store), &ctx("bank-a"), request_id, "other")?;
+            }
+        }
+        Ok(snapshot)
+    }
+
+    fn load_all(&self) -> Result<Vec<clio_store::DurableRequestRow>, clio_types::AmError> {
+        self.store.load_all()
+    }
+}
+
+#[test]
+fn completion_preserves_an_acknowledged_competing_path() {
+    let store = store();
+    persist(&store, &record("request", RequestState::InProgress));
+    let interleaved = InterleavedStore {
+        store: &store,
+        first_load: true.into(),
+        competing_close: false,
+    };
+    let mut service = env(&store);
+    service.durable = &interleaved;
+    let outcome = complete_path(&service, &ctx("bank-a"), "request", "product");
+    let saved = row_to_record(&store.load("request").unwrap().unwrap()).unwrap();
+    assert_eq!(
+        saved.paths.get("other").map(|slot| &slot.state),
+        Some(&PathState::Done)
+    );
+    if outcome.is_ok() {
+        assert_eq!(saved.paths["product"].state, PathState::Done);
+    } else {
+        assert!(!saved.paths.contains_key("product"));
+    }
+}
+
+#[test]
+fn completion_cannot_reopen_a_competing_final_close() {
+    let store = store();
+    let mut request = record("request", RequestState::InProgress);
+    request.paths.insert(
+        "product".into(),
+        PathSlot {
+            owner: PathOwner::Clio,
+            state: PathState::Done,
+        },
+    );
+    persist(&store, &request);
+    let interleaved = InterleavedStore {
+        store: &store,
+        first_load: true.into(),
+        competing_close: true,
+    };
+    let mut service = env(&store);
+    service.durable = &interleaved;
+    let outcome = complete_path(&service, &ctx("bank-a"), "request", "later");
+    let saved = row_to_record(&store.load("request").unwrap().unwrap()).unwrap();
+    assert_eq!(saved.state, RequestState::Final(FinalOutcome::Completed));
+    assert!(
+        outcome.is_err(),
+        "stale completion must not acknowledge a write"
+    );
+    assert!(!saved.paths.contains_key("later"));
+}
+
+#[test]
+fn close_preserves_an_acknowledged_competing_path() {
+    let store = store();
+    let mut request = record("request", RequestState::InProgress);
+    request.paths.insert(
+        "product".into(),
+        PathSlot {
+            owner: PathOwner::Clio,
+            state: PathState::Done,
+        },
+    );
+    persist(&store, &request);
+    let interleaved = InterleavedStore {
+        store: &store,
+        first_load: true.into(),
+        competing_close: false,
+    };
+    let mut service = env(&store);
+    service.durable = &interleaved;
+    let outcome = close(&service, &ctx("bank-a"), "request", "product");
+    let saved = row_to_record(&store.load("request").unwrap().unwrap()).unwrap();
+    assert_eq!(saved.paths["other"].state, PathState::Done);
+    if outcome.is_err() {
+        assert_eq!(saved.state, RequestState::InProgress);
+    } else {
+        assert_eq!(saved.state, RequestState::Final(FinalOutcome::Completed));
+    }
+}
