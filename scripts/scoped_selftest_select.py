@@ -185,6 +185,16 @@ def run(check) -> tuple:
     check("a benches directory is exempt", exemption("crates/clio/benches/parse.rs"), "benchmark")
     check("a build script is exempt", exemption("crates/clio/build.rs"), "build script")
     check(
+        "constant command records have no coverage lines to judge",
+        exemption("crates/clio/src/cli_command_registry_compliance.rs"),
+        "no executable code",
+    )
+    check(
+        "request functions still require measured coverage",
+        exemption("crates/clio-compliance/src/subject_request_service.rs"),
+        None,
+    )
+    check(
         "a report row carries its region percentage",
         report_rows({"data": [{"files": [{
             "filename": str(ROOT / "crates/a/src/x.rs"),
