@@ -121,7 +121,10 @@ mod tests {
         let kms = LocalDevKms::new();
         let cipher = seal_object(&kms, "alice", "host:db.example.com:5432").unwrap();
         assert!(!cipher.contains("db.example.com"));
-        assert_eq!(open_object(&kms, &cipher).unwrap(), "host:db.example.com:5432");
+        assert_eq!(
+            open_object(&kms, &cipher).unwrap(),
+            "host:db.example.com:5432"
+        );
     }
 
     #[test]

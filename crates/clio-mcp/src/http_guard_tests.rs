@@ -188,7 +188,10 @@ fn check_origin_allows_a_configured_host_and_nothing_more() {
 /// configured fails.
 #[test]
 fn origin_host_allowed_accepts_loopback_and_configured_hosts_only() {
-    let extra = vec!["custom-host.example.com".to_owned(), "[2001:db8::1]".to_owned()];
+    let extra = vec![
+        "custom-host.example.com".to_owned(),
+        "[2001:db8::1]".to_owned(),
+    ];
     for origin in [
         "http://localhost:8080",
         "https://127.0.0.1",

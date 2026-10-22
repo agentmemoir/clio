@@ -1,6 +1,9 @@
 name: External Contrib
 on:
-  pull_request_target:
+  # A fork PR needs a write to the target repository to be turned into a draft,
+  # which `pull_request` cannot do. This workflow reads no PR content: it has no
+  # checkout and one step that calls the GitHub API with the event's PR number.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, reopened, ready_for_review]
 permissions:
   contents: read
