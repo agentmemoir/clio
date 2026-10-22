@@ -138,6 +138,12 @@ pub fn close(
     product_path: &str,
 ) -> Result<RequestStatusReport, AmError> {
     let record = load_record(env, request_id)?;
+    if record.paths.is_empty() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "request closure refused: no product path is recorded on this request",
+        ));
+    }
     let copy_rows = env.copies.load_all()?;
     let peer_rows = env.peers.load_for_request(request_id)?;
     let base = closure_inputs(&record, product_path);

@@ -38,7 +38,7 @@ use crate::subject_request_service_fixtures::{
     ctx, env, persist, record, retry_args, scope, store,
 };
 use crate::test_unique::unique;
-use clio_store::{LocalEventStore, PeerActionDisposition};
+use clio_store::{DurableRequestStore, LocalEventStore, PeerActionDisposition};
 use clio_types::{Actor, Bank, ErrorCode, OpContext};
 
 /// A request opened with the operator's decision and deadline records both.
@@ -131,15 +131,33 @@ fn open_refuses_a_reused_id_with_a_changed_scope() {
     assert_eq!(err.code, ErrorCode::Forbidden);
 }
 
-/// A product path the stored record does not know refuses closure.
+/// A request with no recorded paths names the missing record when closure refuses.
 #[test]
-fn close_refuses_an_unknown_product_path() {
+fn close_names_a_missing_recorded_product_path() {
     let store = store();
     let request_id = unique("req-close-path");
-    persist(&store, &record(&request_id, RequestState::InProgress));
-    let err = close(&env(&store), &ctx("bank-a"), &request_id, "unknown-path")
-        .expect_err("an unknown product path refuses closure");
+    open(
+        &env(&store),
+        &ctx("bank-a"),
+        &request_id,
+        RequestKind::Copy,
+        &scope(),
+        PeerEnablement::NotApplicable,
+        &[],
+        &[],
+        None,
+        None,
+    )
+    .expect("the request opens");
+    let before = store.load(&request_id).expect("load request");
+    let err = close(&env(&store), &ctx("bank-a"), &request_id, "copy")
+        .expect_err("a missing recorded product path refuses closure");
     assert_eq!(err.code, ErrorCode::Forbidden);
+    assert_eq!(
+        err.message,
+        "request closure refused: no product path is recorded on this request"
+    );
+    assert_eq!(store.load(&request_id).expect("reload request"), before);
 }
 
 /// An open required copy action refuses closure.
