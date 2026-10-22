@@ -35,8 +35,9 @@ use crate::erasure_reconcile::{ErasureRetryEnv, reconcile_erasure_actions};
 use crate::local_review::{LocalReviewPage, LocalReviewQuery, authorize, review_local_events};
 use crate::subject_peer::{derived_peer_states, record_disposition, snapshot_peers};
 use crate::subject_request::{
-    PeerEnablement, PeerState, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
-    SubjectRequestLedger, SubjectRequestRecord, VerificationResult,
+    PathOwner, PathSlot, PathState, PeerEnablement, PeerState, RegisterOutcome, RequestCommand,
+    RequestKind, RequestScope, RequestState, SubjectRequestLedger, SubjectRequestRecord,
+    VerificationResult,
 };
 use crate::subject_request_events::{ClosureBlock, accept_closure};
 use crate::subject_request_report::report_of;
@@ -128,6 +129,59 @@ pub fn apply_command(
     ledger.apply(request_id, command)?;
     save_record(env, &ledger, request_id)?;
     report_of(env, &load_record(env, request_id)?)
+}
+
+/// Close one request: accept the closure, move it to final, and report it.
+/// Record a privileged caller's verified completion of a product-controlled path.
+pub fn complete_path(
+    env: &SubjectRequestEnv<'_>,
+    ctx: &OpContext,
+    request_id: &str,
+    product_path: &str,
+) -> Result<RequestStatusReport, AmError> {
+    authorize(ctx.actor)?;
+    if product_path.trim().is_empty() {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "a product path is required",
+        ));
+    }
+    let mut record = load_record(env, request_id)?;
+    let (RequestScope::Bank { bank_id } | RequestScope::Subject { bank_id, .. }) = &record.scope;
+    if bank_id != ctx.bank.as_str() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "request belongs to another bank",
+        ));
+    }
+    if matches!(
+        record.state,
+        RequestState::Final(_) | RequestState::Refused { .. }
+    ) {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "a terminal request cannot change paths",
+        ));
+    }
+    if record
+        .paths
+        .get(product_path)
+        .is_some_and(|slot| slot.owner != PathOwner::Clio)
+    {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "only a product-controlled path can be completed",
+        ));
+    }
+    record.paths.insert(
+        product_path.to_owned(),
+        PathSlot {
+            owner: PathOwner::Clio,
+            state: PathState::Done,
+        },
+    );
+    env.durable.save(&record_to_row(&record))?;
+    report_of(env, &record)
 }
 
 /// Close one request: accept the closure, move it to final, and report it.
@@ -353,3 +407,7 @@ mod subject_request_service_pg_tests;
 #[cfg(test)]
 #[path = "subject_request_service_facade_tests.rs"]
 mod subject_request_service_facade_tests;
+
+#[cfg(test)]
+#[path = "subject_request_service_path_tests.rs"]
+mod subject_request_service_path_tests;
