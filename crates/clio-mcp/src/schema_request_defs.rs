@@ -272,3 +272,32 @@ fn props(
     base.extend(bank_actor());
     base
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn completion_schema_requires_path_without_state_or_owner_controls() {
+        let definitions = request_defs();
+        for definition in &definitions {
+            let defects = crate::schema::validate_tool_schema(&definition.to_tool());
+            assert!(defects.is_empty(), "{}: {defects:?}", definition.name);
+        }
+        let tool = definitions
+            .iter()
+            .find(|definition| definition.name == "subject_request_path_complete")
+            .expect("completion tool is published")
+            .to_tool();
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["required"], json!(["request_id", "product_path"]));
+        assert_eq!(schema["additionalProperties"], json!(false));
+        let properties = schema["properties"].as_object().expect("properties");
+        assert_eq!(
+            properties.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["actor", "bank", "product_path", "request_id"]
+        );
+        assert_eq!(properties["product_path"]["type"], json!("string"));
+    }
+}

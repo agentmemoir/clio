@@ -144,22 +144,18 @@ fn validate(sub: &str, parsed: &ParsedArgs) -> Result<(), CliError> {
 /// Build the tool name and arguments for one request verb.
 fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let mut args = base_args(parsed);
+    args.insert("request_id".into(), required(parsed, "request-id"));
     match sub {
         "request-start" => {
             let kind = validate_choice("kind", flag(parsed, "kind"), &["copy", "erasure"])?;
-            args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("kind".into(), Value::from(kind));
             insert_opt(&mut args, parsed, "subject-id", "subject_id");
             insert_opt(&mut args, parsed, "verification", "verification");
             insert_opt(&mut args, parsed, "deadline", "deadline");
             Ok(("subject_request_start", Value::Object(args)))
         }
-        "request-status" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
-            Ok(("subject_request_status", Value::Object(args)))
-        }
+        "request-status" => Ok(("subject_request_status", Value::Object(args))),
         "request-retry" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("subject_id".into(), required(parsed, "subject-id"));
             args.insert("legal_basis".into(), required(parsed, "legal-basis"));
             insert_opt(&mut args, parsed, "reason-code", "reason_code");
@@ -186,7 +182,6 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
                 &["erase", "remove", "delivery", "notice"],
             )?;
             args.insert("copy_id".into(), required(parsed, "copy-id"));
-            args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("custody".into(), Value::from(custody));
             args.insert("owner".into(), Value::from(owner));
             args.insert("required_action".into(), Value::from(action));
@@ -196,12 +191,10 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
             Ok(("subject_request_copy", Value::Object(args)))
         }
         "request-exception" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("reason".into(), required(parsed, "reason"));
             Ok(("subject_request_exception", Value::Object(args)))
         }
         "request-events" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
             if let Some(limit) = parsed.value("limit") {
                 args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
             }
@@ -209,7 +202,6 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
             Ok(("subject_request_events", Value::Object(args)))
         }
         "request-path-complete" | "request-close" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("product_path".into(), required(parsed, "product-path"));
             let tool = if sub == "request-close" {
                 "subject_request_close"
@@ -218,12 +210,8 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
             };
             Ok((tool, Value::Object(args)))
         }
-        "peer-status" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
-            Ok(("subject_request_peer_status", Value::Object(args)))
-        }
+        "peer-status" => Ok(("subject_request_peer_status", Value::Object(args))),
         "peer-retry" => {
-            args.insert("request_id".into(), required(parsed, "request-id"));
             insert_opt(&mut args, parsed, "legal-basis", "legal_basis");
             Ok(("subject_request_peer_retry", Value::Object(args)))
         }
@@ -233,7 +221,6 @@ fn build_request_call(sub: &str, parsed: &ParsedArgs) -> Result<(&'static str, V
                 flag(parsed, "disposition"),
                 &["removal_evidence", "retention_approved", "unknown"],
             )?;
-            args.insert("request_id".into(), required(parsed, "request-id"));
             args.insert("peer_id".into(), required(parsed, "peer-id"));
             args.insert("disposition".into(), Value::from(disposition));
             insert_opt(&mut args, parsed, "proof-ref", "proof_ref");
