@@ -378,3 +378,7 @@ pub(super) fn opaque_record(opaque: &OpaqueItem, bank: &str) -> OpaqueItemRecord
         content_cipher: opaque.content_cipher.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "import_rows_tests.rs"]
+mod import_rows_tests;

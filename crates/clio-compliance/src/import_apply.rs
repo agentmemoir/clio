@@ -412,3 +412,7 @@ fn masked_item(item: &MemoryItem) -> MemoryItem {
     out.context = scrub_context(out.context.as_deref());
     out
 }
+
+#[cfg(test)]
+#[path = "import_apply_tests.rs"]
+mod import_apply_tests;
