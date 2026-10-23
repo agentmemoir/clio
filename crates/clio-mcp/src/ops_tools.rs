@@ -71,7 +71,7 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
                 embedder: embedder(state),
                 timestamp: &timestamp,
             },
-            scope_bank(state, args, &ctx),
+            diagnose_scope_bank(state, &ctx),
         ))),
         "verify" => {
             let bank = scope_bank(state, args, &ctx);
@@ -184,7 +184,7 @@ fn doctor_result(
     Ok(to_value(&plan))
 }
 
-/// The bank scope a read-side operator tool forwards downstream.
+/// The bank scope `verify` and `doctor` forward downstream.
 ///
 /// A bound principal forwards the bank its context resolved and authorized, so
 /// omitting `bank` narrows the call to the credential's own scope instead of
@@ -194,6 +194,19 @@ fn scope_bank<'a>(state: &McpState, args: &'a Value, ctx: &'a OpContext) -> Opti
     match &state.principal {
         Some(_) => Some(ctx.bank.as_str()),
         None => opt_str(args, "bank"),
+    }
+}
+
+/// The bank scope the `diagnose` surface forwards downstream.
+///
+/// `diagnose` published no scope before the grant existed, so a local caller
+/// without a credential keeps the whole-store snapshot whatever `bank` key it
+/// carries. Only a bound principal narrows the report, to the resolved bank its
+/// grant already covers.
+fn diagnose_scope_bank<'a>(state: &McpState, ctx: &'a OpContext) -> Option<&'a str> {
+    match &state.principal {
+        Some(_) => Some(ctx.bank.as_str()),
+        None => None,
     }
 }
 

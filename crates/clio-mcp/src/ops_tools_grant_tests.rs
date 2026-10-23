@@ -368,6 +368,65 @@ fn bound_diagnose_does_not_disclose_a_foreign_bank() {
     assert_eq!(whole["indexable_items"], 2, "{whole}");
 }
 
+/// Both banks populated, with distinct volumes so a narrowed report is visible.
+fn two_bank_store() -> Arc<McpState> {
+    let st = state(false);
+    seed_item(&st, "bank-a", "itm-a");
+    seed_item(&st, "bank-b", "itm-b1");
+    seed_item(&st, "bank-b", "itm-b2");
+    st
+}
+
+/// A report's bank inventory, sorted: catalog order is not part of the contract.
+fn sorted_report_banks(report: &Value) -> Vec<String> {
+    let mut banks: Vec<String> = report["banks"]
+        .as_array()
+        .map(|banks| {
+            banks
+                .iter()
+                .filter_map(|bank| bank.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    banks.sort();
+    banks
+}
+
+#[test]
+fn unbound_diagnose_with_a_bank_argument_reports_the_whole_store() {
+    let st = two_bank_store();
+    let out = dispatch(
+        &st,
+        "diagnose",
+        &json!({ "bank": "bank-a", "timestamp": TS }),
+    );
+    assert_eq!(out["ok"], Value::Bool(true), "{out}");
+    assert_eq!(sorted_report_banks(&out), ["bank-a", "bank-b"], "{out}");
+    assert_eq!(out["indexable_items"], 3, "{out}");
+    assert_eq!(out["dense_rows"], 0, "{out}");
+    assert_eq!(out["lexical_rows"], 0, "{out}");
+}
+
+#[test]
+fn unbound_diagnose_without_a_bank_reports_the_same_whole_store() {
+    let st = two_bank_store();
+    let named = dispatch(
+        &st,
+        "diagnose",
+        &json!({ "bank": "bank-a", "timestamp": TS }),
+    );
+    let omitted = dispatch(&st, "diagnose", &json!({ "timestamp": TS }));
+    assert_eq!(named, omitted, "the bank key changed the unbound report");
+    assert_eq!(
+        sorted_report_banks(&omitted),
+        ["bank-a", "bank-b"],
+        "{omitted}"
+    );
+    assert_eq!(omitted["indexable_items"], 3, "{omitted}");
+    assert_eq!(omitted["dense_rows"], 0, "{omitted}");
+    assert_eq!(omitted["lexical_rows"], 0, "{omitted}");
+}
+
 #[test]
 fn unbound_reindex_without_bank_and_shared_enabled_sweeps_the_whole_store() {
     let st = state(true);
