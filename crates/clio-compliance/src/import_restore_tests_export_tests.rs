@@ -117,7 +117,7 @@ fn bundle_with_a_context_dropped_by_the_scrub_bound_still_imports() {
         .expect("a bundle with a dropped context still imports");
     let restored = h
         .store
-        .get_memory_item(&h.bank, &id)
+        .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
     assert!(restored.context.is_none());

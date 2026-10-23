@@ -131,7 +131,7 @@ fn exported_context_round_trips_into_a_fresh_bank() {
     assert_eq!(report.would_create, 1);
     let restored = h
         .store
-        .get_memory_item(&h.bank, &id)
+        .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
     assert_eq!(restored.context.as_deref(), Some("team chat"));
@@ -154,7 +154,7 @@ fn bundle_without_context_imports_unchanged() {
     assert_eq!(report.would_create, 1);
     let restored = h
         .store
-        .get_memory_item(&h.bank, &id)
+        .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
     assert!(restored.context.is_none());
@@ -221,7 +221,7 @@ fn force_overwrite_scrubs_secret_shaped_context() {
     assert_eq!(report.would_overwrite, 1);
     let restored = h
         .store
-        .get_memory_item(&h.bank, &id)
+        .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
     assert_eq!(restored.context.as_deref(), Some("api_key: ****7890"));

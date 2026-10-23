@@ -278,7 +278,19 @@ fn masked_backup_rows_restore_with_distinct_identities() {
 
     let triples = h.store.list_triples(&h.bank).unwrap();
     assert_eq!(triples.len(), 2, "both triples restore");
-    assert_triple_placeholders_distinct(&triples);
+    let mut restored: Vec<&str> = triples.iter().map(|t| t.subject.as_str()).collect();
+    restored.sort_unstable();
+    let mut exported: Vec<&str> = entities
+        .triples
+        .iter()
+        .map(|t| t.subject.as_str())
+        .collect();
+    exported.sort_unstable();
+    assert_eq!(
+        restored, exported,
+        "the restore keeps each record's own content-free placeholder"
+    );
+    assert_ne!(restored[0], restored[1]);
 
     // The restore is idempotent: a re-import finds every identity and skips.
     let again = import(&h.args(&h.ctx(), h.policy(), bundle.path(), false, false, None))

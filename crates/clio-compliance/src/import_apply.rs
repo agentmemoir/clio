@@ -26,6 +26,7 @@
 //!
 //! Keep this module focused on import planning.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use clio_admission::gated::{GateRequest, gated_create_raw};
@@ -173,7 +174,9 @@ impl<'a> Planner<'a> {
             // restored into ctx.bank, so the entity bank_id is rewritten here.
             let mut it = item.clone();
             bank.clone_into(&mut it.bank_id);
-            if self.item_exists(&it.id)? {
+            let id = import_id(bank, &item.bank_id, &item.id).into_owned();
+            it.id.clone_from(&id);
+            if self.item_exists(&id)? {
                 if args.force {
                     self.overwrite += 1;
                     let masked = masked_item(&it);
@@ -181,7 +184,7 @@ impl<'a> Planner<'a> {
                         item: masked,
                         actor: actor.to_owned(),
                     });
-                    self.stage_force_audit(bank, &it.id, actor);
+                    self.stage_force_audit(bank, &id, actor);
                 } else {
                     self.skip += 1;
                 }
@@ -190,7 +193,7 @@ impl<'a> Planner<'a> {
             // Deferred carriers still pass the gates here; the
             // Commit* row executor later inserts the admitted (score-stamped)
             // clone instead of a CreateItem effect.
-            if self.deferred.contains(&it.id) {
+            if self.deferred.contains(&item.id) {
                 self.gate_carrier(&it)?;
                 continue;
             }
@@ -280,6 +283,15 @@ impl<'a> Planner<'a> {
         let args = self.args;
         let bank = args.ctx.bank.as_str();
         let actor = args.ctx.actor.as_str();
+        let source_bank = if self.envelope.manifest.bank_ids.iter().any(|b| b == bank) {
+            bank
+        } else {
+            self.envelope
+                .manifest
+                .bank_ids
+                .first()
+                .map_or("", String::as_str)
+        };
         if !self.envelope.entities.opaque_items.is_empty() {
             self.note(
                 "ciphertext_backup items restore content opaque under the local KMS; \
@@ -288,15 +300,17 @@ impl<'a> Planner<'a> {
             );
         }
         for opaque in &self.envelope.entities.opaque_items {
-            let record = opaque_record(opaque, bank);
-            if args.store.get_item_identity(bank, &opaque.id)?.is_some() {
+            let mut record = opaque_record(opaque, bank);
+            record.id = import_id(bank, source_bank, &opaque.id).into_owned();
+            if args.store.get_item_identity(bank, &record.id)?.is_some() {
                 if args.force {
                     self.overwrite += 1;
+                    let record_id = record.id.clone();
                     self.staged.push(BatchWrite::PutOpaqueItem {
                         item: record,
                         actor: actor.to_owned(),
                     });
-                    self.stage_force_audit(bank, &opaque.id, actor);
+                    self.stage_force_audit(bank, &record_id, actor);
                 } else {
                     self.skip += 1;
                 }
@@ -318,6 +332,13 @@ impl<'a> Planner<'a> {
         for edge in &self.envelope.entities.assoc_edges {
             let mut e = edge.clone();
             bank.clone_into(&mut e.bank_id);
+            e.id = import_id(bank, &edge.bank_id, &edge.id).into_owned();
+            if self.bundle_item(&edge.source_id).is_some() {
+                e.source_id = import_id(bank, &edge.bank_id, &edge.source_id).into_owned();
+            }
+            if self.bundle_item(&edge.target_id).is_some() {
+                e.target_id = import_id(bank, &edge.bank_id, &edge.target_id).into_owned();
+            }
             if args.store.get_assoc_edge(bank, &e.id)?.is_some() {
                 if args.force {
                     self.overwrite += 1;
@@ -348,6 +369,17 @@ impl<'a> Planner<'a> {
         }
         self.skip += count;
         self.note("tombstones are export provenance; not restored".to_owned());
+    }
+}
+
+/// `items.id`-style primary keys are deployment-unique, so a cross-bank
+/// restore writes a derived id; derived from (source id, target bank) only, so
+/// re-importing the same bundle into the same bank stays idempotent.
+pub(super) fn import_id<'i>(bank: &str, source_bank: &str, id: &'i str) -> Cow<'i, str> {
+    if bank == source_bank {
+        Cow::Borrowed(id)
+    } else {
+        Cow::Owned(format!("{id}#{bank}"))
     }
 }
 
