@@ -88,7 +88,7 @@ fn http_write_set_matrix_with_parity_and_security() {
         .map(|(name, args)| clio_mcp::write_tools::dispatch(&direct_state, name, args))
         .collect();
     // Invalid Origin is rejected before any protocol work.
-    let (status, _) = http_post(&addr, &init_only(), "Origin: http://evil.example\r\n");
+    let (status, _) = http_post(&addr, &init_only(), "Origin: http://evil.example.com\r\n");
     assert_eq!(status, 403, "bad Origin rejected");
     for (i, (name, args)) in fixtures.iter().enumerate() {
         let body = rpc(

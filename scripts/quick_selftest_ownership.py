@@ -131,7 +131,7 @@ class AcceptanceScopeTests(unittest.TestCase):
 
             git("init", "--quiet")
             git("config", "user.name", "Owned acceptance test")
-            git("config", "user.email", "owned-acceptance@example.invalid")
+            git("config", "user.email", "owned-acceptance@example.com")
             git("config", "commit.gpgsign", "false")
             changelog = root / "CHANGELOG.md"
             changelog.write_text("Release history\n", encoding="utf-8")

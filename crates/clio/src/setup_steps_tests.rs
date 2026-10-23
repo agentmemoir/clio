@@ -288,7 +288,7 @@ fn going_back_inside_one_section_re_asks_only_that_question() {
     let run = Harness::fresh()
         .with_secrets(&["sk-1", "sk-1"])
         .typing(format!(
-            "{SQLITE}2\nhttps://embed.example.test\nm1\n4\n\n\n\n1\n{SERVICES}"
+            "{SQLITE}2\nhttps://embed.example.com\nm1\n4\n\n\n\n1\n{SERVICES}"
         ))
         .run();
     let answers = run.answers();

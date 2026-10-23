@@ -1,0 +1,27 @@
+name: DCO
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+# Read only: the check lists the pull request commits and writes no state.
+#   contents: read      checkout of this workflow's own script
+#   pull-requests: read read the commits of the pull request under review
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # No pull request code is run: the check reads commit metadata from the
+      # API and judges the message text, never executing the change.
+      - name: Check the Signed-off-by trailers
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/dco_check.py

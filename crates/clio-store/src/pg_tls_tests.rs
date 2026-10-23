@@ -212,7 +212,7 @@ fn loopback_is_answered_the_same_way_everywhere() {
         "[fe80::1%en0]",
         "db.example.com",
         "10.0.0.1",
-        "trusted@evil.example",
+        "trusted@evil.example.com",
     ] {
         assert!(!is_loopback(host), "{host} is not this machine");
     }

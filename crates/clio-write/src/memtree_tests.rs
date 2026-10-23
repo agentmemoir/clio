@@ -308,7 +308,7 @@ fn t10_summary_does_not_mutate_leaf_snapshot() {
     // Real MemoryItem with structured snapshot bytes (snapshot is authoritative).
     let mut item = sample_item("i1", "b1", "1", "leaf-gist");
     item.snapshot = Some(serde_json::json!({
-        "host": "db.internal",
+        "host": "db.example.com",
         "port": 5432,
         "captured_at": "2026-09-18T00:00:00Z"
     }));

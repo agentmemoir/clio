@@ -1,0 +1,49 @@
+name: CLA
+on:
+  issue_comment:
+    types: [created]
+  # The status refresh must write to the base repository on a fork pull request,
+  # and `pull_request` from a fork holds a read-only token. This path reads no PR
+  # content: the base checkout never runs PR code, no PR text reaches a shell
+  # command, and the script makes guarded API calls with the event's PR number.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened, synchronize]
+
+# Least privilege for the two paths this check has:
+#   contents: write      read signatures/cla.json and commit a new record to the cla-signatures branch
+#   pull-requests: write post and refresh the one sign-request comment on the pull request
+#   statuses: write      set the `CLA` commit status, because a GITHUB_TOKEN push starts no other workflow
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+# One run per pull request. cancel-in-progress stays false so a comment that
+# arrives while a pull request event runs is queued rather than dropped.
+concurrency:
+  group: cla-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    name: CLA
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Read-only checkout of the base branch. The pull request head is never
+      # fetched or run: the payload holds every value the script reads, and the
+      # only shell text is this workflow's own branch on the event name.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Read the signatures, comment and set the status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            python3 scripts/cla_check.py sign
+          else
+            python3 scripts/cla_check.py status
+          fi

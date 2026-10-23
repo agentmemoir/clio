@@ -50,7 +50,7 @@ pub fn url_scheme(url: &str) -> Option<String> {
 /// The host is what a connection would actually reach, so the split removes
 /// the parts of the string that only look like one: a `user:password@` prefix
 /// is not a host, a port is not part of it, and the brackets around an IPv6
-/// literal are syntax. `http://trusted@evil.example` yields `evil.example`,
+/// literal are syntax. `http://trusted@evil.example.com` yields `evil.example.com`,
 /// which is the point — a caller that asked for the host must not be handed the
 /// userinfo instead.
 ///

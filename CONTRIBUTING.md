@@ -156,3 +156,13 @@ Release notes are the hand-written section rather than a generated list of commi
 A tag whose build failed stays where it is. Do not move it and do not delete it. Bump the version and release again.
 
 Record the abandoned version with a normal heading and a plain sentence saying it published nothing, so the next reader knows there is nothing to install from that tag. Keep a Changelog uses `[YANKED]` for a version that was published and then had to be pulled for a serious bug or a security problem. That is a different situation, so use that word only for it.
+
+## Contributor License Agreement and Developer Certificate of Origin
+
+Every pull request from an external contributor must pass two checks: `CLA` and `DCO`.
+
+**CLA.** On your first pull request, comment exactly this sentence on the pull request: `I have read the CLA Document and I hereby sign the CLA`. You sign once per person, and the record lives in `signatures/cla.json` on the `cla-signatures` branch. The agreement is in [CLA.md](CLA.md). If your employer owns your work, the maintainers must arrange a corporate CLA with you first.
+
+**DCO.** Every commit needs a `Signed-off-by` trailer whose email matches the commit author. Add it with `git commit -s`. For an open pull request, run `git rebase --signoff origin/master` and force-push, or `git commit --amend -s` for one commit.
+
+**Adoption point.** This requirement starts on the merge date of this change. Commits merged before that date are not re-signed and need no action. A pull request open before that date needs no change for this rule alone, but new commits do.

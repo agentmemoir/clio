@@ -35,10 +35,10 @@ fn parse_http_url_shapes() {
     assert_eq!(e.host, "127.0.0.1");
     assert_eq!(e.port, 34311);
     assert_eq!(e.path, "/");
-    let e = crate::http::HttpEndpoint::parse("http://host.example/embed").unwrap();
+    let e = crate::http::HttpEndpoint::parse("http://host.example.com/embed").unwrap();
     assert_eq!(e.port, 80);
     assert_eq!(e.path, "/embed");
-    let e = crate::http::HttpEndpoint::parse("https://secure.example/embed").unwrap();
+    let e = crate::http::HttpEndpoint::parse("https://secure.example.com/embed").unwrap();
     assert_eq!(e.port, 443);
     assert_eq!(e.path, "/embed");
     assert!(crate::http::HttpEndpoint::parse("ftp://x").is_err());

@@ -64,17 +64,19 @@ jobs:
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
       # No diff is asked for here any more, so the default shallow clone is enough.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # The same pin the other jobs use. Two jobs on different compilers would give
       # two different answers about the same tree.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.99.0
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Run MCP schema, unit, and conformance tests (pinned 2025-11-25)
         run: cargo test -p clio-mcp --locked

@@ -1,0 +1,1 @@
+External contributors must sign the Contributor License Agreement before a pull request can merge, and the CI pipeline now runs first-defence security scans, stricter clippy warnings, and a domain allow-list check on new external URLs.

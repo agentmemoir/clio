@@ -21,5 +21,6 @@
 
 ## Checklist
 
+- [ ] The [CLA](CLA.md) comment is signed (external contributors, once), and every commit carries a `Signed-off-by` trailer that matches its author (`git commit -s`).
 - [ ] No private file contents or secrets pasted into public files or CI output.
 - [ ] New behavior has tests; updated docs if user-visible.

@@ -1,0 +1,49 @@
+#!/bin/sh
+# Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+# SPDX-License-Identifier: Apache-2.0
+# Append a Signed-off-by trailer to every commit message.
+#
+# git passes the message file as $1. The trailer is added when the author
+# identity is known and no trailer with the same email is present. This step
+# never blocks a commit. The internal message check, when this machine has it,
+# runs first and keeps its own exit code.
+
+set -u
+
+message=${1-}
+
+# The internal check runs first, so a refused message is left as it was. The
+# sibling name is resolved from this hook's own directory, which is the git
+# hooks directory, so nothing here names another checkout.
+hook_dir=$(dirname "$0")
+if [ -x "$hook_dir/commit-msg-internal" ]; then
+    "$hook_dir/commit-msg-internal" "$@" || exit $?
+fi
+
+if [ -n "$message" ] && [ -f "$message" ]; then
+    name=$(git config user.name 2>/dev/null) || name=
+    email=$(git config user.email 2>/dev/null) || email=
+    [ -n "$name" ] || name=${GIT_AUTHOR_NAME-}
+    [ -n "$email" ] || email=${GIT_AUTHOR_EMAIL-}
+
+    if [ -n "$name" ] && [ -n "$email" ]; then
+        found=no
+        while IFS= read -r line; do
+            line=$(printf '%s\n' "$line" | sed 's/[[:space:]]*$//')
+            case $line in
+                "Signed-off-by: "*"<$email>") found=yes ;;
+            esac
+        done < "$message"
+
+        if [ "$found" = no ]; then
+            # Command substitution drops trailing newlines and keeps the shape
+            # of every paragraph above them.
+            body=$(cat "$message")
+            if [ -n "$body" ]; then
+                printf '%s\n\nSigned-off-by: %s <%s>\n' "$body" "$name" "$email" > "$message"
+            fi
+        fi
+    fi
+fi
+
+exit 0

@@ -68,6 +68,7 @@ SHELL_EXTRA = (
     "scripts/git-hooks/pre-commit",
     "scripts/git-hooks/pre-merge-commit",
     "scripts/git-hooks/pre-push",
+    "scripts/git-hooks/commit-msg",
 )
 
 #: Why a file was refused, as the sentence a reader gets with the path.
