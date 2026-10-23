@@ -160,12 +160,24 @@ impl McpState {
     }
 
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.
-    #[must_use]
-    pub fn resolve_timestamp(&self, args: &Value) -> String {
-        args.get("timestamp")
+    ///
+    /// The value is returned in the store's canonical form — UTC RFC 3339 at
+    /// second precision — because every item time column is compared as text.
+    /// Doing it here, at the one resolver every write tool shares, keeps a
+    /// caller's fractional or offset stamp from reaching a column the rest of
+    /// the store compares as `YYYY-MM-DDThh:mm:ssZ`.
+    ///
+    /// # Errors
+    /// [`ErrorCode::InvalidArgument`] when the caller's value is not a stamp
+    /// this build can place: it is refused rather than stored verbatim, since a
+    /// literal string in a time column compares as one.
+    pub fn resolve_timestamp(&self, args: &Value) -> Result<String, AmError> {
+        let raw = args
+            .get("timestamp")
             .and_then(Value::as_str)
             .filter(|t| !t.is_empty())
-            .map_or_else(now_utc, str::to_owned)
+            .map_or_else(now_utc, str::to_owned);
+        crate::runtime_context::canonical_write_stamp(&raw)
     }
 
     /// Dispatch maintenance signals off the write path (never gates the response).
@@ -174,6 +186,20 @@ impl McpState {
             dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
         }
     }
+}
+
+/// The canonical form of a caller-supplied stamp, or the refusal for one this
+/// build cannot place.
+///
+/// A stamp that cannot be placed (not RFC 3339, a month the year does not have,
+/// an offset of `+24:00`) would be stored and compared as a literal string, so
+/// it is refused with the same invalid-argument code the argument contract uses
+/// rather than written.
+///
+/// # Errors
+/// [`ErrorCode::InvalidArgument`] naming the value that cannot be placed.
+pub(crate) fn canonical_write_stamp(raw: &str) -> Result<String, AmError> {
+    clio_store::canonical_write_stamp(raw)
 }
 
 /// Nanoseconds since the Unix epoch, or `0` when the clock predates it.

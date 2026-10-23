@@ -53,7 +53,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
 #[inline(never)]
 fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let rule_raw = req_str(args, "update_rule")?;
     let new_value = args
         .get("new_value")
@@ -96,7 +96,7 @@ fn invalidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
     if let Some(replacement) = opt_str(args, "replacement_id") {
         crate::read_tools::require_item(state, ctx.bank.as_str(), replacement)?;
     }
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let outcome = clio_write::triple::invalidate(
         &*state.store,
         &ctx,
@@ -113,7 +113,7 @@ fn invalidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn discard(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let confirm = opt_bool(args, "confirm", false)?;
     let d_args = clio_write::DiscardArgs {
         store: &*state.store,
@@ -164,7 +164,7 @@ fn has_nonempty_new_value(args: &Value) -> bool {
 #[inline(never)]
 fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let confirm = opt_bool(args, "confirm", false)?;
     let item_id = req_str(args, "item_id")?.to_owned();
     let reason = req_str(args, "reason")?.to_owned();
@@ -293,7 +293,7 @@ fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let salt = clio_compliance::tombstone_salt();
     let journal = clio_compliance::JournalHold::resolve_journal_path(
         state.journal_path.as_deref(),

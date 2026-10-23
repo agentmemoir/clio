@@ -141,7 +141,7 @@ fn triple_add_gated_and_triple_end_expires() {
         "triple_end",
         json!({
             "subject": "rust", "predicate": "used_by", "object": "agent",
-            "valid_until": "t1", "bank": "bank-a"
+            "valid_until": "2026-01-01T00:00:00Z", "bank": "bank-a"
         }),
     );
     assert_eq!(end["ok"], json!(true), "{end}");
@@ -314,7 +314,7 @@ fn triple_end_with_object_filter_and_graph_link_invalid_args() {
         "triple_end",
         json!({
             "subject": "s1", "predicate": "p1", "object": "o1",
-            "valid_until": "t2", "bank": "bank-a"
+            "valid_until": "2026-01-01T00:00:00Z", "bank": "bank-a"
         }),
     );
     assert_eq!(end["ok"], json!(true), "{end}");

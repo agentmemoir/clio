@@ -75,7 +75,9 @@ impl SqliteStore {
                 "actor is required on discard writes",
             ));
         }
-        let ts = crate::migrate::now_iso();
+        // The canonical form, because `updated_at` and `discarded_at` are both
+        // compared as text by the items change feed and the inspect filter.
+        let ts = crate::migrate::now_iso8601();
         let detail = serde_json::json!({ "reason": reason }).to_string();
         self.with_conn(|conn| {
             let tx = conn.transaction().am("discard begin")?;
@@ -156,3 +158,7 @@ impl SqliteStore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_discard_tests.rs"]
+mod sqlite_discard_tests;

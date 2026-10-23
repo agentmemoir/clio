@@ -60,6 +60,20 @@ fn compile_advances_a_leap_day_bound_to_the_next_date() {
 }
 
 #[test]
+fn compile_refuses_a_bound_written_as_epoch_millis() {
+    let mut filter = ItemInspectFilter::new("bank-a");
+    filter.time_start = Some("1700000000000".into());
+    let Err(err) = compile_inspect(&filter, '?') else {
+        panic!("a digit bound must be refused");
+    };
+    assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+
+    filter.time_start = Some("2026-01-01T00:00:00Z".into());
+    filter.time_end = Some("1700000000000".into());
+    assert!(compile_inspect(&filter, '?').is_err());
+}
+
+#[test]
 fn compile_invalidated_keeps_discarded_when_asked() {
     let mut filter = ItemInspectFilter::new("b");
     filter.validity = InspectValidity::Invalidated;

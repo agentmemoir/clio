@@ -227,7 +227,7 @@ fn postgres_halfvec_recall_at_3072_measures_the_ann_index() {
 
 #[test]
 fn pgvector_below_halfvec_floor_fails_closed_with_guidance() {
-    let err = crate::postgres::halfvec_unsupported("0.6.2");
+    let err = crate::postgres_bootstrap::halfvec_unsupported("0.6.2");
     assert_eq!(err.code, clio_types::ErrorCode::ConfigCorrupt);
     assert!(err.message.contains("0.7.0"), "{err}");
     assert!(err.message.contains("upgrade"), "{err}");
@@ -245,7 +245,9 @@ fn old_pgvector_bootstrap_refuses_halfvec_before_ddl() {
     // without a real old pgvector install.
     let err = store
         .with_client(|client| {
-            crate::postgres::apply_vector_ddl_with(client, &space, |_| Ok("0.6.2".to_owned()))
+            crate::postgres_bootstrap::apply_vector_ddl_with(client, &space, |_| {
+                Ok("0.6.2".to_owned())
+            })
         })
         .unwrap_err();
     assert_eq!(err.code, clio_types::ErrorCode::ConfigCorrupt);

@@ -77,7 +77,7 @@ fn a_first_distillation_records_one_entry_per_claimed_source() {
     assert_eq!(trail.len(), 1, "one list per revision: {trail:?}");
     assert_eq!(trail[0].revision, 1);
     assert_eq!(
-        trail[0].reconciled_at, WAVE_STAMP,
+        trail[0].reconciled_at, "1970-01-01T00:00:00Z",
         "the list carries the wave's own reconciliation stamp"
     );
     assert_eq!(
@@ -130,7 +130,7 @@ fn a_revision_appends_its_own_list_and_keeps_the_prior_one() {
         "the prior revision's list is unchanged and still readable"
     );
     assert_eq!(trail[1].revision, 2);
-    assert_eq!(trail[1].reconciled_at, "1000");
+    assert_eq!(trail[1].reconciled_at, "1970-01-01T00:00:01Z");
     assert_eq!(
         entry_ids(&trail[1].entries),
         vec![HUB, "n1", "n2", "n3", "n4"]

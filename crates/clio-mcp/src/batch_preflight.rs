@@ -50,7 +50,7 @@ pub(crate) fn preflight(
     staged: &[MemoryItem],
 ) -> Result<Staged, AmError> {
     let ctx = state.resolve_ctx(params)?;
-    let ts = state.resolve_timestamp(params);
+    let ts = state.resolve_timestamp(params)?;
     let signals = BatchSignals::new(Arc::clone(&state.store), Arc::clone(&state.index), staged);
     match tool {
         "store" => store_preflight(state, &ctx, &ts, params, &signals),
@@ -306,7 +306,7 @@ fn graph_link_preflight(
         assoc_kind: AssocKind::Explicit,
         relationship: Some(relationship.to_owned()),
         weight: w,
-        last_updated_at: state.resolve_timestamp(params),
+        last_updated_at: state.resolve_timestamp(params)?,
     };
     Ok(Staged {
         writes: vec![
@@ -330,3 +330,7 @@ fn graph_link_preflight(
 fn actor_of(ctx: &OpContext) -> String {
     ctx.actor.as_str().to_owned()
 }
+
+#[cfg(test)]
+#[path = "batch_preflight_tests.rs"]
+mod batch_preflight_tests;

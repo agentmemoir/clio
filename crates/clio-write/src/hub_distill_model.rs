@@ -337,7 +337,7 @@ pub(crate) fn build_distill_item(
         valid_until: None,
         tx_from: ts.to_owned(),
         tx_until: None,
-        created_at: ts.to_owned(),
+        created_at: clio_store::canonical_ts(&hub.created_at),
         updated_at: ts.to_owned(),
         context: None,
     }

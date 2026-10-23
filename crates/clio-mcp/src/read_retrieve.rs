@@ -260,7 +260,7 @@ fn compose_context_at(
     now: Option<String>,
 ) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     let (recall_scope, duplicate_tolerance_read) = read_policy(state, &ctx, args)?;
     let (retention_curve, retention_floor) = read_curve(state, &ctx);
     // No raw argument: `compose_context` resolves the bank default for its own

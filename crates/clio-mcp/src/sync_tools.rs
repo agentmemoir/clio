@@ -252,7 +252,7 @@ fn sync_ack_skip_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     // Acknowledging a dead letter is a local store write: it needs neither an
     // endpoint, a token, nor keys, so none is read from the call.
     let cfg = client_cfg(state, None, None);
-    let acked = ack_skip(&cfg, &id, &state.resolve_timestamp(args))?;
+    let acked = ack_skip(&cfg, &id, &state.resolve_timestamp(args)?)?;
     Ok(json!({
         "acked": acked,
         "sync_mutation_id": id,

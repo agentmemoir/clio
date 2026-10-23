@@ -98,7 +98,7 @@ fn args<'a>(
         target,
         new_value: value,
         update_rule: rule,
-        timestamp: "2024-06-01",
+        timestamp: "2024-06-01T00:00:00Z",
         continuous_sink: cont,
         triple_sink: triple,
     }
@@ -244,8 +244,8 @@ fn t_discrete_routes_to_invalidate() {
         UpdateOutcome::Continuous(_) => panic!("discrete update must not EMA"),
     }
     let got = s.get_memory_item(&bank, "i1").unwrap().unwrap();
-    assert_eq!(got.valid_until.as_deref(), Some("2024-06-01"));
-    assert_eq!(got.tx_until.as_deref(), Some("2024-06-01"));
+    assert_eq!(got.valid_until.as_deref(), Some("2024-06-01T00:00:00Z"));
+    assert_eq!(got.tx_until.as_deref(), Some("2024-06-01T00:00:00Z"));
     assert_eq!(triple.events().len(), 1);
     assert_eq!(triple.events()[0].operation, "invalidate");
     assert!(cont.events().is_empty(), "no continuous row was written");

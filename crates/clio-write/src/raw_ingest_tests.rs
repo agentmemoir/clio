@@ -264,3 +264,50 @@ fn fake_http_server(response: String) -> (String, std::thread::JoinHandle<()>) {
     });
     (format!("http://127.0.0.1:{port}"), handle)
 }
+
+#[test]
+fn a_fractional_event_timestamp_is_stored_as_the_same_second() {
+    let store = in_memory_store();
+    let fx = fixture("Ada likes tea", "Ada");
+    let turns = vec![Turn::text("Ada likes tea")];
+    let leaves = LeafIndex::new();
+    let ctx = OpContext::new(Bank::new("bank-stamp"), Actor::Agent);
+    let opts = RawIngestOptions {
+        timestamp: "2026-01-01T00:00:00.750+02:00",
+        ..options(&*store, &ctx, &turns, &leaves, None)
+    };
+
+    let out = ingest_raw_with_extractor(&opts, &fx).expect("a fractional stamp is placeable");
+    assert_eq!(out.admitted.len(), 1, "{out:?}");
+    let id = out.admitted[0].item_id.clone();
+    let stored = store
+        .get_memory_item("bank-stamp", &id)
+        .expect("get")
+        .expect("stored");
+    assert_eq!(stored.valid_from, "2025-12-31T22:00:00Z");
+    assert_eq!(stored.tx_from, "2025-12-31T22:00:00Z");
+    assert_eq!(stored.created_at, "2025-12-31T22:00:00Z");
+    assert_eq!(stored.valid_until, None);
+}
+
+#[test]
+fn an_unplaceable_event_timestamp_is_refused_and_writes_nothing() {
+    let store = in_memory_store();
+    let fx = fixture("Ada likes tea", "Ada");
+    let turns = vec![Turn::text("Ada likes tea")];
+    let leaves = LeafIndex::new();
+    let ctx = OpContext::new(Bank::new("bank-stamp-bad"), Actor::Agent);
+    let opts = RawIngestOptions {
+        timestamp: "2026-13-01T00:00:00Z",
+        ..options(&*store, &ctx, &turns, &leaves, None)
+    };
+
+    let err = ingest_raw_with_extractor(&opts, &fx).expect_err("month 13 is not a stamp");
+    assert_eq!(err.code, ErrorCode::InvalidArgument, "{err}");
+    let jobs = store.pending_index_jobs(10, None, u32::MAX).expect("jobs");
+    assert!(jobs.is_empty(), "a refused ingest enqueued work: {jobs:?}");
+    let admitted = store
+        .get_memory_item("bank-stamp-bad", "raw-0-0")
+        .expect("get");
+    assert!(admitted.is_none(), "a refused ingest stored a row");
+}

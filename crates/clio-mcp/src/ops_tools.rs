@@ -60,7 +60,7 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
         let ctx = state.resolve_ctx(args)?;
         state.require_known_bank(ctx.bank.as_str())?;
     }
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     match name {
         "diagnose" => {
             let report = clio_ops::diagnose(&clio_ops::DiagnoseArgs {

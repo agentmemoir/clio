@@ -72,7 +72,7 @@ pub(crate) fn store_path(
 ) -> Result<Value, AmError> {
     require_content(args)?;
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let candidate = build_candidate(args)?;
     let item_id = args
         .pointer("/item/id")

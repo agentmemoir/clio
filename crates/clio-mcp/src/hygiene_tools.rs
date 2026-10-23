@@ -56,7 +56,7 @@ fn hygiene_audit_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     let report = clio_hygiene::hygiene_audit(&clio_hygiene::AuditArgs {
         store: &*state.store,
         bank: &bank,
-        now: &state.resolve_timestamp(args),
+        now: &state.resolve_timestamp(args)?,
         min_score,
         limit: usize_arg(args, "limit").unwrap_or(50),
         offset: usize_arg(args, "offset").unwrap_or(0),
@@ -75,7 +75,7 @@ fn hygiene_audit_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
 #[inline(never)]
 fn hygiene_clean_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let action_raw = opt_str(args, "action").unwrap_or("keep");
     let action = CleanAction::parse(action_raw)?;
     let targets = clean_targets(args)?;

@@ -30,6 +30,7 @@
 
 use crate::read_tools::opt_usize;
 use crate::runtime::{McpState, StderrSinks};
+use crate::runtime_context::canonical_write_stamp;
 use crate::write_tools::{opt_bool, opt_str, req_str, strict_opt_str};
 use clio_compliance::subject_request_service as svc;
 use clio_compliance::{
@@ -116,7 +117,7 @@ fn retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
             "subject_request_retry requires confirm=true; unconfirmed calls never mutate",
         ));
     }
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     let salt = tombstone_salt();
     let journal = JournalHold::resolve_journal_path(state.journal_path.as_deref(), &|key| {
         std::env::var(key).ok()
@@ -165,8 +166,10 @@ fn copy(state: &McpState, args: &Value) -> Result<Value, AmError> {
         required_action: req_str(args, "required_action")?.to_owned(),
         state: req_str(args, "state")?.to_owned(),
         exception_reason: opt_str(args, "exception_reason").map(str::to_owned),
-        updated_at: opt_str(args, "updated_at")
-            .map_or_else(|| state.resolve_timestamp(args), str::to_owned),
+        updated_at: match opt_str(args, "updated_at") {
+            Some(supplied) => canonical_write_stamp(supplied)?,
+            None => state.resolve_timestamp(args)?,
+        },
     };
     let report = svc::record_copy(&env(state), &ctx, &row)?;
     Ok(serde_json::to_value(&report).expect("serialize request report"))
@@ -251,7 +254,7 @@ fn peer_status(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn peer_retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let request_id = req_str(args, "request_id")?.to_owned();
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     let salt = tombstone_salt();
     let journal = JournalHold::resolve_journal_path(state.journal_path.as_deref(), &|key| {
         std::env::var(key).ok()

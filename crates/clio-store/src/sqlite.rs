@@ -146,6 +146,16 @@ impl SqliteStore {
         };
         conn.execute_batch(&sqlite_vector_ddl(&space)?)
             .map_err(crate::migrate::sqlite_vec_missing)?;
+        // Timestamps a previous build stored as epoch millis are rewritten into
+        // the canonical form the item time columns are compared in. A database
+        // with nothing to fix runs one filtered read. This is the last step of an
+        // open on purpose: every check above can still refuse the file, and a
+        // refused open must leave it unchanged. One transaction covers the whole
+        // pass, so a failure partway through rolls back instead of leaving the
+        // table half rewritten.
+        let tx = conn.transaction().am("timestamp backfill begin")?;
+        crate::migrate::ts_backfill::backfill_sqlite(&tx)?;
+        tx.commit().am("timestamp backfill commit")?;
         Ok(Self {
             conn: Mutex::new(conn),
             kms,
