@@ -115,6 +115,36 @@ fn overlapping_opens_all_finish() {
     }
 }
 
+/// A store whose schema is current opens while a writer holds its table lock.
+/// The server timeout bounds a regression without relying on thread timing.
+#[test]
+fn a_current_schema_opens_beside_an_existing_writer() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let scratch = ScratchDatabase::create(&mut admin, "writer");
+    drop(admin);
+    let fresh = url_for_database(&scratch.name);
+    drop(PostgresStore::open(&fresh, local_kms()).expect("initialize schema"));
+
+    let mut writer = crate::pg_tls::connect(&fresh).expect("writer connect");
+    writer
+        .batch_execute("BEGIN; LOCK TABLE items IN ROW EXCLUSIVE MODE")
+        .expect("hold the same table lock as an item writer");
+    let separator = if fresh.contains('?') { '&' } else { '?' };
+    let bounded = format!("{fresh}{separator}options=-c%20lock_timeout%3D1000ms");
+    let opened = PostgresStore::open(&bounded, local_kms());
+    writer.batch_execute("ROLLBACK").expect("release writer lock");
+    drop(writer);
+    assert!(
+        opened.is_ok(),
+        "a current-schema open must avoid DDL that conflicts with a writer: {:?}",
+        opened.err()
+    );
+}
+
 /// Concurrent opens of a fresh database all finish.
 ///
 /// This is the catalog leg of the race: two sessions creating the schema
