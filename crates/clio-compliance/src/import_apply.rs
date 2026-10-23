@@ -298,14 +298,15 @@ impl<'a> Planner<'a> {
         let args = self.args;
         let bank = args.ctx.bank.as_str();
         let actor = args.ctx.actor.as_str();
-        let source_bank = if self.envelope.manifest.bank_ids.iter().any(|b| b == bank) {
-            bank
-        } else {
-            self.envelope
-                .manifest
-                .bank_ids
-                .first()
-                .map_or("", String::as_str)
+        // `OpaqueItem` carries no bank provenance, so "same bank?" is provable
+        // only when the manifest names exactly the target bank — what every
+        // exporter emits. A multi-bank or empty `bank_ids` fails closed to the
+        // derived id: an unkeyed id would hit the opaque upsert
+        // (`ON CONFLICT (id) DO UPDATE SET bank_id = EXCLUDED.bank_id`) and
+        // move the source bank's row into this bank.
+        let same_bank = {
+            let bank_ids = &self.envelope.manifest.bank_ids;
+            bank_ids.len() == 1 && bank_ids[0] == bank
         };
         if !self.envelope.entities.opaque_items.is_empty() {
             self.note(
@@ -316,7 +317,7 @@ impl<'a> Planner<'a> {
         }
         for opaque in &self.envelope.entities.opaque_items {
             let mut record = opaque_record(opaque, bank);
-            record.id = import_id(bank, source_bank, &opaque.id).into_owned();
+            record.id = import_id(bank, if same_bank { bank } else { "" }, &opaque.id).into_owned();
             if args.store.get_item_identity(bank, &record.id)?.is_some() {
                 if args.force {
                     self.overwrite += 1;
@@ -348,10 +349,10 @@ impl<'a> Planner<'a> {
             let mut e = edge.clone();
             bank.clone_into(&mut e.bank_id);
             e.id = import_id(bank, &edge.bank_id, &edge.id).into_owned();
-            if self.bundle_item(&edge.source_id).is_some() {
+            if self.bundle_owns(&edge.source_id) {
                 e.source_id = import_id(bank, &edge.bank_id, &edge.source_id).into_owned();
             }
-            if self.bundle_item(&edge.target_id).is_some() {
+            if self.bundle_owns(&edge.target_id) {
                 e.target_id = import_id(bank, &edge.bank_id, &edge.target_id).into_owned();
             }
             if args.store.get_assoc_edge(bank, &e.id)?.is_some() {

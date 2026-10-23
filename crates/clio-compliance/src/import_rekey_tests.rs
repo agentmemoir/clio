@@ -19,12 +19,15 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use clio_store::{HistoryStore, ItemInspectFilter, Store};
+use clio_store::{AssocEdgeRecord, HistoryStore, ItemInspectFilter, Store};
 use clio_types::{Actor, Bank, OpContext};
 
-use crate::bundle::ExportContentMode;
+use crate::bundle::{
+    BUNDLE_FORMAT, BUNDLE_FORMAT_VERSION, BundleEnvelope, CompletenessManifest, ExportContentMode,
+    ExportEntities, OpaqueItem, entities_checksum,
+};
 use crate::import::{ImportReport, import};
-use crate::import_fixture::{Harness, TempBundle, write_bundle};
+use crate::import_fixture::{Harness, TempBundle, unique, write_bundle};
 
 const SOURCE_BANK: &str = "exported-bank";
 
@@ -119,6 +122,50 @@ fn reimport_into_same_second_bank_skips() {
     assert_eq!(h.store.list_triples(&h.bank).unwrap().len(), 1);
     assert_eq!(count_in_bank(&h, SOURCE_BANK), 4);
 }
+
+/// One opaque bundle row with a caller-chosen id (the fixture row carries the
+/// `ciphertext_backup` content-envelope shape).
+fn opaque_row(h: &Harness, id: &str) -> OpaqueItem {
+    let mut row = h
+        .opaque_entities()
+        .opaque_items
+        .into_iter()
+        .next()
+        .expect("opaque fixture row");
+    row.id = id.to_owned();
+    row
+}
+
+/// Bundle writer with a caller-chosen manifest `bank_ids` (the shared fixture
+/// always emits exactly one bank id, so provenance edge cases need this).
+fn write_bundle_for_banks(
+    entities: &ExportEntities,
+    mode: ExportContentMode,
+    bank_ids: Vec<String>,
+) -> TempBundle {
+    let envelope = BundleEnvelope {
+        format: BUNDLE_FORMAT.to_owned(),
+        format_version: BUNDLE_FORMAT_VERSION,
+        content_mode: mode,
+        manifest: CompletenessManifest {
+            format_version: BUNDLE_FORMAT_VERSION,
+            content_mode: mode,
+            bank_ids,
+            counts_by_type: entities.counts_by_type(),
+            counts_by_category: vec![],
+            content_sha256: entities_checksum(entities),
+            filter: serde_json::json!({}),
+            generated_at: "2026-06-01T00:00:00Z".into(),
+            complete: true,
+            omissions: vec![],
+        },
+        entities: entities.clone(),
+    };
+    let path = std::env::temp_dir().join(unique("am-rekey-bundle"));
+    std::fs::write(&path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    TempBundle(path)
+}
+
 /// A triple whose `snapshot_ref` / `gist_ref` point at rows the bundle also
 /// carries must re-key those pointers; a stale pointer fails the whole import
 /// (`ItemNotFound: snapshot_ref ... not found in bank`).
@@ -163,3 +210,113 @@ fn triple_refs_follow_bundle_items_into_the_second_bank() {
     );
 }
 
+/// `ciphertext_backup` bundles put every row in `opaque_items` and leave
+/// `items` empty; assoc edges over those rows must still be re-keyed, or the
+/// target bank gets edges pointing at source-bank ids.
+#[test]
+fn ciphertext_backup_assoc_edges_point_at_rekeyed_opaque_rows() {
+    let h = Harness::new();
+    let left = unique("opq");
+    let right = unique("opq");
+    let entities = ExportEntities {
+        opaque_items: vec![opaque_row(&h, &left), opaque_row(&h, &right)],
+        assoc_edges: vec![AssocEdgeRecord {
+            id: unique("ae"),
+            bank_id: SOURCE_BANK.into(),
+            source_id: left.clone(),
+            target_id: right.clone(),
+            assoc_kind: clio_store::AssocKind::Explicit,
+            relationship: Some("relates".into()),
+            weight: 0.4,
+            last_updated_at: "2026-06-01T00:00:00Z".into(),
+        }],
+        ..ExportEntities::default()
+    };
+    let bundle = write_bundle(&entities, ExportContentMode::CiphertextBackup);
+    let first = import_into(&h, &bundle, &source_ctx());
+    assert_eq!(first.would_create, 3);
+    let second = import_into(&h, &bundle, &h.ctx());
+    assert_eq!(second.would_create, 3, "2 opaque rows + 1 assoc edge");
+
+    let suffix = format!("#{}", h.bank);
+    let derived_left = format!("{left}{suffix}");
+    let derived_right = format!("{right}{suffix}");
+    let edges = h.store.list_assoc_edges(&h.bank, None).unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].source_id, derived_left);
+    assert_eq!(edges[0].target_id, derived_right);
+    for endpoint in [&derived_left, &derived_right] {
+        assert!(
+            h.store
+                .get_item_identity(&h.bank, endpoint)
+                .unwrap()
+                .is_some(),
+            "assoc endpoint `{endpoint}` must exist in the target bank"
+        );
+    }
+}
+
+/// `OpaqueItem` has no bank provenance, so only a single-bank manifest naming
+/// the target bank is provably same-bank; a multi-bank or empty `bank_ids` must
+/// fail closed to the derived id. Otherwise the opaque upsert
+/// (`ON CONFLICT (id) DO UPDATE SET bank_id = EXCLUDED.bank_id`) moves the
+/// source bank's row into the target bank.
+#[test]
+fn opaque_ids_fail_closed_outside_a_single_bank_manifest() {
+    let h = Harness::new();
+    let multi_id = unique("opq");
+    let empty_id = unique("opq");
+    let seed = write_bundle(
+        &ExportEntities {
+            opaque_items: vec![opaque_row(&h, &multi_id), opaque_row(&h, &empty_id)],
+            ..ExportEntities::default()
+        },
+        ExportContentMode::CiphertextBackup,
+    );
+    import_into(&h, &seed, &source_ctx());
+
+    let multi = write_bundle_for_banks(
+        &ExportEntities {
+            opaque_items: vec![opaque_row(&h, &multi_id)],
+            ..ExportEntities::default()
+        },
+        ExportContentMode::CiphertextBackup,
+        vec![SOURCE_BANK.to_owned(), h.bank.clone()],
+    );
+    assert_eq!(import_into(&h, &multi, &h.ctx()).would_create, 1);
+
+    let empty = write_bundle_for_banks(
+        &ExportEntities {
+            opaque_items: vec![opaque_row(&h, &empty_id)],
+            ..ExportEntities::default()
+        },
+        ExportContentMode::CiphertextBackup,
+        vec![],
+    );
+    assert_eq!(import_into(&h, &empty, &h.ctx()).would_create, 1);
+
+    let suffix = format!("#{}", h.bank);
+    for id in [&multi_id, &empty_id] {
+        let derived = format!("{id}{suffix}");
+        assert!(
+            h.store
+                .get_item_identity(&h.bank, &derived)
+                .unwrap()
+                .is_some(),
+            "derived id `{derived}` is written in the target bank"
+        );
+        assert!(
+            h.store.get_item_identity(&h.bank, id).unwrap().is_none(),
+            "the unkeyed source id must not appear in the target bank"
+        );
+        assert!(
+            h.store
+                .get_item_identity(SOURCE_BANK, id)
+                .unwrap()
+                .is_some(),
+            "source row `{id}` keeps its original id and bank"
+        );
+    }
+    assert_eq!(count_in_bank(&h, SOURCE_BANK), 2);
+    assert_eq!(count_in_bank(&h, &h.bank), 2);
+}
