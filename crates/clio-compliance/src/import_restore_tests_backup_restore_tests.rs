@@ -278,19 +278,25 @@ fn masked_backup_rows_restore_with_distinct_identities() {
 
     let triples = h.store.list_triples(&h.bank).unwrap();
     assert_eq!(triples.len(), 2, "both triples restore");
-    let mut restored: Vec<&str> = triples.iter().map(|t| t.subject.as_str()).collect();
+    // Pin id↔content: each restored row must keep its own exported id (derived
+    // for the target bank) alongside its own content-free placeholder, so
+    // swapping the ids of the two rows fails here.
+    let mut restored: Vec<(String, String)> = triples
+        .iter()
+        .map(|t| (t.id.clone(), t.subject.clone()))
+        .collect();
     restored.sort_unstable();
-    let mut exported: Vec<&str> = entities
+    let mut expected: Vec<(String, String)> = entities
         .triples
         .iter()
-        .map(|t| t.subject.as_str())
+        .map(|t| (format!("{}#{}", t.id, h.bank), t.subject.clone()))
         .collect();
-    exported.sort_unstable();
+    expected.sort_unstable();
     assert_eq!(
-        restored, exported,
-        "the restore keeps each record's own content-free placeholder"
+        restored, expected,
+        "each restored row keeps its own id and its own content-free placeholder"
     );
-    assert_ne!(restored[0], restored[1]);
+    assert_ne!(restored[0].1, restored[1].1);
 
     // The restore is idempotent: a re-import finds every identity and skips.
     let again = import(&h.args(&h.ctx(), h.policy(), bundle.path(), false, false, None))
