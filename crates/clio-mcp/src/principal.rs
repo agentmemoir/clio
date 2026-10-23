@@ -98,6 +98,16 @@ impl Principal {
         }
     }
 
+    /// Whether this credential's list names `bank`.
+    ///
+    /// The same list [`Self::authorize_bank`] refuses against, asked as a
+    /// question so a caller that has already resolved a scope can decide what
+    /// to forward. It grants nothing on its own: every use still has to refuse
+    /// when the answer is false.
+    pub(crate) fn covers_bank(&self, bank: &str) -> bool {
+        self.banks.iter().any(|b| b == bank)
+    }
+
     /// Refuse a bank this credential's list does not name.
     ///
     /// There is no fallback: falling back would write to a bank the caller did
@@ -107,7 +117,7 @@ impl Principal {
     /// # Errors
     /// [`ErrorCode::Forbidden`] when `bank` is outside the list.
     pub(crate) fn authorize_bank(&self, bank: &str) -> Result<(), AmError> {
-        if self.banks.iter().any(|b| b == bank) {
+        if self.covers_bank(bank) {
             return Ok(());
         }
         Err(AmError::new(

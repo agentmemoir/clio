@@ -28,7 +28,7 @@
 
 use crate::runtime::McpState;
 use crate::write_tools::{opt_bool, opt_str};
-use clio_types::{AmError, ErrorCode};
+use clio_types::{AmError, ErrorCode, OpContext};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -55,11 +55,13 @@ pub(crate) fn dispatch_ops(state: &McpState, name: &str, args: &Value) -> Value 
 }
 
 /// Run the in-process surface, returning the serialized report/outcome.
+///
+/// One gate runs for every operator tool: the credential's actor and the bank
+/// the call resolves to are authorized before any body decides its own scope.
+/// A body that can reach a further bank (a registered plan, a whole-store
+/// sweep) must authorize that scope itself before acting on it.
 fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
-    if matches!(name, "verify" | "doctor") && opt_str(args, "bank").is_some() {
-        let ctx = state.resolve_ctx(args)?;
-        state.require_known_bank(ctx.bank.as_str())?;
-    }
+    let ctx = state.resolve_ctx(args)?;
     let timestamp = state.resolve_timestamp(args)?;
     match name {
         "diagnose" => {
@@ -72,19 +74,27 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
             Ok(to_value(&report))
         }
         "verify" => {
+            let bank = scope_bank(state, args, &ctx);
+            if let Some(bank) = bank {
+                state.require_known_bank(bank)?;
+            }
             let report = clio_ops::verify(&clio_ops::VerifyArgs {
                 store: &*state.ops_store,
                 index: &*state.index,
-                bank: opt_str(args, "bank"),
+                bank,
                 timestamp: &timestamp,
             })?;
             Ok(to_value(&report))
         }
         "doctor" => {
+            let bank = scope_bank(state, args, &ctx);
+            if let Some(bank) = bank {
+                state.require_known_bank(bank)?;
+            }
             let plan = clio_ops::doctor(&clio_ops::DoctorArgs {
                 store: &*state.ops_store,
                 index: &*state.index,
-                bank: opt_str(args, "bank"),
+                bank,
                 dry_run: opt_bool(args, "dry_run", true)?,
                 timestamp: &timestamp,
                 plans: &state.ops_plans,
@@ -92,10 +102,25 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
             Ok(to_value(&plan))
         }
         "repair" => {
-            // Mutating: enforce the same bank authorization as other tools
-            // (shared namespace requires the deployment to enable it).
-            state.resolve_ctx(args)?;
             let actions = string_array(args, "actions")?;
+            // A registered plan names its own bank, and a bank-less request
+            // would otherwise let it reach any bank in the store: authorize the
+            // plan's scope before any action runs, and never widen an omitted
+            // scope past the one already authorized.
+            let plan_bank = opt_str(args, "plan_id")
+                .and_then(|id| state.ops_plans.get(id))
+                .and_then(|plan| plan.bank);
+            let bank = match (&state.principal, opt_str(args, "bank")) {
+                (Some(_), Some(named)) => Some(named.to_owned()),
+                (Some(_), None) => match plan_bank {
+                    Some(scope) => {
+                        state.require_bank_grant(&scope)?;
+                        Some(scope)
+                    }
+                    None => Some(ctx.bank.as_str().to_owned()),
+                },
+                (None, named) => named.map(str::to_owned),
+            };
             let outcome = clio_ops::repair(&clio_ops::RepairArgs {
                 store: &*state.ops_store,
                 writer: &*state.store,
@@ -104,28 +129,28 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
                 plans: &state.ops_plans,
                 plan_id: opt_str(args, "plan_id"),
                 actions: &actions,
-                bank: opt_str(args, "bank"),
+                bank: bank.as_deref(),
                 confirm: opt_bool(args, "confirm", false)?,
                 timestamp: &timestamp,
             })?;
             Ok(to_value(&outcome))
         }
         "reindex" => {
-            // Mutating: same bank authorization gate as `repair`.
-            state.resolve_ctx(args)?;
-            // Whole-store reindex must not silently expand into banks the
-            // caller cannot authorize: when the shared bank is disabled, a
-            // bank-less scope could still sweep `shared` via indexable_banks.
-            let bank = match opt_str(args, "bank") {
-                Some(b) => Some(b),
-                None if state.shared_enabled => None,
-                None => {
-                    return Err(AmError::new(
-                        ErrorCode::Forbidden,
-                        "reindex without `bank` sweeps every indexable bank; pass an \
-                         explicit bank while the shared bank surface is disabled",
-                    ));
-                }
+            // A bound caller's omitted scope never expands to every indexable
+            // bank: the resolved, authorized bank is the whole scope it gets.
+            let bank = match &state.principal {
+                Some(_) => Some(opt_str(args, "bank").unwrap_or(ctx.bank.as_str())),
+                None => match opt_str(args, "bank") {
+                    Some(b) => Some(b),
+                    None if state.shared_enabled => None,
+                    None => {
+                        return Err(AmError::new(
+                            ErrorCode::Forbidden,
+                            "reindex without `bank` sweeps every indexable bank; pass an \
+                             explicit bank while the shared bank surface is disabled",
+                        ));
+                    }
+                },
             };
             let target =
                 clio_index::RebuildTargets::parse(opt_str(args, "target").unwrap_or("all"))?;
@@ -141,6 +166,19 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
             Ok(to_value(&report))
         }
         other => Err(AmError::not_implemented(other)),
+    }
+}
+
+/// The bank scope a read-side operator tool forwards downstream.
+///
+/// A bound principal forwards the bank its context resolved and authorized, so
+/// omitting `bank` narrows the call to the credential's own scope instead of
+/// widening it to the whole store. An unbound local caller keeps the previous
+/// behavior exactly: its own argument, and `None` when it named none.
+fn scope_bank<'a>(state: &McpState, args: &'a Value, ctx: &'a OpContext) -> Option<&'a str> {
+    match &state.principal {
+        Some(_) => Some(ctx.bank.as_str()),
+        None => opt_str(args, "bank"),
     }
 }
 
@@ -212,6 +250,10 @@ fn string_array(args: &Value, key: &str) -> Result<Vec<String>, AmError> {
 fn to_value<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("operator report serializes")
 }
+
+#[cfg(test)]
+#[path = "ops_tools_grant_tests.rs"]
+mod ops_tools_grant_tests;
 
 #[cfg(test)]
 #[path = "ops_tools_tests.rs"]

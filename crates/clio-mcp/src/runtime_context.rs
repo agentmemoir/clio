@@ -8,13 +8,15 @@
 //! non-blocking maintenance dispatch hook.
 //!
 //! ## Owns
-//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` on `McpState`
+//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` / `require_bank_grant`
+//!   on `McpState`
 //! - `dispatch_maintenance` (off-path maintenance handoff)
 //! - `now_utc` (RFC 3339 UTC stamping; the calendar arithmetic is the shared
 //!   `clio_types::civil_from_days`)
 //!
 //! ## Does not own
 //! - Share-path semantics or the shared-bank deployment permission (`runtime`)
+//! - The credential's bank list itself (`principal`)
 //! - Maintenance consumers (`clio-write`)
 //!
 //! ## Boundary
@@ -156,6 +158,35 @@ impl McpState {
         Err(AmError::new(
             clio_types::ErrorCode::NotFound,
             format!("bank `{bank}` not found"),
+        ))
+    }
+
+    /// Refuse an operator scope the bound credential's grant does not cover.
+    ///
+    /// Some operator tools resolve their scope after the request is authorized:
+    /// a registered plan names its own bank, and a bank-less scope would
+    /// otherwise widen to every bank in the store. The grant must therefore
+    /// cover the scope the tool actually acts on, not only the `bank` argument.
+    /// An unbound local caller is allowed, because the process owner already
+    /// holds the store, and the deployment's shared-bank permission is never
+    /// consulted: enablement is not a grant.
+    ///
+    /// The message names neither the bank nor a plan id, so a caller that
+    /// omitted `bank` cannot learn from the refusal that the scope it reached
+    /// exists.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] when a bound credential's list omits `bank`.
+    pub(crate) fn require_bank_grant(&self, bank: &str) -> Result<(), AmError> {
+        let Some(principal) = &self.principal else {
+            return Ok(());
+        };
+        if principal.covers_bank(bank) {
+            return Ok(());
+        }
+        Err(AmError::new(
+            ErrorCode::Forbidden,
+            "the operator scope for this request is outside this credential's banks",
         ))
     }
 
