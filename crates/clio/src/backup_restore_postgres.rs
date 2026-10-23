@@ -30,7 +30,8 @@
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
     Counts, FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, Plan, RESULT_COUNT_MISMATCH, RESULT_PARTIAL,
-    RESULT_RESTORED, Report, RestorePlanInput, pre_restore_decision, pre_restore_from,
+    RESULT_RESTORED, Report, RestorePlanInput, classify_refusal, pre_restore_decision,
+    pre_restore_from,
 };
 use crate::backup_restore_space::{key_destination, preflight};
 use crate::backup_restore_sqlite::{RestorePlacement, merge_settle_failure};
@@ -95,6 +96,11 @@ pub(crate) fn plan_postgres(input: RestorePlanInput<'_>) -> Result<Plan, CliErro
                 &error,
             )
         })?;
+    // The key member is not digest-bound by the manifest, so prove the member
+    // this plan will place is the one the authority check classified.
+    authority
+        .verify_key_member(extracted.key.as_ref())
+        .map_err(|refusal| classify_refusal(&refusal))?;
     let key = key_destination(
         extracted.key.as_ref().map(|member| member.file.path()),
         &target,

@@ -47,8 +47,7 @@ pub enum MemberFacts {
     None,
     /// The member references a subject through a content-free record — a
     /// destroyed key slot, a tombstone, or a ciphertext row without a usable
-    /// DEK. Ciphertext rows without a usable DEK still count as presence.
-    /// Restoring a content-free record cannot make the subject's content
+    /// DEK. Restoring a content-free record cannot make the subject's content
     /// readable, so a content-free reference to a denied subject is allowed.
     Reference {
         /// The referenced subject key's deployment-wide identity.
@@ -58,6 +57,13 @@ pub enum MemberFacts {
     /// would make that subject's content readable. A usable key for a denied
     /// subject refuses the archive.
     LiveKey {
+        /// The referenced subject key's deployment-wide identity.
+        subject_hash: String,
+    },
+    /// The member references a subject, and the archive carries no key member,
+    /// so the restore leaves the target's key store in place and nothing proves
+    /// the reference content-free. A reference to a denied subject refuses.
+    UnprovenKey {
         /// The referenced subject key's deployment-wide identity.
         subject_hash: String,
     },
@@ -92,6 +98,9 @@ pub enum AuthorityRefusal {
     UnknownMember,
     /// A member carries usable key material for a subject the live authority denies.
     DeniedSubject,
+    /// A member references a subject the live authority denies, and the archive
+    /// carries no key member to prove the reference content-free.
+    UnprovenReference,
 }
 
 impl AuthorityRefusal {
@@ -109,7 +118,8 @@ impl AuthorityRefusal {
             | Self::ClaimOtherDeployment
             | Self::ClaimNewerGeneration
             | Self::SaltFingerprintMismatch
-            | Self::DeniedSubject => ErrorCode::Forbidden,
+            | Self::DeniedSubject
+            | Self::UnprovenReference => ErrorCode::Forbidden,
         }
     }
 }
@@ -135,6 +145,10 @@ impl std::fmt::Display for AuthorityRefusal {
             Self::DeniedSubject => {
                 "an archive member carries usable key material for a currently denied subject"
             }
+            Self::UnprovenReference => {
+                "an archive member references a currently denied subject and the archive carries \
+                 no key store to prove it unreadable"
+            }
         })
     }
 }
@@ -149,11 +163,12 @@ impl std::error::Error for AuthorityRefusal {}
 /// authority is that same live authority (same deployment, same generation),
 /// the archive claims that deployment at no newer a generation, the archive's
 /// subject-salt fingerprint matches the live authority's, and no member either
-/// carries usable key material for a denied subject or cannot be classified.
-/// Content-free references to a denied subject — a destroyed key slot, a
-/// tombstone, or a ciphertext row without a usable DEK — do not refuse: they
-/// carry nothing that could make the erased content readable again, which is
-/// why a backup taken from a store after its erasure can be restored.
+/// carries usable key material for a denied subject, references one without a
+/// key store that could prove the reference content-free, or cannot be
+/// classified. Content-free references to a denied subject — a destroyed key
+/// slot, a tombstone, or a ciphertext row without a usable DEK — do not refuse:
+/// they carry nothing that could make the erased content readable again, which
+/// is why a backup taken from a store after its erasure can be restored.
 ///
 /// # Errors
 /// The [`AuthorityRefusal`] naming the first refusal, in check order.
@@ -203,6 +218,11 @@ pub fn check_archive_authority(
             MemberFacts::LiveKey { subject_hash } => {
                 if current.is_denied(subject_hash) {
                     return Err(AuthorityRefusal::DeniedSubject);
+                }
+            }
+            MemberFacts::UnprovenKey { subject_hash } => {
+                if current.is_denied(subject_hash) {
+                    return Err(AuthorityRefusal::UnprovenReference);
                 }
             }
         }

@@ -265,9 +265,16 @@ fn sqlite_each_content_free_artifact_kind_alone_restores() {
             kind.tag()
         );
         let denied = readback(&store, DENIED_ITEM);
-        assert_ne!(
+        let expected = if kind == Artifact::ItemRow {
+            // The row is restored, but the archive carried no key slot for it.
+            Readback::KeyMissing
+        } else {
+            // The archive carried no item row for the denied subject.
+            Readback::Absent
+        };
+        assert_eq!(
             denied,
-            Readback::Readable,
+            expected,
             "the denied subject must not become readable after the {} archive: {denied:?}",
             kind.tag()
         );
@@ -332,9 +339,16 @@ fn postgres_each_content_free_artifact_kind_alone_restores() {
             kind.tag()
         );
         let denied = readback(&store, DENIED_ITEM);
-        assert_ne!(
+        let expected = if kind == Artifact::ItemRow {
+            // The row is restored, but the archive carried no key slot for it.
+            Readback::KeyMissing
+        } else {
+            // The archive carried no item row for the denied subject.
+            Readback::Absent
+        };
+        assert_eq!(
             denied,
-            Readback::Readable,
+            expected,
             "the denied subject must not become readable after the {} archive: {denied:?}",
             kind.tag()
         );

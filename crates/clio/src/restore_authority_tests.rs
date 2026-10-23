@@ -303,8 +303,7 @@ fn an_archive_without_a_key_member_fails_closed() {
         ],
     );
     // Without a key member the restore leaves the target's key store in place,
-    // so the content-free tombstone cannot be proven unreadable and is treated
-    // as usable key material.
+    // so the tombstone cannot be proven unreadable and is an unproven key.
     let built = build_sqlite_archive(&scratch, &payload, None, Some(authority()), None);
 
     let classified = classify_archive(&built.path, &built.manifest).expect("classify");
@@ -312,7 +311,7 @@ fn an_archive_without_a_key_member_fails_closed() {
     assert!(
         classified
             .members
-            .contains(&MemberFacts::LiveKey { subject_hash: hash }),
+            .contains(&MemberFacts::UnprovenKey { subject_hash: hash }),
         "{:?}",
         classified.members
     );
@@ -375,6 +374,84 @@ fn a_payload_subject_key_id_is_hashed_to_a_reference() {
         "{:?}",
         classified.members
     );
+}
+
+#[test]
+fn a_key_member_that_changed_after_classification_is_refused() {
+    let scratch = Scratch::new("key-member-changed");
+    let payload = clean_payload(&scratch);
+    let key = scratch.join("keys.kms.db");
+    sqlite_file(
+        &key,
+        &[
+            "CREATE TABLE slots (subject_id TEXT PRIMARY KEY, version INTEGER NOT NULL, key_b64 TEXT)",
+            "INSERT INTO slots (subject_id, version, key_b64) VALUES ('subject-1', 1, 'AAAA')",
+        ],
+    );
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
+    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    assert!(
+        classified.key_member_sha256.is_some(),
+        "the classified key member carries a digest"
+    );
+
+    // The same extraction passes the proof.
+    let same = scratch.join("same");
+    std::fs::create_dir_all(&same).expect("create the extraction directory");
+    let extracted =
+        clio_backup::extract_members(&built.path, &built.manifest, &same).expect("extract");
+    assert!(
+        classified.verify_key_member(extracted.key.as_ref()).is_ok(),
+        "the same key member is accepted"
+    );
+
+    // A different key member of the same shape is refused, so a swapped archive
+    // cannot be admitted on the strength of the first classification.
+    let other_scratch = Scratch::new("key-member-other");
+    let other_payload = clean_payload(&other_scratch);
+    let other_key = other_scratch.join("keys.kms.db");
+    sqlite_file(
+        &other_key,
+        &[
+            "CREATE TABLE slots (subject_id TEXT PRIMARY KEY, version INTEGER NOT NULL, key_b64 TEXT)",
+            "INSERT INTO slots (subject_id, version, key_b64) VALUES ('subject-1', 1, 'BBBB')",
+        ],
+    );
+    let other = build_sqlite_archive(
+        &other_scratch,
+        &other_payload,
+        Some(&other_key),
+        Some(authority()),
+        None,
+    );
+    let other_dir = other_scratch.join("other");
+    std::fs::create_dir_all(&other_dir).expect("create the other extraction directory");
+    let other_extracted =
+        clio_backup::extract_members(&other.path, &other.manifest, &other_dir).expect("extract");
+    assert!(
+        matches!(
+            classified.verify_key_member(other_extracted.key.as_ref()),
+            Err(ClassifyRefusal::KeyMemberChanged)
+        ),
+        "a changed key member is refused"
+    );
+}
+
+#[test]
+fn an_unreadable_key_member_is_refused() {
+    let scratch = Scratch::new("key-store-unreadable");
+    let payload = clean_payload(&scratch);
+    let key = scratch.join("keys.kms.db");
+    // A SQLite file without the slot table cannot be shown to carry no usable
+    // key, so it fails closed instead of yielding an empty live set.
+    sqlite_file(&key, &["CREATE TABLE meta (key TEXT, value TEXT)"]);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
+
+    let refusal = classify_archive(&built.path, &built.manifest)
+        .expect_err("an unreadable key store refuses");
+
+    assert!(matches!(refusal, ClassifyRefusal::KeyStoreUnreadable));
+    assert_eq!(refusal.code(), ErrorCode::ConfigCorrupt);
 }
 
 #[test]

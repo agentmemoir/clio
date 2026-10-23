@@ -320,7 +320,7 @@ pub(crate) fn place(plan: Plan) -> Result<Report, CliError> {
 }
 
 /// A classification refusal as a clear restore refusal, keeping its own code.
-fn classify_refusal(refusal: &ClassifyRefusal) -> CliError {
+pub(crate) fn classify_refusal(refusal: &ClassifyRefusal) -> CliError {
     let code = refusal.code();
     let error = CliError::refusal(code.as_str(), refusal.to_string());
     match code {

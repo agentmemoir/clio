@@ -30,7 +30,9 @@
 //! Keep this module focused on classifying one archive against its manifest.
 
 use clio_backup::{BackupManifest, ExtractedArchive, ExtractedMember};
-use clio_compliance::{ArchiveClaim, MemberFacts, tombstone_salt, tombstone_salt_fingerprint};
+use clio_compliance::{
+    ArchiveClaim, MemberFacts, sha256_hex_bytes, tombstone_salt, tombstone_salt_fingerprint,
+};
 use clio_store::sha256_hex;
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeSet;
@@ -71,6 +73,34 @@ pub struct ClassifiedArchive {
     pub claim: ArchiveClaim,
     /// What every archive member shows about subject references.
     pub members: Vec<MemberFacts>,
+    /// The SHA-256 of the key member the members were classified from, or
+    /// `None` when the archive carries none.
+    ///
+    /// The manifest records only a size for this member, so the plan re-extracts
+    /// the archive and must prove that the key member it will place is the one
+    /// that was classified. A mismatch means the archive changed between the
+    /// authority check and placement and is refused.
+    pub key_member_sha256: Option<String>,
+}
+
+impl ClassifiedArchive {
+    /// Prove that the key member extracted for placement is the one these
+    /// members were classified from.
+    ///
+    /// # Errors
+    /// [`ClassifyRefusal::KeyMemberChanged`] when a member classified as
+    /// carrying no usable key for a denied subject is replaced by a different
+    /// one before placement, or the reverse.
+    pub fn verify_key_member(&self, key: Option<&ExtractedMember>) -> Result<(), ClassifyRefusal> {
+        let digest = key
+            .map(|member| file_sha256(member.file.path()))
+            .transpose()?;
+        if digest == self.key_member_sha256 {
+            Ok(())
+        } else {
+            Err(ClassifyRefusal::KeyMemberChanged)
+        }
+    }
 }
 
 /// Why an archive could not be classified for the authority check.
@@ -81,6 +111,12 @@ pub enum ClassifyRefusal {
     /// The archive's salt fingerprint is absent or differs from the current
     /// deployment salt, so its stored subject ids cannot be re-hashed.
     SaltFingerprintMismatch,
+    /// The archive's key member is not a key store this build can read, so it
+    /// cannot be shown to carry no usable key.
+    KeyStoreUnreadable,
+    /// The key member extracted for placement differs from the one the
+    /// authority check classified.
+    KeyMemberChanged,
     /// A member whose presence was expected could not be classified.
     UnknownMember(String),
     /// Reading or extracting the archive failed.
@@ -93,15 +129,18 @@ impl ClassifyRefusal {
     /// A missing authority is [`ErrorCode::NotFound`], the same code the
     /// authority check gives a missing presented authority. A salt mismatch is
     /// [`ErrorCode::Forbidden`], the same code the check gives a mismatched
-    /// authority. A member that cannot be classified is
-    /// [`ErrorCode::ConfigCorrupt`], the same code the check gives an unknown
-    /// member. A read failure keeps the code it carries.
+    /// authority. An unreadable key store and a member that cannot be
+    /// classified are [`ErrorCode::ConfigCorrupt`], the same code the check
+    /// gives an unknown member. A key member that changed is
+    /// [`ErrorCode::ArchiveCorrupt`], because the archive is no longer the one
+    /// the check read. A read failure keeps the code it carries.
     #[must_use]
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::ArchiveMissingAuthority => ErrorCode::NotFound,
             Self::SaltFingerprintMismatch => ErrorCode::Forbidden,
-            Self::UnknownMember(_) => ErrorCode::ConfigCorrupt,
+            Self::KeyStoreUnreadable | Self::UnknownMember(_) => ErrorCode::ConfigCorrupt,
+            Self::KeyMemberChanged => ErrorCode::ArchiveCorrupt,
             Self::Io(error) => error.code,
         }
     }
@@ -116,6 +155,12 @@ impl std::fmt::Display for ClassifyRefusal {
             Self::SaltFingerprintMismatch => f.write_str(
                 "the archive's subject-salt fingerprint does not match the current deployment salt",
             ),
+            Self::KeyStoreUnreadable => {
+                f.write_str("the archive's key member is not a readable key store")
+            }
+            Self::KeyMemberChanged => {
+                f.write_str("the archive's key member changed after its authority was checked")
+            }
             Self::UnknownMember(member) => {
                 write!(f, "the archive member {member:?} cannot be classified")
             }
@@ -143,11 +188,11 @@ impl From<AmError> for ClassifyRefusal {
 /// directory and every member is classified:
 ///
 /// - the manifest member proves no subject reference;
-/// - a SQLite payload yields a reference for every `compliance_tombstones`
-///   hash and every hashed `subject_keys` and `items` subject id;
-/// - a Postgres payload is the dump meta, and its `dump/tables` members yield a
-///   reference for the subject columns of the three subject tables;
-/// - the key member yields a reference for every hashed `slots` subject id;
+/// - a SQLite payload names every `compliance_tombstones` hash and every
+///   hashed `subject_keys` and `items` subject id;
+/// - a Postgres payload is the dump meta, and its `dump/tables` members name
+///   the subject columns of the three subject tables;
+/// - the key member names every hashed `slots` subject id;
 /// - any other member is [`MemberFacts::Unknown`] and is never skipped.
 ///
 /// A reference is [`MemberFacts::LiveKey`] when the archive's own key store
@@ -156,13 +201,14 @@ impl From<AmError> for ClassifyRefusal {
 /// [`MemberFacts::Reference`]: a destroyed key slot, a tombstone, or a
 /// ciphertext row the archive carries no usable key for. An archive with no key
 /// member leaves the target's key store in place, so none of its references can
-/// be shown content-free and all of them are [`MemberFacts::LiveKey`]. That
+/// be shown content-free and all of them are [`MemberFacts::UnprovenKey`]. That
 /// distinction is what lets a backup taken after an erasure be restored while a
 /// pre-erasure archive that still carries the subject's key still refuses.
 ///
 /// # Errors
 /// The manifest records no authority ([`ClassifyRefusal::ArchiveMissingAuthority`]),
 /// the salt fingerprint is absent or differs ([`ClassifyRefusal::SaltFingerprintMismatch`]),
+/// the key member is not a readable key store ([`ClassifyRefusal::KeyStoreUnreadable`]),
 /// an expected member cannot be classified ([`ClassifyRefusal::UnknownMember`]),
 /// or the archive cannot be read ([`ClassifyRefusal::Io`]).
 pub fn classify_archive(
@@ -201,6 +247,15 @@ pub fn classify_archive(
     // reference is treated as usable key material.
     let keys_present = extracted.key.is_some();
 
+    // The manifest records only a size for the key member, so the digest is
+    // captured here and re-proved against the plan's own extraction before
+    // placement.
+    let key_member_sha256 = extracted
+        .key
+        .as_ref()
+        .map(|member| file_sha256(member.file.path()))
+        .transpose()?;
+
     let mut members = Vec::new();
     for name in member_names(archive)? {
         if name == clio_backup::MANIFEST_MEMBER {
@@ -227,7 +282,11 @@ pub fn classify_archive(
             members.push(MemberFacts::Unknown);
         }
     }
-    Ok(ClassifiedArchive { claim, members })
+    Ok(ClassifiedArchive {
+        claim,
+        members,
+        key_member_sha256,
+    })
 }
 
 /// The dump table the dump meta declares under `member`, if any.
@@ -287,12 +346,17 @@ fn classify_sqlite_payload(
 /// usable key, as deployment-wide subject hashes.
 ///
 /// A slot whose key column is unreadable is treated as live, so an archive that
-/// cannot be shown to have destroyed the key fails closed.
+/// cannot be shown to have destroyed the key fails closed. A key member that
+/// does not carry the slot table this build reads cannot be classified at all,
+/// so it refuses rather than yielding an empty live set.
 fn live_key_hashes(key: Option<&ExtractedMember>) -> Result<BTreeSet<String>, ClassifyRefusal> {
     let Some(key) = key else {
         return Ok(BTreeSet::new());
     };
     let path = key.file.path();
+    if !column_present(path, KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)? {
+        return Err(ClassifyRefusal::KeyStoreUnreadable);
+    }
     let ids = if column_present(path, KEY_SLOTS_TABLE, KEY_COLUMN)? {
         sqlite_column_where(
             path,
@@ -374,9 +438,9 @@ fn classify_dump_table(
 ///
 /// Without a key member the restore leaves the target's key store in place, so
 /// no reference can be shown content-free: every one is
-/// [`MemberFacts::LiveKey`]. With a key member, a hash the archive still holds a
-/// usable key for is a [`MemberFacts::LiveKey`] and every other one is the
-/// content-free [`MemberFacts::Reference`].
+/// [`MemberFacts::UnprovenKey`]. With a key member, a hash the archive still
+/// holds a usable key for is a [`MemberFacts::LiveKey`] and every other one is
+/// the content-free [`MemberFacts::Reference`].
 fn facts_from_hashes(
     hashes: BTreeSet<String>,
     live: &BTreeSet<String>,
@@ -388,7 +452,9 @@ fn facts_from_hashes(
         hashes
             .into_iter()
             .map(|subject_hash| {
-                if !keys_present || live.contains(&subject_hash) {
+                if !keys_present {
+                    MemberFacts::UnprovenKey { subject_hash }
+                } else if live.contains(&subject_hash) {
                     MemberFacts::LiveKey { subject_hash }
                 } else {
                     MemberFacts::Reference { subject_hash }
@@ -479,6 +545,12 @@ fn io_error(context: &str, path: &Path, error: &std::io::Error) -> AmError {
         ErrorCode::Internal,
         format!("{context} {}: {error}", path.display()),
     )
+}
+
+/// The SHA-256 of a file's bytes.
+fn file_sha256(path: &Path) -> Result<String, ClassifyRefusal> {
+    let bytes = std::fs::read(path).map_err(|error| io_error("reading a member", path, &error))?;
+    Ok(sha256_hex_bytes(&bytes))
 }
 
 /// The refusal for a SQLite read failure, naming the table it was reading.
