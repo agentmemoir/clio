@@ -4,14 +4,16 @@
 //! # Responsibility
 //!
 //! This module is responsible for one resolved principal: the actor a network
-//! credential acts as, the banks it may reach, and the single authorization rule
-//! those two values imply for one tool call.
+//! credential acts as, the banks it may reach, and the rules those two values
+//! imply for one tool call.
 //!
 //! ## Owns
 //! - `Principal` (label, actor, bank list) and `session_identity`, the record
 //!   identity a session binds to
 //! - The two refusal rules applied to one call: a declared actor that disagrees
 //!   with the bound one, and a bank outside the credential's list
+//! - The grant predicate over that same list: whether the credential covers one
+//!   named bank, which a caller asks before forwarding a scope it resolved
 //!
 //! ## Does not own
 //! - Where a principal comes from (see `http_auth`)

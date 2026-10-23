@@ -31,7 +31,11 @@ pub fn ops_defs() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "diagnose",
-            description: "Read-only whole-store install/database health snapshot: backend reachability, schema version, banks, index coverage counts, and embedding readiness. Never mutates memory and takes no bank scope.",
+            description: "Read-only install/database health snapshot: backend reachability, \
+                          schema version, banks, index coverage counts, and embedding \
+                          readiness. Never mutates memory. Takes no `bank` argument: a bound \
+                          caller reads only the bank its grant covers, a caller without a \
+                          credential reads the whole store.",
             required: &[],
             props: vec![("timestamp", s("Snapshot time; defaults to now."))],
         },
@@ -40,7 +44,13 @@ pub fn ops_defs() -> Vec<ToolDef> {
             description: "Deeper read-only consistency pass over referential integrity and index coverage; aggregate ok is false when any error-severity finding exists.",
             required: &[],
             props: vec![
-                ("bank", s("Bank scope; whole store when omitted.")),
+                (
+                    "bank",
+                    s(
+                        "Bank scope; omitted means the bank the caller's grant covers, or the \
+                         whole store for a caller without a credential.",
+                    ),
+                ),
                 ("timestamp", s("Report time; defaults to now.")),
             ],
         },
@@ -49,7 +59,13 @@ pub fn ops_defs() -> Vec<ToolDef> {
             description: "Compose an ordered repair plan from verify findings. Default dry_run=true prints the plan and registers nothing; dry_run=false registers the plan and returns its id without touching the store.",
             required: &[],
             props: vec![
-                ("bank", s("Bank scope; whole store when omitted.")),
+                (
+                    "bank",
+                    s(
+                        "Bank scope; omitted means the bank the caller's grant covers, or the \
+                         whole store for a caller without a credential.",
+                    ),
+                ),
                 (
                     "dry_run",
                     b("Print the plan only (default true); false registers a concrete plan id."),
@@ -73,9 +89,9 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(
-                        "Bank scope; required for explicit actions (or when the plan \
-                         carries none). Without a bank every action fails with no \
-                         mutation.",
+                        "Bank scope; omitted resolves to the plan's bank when it names one, \
+                         otherwise to the bank the caller's grant covers; only a caller without \
+                         a credential ends with none, where every action fails without mutation.",
                     ),
                 ),
                 (
@@ -100,8 +116,9 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(
-                        "Bank scope; every indexable bank when omitted (rejected over \
-                         MCP while the shared bank surface is disabled).",
+                        "Bank scope; omitted means the bank the caller's grant covers, or every \
+                         indexable bank for a caller without a credential (rejected over MCP \
+                         while the shared bank surface is disabled).",
                     ),
                 ),
                 ("dry_run", b("Report scope/cost only (default true).")),
