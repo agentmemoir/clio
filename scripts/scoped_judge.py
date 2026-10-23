@@ -9,7 +9,7 @@ from typing import Any, Collection, Iterable, NamedTuple, Sequence
 
 from scoped_core import CoverageRow, LINE_FLOOR, ROOT, RunError, owned
 import owned_scanner as scanner
-from scoped_select import git, merge_base
+from scoped_select import git, has_no_executable_code, merge_base
 
 
 # --- judging the report --------------------------------------------------------
@@ -181,8 +181,8 @@ def exemption(rel: str) -> str | None:
     """Why a changed file is never judged, or None when it is judged.
 
     A file is exempt by its place (a crate's tests, examples or benches directory),
-    by being build.rs, by holding only declarations, or by being declared behind a
-    test gate. No file name exempts a file.
+    by being build.rs, by holding no executable code, or by being declared behind
+    a test gate. No file name exempts a file.
     """
     if _directly_under(rel, "tests"):
         return "test file"
@@ -196,6 +196,8 @@ def exemption(rel: str) -> str | None:
         return "module declarations and re-exports only"
     if is_test_module(rel):
         return "declared test module"
+    if has_no_executable_code(rel):
+        return "no executable code"
     return None
 
 

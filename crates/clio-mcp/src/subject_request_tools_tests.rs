@@ -34,10 +34,8 @@
 
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::write_tools::dispatch;
-use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
-use clio_compliance::{
-    PathOwner, PathSlot, PathState, RequestKind, RequestScope, VerificationResult,
-};
+use clio_compliance::subject_request_store_wiring::row_to_record;
+use clio_compliance::{RequestKind, RequestScope, VerificationResult};
 use clio_types::Actor;
 use serde_json::{Value, json};
 
@@ -78,28 +76,6 @@ fn store_item(state: &McpState, id: &str, subject: &str) {
         }),
     );
     assert_eq!(out["ok"], json!(true), "seed item {id}: {out}");
-}
-
-/// Mark one product path done on the stored record, the one fact the closure
-/// gate reads that the request verbs do not set themselves.
-fn seed_done_path(state: &McpState, request_id: &str, path: &str) {
-    let row = state
-        .durable
-        .load(request_id)
-        .expect("load request")
-        .expect("request row");
-    let mut record = row_to_record(&row).expect("decode request");
-    record.paths.insert(
-        path.to_owned(),
-        PathSlot {
-            owner: PathOwner::Clio,
-            state: PathState::Done,
-        },
-    );
-    state
-        .durable
-        .save(&record_to_row(&record))
-        .expect("save request");
 }
 
 fn load_record(state: &McpState, request_id: &str) -> clio_compliance::SubjectRequestRecord {
@@ -207,7 +183,13 @@ fn subject_request_start_status_copy_retry_events_close_agree_on_one_request() {
         );
     }
 
-    seed_done_path(&s, request, "erasure");
+    let completed = call(
+        &s,
+        "subject_request_path_complete",
+        json!({"bank": BANK, "request_id": request, "product_path": "erasure"}),
+    );
+    assert_eq!(completed["ok"], json!(true), "{completed}");
+
     let closed = call(
         &s,
         "subject_request_close",

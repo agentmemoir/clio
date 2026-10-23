@@ -53,6 +53,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         | "subject_request_copy"
         | "subject_request_exception"
         | "subject_request_events"
+        | "subject_request_path_complete"
         | "subject_request_close"
         | "subject_request_peer_status"
         | "subject_request_peer_retry"

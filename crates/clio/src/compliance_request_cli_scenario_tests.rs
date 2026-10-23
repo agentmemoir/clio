@@ -25,8 +25,8 @@
 use super::{CliIo, run_with_state};
 use crate::cli_error::EXIT_OPERATIONAL;
 use crate::cli_read_test_support::{json_of, tokens};
-use clio_compliance::subject_request_store_wiring::{record_to_row, row_to_record};
-use clio_compliance::{PathOwner, PathSlot, PathState, RequestScope};
+use clio_compliance::RequestScope;
+use clio_compliance::subject_request_store_wiring::row_to_record;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_types::Actor;
 use serde_json::Value;
@@ -157,23 +157,6 @@ fn load_record(state: &McpState, request_id: &str) -> clio_compliance::SubjectRe
     row_to_record(&row).expect("decode request")
 }
 
-/// Mark one product path done on the stored record, the one fact the closure
-/// gate reads that the request verbs do not set themselves.
-fn seed_done_path(state: &McpState, request_id: &str, path: &str) {
-    let mut record = load_record(state, request_id);
-    record.paths.insert(
-        path.to_owned(),
-        PathSlot {
-            owner: PathOwner::Clio,
-            state: PathState::Done,
-        },
-    );
-    state
-        .durable
-        .save(&record_to_row(&record))
-        .expect("save request");
-}
-
 /// One request id: every request verb operates on one id and the separated fields
 /// agree across start, status, copy, retry, events, and close.
 #[test]
@@ -241,8 +224,13 @@ fn compliance_cli_lifecycle_verbs_agree_on_one_request() {
         "the retry records an event: {events}"
     );
 
-    // The closure gate needs a done product path; the request verbs do not set it.
-    seed_done_path(&s, request, "erasure");
+    let (code, out, err) = run_json(
+        "request-path-complete",
+        &["--request-id", request, "--product-path", "erasure"],
+        &s,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+
     let (code, out, err) = run_json(
         "request-close",
         &["--request-id", request, "--product-path", "erasure"],

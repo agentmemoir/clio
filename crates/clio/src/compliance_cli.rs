@@ -124,7 +124,9 @@ pub(crate) fn run(
         "request-copy" => compliance_request_cli::run_request(io, fallback, &sub, collected),
         "request-exception" => compliance_request_cli::run_request(io, fallback, &sub, collected),
         "request-events" => compliance_request_cli::run_request(io, fallback, &sub, collected),
-        "request-close" => compliance_request_cli::run_request(io, fallback, &sub, collected),
+        "request-path-complete" | "request-close" => {
+            compliance_request_cli::run_request(io, fallback, &sub, collected)
+        }
         "peer-status" => compliance_request_cli::run_request(io, fallback, &sub, collected),
         "peer-retry" => compliance_request_cli::run_request(io, fallback, &sub, collected),
         "peer-disposition" => compliance_request_cli::run_request(io, fallback, &sub, collected),
