@@ -44,6 +44,7 @@ mod scenario_all_bank_peer;
 mod scenario_all_bank_peer_test_support;
 mod scenario_archive_artifact_isolation;
 mod scenario_archive_presence;
+mod scenario_archive_presence_test_support;
 mod scenario_closure_unknown_path;
 mod scenario_event_review;
 mod scenario_export_erase_restore;

@@ -21,10 +21,8 @@
 //!
 //! Keep this module focused on the archive authority check.
 
-use super::{
-    ArchiveClaim, AuthorityRefusal, DenialRecord, ErasureJournal, JournalState, MemberFacts,
-    SCHEMA_VERSION, check_archive_authority,
-};
+use super::super::{DenialRecord, ErasureJournal, JournalState, SCHEMA_VERSION};
+use super::{ArchiveClaim, AuthorityRefusal, MemberFacts, check_archive_authority};
 use clio_types::ErrorCode;
 
 /// An in-memory current state for the check tests.

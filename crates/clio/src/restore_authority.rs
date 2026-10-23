@@ -21,6 +21,10 @@
 //! - The authority check itself (`clio-compliance` owns `check_archive_authority`)
 //! - Where a restore places bytes (the restore flow and the store own that)
 //! - The archive container, manifest, or extraction (`clio-backup` owns those)
+//! - The SQLite payload and key-store reads (`restore_authority_sqlite` owns
+//!   those)
+//! - The Postgres dump-meta and dump-table reads (`restore_authority_dump` owns
+//!   those)
 //!
 //! ## Boundary
 //!
@@ -29,11 +33,8 @@
 //!
 //! Keep this module focused on classifying one archive against its manifest.
 
-use clio_backup::{BackupManifest, ExtractedArchive, ExtractedMember};
-use clio_compliance::{
-    ArchiveClaim, MemberFacts, sha256_hex_bytes, tombstone_salt, tombstone_salt_fingerprint,
-};
-use clio_store::sha256_hex;
+use clio_backup::{BackupManifest, ExtractedMember};
+use clio_compliance::{ArchiveClaim, MemberFacts, sha256_hex_bytes, tombstone_salt_fingerprint};
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -44,27 +45,38 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[path = "restore_authority_copy.rs"]
 mod restore_authority_copy;
 
+/// The SQLite payload and key-store reads.
+#[path = "restore_authority_sqlite.rs"]
+mod restore_authority_sqlite;
+
+/// The Postgres dump-meta and dump-table reads.
+#[path = "restore_authority_dump.rs"]
+mod restore_authority_dump;
+
+use restore_authority_dump::{classify_dump_table, read_dump_meta, table_named};
+use restore_authority_sqlite::{classify_key_store, classify_sqlite_payload, live_key_hashes};
+
 /// The payload table holding one-way subject hashes.
-const TOMBSTONE_TABLE: &str = "compliance_tombstones";
+pub(super) const TOMBSTONE_TABLE: &str = "compliance_tombstones";
 
 /// The payload table linking a subject id to its data key.
-const SUBJECT_KEYS_TABLE: &str = "subject_keys";
+pub(super) const SUBJECT_KEYS_TABLE: &str = "subject_keys";
 
 /// The payload table holding one row per item, each row keeping its subject
 /// link after the subject's key was destroyed.
-const ITEMS_TABLE: &str = "items";
+pub(super) const ITEMS_TABLE: &str = "items";
 
 /// The key-store table holding one row per subject key slot.
-const KEY_SLOTS_TABLE: &str = "slots";
+pub(super) const KEY_SLOTS_TABLE: &str = "slots";
 
 /// The key-store column holding the sealed DEK; `NULL` once it is destroyed.
-const KEY_COLUMN: &str = "key_b64";
+pub(super) const KEY_COLUMN: &str = "key_b64";
 
 /// The tombstone column whose value is already a salted subject hash.
-const TOMBSTONE_HASH_COLUMN: &str = "subject_hash";
+pub(super) const TOMBSTONE_HASH_COLUMN: &str = "subject_hash";
 
 /// The subject id columns, which are plaintext ids that must be hashed.
-const SUBJECT_ID_COLUMN: &str = "subject_id";
+pub(super) const SUBJECT_ID_COLUMN: &str = "subject_id";
 
 /// One archive's claimed authority and the membership fact of every member.
 #[derive(Debug)]
@@ -289,14 +301,6 @@ pub fn classify_archive(
     })
 }
 
-/// The dump table the dump meta declares under `member`, if any.
-fn table_named<'a>(
-    meta: &'a clio_backup::dump_meta::DumpMeta,
-    member: &str,
-) -> Option<&'a clio_backup::dump_meta::DumpTable> {
-    meta.tables.iter().find(|table| table.member == member)
-}
-
 /// Every member name the archive carries, in archive order.
 fn member_names(archive: &Path) -> Result<Vec<String>, ClassifyRefusal> {
     let file = std::fs::File::open(archive)
@@ -310,130 +314,6 @@ fn member_names(archive: &Path) -> Result<Vec<String>, ClassifyRefusal> {
     Ok(names)
 }
 
-/// Parse the staged payload as a Postgres dump meta.
-fn read_dump_meta(payload: &Path) -> Result<clio_backup::dump_meta::DumpMeta, ClassifyRefusal> {
-    let bytes = std::fs::read(payload)
-        .map_err(|error| io_error("reading the dump meta", payload, &error))?;
-    Ok(clio_backup::dump_meta::DumpMeta::from_json_bytes(&bytes)?)
-}
-
-/// Classify a SQLite payload: its tombstones, subject keys, and item subjects.
-///
-/// An item row keeps its subject link after the subject's key was destroyed,
-/// so the item's subject id is a presence the archive carries.
-fn classify_sqlite_payload(
-    payload: &Path,
-    live: &BTreeSet<String>,
-    keys_present: bool,
-) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
-    let mut hashes = BTreeSet::new();
-    for hash in sqlite_column(payload, TOMBSTONE_TABLE, TOMBSTONE_HASH_COLUMN)? {
-        if !hash.is_empty() {
-            hashes.insert(hash);
-        }
-    }
-    let salt = tombstone_salt();
-    for id in sqlite_column(payload, SUBJECT_KEYS_TABLE, SUBJECT_ID_COLUMN)? {
-        hashes.insert(sha256_hex(&salt, &id));
-    }
-    for id in sqlite_column(payload, ITEMS_TABLE, SUBJECT_ID_COLUMN)? {
-        hashes.insert(sha256_hex(&salt, &id));
-    }
-    Ok(facts_from_hashes(hashes, live, keys_present))
-}
-
-/// The subjects whose key slot in the archive's key store still carries a
-/// usable key, as deployment-wide subject hashes.
-///
-/// A slot whose key column is unreadable is treated as live, so an archive that
-/// cannot be shown to have destroyed the key fails closed. A key member that
-/// does not carry the slot table this build reads cannot be classified at all,
-/// so it refuses rather than yielding an empty live set.
-fn live_key_hashes(key: Option<&ExtractedMember>) -> Result<BTreeSet<String>, ClassifyRefusal> {
-    let Some(key) = key else {
-        return Ok(BTreeSet::new());
-    };
-    let path = key.file.path();
-    if !column_present(path, KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)? {
-        return Err(ClassifyRefusal::KeyStoreUnreadable);
-    }
-    let ids = if column_present(path, KEY_SLOTS_TABLE, KEY_COLUMN)? {
-        sqlite_column_where(
-            path,
-            KEY_SLOTS_TABLE,
-            SUBJECT_ID_COLUMN,
-            "key_b64 IS NOT NULL",
-        )?
-    } else {
-        sqlite_column(path, KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)?
-    };
-    let salt = tombstone_salt();
-    Ok(ids.into_iter().map(|id| sha256_hex(&salt, &id)).collect())
-}
-
-/// Classify the archive's key member: one fact per key slot id.
-fn classify_key_store(
-    key: Option<&ExtractedMember>,
-    live: &BTreeSet<String>,
-) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
-    let Some(key) = key else {
-        return Ok(vec![MemberFacts::None]);
-    };
-    let salt = tombstone_salt();
-    let mut hashes = BTreeSet::new();
-    for id in sqlite_column(key.file.path(), KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)? {
-        hashes.insert(sha256_hex(&salt, &id));
-    }
-    // The key member is present by definition here, so its slot facts are
-    // classified against the usable-key set.
-    Ok(facts_from_hashes(hashes, live, true))
-}
-
-/// Classify one Postgres dump table member from its `COPY` text.
-///
-/// Only the three subject tables carry a subject reference; every other table
-/// is content and proves no content-free subject record. The item table is one
-/// of them: an item row keeps its subject link after the subject's key was
-/// destroyed, so the archive names the subject. A subject table whose subject
-/// column is absent cannot be classified, so the archive is refused rather than
-/// passing one whose membership is unknown.
-fn classify_dump_table(
-    table: &clio_backup::dump_meta::DumpTable,
-    extracted: &ExtractedArchive,
-    live: &BTreeSet<String>,
-    keys_present: bool,
-) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
-    let column = match table.table.as_str() {
-        TOMBSTONE_TABLE => Some((TOMBSTONE_HASH_COLUMN, false)),
-        SUBJECT_KEYS_TABLE | ITEMS_TABLE => Some((SUBJECT_ID_COLUMN, true)),
-        _ => None,
-    };
-    let Some((column, hash_the_id)) = column else {
-        return Ok(vec![MemberFacts::None]);
-    };
-    let Some(index) = table.columns.iter().position(|entry| entry.name == column) else {
-        return Err(ClassifyRefusal::UnknownMember(table.member.clone()));
-    };
-    let Some(member) = extracted
-        .dump_tables
-        .iter()
-        .find(|member| member.member == table.member)
-    else {
-        return Err(ClassifyRefusal::UnknownMember(table.member.clone()));
-    };
-    let file = member.file.open()?;
-    let salt = tombstone_salt();
-    let mut hashes = BTreeSet::new();
-    for value in restore_authority_copy::copy_column(std::io::BufReader::new(file), index)? {
-        if hash_the_id {
-            hashes.insert(sha256_hex(&salt, &value));
-        } else {
-            hashes.insert(value);
-        }
-    }
-    Ok(facts_from_hashes(hashes, live, keys_present))
-}
-
 /// The distinct subject references, or one `None` when there are none.
 ///
 /// Without a key member the restore leaves the target's key store in place, so
@@ -441,7 +321,7 @@ fn classify_dump_table(
 /// [`MemberFacts::UnprovenKey`]. With a key member, a hash the archive still
 /// holds a usable key for is a [`MemberFacts::LiveKey`] and every other one is
 /// the content-free [`MemberFacts::Reference`].
-fn facts_from_hashes(
+pub(super) fn facts_from_hashes(
     hashes: BTreeSet<String>,
     live: &BTreeSet<String>,
     keys_present: bool,
@@ -464,83 +344,8 @@ fn facts_from_hashes(
     }
 }
 
-/// Every value of `column` in `table`, read from the SQLite database at `path`.
-///
-/// A missing table or column yields no values: the store simply holds no such
-/// record. A NULL value is skipped: it names no subject, which is what the
-/// `COPY` text reader does with its `\N` marker. The connection is opened
-/// read-write with `query_only` set, the pattern that lets a store recover a
-/// hot journal while a statement still cannot write.
-fn sqlite_column(path: &Path, table: &str, column: &str) -> Result<Vec<String>, ClassifyRefusal> {
-    sqlite_column_where(path, table, column, "")
-}
-
-/// Every value of `column` in the rows of `table` matching `predicate`.
-///
-/// `predicate` is a constant SQL expression owned by this module; it never
-/// carries caller input.
-fn sqlite_column_where(
-    path: &Path,
-    table: &str,
-    column: &str,
-    predicate: &str,
-) -> Result<Vec<String>, ClassifyRefusal> {
-    let connection =
-        rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
-    connection
-        .execute_batch("PRAGMA query_only = ON")
-        .map_err(|error| sqlite_error(path, table, &error))?;
-    if !column_exists(&connection, table, column)
-        .map_err(|error| sqlite_error(path, table, &error))?
-    {
-        return Ok(Vec::new());
-    }
-    let sql = if predicate.is_empty() {
-        format!("SELECT {column} FROM {table}")
-    } else {
-        format!("SELECT {column} FROM {table} WHERE {predicate}")
-    };
-    let mut statement = connection
-        .prepare(&sql)
-        .map_err(|error| sqlite_error(path, table, &error))?;
-    let rows = statement
-        .query_map([], |row| row.get::<_, Option<String>>(0))
-        .map_err(|error| sqlite_error(path, table, &error))?;
-    let mut values = Vec::new();
-    for row in rows {
-        if let Some(value) = row.map_err(|error| sqlite_error(path, table, &error))? {
-            values.push(value);
-        }
-    }
-    Ok(values)
-}
-
-/// Whether `table` holds a column named `column` in the database at `path`.
-fn column_present(path: &Path, table: &str, column: &str) -> Result<bool, ClassifyRefusal> {
-    let connection =
-        rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
-    connection
-        .execute_batch("PRAGMA query_only = ON")
-        .map_err(|error| sqlite_error(path, table, &error))?;
-    column_exists(&connection, table, column).map_err(|error| sqlite_error(path, table, &error))
-}
-
-/// Whether `table` holds a column named `column`.
-fn column_exists(
-    connection: &rusqlite::Connection,
-    table: &str,
-    column: &str,
-) -> Result<bool, rusqlite::Error> {
-    let count: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
-        rusqlite::params![table, column],
-        |row| row.get(0),
-    )?;
-    Ok(count > 0)
-}
-
 /// The refusal for a filesystem failure, naming the path.
-fn io_error(context: &str, path: &Path, error: &std::io::Error) -> AmError {
+pub(super) fn io_error(context: &str, path: &Path, error: &std::io::Error) -> AmError {
     AmError::new(
         ErrorCode::Internal,
         format!("{context} {}: {error}", path.display()),
@@ -551,14 +356,6 @@ fn io_error(context: &str, path: &Path, error: &std::io::Error) -> AmError {
 fn file_sha256(path: &Path) -> Result<String, ClassifyRefusal> {
     let bytes = std::fs::read(path).map_err(|error| io_error("reading a member", path, &error))?;
     Ok(sha256_hex_bytes(&bytes))
-}
-
-/// The refusal for a SQLite read failure, naming the table it was reading.
-fn sqlite_error(path: &Path, table: &str, error: &rusqlite::Error) -> ClassifyRefusal {
-    ClassifyRefusal::Io(AmError::new(
-        ErrorCode::Internal,
-        format!("reading table {table:?} from {}: {error}", path.display()),
-    ))
 }
 
 /// A private directory for one classification, removed when it drops.
@@ -600,5 +397,14 @@ impl Drop for Scratch {
 }
 
 #[cfg(test)]
+#[path = "restore_authority_test_support.rs"]
+mod restore_authority_test_support;
+
+#[cfg(test)]
 #[path = "restore_authority_tests.rs"]
 mod restore_authority_tests;
+
+/// The member-fact cases, split out so the refusal cases stay focused.
+#[cfg(test)]
+#[path = "restore_authority_payload_tests.rs"]
+mod restore_authority_payload_tests;

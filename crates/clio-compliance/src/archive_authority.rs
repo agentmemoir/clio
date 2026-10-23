@@ -11,6 +11,7 @@
 //! ## Owns
 //! - `ArchiveClaim` and `MemberFacts`, the archive's inputs to the check
 //! - `AuthorityRefusal` and `check_archive_authority`
+//! - The check's tests (`archive_authority_tests`)
 //!
 //! ## Does not own
 //! - The journal model, its operations, and its durable file (`erasure_journal`
@@ -229,3 +230,7 @@ pub fn check_archive_authority(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "archive_authority_tests.rs"]
+mod archive_authority_tests;
