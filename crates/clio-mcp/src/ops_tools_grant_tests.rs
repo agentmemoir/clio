@@ -221,9 +221,9 @@ fn bound_repair_without_bank_uses_a_granted_plans_bank() {
     assert!(!has_finding(&check, "ORPHAN_ASSOC_EDGE"), "{check}");
 }
 
-#[test]
-fn bound_reindex_without_bank_and_shared_disabled_scopes_to_the_grant() {
-    let original = state(false);
+/// A bound `reindex` without `bank`, in one shared-enable state.
+fn assert_bound_reindex_scopes_to_the_grant(shared: bool) {
+    let original = state(shared);
     seed_item(&original, "bank-a", "itm-a");
     seed_item(&original, "bank-b", "itm-b");
     let foreign_before = index_rows(&original, "bank-b");
@@ -234,31 +234,22 @@ fn bound_reindex_without_bank_and_shared_disabled_scopes_to_the_grant() {
         "reindex",
         &json!({ "target": "lexical", "dry_run": false, "confirm": true, "timestamp": TS }),
     );
-    assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(out["bank"], "bank-a", "{out}");
-    assert_eq!(out["indexable_items"], 1, "{out}");
+    assert_eq!(out["ok"], Value::Bool(true), "shared={shared}: {out}");
+    assert_eq!(out["bank"], "bank-a", "shared={shared}: {out}");
+    assert_eq!(out["indexable_items"], 1, "shared={shared}: {out}");
     assert_eq!(index_rows(&original, "bank-a").1, 1);
     assert_eq!(index_rows(&original, "bank-b"), foreign_before);
     assert_eq!(count_items(&original, "bank-b"), 1);
 }
 
 #[test]
-fn bound_reindex_without_bank_and_shared_enabled_still_scopes_to_the_grant() {
-    let original = state(true);
-    seed_item(&original, "bank-a", "itm-a");
-    seed_item(&original, "bank-b", "itm-b");
-    let foreign_before = index_rows(&original, "bank-b");
-    let restricted = bound(&original, &["bank-a"]);
+fn bound_reindex_without_bank_scopes_to_the_grant_with_shared_disabled() {
+    assert_bound_reindex_scopes_to_the_grant(false);
+}
 
-    let out = dispatch(
-        &restricted,
-        "reindex",
-        &json!({ "target": "lexical", "dry_run": false, "confirm": true, "timestamp": TS }),
-    );
-    assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(out["bank"], "bank-a", "{out}");
-    assert_eq!(index_rows(&original, "bank-a").1, 1);
-    assert_eq!(index_rows(&original, "bank-b"), foreign_before);
+#[test]
+fn bound_reindex_without_bank_still_scopes_to_the_grant_with_shared_enabled() {
+    assert_bound_reindex_scopes_to_the_grant(true);
 }
 
 #[test]
@@ -275,16 +266,6 @@ fn bound_verify_and_doctor_without_bank_never_scope_to_a_foreign_bank() {
 
     let doctor = dispatch(&restricted, "doctor", &json!({ "timestamp": TS }));
     assert_eq!(doctor["bank"], "bank-a", "{doctor}");
-    let scopes: Vec<&str> = doctor["findings"]
-        .as_array()
-        .map(|findings| {
-            findings
-                .iter()
-                .filter_map(|f| f["scope"].as_str())
-                .collect()
-        })
-        .unwrap_or_default();
-    assert!(!scopes.contains(&"bank:bank-b"), "{doctor}");
     let actions: Vec<&str> = doctor["actions"]
         .as_array()
         .map(|actions| actions.iter().filter_map(|a| a["id"].as_str()).collect())
@@ -305,6 +286,10 @@ fn bound_verify_and_doctor_without_bank_never_scope_to_a_foreign_bank() {
         "doctor leaked a store-wide note: {doctor}"
     );
     let body = doctor.to_string();
+    assert!(
+        !body.contains("bank:bank-b"),
+        "doctor scoped a finding to the foreign bank: {body}"
+    );
     for code in FOREIGN_ONLY_CODES {
         assert!(
             !notes.iter().any(|note| note.contains(code)),
@@ -346,26 +331,41 @@ fn bound_diagnose_does_not_disclose_a_foreign_bank() {
     seed_item(&original, "bank-b", "itm-b");
     let restricted = bound(&original, &["bank-a"]);
 
-    let banks = |report: &Value| -> Vec<String> {
-        report["banks"]
-            .as_array()
-            .map(|banks| {
-                banks
-                    .iter()
-                    .filter_map(|bank| bank.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-
     let scoped = dispatch(&restricted, "diagnose", &json!({ "timestamp": TS }));
     assert_eq!(scoped["ok"], Value::Bool(true), "{scoped}");
-    assert!(!banks(&scoped).contains(&"bank-b".to_owned()), "{scoped}");
+    assert_eq!(sorted_report_banks(&scoped), ["bank-a"], "{scoped}");
     assert_eq!(scoped["indexable_items"], 1, "{scoped}");
 
     let whole = dispatch(&original, "diagnose", &json!({ "timestamp": TS }));
-    assert!(banks(&whole).contains(&"bank-b".to_owned()), "{whole}");
+    assert_eq!(sorted_report_banks(&whole), ["bank-a", "bank-b"], "{whole}");
     assert_eq!(whole["indexable_items"], 2, "{whole}");
+}
+
+/// Every operator tool reports its own scope; none may be the whole store.
+#[test]
+fn bound_caller_without_a_bank_never_reaches_the_whole_store() {
+    let original = two_bank_store();
+    let restricted = bound(&original, &["bank-a"]);
+
+    // Each tool reports the scope it reached: the bank inventory, the `scope`
+    // label, or the `bank` the report ran (or refused) in.
+    let expected = [
+        ("diagnose", "bank-a"),
+        ("verify", "bank:bank-a"),
+        ("doctor", "bank-a"),
+        ("repair", "bank-a"),
+        ("reindex", "bank-a"),
+    ];
+    for (tool, scope) in expected {
+        let out = dispatch(&restricted, tool, &json!({ "timestamp": TS }));
+        assert!(!out.to_string().contains("bank-b"), "{tool}: {out}");
+        let reached = match tool {
+            "diagnose" => sorted_report_banks(&out),
+            "verify" => vec![out["scope"].as_str().unwrap_or_default().to_owned()],
+            _ => vec![out["bank"].as_str().unwrap_or_default().to_owned()],
+        };
+        assert_eq!(reached, [scope.to_owned()], "{tool} left its grant: {out}");
+    }
 }
 
 /// Both banks populated, with distinct volumes so a narrowed report is visible.

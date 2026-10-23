@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - Tool-name detection and dispatch for the operator surfaces
+//! - The one operator-scope gate every arm resolves its bank through
 //! - JSON argument decoding into the frozen `clio-ops` argument structs
 //! - The top-level `{ok, ...}` result envelope and its `{ok:false, code, ...}`
 //!   failure shape
@@ -54,105 +55,105 @@ pub(crate) fn dispatch_ops(state: &McpState, name: &str, args: &Value) -> Value 
     }
 }
 
+/// The operator scope one call may reach: one granted bank, or the whole store.
+enum OpScope<'a> {
+    /// Exactly one bank; a bound credential covers it.
+    Bank(&'a str),
+    /// Every bank in the store; only an unbound local caller reaches it.
+    WholeStore,
+}
+
+impl<'a> OpScope<'a> {
+    /// The scope in the `Option<&str>` shape the `clio-ops` args take.
+    fn bank(&self) -> Option<&'a str> {
+        match *self {
+            Self::Bank(bank) => Some(bank),
+            Self::WholeStore => None,
+        }
+    }
+}
+
+impl McpState {
+    /// The operator scope this call may reach. A bound caller is limited to the
+    /// banks its credential covers and never reaches the whole store.
+    ///
+    /// The gate runs for every caller before the principal is consulted, so a
+    /// local caller without a credential is allowed here rather than beside it.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] when a bound credential's list omits the scope.
+    fn op_scope<'a>(
+        &'a self,
+        ctx: &'a OpContext,
+        target: Option<&'a str>,
+    ) -> Result<OpScope<'a>, AmError> {
+        let bank = target.unwrap_or(ctx.bank.as_str());
+        self.require_bank_grant(bank)?;
+        if self.principal.is_none() {
+            return Ok(target.map_or(OpScope::WholeStore, OpScope::Bank));
+        }
+        Ok(OpScope::Bank(bank))
+    }
+}
+
 /// Run the in-process surface, returning the serialized report/outcome.
 ///
-/// One gate runs for every operator tool: the credential's actor and the bank
-/// the call resolves to are authorized before any body decides its own scope.
-/// A body that can reach a further bank (a registered plan, a whole-store
-/// sweep) must authorize that scope itself before acting on it.
+/// One gate runs for every operator tool: the call resolves its context, and
+/// each arm then asks `McpState::op_scope` for the scope it may reach.
 fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let timestamp = state.resolve_timestamp(args)?;
     match name {
-        "diagnose" => Ok(to_value(&clio_ops::diagnose_scoped(
-            &clio_ops::DiagnoseArgs {
-                store: &*state.ops_store,
-                index: &*state.index,
-                embedder: embedder(state),
-                timestamp: &timestamp,
-            },
-            diagnose_scope_bank(state, &ctx),
-        ))),
-        "verify" => {
-            let bank = scope_bank(state, args, &ctx);
-            if let Some(bank) = bank {
-                state.require_known_bank(bank)?;
-            }
-            let report = clio_ops::verify(&clio_ops::VerifyArgs {
-                store: &*state.ops_store,
-                index: &*state.index,
-                bank,
-                timestamp: &timestamp,
-            })?;
-            Ok(to_value(&report))
-        }
+        "diagnose" => diagnose_result(state, &ctx, &timestamp),
+        "verify" => verify_result(state, args, &ctx, &timestamp),
         "doctor" => doctor_result(state, args, &ctx, &timestamp),
-        "repair" => {
-            let actions = string_array(args, "actions")?;
-            // A registered plan names its own bank, and a bank-less request
-            // would otherwise let it reach any bank in the store: authorize the
-            // plan's scope before any action runs, and never widen an omitted
-            // scope past the one already authorized.
-            let plan_bank = opt_str(args, "plan_id")
-                .and_then(|id| state.ops_plans.get(id))
-                .and_then(|plan| plan.bank);
-            let bank = match (&state.principal, opt_str(args, "bank")) {
-                (Some(_), Some(named)) => Some(named.to_owned()),
-                (Some(_), None) => match plan_bank {
-                    Some(scope) => {
-                        state.require_bank_grant(&scope)?;
-                        Some(scope)
-                    }
-                    None => Some(ctx.bank.as_str().to_owned()),
-                },
-                (None, named) => named.map(str::to_owned),
-            };
-            let outcome = clio_ops::repair(&clio_ops::RepairArgs {
-                store: &*state.ops_store,
-                writer: &*state.store,
-                index: &*state.index,
-                embedder: embedder(state),
-                plans: &state.ops_plans,
-                plan_id: opt_str(args, "plan_id"),
-                actions: &actions,
-                bank: bank.as_deref(),
-                confirm: opt_bool(args, "confirm", false)?,
-                timestamp: &timestamp,
-            })?;
-            Ok(to_value(&outcome))
-        }
-        "reindex" => {
-            // A bound caller's omitted scope never expands to every indexable
-            // bank: the resolved, authorized bank is the whole scope it gets.
-            let bank = match &state.principal {
-                Some(_) => Some(opt_str(args, "bank").unwrap_or(ctx.bank.as_str())),
-                None => match opt_str(args, "bank") {
-                    Some(b) => Some(b),
-                    None if state.shared_enabled => None,
-                    None => {
-                        return Err(AmError::new(
-                            ErrorCode::Forbidden,
-                            "reindex without `bank` sweeps every indexable bank; pass an \
-                             explicit bank while the shared bank surface is disabled",
-                        ));
-                    }
-                },
-            };
-            let target =
-                clio_index::RebuildTargets::parse(opt_str(args, "target").unwrap_or("all"))?;
-            let report = clio_ops::reindex(&clio_ops::ReindexArgs {
-                store: &*state.store,
-                index: &*state.index,
-                embedder: embedder(state),
-                bank,
-                target,
-                dry_run: opt_bool(args, "dry_run", true)?,
-                confirm: opt_bool(args, "confirm", false)?,
-            })?;
-            Ok(to_value(&report))
-        }
+        "repair" => repair_result(state, args, &ctx, &timestamp),
+        "reindex" => reindex_result(state, args, &ctx),
         other => Err(AmError::not_implemented(other)),
     }
+}
+
+/// The `diagnose` arm: a bound caller reads its own bank, a local one the store.
+///
+/// `diagnose` published no bank scope before the grant existed, so a local
+/// caller without a credential keeps the whole-store snapshot whatever `bank`
+/// key it carries. Only a bound principal narrows the report, to the bank its
+/// grant already covers.
+fn diagnose_result(state: &McpState, ctx: &OpContext, timestamp: &str) -> Result<Value, AmError> {
+    let scope = state.op_scope(ctx, None)?.bank();
+    let report = clio_ops::diagnose_scoped(
+        &clio_ops::DiagnoseArgs {
+            store: &*state.ops_store,
+            index: &*state.index,
+            embedder: embedder(state),
+            timestamp,
+        },
+        scope,
+    );
+    Ok(to_value(&report))
+}
+
+/// The `verify` arm: the explicit `bank` argument is the target.
+///
+/// An omitted argument ends where the context resolved, which for a bound
+/// caller is its grant bank, so the gate sees the bank `resolve_ctx` authorized.
+fn verify_result(
+    state: &McpState,
+    args: &Value,
+    ctx: &OpContext,
+    timestamp: &str,
+) -> Result<Value, AmError> {
+    let bank = state.op_scope(ctx, opt_str(args, "bank"))?.bank();
+    if let Some(bank) = bank {
+        state.require_known_bank(bank)?;
+    }
+    let report = clio_ops::verify(&clio_ops::VerifyArgs {
+        store: &*state.ops_store,
+        index: &*state.index,
+        bank,
+        timestamp,
+    })?;
+    Ok(to_value(&report))
 }
 
 /// The `doctor` arm: compose a plan inside the caller's authorized scope.
@@ -166,7 +167,7 @@ fn doctor_result(
     ctx: &OpContext,
     timestamp: &str,
 ) -> Result<Value, AmError> {
-    let bank = scope_bank(state, args, ctx);
+    let bank = state.op_scope(ctx, opt_str(args, "bank"))?.bank();
     if let Some(bank) = bank {
         state.require_known_bank(bank)?;
     }
@@ -184,30 +185,68 @@ fn doctor_result(
     Ok(to_value(&plan))
 }
 
-/// The bank scope `verify` and `doctor` forward downstream.
+/// The `repair` arm: resolve the plan's scope, gate it, then execute.
 ///
-/// A bound principal forwards the bank its context resolved and authorized, so
-/// omitting `bank` narrows the call to the credential's own scope instead of
-/// widening it to the whole store. An unbound local caller keeps the previous
-/// behavior exactly: its own argument, and `None` when it named none.
-fn scope_bank<'a>(state: &McpState, args: &'a Value, ctx: &'a OpContext) -> Option<&'a str> {
-    match &state.principal {
-        Some(_) => Some(ctx.bank.as_str()),
-        None => opt_str(args, "bank"),
-    }
+/// A registered plan names its own bank, and a bank-less request would
+/// otherwise let it reach any bank in the store: resolve the plan's scope before
+/// any action runs, so the gate refuses a foreign plan before it acts. Only a
+/// bound caller derives its scope from the plan; an unbound caller keeps its own
+/// argument, and an omitted one for it stays whole-store as before.
+fn repair_result(
+    state: &McpState,
+    args: &Value,
+    ctx: &OpContext,
+    timestamp: &str,
+) -> Result<Value, AmError> {
+    let actions = string_array(args, "actions")?;
+    let plan_bank = if state.principal.is_some() {
+        opt_str(args, "plan_id")
+            .and_then(|id| state.ops_plans.get(id))
+            .and_then(|plan| plan.bank)
+    } else {
+        None
+    };
+    let scope = state.op_scope(ctx, opt_str(args, "bank").or(plan_bank.as_deref()))?;
+    let outcome = clio_ops::repair(&clio_ops::RepairArgs {
+        store: &*state.ops_store,
+        writer: &*state.store,
+        index: &*state.index,
+        embedder: embedder(state),
+        plans: &state.ops_plans,
+        plan_id: opt_str(args, "plan_id"),
+        actions: &actions,
+        bank: scope.bank(),
+        confirm: opt_bool(args, "confirm", false)?,
+        timestamp,
+    })?;
+    Ok(to_value(&outcome))
 }
 
-/// The bank scope the `diagnose` surface forwards downstream.
+/// The `reindex` arm: one bank, or every indexable bank for a local caller.
 ///
-/// `diagnose` published no scope before the grant existed, so a local caller
-/// without a credential keeps the whole-store snapshot whatever `bank` key it
-/// carries. Only a bound principal narrows the report, to the resolved bank its
-/// grant already covers.
-fn diagnose_scope_bank<'a>(state: &McpState, ctx: &'a OpContext) -> Option<&'a str> {
-    match &state.principal {
-        Some(_) => Some(ctx.bank.as_str()),
-        None => None,
+/// A bound caller's omitted scope never expands to every indexable bank: the
+/// resolved, authorized bank is the whole scope it gets. An unbound omitted
+/// scope is still the whole store, which needs the shared surface enabled.
+fn reindex_result(state: &McpState, args: &Value, ctx: &OpContext) -> Result<Value, AmError> {
+    let bank = state.op_scope(ctx, opt_str(args, "bank"))?.bank();
+    if bank.is_none() && !state.shared_enabled {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "reindex without `bank` sweeps every indexable bank; pass an explicit bank \
+             while the shared bank surface is disabled",
+        ));
     }
+    let target = clio_index::RebuildTargets::parse(opt_str(args, "target").unwrap_or("all"))?;
+    let report = clio_ops::reindex(&clio_ops::ReindexArgs {
+        store: &*state.store,
+        index: &*state.index,
+        embedder: embedder(state),
+        bank,
+        target,
+        dry_run: opt_bool(args, "dry_run", true)?,
+        confirm: opt_bool(args, "confirm", false)?,
+    })?;
+    Ok(to_value(&report))
 }
 
 /// Merge a serialized report into a fresh map with a leading `ok: true`.
