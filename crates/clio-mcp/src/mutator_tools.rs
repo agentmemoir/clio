@@ -412,3 +412,7 @@ mod mutator_tools_audit_tests;
 #[cfg(test)]
 #[path = "mutator_tools_tests.rs"]
 mod mutator_tools_tests;
+
+#[cfg(test)]
+#[path = "mutator_tools_correct_tests.rs"]
+mod mutator_tools_correct_tests;
