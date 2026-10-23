@@ -114,3 +114,29 @@ fn an_error_that_is_not_a_driver_error_keeps_its_own_text() {
     assert_eq!(error.code, ErrorCode::Internal);
     assert_eq!(error.message, "read a file: disk went away");
 }
+
+#[test]
+fn only_postgres_lock_conflicts_are_retryable() {
+    let _guard = lock_pg_test();
+    let url = postgres_url_or_default(std::env::var("CLIO_DATABASE_URL"));
+    let mut client = crate::pg_tls::connect(&url).expect("connect");
+    for (state, code) in [
+        ("40P01", ErrorCode::StorageBusy),
+        ("55P03", ErrorCode::StorageBusy),
+        ("57014", ErrorCode::Internal),
+        ("23505", ErrorCode::Internal),
+    ] {
+        let error = client.batch_execute(&format!("DO $$ BEGIN RAISE EXCEPTION USING ERRCODE = '{state}', MESSAGE = 'server-only detail'; END $$")).expect_err("raise SQLSTATE");
+        assert_eq!(
+            error.code().map(postgres::error::SqlState::code),
+            Some(state)
+        );
+        let mapped = map_db_err("schema", error);
+        assert_eq!(mapped.code, code, "SQLSTATE {state}");
+        if code == ErrorCode::StorageBusy {
+            assert_eq!(mapped.message, "Postgres lock conflict; retry the command");
+        } else {
+            assert!(mapped.message.contains("server-only detail"), "{mapped}");
+        }
+    }
+}
