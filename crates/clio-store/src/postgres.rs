@@ -177,6 +177,10 @@ fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, bool), AmErr
     client.batch_execute(&migrate).am("migrate postgres")?;
     crate::bank_registration::install_postgres_triggers(client)?;
     crate::schema_reshape::bump_schema_version_pg(client)?;
+    // Timestamps a previous build stored as epoch millis are rewritten into the
+    // canonical form the item time columns are compared in. A database with
+    // nothing to fix runs one filtered read.
+    crate::migrate::ts_backfill::backfill_postgres(client)?;
     // The vector table is created for the recorded space, so an existing
     // database keeps its width and a fresh one gets the documented default
     // recorded (and can then adopt the configured space with nothing to purge).

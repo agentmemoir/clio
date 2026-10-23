@@ -105,12 +105,14 @@ pub(crate) fn compile_inspect(
         InspectValidity::Discarded => clauses.push("discarded_at IS NOT NULL".to_owned()),
     }
     if let Some(start) = &filter.time_start {
+        reject_epoch_bound(start)?;
         clauses.push(format!(
             "created_at >= {}",
             bind(&mut params, start.clone())
         ));
     }
     if let Some(end) = &filter.time_end {
+        reject_epoch_bound(end)?;
         let (operator, value) = match next_day(end)? {
             Some(next_day) => ("<", next_day),
             None => ("<=", end.clone()),
@@ -127,6 +129,22 @@ pub(crate) fn compile_inspect(
         where_sql: clauses.join(" AND "),
         params,
     })
+}
+
+/// Refuse a bound written as epoch millis.
+///
+/// `created_at` holds canonical RFC 3339 only, and the bound is compared as the
+/// same text. An all-digit bound would therefore compare against every row as a
+/// date string, which silently selects everything or nothing, so it is refused
+/// here rather than answered wrongly.
+fn reject_epoch_bound(value: &str) -> Result<(), AmError> {
+    if !crate::migrate::is_epoch_stamp(value) {
+        return Ok(());
+    }
+    Err(AmError::new(
+        ErrorCode::InvalidArgument,
+        format!("time bound `{value}` must be an RFC 3339 timestamp or YYYY-MM-DD date"),
+    ))
 }
 
 /// Return the day after an ISO date bound, or `None` for a timestamp bound.

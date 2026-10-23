@@ -205,7 +205,7 @@ impl HubDistillEngine {
             // documents for this outcome.
             return Ok(no_neighbors_outcome(&record));
         }
-        let ts = self.now_millis().to_string();
+        let ts = self.now_canonical();
         let mut updated = record.clone();
         updated.source_ids = claim_sources.iter().map(|i| i.id.clone()).collect();
         updated.distilled_at.clone_from(&ts);

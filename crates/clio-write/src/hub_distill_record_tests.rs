@@ -299,3 +299,65 @@ fn an_admission_reject_writes_neither_item_nor_record() {
         "a rejected distill must not leave a record"
     );
 }
+
+#[test]
+fn the_distilled_unit_keeps_its_sources_creation_time_in_canonical_form() {
+    let store = store();
+    seed_hub(&store, "bank", "hub", &["n1", "n2", "n3"], 0.15);
+    let hub = store
+        .get_memory_item("bank", "hub")
+        .unwrap()
+        .expect("seeded hub");
+    let engine = engine(&store, 0.0, 2);
+    let outcome = engine
+        .distill_hub("bank", "hub", &ctx("bank"), ResolvedRetention::default())
+        .unwrap();
+    assert_eq!(outcome.status, "distilled");
+
+    let item = store
+        .get_memory_item("bank", &outcome.item_id)
+        .unwrap()
+        .expect("distilled item");
+    assert_eq!(
+        item.created_at, "2026-01-01T00:00:00Z",
+        "a distilled unit is created when the cluster it summarizes was, so it keeps the hub's own creation time"
+    );
+    assert_eq!(item.created_at, hub.created_at, "the hub is the source");
+    for stamp in [&item.valid_from, &item.tx_from, &item.updated_at] {
+        assert_eq!(
+            stamp, "1970-01-01T00:00:00Z",
+            "the distillation moment is canonical RFC 3339, never an epoch stamp: {stamp}"
+        );
+    }
+}
+
+#[test]
+fn a_time_bounded_selection_places_the_distilled_unit_at_its_sources_time() {
+    let store = store();
+    seed_hub(&store, "bank", "hub", &["n1", "n2", "n3"], 0.15);
+    let engine = engine(&store, 0.0, 2);
+    let outcome = engine
+        .distill_hub("bank", "hub", &ctx("bank"), ResolvedRetention::default())
+        .unwrap();
+    assert_eq!(outcome.status, "distilled");
+
+    let selected = |end: &str| {
+        let mut filter = clio_store::ItemInspectFilter::new("bank");
+        filter.limit = 200;
+        filter.time_end = Some(end.to_owned());
+        store
+            .inspect_items(&filter)
+            .expect("inspect")
+            .into_iter()
+            .any(|row| row.item_id == outcome.item_id)
+    };
+
+    assert!(
+        selected("2026-06-01T00:00:00Z"),
+        "an upper bound after the source's creation time includes the unit"
+    );
+    assert!(
+        !selected("2025-06-01T00:00:00Z"),
+        "an upper bound before the source's creation time excludes it"
+    );
+}

@@ -128,6 +128,10 @@ impl SqliteStore {
         let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;
+        // Timestamps a previous build stored as epoch millis are rewritten into
+        // the canonical form the item time columns are compared in. A database
+        // with nothing to fix runs one filtered read.
+        crate::migrate::ts_backfill::backfill_sqlite(&mut conn)?;
         conn.execute_batch(SQL_VECTORS_SQLITE)
             .map_err(crate::migrate::sqlite_vec_missing)?;
         crate::bank_registration::install_sqlite_triggers(&conn)?;

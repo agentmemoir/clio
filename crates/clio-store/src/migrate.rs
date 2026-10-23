@@ -99,6 +99,71 @@ pub fn now_iso8601() -> String {
     )
 }
 
+/// The canonical item timestamp: UTC RFC 3339, second precision, `Z` suffix.
+///
+/// Every item time column is compared as text, so the whole column has to be
+/// one form at one precision: `2026-10-12T08:30:01.500Z` sorts before
+/// `2026-10-12T08:30:01Z` even though it is later, and an epoch-millis stamp
+/// sorts after every date string.
+#[must_use]
+pub fn millis_to_rfc3339(millis: i64) -> String {
+    let secs = millis.div_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+/// Whether a timestamp is an all-digit epoch stamp rather than a date string.
+///
+/// This is the one test the backfill and the inspector share, so "needs
+/// rewriting" and "cannot be compared as text" can never disagree.
+#[must_use]
+pub fn is_epoch_stamp(raw: &str) -> bool {
+    !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Rewrite a timestamp the app writes into [`millis_to_rfc3339`]'s form.
+///
+/// An all-digit value is read as epoch millis, the form [`now_iso`] produces. A
+/// date-time with a fraction or a trailing offset is cut back to the seconds
+/// it names, so a value carrying a fraction cannot sort against a value that
+/// does not. Anything this build cannot place is returned unchanged: a stored
+/// stamp is never silently replaced with an invented date.
+#[must_use]
+pub fn canonical_ts(raw: &str) -> String {
+    if is_epoch_stamp(raw) {
+        return raw
+            .parse::<i64>()
+            .map_or_else(|_| raw.to_owned(), millis_to_rfc3339);
+    }
+    let bytes = raw.as_bytes();
+    let date_time = bytes.len() > 19
+        && bytes[10] == b'T'
+        && bytes[..19]
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
+        && bytes[13] == b':'
+        && bytes[16] == b':';
+    if date_time && (bytes[19] == b'Z' || bytes[19] == b'.') {
+        return format!("{}Z", &raw[..19]);
+    }
+    raw.to_owned()
+}
+
+#[path = "migrate_ts_backfill.rs"]
+pub(crate) mod ts_backfill;
+
+#[cfg(test)]
+#[path = "migrate_canonical_tests.rs"]
+mod canonical_tests;
+
 #[cfg(test)]
 #[path = "migrate_reason_tests.rs"]
 mod reason_tests;
