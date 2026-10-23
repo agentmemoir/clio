@@ -1,0 +1,1 @@
+The CLA sign-request comment, the pull request template, and the contributing guide now link to the agreement by absolute URL, so the link opens from a pull request page instead of the new-pull-request form.

@@ -32,7 +32,7 @@ STATUS_CONTEXT = "CLA"
 MAX_ATTEMPTS = 3
 
 COMMENT_BODY = f"""{COMMENT_MARKER}
-Thanks for the pull request. One more step before it can merge: sign the [Contributor License Agreement](CLA.md).
+Thanks for the pull request. One more step before it can merge: sign the [Contributor License Agreement](https://github.com/agentmemoir/clio/blob/master/CLA.md).
 Comment exactly this sentence on this pull request, and this check turns green:
 
 > {SENTENCE}

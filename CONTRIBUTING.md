@@ -161,7 +161,7 @@ Record the abandoned version with a normal heading and a plain sentence saying i
 
 Every pull request from an external contributor must pass two checks: `CLA` and `DCO`.
 
-**CLA.** On your first pull request, comment exactly this sentence on the pull request: `I have read the CLA Document and I hereby sign the CLA`. You sign once per person, and the record lives in `signatures/cla.json` on the `cla-signatures` branch. The agreement is in [CLA.md](CLA.md). If your employer owns your work, the maintainers must arrange a corporate CLA with you first.
+**CLA.** On your first pull request, comment exactly this sentence on the pull request: `I have read the CLA Document and I hereby sign the CLA`. You sign once per person, and the record lives in `signatures/cla.json` on the `cla-signatures` branch. The agreement is in [CLA.md](https://github.com/agentmemoir/clio/blob/master/CLA.md). If your employer owns your work, the maintainers must arrange a corporate CLA with you first.
 
 **DCO.** Every commit needs a `Signed-off-by` trailer whose email matches the commit author. Add it with `git commit -s`. For an open pull request, run `git rebase --signoff origin/master` and force-push, or `git commit --amend -s` for one commit.
 
