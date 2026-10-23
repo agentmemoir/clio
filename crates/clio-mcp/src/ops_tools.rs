@@ -64,15 +64,15 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
     let ctx = state.resolve_ctx(args)?;
     let timestamp = state.resolve_timestamp(args)?;
     match name {
-        "diagnose" => {
-            let report = clio_ops::diagnose(&clio_ops::DiagnoseArgs {
+        "diagnose" => Ok(to_value(&clio_ops::diagnose_scoped(
+            &clio_ops::DiagnoseArgs {
                 store: &*state.ops_store,
                 index: &*state.index,
                 embedder: embedder(state),
                 timestamp: &timestamp,
-            });
-            Ok(to_value(&report))
-        }
+            },
+            scope_bank(state, args, &ctx),
+        ))),
         "verify" => {
             let bank = scope_bank(state, args, &ctx);
             if let Some(bank) = bank {

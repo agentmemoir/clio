@@ -8,8 +8,8 @@
 //! sweep must never reach a bank the grant excludes.
 //!
 //! ## Owns
-//! - Bound-versus-unbound scope tests for `repair`, `reindex`, `verify`, and
-//!   `doctor` over a shared in-memory SQLite state
+//! - Bound-versus-unbound scope tests for `diagnose`, `repair`, `reindex`,
+//!   `verify`, and `doctor` over a shared in-memory SQLite state
 //! - The refusal a foreign registered plan produces, and the state it leaves
 //!   behind
 //!
@@ -278,6 +278,35 @@ fn bound_verify_and_doctor_without_bank_never_scope_to_a_foreign_bank() {
         "doctor planned the foreign bank's repair: {doctor}"
     );
     assert_eq!(restricted.ops_plans.len(), 0, "{doctor}");
+}
+
+#[test]
+fn bound_diagnose_does_not_disclose_a_foreign_bank() {
+    let original = state(false);
+    seed_item(&original, "bank-a", "itm-a");
+    seed_item(&original, "bank-b", "itm-b");
+    let restricted = bound(&original, &["bank-a"]);
+
+    let banks = |report: &Value| -> Vec<String> {
+        report["banks"]
+            .as_array()
+            .map(|banks| {
+                banks
+                    .iter()
+                    .filter_map(|bank| bank.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let scoped = dispatch(&restricted, "diagnose", &json!({ "timestamp": TS }));
+    assert_eq!(scoped["ok"], Value::Bool(true), "{scoped}");
+    assert!(!banks(&scoped).contains(&"bank-b".to_owned()), "{scoped}");
+    assert_eq!(scoped["indexable_items"], 1, "{scoped}");
+
+    let whole = dispatch(&original, "diagnose", &json!({ "timestamp": TS }));
+    assert!(banks(&whole).contains(&"bank-b".to_owned()), "{whole}");
+    assert_eq!(whole["indexable_items"], 2, "{whole}");
 }
 
 #[test]

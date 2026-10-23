@@ -10,6 +10,8 @@
 //! ## Owns
 //! - [`diagnose`]: backend ping, schema version, bank list, vector index
 //!   presence, embedding readiness, coverage counts, and the `ok` bit
+//! - [`diagnose_scoped`]: the same snapshot narrowed to one bank, so a scoped
+//!   caller sees only that bank's name and volume
 //! - [`DiagnoseReport`] shape
 //!
 //! ## Does not own
@@ -28,6 +30,7 @@
 use crate::finding::{Findings, OpsFinding, Severity, codes, scope_label};
 use clio_index::Embedder;
 use clio_store::{IndexStore, OpsStore};
+use clio_types::AmError;
 use serde::Serialize;
 
 /// The command that checks the index-coverage and referential-integrity
@@ -60,7 +63,7 @@ pub struct DiagnoseReport {
     pub schema_version: Option<String>,
     /// Schema version this build expects.
     pub expected_schema_version: String,
-    /// Distinct banks seen in the item table.
+    /// Distinct banks in scope.
     pub banks: Vec<String>,
     /// Derived vector/lexical index state was readable.
     pub vector_index_present: bool,
@@ -70,15 +73,15 @@ pub struct DiagnoseReport {
     pub embedding_dims: Option<usize>,
     /// Index mode serving the active width (`ann_vector`/`ann_halfvec`/`exact_scan`).
     pub index_mode: Option<String>,
-    /// Open, non-discarded indexable items (whole store).
+    /// Open, non-discarded indexable items in scope.
     pub indexable_items: u64,
-    /// Dense vector rows (whole store).
+    /// Dense vector rows in scope.
     pub dense_rows: u64,
-    /// Lexical rows (whole store).
+    /// Lexical rows in scope.
     pub lexical_rows: u64,
-    /// Pending index jobs (whole store).
+    /// Pending index jobs in scope.
     pub pending_jobs: u64,
-    /// Failed index jobs awaiting retry (whole store).
+    /// Failed index jobs awaiting retry in scope.
     pub retry_jobs: u64,
     /// Embedding sidecar ready, when a probe was supplied.
     pub embedding_ready: Option<bool>,
@@ -92,6 +95,17 @@ pub struct DiagnoseReport {
 /// Run the read-only health snapshot. Never fails: probe errors become findings.
 #[must_use]
 pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
+    diagnose_scoped(args, None)
+}
+
+/// Run the read-only health snapshot for one bank (`None` = whole store).
+///
+/// A scoped snapshot lists the scoped bank only when it exists and reports the
+/// coverage counts for that bank, so a caller limited to one bank learns
+/// nothing about another's name or volume. Never fails: probe errors become
+/// findings.
+#[must_use]
+pub fn diagnose_scoped(args: &DiagnoseArgs<'_>, bank: Option<&str>) -> DiagnoseReport {
     let mut findings = Findings::new();
     let reachable = match args.store.ping() {
         Ok(()) => true,
@@ -108,13 +122,13 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
 
     let schema_version = read_schema_version(args.store, &mut findings);
 
-    let banks = match args.store.bank_ids() {
+    let banks = match scoped_banks(args.store, bank) {
         Ok(banks) => banks,
         Err(e) => {
             findings.push(OpsFinding::new(
                 codes::SYSTEM_TABLES_UNREADABLE,
                 Severity::Error,
-                scope_label(None),
+                scope_label(bank),
                 format!("bank inventory unreadable: {}", sanitize(&e.to_string())),
             ));
             Vec::new()
@@ -122,7 +136,7 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
     };
 
     let (vector_index_present, indexable_items, dense_rows, lexical_rows, pending, retry) =
-        match args.index.index_coverage(None) {
+        match args.index.index_coverage(bank) {
             Ok(cov) => (
                 true,
                 cov.indexable_items,
@@ -135,7 +149,7 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
                 findings.push(OpsFinding::new(
                     codes::VECTOR_INDEX_MISSING,
                     Severity::Error,
-                    scope_label(None),
+                    scope_label(bank),
                     format!(
                         "derived index state unreadable: {}",
                         sanitize(&e.to_string())
@@ -152,11 +166,11 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
 
     // Corruption-signal probe: integrity counts are not included in the
     // snapshot, but an unreadable signal table is itself a corruption signal.
-    if let Err(e) = args.store.integrity_signals(None) {
+    if let Err(e) = args.store.integrity_signals(bank) {
         findings.push(OpsFinding::new(
             codes::SYSTEM_TABLES_UNREADABLE,
             Severity::Error,
-            scope_label(None),
+            scope_label(bank),
             format!("integrity tables unreadable: {}", sanitize(&e.to_string())),
         ));
     }
@@ -196,6 +210,19 @@ pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
         embedding_ready,
         findings: findings.into_vec(),
         verify_pointer: VERIFY_POINTER,
+    }
+}
+
+/// The bank inventory for a scope: the whole catalog, or the one in-scope bank
+/// when it exists. A scoped caller never learns another bank's name.
+fn scoped_banks(store: &dyn OpsStore, bank: Option<&str>) -> Result<Vec<String>, AmError> {
+    let Some(bank) = bank else {
+        return store.bank_ids();
+    };
+    if store.bank_exists(bank)? {
+        Ok(vec![bank.to_owned()])
+    } else {
+        Ok(Vec::new())
     }
 }
 
@@ -266,6 +293,10 @@ fn sanitize(message: &str) -> String {
         .collect();
     flat.chars().take(200).collect()
 }
+
+#[cfg(test)]
+#[path = "diagnose_scope_tests.rs"]
+mod diagnose_scope_tests;
 
 #[cfg(test)]
 #[path = "diagnose_tests.rs"]
