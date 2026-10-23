@@ -33,7 +33,7 @@ use std::sync::Arc;
 #[inline(never)]
 pub(crate) fn persona_put_stable(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let context = opt_context(args, "context")?;
     let p_args = clio_persona::PersonaPutStableArgs {
@@ -82,7 +82,7 @@ pub(crate) fn persona_put_stable(state: &McpState, args: &Value) -> Result<Value
 #[inline(never)]
 pub(crate) fn persona_observe(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let context = opt_context(args, "context")?;
     let p_args = clio_persona::PersonaObservePreferenceArgs {
@@ -129,7 +129,7 @@ pub(crate) fn persona_observe(state: &McpState, args: &Value) -> Result<Value, A
 #[inline(never)]
 pub(crate) fn task_upsert(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let task_id = req_str(args, "task_id")?;
     let steps: Vec<String> = args
         .get("steps")
@@ -188,7 +188,7 @@ pub(crate) fn task_upsert(state: &McpState, args: &Value) -> Result<Value, AmErr
 #[inline(never)]
 pub(crate) fn failure_record(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let task_id = req_str(args, "task_id")?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let context = opt_context(args, "context")?;

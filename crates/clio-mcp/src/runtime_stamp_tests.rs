@@ -153,10 +153,11 @@ fn is_real_date_stamp_rejects_a_stamp_with_a_corrupt_time() {
 fn timestamp_args_win_over_now() {
     let s = super::runtime_tests::state();
     assert_eq!(
-        s.resolve_timestamp(&json!({"timestamp": "2024-01-01T00:00:00Z"})),
+        s.resolve_timestamp(&json!({"timestamp": "2024-01-01T00:00:00Z"}))
+            .expect("a canonical stamp is placeable"),
         "2024-01-01T00:00:00Z"
     );
-    let now = s.resolve_timestamp(&json!({}));
+    let now = s.resolve_timestamp(&json!({})).expect("now is placeable");
     assert!(now.ends_with('Z'), "now stamp: {now}");
     // The suffix check alone was green while the stamp named a day that does
     // not exist, so the date portion must also be a real calendar date. The

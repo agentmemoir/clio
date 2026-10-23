@@ -180,10 +180,10 @@ pub fn triple_add(
     if let Some(context) = args.context {
         clio_types::validate_context(context)?;
     }
-    let valid_from = args.valid_from.unwrap_or(args.timestamp);
-    let edge_id = unique_id("trp", args.timestamp);
-    let item_id = unique_id("itm", args.timestamp);
-    let item = triple_carrier(args, item_id.clone(), valid_from);
+    let (timestamp, valid_from, valid_until) = stamped_axes(args)?;
+    let edge_id = unique_id("trp", &timestamp);
+    let item_id = unique_id("itm", &timestamp);
+    let item = triple_carrier(args, item_id.clone(), &valid_from, &valid_until, &timestamp);
     let edge = TripleRecord {
         id: edge_id,
         bank_id: args.ctx.bank.as_str().into(),
@@ -194,14 +194,14 @@ pub fn triple_add(
         epistemic_kind: args.epistemic_kind,
         source_type: args.source_type,
         confidence: args.confidence,
-        valid_from: valid_from.into(),
-        valid_until: args.valid_until.map(str::to_owned),
-        tx_from: args.timestamp.into(),
+        valid_from,
+        valid_until,
+        tx_from: timestamp.clone(),
         tx_until: None,
         snapshot_ref: args.snapshot_ref.map(str::to_owned),
         gist_ref: args.gist_ref.map(str::to_owned),
         context: args.context.map(str::to_owned),
-        created_at: args.timestamp.into(),
+        created_at: timestamp.clone(),
         updated_at: None,
     };
     let mut outcome = None;
@@ -226,7 +226,7 @@ pub fn triple_add(
         ctx: args.ctx,
         policy: args.policy.clone(),
         sink: args.admit_sink,
-        timestamp: args.timestamp,
+        timestamp: &timestamp,
     };
     let decision = gated_create(
         &req,
@@ -239,7 +239,7 @@ pub fn triple_add(
             operation: "triple_add".into(),
             bank: args.ctx.bank.as_str().into(),
             actor: args.ctx.actor.as_str().into(),
-            timestamp: args.timestamp.into(),
+            timestamp,
             edge_or_item_id: o.new_edge_id.clone(),
             prior_ids: o.prior_edge_ids.clone(),
             replacement_id: None,
@@ -252,8 +252,32 @@ pub fn triple_add(
     })
 }
 
+/// The three caller-supplied axes of a triple add, each in canonical form.
+///
+/// A triple's `valid_from`, `valid_until`, and transaction stamps reach item and
+/// edge time columns the store compares as text, so they are canonicalised here —
+/// the one seam every caller (tool handler, batch pre-flight, CLI, library)
+/// shares — rather than at each handler. A value this build cannot place is
+/// refused instead of being stored and compared as a literal string, and an
+/// absent `valid_until` stays absent.
+fn stamped_axes(args: &TripleAddArgs<'_>) -> Result<(String, String, Option<String>), AmError> {
+    let timestamp = clio_store::canonical_write_stamp(args.timestamp)?;
+    let valid_from = match args.valid_from {
+        Some(raw) => clio_store::canonical_write_stamp(raw)?,
+        None => timestamp.clone(),
+    };
+    let valid_until = clio_store::canonical_optional_stamp(args.valid_until)?;
+    Ok((timestamp, valid_from, valid_until))
+}
+
 /// Build the episodic carrier item that holds the triple's snapshot/gist halves.
-fn triple_carrier(args: &TripleAddArgs<'_>, item_id: String, valid_from: &str) -> MemoryItem {
+fn triple_carrier(
+    args: &TripleAddArgs<'_>,
+    item_id: String,
+    valid_from: &str,
+    valid_until: &Option<String>,
+    timestamp: &str,
+) -> MemoryItem {
     MemoryItem {
         id: item_id,
         bank_id: args.ctx.bank.as_str().into(),
@@ -277,11 +301,11 @@ fn triple_carrier(args: &TripleAddArgs<'_>, item_id: String, valid_from: &str) -
             args.subject, args.predicate, args.object
         )),
         valid_from: valid_from.into(),
-        valid_until: args.valid_until.map(str::to_owned),
-        tx_from: args.timestamp.into(),
+        valid_until: valid_until.clone(),
+        tx_from: timestamp.into(),
         tx_until: None,
-        created_at: args.timestamp.into(),
-        updated_at: args.timestamp.into(),
+        created_at: timestamp.into(),
+        updated_at: timestamp.into(),
     }
 }
 
@@ -313,8 +337,10 @@ pub fn triple_end(
     sink: &dyn TripleSink,
 ) -> Result<TripleEndOutcome, AmError> {
     ensure_discrete_update_rule(update_rule)?;
+    let valid_until = clio_store::canonical_write_stamp(valid_until)?;
+    let timestamp = clio_store::canonical_write_stamp(timestamp)?;
     let bank = ctx.bank.as_str();
-    let out = store.triple_end(bank, subject, predicate, object, valid_until, timestamp)?;
+    let out = store.triple_end(bank, subject, predicate, object, &valid_until, &timestamp)?;
     // Nothing was open. The store wrote nothing, so refusing here leaves no partial write.
     if out.closed_ids.is_empty()
         && out.already_ended
@@ -326,7 +352,7 @@ pub fn triple_end(
         operation: "triple_end".into(),
         bank: ctx.bank.as_str().into(),
         actor: ctx.actor.as_str().into(),
-        timestamp: timestamp.into(),
+        timestamp,
         edge_or_item_id: out.closed_ids.first().cloned().unwrap_or_default(),
         prior_ids: out.closed_ids.clone(),
         replacement_id: None,
@@ -358,11 +384,12 @@ pub fn invalidate(
     sink: &dyn TripleSink,
 ) -> Result<TripleEndOutcome, AmError> {
     ensure_discrete_update_rule(update_rule)?;
+    let timestamp = clio_store::canonical_write_stamp(timestamp)?;
     let out = store.invalidate_item(
         ctx.bank.as_str(),
         item_id,
-        timestamp,
-        timestamp,
+        &timestamp,
+        &timestamp,
         replacement_id,
         ctx.actor.as_str(),
     )?;
@@ -370,7 +397,7 @@ pub fn invalidate(
         operation: "invalidate".into(),
         bank: ctx.bank.as_str().into(),
         actor: ctx.actor.as_str().into(),
-        timestamp: timestamp.into(),
+        timestamp: timestamp.clone(),
         edge_or_item_id: item_id.into(),
         prior_ids: out.closed_ids.clone(),
         replacement_id: replacement_id.map(str::to_owned),
@@ -391,3 +418,7 @@ mod triple_tests;
 #[cfg(test)]
 #[path = "triple_end_tests.rs"]
 mod triple_end_tests;
+
+#[cfg(test)]
+#[path = "triple_stamp_tests.rs"]
+mod triple_stamp_tests;

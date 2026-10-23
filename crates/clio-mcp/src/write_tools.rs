@@ -242,7 +242,7 @@ pub(crate) fn build_item(
         .get("item")
         .cloned()
         .unwrap_or_else(|| Value::Object(Map::new()));
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let category = match opt_str(args, "category") {
         Some(raw) => Some(SemanticCategory::parse(raw)?),
         None => None,

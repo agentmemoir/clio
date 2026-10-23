@@ -223,7 +223,7 @@ fn maintenance_status(state: &McpState, args: &Value) -> Result<Value, AmError> 
     // the whole call.
     let drain = state.index_drain.status(Some(ctx.bank.as_str()));
     value["index"] = state.index_status_value(&drain);
-    let now = state.resolve_timestamp(args);
+    let now = state.resolve_timestamp(args)?;
     value["pressure"] = crate::pressure::block(state, ctx.bank.as_str(), &status, &now, &drain);
     // The trigger block reads the trigger's own recorded decision, next to
     // the pressure block it decides from.
@@ -238,7 +238,7 @@ fn maintenance_status(state: &McpState, args: &Value) -> Result<Value, AmError> 
 #[inline(never)]
 fn persona_get(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     let budget =
         opt_usize(args, "budget_tokens").unwrap_or(clio_persona::DEFAULT_PERSONA_TOKEN_BUDGET);
     let outcome = clio_persona::persona_get(&clio_persona::PersonaGetArgs {

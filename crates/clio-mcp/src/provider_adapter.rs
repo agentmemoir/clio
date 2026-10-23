@@ -61,7 +61,7 @@ enum ItemOutcome {
 /// reporting, gating, `provider:<id>` provenance, and external-id idempotency.
 pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let dry_run = opt_bool(args, "dry_run", false)?;
     let options = args.get("options").unwrap_or(&Value::Null);
 
