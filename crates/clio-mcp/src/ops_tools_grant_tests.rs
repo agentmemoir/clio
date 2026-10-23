@@ -8,12 +8,15 @@
 //! sweep must never reach a bank the grant excludes.
 //!
 //! ## Owns
-//! - Bound-versus-unbound scope tests for `diagnose`, `repair`, `reindex`,
-//!   `verify`, and `doctor` over a shared in-memory SQLite state
-//! - The refusal a foreign registered plan produces, and the state it leaves
-//!   behind
+//! - The refusal a registered foreign plan produces, and the plan, edge, and
+//!   index state it leaves behind
+//! - The `doctor` plan and `notes` a bound caller reads, and the store-wide note
+//!   an unbound operator still gets
+//! - The bounded `reindex` sweep in both shared-enable states
+//! - The fixtures every bound-scope test in this module family is built from
 //!
 //! ## Does not own
+//! - The per-tool scope assertions (`ops_tools_grant_scope_tests`)
 //! - Operator semantics themselves (`clio-ops`)
 //! - Argument decoding and the `{ok}` envelope (`ops_tools_tests`)
 //!
@@ -31,10 +34,13 @@ use clio_store::ItemInspectFilter;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-const TS: &str = "2026-01-01T00:00:00Z";
+pub(super) const TS: &str = "2026-01-01T00:00:00Z";
+
+/// An id no test registers: plan ids are allocated from one, per process.
+const ABSENT_PLAN: &str = "plan-404";
 
 /// One unbound in-memory state: `bank-a` is the server default.
-fn state(shared: bool) -> Arc<McpState> {
+pub(super) fn state(shared: bool) -> Arc<McpState> {
     McpState::open_with_effective(
         &McpOpenOptions {
             backend: "sqlite".into(),
@@ -50,7 +56,7 @@ fn state(shared: bool) -> Arc<McpState> {
 }
 
 /// A restricted view of the same store, sharing every field but the principal.
-fn bound(state: &Arc<McpState>, banks: &[&str]) -> Arc<McpState> {
+pub(super) fn bound(state: &Arc<McpState>, banks: &[&str]) -> Arc<McpState> {
     Arc::new(state.with_principal(Principal::new(
         "restricted".into(),
         clio_types::Actor::Harness,
@@ -58,7 +64,7 @@ fn bound(state: &Arc<McpState>, banks: &[&str]) -> Arc<McpState> {
     )))
 }
 
-fn seed_item(st: &McpState, bank: &str, id: &str) {
+pub(super) fn seed_item(st: &McpState, bank: &str, id: &str) {
     let item = clio_types::MemoryItem {
         id: id.into(),
         bank_id: bank.into(),
@@ -84,7 +90,7 @@ fn seed_item(st: &McpState, bank: &str, id: &str) {
     st.store.create_memory_item(&item, "actor").expect("seed");
 }
 
-fn plant_orphan_edge(st: &McpState, bank: &str) {
+pub(super) fn plant_orphan_edge(st: &McpState, bank: &str) {
     st.store
         .put_assoc_edge(&clio_store::AssocEdgeRecord {
             id: format!("ghost-edge-{bank}"),
@@ -99,7 +105,7 @@ fn plant_orphan_edge(st: &McpState, bank: &str) {
         .expect("plant orphan edge");
 }
 
-fn has_finding(value: &Value, code: &str) -> bool {
+pub(super) fn has_finding(value: &Value, code: &str) -> bool {
     value["findings"]
         .as_array()
         .is_some_and(|findings| findings.iter().any(|f| f["code"] == code))
@@ -138,15 +144,24 @@ fn registered_plan(st: &McpState, bank: &str) -> String {
     out["plan_id"].as_str().expect("plan id").to_owned()
 }
 
-fn index_rows(st: &McpState, bank: &str) -> (u64, u64) {
+pub(super) fn index_rows(st: &McpState, bank: &str) -> (u64, u64) {
     let coverage = st.index.index_coverage(Some(bank)).expect("coverage");
     (coverage.dense_rows, coverage.lexical_rows)
 }
 
-fn count_items(st: &McpState, bank: &str) -> usize {
+pub(super) fn count_items(st: &McpState, bank: &str) -> usize {
     st.store
         .count_items(&ItemInspectFilter::new(bank))
         .expect("count")
+}
+
+/// A refusal body with the caller's own plan id normalized away.
+///
+/// The one text a foreign id and an unknown id may not share is the id itself,
+/// which the message echoes from the request; everything else a caller can see
+/// must be identical.
+fn body_without_plan_id(value: &Value, plan_id: &str) -> String {
+    value.to_string().replace(plan_id, "<plan-id>")
 }
 
 #[test]
@@ -175,21 +190,50 @@ fn bound_repair_cannot_reach_the_bank_of_a_foreign_plan() {
     let plan_id = registered_plan(&original, "bank-b");
     let restricted = bound(&original, &["bank-a"]);
 
-    let out = dispatch(
+    let foreign = dispatch(
         &restricted,
         "repair",
         &json!({ "plan_id": plan_id, "confirm": true, "timestamp": TS }),
     );
-    assert_eq!(out["ok"], Value::Bool(false), "{out}");
-    assert_eq!(out["code"], "forbidden", "{out}");
-    let message = out["message"].as_str().unwrap_or_default();
-    assert!(!message.contains("bank-b"), "refusal names the bank: {out}");
+    // A plan the grant does not cover answers exactly like an id that was never
+    // registered: ids are sequential, so any difference would say that another
+    // bank exists.
+    let absent = dispatch(
+        &restricted,
+        "repair",
+        &json!({ "plan_id": ABSENT_PLAN, "confirm": true, "timestamp": TS }),
+    );
+    assert_eq!(foreign["ok"], Value::Bool(false), "{foreign}");
+    assert_eq!(
+        foreign["findings"][0]["code"], "PLAN_NOT_FOUND",
+        "{foreign}"
+    );
+    assert_eq!(
+        foreign["findings"][0]["scope"], absent["findings"][0]["scope"],
+        "the refusal scoped a foreign plan differently: {foreign} / {absent}"
+    );
+    assert_eq!(foreign["bank"], absent["bank"], "{foreign} / {absent}");
+    assert_eq!(
+        foreign["plan_id"], absent["plan_id"],
+        "{foreign} / {absent}"
+    );
+    assert_eq!(foreign["results"], json!([]), "{foreign}");
+    assert_eq!(
+        body_without_plan_id(&foreign, &plan_id),
+        body_without_plan_id(&absent, ABSENT_PLAN),
+        "a foreign plan id answered differently from an unregistered one"
+    );
     assert!(
-        !message.contains(&plan_id),
-        "refusal echoes the plan: {out}"
+        !foreign.to_string().contains("bank-b"),
+        "the refusal names the foreign bank: {foreign}"
     );
 
-    // The refusal ran no action: the foreign bank's orphan edge survives.
+    // Nothing was hidden in the registry itself: the other caller's plan is
+    // still there, and the refusal above ran none of its actions.
+    assert!(
+        original.ops_plans.get(&plan_id).is_some(),
+        "the foreign plan was removed from the registry"
+    );
     let check = dispatch(
         &original,
         "verify",
@@ -274,7 +318,25 @@ fn bound_verify_and_doctor_without_bank_never_scope_to_a_foreign_bank() {
         !actions.contains(&"drop_orphan_assoc_edge"),
         "doctor planned the foreign bank's repair: {doctor}"
     );
-    assert_eq!(restricted.ops_plans.len(), 0, "{doctor}");
+
+    // A dry run stores nothing, so the plan a bound caller then composes live is
+    // the one to read: its `bank` is its own, never the whole store (`null`).
+    let live = dispatch(
+        &restricted,
+        "doctor",
+        &json!({ "timestamp": TS, "dry_run": false }),
+    );
+    assert_eq!(live["bank"], "bank-a", "{live}");
+    let live_id = live["plan_id"].as_str().expect("a plan id");
+    let stored = restricted
+        .ops_plans
+        .get(live_id)
+        .expect("the plan it composed");
+    assert_eq!(
+        stored.bank.as_deref(),
+        Some("bank-a"),
+        "the bound plan spans the whole store"
+    );
 
     // `notes` is a second field with its own disclosure rule: a bound caller
     // must not read that another bank exists or which codes it carries.
@@ -322,123 +384,4 @@ fn bound_verify_and_doctor_without_bank_never_scope_to_a_foreign_bank() {
             .any(|note| note.contains("ORPHAN_ASSOC_EDGE")),
         "the store-wide note names no foreign finding: {open}"
     );
-}
-
-#[test]
-fn bound_diagnose_does_not_disclose_a_foreign_bank() {
-    let original = state(false);
-    seed_item(&original, "bank-a", "itm-a");
-    seed_item(&original, "bank-b", "itm-b");
-    let restricted = bound(&original, &["bank-a"]);
-
-    let scoped = dispatch(&restricted, "diagnose", &json!({ "timestamp": TS }));
-    assert_eq!(scoped["ok"], Value::Bool(true), "{scoped}");
-    assert_eq!(sorted_report_banks(&scoped), ["bank-a"], "{scoped}");
-    assert_eq!(scoped["indexable_items"], 1, "{scoped}");
-
-    let whole = dispatch(&original, "diagnose", &json!({ "timestamp": TS }));
-    assert_eq!(sorted_report_banks(&whole), ["bank-a", "bank-b"], "{whole}");
-    assert_eq!(whole["indexable_items"], 2, "{whole}");
-}
-
-/// Every operator tool reports its own scope; none may be the whole store.
-#[test]
-fn bound_caller_without_a_bank_never_reaches_the_whole_store() {
-    let original = two_bank_store();
-    let restricted = bound(&original, &["bank-a"]);
-
-    // Each tool reports the scope it reached: the bank inventory, the `scope`
-    // label, or the `bank` the report ran (or refused) in.
-    let expected = [
-        ("diagnose", "bank-a"),
-        ("verify", "bank:bank-a"),
-        ("doctor", "bank-a"),
-        ("repair", "bank-a"),
-        ("reindex", "bank-a"),
-    ];
-    for (tool, scope) in expected {
-        let out = dispatch(&restricted, tool, &json!({ "timestamp": TS }));
-        assert!(!out.to_string().contains("bank-b"), "{tool}: {out}");
-        let reached = match tool {
-            "diagnose" => sorted_report_banks(&out),
-            "verify" => vec![out["scope"].as_str().unwrap_or_default().to_owned()],
-            _ => vec![out["bank"].as_str().unwrap_or_default().to_owned()],
-        };
-        assert_eq!(reached, [scope.to_owned()], "{tool} left its grant: {out}");
-    }
-}
-
-/// Both banks populated, with distinct volumes so a narrowed report is visible.
-fn two_bank_store() -> Arc<McpState> {
-    let st = state(false);
-    seed_item(&st, "bank-a", "itm-a");
-    seed_item(&st, "bank-b", "itm-b1");
-    seed_item(&st, "bank-b", "itm-b2");
-    st
-}
-
-/// A report's bank inventory, sorted: catalog order is not part of the contract.
-fn sorted_report_banks(report: &Value) -> Vec<String> {
-    let mut banks: Vec<String> = report["banks"]
-        .as_array()
-        .map(|banks| {
-            banks
-                .iter()
-                .filter_map(|bank| bank.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default();
-    banks.sort();
-    banks
-}
-
-#[test]
-fn unbound_diagnose_with_a_bank_argument_reports_the_whole_store() {
-    let st = two_bank_store();
-    let out = dispatch(
-        &st,
-        "diagnose",
-        &json!({ "bank": "bank-a", "timestamp": TS }),
-    );
-    assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(sorted_report_banks(&out), ["bank-a", "bank-b"], "{out}");
-    assert_eq!(out["indexable_items"], 3, "{out}");
-    assert_eq!(out["dense_rows"], 0, "{out}");
-    assert_eq!(out["lexical_rows"], 0, "{out}");
-}
-
-#[test]
-fn unbound_diagnose_without_a_bank_reports_the_same_whole_store() {
-    let st = two_bank_store();
-    let named = dispatch(
-        &st,
-        "diagnose",
-        &json!({ "bank": "bank-a", "timestamp": TS }),
-    );
-    let omitted = dispatch(&st, "diagnose", &json!({ "timestamp": TS }));
-    assert_eq!(named, omitted, "the bank key changed the unbound report");
-    assert_eq!(
-        sorted_report_banks(&omitted),
-        ["bank-a", "bank-b"],
-        "{omitted}"
-    );
-    assert_eq!(omitted["indexable_items"], 3, "{omitted}");
-    assert_eq!(omitted["dense_rows"], 0, "{omitted}");
-    assert_eq!(omitted["lexical_rows"], 0, "{omitted}");
-}
-
-#[test]
-fn unbound_reindex_without_bank_and_shared_enabled_sweeps_the_whole_store() {
-    let st = state(true);
-    seed_item(&st, "bank-a", "itm-a");
-    seed_item(&st, "bank-b", "itm-b");
-
-    let out = dispatch(&st, "reindex", &json!({ "timestamp": TS }));
-    assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(out["dry_run"], Value::Bool(true), "{out}");
-    assert!(
-        out["bank"].is_null(),
-        "unbound scope is the whole store: {out}"
-    );
-    assert_eq!(out["indexable_items"], 2, "{out}");
 }

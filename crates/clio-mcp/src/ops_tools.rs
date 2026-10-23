@@ -189,9 +189,14 @@ fn doctor_result(
 ///
 /// A registered plan names its own bank, and a bank-less request would
 /// otherwise let it reach any bank in the store: resolve the plan's scope before
-/// any action runs, so the gate refuses a foreign plan before it acts. Only a
-/// bound caller derives its scope from the plan; an unbound caller keeps its own
-/// argument, and an omitted one for it stays whole-store as before.
+/// any action runs. Only a bound caller derives its scope from the plan; an
+/// unbound caller keeps its own argument, and an omitted one for it stays
+/// whole-store as before.
+///
+/// A plan registered for a bank outside the bound caller's grant is neither
+/// authorized nor disclosed: it answers exactly like an id that was never
+/// registered, because plan ids are sequential and a distinguishable refusal
+/// would tell the caller that another bank exists.
 fn repair_result(
     state: &McpState,
     args: &Value,
@@ -199,20 +204,35 @@ fn repair_result(
     timestamp: &str,
 ) -> Result<Value, AmError> {
     let actions = string_array(args, "actions")?;
-    let plan_bank = if state.principal.is_some() {
+    let explicit_bank = opt_str(args, "bank");
+    // Only an omitted `bank` is affected: an explicit argument stays the
+    // authority it was, and the gate below still refuses a foreign one.
+    let unreachable_plan = explicit_bank.is_none() && plan_outside_grant(state, args);
+    let plan_bank = if state.principal.is_some() && !unreachable_plan {
         opt_str(args, "plan_id")
             .and_then(|id| state.ops_plans.get(id))
             .and_then(|plan| plan.bank)
     } else {
         None
     };
-    let scope = state.op_scope(ctx, opt_str(args, "bank").or(plan_bank.as_deref()))?;
+    let scope = state.op_scope(ctx, explicit_bank.or(plan_bank.as_deref()))?;
+    // An unreachable plan is resolved against a registry that cannot hold it, so
+    // the operator refuses it with the same `plan_not_found` finding, the same
+    // scope, and the same empty `results` an unknown id produces, and runs no
+    // action a plan could have carried.
+    let unseen;
+    let plans: &clio_ops::PlanRegistry = if unreachable_plan {
+        unseen = clio_ops::PlanRegistry::new();
+        &unseen
+    } else {
+        &state.ops_plans
+    };
     let outcome = clio_ops::repair(&clio_ops::RepairArgs {
         store: &*state.ops_store,
         writer: &*state.store,
         index: &*state.index,
         embedder: embedder(state),
-        plans: &state.ops_plans,
+        plans,
         plan_id: opt_str(args, "plan_id"),
         actions: &actions,
         bank: scope.bank(),
@@ -220,6 +240,21 @@ fn repair_result(
         timestamp,
     })?;
     Ok(to_value(&outcome))
+}
+
+/// True when the request's plan id names a registered plan the grant excludes.
+///
+/// The grant gate answers, so this asks the question the scope gate asks. An id
+/// that was never registered is not outside anything, and neither is a plan that
+/// names no bank: both keep the scope the context already authorized.
+fn plan_outside_grant(state: &McpState, args: &Value) -> bool {
+    let Some(plan) = opt_str(args, "plan_id").and_then(|id| state.ops_plans.get(id)) else {
+        return false;
+    };
+    match plan.bank {
+        Some(bank) => state.require_bank_grant(&bank).is_err(),
+        None => false,
+    }
 }
 
 /// The `reindex` arm: one bank, or every indexable bank for a local caller.
@@ -321,6 +356,10 @@ fn to_value<T: Serialize>(value: &T) -> Value {
 #[cfg(test)]
 #[path = "ops_tools_grant_tests.rs"]
 mod ops_tools_grant_tests;
+
+#[cfg(test)]
+#[path = "ops_tools_grant_scope_tests.rs"]
+mod ops_tools_grant_scope_tests;
 
 #[cfg(test)]
 #[path = "ops_tools_tests.rs"]
