@@ -57,16 +57,22 @@ fn an_open_rewrites_epoch_millis_item_timestamps() {
     // process-local KMS, which cannot unwrap the first store's content.
     let _reopened = schema.open();
     assert_eq!(
-        schema.query_value("SELECT created_at FROM items WHERE id = 'b1-i1'").unwrap(),
+        schema
+            .query_value("SELECT created_at FROM items WHERE id = 'b1-i1'")
+            .unwrap(),
         Some("2023-11-14T22:13:20Z".to_owned())
     );
     assert_eq!(
-        schema.query_value("SELECT updated_at FROM items WHERE id = 'b1-i1'").unwrap(),
+        schema
+            .query_value("SELECT updated_at FROM items WHERE id = 'b1-i1'")
+            .unwrap(),
         Some("2023-11-14T22:13:20Z".to_owned())
     );
     // A column the rewrite leaves alone keeps its stored value.
     assert_eq!(
-        schema.query_value("SELECT tx_from FROM items WHERE id = 'b1-i1'").unwrap(),
+        schema
+            .query_value("SELECT tx_from FROM items WHERE id = 'b1-i1'")
+            .unwrap(),
         Some("t0".to_owned())
     );
 }
