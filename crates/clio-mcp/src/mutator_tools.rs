@@ -49,7 +49,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
     }
 }
 
-/// Shared `update` facade: discrete invalidation vs continuous EMA.
+/// Shared `update` facade: discrete supersession vs continuous EMA.
 #[inline(never)]
 fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -81,17 +81,18 @@ fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
         ),
         clio_write::UpdateOutcome::Discrete(end) => {
             // A discrete update that stored nothing must never read as success:
-            // the caller's value would be lost with no way to notice.
+            // the caller's value would be lost with no way to notice. The write
+            // layer fills the id on every stored supersession, so this is a
+            // defensive guard against a payload that lost it.
             if end.replacement_id.is_none() {
                 return Err(AmError::new(
-                    ErrorCode::Internal,
+                    ErrorCode::InvalidArgument,
                     "discrete update stored no replacement item; nothing was written",
                 ));
             }
             Ok(json!({
                 "rule": "discrete",
                 "closed_ids": end.closed_ids,
-                "already_ended": end.already_ended,
                 "replacement_id": end.replacement_id
             }))
         }

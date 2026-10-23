@@ -110,6 +110,7 @@ pub use triple::{
     triple_add, triple_end, triple_query,
 };
 pub use update::{
-    ContinuousEvent, ContinuousSink, ContinuousVecSink, UpdateArgs, UpdateOutcome, update,
+    ContinuousEvent, ContinuousSink, ContinuousVecSink, DiscreteOutcome, UpdateArgs, UpdateOutcome,
+    update,
 };
 pub use verify::{SpanOffsets, VerifyConfig, VerifyFailure, VerifyReport, verify_snapshot};

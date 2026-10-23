@@ -36,8 +36,7 @@
 use crate::triple::{TripleEvent, TripleSink};
 use clio_store::{ContinuousStore, CorrectionSpec, Store};
 use clio_types::{
-    AmError, ContinuousState, EpistemicKind, ErrorCode, MemoryItem, OpContext, TripleEndOutcome,
-    UpdateRule,
+    AmError, ContinuousState, EpistemicKind, ErrorCode, MemoryItem, OpContext, UpdateRule,
 };
 use serde::{Deserialize, Serialize};
 
@@ -99,15 +98,25 @@ impl ContinuousSink for ContinuousVecSink {
 /// Outcome of a routed `update` call.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UpdateOutcome {
-    /// Continuous attribute: new EMA state (no invalidation).
+    /// Continuous attribute: new EMA state (no supersession).
     Continuous(ContinuousState),
-    /// Discrete record: both time axes closed (invalidation / supersession).
-    Discrete(TripleEndOutcome),
+    /// Discrete record: the prior revision is closed and its value replaced.
+    Discrete(DiscreteOutcome),
+}
+
+/// What a discrete `update` did: the revisions it closed and the replacement
+/// that now holds the caller's value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscreteOutcome {
+    /// Prior revisions closed by the supersession.
+    pub closed_ids: Vec<String>,
+    /// Item id of the replacement storing the value.
+    pub replacement_id: Option<String>,
 }
 
 /// Inputs for the shared `update` entrypoint.
 pub struct UpdateArgs<'a> {
-    /// Discrete repository (invalidation path).
+    /// Discrete repository (supersede-and-store path).
     pub store: &'a dyn Store,
     /// Continuous repository (attribute registry + EMA engine).
     pub continuous: &'a dyn ContinuousStore,
@@ -140,7 +149,7 @@ pub struct UpdateArgs<'a> {
 /// - `update_rule=continuous` → `target` is a **declared attribute key**. The
 ///   continuous series is bank-scoped by `(bank, attr_key)`, so the key is the
 ///   stable address.
-/// - `update_rule=discrete` → `target` is an **item id** to invalidate. A
+/// - `update_rule=discrete` → `target` is an **item id** to supersede. A
 ///   declared discrete attribute key is not accepted here: a key names a
 ///   bank-wide predicate shared by many subjects, so invalidating "by key"
 ///   would close unrelated subjects' edges. The item id is the only
@@ -219,7 +228,7 @@ fn route_declared(
 }
 
 /// Target is not a declared attribute: continuous fails closed, discrete
-/// routes to the invalidation path.
+/// routes to the supersede-and-store path.
 fn route_unregistered(args: &UpdateArgs<'_>) -> Result<UpdateOutcome, AmError> {
     match args.update_rule {
         UpdateRule::Continuous => Err(AmError::new(
@@ -241,7 +250,7 @@ fn route_unregistered(args: &UpdateArgs<'_>) -> Result<UpdateOutcome, AmError> {
 /// given is persisted rather than dropped. A prior that is already closed means
 /// nothing was written, which fails closed instead of reporting a supersession
 /// that did not happen.
-fn supersede(args: &UpdateArgs<'_>) -> Result<TripleEndOutcome, AmError> {
+fn supersede(args: &UpdateArgs<'_>) -> Result<DiscreteOutcome, AmError> {
     if args.new_value.trim().is_empty() {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
@@ -300,9 +309,8 @@ fn supersede(args: &UpdateArgs<'_>) -> Result<TripleEndOutcome, AmError> {
         prior_ids: vec![args.target.to_owned()],
         replacement_id: replacement_id.clone(),
     });
-    Ok(TripleEndOutcome {
+    Ok(DiscreteOutcome {
         closed_ids: vec![args.target.to_owned()],
-        already_ended: false,
         replacement_id,
     })
 }

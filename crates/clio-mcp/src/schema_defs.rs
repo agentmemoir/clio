@@ -231,7 +231,8 @@ pub fn core_defs() -> Vec<ToolDef> {
         ),
         ToolDef {
             name: "update",
-            description: "Route an update by rule: `discrete` invalidates, `continuous` applies EMA.",
+            description: "Route an update by rule: `discrete` supersedes the item and stores \
+`new_value` on a replacement whose id is returned; `continuous` applies EMA.",
             required: &["target", "new_value", "update_rule"],
             props: vec![
                 (
