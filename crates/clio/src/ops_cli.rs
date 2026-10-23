@@ -38,14 +38,13 @@ use std::sync::Arc;
 ///
 /// - `0`: success — `diagnose` and `verify` are healthy, `doctor` composed a
 ///   clean plan, `repair` applied, or `reindex` completed.
-/// - `1`: `verify` or `doctor` reported error-severity findings, a store/index
-///   read failed, a referenced repair plan was not found, the `diagnose`
-///   backend was unreachable, a repair action failed, or the store could not
-///   be opened.
+/// - `1`: operator findings, store/index or key-store failures, missing repair
+///   plans, unreachable diagnose backends, or failed repair actions.
 /// - `2`: a repair was refused (missing confirm or unknown action), the
 ///   backend value is invalid, or the `clio ops` subcommand is unknown.
 /// - `3`: `reindex` failed or aborted (including a dense target with no
 ///   embedding sidecar).
+/// - `75`: a Postgres lock conflict is temporary; retry the command.
 ///
 /// `doctor` never mutates the store under any `--dry-run` value; `repair` and
 /// `reindex` mutate only when `--confirm` is given.
@@ -400,12 +399,17 @@ fn run_reindex<S: OpsRepos>(
 
 /// Render an error as structured JSON and return the mapped exit code.
 fn emit_error(error: &AmError, code: u8) -> ExitCode {
+    let exit_code = if error.code == clio_types::ErrorCode::StorageBusy {
+        crate::cli_error::CliError::from_am_error(error).exit_code()
+    } else {
+        ExitCode::from(code)
+    };
     print_json(&serde_json::json!({
         "ok": false,
         "code": error.code.as_str(),
         "message": redact(&error.message),
     }));
-    ExitCode::from(code)
+    exit_code
 }
 
 /// Render a bad flag value with the shared usage code and exit group.
