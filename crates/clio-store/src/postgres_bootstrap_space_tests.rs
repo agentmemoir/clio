@@ -139,3 +139,50 @@ fn distance_sql_uses_the_recorded_width_and_alias() {
         "v.embedding::halfvec(3072) <=> $1::vector::halfvec(3072)"
     );
 }
+
+#[test]
+fn a_failed_space_switch_preserves_the_current_bootstrap() {
+    let _guard = crate::lock_pg_test();
+    let schema = ScopedSchema::new(&postgres_url_from_env());
+    let mut store = schema.open();
+    let original = store.space().clone();
+    let requested = EmbeddingSpace::new("bootstrap/refused", 768).expect("requested space");
+    schema
+        .execute(
+            "CREATE FUNCTION refuse_space_write() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION 'refuse space setting'; END $$;
+             CREATE TRIGGER refuse_space_write BEFORE UPDATE ON schema_settings
+             FOR EACH ROW WHEN (NEW.key = 'embedding_model')
+             EXECUTE FUNCTION refuse_space_write()",
+        )
+        .expect("inject settings write failure after vector recreation");
+    let error = store
+        .apply_configured_space(&requested, true)
+        .expect_err("space switch must encounter settings write failure");
+    assert!(error.message.contains("refuse space setting"), "{error}");
+    schema
+        .execute("DROP TRIGGER refuse_space_write ON schema_settings; DROP FUNCTION refuse_space_write()")
+        .expect("remove settings failure");
+    drop(store);
+    let mut reopened = schema.open();
+    assert_eq!(reopened.space(), &original);
+    assert_eq!(
+        schema
+            .query_value(
+                "SELECT value FROM schema_settings WHERE key = 'postgres_bootstrap_version'"
+            )
+            .expect("completion marker")
+            .as_deref(),
+        Some(super::PG_BOOTSTRAP_VERSION)
+    );
+    assert_eq!(
+        schema.query_value("SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = 'item_embeddings'::regclass AND attname = 'embedding'").expect("vector column type").as_deref(),
+        Some("vector(384)"),
+        "a failed switch must keep the vector schema consistent with its completion marker"
+    );
+    reopened
+        .apply_configured_space(&requested, true)
+        .expect("retry switch after removing failure");
+    drop(reopened);
+    assert_eq!(schema.open().space(), &requested);
+}

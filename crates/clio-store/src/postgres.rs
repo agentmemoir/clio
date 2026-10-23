@@ -396,18 +396,32 @@ pub(crate) fn write_space(client: &mut Client, space: &EmbeddingSpace) -> Result
 /// Runs under [`PG_BOOTSTRAP_ADVISORY_KEY`] like the bootstrap does: the drop
 /// and the vector DDL take the same table locks an open takes, so an unguarded
 /// switch could deadlock against a concurrent open.
+/// The transaction keeps the table and recorded space consistent with the
+/// completion stamp if any switch step fails.
 fn switch_pg(client: &mut Client, space: &EmbeddingSpace) -> Result<u64, AmError> {
     with_bootstrap_lock(client, |client| {
-        let purged: i64 = client
-            .query_one("SELECT COUNT(*) FROM item_embeddings", &[])
-            .am("space purge count")?
-            .get(0);
-        client
-            .batch_execute("DROP TABLE IF EXISTS item_embeddings;")
-            .am("space drop")?;
-        apply_vector_ddl(client, space)?;
-        write_space(client, space)?;
-        Ok(u64::try_from(purged.max(0)).unwrap_or(0))
+        client.batch_execute("BEGIN").am("space switch begin")?;
+        let outcome = (|| {
+            let purged = vector_row_count(client)?;
+            client
+                .batch_execute("DROP TABLE IF EXISTS item_embeddings;")
+                .am("space drop")?;
+            apply_vector_ddl(client, space)?;
+            write_space(client, space)?;
+            Ok(purged)
+        })();
+        match outcome {
+            Ok(purged) => {
+                client.batch_execute("COMMIT").am("space switch commit")?;
+                Ok(purged)
+            }
+            Err(error) => {
+                client
+                    .batch_execute("ROLLBACK")
+                    .am("space switch rollback")?;
+                Err(error)
+            }
+        }
     })
 }
 
