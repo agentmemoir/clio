@@ -6,20 +6,27 @@ on:
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, reopened, ready_for_review]
 permissions:
-  contents: read
+  # `convertPullRequestToDraft` refuses the call with only `pull-requests: write`.
+  contents: write
   pull-requests: write
 jobs:
   draft-external:
     if: >-
       github.event.pull_request.draft == false &&
-      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # No checkout, no PR-content evaluation, only GitHub API mutation.
       - name: Convert external PR to draft
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_REPO: ${{ github.repository }}
-        run: gh pr ready "$PR_NUMBER" --undo --repo "$GH_REPO"
+        # A refused mutation reports one line and leaves the job green: a draft
+        # conversion is a courtesy, not a merge gate.
+        run: |
+          if ! gh pr ready "$PR_NUMBER" --undo --repo "$GH_REPO"; then
+            echo "Could not convert PR #$PR_NUMBER to draft: the API refused the mutation."
+          fi

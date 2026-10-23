@@ -1,0 +1,1 @@
+The External Contrib workflow now decides from the pull request head repository instead of `author_association`, so a same-repository pull request from a member whose organization membership is private is no longer converted to a draft, and a refused API call reports one line instead of failing the job.
