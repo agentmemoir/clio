@@ -15,6 +15,17 @@
 //! - EMA math (shared engine in `clio-types` behind the store) or SQL drivers
 //! - Admission scoring (mutators are N/A-gated; audit still emitted)
 //!
+//! ## Discrete writes are not admission-scored
+//!
+//! The discrete path stores the caller's value on a replacement revision
+//! without admission scoring: nothing measures whether the new text is
+//! admissible. Because of that, the replacement does not inherit the prior
+//! revision's admission score or confidence — unvetted content must not report
+//! a trust score it never earned. The fields that describe what the item is
+//! (category, episodic type, source reference, context) are carried over, and
+//! the value becomes the replacement's gist, plus its authoritative snapshot
+//! only when the value is a JSON object.
+//!
 //! ## Boundary
 //!
 //! Changes to update routing or rejection semantics should normally require changes here.
@@ -298,10 +309,14 @@ fn supersede(args: &UpdateArgs<'_>) -> Result<TripleEndOutcome, AmError> {
 
 /// Build the replacement revision from the prior one plus the new value.
 ///
-/// `new_value` always becomes the non-authoritative gist; when it parses as a
-/// JSON object it also becomes the authoritative snapshot (the prior snapshot
-/// is retained otherwise). Create-time admission score, provenance, taxonomy,
-/// and context are carried over untouched: a mutator never re-scores.
+/// `new_value` always becomes the non-authoritative gist. When it parses as a
+/// JSON object it also becomes the authoritative snapshot; otherwise the
+/// replacement carries no snapshot at all, so the prior revision's exact values
+/// cannot survive as a stale authoritative half of the new revision.
+///
+/// Provenance, taxonomy, and context are carried over untouched. The
+/// admission score and confidence are not: this content was never admitted, so
+/// it must not report a score the prior revision earned.
 fn replacement_item(
     prior: &MemoryItem,
     new_value: &str,
@@ -310,7 +325,7 @@ fn replacement_item(
 ) -> MemoryItem {
     let snapshot = match serde_json::from_str::<serde_json::Value>(new_value) {
         Ok(v) if v.is_object() => Some(v),
-        _ => prior.snapshot.clone(),
+        _ => None,
     };
     MemoryItem {
         id: new_item_id.to_owned(),
@@ -321,8 +336,8 @@ fn replacement_item(
         episodic_type: prior.episodic_type,
         epistemic_kind: prior.epistemic_kind,
         source_type: prior.source_type,
-        confidence: prior.confidence,
-        admission_score: prior.admission_score,
+        confidence: None,
+        admission_score: None,
         source_ref: prior.source_ref.clone(),
         context: prior.context.clone(),
         snapshot,
@@ -363,3 +378,7 @@ mod update_fail_closed_tests;
 #[cfg(test)]
 #[path = "update_tests.rs"]
 pub(crate) mod update_tests;
+
+#[cfg(test)]
+#[path = "update_snapshot_tests.rs"]
+mod update_snapshot_tests;

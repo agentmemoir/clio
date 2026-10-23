@@ -270,6 +270,16 @@ fn t_discrete_stores_the_value_and_links_the_replacement() {
         Some("the replacement value"),
         "value not stored"
     );
+    assert!(
+        stored.snapshot.is_none(),
+        "a prose value must not keep the prior authoritative snapshot: {:?}",
+        stored.snapshot
+    );
+    assert!(
+        stored.admission_score.is_none(),
+        "the replacement must not inherit the prior admission score: {:?}",
+        stored.admission_score
+    );
     assert!(stored.tx_until.is_none(), "the replacement must be active");
     assert_eq!(triple.events().len(), 1);
     assert_eq!(triple.events()[0].operation, "invalidate");
