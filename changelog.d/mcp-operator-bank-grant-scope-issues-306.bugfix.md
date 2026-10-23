@@ -1,0 +1,1 @@
+An authenticated MCP caller granted one bank could omit `bank` and make `repair`, `reindex`, `verify`, `doctor`, or `diagnose` act on another bank or on the whole store. These operator tools now authorize the request and forward a grant-bounded scope, so the work stays inside the bank the caller was granted.
