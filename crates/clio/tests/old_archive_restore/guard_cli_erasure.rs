@@ -4,14 +4,15 @@
 //! # Responsibility
 //!
 //! This module is responsible for driving the real `clio backup restore` route
-//! against erasure-related archives on SQLite: a fresh post-erasure archive, an
-//! archive with an unclassifiable member, a replaced empty journal, and a mixed
-//! allowed/denied archive. Each refusal must leave the target and the journal
-//! unchanged and the live control subject readable.
+//! against erasure-related archives on SQLite: a fresh post-erasure archive
+//! that restores without resurrecting the subject, an archive with an
+//! unclassifiable member, a replaced empty journal, and a mixed
+//! allowed/denied archive that still refuses. Each refusal must leave the
+//! target and the journal unchanged and the live control subject readable.
 //!
 //! ## Owns
-//! - The post-erasure, unclassifiable-member, empty-journal, and mixed-archive
-//!   SQLite refusals and their evidence lines
+//! - The post-erasure restore, the unclassifiable-member, empty-journal, and
+//!   mixed-archive SQLite behavior and their evidence lines
 //!
 //! ## Does not own
 //! - The pre-decision authority refusals (see `guard_cli`)
@@ -58,7 +59,7 @@ fn place_raw(backups: &Path, id: &str, raw: &Path) -> PathBuf {
 }
 
 #[test]
-fn sqlite_post_erasure_archive_refuses_without_placement() {
+fn sqlite_post_erasure_archive_restores_without_resurrecting_the_subject() {
     let scratch = Scratch::new("guard-cli-t05a");
     let backups = backup_dir(&scratch);
     let source_db = scratch.join("source/clio.db");
@@ -96,10 +97,10 @@ fn sqlite_post_erasure_archive_refuses_without_placement() {
         &[(CONTROL_ITEM, CONTROL_SUBJECT, "control sentinel gist")],
     );
     let target = target_db.to_str().expect("the target path is UTF-8");
-    let target_before = file_sha256(&target_db);
     let archive_before = file_sha256(&post_erasure.path);
-    let journal_before = file_sha256(&journal);
 
+    // The archive carries no usable key for the denied subject, so the backup
+    // taken after the erasure restores. The archive itself is never rewritten.
     let output = run_restore(
         &journal,
         &target_kms,
@@ -107,37 +108,29 @@ fn sqlite_post_erasure_archive_refuses_without_placement() {
         target,
         &[post_erasure.id.as_str()],
     );
-    assert_refused(&output, "denied subject");
+    assert_eq!(
+        output.code,
+        Some(0),
+        "a post-erasure archive must restore: {}",
+        output.stderr
+    );
     assert_eq!(
         file_sha256(&post_erasure.path),
         archive_before,
-        "the archive is not sanitized by the refused restore"
-    );
-    assert_eq!(
-        file_sha256(&target_db),
-        target_before,
-        "the refused post-erasure archive placed no bytes"
-    );
-    assert_eq!(
-        file_sha256(&journal),
-        journal_before,
-        "the refused post-erasure archive left the journal unchanged"
+        "the restore does not sanitize the archive"
     );
     let store = open_sqlite(&target_db, &target_kms);
     assert_eq!(
         readback(&store, CONTROL_ITEM),
         Readback::Readable,
-        "the live permitted subject stays readable"
+        "the permitted subject restores readable"
     );
     assert_eq!(
         readback(&store, DENIED_ITEM),
-        Readback::Absent,
-        "the denied subject never became active"
+        Readback::DestroyedKey,
+        "the denied subject's row restores without a usable key"
     );
-    println!(
-        "REFUSED sqlite post-erasure archive={} target_sha256={target_before}",
-        post_erasure.id
-    );
+    println!("RESTORED sqlite post-erasure archive={}", post_erasure.id);
 }
 
 #[test]

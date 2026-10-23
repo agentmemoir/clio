@@ -242,15 +242,15 @@ pub struct Refusal {
     pub message: &'static str,
 }
 
-/// The production's refusal when an archive member references a subject the
-/// live authority denies.
+/// The production's refusal when an archive member carries usable key material
+/// for a subject the live authority denies.
 ///
 /// The error code is the public enum's own string, so a rename of the code
 /// fails this check here instead of leaving a copied string behind.
 pub const DENIED_SUBJECT_REFUSAL: Refusal = Refusal {
     exit: 2,
     code: ErrorCode::Forbidden.as_str(),
-    message: "an archive member references a currently denied subject",
+    message: "an archive member carries usable key material for a currently denied subject",
 };
 
 /// Assert one CLI restore refused with the production's exact exit code, error

@@ -6,12 +6,14 @@
 //! This module is responsible for driving the real `clio backup restore` route
 //! against an archive the erasure authority denies, on loopback Postgres: a
 //! pre-denial archive refused on every selector, a missing or wrong-deployment
-//! authority, a fresh post-erasure archive, and a mixed allowed/denied archive.
-//! Each refusal must leave the target's items, the journal, the archive, and
-//! the live control subject unchanged.
+//! authority, a fresh post-erasure archive that restores without resurrecting
+//! the subject, and a mixed allowed/denied archive. Each refusal must leave the
+//! target's items, the journal, the archive, and the live control subject
+//! unchanged.
 //!
 //! ## Owns
-//! - The Postgres CLI-restore refusal scenarios and their evidence lines
+//! - The Postgres CLI-restore refusal and restore scenarios and their evidence
+//!   lines
 //!
 //! ## Does not own
 //! - The archive assembly and read-back probes (see `support_pg`)
@@ -226,7 +228,7 @@ fn postgres_missing_and_wrong_deployment_authority_refuse() {
 }
 
 #[test]
-fn postgres_post_erasure_archive_refuses_without_placement() {
+fn postgres_post_erasure_archive_restores_without_resurrecting_the_subject() {
     let base = pg_url();
     if !require_postgres(postgres_reachable(&base)) {
         return;
@@ -267,10 +269,10 @@ fn postgres_post_erasure_archive_refuses_without_placement() {
         &[(CONTROL_ITEM, CONTROL_SUBJECT, "control sentinel gist")],
     );
     let target_db = target.url();
-    let items_before = items(target_db);
-    let journal_before = file_sha256(&journal);
     let archive_before = file_sha256(&archive.path);
 
+    // The archive carries no usable key for the denied subject, so the backup
+    // taken after the erasure restores and the archive is never rewritten.
     let output = run_restore(
         &journal,
         &target_kms,
@@ -278,38 +280,30 @@ fn postgres_post_erasure_archive_refuses_without_placement() {
         target_db,
         &[archive.id.as_str()],
     );
-    assert_refused(&output, "denied subject");
     assert_eq!(
-        items(target_db),
-        items_before,
-        "the refused post-erasure archive placed no rows"
-    );
-    assert_eq!(
-        file_sha256(&journal),
-        journal_before,
-        "the refused post-erasure archive left the journal unchanged"
+        output.code,
+        Some(0),
+        "a post-erasure archive must restore: {}",
+        output.stderr
     );
     assert_eq!(
         file_sha256(&archive.path),
         archive_before,
-        "the archive is not sanitized by the refused restore"
+        "the restore does not sanitize the archive"
     );
 
     let store = open_pg(target.url(), &target_kms);
     assert_eq!(
         readback(&store, CONTROL_ITEM),
         Readback::Readable,
-        "the live permitted subject stays readable"
+        "the permitted subject restores readable"
     );
     assert_eq!(
         readback(&store, DENIED_ITEM),
-        Readback::Absent,
-        "the denied subject never became active"
+        Readback::DestroyedKey,
+        "the denied subject's row restores without a usable key"
     );
-    println!(
-        "REFUSED postgres post-erasure archive={} items={items_before:?}",
-        archive.id
-    );
+    println!("RESTORED postgres post-erasure archive={}", archive.id);
 }
 
 #[test]

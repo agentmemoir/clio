@@ -1,1 +1,0 @@
-An archive restore now refuses an archive that carries a denied subject even when the only trace of that subject is a ciphertext-only item row: the restore presence check now reads the item table's subject column as a presence signal, so such an archive is refused as a whole on SQLite and on Postgres instead of being admitted and placed.

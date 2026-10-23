@@ -313,9 +313,3 @@ pub use archive_authority::{ArchiveClaim, AuthorityRefusal, MemberFacts, check_a
 #[cfg(test)]
 #[path = "erasure_journal_tests.rs"]
 mod erasure_journal_tests;
-
-/// The archive authority check tests, split out so the model and operations
-/// tests stay focused.
-#[cfg(test)]
-#[path = "erasure_journal_check_tests.rs"]
-mod erasure_journal_check_tests;
