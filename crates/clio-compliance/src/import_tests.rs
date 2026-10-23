@@ -291,7 +291,7 @@ fn force_overwrites_differing_items_and_keeps_triples() {
     let semantic = entities.items.first().unwrap().id.clone();
     let restored = h
         .store
-        .get_memory_item(&h.bank, &semantic)
+        .get_memory_item(&h.bank, &format!("{semantic}#{}", h.bank))
         .unwrap()
         .unwrap();
     assert_eq!(restored.gist, entities.items.first().unwrap().gist);
@@ -314,7 +314,7 @@ fn ciphertext_backup_import_restores_opaque_rows() {
     // The exporting node's ciphertext is stored verbatim (no re-encryption).
     assert_eq!(
         h.store
-            .inspect_content_ciphertext(&h.bank, &opaque.id)
+            .inspect_content_ciphertext(&h.bank, &format!("{}#{}", opaque.id, h.bank))
             .unwrap()
             .as_deref(),
         Some(opaque.content_cipher.as_str())
@@ -326,7 +326,7 @@ fn ciphertext_backup_import_restores_opaque_rows() {
         .unwrap();
     let row = rows
         .iter()
-        .find(|r| r.item_id == opaque.id)
+        .find(|r| r.item_id == format!("{}#{}", opaque.id, h.bank))
         .expect("restored opaque row is listed");
     assert_eq!(row.kind, "semantic");
     assert_eq!(row.category.as_deref(), Some("schema"));

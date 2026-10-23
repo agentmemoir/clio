@@ -233,5 +233,9 @@ mod import_context_persona_tests;
 mod import_restore_tests;
 
 #[cfg(test)]
+#[path = "import_rekey_tests.rs"]
+mod import_rekey_tests;
+
+#[cfg(test)]
 #[path = "import_secret_scrub_tests.rs"]
 mod import_secret_scrub_tests;

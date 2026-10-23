@@ -119,7 +119,7 @@ fn a_handcrafted_item_context_is_scrubbed_on_the_plain_create_path() {
 
     let restored = h
         .store
-        .get_memory_item(&h.bank, &id)
+        .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
     let context = restored.context.as_deref().expect("context present");
@@ -145,7 +145,7 @@ fn an_ordinary_item_context_is_not_altered_by_the_scrub() {
 
     let restored = h
         .store
-        .get_memory_item(&h.bank, &id)
+        .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
     assert_eq!(

@@ -28,7 +28,7 @@ use clio_store::{BatchWrite, OpaqueItemRecord};
 use clio_types::{AmError, BeliefObject, ErrorCode, MemoryItem};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::import_apply::Planner;
+use super::import_apply::{Planner, import_id};
 use crate::bundle::OpaqueItem;
 use crate::export_mask::scrub_context;
 
@@ -56,28 +56,35 @@ impl Planner<'_> {
         what: &str,
         key: &str,
     ) -> Result<Option<MemoryItem>, AmError> {
-        if let Some(reason) = self.rejected_carriers.get(item_id).cloned() {
+        let args = self.args;
+        let bank = args.ctx.bank.as_str();
+        let source_bank = self
+            .bundle_item(item_id)
+            .map_or_else(|| bank.to_owned(), |i| i.bank_id.clone());
+        let written = import_id(bank, &source_bank, item_id).into_owned();
+        if let Some(reason) = self.rejected_carriers.get(&written).cloned() {
             self.skip += 1;
             self.note(format!(
                 "{what} {key} restore skipped: carrier item rejected by admission gate ({reason})"
             ));
             return Ok(None);
         }
-        if self.item_exists(item_id)? || self.consumed.contains(&format!("carrier:{item_id}")) {
+        if self.item_exists(&written)? || self.consumed.contains(&format!("carrier:{written}")) {
             self.skip += 1;
             self.note(format!(
                 "{what} {key} restore skipped: carrier item already exists"
             ));
             return Ok(None);
         }
-        let Some(mut carrier) = self.admitted_carriers.get(item_id).cloned() else {
+        let Some(mut carrier) = self.admitted_carriers.get(&written).cloned() else {
             self.skip += 1;
             self.note(format!(
                 "{what} {key} restore skipped: carrier item missing from bundle"
             ));
             return Ok(None);
         };
-        self.args.ctx.bank.as_str().clone_into(&mut carrier.bank_id);
+        bank.clone_into(&mut carrier.bank_id);
+        carrier.id.clone_from(&written);
         // The carrier is stashed pre-admission, so it never passed the item
         // create path's mask. Scrub it here so it carries the same value the
         // record was masked to; the store fails a record whose context
@@ -95,19 +102,22 @@ impl Planner<'_> {
         let bank = args.ctx.bank.as_str();
         let entities = &self.envelope.entities;
         for edge in &entities.triples {
-            let exists = args.store.get_triple(bank, &edge.id)?.is_some();
-            self.edge_seen.insert(edge.id.clone(), exists);
+            let id = import_id(bank, &edge.bank_id, &edge.id).into_owned();
+            let exists = args.store.get_triple(bank, &id)?.is_some();
+            self.edge_seen.insert(id, exists);
         }
         for task in &entities.tasks {
             let latest = args.history.get_task(bank, &task.task_id)?;
             self.task_latest.insert(task.task_id.clone(), latest);
         }
         for failure in &entities.failures {
-            let exists = args.history.get_failure(bank, &failure.id)?.is_some();
-            self.failure_exists.insert(failure.id.clone(), exists);
+            let id = import_id(bank, &failure.bank_id, &failure.id).into_owned();
+            let exists = args.history.get_failure(bank, &id)?.is_some();
+            self.failure_exists.insert(id, exists);
         }
         for edge in &entities.triples {
-            if !self.edge_seen[&edge.id] {
+            let id = import_id(bank, &edge.bank_id, &edge.id).into_owned();
+            if !self.edge_seen[&id] {
                 self.defer_carrier(&edge.item_id)?;
             }
         }
@@ -120,7 +130,8 @@ impl Planner<'_> {
             }
         }
         for failure in &entities.failures {
-            if !self.failure_exists[&failure.id] {
+            let id = import_id(bank, &failure.bank_id, &failure.id).into_owned();
+            if !self.failure_exists[&id] {
                 self.defer_carrier(&failure.item_id)?;
             }
         }
@@ -131,8 +142,11 @@ impl Planner<'_> {
         if self.deferred.contains(item_id) {
             return Ok(());
         }
-        let missing = !self.item_exists(item_id)?;
-        if missing && self.bundle_item(item_id).is_some() {
+        let Some(source_bank) = self.bundle_item(item_id).map(|i| i.bank_id.clone()) else {
+            return Ok(());
+        };
+        let written = import_id(self.args.ctx.bank.as_str(), &source_bank, item_id).into_owned();
+        if !self.item_exists(&written)? {
             self.deferred.insert(item_id.to_owned());
         }
         Ok(())
@@ -143,18 +157,16 @@ impl Planner<'_> {
         let bank = args.ctx.bank.as_str();
         let actor = args.ctx.actor.as_str();
         for failure in &self.envelope.entities.failures {
-            if self
-                .failure_exists
-                .get(&failure.id)
-                .copied()
-                .unwrap_or(false)
-                || self.consumed.contains(&format!("failure:{}", failure.id))
+            let id = import_id(bank, &failure.bank_id, &failure.id).into_owned();
+            if self.failure_exists.get(&id).copied().unwrap_or(false)
+                || self.consumed.contains(&format!("failure:{id}"))
             {
                 self.skip += 1;
                 continue;
             }
             let mut record = failure.clone();
             bank.clone_into(&mut record.bank_id);
+            record.id.clone_from(&id);
             // Hand-crafted bundles can carry a secret-shaped context; scrub it
             // rather than trusting that the exporter masked it.
             record.context = scrub_context(record.context.as_deref());
@@ -162,7 +174,8 @@ impl Planner<'_> {
             else {
                 continue;
             };
-            self.consumed.insert(format!("failure:{}", record.id));
+            record.item_id.clone_from(&carrier.id);
+            self.consumed.insert(format!("failure:{id}"));
             self.consumed.insert(format!("carrier:{}", record.item_id));
             self.staged.push(BatchWrite::CommitFailureRecord {
                 item: carrier,
@@ -185,8 +198,9 @@ impl Planner<'_> {
         let mut triples = self.envelope.entities.triples.clone();
         triples.sort_by(|a, b| (&a.tx_from, &a.id).cmp(&(&b.tx_from, &b.id)));
         for edge in &triples {
-            if self.edge_seen.get(&edge.id).copied().unwrap_or(false)
-                || self.consumed.contains(&format!("triple:{}", edge.id))
+            let id = import_id(bank, &edge.bank_id, &edge.id).into_owned();
+            if self.edge_seen.get(&id).copied().unwrap_or(false)
+                || self.consumed.contains(&format!("triple:{id}"))
             {
                 self.skip += 1;
                 if args.force && !self.noted_triple_force {
@@ -201,10 +215,26 @@ impl Planner<'_> {
             }
             let mut e = edge.clone();
             bank.clone_into(&mut e.bank_id);
+            e.id.clone_from(&id);
             let Some(carrier) = self.stageable_carrier(&e.item_id, "edge", &e.id)? else {
                 continue;
             };
-            self.consumed.insert(format!("triple:{}", e.id));
+            e.item_id.clone_from(&carrier.id);
+            // `snapshot_ref` / `gist_ref` are item-id pointers, exported verbatim
+            // (masking never rewrites them). A pointer at a row this bundle also
+            // carries must move with that row, or the cross-bank triple insert
+            // fails `snapshot_ref ... not found in bank` (and `gist_ref` dangles
+            // silently, having no existence check).
+            for r in [&mut e.snapshot_ref, &mut e.gist_ref] {
+                let Some(ref_id) = r.as_deref() else {
+                    continue;
+                };
+                if !self.bundle_owns(ref_id) {
+                    continue;
+                }
+                *r = Some(import_id(bank, &edge.bank_id, ref_id).into_owned());
+            }
+            self.consumed.insert(format!("triple:{id}"));
             self.consumed.insert(format!("carrier:{}", e.item_id));
             self.staged.push(BatchWrite::CommitTriple {
                 item: carrier,
@@ -235,6 +265,7 @@ impl Planner<'_> {
             }
             let mut record = task.clone();
             bank.clone_into(&mut record.bank_id);
+            record.id = import_id(bank, &task.bank_id, &task.id).into_owned();
             // Hand-crafted bundles can carry a secret-shaped context; scrub it
             // rather than trusting that the exporter masked it.
             record.context = scrub_context(record.context.as_deref());
@@ -242,6 +273,7 @@ impl Planner<'_> {
             else {
                 continue;
             };
+            record.item_id.clone_from(&carrier.id);
             self.consumed.insert(format!("task:{}", record.task_id));
             self.consumed.insert(format!("carrier:{}", record.item_id));
             self.staged.push(BatchWrite::CommitTaskUpsert {
@@ -360,3 +392,7 @@ pub(super) fn opaque_record(opaque: &OpaqueItem, bank: &str) -> OpaqueItemRecord
         content_cipher: opaque.content_cipher.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "import_rows_tests.rs"]
+mod import_rows_tests;
