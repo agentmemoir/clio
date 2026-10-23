@@ -108,6 +108,7 @@ mod postgres_attribute;
 mod postgres_audit;
 mod postgres_backup_model;
 mod postgres_belief;
+mod postgres_bootstrap;
 mod postgres_correct;
 mod postgres_coverage;
 mod postgres_discard;
