@@ -183,6 +183,10 @@ fn column_exists(
     Ok(count > 0)
 }
 
+#[cfg(test)]
+#[path = "restore_authority_sqlite_tests.rs"]
+mod restore_authority_sqlite_tests;
+
 /// The refusal for a SQLite read failure, naming the table it was reading.
 fn sqlite_error(path: &Path, table: &str, error: &rusqlite::Error) -> ClassifyRefusal {
     ClassifyRefusal::Io(AmError::new(
