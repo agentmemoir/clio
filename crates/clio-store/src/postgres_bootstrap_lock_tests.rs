@@ -136,7 +136,9 @@ fn a_current_schema_opens_beside_an_existing_writer() {
     let separator = if fresh.contains('?') { '&' } else { '?' };
     let bounded = format!("{fresh}{separator}options=-c%20lock_timeout%3D1000ms");
     let opened = PostgresStore::open(&bounded, local_kms());
-    writer.batch_execute("ROLLBACK").expect("release writer lock");
+    writer
+        .batch_execute("ROLLBACK")
+        .expect("release writer lock");
     drop(writer);
     assert!(
         opened.is_ok(),
@@ -252,4 +254,96 @@ fn a_refused_bootstrap_releases_the_lock() {
             &[&PG_BOOTSTRAP_ADVISORY_KEY],
         )
         .expect("release the probe lock");
+}
+
+#[test]
+fn missing_or_stale_bootstrap_stamp_runs_required_ddl() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else { return };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let scratch = ScratchDatabase::create(&mut admin, "stamp");
+    let fresh = url_for_database(&scratch.name);
+    drop(PostgresStore::open(&fresh, local_kms()).expect("initialize"));
+    let mut client = crate::pg_tls::connect(&fresh).expect("connect");
+    for stale in [false, true] {
+        client
+            .batch_execute("DROP INDEX items_corrects_item_id_inx")
+            .expect("remove index");
+        if stale {
+            client.execute("UPDATE schema_settings SET value = 'old' WHERE key = 'postgres_bootstrap_version'", &[]).expect("old stamp");
+        } else {
+            client
+                .execute(
+                    "DELETE FROM schema_settings WHERE key = 'postgres_bootstrap_version'",
+                    &[],
+                )
+                .expect("missing stamp");
+        }
+        drop(PostgresStore::open(&fresh, local_kms()).expect("repair incomplete schema"));
+        let present: bool = client
+            .query_one(
+                "SELECT to_regclass('items_corrects_item_id_inx') IS NOT NULL",
+                &[],
+            )
+            .expect("index probe")
+            .get(0);
+        assert!(
+            present,
+            "required bootstrap DDL must run without a current completion stamp"
+        );
+    }
+}
+
+#[test]
+fn failed_vector_ddl_does_not_stamp_complete_bootstrap() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else { return };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let scratch = ScratchDatabase::create(&mut admin, "partial");
+    let fresh = url_for_database(&scratch.name);
+    drop(PostgresStore::open(&fresh, local_kms()).expect("initialize"));
+    let mut client = crate::pg_tls::connect(&fresh).expect("connect");
+    client.batch_execute("UPDATE schema_settings SET value = 'old' WHERE key = 'postgres_bootstrap_version'; DROP TABLE item_embeddings; CREATE VIEW item_embeddings AS SELECT 1 AS id").expect("force vector DDL refusal");
+    assert!(
+        PostgresStore::open(&fresh, local_kms()).is_err(),
+        "vector DDL must fail"
+    );
+    let stamp: bool = client.query_one("SELECT EXISTS (SELECT 1 FROM schema_settings WHERE key = 'postgres_bootstrap_version')", &[]).expect("stamp probe").get(0);
+    assert!(!stamp, "failed bootstrap must leave no completion stamp");
+    client
+        .batch_execute("DROP VIEW item_embeddings")
+        .expect("remove refusal");
+    drop(PostgresStore::open(&fresh, local_kms()).expect("retry completes bootstrap"));
+}
+
+#[test]
+fn required_schema_work_reports_writer_lock_timeout_as_retryable() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else { return };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let scratch = ScratchDatabase::create(&mut admin, "busy");
+    let fresh = url_for_database(&scratch.name);
+    drop(PostgresStore::open(&fresh, local_kms()).expect("initialize"));
+    let mut writer = crate::pg_tls::connect(&fresh).expect("writer connect");
+    writer
+        .execute(
+            "DELETE FROM schema_settings WHERE key = 'postgres_bootstrap_version'",
+            &[],
+        )
+        .expect("invalidate stamp before writer begins");
+    writer
+        .batch_execute("BEGIN; LOCK TABLE items IN ROW EXCLUSIVE MODE")
+        .expect("hold writer");
+    let separator = if fresh.contains('?') { '&' } else { '?' };
+    let opened = PostgresStore::open(
+        &format!("{fresh}{separator}options=-c%20lock_timeout%3D1000ms"),
+        local_kms(),
+    );
+    writer.batch_execute("ROLLBACK").expect("release writer");
+    let Err(error) = opened else {
+        panic!("required DDL must encounter writer lock")
+    };
+    assert_eq!(error.code, ErrorCode::StorageBusy);
+    assert_eq!(error.message, "Postgres lock conflict; retry the command");
+    drop(PostgresStore::open(&fresh, local_kms()).expect("retry after writer exits"));
 }

@@ -13,7 +13,7 @@
 //!   prints `message`, the raw `help` block, then a `hint:` line)
 //! - Mapping in-process failures into the CLI contract (credentials masked, then
 //!   the input names translated by `cli_error_names`)
-//! - The 0/1/2 exit-code mapping shared by the read commands
+//! - The success, operational, usage, partial, and temporary exit codes
 //!
 //! ## Does not own
 //! - Output-mode selection or rendering (see `cli_output`)
@@ -39,6 +39,8 @@ pub(crate) const EXIT_USAGE: u8 = 2;
 /// Process exit code for a command-specific degraded outcome. Distinct from
 /// success and a refusal so scripts can identify partial or incomplete work.
 pub(crate) const EXIT_PARTIAL: u8 = 3;
+/// Process exit code for a transient storage lock conflict that can be retried.
+pub(crate) const EXIT_TEMPORARY: u8 = 75;
 
 /// One CLI failure: a machine code, a human message, an optional hint, an
 /// optional raw help block, and the process exit code it maps to.
@@ -95,14 +97,21 @@ impl CliError {
         Self::usage(message).with_help(help)
     }
 
-    /// An operational failure (exit 1) with an explicit machine code.
+    /// An operational failure with an explicit machine code.
+    /// Storage lock conflicts exit 75; other operational failures exit 1.
     pub(crate) fn operational(code: impl Into<String>, message: impl Into<String>) -> Self {
+        let code = code.into();
+        let exit = if code == "storage_busy" {
+            EXIT_TEMPORARY
+        } else {
+            EXIT_OPERATIONAL
+        };
         Self {
-            code: code.into(),
+            code,
             message: message.into(),
             hint: None,
             help: None,
-            exit: EXIT_OPERATIONAL,
+            exit,
         }
     }
 

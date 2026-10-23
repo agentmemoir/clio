@@ -44,6 +44,21 @@ fn operational_error_exits_one_with_the_given_code() {
 }
 
 #[test]
+fn storage_lock_conflicts_have_a_temporary_exit_code() {
+    let error = AmError::new(
+        ErrorCode::StorageBusy,
+        "Postgres lock conflict; retry the command",
+    );
+    for mapped in [
+        CliError::from_am_error(&error),
+        CliError::tool_failure("storage_busy", &error.message),
+    ] {
+        assert_eq!(mapped.exit_code(), ExitCode::from(75));
+        assert_eq!(mapped.to_envelope()["code"], "storage_busy");
+    }
+}
+
+#[test]
 fn tool_domain_errors_keep_the_operational_exit_group() {
     for code in ["invalid_argument", "invalid_type", "out_of_range"] {
         let error = CliError::tool_failure(code, "bad flag value");

@@ -53,6 +53,9 @@ pub struct PostgresStore {
 /// let two opens into the same tables at once.
 const PG_BOOTSTRAP_ADVISORY_KEY: i64 = crate::pg_advisory_keys::STORE_BOOTSTRAP;
 
+// Increment when the complete bootstrap changes independently of schema_version.
+const PG_BOOTSTRAP_VERSION: &str = "1";
+
 impl PostgresStore {
     /// Connect, migrate, and verify the `vector` extension.
     ///
@@ -61,12 +64,8 @@ impl PostgresStore {
     pub fn open(database_url: &str, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
         let mut client = crate::pg_tls::connect(database_url).am("postgres connect")?;
         crate::postgres_ext::require_extension(&mut client, "vector")?;
-        // Every open runs schema and trigger DDL. Two opens that overlap take
-        // the same table locks in different orders and write the same catalog
-        // rows, so the server aborts one of them with `deadlock detected`,
-        // `tuple concurrently updated`, or a `pg_type` unique-constraint
-        // violation. The whole bootstrap runs under one cross-session
-        // advisory lock.
+        // Serialize schema checks and actual migrations. A complete current
+        // schema opens without DDL that could conflict with an existing writer.
         let (space, space_was_absent) = with_bootstrap_lock(&mut client, bootstrap_schema)?;
         Ok(Self {
             client: Mutex::new(client),
@@ -173,10 +172,23 @@ fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, bool), AmErr
     // existing placeholder table lacks the columns the event writer names, and
     // the slot DDL only declares a fresh table.
     crate::local_events_converge::converge_pg(client)?;
+    if bootstrap_is_current(client)?
+        && let Some(space) = read_space(client)?
+    {
+        return Ok((space, false));
+    }
+    // A partial bootstrap must never retain a previous completion stamp.
+    if settings_exist(client)? {
+        client
+            .execute(
+                "DELETE FROM schema_settings WHERE key = 'postgres_bootstrap_version'",
+                &[],
+            )
+            .am("invalidate postgres bootstrap version")?;
+    }
     let migrate = format!("{SQL_CORE}\n{SQL_VECTORS_POSTGRES}\n{SQL_COMPLIANCE_SLOTS}");
     client.batch_execute(&migrate).am("migrate postgres")?;
     crate::bank_registration::install_postgres_triggers(client)?;
-    crate::schema_reshape::bump_schema_version_pg(client)?;
     // The vector table is created for the recorded space, so an existing
     // database keeps its width and a fresh one gets the documented default
     // recorded (and can then adopt the configured space with nothing to purge).
@@ -188,7 +200,41 @@ fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, bool), AmErr
         (space, true)
     };
     apply_vector_ddl(client, &space)?;
+    crate::schema_reshape::bump_schema_version_pg(client)?;
+    client
+        .execute(
+            "INSERT INTO schema_settings (key, value, created_at, updated_at)
+             VALUES ('postgres_bootstrap_version', $1, $2, $2)
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+            &[&PG_BOOTSTRAP_VERSION, &now_iso()],
+        )
+        .am("stamp postgres bootstrap version")?;
     Ok((space, space_was_absent))
+}
+
+fn settings_exist(client: &mut Client) -> Result<bool, AmError> {
+    client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = current_schema() AND table_name = 'schema_settings')",
+            &[],
+        )
+        .am("postgres schema settings probe")
+        .map(|row| row.get(0))
+}
+
+fn bootstrap_is_current(client: &mut Client) -> Result<bool, AmError> {
+    if !settings_exist(client)? {
+        return Ok(false);
+    }
+    client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM schema_settings WHERE key = 'schema_version' AND value = $1)
+             AND EXISTS (SELECT 1 FROM schema_settings WHERE key = 'postgres_bootstrap_version' AND value = $2)",
+            &[&crate::schema_reshape::SCHEMA_VERSION, &PG_BOOTSTRAP_VERSION],
+        )
+        .am("postgres bootstrap version read")
+        .map(|row| row.get(0))
 }
 
 /// Take [`PG_BOOTSTRAP_ADVISORY_KEY`], run `body`, and release the key on both
