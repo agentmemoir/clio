@@ -20,7 +20,7 @@
 //! Changes to Postgres discard SQL should normally require changes here.
 //! Changes to SQLite discard SQL should not require changes here.
 
-use crate::migrate::{IntoAmError, now_iso};
+use crate::migrate::{IntoAmError, now_iso8601};
 use crate::model::ItemIdentity;
 use crate::postgres::PostgresStore;
 use clio_types::{AmError, ErrorCode};
@@ -73,7 +73,9 @@ impl PostgresStore {
                 "actor is required on discard writes",
             ));
         }
-        let ts = now_iso();
+        // The canonical form, because `updated_at` and `discarded_at` are both
+        // compared as text by the items change feed and the inspect filter.
+        let ts = now_iso8601();
         let detail = serde_json::json!({ "reason": reason }).to_string();
         self.with_client(|client| {
             let mut tx = client.transaction().am("discard begin")?;
@@ -155,3 +157,7 @@ impl PostgresStore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "postgres_discard_tests.rs"]
+mod postgres_discard_tests;
