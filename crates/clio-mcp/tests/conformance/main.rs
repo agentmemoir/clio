@@ -183,7 +183,7 @@ fn write_set_fixture() -> Vec<(&'static str, Value)> {
 
 /// Mask process-unique generated ids before comparing transport parity.
 fn mask_volatile(value: Value) -> Value {
-    const VOLATILE: [&str; 7] = [
+    const VOLATILE: [&str; 8] = [
         "new_edge_id",
         "prior_edge_ids",
         "closed_ids",
@@ -191,6 +191,7 @@ fn mask_volatile(value: Value) -> Value {
         "item_id",
         "record_id",
         "belief_id",
+        "replacement_id",
     ];
     match value {
         Value::Object(map) => Value::Object(
