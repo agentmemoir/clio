@@ -12,6 +12,9 @@
 //! - `classify_archive`, `ClassifiedArchive`, and `ClassifyRefusal`
 //! - Extracting an archive into a private scratch directory, then reading the
 //!   subject references its payload, key store, and dump tables carry
+//! - Marking a subject whose archive key slot still holds a usable key as
+//!   `MemberFacts::LiveKey`, and every other reference as the content-free
+//!   `MemberFacts::Reference`
 //! - Marking a member it cannot recognize as `MemberFacts::Unknown`
 //!
 //! ## Does not own
@@ -51,6 +54,9 @@ const ITEMS_TABLE: &str = "items";
 
 /// The key-store table holding one row per subject key slot.
 const KEY_SLOTS_TABLE: &str = "slots";
+
+/// The key-store column holding the sealed DEK; `NULL` once it is destroyed.
+const KEY_COLUMN: &str = "key_b64";
 
 /// The tombstone column whose value is already a salted subject hash.
 const TOMBSTONE_HASH_COLUMN: &str = "subject_hash";
@@ -144,6 +150,14 @@ impl From<AmError> for ClassifyRefusal {
 /// - the key member yields a reference for every hashed `slots` subject id;
 /// - any other member is [`MemberFacts::Unknown`] and is never skipped.
 ///
+/// A reference is [`MemberFacts::LiveKey`] when the archive's own key store
+/// still holds a usable key for that subject, because restoring it would make
+/// the subject's content readable. Every other reference is the content-free
+/// [`MemberFacts::Reference`]: a destroyed key slot, a tombstone, or a
+/// ciphertext row the archive carries no usable key for. That distinction is
+/// what lets a backup taken after an erasure be restored while a pre-erasure
+/// archive that still carries the subject's key still refuses.
+///
 /// # Errors
 /// The manifest records no authority ([`ClassifyRefusal::ArchiveMissingAuthority`]),
 /// the salt fingerprint is absent or differs ([`ClassifyRefusal::SaltFingerprintMismatch`]),
@@ -176,6 +190,10 @@ pub fn classify_archive(
     } else {
         Some(read_dump_meta(extracted.payload.file.path())?)
     };
+    // The subjects whose key slot in the archive still holds a usable key. A
+    // reference to one of them is not content-free: restoring the archive would
+    // make it readable.
+    let live = live_key_hashes(extracted.key.as_ref())?;
 
     let mut members = Vec::new();
     for name in member_names(archive)? {
@@ -187,14 +205,14 @@ pub fn classify_archive(
                 // and never carries a subject reference itself.
                 members.push(MemberFacts::None);
             } else {
-                members.extend(classify_sqlite_payload(extracted.payload.file.path())?);
+                members.extend(classify_sqlite_payload(extracted.payload.file.path(), &live)?);
             }
         } else if manifest.keys.carries_key_member()
             && manifest.keys.member.as_deref() == Some(name.as_str())
         {
-            members.extend(classify_key_store(extracted.key.as_ref())?);
+            members.extend(classify_key_store(extracted.key.as_ref(), &live)?);
         } else if let Some(table) = meta.as_ref().and_then(|meta| table_named(meta, &name)) {
-            members.extend(classify_dump_table(table, &extracted)?);
+            members.extend(classify_dump_table(table, &extracted, &live)?);
         } else {
             members.push(MemberFacts::Unknown);
         }
@@ -234,7 +252,10 @@ fn read_dump_meta(payload: &Path) -> Result<clio_backup::dump_meta::DumpMeta, Cl
 ///
 /// An item row keeps its subject link after the subject's key was destroyed,
 /// so the item's subject id is a presence the archive carries.
-fn classify_sqlite_payload(payload: &Path) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
+fn classify_sqlite_payload(
+    payload: &Path,
+    live: &BTreeSet<String>,
+) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
     let mut hashes = BTreeSet::new();
     for hash in sqlite_column(payload, TOMBSTONE_TABLE, TOMBSTONE_HASH_COLUMN)? {
         if !hash.is_empty() {
@@ -248,11 +269,36 @@ fn classify_sqlite_payload(payload: &Path) -> Result<Vec<MemberFacts>, ClassifyR
     for id in sqlite_column(payload, ITEMS_TABLE, SUBJECT_ID_COLUMN)? {
         hashes.insert(sha256_hex(&salt, &id));
     }
-    Ok(facts_from_hashes(hashes))
+    Ok(facts_from_hashes(hashes, live))
 }
 
-/// Classify the archive's key member: one reference per hashed key slot id.
-fn classify_key_store(key: Option<&ExtractedMember>) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
+/// The subjects whose key slot in the archive's key store still carries a
+/// usable key, as deployment-wide subject hashes.
+///
+/// A slot whose key column is unreadable is treated as live, so an archive that
+/// cannot be shown to have destroyed the key fails closed.
+fn live_key_hashes(key: Option<&ExtractedMember>) -> Result<BTreeSet<String>, ClassifyRefusal> {
+    let Some(key) = key else {
+        return Ok(BTreeSet::new());
+    };
+    let path = key.file.path();
+    let ids = if column_present(path, KEY_SLOTS_TABLE, KEY_COLUMN)? {
+        sqlite_column_where(path, KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN, "key_b64 IS NOT NULL")?
+    } else {
+        sqlite_column(path, KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)?
+    };
+    let salt = tombstone_salt();
+    Ok(ids
+        .into_iter()
+        .map(|id| sha256_hex(&salt, &id))
+        .collect())
+}
+
+/// Classify the archive's key member: one fact per key slot id.
+fn classify_key_store(
+    key: Option<&ExtractedMember>,
+    live: &BTreeSet<String>,
+) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
     let Some(key) = key else {
         return Ok(vec![MemberFacts::None]);
     };
@@ -261,7 +307,7 @@ fn classify_key_store(key: Option<&ExtractedMember>) -> Result<Vec<MemberFacts>,
     for id in sqlite_column(key.file.path(), KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)? {
         hashes.insert(sha256_hex(&salt, &id));
     }
-    Ok(facts_from_hashes(hashes))
+    Ok(facts_from_hashes(hashes, live))
 }
 
 /// Classify one Postgres dump table member from its `COPY` text.
@@ -275,6 +321,7 @@ fn classify_key_store(key: Option<&ExtractedMember>) -> Result<Vec<MemberFacts>,
 fn classify_dump_table(
     table: &clio_backup::dump_meta::DumpTable,
     extracted: &ExtractedArchive,
+    live: &BTreeSet<String>,
 ) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
     let column = match table.table.as_str() {
         TOMBSTONE_TABLE => Some((TOMBSTONE_HASH_COLUMN, false)),
@@ -304,17 +351,27 @@ fn classify_dump_table(
             hashes.insert(value);
         }
     }
-    Ok(facts_from_hashes(hashes))
+    Ok(facts_from_hashes(hashes, live))
 }
 
 /// The distinct subject references, or one `None` when there are none.
-fn facts_from_hashes(hashes: BTreeSet<String>) -> Vec<MemberFacts> {
+///
+/// A hash the archive's key store still holds a usable key for is a
+/// [`MemberFacts::LiveKey`]; every other one is the content-free
+/// [`MemberFacts::Reference`].
+fn facts_from_hashes(hashes: BTreeSet<String>, live: &BTreeSet<String>) -> Vec<MemberFacts> {
     if hashes.is_empty() {
         vec![MemberFacts::None]
     } else {
         hashes
             .into_iter()
-            .map(|subject_hash| MemberFacts::Reference { subject_hash })
+            .map(|subject_hash| {
+                if live.contains(&subject_hash) {
+                    MemberFacts::LiveKey { subject_hash }
+                } else {
+                    MemberFacts::Reference { subject_hash }
+                }
+            })
             .collect()
     }
 }
@@ -327,6 +384,19 @@ fn facts_from_hashes(hashes: BTreeSet<String>) -> Vec<MemberFacts> {
 /// read-write with `query_only` set, the pattern that lets a store recover a
 /// hot journal while a statement still cannot write.
 fn sqlite_column(path: &Path, table: &str, column: &str) -> Result<Vec<String>, ClassifyRefusal> {
+    sqlite_column_where(path, table, column, "")
+}
+
+/// Every value of `column` in the rows of `table` matching `predicate`.
+///
+/// `predicate` is a constant SQL expression owned by this module; it never
+/// carries caller input.
+fn sqlite_column_where(
+    path: &Path,
+    table: &str,
+    column: &str,
+    predicate: &str,
+) -> Result<Vec<String>, ClassifyRefusal> {
     let connection =
         rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
     connection
@@ -337,7 +407,11 @@ fn sqlite_column(path: &Path, table: &str, column: &str) -> Result<Vec<String>, 
     {
         return Ok(Vec::new());
     }
-    let sql = format!("SELECT {column} FROM {table}");
+    let sql = if predicate.is_empty() {
+        format!("SELECT {column} FROM {table}")
+    } else {
+        format!("SELECT {column} FROM {table} WHERE {predicate}")
+    };
     let mut statement = connection
         .prepare(&sql)
         .map_err(|error| sqlite_error(path, table, &error))?;
@@ -351,6 +425,17 @@ fn sqlite_column(path: &Path, table: &str, column: &str) -> Result<Vec<String>, 
         }
     }
     Ok(values)
+}
+
+/// Whether `table` holds a column named `column` in the database at `path`.
+fn column_present(path: &Path, table: &str, column: &str) -> Result<bool, ClassifyRefusal> {
+    let connection =
+        rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
+    connection
+        .execute_batch("PRAGMA query_only = ON")
+        .map_err(|error| sqlite_error(path, table, &error))?;
+    column_exists(&connection, table, column)
+        .map_err(|error| sqlite_error(path, table, &error))
 }
 
 /// Whether `table` holds a column named `column`.
