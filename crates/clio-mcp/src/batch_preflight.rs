@@ -330,3 +330,7 @@ fn graph_link_preflight(
 fn actor_of(ctx: &OpContext) -> String {
     ctx.actor.as_str().to_owned()
 }
+
+#[cfg(test)]
+#[path = "batch_preflight_tests.rs"]
+mod batch_preflight_tests;

@@ -183,7 +183,13 @@ pub fn triple_add(
     let (timestamp, valid_from, valid_until) = stamped_axes(args)?;
     let edge_id = unique_id("trp", &timestamp);
     let item_id = unique_id("itm", &timestamp);
-    let item = triple_carrier(args, item_id.clone(), &valid_from, &valid_until, &timestamp);
+    let item = triple_carrier(
+        args,
+        item_id.clone(),
+        &valid_from,
+        valid_until.as_ref(),
+        &timestamp,
+    );
     let edge = TripleRecord {
         id: edge_id,
         bank_id: args.ctx.bank.as_str().into(),
@@ -275,7 +281,7 @@ fn triple_carrier(
     args: &TripleAddArgs<'_>,
     item_id: String,
     valid_from: &str,
-    valid_until: &Option<String>,
+    valid_until: Option<&String>,
     timestamp: &str,
 ) -> MemoryItem {
     MemoryItem {
@@ -301,7 +307,7 @@ fn triple_carrier(
             args.subject, args.predicate, args.object
         )),
         valid_from: valid_from.into(),
-        valid_until: valid_until.clone(),
+        valid_until: valid_until.cloned(),
         tx_from: timestamp.into(),
         tx_until: None,
         created_at: timestamp.into(),
@@ -397,7 +403,7 @@ pub fn invalidate(
         operation: "invalidate".into(),
         bank: ctx.bank.as_str().into(),
         actor: ctx.actor.as_str().into(),
-        timestamp: timestamp.clone(),
+        timestamp,
         edge_or_item_id: item_id.into(),
         prior_ids: out.closed_ids.clone(),
         replacement_id: replacement_id.map(str::to_owned),

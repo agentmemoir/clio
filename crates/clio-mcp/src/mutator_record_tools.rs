@@ -236,3 +236,7 @@ pub(crate) fn failure_record(state: &McpState, args: &Value) -> Result<Value, Am
         })),
     }
 }
+
+#[cfg(test)]
+#[path = "mutator_record_tools_tests.rs"]
+mod mutator_record_tools_tests;
