@@ -105,6 +105,22 @@ fn has_finding(value: &Value, code: &str) -> bool {
         .is_some_and(|findings| findings.iter().any(|f| f["code"] == code))
 }
 
+/// The `notes` strings of a doctor plan.
+fn plan_notes(plan: &Value) -> Vec<&str> {
+    plan["notes"]
+        .as_array()
+        .map(|notes| notes.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// Error codes only the seeded foreign bank can carry, so a note or a body that
+/// names one of them came from outside the caller's grant.
+const FOREIGN_ONLY_CODES: [&str; 3] = [
+    "ORPHAN_ASSOC_EDGE",
+    "DENSE_COVERAGE_GAP",
+    "LEXICAL_COVERAGE_GAP",
+];
+
 /// Register a live plan for `bank` through the unbound state, as another
 /// caller would, and return its id.
 fn registered_plan(st: &McpState, bank: &str) -> String {
@@ -278,6 +294,49 @@ fn bound_verify_and_doctor_without_bank_never_scope_to_a_foreign_bank() {
         "doctor planned the foreign bank's repair: {doctor}"
     );
     assert_eq!(restricted.ops_plans.len(), 0, "{doctor}");
+
+    // `notes` is a second field with its own disclosure rule: a bound caller
+    // must not read that another bank exists or which codes it carries.
+    let notes = plan_notes(&doctor);
+    assert!(
+        !notes
+            .iter()
+            .any(|note| note.contains("store-wide findings outside")),
+        "doctor leaked a store-wide note: {doctor}"
+    );
+    let body = doctor.to_string();
+    for code in FOREIGN_ONLY_CODES {
+        assert!(
+            !notes.iter().any(|note| note.contains(code)),
+            "doctor note names the foreign bank's {code}: {doctor}"
+        );
+        assert!(
+            !body.contains(code),
+            "doctor response names the foreign bank's {code}: {body}"
+        );
+    }
+
+    // The same scope from the unbound state does emit the note, so the silence
+    // above is the grant rather than a probe that never ran.
+    let open = dispatch(
+        &original,
+        "doctor",
+        &json!({ "bank": "bank-a", "timestamp": TS }),
+    );
+    assert_eq!(open["bank"], "bank-a", "{open}");
+    let open_notes = plan_notes(&open);
+    assert!(
+        open_notes
+            .iter()
+            .any(|note| note.contains("store-wide findings outside bank `bank-a`")),
+        "the unbound operator lost the store-wide note: {open}"
+    );
+    assert!(
+        open_notes
+            .iter()
+            .any(|note| note.contains("ORPHAN_ASSOC_EDGE")),
+        "the store-wide note names no foreign finding: {open}"
+    );
 }
 
 #[test]

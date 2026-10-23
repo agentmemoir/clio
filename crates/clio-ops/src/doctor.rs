@@ -10,6 +10,8 @@
 //! ## Owns
 //! - [`doctor`]: finding-to-action mapping, risk/quiesce annotations, and
 //!   non-repairable notes
+//! - [`doctor_scoped`]: the same plan with the store-wide note probe gated, so a
+//!   caller whose grant covers one bank reads no other bank
 //! - [`RepairAction`], [`DoctorPlan`], and [`PlanRegistry`]
 //! - The repair action allowlist (`known_actions` / `is_known_action`)
 //!
@@ -163,9 +165,25 @@ pub struct DoctorArgs<'a> {
 /// When `dry_run=false` the plan is recorded in `args.plans` so a later
 /// `repair(plan_id)` can resolve it; the store itself is untouched either way.
 ///
+/// A bank-scoped plan also reports the error codes other banks carry, so a
+/// reader does not mistake a clean plan for a clean store. Callers whose grant
+/// covers one bank must use [`doctor_scoped`] with the note probe off.
+///
 /// # Errors
 /// Storage/index read failures (an unreadable store cannot be planned for).
 pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
+    doctor_scoped(args, true)
+}
+
+/// Compose an ordered repair plan, optionally probing the rest of the store.
+///
+/// `store_wide_notes: false` reads no bank outside `args.bank`: a caller limited
+/// to one bank must not learn that another bank exists or which codes it
+/// carries. `true` keeps the store-wide note described on [`doctor`].
+///
+/// # Errors
+/// Storage/index read failures (an unreadable store cannot be planned for).
+pub fn doctor_scoped(args: &DoctorArgs<'_>, store_wide_notes: bool) -> Result<DoctorPlan, AmError> {
     let report = crate::verify::verify(&VerifyArgs {
         store: args.store,
         index: args.index,
@@ -173,7 +191,7 @@ pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
         timestamp: args.timestamp,
     })?;
     let (actions, mut notes) = compose(&report);
-    if args.bank.is_some() {
+    if store_wide_notes && args.bank.is_some() {
         notes.extend(store_wide_note(args));
     }
     let plan = DoctorPlan {

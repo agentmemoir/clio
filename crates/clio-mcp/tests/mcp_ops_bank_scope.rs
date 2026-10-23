@@ -5,15 +5,16 @@
 //!
 //! This integration test drives the operator tools over the real HTTP MCP
 //! transport: a credential bound to one bank must not reach another bank's
-//! `reindex`, `repair`, or `diagnose`, whether the caller names that bank or
-//! omits the argument.
+//! `reindex`, `repair`, `diagnose`, `verify`, or `doctor`, whether the caller
+//! names that bank or omits the argument.
 //!
 //! ## Owns
 //! - The one bound server this target drives: a restricted operator principal
 //!   and a seeding principal that plants the foreign bank's rows through the
 //!   same transport
 //! - The refused explicit bank, the granted omitted bank, the granted plan
-//!   round-trip, the scoped report, and the 401 without any credential
+//!   round-trip, the scoped report, the note-free plan, and the 401 without any
+//!   credential
 //!
 //! ## Does not own
 //! - The harness itself (`mcp_principal_binding_support`), shared with the
@@ -42,6 +43,13 @@ use mcp_principal_binding_support::{
     Store, assert_no_secret_material, bearer, bound_server, call, forbidden, post, tool_ok,
 };
 use serde_json::{Value, json};
+
+/// True when a structured result's `findings` carry `code`.
+fn has_finding(result: &Value, code: &str) -> bool {
+    result["findings"]
+        .as_array()
+        .is_some_and(|findings| findings.iter().any(|f| f["code"] == code))
+}
 
 /// One bound server serving two principals over one in-memory store.
 struct Fixture {
@@ -149,11 +157,16 @@ fn repair_without_a_bank_stays_inside_the_grant() {
     assert_eq!(out["code"], json!("forbidden"), "{out}");
 
     // The omitted bank plans for the granted bank only: the foreign bank's
-    // coverage gap is not an action this plan carries.
+    // coverage gap is not an action this plan carries, and it is not named in
+    // the store-wide note either.
     let (raw, plan) = f.ops_call("doctor", json!({"dry_run": false}));
     assert!(tool_ok(&raw), "the granted bank's plan must compose: {raw}");
     assert_eq!(plan["bank"], json!("bank-a"), "{plan}");
     assert_eq!(plan["actions"], json!([]), "{plan}");
+    assert!(
+        !raw.contains("store-wide findings outside"),
+        "the plan carries a store-wide note: {raw}"
+    );
     assert!(
         !raw.contains("bank-b"),
         "the plan names a foreign bank: {raw}"
@@ -222,6 +235,43 @@ fn diagnose_without_a_bank_names_no_foreign_bank() {
         privileged["result"]["structuredContent"]["banks"],
         json!(["bank-b"]),
         "{raw}"
+    );
+}
+
+#[test]
+fn doctor_without_a_bank_emits_no_store_wide_note() {
+    let f = Fixture::new("scope-doctor-omitted");
+    f.seed("bank-b", "itm-b");
+
+    // A bound caller's omitted bank is its own: no field may say that another
+    // bank exists or what it carries, and `notes` is such a field.
+    let (raw, plan) = f.ops_call("doctor", json!({"dry_run": false}));
+    assert!(tool_ok(&raw), "the granted bank's plan must compose: {raw}");
+    assert_eq!(plan["bank"], json!("bank-a"), "{plan}");
+    assert!(
+        !raw.contains("store-wide findings outside"),
+        "the plan carries a store-wide note: {raw}"
+    );
+    assert!(
+        !raw.contains("bank-b"),
+        "the plan names a foreign bank: {raw}"
+    );
+    assert!(
+        !raw.contains("DENSE_COVERAGE_GAP") && !raw.contains("LEXICAL_COVERAGE_GAP"),
+        "the plan reports a foreign bank's finding: {raw}"
+    );
+
+    // The foreign bank really is in this store and carries error findings: the
+    // seeding credential, which may reach it, reads them back over the same
+    // transport. The silence above is the grant, not a clean store.
+    let body = call("verify", json!({"bank": "bank-b"}));
+    let (status, raw) = post(f.port, &body, &f.seed);
+    assert_eq!(status, 200, "{raw}");
+    let privileged: Value = serde_json::from_str(&raw).expect("a JSON-RPC body");
+    let foreign = &privileged["result"]["structuredContent"];
+    assert!(
+        has_finding(foreign, "DENSE_COVERAGE_GAP") && has_finding(foreign, "LEXICAL_COVERAGE_GAP"),
+        "the foreign bank carries the findings a store-wide note would name: {raw}"
     );
 }
 

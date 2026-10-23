@@ -86,21 +86,7 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
             })?;
             Ok(to_value(&report))
         }
-        "doctor" => {
-            let bank = scope_bank(state, args, &ctx);
-            if let Some(bank) = bank {
-                state.require_known_bank(bank)?;
-            }
-            let plan = clio_ops::doctor(&clio_ops::DoctorArgs {
-                store: &*state.ops_store,
-                index: &*state.index,
-                bank,
-                dry_run: opt_bool(args, "dry_run", true)?,
-                timestamp: &timestamp,
-                plans: &state.ops_plans,
-            })?;
-            Ok(to_value(&plan))
-        }
+        "doctor" => doctor_result(state, args, &ctx, &timestamp),
         "repair" => {
             let actions = string_array(args, "actions")?;
             // A registered plan names its own bank, and a bank-less request
@@ -167,6 +153,35 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
         }
         other => Err(AmError::not_implemented(other)),
     }
+}
+
+/// The `doctor` arm: compose a plan inside the caller's authorized scope.
+///
+/// The store-wide note probe reads every other bank, so it runs only for an
+/// unbound local operator: a bound caller whose grant covers one bank must not
+/// learn from `notes` that another bank exists or which codes it carries.
+fn doctor_result(
+    state: &McpState,
+    args: &Value,
+    ctx: &OpContext,
+    timestamp: &str,
+) -> Result<Value, AmError> {
+    let bank = scope_bank(state, args, ctx);
+    if let Some(bank) = bank {
+        state.require_known_bank(bank)?;
+    }
+    let plan = clio_ops::doctor_scoped(
+        &clio_ops::DoctorArgs {
+            store: &*state.ops_store,
+            index: &*state.index,
+            bank,
+            dry_run: opt_bool(args, "dry_run", true)?,
+            timestamp,
+            plans: &state.ops_plans,
+        },
+        state.principal.is_none(),
+    )?;
+    Ok(to_value(&plan))
 }
 
 /// The bank scope a read-side operator tool forwards downstream.
