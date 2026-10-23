@@ -418,3 +418,7 @@ mod postgres_distilled_evidence_tests;
 #[cfg(test)]
 #[path = "postgres_bootstrap_lock_tests.rs"]
 mod postgres_bootstrap_lock_tests;
+
+#[cfg(test)]
+#[path = "postgres_bootstrap_space_tests.rs"]
+mod postgres_bootstrap_space_tests;
