@@ -36,6 +36,19 @@ fn usage_hint_carries_the_hint() {
 }
 
 #[test]
+fn help_hint_only_fills_an_unhinted_usage_error() {
+    let usage = with_help_hint(CliError::usage("bad flag"), "recall");
+    assert_eq!(usage.hint(), Some("try `clio recall --help`"));
+
+    let suggested = CliError::usage_hint("bad flag", "try --bank");
+    let usage = with_help_hint(suggested, "recall");
+    assert_eq!(usage.hint(), Some("try --bank"));
+
+    let operational = with_help_hint(CliError::operational("internal", "failed"), "recall");
+    assert!(operational.hint().is_none());
+}
+
+#[test]
 fn operational_error_exits_one_with_the_given_code() {
     let error = CliError::operational("internal", "boom");
     assert_eq!(error.code(), "internal");
@@ -174,4 +187,62 @@ fn cross_process_dek_hint_names_the_durable_provider() {
     let hint = cross_process_dek_hint("no DEK for subject `itm-1`").expect("hint");
     assert!(hint.contains("durable KMS provider"), "{hint}");
     assert!(cross_process_dek_hint("item not found").is_none());
+}
+
+#[test]
+fn library_input_names_are_translated_for_cli_messages() {
+    assert_eq!(
+        name_cli_inputs("retrieve item_id is required"),
+        "the ID argument is required"
+    );
+    assert_eq!(
+        name_cli_inputs("the store is unavailable"),
+        "the store is unavailable"
+    );
+}
+
+#[test]
+fn blank_flag_values_are_rejected_with_a_replacement_hint() {
+    assert!(reject_blank_value("--bank", "agents").is_ok());
+
+    for value in ["", "  \t  "] {
+        let error = reject_blank_value("--bank", value).expect_err("blank values are refused");
+        assert_eq!(error.code(), "usage");
+        assert_eq!(error.hint(), Some("pass a non-blank value or omit --bank"));
+    }
+}
+
+#[test]
+fn blank_positional_values_are_rejected() {
+    assert!(reject_blank_positional("remember this").is_ok());
+
+    let error = reject_blank_positional(" \t ").expect_err("blank text is refused");
+    assert_eq!(error.code(), "usage");
+    assert_eq!(
+        error.hint(),
+        Some("pass the text, or leave the argument out")
+    );
+}
+
+#[test]
+fn repeated_flags_are_rejected_only_after_the_first_value() {
+    assert!(reject_repeated_flag("--output", false).is_ok());
+
+    let error = reject_repeated_flag("--output", true).expect_err("second value is refused");
+    assert_eq!(error.message(), "--output was given more than once");
+    assert_eq!(error.hint(), Some("pass --output once"));
+}
+
+#[test]
+fn accepted_timestamp_forms_pass_and_malformed_values_are_refused() {
+    for value in ["2026-01-01T00:00:00Z", "2026-01-01", "2026-01-01T00:00:00"] {
+        assert!(reject_bad_timestamp("--since", value).is_ok(), "{value}");
+    }
+
+    let error = reject_bad_timestamp("--since", "tomorrow").expect_err("not a timestamp");
+    assert_eq!(error.code(), "usage");
+    assert_eq!(
+        error.hint(),
+        Some("pass a timestamp for --since, or omit it")
+    );
 }
