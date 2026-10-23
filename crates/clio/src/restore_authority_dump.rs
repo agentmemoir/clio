@@ -93,3 +93,7 @@ pub(super) fn classify_dump_table(
     }
     Ok(facts_from_hashes(hashes, live, keys_present))
 }
+
+#[cfg(test)]
+#[path = "restore_authority_dump_tests.rs"]
+mod restore_authority_dump_tests;
