@@ -291,6 +291,16 @@ fn unknown_backend_exits_2() {
 }
 
 #[test]
+fn temporary_storage_errors_use_the_shared_temporary_exit_code() {
+    let error = AmError::new(clio_types::ErrorCode::StorageBusy, "Postgres lock conflict");
+
+    assert_eq!(
+        super::emit_error(&error, 1),
+        ExitCode::from(crate::cli_error::EXIT_TEMPORARY)
+    );
+}
+
+#[test]
 fn ops_help_exits_0() {
     assert_eq!(run_ops(&["--help"]), ExitCode::SUCCESS);
     assert_eq!(run_ops(&["diagnose", "--help"]), ExitCode::SUCCESS);
