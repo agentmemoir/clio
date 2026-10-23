@@ -435,3 +435,7 @@ fn reconcile_changed(
 
 #[path = "hub_distill_reconcile_outcomes.rs"]
 mod hub_distill_reconcile_outcomes;
+
+#[cfg(test)]
+#[path = "hub_distill_reconcile_stamp_tests.rs"]
+mod hub_distill_reconcile_stamp_tests;
