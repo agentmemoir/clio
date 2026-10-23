@@ -198,7 +198,14 @@ fn mask_volatile(value: Value) -> Value {
             map.into_iter()
                 .map(|(k, v)| {
                     if VOLATILE.contains(&k.as_str()) {
-                        (k, Value::from("<volatile>"))
+                        // Mask the generated value, never its presence: a null or
+                        // absent key must still differ from a populated one, so a
+                        // transport that loses the value fails parity.
+                        if v.is_null() {
+                            (k, v)
+                        } else {
+                            (k, Value::from("<volatile>"))
+                        }
                     } else {
                         (k, mask_volatile(v))
                     }
