@@ -46,8 +46,8 @@ fn require_authority_at_plan(journal: &Path, claim: &ArchiveClaim, members: &[Me
 fn a_denial_between_plan_and_placement_is_caught_by_the_locked_check() {
     let scratch = Scratch::new("guard-api-inject");
     let journal = journal_path(&scratch, "journal.json");
-    // The archive is valid at plan time: it references DENIED_SUBJECT, which
-    // is not yet denied; only an unrelated subject is.
+    // The archive is valid at plan time: it carries the denied subject's usable
+    // key, but that subject is not yet denied; only an unrelated subject is.
     record_denial(
         &journal,
         &subject_hash("subject-unrelated"),
@@ -55,7 +55,7 @@ fn a_denial_between_plan_and_placement_is_caught_by_the_locked_check() {
     )
     .expect("record the unrelated denial");
     let claim = claim_of(&journal);
-    let member = MemberFacts::Reference {
+    let member = MemberFacts::LiveKey {
         subject_hash: denied_hash(),
     };
     require_authority_at_plan(&journal, &claim, std::slice::from_ref(&member));

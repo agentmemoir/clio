@@ -261,12 +261,12 @@ clio backup restore --latest --yes
 
 The guard refuses before any content becomes readable, in these observed cases:
 
-- An archive that references a currently denied subject refuses with `an archive member references a currently denied subject`.
+- An archive that still carries usable key material for a currently denied subject refuses with `an archive member carries usable key material for a currently denied subject`.
 - A journal file that is missing refuses with `the erasure journal is missing`.
-- A journal copied before a later erasure refuses before old content becomes readable, in two observed ways. If the archive claims a newer generation than the live journal, the refusal is `the archive claims a generation newer than the live authority's`. If the archive is of the same generation and still holds denied references, the refusal is `an archive member references a currently denied subject`.
+- A journal copied before a later erasure refuses before old content becomes readable, in two observed ways. If the archive claims a newer generation than the live journal, the refusal is `the archive claims a generation newer than the live authority's`. If the archive is of the same generation and still carries usable key material for a denied subject, the refusal is `an archive member carries usable key material for a currently denied subject`.
 - An archive taken before any journal existed refuses with `the archive records no erasure authority`.
 
-The guard applies a strict presence predicate to every archive member. A backup that keeps only a destroyed key slot or a tombstone for a denied subject still refuses. Ciphertext rows without a usable data-encryption key still count as presence. A member the guard cannot classify refuses too. The last two behaviors were not run locally; the shipped restore-guard tests document them.
+The guard refuses on usable key material, not on bare presence. A backup taken from a store after its erasure keeps only content-free records for the denied subject — a destroyed key slot, a tombstone, or a ciphertext row without a usable DEK — and those restore cleanly because no key in the archive can make the content readable again. An archive that still carries the subject's key is refused as a whole. A member the guard cannot classify refuses too. The shipped restore-guard and archive-presence scenarios document both the allowed content-free restore and the refusal.
 
 A refusal is not a defect: do not strip markers, reset the journal, or fabricate new authority to make a restore pass.
 

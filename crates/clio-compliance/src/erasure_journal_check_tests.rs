@@ -60,6 +60,13 @@ fn reference(subject: &str) -> MemberFacts {
     }
 }
 
+/// A member carrying usable key material for a subject.
+fn live_key(subject: &str) -> MemberFacts {
+    MemberFacts::LiveKey {
+        subject_hash: subject.to_owned(),
+    }
+}
+
 /// Run the check and require a refusal.
 fn refuse(
     current: &JournalState,
@@ -161,11 +168,22 @@ fn check_refuses_an_absent_salt_fingerprint() {
 }
 
 #[test]
-fn check_refuses_a_reference_to_a_denied_subject() {
+fn check_refuses_a_live_key_for_a_denied_subject() {
     let current = current_of("deployment-a", 1, &["subject-a"]);
-    let members = [MemberFacts::None, reference("subject-a")];
+    let members = [MemberFacts::None, live_key("subject-a")];
     let refusal = check_members(&current, &members);
     assert_eq!(refusal, Err(AuthorityRefusal::DeniedSubject));
+}
+
+#[test]
+fn check_allows_a_content_free_reference_to_a_denied_subject() {
+    // A destroyed key slot, a tombstone, or a ciphertext row without a usable
+    // DEK cannot make the erased content readable again, so a backup taken
+    // after the erasure restores.
+    let current = current_of("deployment-a", 1, &["subject-a"]);
+    let members = [MemberFacts::None, reference("subject-a")];
+    let outcome = check_members(&current, &members);
+    assert_eq!(outcome, Ok(()));
 }
 
 #[test]
@@ -205,7 +223,7 @@ fn authority_refusal_codes_and_texts_are_stable() {
         (R::ClaimNewerGeneration, E::Forbidden, "the archive claims a generation newer than the live authority's"),
         (R::SaltFingerprintMismatch, E::Forbidden, "the archive's subject-salt fingerprint does not match the live authority's"),
         (R::UnknownMember, E::ConfigCorrupt, "an archive member cannot be classified"),
-        (R::DeniedSubject, E::Forbidden, "an archive member references a currently denied subject"),
+        (R::DeniedSubject, E::Forbidden, "an archive member carries usable key material for a currently denied subject"),
     ] {
         assert_eq!(refusal.code(), code, "{refusal:?}");
         assert_eq!(refusal.to_string(), text, "{refusal:?}");

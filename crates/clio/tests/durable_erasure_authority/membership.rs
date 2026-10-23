@@ -206,19 +206,35 @@ fn denied_and_unknown_membership_refuse_while_un_denied_membership_passes() {
     // refusal batch below.
     let journal_before = file_sha256(&journal);
 
-    // The content-free subject reference a destroyed slot, a tombstone, or a
-    // ciphertext-only row carries for the denied subject.
+    // The archive still carries the denied subject's usable key, so restoring
+    // it would make the erased content readable again.
     let denied = check_archive_authority(
         &state,
         Some(&state),
         &claim,
-        &[MemberFacts::Reference {
+        &[MemberFacts::LiveKey {
             subject_hash: denied_hash(),
         }],
     );
     assert_eq!(
-        denied.expect_err("a reference to the denied subject must refuse"),
+        denied.expect_err("usable key material for the denied subject must refuse"),
         AuthorityRefusal::DeniedSubject
+    );
+
+    // The content-free records a destroyed slot, a tombstone, or a
+    // ciphertext-only row carry for the denied subject cannot make it readable,
+    // so they pass: this is the backup-of-an-erased-store case.
+    assert_eq!(
+        check_archive_authority(
+            &state,
+            Some(&state),
+            &claim,
+            &[MemberFacts::Reference {
+                subject_hash: denied_hash(),
+            }],
+        ),
+        Ok(()),
+        "a content-free reference to the denied subject must pass"
     );
 
     // A member whose subject membership cannot be classified refuses.

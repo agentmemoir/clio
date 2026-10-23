@@ -11,7 +11,7 @@
 //! ## Owns
 //! - `Archive`, `archive_sqlite`, and `archive_sqlite_with_authority`
 //! - `restore_sqlite`, `extract_into`, `key_source`, and `publish`
-//! - `current_authority`, `file_sha256`, and `items`
+//! - `current_authority`
 //! - `erase_subject`, `Readback`, `readback`, and `subject_key_destroyed`
 //!
 //! ## Does not own
@@ -30,8 +30,7 @@
 
 use crate::case_fixtures::{BANK, scratch};
 use clio::store::{
-    ComplianceStore, KeyPlacement, Store, SwapReport, SwapRequest, postgres_target_state,
-    swap_sqlite_store,
+    ComplianceStore, KeyPlacement, Store, SwapReport, SwapRequest, swap_sqlite_store,
 };
 use clio::{Actor, Bank, ErrorCode, OpContext};
 use clio_backup::manifest::ManifestAuthority;
@@ -41,8 +40,7 @@ use clio_backup::{
     extract_members, read_manifest,
 };
 use clio_compliance::{
-    EraseArgs, EraseVecSink, JournalState, erase_request, load_journal, sha256_hex_bytes,
-    tombstone_salt,
+    EraseArgs, EraseVecSink, JournalState, erase_request, load_journal, tombstone_salt,
 };
 use std::path::{Path, PathBuf};
 
@@ -131,19 +129,6 @@ pub(crate) fn current_authority(journal: &Path) -> ManifestAuthority {
         },
         other => panic!("expected a current journal: {other:?}"),
     }
-}
-
-/// The SHA-256 of a file's bytes.
-pub(crate) fn file_sha256(path: &Path) -> String {
-    let bytes = std::fs::read(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
-    sha256_hex_bytes(&bytes)
-}
-
-/// The target schema's `items` count, the Postgres stand-in for a file hash.
-pub(crate) fn items(url: &str) -> Option<u64> {
-    postgres_target_state(url)
-        .expect("measure the target schema")
-        .count_of("items")
 }
 
 /// Replace the live SQLite payload (and, when asked, the key store) with the

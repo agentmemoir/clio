@@ -196,11 +196,10 @@ pub fn check_archive_authority(
     }
     for member in members {
         match member {
-            MemberFacts::None => {}
-            MemberFacts::Unknown => return Err(AuthorityRefusal::UnknownMember),
             // A content-free record cannot make the subject's content readable
             // again, so it is safe to restore even when the subject is denied.
-            MemberFacts::Reference { .. } => {}
+            MemberFacts::None | MemberFacts::Reference { .. } => {}
+            MemberFacts::Unknown => return Err(AuthorityRefusal::UnknownMember),
             MemberFacts::LiveKey { subject_hash } => {
                 if current.is_denied(subject_hash) {
                     return Err(AuthorityRefusal::DeniedSubject);

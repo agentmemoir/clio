@@ -5,9 +5,10 @@
 //!
 //! This module is responsible for the tests of `restore_authority`: an archive
 //! recording no authority, a SQLite payload whose tombstone hash or subject key
-//! becomes a reference, a key store slot id becomes a reference, an undeclared
-//! member stays unknown, a Postgres dump whose tombstone, subject key and item
-//! subject tables become references, and a clean archive yields no reference.
+//! becomes a reference, a key store slot id becomes a live key or a content-free
+//! reference depending on whether its key survives, an undeclared member stays
+//! unknown, a Postgres dump whose tombstone, subject key and item subject tables
+//! become references, and a clean archive yields no reference.
 //!
 //! ## Owns
 //! - The SQLite and Postgres archive fixtures these cases build
@@ -140,8 +141,12 @@ fn build_sqlite_archive(
 }
 
 /// Assemble a Postgres archive over `tables`: each is a table name, its column
-/// names in dump order, and its `COPY` text.
-fn build_postgres_archive(scratch: &Scratch, tables: &[(&str, &[&str], &[u8])]) -> Built {
+/// names in dump order, and its `COPY` text. `key` adds a key member.
+fn build_postgres_archive(
+    scratch: &Scratch,
+    tables: &[(&str, &[&str], &[u8])],
+    key: Option<&Path>,
+) -> Built {
     use clio_backup::dump_meta::{
         DUMP_FORMAT_VERSION, DUMP_KIND, DUMP_META_MEMBER, DumpColumn, DumpMeta, DumpTable,
     };
@@ -204,7 +209,10 @@ fn build_postgres_archive(scratch: &Scratch, tables: &[(&str, &[&str], &[u8])]) 
         started_at: "2026-09-27T00:00:00Z".to_owned(),
         duration_ms: 1,
         counts_complete: true,
-        keys: None,
+        keys: key.map(|path| clio_backup::create::KeySource {
+            path: path.to_path_buf(),
+            subjects: 1,
+        }),
         label: None,
         note: None,
         authority: Some(authority()),
@@ -222,6 +230,18 @@ fn build_postgres_archive(scratch: &Scratch, tables: &[(&str, &[&str], &[u8])]) 
 fn clean_payload(scratch: &Scratch) -> PathBuf {
     let path = scratch.join("store.db");
     sqlite_file(&path, &["CREATE TABLE items (id TEXT PRIMARY KEY)"]);
+    path
+}
+
+/// An empty key store: the `slots` table and no key in it.
+fn empty_key_store(scratch: &Scratch) -> PathBuf {
+    let path = scratch.join("keys.kms.db");
+    sqlite_file(
+        &path,
+        &[
+            "CREATE TABLE slots (subject_id TEXT PRIMARY KEY, version INTEGER NOT NULL, key_b64 TEXT)",
+        ],
+    );
     path
 }
 
@@ -249,7 +269,8 @@ fn a_tombstone_hash_becomes_a_reference() {
             &format!("INSERT INTO compliance_tombstones (subject_hash) VALUES ('{hash}')"),
         ],
     );
-    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority()), None);
+    let key = empty_key_store(&scratch);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
 
     let classified = classify_archive(&built.path, &built.manifest).expect("classify");
 
@@ -266,6 +287,34 @@ fn a_tombstone_hash_becomes_a_reference() {
         classified.claim.salt_fingerprint,
         Some(clio_compliance::tombstone_salt_fingerprint()),
         "the manifest authority's salt fingerprint reaches the claim"
+    );
+}
+
+#[test]
+fn an_archive_without_a_key_member_fails_closed() {
+    let scratch = Scratch::new("no-key-member");
+    let hash = "c".repeat(64);
+    let payload = scratch.join("store.db");
+    sqlite_file(
+        &payload,
+        &[
+            "CREATE TABLE compliance_tombstones (subject_hash TEXT NOT NULL)",
+            &format!("INSERT INTO compliance_tombstones (subject_hash) VALUES ('{hash}')"),
+        ],
+    );
+    // Without a key member the restore leaves the target's key store in place,
+    // so the content-free tombstone cannot be proven unreadable and is treated
+    // as usable key material.
+    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority()), None);
+
+    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+
+    assert!(
+        classified
+            .members
+            .contains(&MemberFacts::LiveKey { subject_hash: hash }),
+        "{:?}",
+        classified.members
     );
 }
 
@@ -313,7 +362,8 @@ fn a_payload_subject_key_id_is_hashed_to_a_reference() {
             &format!("INSERT INTO subject_keys (subject_id, dek_ref) VALUES ('{id}', 'dek')"),
         ],
     );
-    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority()), None);
+    let key = empty_key_store(&scratch);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
     let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
 
     let classified = classify_archive(&built.path, &built.manifest).expect("classify");
@@ -328,7 +378,7 @@ fn a_payload_subject_key_id_is_hashed_to_a_reference() {
 }
 
 #[test]
-fn a_key_store_slot_id_is_hashed_to_a_reference() {
+fn a_key_store_slot_with_a_usable_key_becomes_a_live_key() {
     let scratch = Scratch::new("key-slot");
     let id = "subject-0042";
     let key = scratch.join("keys.kms.db");
@@ -346,7 +396,78 @@ fn a_key_store_slot_id_is_hashed_to_a_reference() {
     let classified = classify_archive(&built.path, &built.manifest).expect("classify");
 
     assert!(
+        classified.members.contains(&MemberFacts::LiveKey {
+            subject_hash: expected,
+        }),
+        "{:?}",
+        classified.members
+    );
+}
+
+#[test]
+fn a_destroyed_key_slot_is_a_content_free_reference() {
+    let scratch = Scratch::new("destroyed-key-slot");
+    let id = "subject-0043";
+    let key = scratch.join("keys.kms.db");
+    sqlite_file(
+        &key,
+        &[
+            "CREATE TABLE slots (subject_id TEXT PRIMARY KEY, version INTEGER NOT NULL, key_b64 TEXT)",
+            &format!("INSERT INTO slots (subject_id, version, key_b64) VALUES ('{id}', 1, NULL)"),
+        ],
+    );
+    let payload = clean_payload(&scratch);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
+    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
+
+    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+
+    assert!(
         classified.members.contains(&MemberFacts::Reference {
+            subject_hash: expected,
+        }),
+        "{:?}",
+        classified.members
+    );
+    assert!(
+        classified
+            .members
+            .iter()
+            .all(|member| !matches!(member, MemberFacts::LiveKey { .. })),
+        "a destroyed slot carries no usable key: {:?}",
+        classified.members
+    );
+}
+
+/// A payload subject whose archive key slot is still usable is a live key, so a
+/// pre-erasure archive that carries the key refuses even from the payload.
+#[test]
+fn a_payload_subject_key_id_with_a_usable_slot_becomes_a_live_key() {
+    let scratch = Scratch::new("payload-live-key");
+    let id = "subject-0044";
+    let payload = scratch.join("store.db");
+    sqlite_file(
+        &payload,
+        &[
+            "CREATE TABLE subject_keys (subject_id TEXT PRIMARY KEY, dek_ref TEXT)",
+            &format!("INSERT INTO subject_keys (subject_id, dek_ref) VALUES ('{id}', 'dek')"),
+        ],
+    );
+    let key = scratch.join("keys.kms.db");
+    sqlite_file(
+        &key,
+        &[
+            "CREATE TABLE slots (subject_id TEXT PRIMARY KEY, version INTEGER NOT NULL, key_b64 TEXT)",
+            &format!("INSERT INTO slots (subject_id, version, key_b64) VALUES ('{id}', 1, 'AAAA')"),
+        ],
+    );
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
+    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
+
+    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+
+    assert!(
+        classified.members.contains(&MemberFacts::LiveKey {
             subject_hash: expected,
         }),
         "{:?}",
@@ -400,6 +521,7 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
     let tombstone_copy = format!("{hash}\tCOMPLIANCE_CRYPTO_SHRED\n");
     let subject_id = "subject-0009";
     let subject_copy = format!("{subject_id}\tdek\tactive\n");
+    let key = empty_key_store(&scratch);
     let built = build_postgres_archive(
         &scratch,
         &[
@@ -416,6 +538,7 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
             ),
             ("triples", &["id"], b"triple-1\n"),
         ],
+        Some(&key),
     );
     let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), subject_id);
 

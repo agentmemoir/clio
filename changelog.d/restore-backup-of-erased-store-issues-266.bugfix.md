@@ -1,0 +1,1 @@
+A backup taken from a store after an erasure now restores: the restore authority check refuses an archive only when it still carries usable key material for a denied subject, so a backup that keeps just the erased subject's destroyed key slot, tombstone, or ciphertext-only row loads back into the same store while the erased content stays unreadable.
