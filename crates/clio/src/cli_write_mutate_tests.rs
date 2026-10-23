@@ -39,11 +39,18 @@ fn stats(s: &clio_mcp::runtime::McpState) -> Value {
 }
 
 #[test]
-fn update_discrete_invalidates_the_prior_value() {
+fn update_discrete_stores_the_new_value_on_a_replacement() {
     let s = seeded("demo", "itm-u1", "old value");
     let (code, out, err) = run_write_state(
         "update",
-        &["itm-u1", "ignored", "--rule", "discrete", "--bank", "demo"],
+        &[
+            "itm-u1",
+            "new value",
+            "--rule",
+            "discrete",
+            "--bank",
+            "demo",
+        ],
         &s,
         false,
     );
@@ -56,7 +63,12 @@ fn update_discrete_invalidates_the_prior_value() {
             .is_some_and(|ids| !ids.is_empty()),
         "{payload}"
     );
-    assert_eq!(stats(&s)["items_active"], json!(0), "prior closed");
+    let replacement = payload["replacement_id"].as_str().expect("replacement");
+    assert!(!replacement.is_empty(), "no replacement: {payload}");
+    // The prior is closed and the replacement carrying the new value is active.
+    let report = stats(&s);
+    assert_eq!(report["items_active"], json!(1), "{report}");
+    assert_eq!(report["items_total"], json!(2), "{report}");
 }
 
 #[test]

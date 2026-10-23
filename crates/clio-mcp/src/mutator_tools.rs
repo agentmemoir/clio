@@ -70,6 +70,7 @@ fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
         target: req_str(args, "target")?,
         new_value: &new_value,
         update_rule: UpdateRule::parse(rule_raw)?,
+        new_item_id: &state.next_item_id(),
         timestamp: &ts,
         continuous_sink: &StderrSinks,
         triple_sink: &StderrSinks,
@@ -78,12 +79,22 @@ fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
         clio_write::UpdateOutcome::Continuous(state) => Ok(
             json!({"rule": "continuous", "state": serde_json::to_value(&state).expect("serialize tool payload")}),
         ),
-        clio_write::UpdateOutcome::Discrete(end) => Ok(json!({
-            "rule": "discrete",
-            "closed_ids": end.closed_ids,
-            "already_ended": end.already_ended,
-            "replacement_id": end.replacement_id
-        })),
+        clio_write::UpdateOutcome::Discrete(end) => {
+            // A discrete update that stored nothing must never read as success:
+            // the caller's value would be lost with no way to notice.
+            if end.replacement_id.is_none() {
+                return Err(AmError::new(
+                    ErrorCode::Internal,
+                    "discrete update stored no replacement item; nothing was written",
+                ));
+            }
+            Ok(json!({
+                "rule": "discrete",
+                "closed_ids": end.closed_ids,
+                "already_ended": end.already_ended,
+                "replacement_id": end.replacement_id
+            }))
+        }
     }
 }
 

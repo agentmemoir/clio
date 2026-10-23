@@ -52,18 +52,30 @@ fn update_rejects_fact_rule() {
 }
 
 #[test]
-fn update_discrete_invalidates_stored_item() {
+fn update_discrete_stores_the_value_on_a_replacement() {
     let s = state();
     stored_item_id(&s);
     let out = call(
         &s,
         "update",
         json!({
-            "target": "itm-u1", "new_value": "ignored", "update_rule": "discrete", "bank": "bank-a"
+            "target": "itm-u1", "new_value": "replacement-u1",
+            "update_rule": "discrete", "bank": "bank-a"
         }),
     );
     assert_eq!(out["ok"], json!(true), "{out}");
     assert_eq!(out["rule"], json!("discrete"));
+    let replacement = out["replacement_id"]
+        .as_str()
+        .expect("a discrete update must report its replacement");
+    let stored = clio_store::Store::get_memory_item(&*s.store, "bank-a", replacement)
+        .expect("read replacement")
+        .expect("the replacement row was not written");
+    assert_eq!(
+        stored.gist.as_deref(),
+        Some("replacement-u1"),
+        "the new value was not stored"
+    );
 }
 
 #[test]

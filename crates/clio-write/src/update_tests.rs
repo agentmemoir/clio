@@ -26,7 +26,7 @@ use std::sync::Arc;
 static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 use std::sync::atomic::Ordering;
 
-fn unique(prefix: &str) -> String {
+pub(crate) fn unique(prefix: &str) -> String {
     // The counter is what makes this distinct: the process id is constant
     // inside one process, so clock-plus-pid alone repeats whenever two calls
     // land in the same tick, and this name is a bank id other tests share.
@@ -37,7 +37,7 @@ fn unique(prefix: &str) -> String {
     format!("{prefix}-{n}-{}-{sequence}", std::process::id())
 }
 
-fn store() -> clio_store::SqliteStore {
+pub(crate) fn store() -> clio_store::SqliteStore {
     let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
     clio_store::SqliteStore::open_in_memory(kms).expect("sqlite")
 }
@@ -57,7 +57,7 @@ fn schema(bank: &str, key: &str, rule: UpdateRule) -> clio_types::AttributeSchem
     }
 }
 
-fn item(id: &str, bank: &str) -> MemoryItem {
+pub(crate) fn item(id: &str, bank: &str) -> MemoryItem {
     MemoryItem {
         id: id.into(),
         bank_id: bank.into(),
@@ -82,7 +82,7 @@ fn item(id: &str, bank: &str) -> MemoryItem {
     }
 }
 
-fn args<'a>(
+pub(crate) fn args<'a>(
     s: &'a SqliteStore,
     ctx: &'a OpContext,
     target: &'a str,
@@ -98,6 +98,7 @@ fn args<'a>(
         target,
         new_value: value,
         update_rule: rule,
+        new_item_id: "itm-update-replacement",
         timestamp: "2024-06-01T00:00:00Z",
         continuous_sink: cont,
         triple_sink: triple,
@@ -229,43 +230,55 @@ fn t07_continuous_on_discrete_rejected() {
     assert!(cont.events().is_empty(), "no continuous row was written");
 }
 
-/// Discrete success path: update(item_id, value, discrete) invalidates (bi-temporal).
+/// Discrete success path: update(item_id, value, discrete) stores the value on
+/// a replacement item and links the closed revision to it.
 #[test]
-fn t_discrete_routes_to_invalidate() {
+fn t_discrete_stores_the_value_and_links_the_replacement() {
     let s = store();
     let bank = unique("b");
     s.create_memory_item(&item("i1", &bank), "agent").unwrap();
     let ctx = OpContext::new(Bank::new(&bank), Actor::Agent);
     let cont = ContinuousVecSink::default();
     let triple = TripleVecSink::default();
-    let a = args(&s, &ctx, "i1", "0.5", UpdateRule::Discrete, &cont, &triple);
-    match update(&a).unwrap() {
-        UpdateOutcome::Discrete(out) => assert_eq!(out.closed_ids, vec!["i1".to_owned()]),
-        UpdateOutcome::Continuous(_) => panic!("discrete update must not EMA"),
-    }
-    let got = s.get_memory_item(&bank, "i1").unwrap().unwrap();
-    assert_eq!(got.valid_until.as_deref(), Some("2024-06-01T00:00:00Z"));
-    assert_eq!(got.tx_until.as_deref(), Some("2024-06-01T00:00:00Z"));
-    assert_eq!(triple.events().len(), 1);
-    assert_eq!(triple.events()[0].operation, "invalidate");
-    assert!(cont.events().is_empty(), "no continuous row was written");
-    // Already-closed item invalidates as a documented no-op.
-    let a = args(&s, &ctx, "i1", "0.5", UpdateRule::Discrete, &cont, &triple);
-    match update(&a).unwrap() {
-        UpdateOutcome::Discrete(out) => assert!(out.already_ended),
-        UpdateOutcome::Continuous(_) => panic!(),
-    }
-    // Unknown item fails closed.
     let a = args(
         &s,
         &ctx,
-        "missing",
-        "0.5",
+        "i1",
+        "the replacement value",
         UpdateRule::Discrete,
         &cont,
         &triple,
     );
-    assert_eq!(update(&a).unwrap_err().code, ErrorCode::ItemNotFound);
+    let replacement = match update(&a).unwrap() {
+        UpdateOutcome::Discrete(out) => {
+            assert_eq!(out.closed_ids, vec!["i1".to_owned()]);
+            out.replacement_id
+                .expect("discrete update must mint a replacement")
+        }
+        UpdateOutcome::Continuous(_) => panic!("discrete update must not EMA"),
+    };
+    assert_eq!(
+        replacement, "itm-update-replacement",
+        "not the caller-supplied id"
+    );
+    let prior = s.get_memory_item(&bank, "i1").unwrap().unwrap();
+    assert_eq!(prior.valid_until.as_deref(), Some("2024-06-01T00:00:00Z"));
+    assert_eq!(prior.tx_until.as_deref(), Some("2024-06-01T00:00:00Z"));
+    let stored = s.get_memory_item(&bank, &replacement).unwrap().unwrap();
+    assert_eq!(
+        stored.gist.as_deref(),
+        Some("the replacement value"),
+        "value not stored"
+    );
+    assert!(stored.tx_until.is_none(), "the replacement must be active");
+    assert_eq!(triple.events().len(), 1);
+    assert_eq!(triple.events()[0].operation, "invalidate");
+    assert_eq!(
+        triple.events()[0].replacement_id.as_deref(),
+        Some(replacement.as_str()),
+        "the invalidate event must carry the replacement id"
+    );
+    assert!(cont.events().is_empty(), "no continuous row was written");
 }
 
 /// `fact`/`belief` are rejected as update_rule before any mutation.
