@@ -220,6 +220,20 @@ impl Planner<'_> {
                 continue;
             };
             e.item_id.clone_from(&carrier.id);
+            // `snapshot_ref` / `gist_ref` are item-id pointers, exported verbatim
+            // (masking never rewrites them). A pointer at a row this bundle also
+            // carries must move with that row, or the cross-bank triple insert
+            // fails `snapshot_ref ... not found in bank` (and `gist_ref` dangles
+            // silently, having no existence check).
+            for r in [&mut e.snapshot_ref, &mut e.gist_ref] {
+                let Some(ref_id) = r.as_deref() else {
+                    continue;
+                };
+                if !self.bundle_owns(ref_id) {
+                    continue;
+                }
+                *r = Some(import_id(bank, &edge.bank_id, ref_id).into_owned());
+            }
             self.consumed.insert(format!("triple:{id}"));
             self.consumed.insert(format!("carrier:{}", e.item_id));
             self.staged.push(BatchWrite::CommitTriple {

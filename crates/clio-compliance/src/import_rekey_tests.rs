@@ -119,3 +119,47 @@ fn reimport_into_same_second_bank_skips() {
     assert_eq!(h.store.list_triples(&h.bank).unwrap().len(), 1);
     assert_eq!(count_in_bank(&h, SOURCE_BANK), 4);
 }
+/// A triple whose `snapshot_ref` / `gist_ref` point at rows the bundle also
+/// carries must re-key those pointers; a stale pointer fails the whole import
+/// (`ItemNotFound: snapshot_ref ... not found in bank`).
+#[test]
+fn triple_refs_follow_bundle_items_into_the_second_bank() {
+    let h = Harness::new();
+    let mut entities = h.full_entities();
+    let snapshot_source = entities.items[0].id.clone();
+    let gist_source = entities.items[2].id.clone();
+    entities.triples[0].snapshot_ref = Some(snapshot_source.clone());
+    entities.triples[0].gist_ref = Some(gist_source.clone());
+    let bundle = write_bundle(&entities, ExportContentMode::DsarPlaintext);
+
+    let first = import_into(&h, &bundle, &source_ctx());
+    assert_eq!((first.would_create, first.would_skip), (11, 0));
+    let second = import_into(&h, &bundle, &h.ctx());
+    assert_eq!((second.would_create, second.would_skip), (11, 0));
+
+    let suffix = format!("#{}", h.bank);
+    let edges = h.store.list_triples(&h.bank).unwrap();
+    assert_eq!(edges.len(), 1);
+    let edge = &edges[0];
+    assert_eq!(edge.id, format!("{}{suffix}", entities.triples[0].id));
+    let expected_snapshot = format!("{snapshot_source}{suffix}");
+    let expected_gist = format!("{gist_source}{suffix}");
+    assert_eq!(
+        edge.snapshot_ref.as_deref(),
+        Some(expected_snapshot.as_str())
+    );
+    assert_eq!(edge.gist_ref.as_deref(), Some(expected_gist.as_str()));
+    for ref_id in [&expected_snapshot, &expected_gist] {
+        assert!(
+            h.store.get_memory_item(&h.bank, ref_id).unwrap().is_some(),
+            "re-keyed ref `{ref_id}` must resolve to a row in the target bank"
+        );
+    }
+    let originals = h.store.list_triples(SOURCE_BANK).unwrap();
+    assert_eq!(
+        originals[0].snapshot_ref.as_deref(),
+        Some(snapshot_source.as_str()),
+        "the source bank's own refs are not rewritten"
+    );
+}
+

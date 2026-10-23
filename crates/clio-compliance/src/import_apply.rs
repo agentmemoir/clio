@@ -165,6 +165,21 @@ impl<'a> Planner<'a> {
         self.envelope.entities.items.iter().find(|i| i.id == id)
     }
 
+    /// True when `id` names a row the bundle itself carries — an item or an
+    /// opaque (`content_mode = ciphertext_backup`) row — so a pointer at it has
+    /// to be re-keyed alongside the row. `ciphertext_backup` bundles carry an
+    /// empty `items` array and put every row in `opaque_items`, so both arrays
+    /// have to count.
+    pub(super) fn bundle_owns(&self, id: &str) -> bool {
+        self.bundle_item(id).is_some()
+            || self
+                .envelope
+                .entities
+                .opaque_items
+                .iter()
+                .any(|o| o.id == id)
+    }
+
     fn plan_items(&mut self) -> Result<(), AmError> {
         let args = self.args;
         let bank = args.ctx.bank.as_str();
