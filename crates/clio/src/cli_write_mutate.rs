@@ -324,3 +324,7 @@ fn render_correct(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_write_mutate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_mutate_text_tests.rs"]
+mod text_tests;

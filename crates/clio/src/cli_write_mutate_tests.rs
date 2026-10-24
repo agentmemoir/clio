@@ -69,6 +69,49 @@ fn update_discrete_stores_the_new_value_on_a_replacement() {
     let report = stats(&s);
     assert_eq!(report["items_active"], json!(1), "{report}");
     assert_eq!(report["items_total"], json!(2), "{report}");
+    // The value reads back through `get` on the replacement, while the prior
+    // keeps its own value with validity closed.
+    let read = call(&s, "get", json!({"bank": "demo", "item_id": replacement}));
+    assert_eq!(read["gist"], json!("new value"), "{read}");
+    let prior = call(&s, "get", json!({"bank": "demo", "item_id": "itm-u1"}));
+    assert_eq!(prior["gist"], json!("old value"), "{prior}");
+    assert!(prior["valid_until"].is_string(), "{prior}");
+    // The old item's invalidation names the replacement it was closed for.
+    let trail = call(
+        &s,
+        "audit_trail",
+        json!({"bank": "demo", "item_id": "itm-u1"}),
+    );
+    let closed = trail["events"]
+        .as_array()
+        .and_then(|events| {
+            events
+                .iter()
+                .find(|e| e["detail"]["corrected_by"].is_string())
+        })
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert_eq!(
+        closed["detail"]["corrected_by"],
+        json!(replacement),
+        "the old item's invalidate event must carry the replacement id: {trail}"
+    );
+}
+
+#[test]
+fn second_discrete_update_of_a_superseded_item_fails() {
+    let s = seeded("demo", "itm-u7", "old");
+    let args = ["itm-u7", "new", "--rule", "discrete", "--bank", "demo"];
+    let (code, out, err) = run_write_state("update", &args, &s, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let (code, out, err) = run_write_state("update", &args, &s, false);
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(
+        !out.contains(r#""ok":true"#),
+        "a refused update must not report success: {out}"
+    );
+    assert_eq!(json_of(&err)["code"], json!("invalid_argument"), "{err}");
+    assert!(err.contains("already superseded"), "{err}");
 }
 
 #[test]
@@ -384,56 +427,4 @@ fn correct_requires_id_and_value_positionals() {
     let (code, out, err) = run_write_state("correct", &["itm-c4", "--reason", "fix"], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
     assert!(err.contains("ID VALUE"), "{err}");
-}
-
-#[test]
-fn invalidate_text_mode_view_without_replacement() {
-    let s = seeded("demo", "itm-i9", "value");
-    let (code, out, err) = run_write_state("invalidate", &["itm-i9", "--bank", "demo"], &s, true);
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert_eq!(
-        out.trim(),
-        "invalidated (closed 1, already_ended 0) in bank `demo`",
-        "{out}"
-    );
-}
-
-#[test]
-fn update_text_mode_view_is_deterministic() {
-    let s = seeded("demo", "itm-u5", "value");
-    let (code, out, err) = run_write_state(
-        "update",
-        &["itm-u5", "ignored", "--rule", "discrete", "--bank", "demo"],
-        &s,
-        true,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.starts_with("updated (discrete): closed 1"), "{out}");
-}
-
-#[test]
-fn discard_text_mode_view_reports_the_removed_item() {
-    let s = seeded("demo", "itm-d5", "value");
-    let (code, out, err) = run_write_state(
-        "discard",
-        &["itm-d5", "--reason", "noise", "--confirm", "--bank", "demo"],
-        &s,
-        true,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert_eq!(out.trim(), "discarded itm-d5 in bank `demo`", "{out}");
-}
-
-#[test]
-fn discard_dry_run_text_view_states_irreversibility_note() {
-    let s = seeded("demo", "itm-d6", "value");
-    let (code, out, err) = run_write_state(
-        "discard",
-        &["itm-d6", "--reason", "noise", "--dry-run", "--bank", "demo"],
-        &s,
-        true,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.contains("would discard itm-d6"), "{out}");
-    assert!(out.contains("not compliance erasure"), "{out}");
 }
