@@ -1,1 +1,3 @@
 Sync content is now sealed with the execution envelope as its associated data, so a relay that cannot decrypt can no longer retarget valid ciphertext at a different mutation, bank, or identifier: any change to the envelope fails authentication and the row is quarantined by the existing receive path.
+
+A node configured with a sync key now accepts only sealed content on the receive path: a plaintext row pulled for such a node is quarantined before it can be applied, journaled, or moved past on the cursor, because a plaintext row carries no envelope and a relay can fabricate or downgrade one freely. A node with no key configured keeps its current behaviour and still applies plaintext rows.

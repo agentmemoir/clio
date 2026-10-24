@@ -63,6 +63,7 @@ mod apply_records;
 mod bind_warning;
 pub mod client;
 mod client_feed;
+mod client_refusal;
 pub mod clock;
 mod conn_pool;
 mod credential;

@@ -40,32 +40,32 @@ use std::sync::Arc;
 
 type TestStore = Arc<clio_store::SqliteStore>;
 
-const BANK: &str = "bank-a";
+pub(crate) const BANK: &str = "bank-a";
 const OTHER_BANK: &str = "bank-b";
 const STAMP: &str = "2026-01-01T00:00:00Z";
-const VICTIM: &str = "victim-a";
+pub(crate) const VICTIM: &str = "victim-a";
 const SOURCE: &str = "source-a";
 /// The tail every failed open carries; the refusal names the open failure and
 /// never the rewrite, so a relay cannot learn which field it mistyped.
 const OPEN_FAILED: &str = "could not be opened with the matching held key";
 
 /// One receiving node: its own relay endpoint, its own store, one held key.
-struct Receiver {
-    server: SyncServer,
-    addr: String,
-    store: TestStore,
-    cfg: SyncClientConfig,
+pub(crate) struct Receiver {
+    pub(crate) server: SyncServer,
+    pub(crate) addr: String,
+    pub(crate) store: TestStore,
+    pub(crate) cfg: SyncClientConfig,
 }
 
 /// One held key: the tag picks a generated secret, so a test that hands the
 /// same key to two nodes is the only way they can open each other's rows.
-fn held_key(tag: &str) -> SyncCipherKey {
+pub(crate) fn held_key(tag: &str) -> SyncCipherKey {
     SyncCipherKey::from_secret(&crate::credential_fixtures::secret(tag))
 }
 
 /// Bind a fresh relay for `banks`, a fresh store holding `key`, and the client
 /// config that pulls through both.
-fn receiver(banks: &[&str], key: &SyncCipherKey) -> Receiver {
+pub(crate) fn receiver(banks: &[&str], key: &SyncCipherKey) -> Receiver {
     let (server, _srv, _kms) = serve(banks);
     let addr = server.addr().to_owned();
     let store = sqlite();
@@ -114,7 +114,7 @@ fn sealed(bank: &str, id: &str, op: &str, key: &SyncCipherKey) -> SyncMutation {
 /// Push one mutation the caller shaped by hand. The payload bank is chosen
 /// separately from the mutation's own bank, so a test can split the two and
 /// find out which one the relay routes on.
-fn hand_push(addr: &str, payload_bank: &str, mutation: SyncMutation) {
+pub(crate) fn hand_push(addr: &str, payload_bank: &str, mutation: SyncMutation) {
     let ack: PushAck = post_json(
         addr,
         "/sync/push",

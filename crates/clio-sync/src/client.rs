@@ -33,6 +33,7 @@ use crate::apply::{
     ApplyEngine, ApplyOutcome, admission_score, apply_mutation_guarded, quarantine,
 };
 use crate::client_feed::push_bank;
+use crate::client_refusal::{PLAINTEXT_REFUSED_REASON, missing_key_reason, open_failed_reason};
 use crate::http::post_json;
 use crate::protocol::{
     BankSyncStatus, PullRequest, PullResponse, SyncContent, SyncMutation, SyncStatusReport,
@@ -293,9 +294,10 @@ fn pull_bank(
 /// Decrypt a pulled cipher mutation with the local sync keys before apply,
 /// restore its origin admission receipt, and resolve its identifier handle back
 /// to the real identifier from the opened payload. Returns `None` when the row
-/// was quarantined (unusable content, or an identifier that cannot be
-/// resolved). Rows the operator already ack-skipped pass through unchanged so
-/// apply treats them as duplicates and the cursor may advance.
+/// was quarantined (unusable content, a plaintext row at a sealed node, or an
+/// identifier that cannot be resolved). Rows the operator already ack-skipped
+/// pass through unchanged so apply treats them as duplicates and the cursor may
+/// advance.
 fn decrypt_for_apply(
     cfg: &SyncClientConfig,
     m: &SyncMutation,
@@ -308,23 +310,15 @@ fn decrypt_for_apply(
     {
         return Ok(Some(m.clone()));
     }
-    let SyncContent::Cipher(cipher) = &m.content else {
-        return Ok(Some(m.clone()));
-    };
     let engine = ApplyEngine {
         store: cfg.store.as_ref(),
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
     };
-    let held: Vec<String> = cfg
-        .cipher
-        .iter()
-        .map(crate::crypto::SyncCipherKey::key_id)
-        .collect();
-    // One refusal shape for every unopenable row: quarantine it under the
-    // row's own bank and stop, so the cursor freezes at the prior id and the
-    // operator can discard the row deliberately with `ack_skip`.
+    // One refusal shape for every row this node cannot trust: quarantine it
+    // under the row's own bank and stop, so the cursor freezes at the prior id
+    // and the operator can discard the row deliberately with `ack_skip`.
     let refuse = |bank: &str, reason: &str| -> Result<Option<SyncMutation>, AmError> {
         quarantine(
             &engine,
@@ -336,9 +330,25 @@ fn decrypt_for_apply(
         )?;
         Ok(None)
     };
+    let SyncContent::Cipher(cipher) = &m.content else {
+        // A node configured with a sync key is in sealed mode and accepts only
+        // sealed content. A plaintext row carries no authenticated envelope, so
+        // a relay can fabricate it or downgrade a sealed row to it freely;
+        // refusing here is what stops both. A node with no key keeps the
+        // plaintext passthrough its peers rely on.
+        if cfg.cipher.is_empty() {
+            return Ok(Some(m.clone()));
+        }
+        return refuse(&m.bank, PLAINTEXT_REFUSED_REASON);
+    };
     if cfg.cipher.is_empty() {
         return refuse(&m.bank, "no sync cipher key configured");
     }
+    let held: Vec<String> = cfg
+        .cipher
+        .iter()
+        .map(crate::crypto::SyncCipherKey::key_id)
+        .collect();
     // A row with no key identifier no longer opens: current writes always
     // stamp one, and trial-opening every held key widens the wrong-key
     // surface. The refusal is a stable quarantine the operator discards.
@@ -396,34 +406,12 @@ fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
     }
 }
 
-/// The refusal for a row sealed under a key this node does not hold. It names
-/// the stamped identifier and the identifiers held, both derived and
-/// non-reversible, and the recovery. It never carries a key or a prefix of
-/// one; the identifier is the operator's clue, the store-byte fingerprint is
-/// what `clio sync key status` prints.
-fn missing_key_reason(stamped: &str, held: &[String]) -> String {
-    format!(
-        "sync content is sealed under key {stamped}, which this node does not hold; held keys: \
-         {}. Add the missing key on this node and pull again, or discard the row deliberately \
-         with `clio sync ack-skip`",
-        held.join(", "),
-    )
-}
-
-/// The refusal for a stamped row its own matching held key cannot open: a
-/// failed open means the bytes are damaged or were altered, so the message
-/// names the deliberate discard.
-fn open_failed_reason(stamped: &str) -> String {
-    format!(
-        "sync cipher stamped with key {stamped} could not be opened with the matching held key; \
-         the ciphertext may be corrupted or tampered with. Discard the row deliberately with \
-         `clio sync ack-skip`"
-    )
-}
-
 #[cfg(test)]
 #[path = "client_envelope_tests.rs"]
 mod client_envelope_tests;
+#[cfg(test)]
+#[path = "client_plain_policy_tests.rs"]
+mod client_plain_policy_tests;
 #[cfg(test)]
 #[path = "client_receipt_tests.rs"]
 mod client_receipt_tests;
