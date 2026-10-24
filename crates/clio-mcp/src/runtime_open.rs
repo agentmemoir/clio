@@ -40,13 +40,17 @@ use clio_store::{
     BankScopeStore, BatchStore, BeliefStore, ComplianceStore, ContinuousStore, CopyInventoryStore,
     DekProvider, DestinationCustodyStore, DurableRequestStore, HistoryStore, HygieneStore,
     IndexStore, LocalDevKms, LocalEventStore, OpsStore, PeerActionStore, PersonaStore,
-    PostgresStore, PostgresTargetState, SqliteFileState, SqliteStore, Store, SyncStore,
+    PostgresStore, SqliteFileState, SqliteStore, Store, SyncStore,
 };
 use clio_types::{AmError, ErrorCode};
 use clio_write::{HubDistillEngine, LeafIndex, MemForest, MemTreeMaint};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+#[cfg(test)]
+#[path = "runtime_open_tests.rs"]
+mod runtime_open_tests;
 
 /// The caller's retriever and its read-only diagnostic twin: both from the
 /// same env, store, index, embedder, and reranker, with the twin's
@@ -180,7 +184,7 @@ impl McpState {
         let batch: Arc<dyn BatchStore> = store.clone();
         let ops_store: Arc<dyn OpsStore> = store.clone();
         let sync: Arc<dyn SyncStore> = store.clone();
-        let (inventory_facts, inventory_backend, inventory_measured) = measure_inventory(options);
+        let (inventory_facts, inventory_backend, inventory_measured) = measure_inventory(options)?;
         // One embedder resolution, shared by retrieval and the index drain.
         let ops_embedder = build_ops_embedder_from(&OpsEmbedConfig::from_effective(
             effective,
@@ -303,12 +307,18 @@ fn reconcile_after_open(state: &McpState) -> Result<(), clio_types::AmError> {
     clio_compliance::reconcile_open_destinations(&*state.events, &*state.custody).map(|_| ())
 }
 
-/// Best-effort live-store facts for a subject-scoped export.
+/// Live-store facts for a subject-scoped export, measured once at open.
 ///
-/// A `sqlite::memory:` store and any measurement failure yield an empty
-/// measurement marked unmeasured, so a subject export refuses with
-/// `InvalidArgument` instead of emitting a wrong manifest.
-fn measure_inventory(options: &McpOpenOptions) -> (InventoryFacts, InventoryBackend, bool) {
+/// A measurement failure fails the open with the measurement's own error code,
+/// so a caller never sees a silent empty inventory behind a successful open: an
+/// inventory it cannot measure is a store it cannot export from, and an open
+/// that reported success would let a subject export emit a wrong manifest or
+/// claim there was nothing to export. Only a `sqlite::memory:` store opens
+/// unmeasured — it has no file to measure — and that empty measurement is
+/// marked unmeasured so a subject export refuses with `InvalidArgument`.
+fn measure_inventory(
+    options: &McpOpenOptions,
+) -> Result<(InventoryFacts, InventoryBackend, bool), AmError> {
     let empty_sqlite = || {
         InventoryFacts::Sqlite(SqliteFileState {
             path: PathBuf::new(),
@@ -318,41 +328,33 @@ fn measure_inventory(options: &McpOpenOptions) -> (InventoryFacts, InventoryBack
             banks: Vec::new(),
         })
     };
-    let empty_postgres = || {
-        InventoryFacts::Postgres(PostgresTargetState {
-            schema: String::new(),
-            tables: Vec::new(),
-            table_counts: Vec::new(),
-            banks: Vec::new(),
-        })
-    };
     if options.backend.as_str() == "postgres" {
-        return match clio_store::postgres_target_state(&options.database_url) {
-            Ok(state) => (
-                InventoryFacts::Postgres(state),
-                InventoryBackend::Postgres,
-                true,
-            ),
-            Err(err) => {
-                eprintln!("clio-mcp: postgres inventory measurement failed: {err}");
-                (empty_postgres(), InventoryBackend::Postgres, false)
-            }
-        };
+        let state = clio_store::postgres_target_state(&options.database_url).map_err(|err| {
+            AmError::new(
+                err.code,
+                format!("measure the postgres inventory at open: {}", err.message),
+            )
+        })?;
+        return Ok((
+            InventoryFacts::Postgres(state),
+            InventoryBackend::Postgres,
+            true,
+        ));
     }
     if options.database_url == "sqlite::memory:" {
-        return (empty_sqlite(), InventoryBackend::Sqlite, false);
+        return Ok((empty_sqlite(), InventoryBackend::Sqlite, false));
     }
-    match clio_store::sqlite_file_state(Path::new(&options.database_url)) {
-        Ok(state) => (
-            InventoryFacts::Sqlite(state),
-            InventoryBackend::Sqlite,
-            true,
-        ),
-        Err(err) => {
-            eprintln!("clio-mcp: sqlite inventory measurement failed: {err}");
-            (empty_sqlite(), InventoryBackend::Sqlite, false)
-        }
-    }
+    let state = clio_store::sqlite_file_state(Path::new(&options.database_url)).map_err(|err| {
+        AmError::new(
+            err.code,
+            format!("measure the sqlite inventory at open: {}", err.message),
+        )
+    })?;
+    Ok((
+        InventoryFacts::Sqlite(state),
+        InventoryBackend::Sqlite,
+        true,
+    ))
 }
 
 /// Whether the configured extraction provider would actually run, matching the
