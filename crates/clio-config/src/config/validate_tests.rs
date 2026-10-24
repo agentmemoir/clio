@@ -259,6 +259,24 @@ fn provider_value_validation() {
 }
 
 #[test]
+fn rerank_max_batch_validation() {
+    validate_set_path("rerank.max_batch").unwrap();
+    validate_set_value("rerank.max_batch", &json!(7)).unwrap();
+    assert_eq!(
+        validate_set_value("rerank.max_batch", &json!(0))
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidType
+    );
+    assert_eq!(
+        validate_set_value("rerank.max_batch", &json!("7"))
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidType
+    );
+}
+
+#[test]
 fn history_knob_validation() {
     validate_set_path("history.lesson_max_tokens").unwrap();
     validate_set_value("history.lesson_max_tokens", &json!(10)).unwrap();

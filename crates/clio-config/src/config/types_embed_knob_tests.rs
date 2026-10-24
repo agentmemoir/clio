@@ -141,7 +141,7 @@ fn rerank_defaults_and_settable_all_scopes() {
     assert_eq!(eff["embed"]["provider"], "");
     assert_eq!(
         eff["rerank"],
-        json!({"url": "", "model": "", "provider": ""})
+        json!({"url": "", "model": "", "provider": "", "max_batch": 32})
     );
 
     let mut rt_set = Runtime::with_env(&|_| None);

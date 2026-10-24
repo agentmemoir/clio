@@ -32,8 +32,12 @@
 //! Rerank is precision-only: it reorders a bounded shortlist and can never
 //! recover a document the first stage missed. Any error (timeout, transport,
 //! malformed body) is surfaced to the orchestrator, which keeps the fused
-//! order (fail-open) and records a structured warning. Rerank never blocks
-//! compose indefinitely because the HTTP client has a bounded deadline.
+//! order (fail-open) and records a structured warning. One `rerank` call
+//! spends a single deadline (`self.timeout`) across every request it makes:
+//! each request is given only the time that remains, and a call whose budget
+//! is spent before a request can be sent fails closed rather than starting
+//! another one. Rerank therefore never blocks compose for longer than that one
+//! deadline, however many requests the batch cap requires.
 //!
 //! # Score contract
 //!
@@ -48,10 +52,19 @@ use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-/// Default rerank request deadline (a small fraction of the retrieve SLO).
+/// Default deadline for a whole rerank call, all requests included (a small
+/// fraction of the retrieve SLO).
 pub const DEFAULT_RERANK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Default number of documents the TEI sidecar accepts in one rerank request.
+///
+/// The sidecar enforces its own client batch ceiling and rejects a larger
+/// request outright, so a shortlist longer than this is split into sequential
+/// requests of at most this many documents and merged back into one
+/// index-consistent result.
+pub const DEFAULT_RERANK_MAX_BATCH: usize = 32;
 
 /// The provider an unset `rerank.provider` resolves to: the tei sidecar.
 ///
@@ -82,6 +95,7 @@ pub struct HttpReranker {
     url: String,
     bearer: Option<String>,
     timeout: Duration,
+    max_batch: usize,
 }
 
 impl fmt::Debug for HttpReranker {
@@ -91,6 +105,7 @@ impl fmt::Debug for HttpReranker {
             .field("url", &self.url)
             .field("bearer", &self.bearer.as_ref().map(|_| "****"))
             .field("timeout", &self.timeout)
+            .field("max_batch", &self.max_batch)
             .finish()
     }
 }
@@ -113,12 +128,21 @@ impl HttpReranker {
             url,
             bearer,
             timeout: DEFAULT_RERANK_TIMEOUT,
+            max_batch: DEFAULT_RERANK_MAX_BATCH,
         })
     }
 
-    /// Override the request deadline (tests / tuning).
+    /// Override the deadline for a whole `rerank` call, every request it makes
+    /// included (tests / tuning).
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout;
+    }
+
+    /// Override the documents-per-request ceiling (tests / tuning).
+    ///
+    /// A request must carry at least one document, so `0` is clamped to `1`.
+    pub fn set_max_batch(&mut self, max_batch: usize) {
+        self.max_batch = max_batch.max(1);
     }
 }
 
@@ -132,19 +156,89 @@ impl Reranker for HttpReranker {
         if documents.is_empty() {
             return Ok(Vec::new());
         }
-        // TEI `RerankRequest` = `{query, texts, raw_scores}`; `top_k` is not a
-        // TEI field, so it is intentionally omitted from the wire body.
-        // `raw_scores: false` is pinned so the sidecar returns its sigmoid
-        // score in `[0, 1]` even if the server default ever drifts.
-        let body = json!({
-            "query": query,
-            "texts": documents,
-            "raw_scores": false,
-        });
         let url = format!("{}/rerank", self.url.trim_end_matches('/'));
-        let value = post_json(&url, &body, self.timeout, self.bearer.as_deref())?;
-        parse_rerank_response(&value, documents.len())
+        let batch = self.max_batch.max(1);
+        let batches = documents.len().div_ceil(batch);
+        // One deadline for the whole call: the chunks share it instead of each
+        // taking a fresh `self.timeout`, so the total wall time stays bounded
+        // no matter how many requests the cap requires.
+        let deadline = Instant::now() + self.timeout;
+        let mut merged: Vec<RerankedDoc> = Vec::with_capacity(documents.len());
+        for (ordinal, chunk) in documents.chunks(batch).enumerate() {
+            let start = ordinal * batch;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(budget_spent());
+            }
+            // TEI `RerankRequest` = `{query, texts, raw_scores}`; `top_k` is not
+            // a TEI field, so it is intentionally omitted from the wire body.
+            // `raw_scores: false` is pinned so the sidecar returns its sigmoid
+            // score in `[0, 1]` even if the server default ever drifts.
+            let body = json!({
+                "query": query,
+                "texts": chunk,
+                "raw_scores": false,
+            });
+            let value = post_json(&url, &body, remaining, self.bearer.as_deref())
+                .map_err(|e| chunk_failed(ordinal, batches, start, chunk.len(), &e))?;
+            // Each response indexes its own chunk, so a chunk-local index is
+            // shifted by the chunk's offset in `documents` before merging.
+            let ranked = parse_rerank_response(&value, chunk.len())
+                .map_err(|e| chunk_failed(ordinal, batches, start, chunk.len(), &e))?;
+            for mut doc in ranked {
+                doc.index += start;
+                merged.push(doc);
+            }
+        }
+        // The parser already rejects a missing, duplicated, or out-of-range
+        // index for its own chunk; assert that the shifted concatenation is
+        // still a permutation of the whole shortlist.
+        debug_assert_eq!(
+            {
+                let mut seen: Vec<usize> = merged.iter().map(|doc| doc.index).collect();
+                seen.sort_unstable();
+                seen
+            },
+            (0..documents.len()).collect::<Vec<usize>>(),
+            "rerank merge must yield every document index exactly once"
+        );
+        // Chunks are appended in document order, so the concatenation is
+        // chunk-major. The trait promises best-first, so order the whole
+        // shortlist by score with an unscored (`None`) document last; the
+        // parser clamps scores to `[0, 1]`, and the stable sort keeps the
+        // parser's relative order for ties.
+        merged.sort_by(|a, b| {
+            b.score
+                .unwrap_or(f64::NEG_INFINITY)
+                .total_cmp(&a.score.unwrap_or(f64::NEG_INFINITY))
+        });
+        Ok(merged)
     }
+}
+
+/// Error shape `post_json` reports for a timeout, reused when the shared
+/// budget is spent before a request can be sent.
+fn budget_spent() -> AmError {
+    AmError::new(
+        ErrorCode::Internal,
+        "rerank deadline exhausted (sidecar unreachable): read timed out",
+    )
+}
+
+/// Wrap a chunk failure with the chunk ordinal and document range, so the
+/// orchestrator's fail-open warning distinguishes a bad chunk from a dead
+/// sidecar. The original message is transport-owned and carries no key
+/// material.
+fn chunk_failed(ordinal: usize, total: usize, start: usize, len: usize, err: &AmError) -> AmError {
+    AmError::new(
+        err.code,
+        format!(
+            "rerank chunk {}/{total} (docs {start}..{}) failed: {}",
+            ordinal + 1,
+            start + len,
+            err.message
+        ),
+    )
 }
 
 /// Cohere-compatible hosted reranker (`POST {url}/v1/rerank`).
@@ -287,7 +381,17 @@ pub fn build_reranker_from(
                     "rerank.model is required when rerank.url is set",
                 ));
             }
-            HttpReranker::new(url, bearer).map(|r| Some(Arc::new(r) as Arc<dyn Reranker>))
+            let mut client = HttpReranker::new(url, bearer)?;
+            // An absent key keeps `DEFAULT_RERANK_MAX_BATCH`; a key of `0` is
+            // not a cap the sidecar could accept, so the setter clamps it.
+            if let Some(max_batch) = effective
+                .pointer("/rerank/max_batch")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+            {
+                client.set_max_batch(max_batch);
+            }
+            Ok(Some(Arc::new(client) as Arc<dyn Reranker>))
         }
         "cohere" => {
             let Some(key) = bearer else {
@@ -313,3 +417,7 @@ pub(crate) mod rerank_tests;
 #[cfg(test)]
 #[path = "rerank_score_tests.rs"]
 mod rerank_score_tests;
+
+#[cfg(test)]
+#[path = "rerank_batch_tests.rs"]
+mod rerank_batch_tests;

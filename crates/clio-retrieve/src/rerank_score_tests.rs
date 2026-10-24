@@ -159,6 +159,9 @@ fn adapter_clamps_out_of_range_scores_into_the_documented_range() {
     ])));
     let client = HttpReranker::new(url, None).expect("build");
     let order = client.rerank("query", &docs(), 3).expect("rerank");
-    assert_eq!(scores(&order), vec![Some(0.0), Some(1.0), None]);
+    // Best-first after the clamp: the above-range score leads, the clamped
+    // negative trails it, and the omitted document stays last with `None`.
+    assert_eq!(indices(&order), vec![1, 0, 2]);
+    assert_eq!(scores(&order), vec![Some(1.0), Some(0.0), None]);
     handle.join().expect("server join");
 }

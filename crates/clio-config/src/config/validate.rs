@@ -14,6 +14,7 @@
 //! ## Does not own
 //! - Writing overlays into `Runtime` state
 //! - Secret masking of validated values
+//! - Numeric range rules for the paths that carry a number (see `validate_set`)
 //!
 //! ## Boundary
 //!
@@ -22,6 +23,7 @@
 //!
 //! Keep this module focused on config path/value and scope validation.
 
+use super::validate_set::validate_numeric_value;
 use crate::error::{AmError, ErrorCode};
 use crate::log::LogLevel;
 use clio_types::{is_loopback_host, parse_scheme_host};
@@ -61,6 +63,7 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "rerank.url",
     "rerank.model",
     "rerank.provider",
+    "rerank.max_batch",
     "credentials.embed_api_key",
     "credentials.rerank_api_key",
     "credentials.extract_api_key",
@@ -149,11 +152,23 @@ pub(crate) fn validate_set_path(path: &str) -> Result<(), AmError> {
 
 /// Type/range checks for allowlisted paths.
 ///
+/// The numeric paths are answered by [`validate_numeric_value`], which owns
+/// their ranges and their rejection messages; this match remains the single
+/// entry point every caller uses.
+///
 /// # Errors
 /// Invalid types or out-of-range values.
 #[expect(clippy::too_many_lines)] // path matrix is clearer as one match.
 pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmError> {
     match path {
+        "injection.budget_tokens"
+        | "history.lesson_max_tokens"
+        | "history.default_limit"
+        | "history.max_limit"
+        | "history.similarity_threshold"
+        | "extract.temperature"
+        | "embed.dims"
+        | "rerank.max_batch" => validate_numeric_value(path, value)?,
         "log.level" => {
             let Some(s) = value.as_str() else {
                 return Err(AmError::new(
@@ -165,48 +180,6 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 return Err(AmError::new(
                     ErrorCode::OutOfRange,
                     format!("log.level `{s}` is not error|warn|info|debug|trace"),
-                ));
-            }
-        }
-        "injection.budget_tokens" => {
-            let Some(n) = value.as_u64() else {
-                return Err(AmError::new(
-                    ErrorCode::InvalidType,
-                    "injection.budget_tokens must be a non-negative integer",
-                ));
-            };
-            if n == 0 || n > 100_000 {
-                return Err(AmError::new(
-                    ErrorCode::OutOfRange,
-                    "injection.budget_tokens must be in 1..=100000",
-                ));
-            }
-        }
-        "history.lesson_max_tokens" | "history.default_limit" | "history.max_limit" => {
-            let Some(n) = value.as_u64() else {
-                return Err(AmError::new(
-                    ErrorCode::InvalidType,
-                    format!("{path} must be a positive integer"),
-                ));
-            };
-            if n == 0 || n > 100_000 {
-                return Err(AmError::new(
-                    ErrorCode::OutOfRange,
-                    format!("{path} must be in 1..=100000"),
-                ));
-            }
-        }
-        "history.similarity_threshold" => {
-            let Some(n) = value.as_f64() else {
-                return Err(AmError::new(
-                    ErrorCode::InvalidType,
-                    "history.similarity_threshold must be a number",
-                ));
-            };
-            if !(0.0..=1.0).contains(&n) {
-                return Err(AmError::new(
-                    ErrorCode::OutOfRange,
-                    "history.similarity_threshold must be in 0.0..=1.0",
                 ));
             }
         }
@@ -302,20 +275,6 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 ));
             }
         }
-        "extract.temperature" => {
-            let Some(n) = value.as_f64() else {
-                return Err(AmError::new(
-                    ErrorCode::InvalidType,
-                    "extract.temperature must be a number",
-                ));
-            };
-            if !(0.0..=2.0).contains(&n) {
-                return Err(AmError::new(
-                    ErrorCode::OutOfRange,
-                    "extract.temperature must be in 0.0..=2.0",
-                ));
-            }
-        }
         "extract.day_first" => match value {
             Value::Bool(_) | Value::Null => {}
             _ => {
@@ -360,20 +319,6 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 return Err(AmError::new(
                     ErrorCode::OutOfRange,
                     format!("{path} must be {}, got `{s}`", allowed.join("|")),
-                ));
-            }
-        }
-        "embed.dims" => {
-            let Some(n) = value.as_u64() else {
-                return Err(AmError::new(
-                    ErrorCode::InvalidType,
-                    "embed.dims must be a positive integer",
-                ));
-            };
-            if n == 0 || n > MAX_EMBED_DIMS {
-                return Err(AmError::new(
-                    ErrorCode::OutOfRange,
-                    format!("embed.dims must be in 1..={MAX_EMBED_DIMS} (storage ceiling)"),
                 ));
             }
         }

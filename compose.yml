@@ -132,8 +132,12 @@ services:
       # See TEI #819 / #280 / PR #884. Rerank top ~30–50 candidates.
       - --max-batch-tokens
       - ${CLIO_RERANK_MAX_BATCH_TOKENS:-2048}
+      # The host CLI's own cap (`CLIO_RERANK_MAX_BATCH`, TEI provider only) must
+      # never exceed this ceiling, or the service rejects a batch instead of
+      # reranking it. Taking the client cap as a fallback lets one setting move
+      # both, so the pair cannot disagree when only the client value is given.
       - --max-client-batch-size
-      - ${CLIO_RERANK_MAX_CLIENT_BATCH:-32}
+      - ${CLIO_RERANK_MAX_CLIENT_BATCH:-${CLIO_RERANK_MAX_BATCH:-32}}
       - --tokenization-workers
       - ${CLIO_RERANK_TOKENIZATION_WORKERS:-2}
       - --max-concurrent-requests
