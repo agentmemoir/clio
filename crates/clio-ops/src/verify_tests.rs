@@ -9,6 +9,8 @@
 //!
 //! ## Owns
 //! - `verify` clean/orphan/coverage-gap reports in bank and store scopes
+//! - The store-wide note a bank-scoped report carries, and the scoped form that
+//!   never runs that probe
 //! - `error_codes` extraction from mixed and empty finding sets
 //!
 //! ## Does not own
@@ -23,7 +25,7 @@
 //! Keep this module focused on verify behavior.
 
 use crate::finding::{OpsFinding, Severity, codes};
-use crate::verify::{VerifyArgs, error_codes, verify};
+use crate::verify::{VerifyArgs, error_codes, verify, verify_scoped};
 use clio_store::{AssocEdgeRecord, AssocKind, IntegritySignals, OpsStore, SqliteStore, Store};
 use clio_types::{AmError, EpisodicType, EpistemicKind, ItemKind, MemoryItem};
 use serde_json::json;
@@ -242,4 +244,109 @@ fn error_codes_ignores_info_and_warning() {
         error_codes(&mixed),
         vec![codes::ORPHAN_ASSOC_EDGE.to_owned()]
     );
+}
+
+/// A bank-scoped pass sees only that bank. A gap in another bank must surface as
+/// a note and must fail the aggregate, so a clean bank is not read as a clean
+/// store.
+#[test]
+fn bank_scoped_verify_notes_store_wide_findings_outside_the_bank() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    let report = verify_bank(&store, Some("b"));
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|f| f.severity != Severity::Error),
+        "{report:?}"
+    );
+    assert!(!report.ok, "{report:?}");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("store-wide findings outside bank `b`")),
+        "{:?}",
+        report.notes
+    );
+}
+
+/// The note must fire even when the scoped bank carries the same error code as
+/// another bank: the outside finding is real regardless.
+#[test]
+fn bank_scoped_verify_notes_an_outside_bank_with_the_same_code() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    store.create_memory_item(&item("i2", "b"), "actor").unwrap();
+    let report = verify_bank(&store, Some("b"));
+    assert!(
+        error_codes(&report.findings).contains(&codes::DENSE_COVERAGE_GAP.to_owned()),
+        "{:?}",
+        report.findings
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("store-wide findings outside bank `b`")),
+        "{:?}",
+        report.notes
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains(codes::DENSE_COVERAGE_GAP)),
+        "{:?}",
+        report.notes
+    );
+}
+
+/// A bank-scoped pass reads no other bank: no note names another bank, and no
+/// field carries its name or its findings.
+#[test]
+fn verify_scoped_never_reads_another_bank() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    store.put_assoc_edge(&orphan_edge("a")).unwrap();
+    let report = verify_scoped(
+        &VerifyArgs {
+            store: &store,
+            index: &store,
+            bank: None,
+            timestamp: TS,
+        },
+        "b",
+    )
+    .expect("verify_scoped");
+    // The named bank is the report's scope whatever the args leave unsaid.
+    assert_eq!(report.scope, "bank:b");
+    assert!(report.ok, "{report:?}");
+    assert!(report.notes.is_empty(), "{:?}", report.notes);
+    let body = serde_json::to_string(&report).expect("report json");
+    assert!(!body.contains("store-wide findings outside"), "{body}");
+    assert!(!body.contains("bank:a"), "{body}");
+    assert!(!body.contains(codes::ORPHAN_ASSOC_EDGE), "{body}");
+}
+
+/// The whole-store pass already reports every bank's findings, so it carries no
+/// note about banks outside a scope it does not have.
+#[test]
+fn store_wide_verify_carries_no_note() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    let report = verify_bank(&store, None);
+    assert!(!report.ok, "{report:?}");
+    assert!(report.notes.is_empty(), "{:?}", report.notes);
+}
+
+#[test]
+fn clean_bank_verify_is_ok_without_a_note() {
+    let store = store();
+    store.register_bank("b", TS).unwrap();
+    let report = verify_bank(&store, Some("b"));
+    assert!(report.ok, "{report:?}");
+    assert_eq!(report.scope, "bank:b");
+    assert!(report.notes.is_empty(), "{:?}", report.notes);
 }

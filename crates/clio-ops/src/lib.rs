@@ -57,4 +57,4 @@ pub use doctor::{
 pub use finding::{Findings, OpsFinding, Severity, codes, redact_credentials, scope_label};
 pub use reindex::{ReindexArgs, ReindexReport, reindex, target_label};
 pub use repair::{ActionOutcome, ActionStatus, RepairArgs, RepairOutcome, repair};
-pub use verify::{VerifyArgs, VerifyReport, error_codes, verify};
+pub use verify::{VerifyArgs, VerifyReport, error_codes, store_wide_note, verify, verify_scoped};

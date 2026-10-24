@@ -80,7 +80,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "verify",
-            description: "Deeper read-only consistency pass over referential integrity and index coverage; aggregate ok is false when any error-severity finding exists.",
+            description: "Deeper read-only consistency pass over referential integrity and index coverage; aggregate ok is false when any error-severity finding exists. A pass for a named bank is also not ok while another bank carries an error finding, and names those codes in notes; a bound caller's pass reads no other bank and so carries no such note.",
             required: &[],
             props: vec![
                 (

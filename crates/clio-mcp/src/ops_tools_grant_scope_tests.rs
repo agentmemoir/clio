@@ -275,3 +275,71 @@ fn unbound_reindex_without_bank_and_shared_enabled_sweeps_the_whole_store() {
     );
     assert_eq!(out["indexable_items"], 2, "{out}");
 }
+
+/// The `notes` strings of a verify report.
+fn report_notes(report: &Value) -> Vec<&str> {
+    report["notes"]
+        .as_array()
+        .map(|notes| notes.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// `verify` publishes `notes` too, so a bound caller must not read another
+/// bank's codes or the note that names them, while the unbound operator on the
+/// same bank still gets that note.
+#[test]
+fn bound_verify_does_not_read_another_bank() {
+    let original = state(false);
+    seed_item(&original, "bank-b", "itm-b");
+    plant_orphan_edge(&original, "bank-b");
+    let restricted = bound(&original, &["bank-a"]);
+
+    let scoped = dispatch(&restricted, "verify", &json!({ "timestamp": TS }));
+    assert_eq!(scoped["scope"], "bank:bank-a", "{scoped}");
+    assert_eq!(scoped["ok"], Value::Bool(true), "{scoped}");
+    assert!(
+        report_notes(&scoped)
+            .iter()
+            .all(|note| !note.contains("store-wide findings outside")),
+        "verify leaked a store-wide note: {scoped}"
+    );
+    let body = scoped.to_string();
+    assert!(
+        !body.contains("bank:bank-b"),
+        "verify scoped a finding to the foreign bank: {body}"
+    );
+    // Only the seeded foreign bank can carry these, so a body that names one of
+    // them came from outside the caller's grant.
+    for code in [
+        "ORPHAN_ASSOC_EDGE",
+        "DENSE_COVERAGE_GAP",
+        "LEXICAL_COVERAGE_GAP",
+    ] {
+        assert!(
+            !body.contains(code),
+            "verify response names the foreign bank's {code}: {body}"
+        );
+    }
+
+    // The same bank from the unbound state does emit the note, so the silence
+    // above is the grant rather than a probe that never ran.
+    let open = dispatch(
+        &original,
+        "verify",
+        &json!({ "bank": "bank-a", "timestamp": TS }),
+    );
+    assert_eq!(open["scope"], "bank:bank-a", "{open}");
+    assert_eq!(open["ok"], Value::Bool(false), "{open}");
+    assert!(
+        report_notes(&open)
+            .iter()
+            .any(|note| note.contains("store-wide findings outside bank `bank-a`")),
+        "the unbound operator lost the store-wide note: {open}"
+    );
+    assert!(
+        report_notes(&open)
+            .iter()
+            .any(|note| note.contains("ORPHAN_ASSOC_EDGE")),
+        "the store-wide note names no foreign finding: {open}"
+    );
+}
