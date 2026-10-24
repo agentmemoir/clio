@@ -370,9 +370,10 @@ fn run_reindex<S: OpsRepos>(
         },
         None => clio_index::RebuildTargets::All,
     };
-    // `--confirm` alone starts the live rebuild, the way `repair` treats it; an
-    // explicit `--dry-run true` asks for the report-only path instead.
-    let confirm = flags.contains_key("confirm");
+    // `--confirm` alone starts the live rebuild, the way `repair` treats it. The
+    // value decides, not presence: the parser stores the token after a bare flag,
+    // so `--confirm false` is not a confirmation. `--dry-run true` asks for a report.
+    let confirm = flags.get("confirm").is_some_and(|v| v != "false");
     let dry_run = match flags.get("dry-run") {
         Some(v) => v != "false",
         None => !confirm,

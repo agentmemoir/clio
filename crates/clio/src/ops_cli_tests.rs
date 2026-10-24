@@ -211,6 +211,22 @@ fn reindex_confirm_alone_runs_the_live_rebuild() {
     );
 }
 
+/// The parser stores the token after a bare flag, so `--confirm false` is a
+/// value the run must honour, not a presence: it stays a report and writes
+/// nothing (issue 270).
+#[test]
+fn reindex_confirm_false_reports_and_writes_nothing() {
+    let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-confirm-false");
+    let db = scratch.join("clio.db");
+    crate::backup_cli_fixtures::populated_store(&db, 2, 1);
+    let before = coverage_of(&db);
+    assert_eq!(
+        run_ops_args(reindex_args(&db, &["--confirm", "false"])),
+        ExitCode::from(3)
+    );
+    assert_eq!(coverage_of(&db), before, "`--confirm false` wrote nothing");
+}
+
 /// `--confirm` with an explicit `--dry-run true` asks for two opposite things,
 /// so it is refused instead of quietly reporting.
 #[test]

@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - The printed `{ok, dry_run, ..._applied}` fields and their exit codes
-//! - The refusal of the contradictory `--confirm --dry-run` pair
+//! - The refusal of the contradictory `--confirm --dry-run` pair, of a live run
+//!   without confirmation, and of a `--confirm false` live request
 //!
 //! ## Does not own
 //! - The swap under test (`ops_cli` / `clio-ops`)
@@ -152,5 +153,79 @@ fn confirm_with_a_dry_run_is_refused() {
     let (code, report) = report_of(&output);
     assert_eq!(code, Some(3), "{report}");
     assert_eq!(report["ok"], Value::Bool(false), "{report}");
+    assert_eq!(report["code"], "invalid_argument", "{report}");
+}
+
+/// The parser stores the token after a bare flag, so `--confirm false` must be
+/// read by value: it is a report, never a live mutating rebuild (issue 270).
+#[test]
+fn confirm_false_is_a_report_not_a_live_rebuild() {
+    let (db, backups) = fixture("confirm-false");
+    seed(&db, &backups);
+    let output = run(
+        &db,
+        &backups,
+        &[
+            "ops",
+            "reindex",
+            "--target",
+            "lexical",
+            "--confirm",
+            "false",
+        ],
+    );
+    let (code, report) = report_of(&output);
+    assert_eq!(code, Some(3), "{report}");
+    assert_eq!(report["ok"], Value::Bool(false), "{report}");
+    assert_eq!(report["dry_run"], Value::Bool(true), "{report}");
+    assert_eq!(report["lexical_applied"], serde_json::json!(0), "{report}");
+    assert_eq!(report["indexable_items"], serde_json::json!(2), "{report}");
+}
+
+/// A mutating run without confirmation is refused, so an explicit
+/// `--dry-run false` on its own cannot start a rebuild (issue 270).
+#[test]
+fn dry_run_false_without_confirm_is_refused() {
+    let (db, backups) = fixture("live-unconfirmed");
+    seed(&db, &backups);
+    let output = run(
+        &db,
+        &backups,
+        &[
+            "ops",
+            "reindex",
+            "--target",
+            "lexical",
+            "--dry-run",
+            "false",
+        ],
+    );
+    let (code, report) = report_of(&output);
+    assert_eq!(code, Some(3), "{report}");
+    assert_eq!(report["code"], "invalid_argument", "{report}");
+}
+
+/// `--confirm false --dry-run false` is a mutating run without confirmation, so
+/// the same gate refuses it instead of rebuilding live.
+#[test]
+fn confirm_false_with_dry_run_false_is_refused() {
+    let (db, backups) = fixture("confirm-false-live");
+    seed(&db, &backups);
+    let output = run(
+        &db,
+        &backups,
+        &[
+            "ops",
+            "reindex",
+            "--target",
+            "lexical",
+            "--confirm",
+            "false",
+            "--dry-run",
+            "false",
+        ],
+    );
+    let (code, report) = report_of(&output);
+    assert_eq!(code, Some(3), "{report}");
     assert_eq!(report["code"], "invalid_argument", "{report}");
 }
