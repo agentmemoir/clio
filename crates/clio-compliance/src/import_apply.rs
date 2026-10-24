@@ -26,24 +26,29 @@
 //!
 //! Keep this module focused on import planning.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use clio_admission::gated::{GateRequest, gated_create_raw};
-use clio_config::secret::{masked_clone, scrub_inline_secrets};
+use clio_config::secret::scrub_inline_secrets;
 use clio_store::BatchWrite;
-use clio_types::{AmError, ItemKind, MemoryItem, SemanticCategory, TaskRecord};
+use clio_types::{AmError, MemoryItem, TaskRecord};
 use serde_json::json;
 
-use super::ImportArgs;
 use super::import_rows::opaque_record;
+use super::{ImportArgs, SkippedInvalid};
 use crate::bundle::BundleEnvelope;
-use crate::export_mask::scrub_context;
 
 // Persona row planning lives in its own module (extracted to keep this file
 // within the source-size bound); it shares the same `Planner` state.
 #[path = "import_apply_persona.rs"]
 mod persona;
+
+// The pure key and masking helpers live in their own module for the same
+// reason; the row planners reach them through this re-export.
+#[path = "import_apply_keys.rs"]
+mod keys;
+
+pub(super) use keys::{import_id, kind_key, masked_item};
 
 /// Per-entity import planner (see `run` for the entity order).
 pub(super) struct Planner<'a> {
@@ -54,7 +59,11 @@ pub(super) struct Planner<'a> {
     pub(super) skip: usize,
     pub(super) reject: usize,
     pub(super) overwrite: usize,
+    /// Rows skipped because their own stored content failed validation.
+    pub(super) skip_invalid: usize,
     pub(super) samples: Vec<String>,
+    /// One `(id, code, masked reason)` entry per skipped row (capped at 10).
+    pub(super) skipped_invalid: Vec<SkippedInvalid>,
     pub(super) notes: Vec<String>,
     pub(super) item_exists: HashMap<String, bool>,
     pub(super) edge_seen: HashMap<String, bool>,
@@ -79,7 +88,9 @@ impl<'a> Planner<'a> {
             skip: 0,
             reject: 0,
             overwrite: 0,
+            skip_invalid: 0,
             samples: Vec::new(),
+            skipped_invalid: Vec::new(),
             notes: Vec::new(),
             item_exists: HashMap::new(),
             edge_seen: HashMap::new(),
@@ -148,6 +159,24 @@ impl<'a> Planner<'a> {
         }
     }
 
+    /// Record one entity this run reports and skips instead of failing the
+    /// whole import. A skipped deferred carrier also becomes unusable, so the
+    /// row that depends on it takes the existing carrier-missing path.
+    fn record_skip_invalid(&mut self, id: &str, carrier: bool, err: &AmError) {
+        self.skip_invalid += 1;
+        let reason = scrub_inline_secrets(&err.message);
+        if carrier {
+            self.rejected_carriers.insert(id.to_owned(), reason.clone());
+        }
+        if self.skipped_invalid.len() < 10 {
+            self.skipped_invalid.push(SkippedInvalid {
+                id: id.to_owned(),
+                code: err.code.as_str().to_owned(),
+                reason,
+            });
+        }
+    }
+
     pub(super) fn item_exists(&mut self, id: &str) -> Result<bool, AmError> {
         if let Some(seen) = self.item_exists.get(id) {
             return Ok(*seen);
@@ -191,6 +220,19 @@ impl<'a> Planner<'a> {
             bank.clone_into(&mut it.bank_id);
             let id = import_id(bank, &item.bank_id, &item.id).into_owned();
             it.id.clone_from(&id);
+            // A gist whose length predates the published cap must be reported
+            // and skipped, not abort the restore: the cap is a producer gate and
+            // the row already exists. The value is never truncated. Scoped to
+            // the gist alone — a structural `context` violation still fails the
+            // whole bundle, and this runs before the exists/force branch so the
+            // force path cannot stage a row the batch commit would reject.
+            if let Some(gist) = it.gist.as_deref()
+                && let Err(err) = clio_types::validate_gist(gist)
+            {
+                let carrier = self.deferred.contains(&item.id);
+                self.record_skip_invalid(&id, carrier, &err);
+                continue;
+            }
             if self.item_exists(&id)? {
                 if args.force {
                     self.overwrite += 1;
@@ -386,47 +428,6 @@ impl<'a> Planner<'a> {
         self.skip += count;
         self.note("tombstones are export provenance; not restored".to_owned());
     }
-}
-
-/// `items.id`-style primary keys are deployment-unique, so a cross-bank
-/// restore writes a derived id; derived from (source id, target bank) only, so
-/// re-importing the same bundle into the same bank stays idempotent.
-pub(super) fn import_id<'i>(bank: &str, source_bank: &str, id: &'i str) -> Cow<'i, str> {
-    if bank == source_bank {
-        Cow::Borrowed(id)
-    } else {
-        Cow::Owned(format!("{id}#{bank}"))
-    }
-}
-
-/// Candidate discriminator strings for the gated create path.
-pub(super) fn kind_key(item: &MemoryItem) -> (&'static str, &'static str) {
-    match item.kind {
-        ItemKind::Semantic => (
-            "semantic",
-            item.category.map_or("", SemanticCategory::as_str),
-        ),
-        ItemKind::Episodic => (
-            "episodic",
-            item.episodic_type
-                .map_or("", clio_types::EpisodicType::as_str),
-        ),
-    }
-}
-
-/// Defensive masking pass before a force overwrite (diagnostics-grade masking
-/// on top of the export-time masking already present in the bundle). A context
-/// that scrubs to an empty string is treated as absent, never written as `Some("")`.
-fn masked_item(item: &MemoryItem) -> MemoryItem {
-    let mut out = item.clone();
-    if let Some(snapshot) = out.snapshot.as_mut() {
-        *snapshot = masked_clone(snapshot);
-    }
-    if let Some(gist) = out.gist.as_mut() {
-        *gist = scrub_inline_secrets(gist);
-    }
-    out.context = scrub_context(out.context.as_deref());
-    out
 }
 
 #[cfg(test)]

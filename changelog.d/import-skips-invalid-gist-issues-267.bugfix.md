@@ -1,0 +1,1 @@
+An import now reports the entity id and skips an entity whose stored gist exceeds the published length limit, instead of aborting the whole bundle: every other entity in the bundle still applies, and the report lists what was skipped and why. [Issue #267](https://github.com/agentmemoir/clio/issues/267)
