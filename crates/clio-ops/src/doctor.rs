@@ -8,8 +8,12 @@
 //! plan registry that lets a later `repair` call resolve a returned plan id.
 //!
 //! ## Owns
-//! - [`doctor`]: finding-to-action mapping, risk/quiesce annotations, and
-//!   non-repairable notes
+//! - [`doctor_unscoped`]: finding-to-action mapping, risk/quiesce
+//!   annotations, non-repairable notes, and the store-wide note probe, over the
+//!   bank the arguments name or the whole store when they name none
+//! - [`doctor_scoped`]: the same plan for one named bank, with the store-wide
+//!   note probe never run, so a caller whose grant covers one bank reads no
+//!   other bank
 //! - [`RepairAction`], [`DoctorPlan`], and [`PlanRegistry`]
 //! - The repair action allowlist (`known_actions` / `is_known_action`)
 //!
@@ -142,7 +146,7 @@ impl PlanRegistry {
     }
 }
 
-/// Inputs for [`doctor`].
+/// Inputs for [`doctor_unscoped`] and [`doctor_scoped`].
 pub struct DoctorArgs<'a> {
     /// Operator health repository.
     pub store: &'a dyn OpsStore,
@@ -158,28 +162,57 @@ pub struct DoctorArgs<'a> {
     pub plans: &'a PlanRegistry,
 }
 
-/// Compose an ordered repair plan from verify findings. Never mutates the store.
+/// Compose an ordered repair plan with no credential scope: over the bank
+/// `args.bank` names, or over the whole store when it names none. Never mutates
+/// the store.
 ///
 /// When `dry_run=false` the plan is recorded in `args.plans` so a later
 /// `repair(plan_id)` can resolve it; the store itself is untouched either way.
 ///
+/// This form reads the store-wide note probe, so a plan for a named bank also
+/// reports the error codes other banks carry, and a reader does not mistake a
+/// clean plan for a clean store. A caller whose grant covers one bank must call
+/// [`doctor_scoped`] instead, which never runs that probe.
+///
 /// # Errors
 /// Storage/index read failures (an unreadable store cannot be planned for).
-pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
+pub fn doctor_unscoped(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
+    compose_plan(args, args.bank, true)
+}
+
+/// Compose an ordered repair plan for exactly `bank`, reading no other bank.
+///
+/// The store-wide note probe never runs here: a caller limited to one bank must
+/// not learn that another bank exists or which codes it carries. `bank` is the
+/// plan's scope whatever `args.bank` names. A caller with no bank to name uses
+/// [`doctor_unscoped`].
+///
+/// # Errors
+/// Storage/index read failures (an unreadable store cannot be planned for).
+pub fn doctor_scoped(args: &DoctorArgs<'_>, bank: &str) -> Result<DoctorPlan, AmError> {
+    compose_plan(args, Some(bank), false)
+}
+
+/// The plan body both entry points share (`bank` `None` = whole store).
+fn compose_plan(
+    args: &DoctorArgs<'_>,
+    bank: Option<&str>,
+    store_wide_notes: bool,
+) -> Result<DoctorPlan, AmError> {
     let report = crate::verify::verify(&VerifyArgs {
         store: args.store,
         index: args.index,
-        bank: args.bank,
+        bank,
         timestamp: args.timestamp,
     })?;
     let (actions, mut notes) = compose(&report);
-    if args.bank.is_some() {
-        notes.extend(store_wide_note(args));
+    if let Some(bank) = bank.filter(|_| store_wide_notes) {
+        notes.extend(store_wide_note(args, bank));
     }
     let plan = DoctorPlan {
         plan_id: args.plans.allocate_id(),
         generated_at: args.timestamp.to_owned(),
-        bank: args.bank.map(str::to_owned),
+        bank: bank.map(str::to_owned),
         dry_run: args.dry_run,
         ok: report.ok,
         actions,
@@ -198,8 +231,7 @@ pub fn doctor(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
 /// banks (not against the whole-store aggregate) catches a gap in another bank
 /// even when the scoped bank carries the same code. A store whose bank list
 /// cannot be read adds no claim.
-fn store_wide_note(args: &DoctorArgs<'_>) -> Option<String> {
-    let bank = args.bank?;
+fn store_wide_note(args: &DoctorArgs<'_>, bank: &str) -> Option<String> {
     let mut outside: Vec<String> = Vec::new();
     for other in args.store.bank_ids().ok()? {
         if other == bank {

@@ -251,7 +251,7 @@ fn run_diagnose<S: OpsRepos>(
     embedder: Option<&dyn Embedder>,
     timestamp: &str,
 ) -> ExitCode {
-    let report = clio_ops::diagnose(&clio_ops::DiagnoseArgs {
+    let report = clio_ops::diagnose_unscoped(&clio_ops::DiagnoseArgs {
         store,
         index: store,
         embedder,
@@ -292,7 +292,7 @@ fn run_doctor<S: OpsRepos>(
     plans: &clio_ops::PlanRegistry,
 ) -> ExitCode {
     let dry_run = flags.get("dry-run").is_none_or(|v| v != "false");
-    match clio_ops::doctor(&clio_ops::DoctorArgs {
+    match clio_ops::doctor_unscoped(&clio_ops::DoctorArgs {
         store,
         index: store,
         bank,
