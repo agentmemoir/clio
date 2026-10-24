@@ -386,3 +386,7 @@ mod subject_tests;
 #[cfg(test)]
 #[path = "cli_write_portability_import_render_tests.rs"]
 mod import_render_tests;
+
+#[cfg(test)]
+#[path = "cli_write_portability_review_export_tests.rs"]
+mod review_export_tests;

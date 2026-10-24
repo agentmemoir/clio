@@ -72,3 +72,7 @@ pub(crate) fn masked_item(item: &MemoryItem) -> MemoryItem {
     out.context = scrub_context(out.context.as_deref());
     out
 }
+
+#[cfg(test)]
+#[path = "import_apply_keys_tests.rs"]
+mod tests;
