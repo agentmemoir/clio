@@ -106,7 +106,8 @@ pub struct McpState {
     pub bank_scope: Arc<dyn clio_store::BankScopeStore>,
     /// Export destination-custody persistence.
     pub custody: Arc<dyn DestinationCustodyStore>,
-    /// Best-effort measured live-store facts for a subject-scoped export.
+    /// Live-store facts, measured once at open; a failed measurement fails the
+    /// open, and only an in-memory store opens with no measurement.
     pub inventory_facts: Arc<clio_compliance::InventoryFacts>,
     /// Whether [`Self::inventory_facts`] is a real measurement. A subject
     /// export refuses (`InvalidArgument`) rather than emit a wrong manifest.
