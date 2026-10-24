@@ -8,8 +8,8 @@
 //! reports, and what it must not disclose about a foreign bank.
 //!
 //! ## Owns
-//! - `diagnose_scoped` bank inventory for an existing, an unknown, and a
-//!   whole-store scope
+//! - `diagnose_scoped` bank inventory for an existing and an unknown bank
+//! - `diagnose_whole_store` listing every bank
 //! - Scoped coverage counts and the disclosure boundary between banks
 //!
 //! ## Does not own
@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on scoped diagnose behavior.
 
-use crate::diagnose::{DiagnoseArgs, diagnose_scoped};
+use crate::diagnose::{DiagnoseArgs, diagnose_scoped, diagnose_whole_store};
 use crate::diagnose_fixtures::{TS, failed, item, sqlite};
 use crate::finding::{Severity, codes};
 use clio_store::{
@@ -64,7 +64,7 @@ fn scoped_report_lists_only_the_named_bank() {
             embedder: None,
             timestamp: TS,
         },
-        Some("bank-a"),
+        "bank-a",
     );
     assert!(scoped.ok, "{:?}", scoped.findings);
     assert_eq!(scoped.banks, vec!["bank-a".to_owned()]);
@@ -88,7 +88,7 @@ fn unknown_bank_scope_lists_no_bank() {
             embedder: None,
             timestamp: TS,
         },
-        Some("ghost-bank"),
+        "ghost-bank",
     );
     assert!(report.ok, "{:?}", report.findings);
     assert!(report.backend_reachable);
@@ -105,20 +105,17 @@ fn unknown_bank_scope_lists_no_bank() {
     assert!(!rendered.contains("bank-a"), "{rendered}");
 }
 
-/// A whole-store scope (`None`) still lists every bank, the behavior callers
+/// The whole-store entry point still lists every bank, the behavior callers
 /// had before the scope parameter existed.
 #[test]
-fn whole_store_scope_lists_every_bank() {
+fn whole_store_snapshot_lists_every_bank() {
     let store = two_banks();
-    let report = diagnose_scoped(
-        &DiagnoseArgs {
-            store: &store,
-            index: &store,
-            embedder: None,
-            timestamp: TS,
-        },
-        None,
-    );
+    let report = diagnose_whole_store(&DiagnoseArgs {
+        store: &store,
+        index: &store,
+        embedder: None,
+        timestamp: TS,
+    });
     let mut banks = report.banks.clone();
     banks.sort();
     assert_eq!(banks, vec!["bank-a".to_owned(), "bank-b".to_owned()]);
@@ -183,7 +180,7 @@ fn unreadable_bank_inventory_is_scoped_to_the_bank() {
             embedder: None,
             timestamp: TS,
         },
-        Some("bank-a"),
+        "bank-a",
     );
     assert!(!report.ok);
     assert!(report.banks.is_empty(), "{:?}", report.banks);

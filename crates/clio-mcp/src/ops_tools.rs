@@ -118,18 +118,18 @@ fn ops_result(state: &McpState, name: &str, args: &Value) -> Result<Value, AmErr
 /// `diagnose` published no bank scope before the grant existed, so a local
 /// caller without a credential keeps the whole-store snapshot whatever `bank`
 /// key it carries. Only a bound principal narrows the report, to the bank its
-/// grant already covers.
+/// grant already covers. The scope match names which snapshot the caller gets.
 fn diagnose_result(state: &McpState, ctx: &OpContext, timestamp: &str) -> Result<Value, AmError> {
-    let scope = state.op_scope(ctx, None)?.bank();
-    let report = clio_ops::diagnose_scoped(
-        &clio_ops::DiagnoseArgs {
-            store: &*state.ops_store,
-            index: &*state.index,
-            embedder: embedder(state),
-            timestamp,
-        },
-        scope,
-    );
+    let args = clio_ops::DiagnoseArgs {
+        store: &*state.ops_store,
+        index: &*state.index,
+        embedder: embedder(state),
+        timestamp,
+    };
+    let report = match state.op_scope(ctx, None)? {
+        OpScope::Bank(bank) => clio_ops::diagnose_scoped(&args, bank),
+        OpScope::WholeStore => clio_ops::diagnose_whole_store(&args),
+    };
     Ok(to_value(&report))
 }
 
@@ -160,28 +160,34 @@ fn verify_result(
 ///
 /// The store-wide note probe reads every other bank, so it runs only for an
 /// unbound local operator: a bound caller whose grant covers one bank must not
-/// learn from `notes` that another bank exists or which codes it carries.
+/// learn from `notes` that another bank exists or which codes it carries. The
+/// scope and the principal together therefore pick the planner at this call
+/// site: only a bound caller takes the bank-scoped form, and an unbound local
+/// operator keeps the whole-store form even when it names a bank.
 fn doctor_result(
     state: &McpState,
     args: &Value,
     ctx: &OpContext,
     timestamp: &str,
 ) -> Result<Value, AmError> {
-    let bank = state.op_scope(ctx, opt_str(args, "bank"))?.bank();
-    if let Some(bank) = bank {
+    let scope = state.op_scope(ctx, opt_str(args, "bank"))?;
+    if let Some(bank) = scope.bank() {
         state.require_known_bank(bank)?;
     }
-    let plan = clio_ops::doctor_scoped(
-        &clio_ops::DoctorArgs {
-            store: &*state.ops_store,
-            index: &*state.index,
-            bank,
-            dry_run: opt_bool(args, "dry_run", true)?,
-            timestamp,
-            plans: &state.ops_plans,
-        },
-        state.principal.is_none(),
-    )?;
+    let doctor_args = clio_ops::DoctorArgs {
+        store: &*state.ops_store,
+        index: &*state.index,
+        bank: scope.bank(),
+        dry_run: opt_bool(args, "dry_run", true)?,
+        timestamp,
+        plans: &state.ops_plans,
+    };
+    let plan = match scope {
+        OpScope::Bank(bank) if state.principal.is_some() => {
+            clio_ops::doctor_scoped(&doctor_args, bank)?
+        }
+        _ => clio_ops::doctor_whole_store(&doctor_args)?,
+    };
     Ok(to_value(&plan))
 }
 

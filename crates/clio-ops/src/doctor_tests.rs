@@ -24,7 +24,7 @@
 
 use crate::doctor::{
     ACTION_DROP_ORPHAN_ASSOC_EDGE, ACTION_REBUILD_DENSE_INDEX, ACTION_REBUILD_LEXICAL_INDEX,
-    DoctorArgs, PlanRegistry, doctor, is_known_action, known_actions,
+    DoctorArgs, PlanRegistry, doctor_scoped, doctor_whole_store, is_known_action, known_actions,
 };
 use crate::finding::codes;
 use clio_store::{AssocEdgeRecord, AssocKind, SqliteStore, Store};
@@ -82,7 +82,7 @@ fn plan_for(
     dry_run: bool,
 ) -> (PlanRegistry, crate::doctor::DoctorPlan) {
     let registry = PlanRegistry::new();
-    let plan = doctor(&DoctorArgs {
+    let plan = doctor_whole_store(&DoctorArgs {
         store,
         index: store,
         bank,
@@ -178,6 +178,40 @@ fn scoped_plan_notes_an_outside_bank_with_the_same_code() {
         "{:?}",
         plan.notes
     );
+}
+
+/// A bank-scoped plan reads no other bank: no store-wide note names another
+/// bank, and no field carries its name or its findings.
+#[test]
+fn scoped_plan_never_reads_another_bank() {
+    let store = store();
+    store.create_memory_item(&item("i1", "a"), "actor").unwrap();
+    store.put_assoc_edge(&orphan_edge("a")).unwrap();
+    let registry = PlanRegistry::new();
+    let plan = doctor_scoped(
+        &DoctorArgs {
+            store: &store,
+            index: &store,
+            bank: None,
+            dry_run: true,
+            timestamp: TS,
+            plans: &registry,
+        },
+        "b",
+    )
+    .expect("doctor_scoped");
+    // The named bank is the plan's scope whatever the args leave unsaid.
+    assert_eq!(plan.bank.as_deref(), Some("b"));
+    assert!(
+        plan.notes
+            .iter()
+            .all(|note| !note.contains("store-wide findings outside")),
+        "{:?}",
+        plan.notes
+    );
+    let body = serde_json::to_string(&plan).expect("plan json");
+    assert!(!body.contains("bank:a"), "{body}");
+    assert!(!body.contains("ORPHAN_ASSOC_EDGE"), "{body}");
 }
 
 #[test]

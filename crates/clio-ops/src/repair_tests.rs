@@ -24,7 +24,7 @@
 
 use crate::doctor::{
     ACTION_DROP_ORPHAN_ASSOC_EDGE, ACTION_REBUILD_DENSE_INDEX, ACTION_REBUILD_LEXICAL_INDEX,
-    DoctorArgs, PlanRegistry, doctor,
+    DoctorArgs, PlanRegistry, doctor_whole_store,
 };
 use crate::finding::codes;
 use crate::repair::{ActionStatus, RepairArgs, RepairOutcome, repair};
@@ -383,7 +383,7 @@ fn refused_plan_falls_back_to_plan_bank_scope() {
     let store = store();
     store.put_assoc_edge(&orphan_edge("b")).unwrap();
     let registry = PlanRegistry::new();
-    let plan = doctor(&DoctorArgs {
+    let plan = doctor_whole_store(&DoctorArgs {
         store: &store,
         index: &store,
         bank: Some("b"),
@@ -421,7 +421,7 @@ fn doctor_plan_id_resolves_and_executes() {
     let store = store();
     store.put_assoc_edge(&orphan_edge("b")).unwrap();
     let registry = PlanRegistry::new();
-    let plan = doctor(&DoctorArgs {
+    let plan = doctor_whole_store(&DoctorArgs {
         store: &store,
         index: &store,
         bank: Some("b"),

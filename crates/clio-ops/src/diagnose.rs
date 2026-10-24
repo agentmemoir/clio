@@ -8,10 +8,10 @@
 //! field names and PII-free findings.
 //!
 //! ## Owns
-//! - [`diagnose`]: backend ping, schema version, bank list, vector index
-//!   presence, embedding readiness, coverage counts, and the `ok` bit
-//! - [`diagnose_scoped`]: the same snapshot narrowed to one bank, so a scoped
-//!   caller sees only that bank's name and volume
+//! - [`diagnose_whole_store`]: backend ping, schema version, bank list, vector
+//!   index presence, embedding readiness, coverage counts, and the `ok` bit
+//! - [`diagnose_scoped`]: the same snapshot narrowed to one named bank, so a
+//!   scoped caller sees only that bank's name and volume
 //! - [`DiagnoseReport`] shape
 //!
 //! ## Does not own
@@ -38,7 +38,7 @@ use serde::Serialize;
 /// reader at the deeper pass instead of standing in for it.
 pub const VERIFY_POINTER: &str = "clio ops verify";
 
-/// Inputs for [`diagnose`].
+/// Inputs for [`diagnose_whole_store`] and [`diagnose_scoped`].
 pub struct DiagnoseArgs<'a> {
     /// Operator health repository.
     pub store: &'a dyn OpsStore,
@@ -92,20 +92,28 @@ pub struct DiagnoseReport {
     pub verify_pointer: &'static str,
 }
 
-/// Run the read-only health snapshot. Never fails: probe errors become findings.
+/// Run the read-only health snapshot for the whole store. Never fails: probe
+/// errors become findings.
 #[must_use]
-pub fn diagnose(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
-    diagnose_scoped(args, None)
+pub fn diagnose_whole_store(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
+    snapshot(args, None)
 }
 
-/// Run the read-only health snapshot for one bank (`None` = whole store).
+/// Run the read-only health snapshot for exactly `bank`.
 ///
-/// A scoped snapshot lists the scoped bank only when it exists and reports the
-/// coverage counts for that bank, so a caller limited to one bank learns
-/// nothing about another's name or volume. Never fails: probe errors become
+/// A scoped snapshot lists `bank` only when it exists and reports the coverage
+/// counts for that bank, so a caller limited to one bank learns nothing about
+/// another's name or volume. There is no whole-store form here: a caller with no
+/// bank to name uses [`diagnose_whole_store`]. Never fails: probe errors become
 /// findings.
 #[must_use]
-pub fn diagnose_scoped(args: &DiagnoseArgs<'_>, bank: Option<&str>) -> DiagnoseReport {
+pub fn diagnose_scoped(args: &DiagnoseArgs<'_>, bank: &str) -> DiagnoseReport {
+    snapshot(args, Some(bank))
+}
+
+/// The snapshot body both entry points share (`bank` `None` = whole store).
+#[must_use]
+fn snapshot(args: &DiagnoseArgs<'_>, bank: Option<&str>) -> DiagnoseReport {
     let mut findings = Findings::new();
     let reachable = match args.store.ping() {
         Ok(()) => true,
