@@ -128,3 +128,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_ops_defs_tests.rs"]
+mod schema_ops_defs_tests;
