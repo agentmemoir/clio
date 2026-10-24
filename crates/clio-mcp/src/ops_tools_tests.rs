@@ -229,6 +229,33 @@ fn reindex_dry_run_reports_cost_and_rejects_unknown_target() {
     assert_eq!(bogus["ok"], Value::Bool(false), "{bogus}");
 }
 
+/// `confirm` alone is the live switch over MCP, as it is on the CLI (issue 270).
+#[test]
+fn reindex_confirm_alone_runs_live() {
+    let st = state();
+    seed_item(&st, "ops-reindex-live");
+    let r = dispatch(
+        &st,
+        "reindex",
+        &json!({ "bank": "bank-ops", "target": "lexical", "confirm": true, "timestamp": TS }),
+    );
+    assert_eq!(r["ok"], Value::Bool(true), "{r}");
+    assert!(r["lexical_applied"].as_u64().is_some_and(|n| n > 0), "{r}");
+}
+
+/// `confirm` with an explicit `dry_run` is the contradictory pair, refused.
+#[test]
+fn reindex_confirm_with_dry_run_true_is_refused() {
+    let st = state();
+    let r = dispatch(
+        &st,
+        "reindex",
+        &json!({ "bank": "bank-ops", "confirm": true, "dry_run": true, "timestamp": TS }),
+    );
+    assert_eq!(r["code"], "invalid_argument", "{r}");
+    assert_eq!(r["ok"], Value::Bool(false), "{r}");
+}
+
 #[test]
 fn ops_tools_are_schema_published_and_bound() {
     let defs = crate::schema::catalog_defs();

@@ -42,13 +42,13 @@ use std::sync::Arc;
 ///   plans, unreachable diagnose backends, or failed repair actions.
 /// - `2`: a repair was refused (missing confirm or unknown action), the
 ///   backend value is invalid, or the `clio ops` subcommand is unknown.
-/// - `3`: `reindex` refused, failed, or ran report-only: a dry run applies
-///   nothing, so its report is `ok:false`.
+/// - `3`: `reindex` refused, failed, or ran report-only (`--dry-run`): a report
+///   applies nothing, so it is never `ok`.
 /// - `75`: a Postgres lock conflict is temporary; retry the command.
 ///
 /// `doctor` never mutates the store under any `--dry-run` value. `repair` and
-/// `reindex` mutate only with `--confirm`, which makes `reindex` live unless a
-/// `--dry-run` asks for a report instead — that contradictory pair is refused.
+/// `reindex` mutate only with `--confirm`: for `reindex` that alone starts the
+/// live rebuild, and `--dry-run` asks for a report instead — the pair is refused.
 ///
 /// Plan ids are process-local: `doctor` and `repair` run as separate processes,
 /// so pass an explicit `--actions` list for a cross-invocation repair.
@@ -370,9 +370,8 @@ fn run_reindex<S: OpsRepos>(
         },
         None => clio_index::RebuildTargets::All,
     };
-    // `--confirm` alone is the live switch, the way `repair` treats it;
-    // `--dry-run false` is the older spelling of the same thing. A bare or
-    // `true` `--dry-run` asks for a report instead.
+    // `--confirm` alone starts the live rebuild, the way `repair` treats it; an
+    // explicit `--dry-run true` asks for the report-only path instead.
     let confirm = flags.contains_key("confirm");
     let dry_run = match flags.get("dry-run") {
         Some(v) => v != "false",

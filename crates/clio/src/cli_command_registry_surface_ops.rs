@@ -9,8 +9,8 @@
 //! ## Owns
 //! - The five `CommandSpec` records and their usage examples
 //! - The database trio every ops subcommand prints, and the mutating
-//!   subcommands' extra flags: the `--dry-run false` pair, `--confirm`, the
-//!   repair plan and action selectors, and the reindex target legs
+//!   subcommands' extra flags: `--dry-run`, `--confirm`, the repair plan and
+//!   action selectors, and the reindex target legs
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche and the shared flag facts its children read (see
@@ -33,8 +33,17 @@ use super::{DB_BACKEND_BANK, DB_BANK_UNDOCUMENTED_GLOBALS};
 use crate::cli_command_registry::{GLOBAL_BACKEND, GLOBAL_BANK, GLOBAL_DB};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
-/// The flags the mutating `ops` subcommands document past the database trio.
-const DRY_RUN_FALSE: Flag = Flag::text("dry-run", "false", "Pass `false` to record or apply.");
+/// `ops doctor`'s dry-run pair: `--dry-run false` records the plan it composed.
+const DRY_RUN_FALSE: Flag = Flag::text(
+    "dry-run",
+    "false",
+    "`ops doctor` records the plan instead of only reporting it.",
+);
+/// `ops reindex`'s report-only switch: it applies nothing and is not `ok`.
+const REINDEX_DRY_RUN: Flag = Flag::toggle(
+    "dry-run",
+    "Report-only: applies nothing and is not reported as ok (`--confirm` is the live switch).",
+);
 const CONFIRM: Flag = Flag::toggle("confirm", "Confirms a live run in `ops_cli`.");
 const REPAIR_PLAN: Flag = Flag::text("plan", "PLAN_ID", "Plan id `ops_cli`'s repair resolves.");
 const REPAIR_ACTIONS: Flag = Flag::text("actions", "a,b", "Comma list `ops_cli`'s repair applies.");
@@ -176,7 +185,7 @@ pub(crate) const OPS_REPAIR: CommandSpec = CommandSpec {
 pub(crate) const OPS_REINDEX: CommandSpec = CommandSpec {
     name: "ops reindex",
     aliases: &[],
-    summary: "Rebuild derived indexes (live run requires --confirm); a lexical rebuild replaces legacy plaintext index rows with keyed term digests. Ops exit codes: 0 healthy or completed, 1 domain/runtime failure or findings, 2 usage or repair refusal, 3 reindex failed",
+    summary: "Rebuild derived indexes (live run requires --confirm); `--dry-run` is report-only and applies nothing, so a report-only run is not reported as ok. A lexical rebuild replaces legacy plaintext index rows with keyed term digests. Ops exit codes: 0 healthy or completed, 1 domain/runtime failure or findings, 2 usage or repair refusal, 3 reindex failed or ran report-only",
     notes: &[],
     positionals: &[],
     documented: &[
@@ -184,7 +193,7 @@ pub(crate) const OPS_REINDEX: CommandSpec = CommandSpec {
         GLOBAL_BACKEND,
         GLOBAL_BANK,
         REINDEX_TARGET,
-        DRY_RUN_FALSE,
+        REINDEX_DRY_RUN,
         CONFIRM,
     ],
     accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
@@ -198,7 +207,7 @@ pub(crate) const OPS_REINDEX: CommandSpec = CommandSpec {
         },
         Example {
             command: "clio ops reindex --target all",
-            comment: Some("Report the cost of rebuilding both legs."),
+            comment: Some("Report the cost of rebuilding both legs; applies nothing."),
         },
         Example {
             command: "clio ops reindex --target lexical --confirm --db ./memory.db",

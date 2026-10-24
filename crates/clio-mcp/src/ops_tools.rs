@@ -280,14 +280,22 @@ fn reindex_result(state: &McpState, args: &Value, ctx: &OpContext) -> Result<Val
         ));
     }
     let target = clio_index::RebuildTargets::parse(opt_str(args, "target").unwrap_or("all"))?;
+    // `confirm` is the live switch, as it is for the CLI: an absent `dry_run`
+    // follows `confirm` rather than defaulting to a report, so `confirm:true`
+    // alone rebuilds instead of raising the contradictory-pair refusal.
+    let confirm = opt_bool(args, "confirm", false)?;
+    let dry_run = match args.get("dry_run") {
+        None | Some(Value::Null) => !confirm,
+        Some(_) => opt_bool(args, "dry_run", true)?,
+    };
     let report = clio_ops::reindex(&clio_ops::ReindexArgs {
         store: &*state.store,
         index: &*state.index,
         embedder: embedder(state),
         bank,
         target,
-        dry_run: opt_bool(args, "dry_run", true)?,
-        confirm: opt_bool(args, "confirm", false)?,
+        dry_run,
+        confirm,
     })?;
     Ok(to_value(&report))
 }

@@ -129,7 +129,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "reindex",
-            description: "Rebuild derived dense and/or lexical indexes. dry_run=true (default) reports scope and cost only; a mutating run requires confirm=true and an embedding sidecar for the dense leg.",
+            description: "Rebuild derived dense and/or lexical indexes. confirm=true is the live switch and starts the rebuild; dry_run is report-only, defaulting to the opposite of confirm, so a report-only run applies nothing and is not reported as ok. A live dense rebuild also needs an embedding sidecar.",
             required: &[],
             props: vec![
                 (
@@ -147,8 +147,8 @@ pub fn ops_defs() -> Vec<ToolDef> {
                          surface is disabled)."
                     )),
                 ),
-                ("dry_run", b("Report scope/cost only (default true).")),
-                ("confirm", b("Perform the rebuild; default false.")),
+                ("dry_run", b("Report only; applies nothing and is not ok.")),
+                ("confirm", b("Start the live rebuild; default false.")),
                 ("timestamp", s("Report time; defaults to now.")),
             ],
         },
