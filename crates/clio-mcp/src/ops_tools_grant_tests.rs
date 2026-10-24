@@ -242,6 +242,66 @@ fn bound_repair_cannot_reach_the_bank_of_a_foreign_plan() {
     assert!(has_finding(&check, "ORPHAN_ASSOC_EDGE"), "{check}");
 }
 
+/// Whether the orphan edge [`plant_orphan_edge`] planted is still stored.
+fn orphan_edge_present(st: &McpState, bank: &str) -> bool {
+    st.store
+        .get_assoc_edge(bank, &format!("ghost-edge-{bank}"))
+        .expect("read orphan edge")
+        .is_some()
+}
+
+#[test]
+fn bound_repair_with_a_granted_explicit_bank_cannot_reach_a_foreign_plan() {
+    let original = state(false);
+    seed_item(&original, "bank-b", "itm-b");
+    plant_orphan_edge(&original, "bank-b");
+    plant_orphan_edge(&original, "bank-a");
+    let plan_id = registered_plan(&original, "bank-b");
+    let restricted = bound(&original, &["bank-a"]);
+
+    let foreign = dispatch(
+        &restricted,
+        "repair",
+        &json!({ "plan_id": plan_id, "bank": "bank-a", "confirm": true, "timestamp": TS }),
+    );
+    let absent = dispatch(
+        &restricted,
+        "repair",
+        &json!({ "plan_id": ABSENT_PLAN, "bank": "bank-a", "confirm": true, "timestamp": TS }),
+    );
+    // An explicit `bank` the grant covers must not make a plan it excludes
+    // resolvable: the answer is the unregistered id's, minus the id echo.
+    assert_eq!(foreign["ok"], Value::Bool(false), "{foreign}");
+    assert_eq!(
+        body_without_plan_id(&foreign, &plan_id),
+        body_without_plan_id(&absent, ABSENT_PLAN),
+        "a granted explicit bank let a foreign plan answer differently"
+    );
+    assert!(!foreign.to_string().contains("bank-b"), "{foreign}");
+
+    // Nothing ran, in either bank, and the other caller's plan is still there.
+    assert!(orphan_edge_present(&original, "bank-b"), "bank-b's edge");
+    assert!(orphan_edge_present(&original, "bank-a"), "bank-a's edge");
+    assert!(original.ops_plans.get(&plan_id).is_some(), "plan gone");
+}
+
+#[test]
+fn bound_repair_with_a_granted_explicit_bank_still_runs_a_granted_plan() {
+    let original = state(false);
+    plant_orphan_edge(&original, "bank-a");
+    let plan_id = registered_plan(&original, "bank-a");
+    let restricted = bound(&original, &["bank-a"]);
+
+    let out = dispatch(
+        &restricted,
+        "repair",
+        &json!({ "plan_id": plan_id, "bank": "bank-a", "confirm": true, "timestamp": TS }),
+    );
+    assert_eq!(out["ok"], Value::Bool(true), "{out}");
+    assert_eq!(out["bank"], "bank-a", "{out}");
+    assert!(!orphan_edge_present(&original, "bank-a"), "{out}");
+}
+
 #[test]
 fn bound_repair_without_bank_uses_a_granted_plans_bank() {
     let original = state(false);

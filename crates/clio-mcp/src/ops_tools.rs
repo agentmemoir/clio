@@ -205,9 +205,10 @@ fn repair_result(
 ) -> Result<Value, AmError> {
     let actions = string_array(args, "actions")?;
     let explicit_bank = opt_str(args, "bank");
-    // Only an omitted `bank` is affected: an explicit argument stays the
-    // authority it was, and the gate below still refuses a foreign one.
-    let unreachable_plan = explicit_bank.is_none() && plan_outside_grant(state, args);
+    // A plan the grant excludes stays unreachable whatever `bank` the request
+    // also carries: an explicit, granted argument must not turn a foreign plan
+    // into one the registry below resolves.
+    let unreachable_plan = plan_outside_grant(state, args);
     let plan_bank = if state.principal.is_some() && !unreachable_plan {
         opt_str(args, "plan_id")
             .and_then(|id| state.ops_plans.get(id))
@@ -244,17 +245,18 @@ fn repair_result(
 
 /// True when the request's plan id names a registered plan the grant excludes.
 ///
-/// The grant gate answers, so this asks the question the scope gate asks. An id
-/// that was never registered is not outside anything, and neither is a plan that
-/// names no bank: both keep the scope the context already authorized.
+/// The grant's own list answers, asked as a question rather than built into a
+/// refusal. An id that was never registered is not outside anything, and neither
+/// is a plan that names no bank: both keep the scope the context already
+/// authorized. An unbound caller is outside nothing.
 fn plan_outside_grant(state: &McpState, args: &Value) -> bool {
-    let Some(plan) = opt_str(args, "plan_id").and_then(|id| state.ops_plans.get(id)) else {
+    let Some(principal) = &state.principal else {
         return false;
     };
-    match plan.bank {
-        Some(bank) => state.require_bank_grant(&bank).is_err(),
-        None => false,
-    }
+    opt_str(args, "plan_id")
+        .and_then(|id| state.ops_plans.get(id))
+        .and_then(|plan| plan.bank)
+        .is_some_and(|bank| !principal.covers_bank(&bank))
 }
 
 /// The `reindex` arm: one bank, or every indexable bank for a local caller.
