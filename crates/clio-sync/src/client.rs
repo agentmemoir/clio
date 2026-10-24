@@ -422,6 +422,9 @@ fn open_failed_reason(stamped: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "client_envelope_tests.rs"]
+mod client_envelope_tests;
+#[cfg(test)]
 #[path = "client_receipt_tests.rs"]
 mod client_receipt_tests;
 #[cfg(test)]
