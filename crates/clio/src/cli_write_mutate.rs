@@ -76,7 +76,8 @@ impl WriteGroup for MutationWriteGroup {
 }
 
 /// `update ID VALUE --rule discrete|continuous` → `update`: the tool routes
-/// `discrete` to invalidation and `continuous` to the shared EMA engine.
+/// `discrete` to supersession, which stores the value on a replacement item and
+/// returns its id, and `continuous` to the shared EMA engine.
 fn update_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     let positionals = parsed.positionals();
     if positionals.len() != 2 {
@@ -99,7 +100,8 @@ fn update_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             positionals[0].as_str(),
             parsed,
             &args,
-            "apply the selected rule: `discrete` invalidates the item, `continuous` runs the shared EMA engine",
+            "apply the selected rule: `discrete` supersedes the item and stores the value on a \
+replacement item whose id is returned, `continuous` runs the shared EMA engine",
         ));
     }
     Ok(WriteCall::Tool {
@@ -322,3 +324,7 @@ fn render_correct(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_write_mutate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_mutate_text_tests.rs"]
+mod text_tests;
