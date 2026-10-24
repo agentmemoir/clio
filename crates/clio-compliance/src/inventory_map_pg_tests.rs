@@ -56,7 +56,7 @@ const PINNED: &[(&str, FamilyClass, u64, u64, u64, bool)] = &[
     ("beliefs", FamilyClass::Selected, 1, 1, 3, true),
     ("tombstones", FamilyClass::UnknownLink, 0, 0, 2, true),
     ("derived_item_structures", FamilyClass::OtherOnly, 0, 0, 9, true),
-    ("bank_structures", FamilyClass::InseparableShared, 0, 0, 6, true),
+    ("bank_structures", FamilyClass::InseparableShared, 0, 0, 7, true),
     ("events", FamilyClass::OtherOnly, 0, 0, 16, true),
     ("sync_state", FamilyClass::InseparableShared, 0, 0, 0, true),
     ("subject_keys", FamilyClass::OtherOnly, 0, 0, 4, true),
@@ -252,7 +252,7 @@ fn inventory_map_pg_the_fixture_store_gives_exact_per_family_counts() {
     }
     let reason = family(&mapping, "items").omission.as_deref();
     assert_eq!(reason, Some(ITEMS_OMISSION));
-    assert_eq!((mapping.selected_total, mapping.omitted_total), (10, 52));
+    assert_eq!((mapping.selected_total, mapping.omitted_total), (10, 53));
     assert!(!mapping.complete, "named omissions keep the mapping open");
     assert_no_other_subject(&mapping);
 

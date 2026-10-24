@@ -301,8 +301,25 @@ fn postgres_bad_assoc_kind_and_readonly_migrate() {
         )
         .unwrap();
 
-    let ro = format!("{url}?options=-c%20default_transaction_read_only%3Don");
-    assert!(PostgresStore::open(&ro, kms).is_err());
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let ro = format!("{url}{separator}options=-c%20default_transaction_read_only%3Don");
+    drop(
+        PostgresStore::open(&ro, Arc::clone(&kms))
+            .expect("a current schema needs no migration writes"),
+    );
+    store
+        .test_execute("DELETE FROM schema_settings WHERE key = 'postgres_bootstrap_version'")
+        .expect("make bootstrap migration necessary");
+    let refused = PostgresStore::open(&ro, Arc::clone(&kms));
+    drop(PostgresStore::open(&url, kms).expect("restore the bootstrap stamp with a writable open"));
+    let Err(error) = refused else {
+        panic!("a required migration must fail on a read-only connection")
+    };
+    assert_eq!(error.code, ErrorCode::Internal);
+    assert!(
+        error.message.contains("read-only transaction"),
+        "the migration must fail because writes are refused: {error}"
+    );
 }
 
 #[test]

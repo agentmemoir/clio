@@ -197,7 +197,7 @@ fn subject_bundle_pg_the_pinned_families_are_carried_and_verified() {
             bundle.manifest.selected_total,
             bundle.manifest.omitted_total
         ),
-        (10, 52),
+        (10, 53),
         "the pinned totals"
     );
     let value: Value = serde_json::from_slice(&bundle.bytes).expect("parse the selection bytes");
