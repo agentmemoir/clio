@@ -322,6 +322,12 @@ jobs:
           CHANGELOG_BASE: ${{ env.SCOPED_BASE }}
         run: make scripts-check-changelog
 
+      # The executable-directory helper: parallel probes of one directory do not
+      # collide (issue #323).
+      - name: Executable-directory helper self-test
+        if: always()
+        run: make scripts-check-exec-tempdir
+
       # Whether prose stays one paragraph per line. Runs no build.
       - name: Prose check
         if: always()

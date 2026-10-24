@@ -14,7 +14,7 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-gate-install scripts-check-quick \
 	scripts-check-ci-parity scripts-check-compose-model \
 	scripts-check-changelog scripts-check-prose \
-	scripts-check-env-mutation
+	scripts-check-env-mutation scripts-check-exec-tempdir
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -100,3 +100,8 @@ scripts-check-prose:
 scripts-check-env-mutation:
 	python3 scripts/env_mutation_check.py --self-test
 	python3 scripts/env_mutation_check.py
+
+# The executable-directory helper: parallel probes of one directory do not
+# collide (issue #323). The test lives beside the helper it checks.
+scripts-check-exec-tempdir:
+	python3 scripts/exec_tempdir_selftest.py
