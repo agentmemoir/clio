@@ -113,12 +113,45 @@ fn unknown_backend_is_refused() {
 
 #[test]
 fn postgres_open_failure_is_returned() {
+    // The store-open step fails before any measurement, so this covers the
+    // malformed-target open only, not the measurement propagation in `build`.
     let result =
         McpState::open_with_effective(&options("postgres", "not a postgres url"), &json!({}))
             .map(|_| ());
     assert!(
         result.is_err(),
         "an unusable postgres target must fail the open"
+    );
+}
+
+/// Pins the propagation edge inside `build`: the helper tests above only pin
+/// `measure_inventory`, so this test is the one that fails if `build` ever
+/// tolerates a failed measurement again.
+#[test]
+fn build_refuses_a_failed_measurement() {
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = Arc::new(SqliteStore::open_in_memory(Arc::clone(&kms)).expect("in-memory store"));
+    let belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector> = store.clone();
+    let store: Arc<dyn Repos> = store;
+    // The store opened fine and only the measurement is deliberately unusable,
+    // so the refusal cannot come from the store-open step that precedes `build`.
+    let measurement_options = options("postgres", "not a postgres url");
+    let err = McpState::build(
+        &store,
+        belief_corrector,
+        &measurement_options,
+        &json!({}),
+        kms,
+        clio_config::Runtime::with_env(&|_| None),
+        false,
+        None,
+    )
+    .expect_err("a failed inventory measurement must fail the open");
+    assert_eq!(err.code, ErrorCode::Internal, "unexpected error: {err:?}");
+    assert!(
+        err.message
+            .contains("measure the postgres inventory at open"),
+        "the message must name the measurement: {err:?}"
     );
 }
 

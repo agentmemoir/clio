@@ -48,10 +48,6 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-#[cfg(test)]
-#[path = "runtime_open_tests.rs"]
-mod runtime_open_tests;
-
 /// The caller's retriever and its read-only diagnostic twin: both from the
 /// same env, store, index, embedder, and reranker, with the twin's
 /// co-activation reinforcement disabled, so a read-only report ranks the
@@ -420,3 +416,7 @@ pub(crate) fn load_retention_store_from(path: Option<std::path::PathBuf>) -> Ret
         None => RetentionStore::default(),
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_open_tests.rs"]
+mod runtime_open_tests;
