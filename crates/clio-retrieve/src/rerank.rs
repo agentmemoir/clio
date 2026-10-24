@@ -362,4 +362,4 @@ mod rerank_score_tests;
 
 #[cfg(test)]
 #[path = "rerank_batch_tests.rs"]
-mod rerank_batch_tests;
+pub(crate) mod rerank_batch_tests;

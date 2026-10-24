@@ -13,6 +13,8 @@
 //!   offset applied to each merged entry, and the fail-closed chunk error
 //! - The configured cap the factory reads from the document, and the default it
 //!   keeps when that key is absent
+//! - The multi-connection fake rerank server and request decoder the end-to-end
+//!   retrieval rerank tests reuse
 //!
 //! ## Does not own
 //! - Response parsing rules (`rerank_parse`) or the single-request wire shape
@@ -102,10 +104,13 @@ fn content_length(buf: &[u8]) -> Option<usize> {
 /// Fake rerank service answering `responses` in order, one connection each.
 ///
 /// Captures every raw request and returns them from the join handle, so a test
-/// can assert how many requests were sent and what each carried. The accept
-/// loop is bounded by `SERVER_TIMEOUT`: the deadline is a safety net, not the
-/// synchronization, which is the accepted connection itself.
-fn batch_server(responses: Vec<String>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+/// can assert how many requests were sent and what each carried. Shared with
+/// the end-to-end retrieval rerank tests. The accept loop is bounded by
+/// `SERVER_TIMEOUT`: the deadline is a safety net, not the synchronization,
+/// which is the accepted connection itself.
+pub(crate) fn batch_server(
+    responses: Vec<String>,
+) -> (String, std::thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake batch server");
     let addr = listener.local_addr().expect("addr");
     listener
@@ -149,7 +154,7 @@ fn json_body(request: &str) -> Value {
     serde_json::from_str(&request[head_end + 4..]).expect("request body is JSON")
 }
 
-fn texts(request: &str) -> Vec<String> {
+pub(crate) fn texts(request: &str) -> Vec<String> {
     json_body(request)["texts"]
         .as_array()
         .expect("texts array")

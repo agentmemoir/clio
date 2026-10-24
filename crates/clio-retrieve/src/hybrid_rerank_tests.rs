@@ -22,6 +22,7 @@
 
 use crate::fixtures_tests as fx;
 use crate::rerank::HttpReranker;
+use crate::rerank::rerank_batch_tests::{batch_server, texts};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -39,6 +40,29 @@ fn http_ok(body: &Value) -> String {
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
+}
+
+/// Lexical document text owned by `index`: every candidate matches the query,
+/// and no two candidates are near-duplicates of each other.
+fn candidate_text(index: usize) -> String {
+    let words: Vec<String> = (0..8).map(|k| format!("w{index}x{k}")).collect();
+    format!("shared {}", words.join(" "))
+}
+
+/// TEI body for one batch of the shortlist: that batch's documents served in
+/// reverse, each scored by the place it takes in the reranked page. The first
+/// batch therefore scores above the second, the page is monotone in the served
+/// score, and the fused order is not the order that comes back.
+fn reranked_batch(start: usize, len: usize, total: usize) -> String {
+    let entries: Vec<Value> = (0..len)
+        .map(|j| {
+            json!({
+                "index": len - 1 - j,
+                "score": (total - 1 - start - j) as f64 / 100.0,
+            })
+        })
+        .collect();
+    http_ok(&Value::Array(entries))
 }
 
 #[test]
@@ -158,6 +182,58 @@ fn t08_rerank_sidecar_down_keeps_fused_order() {
             .any(|w| w.contains("rerank unavailable"))
     );
 }
+#[test]
+fn a_shortlist_larger_than_the_service_batch_cap_is_still_reranked() {
+    const CANDIDATES: usize = 60;
+    const CAP: usize = 32;
+    let store = fx::store();
+    for i in 0..CANDIDATES {
+        let entry = fx::item(&format!("item-{i:02}"), "bank", &format!("candidate {i}"));
+        fx::put_lexical(&store, &entry, &candidate_text(i));
+    }
+    let mut req = request("bank", "shared");
+    req.limit = CANDIDATES;
+    let fused = ids(&fx::retriever(&store).retrieve(&req).expect("retrieve"));
+    assert_eq!(fused.len(), CANDIDATES, "full fused shortlist: {fused:?}");
+
+    // The sidecar caps one request at `CAP` documents, below the shortlist.
+    let (url, handle) = batch_server(vec![
+        reranked_batch(0, CAP, CANDIDATES),
+        reranked_batch(CAP, CANDIDATES - CAP, CANDIDATES),
+    ]);
+    let mut client = HttpReranker::new(url, None).expect("client");
+    client.set_max_batch(CAP);
+    let mut retriever = fx::retriever(&store);
+    retriever.set_reranker(Arc::new(client));
+    let out = retriever.retrieve(&req).expect("retrieve");
+    let requests = handle.join().expect("server join");
+
+    assert!(out.reranked, "the reranker ran: {:?}", out.warnings);
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("rerank unavailable")),
+        "{:?}",
+        out.warnings
+    );
+    let sizes: Vec<usize> = requests.iter().map(|r| texts(r).len()).collect();
+    assert_eq!(sizes, vec![CAP, CANDIDATES - CAP], "one request per batch");
+    // Each batch came back reversed, so the page is the fused order reversed —
+    // not the fused order — and every hit keeps the score it was served.
+    let mut expected: Vec<String> = fused[..CAP].iter().rev().cloned().collect();
+    expected.extend(fused[CAP..].iter().rev().cloned());
+    assert_eq!(ids(&out), expected, "ordered by reranker score");
+    for (rank, hit) in out.hits.iter().enumerate() {
+        let served = (CANDIDATES - 1 - rank) as f64 / 100.0;
+        assert_eq!(
+            hit.scores.reranker,
+            Some(served),
+            "hit {rank}: {}",
+            hit.hit.item_id
+        );
+    }
+}
+
 #[test]
 fn rerank_can_be_cleared() {
     let store = fx::store();
