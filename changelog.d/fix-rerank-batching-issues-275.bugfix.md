@@ -1,0 +1,1 @@
+Reranking now splits large shortlists at the configured service batch limit and merges the scored batches, so the default local deployment no longer falls back to fused ordering when more than 32 candidates are available.

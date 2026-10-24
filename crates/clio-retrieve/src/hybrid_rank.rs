@@ -37,6 +37,7 @@ use clio_config::ranking::{RetrievalWeights, TrustRatios};
 use clio_config::retention_levels::ProvenanceFloorDefault;
 use clio_types::decay::floored_half_life_factor;
 use clio_types::{EpistemicKind, MemoryItem, SourceType};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -240,11 +241,11 @@ fn split_leg(hits: &[StageHit]) -> (Vec<String>, Vec<f64>) {
     )
 }
 
-/// Rerank the bounded shortlist; a rerank error keeps the fused order with a
-/// structured warning. On success each reordered shortlist hit carries the
-/// provider's normalized relevance in `rerank_score` (`None` for a document
-/// the provider omitted); on error no score is written. Returns the ordered
-/// candidates and whether rerank ran.
+/// Rerank the bounded shortlist in deployment-sized batches; a rerank error
+/// keeps the fused order with a structured warning. On success each reordered
+/// shortlist hit carries the provider's normalized relevance in `rerank_score`
+/// (`None` for a document the provider omitted), and scored batches are merged
+/// by that relevance. Returns the ordered candidates and whether rerank ran.
 pub(crate) fn apply_rerank(
     reranker: Option<&Arc<dyn Reranker>>,
     shortlist_m: usize,
@@ -260,37 +261,53 @@ pub(crate) fn apply_rerank(
     if shortlist.is_empty() {
         return (fused, false);
     }
-    let docs: Vec<String> = shortlist
-        .iter()
-        .map(|h| doc_text(items.get(&h.id)))
-        .collect();
-    match reranker.rerank(query, &docs, shortlist_m) {
-        Ok(pairs) => {
-            let mut reordered: Vec<FusedHit> = Vec::with_capacity(shortlist.len());
-            for pair in &pairs {
-                if let Some(h) = shortlist.get(pair.index) {
-                    let mut hit = h.clone();
-                    hit.rerank_score = pair.score;
-                    reordered.push(hit);
-                }
+    let batch_size = reranker.max_batch_size();
+    if batch_size == 0 {
+        warnings.push("rerank unavailable, using fused order: batch size is zero".into());
+        return (fused, false);
+    }
+    let mut reordered: Vec<FusedHit> = Vec::with_capacity(shortlist.len());
+    for batch in shortlist.chunks(batch_size) {
+        let docs: Vec<String> = batch.iter().map(|h| doc_text(items.get(&h.id))).collect();
+        let pairs = match reranker.rerank(query, &docs, batch.len()) {
+            Ok(pairs) => pairs,
+            Err(e) => {
+                warnings.push(format!(
+                    "rerank unavailable, using fused order: {}",
+                    e.message
+                ));
+                return (fused, false);
             }
-            for (i, h) in shortlist.iter().enumerate() {
-                if !pairs.iter().any(|p| p.index == i) {
-                    // Defensive append; `rerank_score` stays `None`.
-                    reordered.push(h.clone());
-                }
+        };
+        for pair in &pairs {
+            if let Some(h) = batch.get(pair.index) {
+                let mut hit = h.clone();
+                hit.rerank_score = pair.score;
+                reordered.push(hit);
             }
-            let rest = fused.iter().skip(shortlist.len()).cloned();
-            (reordered.into_iter().chain(rest).collect(), true)
         }
-        Err(e) => {
-            warnings.push(format!(
-                "rerank unavailable, using fused order: {}",
-                e.message
-            ));
-            (fused, false)
+        for (i, h) in batch.iter().enumerate() {
+            if !pairs.iter().any(|p| p.index == i) {
+                // Defensive append; `rerank_score` stays `None`.
+                reordered.push(h.clone());
+            }
         }
     }
+    // Scores are comparable within one provider, so merge independently
+    // reranked batches by relevance. A single request keeps the provider's
+    // established order, including custom rerankers that omit scores.
+    if shortlist.len() > batch_size {
+        reordered.sort_by(
+            |left, right| match (left.rerank_score, right.rerank_score) {
+                (Some(left), Some(right)) => right.partial_cmp(&left).unwrap_or(Ordering::Equal),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            },
+        );
+    }
+    let rest = fused.iter().skip(shortlist.len()).cloned();
+    (reordered.into_iter().chain(rest).collect(), true)
 }
 
 #[cfg(test)]
