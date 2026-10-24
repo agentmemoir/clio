@@ -1,0 +1,1 @@
+Sync content is now sealed with the execution envelope as its associated data, so a relay that cannot decrypt can no longer retarget valid ciphertext at a different mutation, bank, or identifier: any change to the envelope fails authentication and the row is quarantined by the existing receive path.

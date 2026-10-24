@@ -27,15 +27,19 @@
 //! it is not sufficient on its own: the uniqueness claim at the reproduction
 //! volume lives in `crypto_nonce_tests`.
 
+/// A fixed associated data for the pure crypto round trips here: these tests
+/// seal and open content with no envelope involved.
+const TEST_AAD: &[u8] = b"am-sync-test-aad";
+
 #[test]
 fn seal_open_roundtrip() {
     let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
         "shared-secret",
     ));
     let plaintext = br#"{"snapshot":{"k":"v"},"gist":"g"}"#;
-    let cipher = key.seal(plaintext).expect("seal");
+    let cipher = key.seal(plaintext, TEST_AAD).expect("seal");
     assert_eq!(cipher.alg, "xchacha20poly1305");
-    let opened = key.open(&cipher).expect("open");
+    let opened = key.open(&cipher, TEST_AAD).expect("open");
     assert_eq!(opened, plaintext.to_vec());
 }
 
@@ -45,34 +49,34 @@ fn wrong_key_and_tampering_fail_closed() {
         crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("right"));
     let wrong =
         crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("wrong"));
-    let cipher = key.seal(b"payload").expect("seal");
-    assert!(wrong.open(&cipher).is_err());
+    let cipher = key.seal(b"payload", TEST_AAD).expect("seal");
+    assert!(wrong.open(&cipher, TEST_AAD).is_err());
     let mut tampered = cipher.clone();
     tampered.ciphertext_b64 = tampered.ciphertext_b64.trim_end_matches('=').to_owned();
-    assert!(key.open(&tampered).is_err());
+    assert!(key.open(&tampered, TEST_AAD).is_err());
     let mut flipped = cipher.clone();
     let mut chars: Vec<char> = flipped.ciphertext_b64.chars().collect();
     let last = chars.len() - 1;
     chars[last] = if chars[last] == 'A' { 'B' } else { 'A' };
     flipped.ciphertext_b64 = chars.into_iter().collect::<String>();
-    assert!(key.open(&flipped).is_err());
+    assert!(key.open(&flipped, TEST_AAD).is_err());
     let mut other_alg = cipher.clone();
     other_alg.alg = "aes".to_owned();
-    assert!(key.open(&other_alg).is_err());
+    assert!(key.open(&other_alg, TEST_AAD).is_err());
     let mut bad = cipher.clone();
     bad.ciphertext_b64 = "not base64!!".into();
-    assert!(key.open(&bad).is_err());
+    assert!(key.open(&bad, TEST_AAD).is_err());
     let mut bad = cipher;
     bad.nonce_b64 = "not base64!!".into();
-    assert!(key.open(&bad).is_err());
+    assert!(key.open(&bad, TEST_AAD).is_err());
 }
 
 #[test]
 fn key_debug_is_masked_and_nonces_differ() {
     let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("k"));
     assert_eq!(format!("{key:?}"), "SyncCipherKey(<masked>)");
-    let a = key.seal(b"same input").expect("seal a");
-    let b = key.seal(b"same input").expect("seal b");
+    let a = key.seal(b"same input", TEST_AAD).expect("seal a");
+    let b = key.seal(b"same input", TEST_AAD).expect("seal b");
     assert_ne!(a.nonce_b64, b.nonce_b64);
 }
 
@@ -120,7 +124,7 @@ fn seal_stamps_the_sealing_keys_identifier() {
     let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
         "shared-secret",
     ));
-    let cipher = key.seal(b"payload").expect("seal");
+    let cipher = key.seal(b"payload", TEST_AAD).expect("seal");
     assert_eq!(cipher.key_id.as_deref(), Some(key.key_id().as_str()));
 }
 
@@ -133,7 +137,7 @@ fn an_identifier_less_ciphertext_serializes_without_the_field() {
     let key = crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret(
         "shared-secret",
     ));
-    let cipher = key.seal(b"payload").expect("seal");
+    let cipher = key.seal(b"payload", TEST_AAD).expect("seal");
     let stripped = crate::crypto::SyncCipher {
         key_id: None,
         ..cipher.clone()
@@ -198,7 +202,7 @@ fn content_sealed_under_the_raw_sync_key_is_refused() {
             XNonce::from_slice(&nonce),
             Payload {
                 msg: b"legacy payload",
-                aad: b"am-sync-v1",
+                aad: TEST_AAD,
             },
         )
         .expect("seal under the raw key");
@@ -209,12 +213,12 @@ fn content_sealed_under_the_raw_sync_key_is_refused() {
         ciphertext_b64: base64::engine::general_purpose::STANDARD.encode(sealed),
     };
     assert!(
-        key.open(&legacy).is_err(),
+        key.open(&legacy, TEST_AAD).is_err(),
         "a row sealed under the raw key is refused, not opened by a fallback"
     );
     // And a row this build seals does not open under the raw key alone, so
     // the retired fallback cannot be mistaken for the sealing path.
-    let mine = key.seal(b"new payload").expect("seal");
+    let mine = key.seal(b"new payload", TEST_AAD).expect("seal");
     assert!(
         XChaCha20Poly1305::new(key.key_bytes().to_vec().as_slice().into())
             .decrypt(
@@ -227,10 +231,32 @@ fn content_sealed_under_the_raw_sync_key_is_refused() {
                     msg: &base64::engine::general_purpose::STANDARD
                         .decode(&mine.ciphertext_b64)
                         .expect("body"),
-                    aad: b"am-sync-v1",
+                    aad: TEST_AAD,
                 },
             )
             .is_err(),
         "a newly sealed row is not readable with the raw sync key"
+    );
+}
+
+/// The AEAD authenticates the associated data: the same ciphertext opened
+/// under a different envelope is refused, which is what stops a relay from
+/// retargeting valid ciphertext at another mutation.
+#[test]
+fn a_different_associated_data_fails_authentication() {
+    let key =
+        crate::crypto::SyncCipherKey::from_secret(&crate::credential_fixtures::secret("aad-key"));
+    let cipher = key.seal(b"envelope-bound payload", TEST_AAD).expect("seal");
+    assert!(
+        key.open(&cipher, b"am-sync-test-aab").is_err(),
+        "another envelope must not open this ciphertext"
+    );
+    assert!(
+        key.open(&cipher, b"").is_err(),
+        "an empty envelope is refused"
+    );
+    assert!(
+        key.open(&cipher, TEST_AAD).is_ok(),
+        "the envelope it was sealed under still opens it"
     );
 }

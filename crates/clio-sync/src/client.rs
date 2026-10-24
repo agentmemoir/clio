@@ -360,7 +360,7 @@ fn decrypt_for_apply(
     // A ciphertext the stamped key cannot open (wrong key, tampering,
     // corruption) is a permanent per-row failure: quarantine it so
     // `pull_cursor` freezes at the prior id and the operator can `ack_skip`.
-    let Ok(bytes) = key.open(cipher) else {
+    let Ok(bytes) = key.open(cipher, &m.execution_view().aad()) else {
         return refuse(&m.bank, &open_failed_reason(stamped));
     };
     let Ok(plain) = serde_json::from_slice::<Value>(&bytes) else {
