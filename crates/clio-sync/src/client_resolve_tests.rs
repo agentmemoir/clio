@@ -29,7 +29,7 @@
 
 use crate::client::client_tests::{cfg, serve, sqlite};
 use crate::client::{ack_skip, pull, push, sync_status};
-use crate::crypto::{SyncCipher, SyncCipherKey};
+use crate::crypto::SyncCipherKey;
 use crate::http::post_json;
 use crate::protocol::{
     ENTITY_KIND_TASK, OP_UPSERT, PushAck, SyncContent, SyncMutation, SyncPayload,
@@ -260,9 +260,6 @@ fn a_row_whose_payload_lacks_its_identifier_is_refused() {
     // Hand-push a sealed task row whose payload has no task record, so the
     // handle has nothing in the opened content to resolve against.
     let plain = json!({"item": carrier("car-x", "br")});
-    let sealed = key
-        .seal(&serde_json::to_vec(&plain).expect("plain bytes"))
-        .expect("seal");
     // The idempotency key a current writer would produce for this row, so the
     // fixture is the real wire shape rather than a hand-rolled one.
     let mutation_id = crate::keyed_roles::mutation_id(Some(&key), TASK_ID, "2026-01-01", OP_UPSERT);
@@ -274,16 +271,14 @@ fn a_row_whose_payload_lacks_its_identifier_is_refused() {
         op: OP_UPSERT.into(),
         transaction_time: "2026-01-01T00:00:00Z".into(),
         device_id: "dev-hand".into(),
-        content: SyncContent::Cipher(SyncCipher {
-            key_id: Some(key.key_id()),
-            ..sealed
-        }),
+        content: SyncContent::Plain(serde_json::Value::Null),
         content_hash: clio_store::sha256_hex(
             crate::keyed_roles::published_digest_salt(),
             "anything",
         ),
         admission_receipt: None,
     };
+    let mutation = crate::envelope_fixtures::seal_content_for(mutation, &key, &plain);
     let ack: PushAck = post_json(
         &addr,
         "/sync/push",

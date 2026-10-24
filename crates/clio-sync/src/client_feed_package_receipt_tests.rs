@@ -31,17 +31,18 @@ use crate::client_feed_package_fixtures::{
     BANK, FAILURE_ID, STAMP, TASK_ID, carrier, edge, failure_record, item, plain_cfg, preference,
     sealed_cfg, stable_entry, task_record,
 };
-use crate::protocol::SyncContent;
+use crate::protocol::{SyncContent, SyncMutation};
 use serde_json::{Value, json};
 
 /// The decrypted document a packaging call sealed, opened with the key its
 /// fixture config holds.
-fn opened_document(cfg: &crate::client::SyncClientConfig, content: &SyncContent) -> Value {
-    let SyncContent::Cipher(cipher) = content else {
+fn opened_document(cfg: &crate::client::SyncClientConfig, mutation: &SyncMutation) -> Value {
+    let SyncContent::Cipher(cipher) = &mutation.content else {
         panic!("a cipher-configured packaging call must seal");
     };
     let key = cfg.cipher.first().expect("a held key");
-    let bytes = key.open(cipher).expect("open the sealed document");
+    let aad = mutation.execution_view().aad();
+    let bytes = key.open(cipher, &aad).expect("open the sealed document");
     serde_json::from_slice(&bytes).expect("the sealed document is JSON")
 }
 
@@ -56,7 +57,7 @@ fn a_sealed_item_carries_its_receipt_inside_the_document() {
         "the relay must see no receipt: {:?}",
         mutation.admission_receipt
     );
-    let document = opened_document(&cfg, &mutation.content);
+    let document = opened_document(&cfg, &mutation);
     assert_eq!(
         document[ADMISSION_RECEIPT_KEY],
         json!({ "admitted": true, "score": 0.5 }),
@@ -122,7 +123,7 @@ fn a_sealed_task_failure_and_persona_each_seal_their_receipt() {
             mutation.admission_receipt.is_none(),
             "{label}: the relay must see no receipt"
         );
-        let document = opened_document(&cfg, &mutation.content);
+        let document = opened_document(&cfg, &mutation);
         assert_eq!(
             document[ADMISSION_RECEIPT_KEY]["score"], 0.5,
             "{label}: the score is sealed"
@@ -142,7 +143,7 @@ fn a_sealed_edge_carries_no_receipt_anywhere() {
     let edge_id = clio_store::explicit_id(BANK, "i-1", "i-2", "rel");
     let mutation = assoc_mutation(&cfg, BANK, &edge(&edge_id, "rel")).expect("edge");
     assert!(mutation.admission_receipt.is_none());
-    let document = opened_document(&cfg, &mutation.content);
+    let document = opened_document(&cfg, &mutation);
     assert!(
         document.get(ADMISSION_RECEIPT_KEY).is_none(),
         "an edge has no score to seal: {document}"

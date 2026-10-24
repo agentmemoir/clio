@@ -60,12 +60,11 @@ pub(crate) fn item_mutation(
     let receipt = item
         .admission_score
         .map(|score| serde_json::json!({ "admitted": true, "score": score }));
-    let (content, admission_receipt) = content_and_receipt(cfg, &plain, receipt)?;
     let identity_stamp = match op {
         OP_UPSERT => item.updated_at.clone(),
         _ => am_store_now(item),
     };
-    Ok(SyncMutation {
+    let m = SyncMutation {
         sync_mutation_id: mutation_id(cfg, &item.id, &identity_stamp, op),
         bank: item.bank_id.clone(),
         entity_kind: ENTITY_KIND_ITEM.into(),
@@ -74,10 +73,11 @@ pub(crate) fn item_mutation(
         op: op.to_owned(),
         transaction_time: identity_stamp.clone(),
         device_id: cfg.device_id.clone(),
-        content,
+        content: SyncContent::Plain(Value::Null),
         content_hash,
-        admission_receipt,
-    })
+        admission_receipt: wire_receipt(cfg, receipt.as_ref()),
+    };
+    finish_mutation(cfg, m, &plain, receipt)
 }
 
 pub(crate) fn assoc_mutation(
@@ -87,8 +87,7 @@ pub(crate) fn assoc_mutation(
 ) -> Result<SyncMutation, AmError> {
     let plain = serde_json::to_value(edge).expect("serialize edge");
     let content_hash = content_hash(cfg, &plain);
-    let (content, admission_receipt) = content_and_receipt(cfg, &plain, None)?;
-    Ok(SyncMutation {
+    let m = SyncMutation {
         // The edge id embeds the caller's relationship label, so the wire
         // identifier is a handle while the idempotency key stays on the real
         // id. The real id is inside the sealed edge record.
@@ -99,10 +98,11 @@ pub(crate) fn assoc_mutation(
         op: OP_UPSERT.into(),
         transaction_time: edge.last_updated_at.clone(),
         device_id: cfg.device_id.clone(),
-        content,
+        content: SyncContent::Plain(Value::Null),
         content_hash,
-        admission_receipt,
-    })
+        admission_receipt: wire_receipt(cfg, None),
+    };
+    finish_mutation(cfg, m, &plain, None)
 }
 
 /// Package one closed triple as an `invalidate` mutation. Open triples (not yet
@@ -128,8 +128,7 @@ pub(crate) fn triple_mutation(
         "object": triple.object,
     });
     let content_hash = content_hash(cfg, &plain);
-    let (content, admission_receipt) = content_and_receipt(cfg, &plain, None)?;
-    Ok(Some(SyncMutation {
+    let m = SyncMutation {
         sync_mutation_id: mutation_id(cfg, &triple.id, &close, OP_INVALIDATE),
         bank: bank.to_owned(),
         entity_kind: ENTITY_KIND_TRIPLE.into(),
@@ -138,10 +137,11 @@ pub(crate) fn triple_mutation(
         op: OP_INVALIDATE.into(),
         transaction_time: close,
         device_id: cfg.device_id.clone(),
-        content,
+        content: SyncContent::Plain(Value::Null),
         content_hash,
-        admission_receipt,
-    }))
+        admission_receipt: wire_receipt(cfg, None),
+    };
+    finish_mutation(cfg, m, &plain, None).map(Some)
 }
 
 /// Package one task version as a `task` upsert: the carrier item plus the
@@ -161,8 +161,7 @@ pub(crate) fn task_mutation(
     let receipt = item
         .admission_score
         .map(|score| serde_json::json!({ "admitted": true, "score": score }));
-    let (content, admission_receipt) = content_and_receipt(cfg, &plain, receipt)?;
-    Ok(SyncMutation {
+    let m = SyncMutation {
         // The task id is the caller-supplied string this phase exists to hide,
         // so it leaves as a handle; the idempotency key still names it, under a
         // key the relay does not hold.
@@ -173,10 +172,11 @@ pub(crate) fn task_mutation(
         op: OP_UPSERT.into(),
         transaction_time: stamp.to_owned(),
         device_id: cfg.device_id.clone(),
-        content,
+        content: SyncContent::Plain(Value::Null),
         content_hash,
-        admission_receipt,
-    })
+        admission_receipt: wire_receipt(cfg, receipt.as_ref()),
+    };
+    finish_mutation(cfg, m, &plain, receipt)
 }
 
 /// Package one failure record as a `failure` upsert (carrier item + record).
@@ -192,8 +192,7 @@ pub(crate) fn failure_mutation(
     let receipt = item
         .admission_score
         .map(|score| serde_json::json!({ "admitted": true, "score": score }));
-    let (content, admission_receipt) = content_and_receipt(cfg, &plain, receipt)?;
-    Ok(SyncMutation {
+    let m = SyncMutation {
         // A failure id embeds the caller's task id, so it leaves as a handle.
         sync_mutation_id: mutation_id(cfg, &failure.id, stamp, OP_UPSERT),
         bank: bank.to_owned(),
@@ -202,10 +201,11 @@ pub(crate) fn failure_mutation(
         op: OP_UPSERT.into(),
         transaction_time: stamp.to_owned(),
         device_id: cfg.device_id.clone(),
-        content,
+        content: SyncContent::Plain(Value::Null),
         content_hash,
-        admission_receipt,
-    })
+        admission_receipt: wire_receipt(cfg, receipt.as_ref()),
+    };
+    finish_mutation(cfg, m, &plain, receipt)
 }
 
 /// Package one persona stable-entry version as a `persona` upsert. The wire
@@ -296,8 +296,7 @@ fn record_mutation(
     let content_hash = content_hash(cfg, plain);
     let receipt =
         admission_score.map(|score| serde_json::json!({ "admitted": true, "score": score }));
-    let (content, admission_receipt) = content_and_receipt(cfg, plain, receipt)?;
-    Ok(SyncMutation {
+    let m = SyncMutation {
         // The idempotency key always names the real identifier, including for
         // the persona kinds whose wire identifier is a handle.
         sync_mutation_id: mutation_id(cfg, &real_id, stamp, OP_UPSERT),
@@ -307,10 +306,11 @@ fn record_mutation(
         op: OP_UPSERT.into(),
         transaction_time: stamp.to_owned(),
         device_id: cfg.device_id.clone(),
-        content,
+        content: SyncContent::Plain(Value::Null),
         content_hash,
-        admission_receipt,
-    })
+        admission_receipt: wire_receipt(cfg, receipt.as_ref()),
+    };
+    finish_mutation(cfg, m, plain, receipt)
 }
 
 fn am_store_now(item: &MemoryItem) -> String {
@@ -321,7 +321,11 @@ fn am_store_now(item: &MemoryItem) -> String {
     }
 }
 
-fn content_for(cfg: &SyncClientConfig, content: &Value) -> Result<SyncContent, AmError> {
+fn content_for(
+    cfg: &SyncClientConfig,
+    content: &Value,
+    aad: &[u8],
+) -> Result<SyncContent, AmError> {
     // The newest key is the first entry. An empty list means encryption off,
     // which is what every existing deployment has today, so content goes out
     // as `Plain` and `seal` is never called.
@@ -330,7 +334,7 @@ fn content_for(cfg: &SyncClientConfig, content: &Value) -> Result<SyncContent, A
     };
     // Serializing a `serde_json::Value` cannot fail.
     let bytes = serde_json::to_vec(content).expect("serialize sync content");
-    Ok(SyncContent::Cipher(key.seal(&bytes)?))
+    Ok(SyncContent::Cipher(key.seal(&bytes, aad)?))
 }
 
 /// Key of the origin admission receipt inside a sealed content document.
@@ -343,9 +347,6 @@ pub(crate) const ADMISSION_RECEIPT_KEY: &str = "clio_admission_receipt";
 /// Package one record for the wire: the content to send and the receipt that
 /// travels beside it.
 ///
-/// The record document is always a JSON object, so the receipt insert below
-/// cannot fail.
-///
 /// With a cipher configured the receipt is written into the sealed document
 /// under `ADMISSION_RECEIPT_KEY` and the wire receipt is `None`, so the relay
 /// learns no score. Without one the document is the record alone and the
@@ -356,9 +357,11 @@ fn content_and_receipt(
     cfg: &SyncClientConfig,
     plain: &Value,
     receipt: Option<Value>,
+    aad: &[u8],
 ) -> Result<(SyncContent, Option<Value>), AmError> {
+    let wire = wire_receipt(cfg, receipt.as_ref());
     if cfg.cipher.is_empty() {
-        return Ok((content_for(cfg, plain)?, receipt));
+        return Ok((content_for(cfg, plain, aad)?, wire));
     }
     let document = match receipt {
         Some(receipt) => {
@@ -368,7 +371,34 @@ fn content_and_receipt(
         }
         None => plain.clone(),
     };
-    Ok((content_for(cfg, &document)?, None))
+    Ok((content_for(cfg, &document, aad)?, wire))
+}
+
+/// The receipt the wire copy carries: present only without a cipher, since
+/// with one it rides inside the sealed document instead.
+fn wire_receipt(cfg: &SyncClientConfig, receipt: Option<&Value>) -> Option<Value> {
+    if cfg.cipher.is_empty() {
+        receipt.cloned()
+    } else {
+        None
+    }
+}
+
+/// Seal the content for `m` under its own execution envelope, which is final
+/// in every other field by the time this runs, so the content is set last.
+fn finish_mutation(
+    cfg: &SyncClientConfig,
+    mut m: SyncMutation,
+    plain: &Value,
+    receipt: Option<Value>,
+) -> Result<SyncMutation, AmError> {
+    let (content, wire) = content_and_receipt(cfg, plain, receipt, &m.execution_view().aad())?;
+    debug_assert_eq!(
+        wire, m.admission_receipt,
+        "the wire receipt decision must match the mutation's"
+    );
+    m.content = content;
+    Ok(m)
 }
 
 /// The wire identifier for one record: the opaque handle when a cipher is

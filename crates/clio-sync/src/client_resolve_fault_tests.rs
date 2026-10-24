@@ -26,7 +26,7 @@
 use crate::client::client_tests::{TOKEN, cfg, item, serve, sqlite};
 use crate::client::pull;
 use crate::client_wire_fixtures::TASK_ID;
-use crate::crypto::{SyncCipher, SyncCipherKey};
+use crate::crypto::SyncCipherKey;
 use crate::http::post_json;
 use crate::protocol::{
     ENTITY_KIND_ITEM, ENTITY_KIND_TASK, OP_UPSERT, PushAck, SyncContent, SyncMutation, SyncPayload,
@@ -83,11 +83,7 @@ fn a_sealed_row_for_a_shredded_subject_still_dead_letters() {
         "resurrected",
     );
     let plain = serde_json::to_value(&fixture).expect("serialize the item");
-    let sealed = key
-        .seal(&serde_json::to_vec(&plain).expect("plain bytes"))
-        .expect("seal");
-    hand_push(
-        &addr,
+    let mutation = crate::envelope_fixtures::seal_content_for(
         SyncMutation {
             sync_mutation_id: mutation_id("i-res", &fixture.tx_from, OP_UPSERT),
             bank: "bs".into(),
@@ -96,14 +92,17 @@ fn a_sealed_row_for_a_shredded_subject_still_dead_letters() {
             op: OP_UPSERT.into(),
             transaction_time: fixture.tx_from.clone(),
             device_id: "dev-hand".into(),
-            content: SyncContent::Cipher(sealed),
+            content: SyncContent::Plain(serde_json::Value::Null),
             content_hash: clio_store::sha256_hex(
                 crate::keyed_roles::published_digest_salt(),
                 "anything",
             ),
             admission_receipt: None,
         },
+        &key,
+        &plain,
     );
+    hand_push(&addr, mutation);
     pull(&cfg_b, &["bs".to_owned()]).expect("pull");
     let open = b
         .dead_letter_list("bs", DeadLetterStatus::Open, 10)
@@ -131,12 +130,7 @@ fn an_unknown_algorithm_on_an_encrypted_row_is_still_refused() {
     let cfg_b = cfg("dev-b", &b, &addr, vec![key.clone()]);
 
     let payload = json!({"task": {"task_id": TASK_ID, "id": "row-1"}});
-    let mut sealed = key
-        .seal(&serde_json::to_vec(&payload).expect("plain bytes"))
-        .expect("seal");
-    sealed.alg = "aes256gcm".to_owned();
-    hand_push(
-        &addr,
+    let mut mutation = crate::envelope_fixtures::seal_content_for(
         SyncMutation {
             sync_mutation_id: mutation_id(TASK_ID, "2026-01-01T00:00:00Z", OP_UPSERT),
             bank: "bs".into(),
@@ -145,17 +139,20 @@ fn an_unknown_algorithm_on_an_encrypted_row_is_still_refused() {
             op: OP_UPSERT.into(),
             transaction_time: "2026-01-01T00:00:00Z".into(),
             device_id: "dev-hand".into(),
-            content: SyncContent::Cipher(SyncCipher {
-                key_id: Some(key.key_id()),
-                ..sealed
-            }),
+            content: SyncContent::Plain(serde_json::Value::Null),
             content_hash: clio_store::sha256_hex(
                 crate::keyed_roles::published_digest_salt(),
                 "anything",
             ),
             admission_receipt: None,
         },
+        &key,
+        &payload,
     );
+    if let SyncContent::Cipher(cipher) = &mut mutation.content {
+        cipher.alg = "aes256gcm".to_owned();
+    }
+    hand_push(&addr, mutation);
     pull(&cfg_b, &["bs".to_owned()]).expect("pull");
     let open = b
         .dead_letter_list("bs", DeadLetterStatus::Open, 10)

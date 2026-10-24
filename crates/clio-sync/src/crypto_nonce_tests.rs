@@ -30,6 +30,10 @@ use base64::Engine as _;
 use std::collections::HashSet;
 
 /// Sealing threads for the uniqueness test.
+/// A fixed associated data for the nonce tests: they exercise the AEAD's nonce
+/// handling and not the envelope binding.
+const TEST_AAD: &[u8] = b"am-sync-test-aad";
+
 const THREADS: usize = 8;
 
 /// Seals per thread: 8 x `30_000` = `240_000`, the volume the reuse reproduction
@@ -65,7 +69,9 @@ fn concurrent_seals_never_reuse_a_nonce() {
             handles.push(scope.spawn(|| {
                 let mut nonces = Vec::with_capacity(SEALS_PER_THREAD);
                 for i in 0..SEALS_PER_THREAD {
-                    let sealed = key.seal(payloads[i % payloads.len()]).expect("seal");
+                    let sealed = key
+                        .seal(payloads[i % payloads.len()], TEST_AAD)
+                        .expect("seal");
                     let decoded = base64::engine::general_purpose::STANDARD
                         .decode(&sealed.nonce_b64)
                         .expect("sealed nonce is base64");
@@ -122,7 +128,7 @@ fn sealed_nonce_is_24_raw_bytes_not_hex_text() {
     let key =
         SyncCipherKey::from_secret(&crate::credential_fixtures::secret("nonce-shape-fixture"));
     for _ in 0..16 {
-        let sealed = key.seal(b"shape probe").expect("seal");
+        let sealed = key.seal(b"shape probe", TEST_AAD).expect("seal");
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&sealed.nonce_b64)
             .expect("sealed nonce is base64");
@@ -161,7 +167,7 @@ fn ciphertext_sealed_before_the_nonce_change_is_refused() {
         nonce_b64: PRE_CHANGE_NONCE_B64.to_owned(),
         ciphertext_b64: PRE_CHANGE_CIPHERTEXT_B64.to_owned(),
     };
-    let opened = key.open(&sealed);
+    let opened = key.open(&sealed, TEST_AAD);
     assert!(
         opened.is_err(),
         "pre-identifier ciphertext is refused, not opened"

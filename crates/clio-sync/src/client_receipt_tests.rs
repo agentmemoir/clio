@@ -69,9 +69,8 @@ fn sealed_without_receipt(
     mid: &str,
 ) -> SyncMutation {
     let key = cfg.cipher.first().expect("a held key");
-    let bytes = serde_json::to_vec(&serde_json::to_value(record).expect("record")).expect("bytes");
-    let cipher = key.seal(&bytes).expect("seal");
-    SyncMutation {
+    let document = serde_json::to_value(record).expect("record");
+    let mutation = SyncMutation {
         sync_mutation_id: mid.into(),
         bank: bank.into(),
         entity_kind: ENTITY_KIND_ITEM.into(),
@@ -79,13 +78,14 @@ fn sealed_without_receipt(
         op: OP_UPSERT.into(),
         transaction_time: record.updated_at.clone(),
         device_id: device.into(),
-        content: SyncContent::Cipher(cipher),
+        content: SyncContent::Plain(Value::Null),
         content_hash: clio_store::sha256_hex(
             crate::keyed_roles::published_digest_salt(),
-            &String::from_utf8(bytes).unwrap_or_default(),
+            &String::from_utf8(serde_json::to_vec(&document).expect("bytes")).unwrap_or_default(),
         ),
         admission_receipt: None,
-    }
+    };
+    crate::envelope_fixtures::seal_content_for(mutation, key, &document)
 }
 
 /// The wire mutation of one sealed item record carrying `receipt` in its
@@ -99,10 +99,7 @@ fn sealed_with_receipt(
 ) -> SyncMutation {
     let mut document = serde_json::to_value(record).expect("record");
     document[crate::client_feed::package::ADMISSION_RECEIPT_KEY] = receipt;
-    let cipher = key
-        .seal(&serde_json::to_vec(&document).expect("bytes"))
-        .expect("seal");
-    SyncMutation {
+    let mutation = SyncMutation {
         sync_mutation_id: format!("m-{}", record.id),
         bank: bank.into(),
         entity_kind: ENTITY_KIND_ITEM.into(),
@@ -110,10 +107,11 @@ fn sealed_with_receipt(
         op: OP_UPSERT.into(),
         transaction_time: record.updated_at.clone(),
         device_id: device.into(),
-        content: SyncContent::Cipher(cipher),
+        content: SyncContent::Plain(Value::Null),
         content_hash: "unused-by-the-restoration".into(),
         admission_receipt: None,
-    }
+    };
+    crate::envelope_fixtures::seal_content_for(mutation, key, &document)
 }
 
 /// The restoration runs when the content opens, before `apply_mutation` sees
@@ -164,9 +162,6 @@ fn an_absent_or_malformed_receipt_degrades_to_the_documented_fallback() {
         if !receipt.is_null() {
             document[crate::client_feed::package::ADMISSION_RECEIPT_KEY] = receipt;
         }
-        let cipher = key
-            .seal(&serde_json::to_vec(&document).expect("bytes"))
-            .expect("seal");
         let mutation = SyncMutation {
             sync_mutation_id: format!("m-{label}"),
             bank: BANK.into(),
@@ -175,10 +170,11 @@ fn an_absent_or_malformed_receipt_degrades_to_the_documented_fallback() {
             op: OP_UPSERT.into(),
             transaction_time: STAMP.into(),
             device_id: "dev-a".into(),
-            content: SyncContent::Cipher(cipher),
+            content: SyncContent::Plain(Value::Null),
             content_hash: "unused-by-the-restoration".into(),
             admission_receipt: None,
         };
+        let mutation = crate::envelope_fixtures::seal_content_for(mutation, &key, &document);
         let envelope = serde_json::to_string(&mutation).expect("envelope");
         let opened = super::decrypt_for_apply(&cfg, &mutation, &envelope)
             .expect("decrypt")
