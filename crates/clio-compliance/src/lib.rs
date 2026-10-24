@@ -114,7 +114,7 @@ pub use export_custody::{
     CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,
     reconcile_open_destinations,
 };
-pub use import::{ImportArgs, ImportReport, import};
+pub use import::{ImportArgs, ImportReport, SkippedInvalid, import};
 pub use inventory::{
     Custody, InventoryBackend, InventoryFacts, InventoryInput, InventoryPaths, InventoryRow, Owner,
     Readability, RetentionAction, ScopeInventory, scope_inventory,
