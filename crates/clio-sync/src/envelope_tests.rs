@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - Unit coverage for `envelope` (`ExecutionView::aad`)
+//! - The injectivity of the encoding: distinct envelopes, distinct bytes
 //!
 //! ## Does not own
 //! - Seal/open behaviour (`crypto_tests`)
@@ -85,5 +86,82 @@ fn the_sealed_content_is_not_part_of_the_envelope() {
     assert_eq!(
         changed.execution_view().aad(),
         base().execution_view().aad()
+    );
+}
+
+/// Values whose text a concatenating encoding would let one field absorb into
+/// another: every delimiter of the envelope's own syntax, the escape character,
+/// a newline, a control character, the empty string, and a value that spells a
+/// whole neighbouring field.
+const HOSTILE_VALUES: [&str; 9] = [
+    "",
+    "\"",
+    "\\",
+    "{}",
+    ",",
+    ":",
+    "a\nb",
+    "a\u{7}b",
+    "\"},{\"bank\":\"bank-b",
+];
+
+#[test]
+fn distinct_field_values_never_share_the_same_bytes() {
+    let mut seen: Vec<(&str, Vec<u8>)> = Vec::new();
+    for value in HOSTILE_VALUES {
+        let mut mutation = base();
+        mutation.entity_id = value.into();
+        let aad = mutation.execution_view().aad();
+        for (other, bytes) in &seen {
+            assert_ne!(
+                &aad, bytes,
+                "the entity_id values {other:?} and {value:?} encoded to the same bytes"
+            );
+        }
+        // Stability: the same value still encodes to the same bytes.
+        assert_eq!(
+            aad,
+            mutation.execution_view().aad(),
+            "the value {value:?} encodes unstably"
+        );
+        seen.push((value, aad));
+    }
+    // No field may absorb text moved into it from its neighbour.
+    let mut left = base();
+    left.entity_id = "ab".into();
+    left.device_id = "c".into();
+    let mut right = base();
+    right.entity_id = "a".into();
+    right.device_id = "bc".into();
+    assert_ne!(
+        left.execution_view().aad(),
+        right.execution_view().aad(),
+        "fields whose text concatenates equally must not collide"
+    );
+}
+
+#[test]
+fn a_present_receipt_and_an_absent_one_encode_differently() {
+    let mut absent = base();
+    absent.admission_receipt = None;
+    let mut present = base();
+    present.admission_receipt = Some(json!({}));
+    let mut scored = base();
+    scored.admission_receipt = Some(json!({ "score": 0.9 }));
+    assert_ne!(
+        absent.execution_view().aad(),
+        present.execution_view().aad(),
+        "an absent receipt must not encode as a present one"
+    );
+    assert_ne!(
+        present.execution_view().aad(),
+        scored.execution_view().aad(),
+        "the receipt's own content is bound"
+    );
+    // Stability: an equal receipt encodes to equal bytes.
+    assert_eq!(
+        present.execution_view().aad(),
+        present.execution_view().aad(),
+        "the same present receipt encodes unstably"
     );
 }

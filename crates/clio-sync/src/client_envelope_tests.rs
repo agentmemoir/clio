@@ -11,7 +11,7 @@
 //! ## Owns
 //! - Hostile-relay retarget coverage for the destructive operations
 //! - Per-field authentication coverage of the execution envelope
-//! - The positive control, the replay control, and the key-scoped control
+//! - The positive control, the replay control, and the rotation controls
 //!
 //! ## Does not own
 //! - How the envelope encodes to bytes (`envelope`, `envelope_tests`)
@@ -26,7 +26,7 @@
 
 use crate::client::SyncClientConfig;
 use crate::client::client_tests::{TOKEN, cfg, create_item, item, serve, sqlite};
-use crate::client::{pull, sync_status};
+use crate::client::{ack_skip, pull, sync_status};
 use crate::crypto::SyncCipherKey;
 use crate::http::post_json;
 use crate::protocol::{
@@ -45,6 +45,9 @@ const OTHER_BANK: &str = "bank-b";
 const STAMP: &str = "2026-01-01T00:00:00Z";
 pub(crate) const VICTIM: &str = "victim-a";
 const SOURCE: &str = "source-a";
+/// A second legitimate writer id, so a row that must still apply after a
+/// refusal is not the row that was refused.
+const SOURCE_AFTER: &str = "source-b";
 /// The tail every failed open carries; the refusal names the open failure and
 /// never the rewrite, so a relay cannot learn which field it mistyped.
 const OPEN_FAILED: &str = "could not be opened with the matching held key";
@@ -130,9 +133,9 @@ pub(crate) fn hand_push(addr: &str, payload_bank: &str, mutation: SyncMutation) 
     assert!(ack.rejected.is_empty(), "the relay stores the row verbatim");
 }
 
-/// The one open dead letter `bank` holds, asserted to be the failed-open
-/// refusal rather than some other reject.
-fn refused(r: &Receiver, bank: &str) {
+/// The one open dead letter `bank` holds, asserted to be a refusal whose
+/// detail names `expected`: the key it names, or the open it failed.
+fn refused_naming(r: &Receiver, bank: &str, expected: &str) {
     let open = r
         .store
         .dead_letter_list(bank, DeadLetterStatus::Open, 10)
@@ -143,16 +146,15 @@ fn refused(r: &Receiver, bank: &str) {
         "a re-addressed cipher is refused as malformed"
     );
     assert!(
-        open[0].detail.contains(OPEN_FAILED),
-        "the refusal names the open failure: {}",
+        open[0].detail.contains(expected),
+        "the refusal names {expected}: {}",
         open[0].detail
     );
 }
 
-/// The receiver pulled, refused, and left the named row untouched: the cursor
-/// is frozen and the source id never landed.
-fn refused_without_effect(r: &Receiver, bank: &str, applied: &str) {
-    refused(r, bank);
+/// The receiver pulled and left the named row untouched: no store write, no
+/// journal row, and a cursor still frozen at the prior position.
+fn left_without_effect(r: &Receiver, bank: &str, applied: &str) {
     assert!(
         r.store
             .get_memory_item(bank, applied)
@@ -160,11 +162,30 @@ fn refused_without_effect(r: &Receiver, bank: &str, applied: &str) {
             .is_none(),
         "the refused row applied nothing"
     );
+    // The rule is "before store, journal or cursor effects": a refused row
+    // never reaches apply, so its bank's journal is still empty at seq 0.
+    assert_eq!(
+        r.store.journal_max_seq(bank).expect("max seq"),
+        0,
+        "the refusal appended no journal row in {bank}"
+    );
+    let journal = r.store.journal_list_since(bank, 0, 200).expect("journal");
+    assert!(
+        journal.is_empty(),
+        "the refusal left {} journal rows",
+        journal.len()
+    );
     let report = sync_status(&r.cfg, &[bank.to_owned()]).expect("status");
     assert!(
         report.banks[0].pull_cursor.is_none(),
         "the cursor did not advance past a refused row"
     );
+}
+
+/// The failed-open refusal, with no effect of any kind.
+fn refused_without_effect(r: &Receiver, bank: &str, applied: &str) {
+    refused_naming(r, bank, OPEN_FAILED);
+    left_without_effect(r, bank, applied);
 }
 
 /// The main case, shared by the two destructive operations: a captured
@@ -346,38 +367,77 @@ fn replay_of_the_same_mutation_id_does_not_apply_twice() {
     r.server.stop();
 }
 
-/// The key control: a cipher sealed for one envelope does not open for
-/// another, and a valid delivery under the same held key still applies.
+/// The rotation control, following the rotation rules the client obeys: the
+/// node holds only the key it kept, so a row sealed under the key it rotated
+/// away from is quarantined, and a row genuinely sealed under the held key
+/// applies in that same bank once the unopenable row is discarded.
 #[test]
-fn cipher_sealed_for_one_mutation_does_not_open_for_another() {
-    let key = held_key("envelope-rotation-key");
-    let r = receiver(&[BANK, OTHER_BANK], &key);
-    create_item(&r.store, BANK, VICTIM, "victim gist");
-    let mut as_another = sealed(BANK, SOURCE, OP_DISCARD, &key);
-    as_another.entity_id = VICTIM.into();
-    hand_push(&r.addr, BANK, as_another);
+fn rotation_control_row_sealed_under_the_rotated_away_key_is_quarantined_and_the_held_key_applies()
+{
+    let held = held_key("envelope-rotation-held");
+    let rotated_away = held_key("envelope-rotation-away");
+    let r = receiver(&[BANK], &held);
+    // A peer that had already rotated wrote this row: its stamp names a key
+    // this node never held, so the row cannot be selected, let alone opened.
+    let stale = sealed(BANK, SOURCE, OP_UPSERT, &rotated_away);
+    hand_push(&r.addr, BANK, stale.clone());
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
-    refused_without_effect(&r, BANK, SOURCE);
+    refused_naming(&r, BANK, &rotated_away.key_id());
+    left_without_effect(&r, BANK, SOURCE);
+    // The operator discards the unopenable row; the next pull of the same bank
+    // delivers a row sealed under the key this node still holds, and it applies.
+    assert!(ack_skip(&r.cfg, &stale.sync_mutation_id, STAMP).expect("ack skip"));
+    hand_push(&r.addr, BANK, sealed(BANK, SOURCE_AFTER, OP_UPSERT, &held));
+    pull(&r.cfg, &[BANK.to_owned()]).expect("pull after the discard");
+    let got = r
+        .store
+        .get_memory_item(BANK, SOURCE_AFTER)
+        .expect("get")
+        .expect("the held key's row applies in the same bank");
+    assert_eq!(got.gist.as_deref(), Some("source gist"));
+    assert_eq!(
+        r.store.journal_max_seq(BANK).expect("max seq"),
+        1,
+        "only the row that opened reached the journal"
+    );
+    r.server.stop();
+}
+
+/// Key selection alone cannot retarget a seal: a destructive row sealed under
+/// one held key but stamped with a second held key fails authentication under
+/// the stamped key, so it is quarantined with no effect.
+#[test]
+fn a_key_id_naming_a_second_held_key_fails_authentication_and_applies_nothing() {
+    let sealer = held_key("envelope-swap-sealer");
+    let other = held_key("envelope-swap-other");
+    let mut r = receiver(&[BANK], &sealer);
+    // The node holds both keys, so the stamp alone decides which one is tried.
+    let both = cfg(
+        "dev-a",
+        &r.store,
+        &r.addr,
+        vec![sealer.clone(), other.clone()],
+    );
+    r.cfg = both;
+    create_item(&r.store, BANK, VICTIM, "victim gist");
+    let mut swapped = sealed(BANK, SOURCE, OP_DISCARD, &sealer);
+    swapped.entity_id = VICTIM.into();
+    swapped.sync_mutation_id = mutation_id("synthetic-relay", STAMP, OP_DISCARD);
+    if let SyncContent::Cipher(cipher) = &mut swapped.content {
+        cipher.key_id = Some(other.key_id());
+    }
+    hand_push(&r.addr, BANK, swapped);
+    pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
+    // The refusal names the stamped key, so the swapped identifier is what
+    // chose the key that then refused the ciphertext.
+    refused_naming(&r, BANK, &other.key_id());
+    left_without_effect(&r, BANK, SOURCE);
     assert!(
         r.store
             .get_item_identity(BANK, VICTIM)
             .expect("identity read")
             .is_some(),
-        "the victim outlived the resealed row"
-    );
-    // Same node, same held key, a genuinely sealed row: it applies.
-    hand_push(
-        &r.addr,
-        OTHER_BANK,
-        sealed(OTHER_BANK, SOURCE, OP_UPSERT, &key),
-    );
-    pull(&r.cfg, &[OTHER_BANK.to_owned()]).expect("pull the valid row");
-    assert!(
-        r.store
-            .get_memory_item(OTHER_BANK, SOURCE)
-            .expect("get")
-            .is_some(),
-        "a valid delivery under the held key still applies"
+        "the victim outlived the swapped row"
     );
     r.server.stop();
 }
