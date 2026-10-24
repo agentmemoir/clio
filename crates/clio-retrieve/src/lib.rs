@@ -120,3 +120,6 @@ pub use types::{
 
 #[cfg(test)]
 mod fixtures_tests;
+
+#[cfg(test)]
+mod rerank_seam;

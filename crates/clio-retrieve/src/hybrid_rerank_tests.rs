@@ -22,7 +22,7 @@
 
 use crate::fixtures_tests as fx;
 use crate::rerank::HttpReranker;
-use crate::rerank::rerank_batch_tests::{batch_server, texts};
+use crate::rerank_seam::{batch_server, texts};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -50,15 +50,18 @@ fn candidate_text(index: usize) -> String {
 }
 
 /// TEI body for one batch of the shortlist: that batch's documents served in
-/// reverse, each scored by the place it takes in the reranked page. The first
-/// batch therefore scores above the second, the page is monotone in the served
-/// score, and the fused order is not the order that comes back.
+/// reverse, each scored by the global position of its document. Scores rise
+/// with the position, so the *second* batch holds the highest-scoring document
+/// — the page the shortlist default can actually return — and the fused order
+/// is not the order that comes back.
 fn reranked_batch(start: usize, len: usize, total: usize) -> String {
+    assert!(start + len <= total, "batch exceeds the shortlist");
     let entries: Vec<Value> = (0..len)
         .map(|j| {
+            let local = len - 1 - j;
             json!({
-                "index": len - 1 - j,
-                "score": (total - 1 - start - j) as f64 / 100.0,
+                "index": local,
+                "score": (start + local) as f64 / 100.0,
             })
         })
         .collect();
@@ -218,11 +221,17 @@ fn a_shortlist_larger_than_the_service_batch_cap_is_still_reranked() {
     );
     let sizes: Vec<usize> = requests.iter().map(|r| texts(r).len()).collect();
     assert_eq!(sizes, vec![CAP, CANDIDATES - CAP], "one request per batch");
-    // Each batch came back reversed, so the page is the fused order reversed —
-    // not the fused order — and every hit keeps the score it was served.
-    let mut expected: Vec<String> = fused[..CAP].iter().rev().cloned().collect();
-    expected.extend(fused[CAP..].iter().rev().cloned());
+    // Every batch came back reversed and the second batch scored highest, so
+    // the page is the whole fused order reversed — not the fused order and not
+    // the first batch's block first. The winner is a chunk-1 document, which a
+    // chunk-major merge could only ever place behind all 32 chunk-0 entries.
+    let expected: Vec<String> = fused.iter().rev().cloned().collect();
     assert_eq!(ids(&out), expected, "ordered by reranker score");
+    assert_eq!(
+        out.hits[0].hit.item_id,
+        fused[CANDIDATES - 1],
+        "the top-scored document lives in the second batch"
+    );
     for (rank, hit) in out.hits.iter().enumerate() {
         let served = (CANDIDATES - 1 - rank) as f64 / 100.0;
         assert_eq!(
