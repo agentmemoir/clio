@@ -5,7 +5,7 @@
 //!
 //! This module tests the `clio ops reindex` report the real binary prints:
 //! `--confirm` alone runs the live sweep, a `--dry-run` is a report that is
-//! never `ok`, and a confirmed dry run is refused (issue 270).
+//! never `ok`, and a confirmed dry run is refused.
 //!
 //! ## Owns
 //! - The printed `{ok, dry_run, ..._applied}` fields and their exit codes
@@ -157,7 +157,7 @@ fn confirm_with_a_dry_run_is_refused() {
 }
 
 /// The parser stores the token after a bare flag, so `--confirm false` must be
-/// read by value: it is a report, never a live mutating rebuild (issue 270).
+/// read by value: it is a report, never a live mutating rebuild.
 #[test]
 fn confirm_false_is_a_report_not_a_live_rebuild() {
     let (db, backups) = fixture("confirm-false");
@@ -183,7 +183,7 @@ fn confirm_false_is_a_report_not_a_live_rebuild() {
 }
 
 /// A mutating run without confirmation is refused, so an explicit
-/// `--dry-run false` on its own cannot start a rebuild (issue 270).
+/// `--dry-run false` on its own cannot start a rebuild.
 #[test]
 fn dry_run_false_without_confirm_is_refused() {
     let (db, backups) = fixture("live-unconfirmed");

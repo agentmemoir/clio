@@ -229,7 +229,7 @@ fn reindex_dry_run_reports_cost_and_rejects_unknown_target() {
     assert_eq!(bogus["ok"], Value::Bool(false), "{bogus}");
 }
 
-/// `confirm` alone is the live switch over MCP, as it is on the CLI (issue 270).
+/// `confirm` alone is the live switch over MCP, as it is on the CLI.
 #[test]
 fn reindex_confirm_alone_runs_live() {
     let st = state();

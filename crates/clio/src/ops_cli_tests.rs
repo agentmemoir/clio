@@ -134,8 +134,8 @@ fn missing_ops_subcommand_exits_2() {
     assert_eq!(run_ops(&[]), ExitCode::from(2));
 }
 
-/// A report-only run applies nothing, so it is never `ok` and never exits 0
-/// (issue 270: a no-op must not look like a completed rebuild).
+/// A report-only run applies nothing, so it is never `ok` and never exits 0: a
+/// no-op must not look like a completed rebuild.
 #[test]
 fn reindex_dry_run_reports_not_ok_exits_3() {
     let mut args = memory("reindex");
@@ -191,7 +191,7 @@ fn reindex_args(db: &Path, flags: &[&str]) -> Vec<String> {
 }
 
 /// `--confirm` alone is the live switch, the way `repair` treats it: the sweep
-/// runs and rewrites every item row instead of reporting a cost (issue 270).
+/// runs and rewrites every item row instead of reporting a cost.
 #[test]
 fn reindex_confirm_alone_runs_the_live_rebuild() {
     let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-confirm");
@@ -213,7 +213,7 @@ fn reindex_confirm_alone_runs_the_live_rebuild() {
 
 /// The parser stores the token after a bare flag, so `--confirm false` is a
 /// value the run must honour, not a presence: it stays a report and writes
-/// nothing (issue 270).
+/// nothing.
 #[test]
 fn reindex_confirm_false_reports_and_writes_nothing() {
     let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-confirm-false");

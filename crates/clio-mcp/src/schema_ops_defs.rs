@@ -55,6 +55,12 @@ const REPAIR_BANK: &str = "Bank scope; omitted means the registered plan's own b
                            argument when it passes one, and with neither a bank nor a registered \
                            plan has no bank scope at all, where each action fails without mutating.";
 
+/// `reindex`'s `dry_run` clause: absent, it follows `confirm`, and a `false`
+/// with nothing confirming it is refused as an unconfirmed mutating rebuild.
+const REINDEX_DRY_RUN: &str = "Report only; applies nothing and is not ok. Defaults to the \
+                               opposite of `confirm`. `false` without `confirm: true` is \
+                               refused.";
+
 /// All operator tool definitions (three read-planning + two mutating rows).
 #[must_use]
 pub fn ops_defs() -> Vec<ToolDef> {
@@ -147,7 +153,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                          surface is disabled)."
                     )),
                 ),
-                ("dry_run", b("Report only; applies nothing and is not ok.")),
+                ("dry_run", b(REINDEX_DRY_RUN)),
                 ("confirm", b("Start the live rebuild; default false.")),
                 ("timestamp", s("Report time; defaults to now.")),
             ],

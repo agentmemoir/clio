@@ -47,8 +47,9 @@ use std::sync::Arc;
 /// - `75`: a Postgres lock conflict is temporary; retry the command.
 ///
 /// `doctor` never mutates the store under any `--dry-run` value. `repair` and
-/// `reindex` mutate only with `--confirm`: for `reindex` that alone starts the
-/// live rebuild, and `--dry-run` asks for a report instead — the pair is refused.
+/// `reindex` mutate only with `--confirm`, and `reindex` reads that flag by
+/// value: a bare `--confirm` starts the live rebuild, `--confirm false` does not,
+/// and pairing it with `--dry-run` is refused.
 ///
 /// Plan ids are process-local: `doctor` and `repair` run as separate processes,
 /// so pass an explicit `--actions` list for a cross-invocation repair.

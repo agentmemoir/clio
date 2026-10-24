@@ -44,7 +44,11 @@ const REINDEX_DRY_RUN: Flag = Flag::toggle(
     "dry-run",
     "Report-only: applies nothing and is not reported as ok (`--confirm` is the live switch).",
 );
-const CONFIRM: Flag = Flag::toggle("confirm", "Confirms a live run in `ops_cli`.");
+const CONFIRM: Flag = Flag::toggle(
+    "confirm",
+    "Signals the live path: `ops repair` applies only with it, and `ops reindex` is report-only \
+     without it.",
+);
 const REPAIR_PLAN: Flag = Flag::text("plan", "PLAN_ID", "Plan id `ops_cli`'s repair resolves.");
 const REPAIR_ACTIONS: Flag = Flag::text("actions", "a,b", "Comma list `ops_cli`'s repair applies.");
 const REINDEX_TARGET: Flag = Flag::choice(

@@ -149,7 +149,7 @@ fn postgres_ops_subcommands_exit_with_the_documented_codes() {
     assert_eq!(super::ops_with(refused, &env), ExitCode::from(2));
     let mut dry = postgres("reindex");
     dry.push("--dry-run".to_owned());
-    // A report-only run applies nothing, so it is not `ok` and exits 3 (#270).
+    // A report-only run applies nothing, so it is not `ok` and exits 3.
     assert_eq!(super::ops_with(dry, &env), ExitCode::from(3));
 
     let half_space = |key: &str| match key {
