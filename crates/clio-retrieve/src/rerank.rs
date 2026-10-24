@@ -53,6 +53,14 @@ use std::time::Duration;
 /// Default rerank request deadline (a small fraction of the retrieve SLO).
 pub const DEFAULT_RERANK_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Default number of documents the TEI sidecar accepts in one rerank request.
+///
+/// The sidecar enforces its own client batch ceiling and rejects a larger
+/// request outright, so a shortlist longer than this is split into sequential
+/// requests of at most this many documents and merged back into one
+/// index-consistent result.
+pub const DEFAULT_RERANK_MAX_BATCH: usize = 32;
+
 /// The provider an unset `rerank.provider` resolves to: the tei sidecar.
 ///
 /// The effective document carries the empty system default for an omitted
@@ -82,6 +90,7 @@ pub struct HttpReranker {
     url: String,
     bearer: Option<String>,
     timeout: Duration,
+    max_batch: usize,
 }
 
 impl fmt::Debug for HttpReranker {
@@ -91,6 +100,7 @@ impl fmt::Debug for HttpReranker {
             .field("url", &self.url)
             .field("bearer", &self.bearer.as_ref().map(|_| "****"))
             .field("timeout", &self.timeout)
+            .field("max_batch", &self.max_batch)
             .finish()
     }
 }
@@ -113,12 +123,20 @@ impl HttpReranker {
             url,
             bearer,
             timeout: DEFAULT_RERANK_TIMEOUT,
+            max_batch: DEFAULT_RERANK_MAX_BATCH,
         })
     }
 
     /// Override the request deadline (tests / tuning).
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout;
+    }
+
+    /// Override the documents-per-request ceiling (tests / tuning).
+    ///
+    /// A request must carry at least one document, so `0` is clamped to `1`.
+    pub fn set_max_batch(&mut self, max_batch: usize) {
+        self.max_batch = max_batch.max(1);
     }
 }
 
@@ -132,18 +150,36 @@ impl Reranker for HttpReranker {
         if documents.is_empty() {
             return Ok(Vec::new());
         }
-        // TEI `RerankRequest` = `{query, texts, raw_scores}`; `top_k` is not a
-        // TEI field, so it is intentionally omitted from the wire body.
-        // `raw_scores: false` is pinned so the sidecar returns its sigmoid
-        // score in `[0, 1]` even if the server default ever drifts.
-        let body = json!({
-            "query": query,
-            "texts": documents,
-            "raw_scores": false,
-        });
         let url = format!("{}/rerank", self.url.trim_end_matches('/'));
-        let value = post_json(&url, &body, self.timeout, self.bearer.as_deref())?;
-        parse_rerank_response(&value, documents.len())
+        let batch = self.max_batch.max(1);
+        let mut merged: Vec<RerankedDoc> = Vec::with_capacity(documents.len());
+        let mut start = 0;
+        for chunk in documents.chunks(batch) {
+            // TEI `RerankRequest` = `{query, texts, raw_scores}`; `top_k` is not
+            // a TEI field, so it is intentionally omitted from the wire body.
+            // `raw_scores: false` is pinned so the sidecar returns its sigmoid
+            // score in `[0, 1]` even if the server default ever drifts.
+            let body = json!({
+                "query": query,
+                "texts": chunk,
+                "raw_scores": false,
+            });
+            let value = post_json(&url, &body, self.timeout, self.bearer.as_deref())?;
+            // Each response indexes its own chunk, so a chunk-local index is
+            // shifted by the chunk's offset in `documents` before merging.
+            for mut doc in parse_rerank_response(&value, chunk.len())? {
+                doc.index += start;
+                if doc.index >= documents.len() {
+                    return Err(AmError::new(
+                        ErrorCode::Internal,
+                        "rerank index out of range after batch merge",
+                    ));
+                }
+                merged.push(doc);
+            }
+            start += chunk.len();
+        }
+        Ok(merged)
     }
 }
 
@@ -313,3 +349,7 @@ pub(crate) mod rerank_tests;
 #[cfg(test)]
 #[path = "rerank_score_tests.rs"]
 mod rerank_score_tests;
+
+#[cfg(test)]
+#[path = "rerank_batch_tests.rs"]
+mod rerank_batch_tests;
