@@ -30,7 +30,7 @@ use crate::doctor::{
 };
 use crate::finding::{Findings, OpsFinding, Severity, codes, scope_label};
 use crate::reindex::{ReindexArgs, reindex};
-use crate::verify::{VerifyArgs, verify};
+use crate::verify::{VerifyArgs, verify_for_plan};
 use clio_index::{Embedder, RebuildTargets};
 use clio_store::{IndexStore, OpsStore, Store};
 use serde::Serialize;
@@ -225,12 +225,17 @@ fn execute_all(
         }
     }
 
-    let report = verify(&VerifyArgs {
-        store: args.store,
-        index: args.index,
-        bank: bank.as_deref(),
-        timestamp: args.timestamp,
-    })?;
+    // The re-verification reads the repaired scope only: it reports the residual
+    // findings of this scope, so it runs no store-wide probe.
+    let report = verify_for_plan(
+        &VerifyArgs {
+            store: args.store,
+            index: args.index,
+            bank: bank.as_deref(),
+            timestamp: args.timestamp,
+        },
+        bank.as_deref(),
+    )?;
     let residual: Vec<OpsFinding> = report
         .findings
         .iter()

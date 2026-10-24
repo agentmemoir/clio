@@ -137,22 +137,34 @@ fn diagnose_result(state: &McpState, ctx: &OpContext, timestamp: &str) -> Result
 ///
 /// An omitted argument ends where the context resolved, which for a bound
 /// caller is its grant bank, so the gate sees the bank `resolve_ctx` authorized.
+///
+/// The store-wide note probe reads every other bank, so it runs only for an
+/// unbound local operator: a bound caller whose grant covers one bank must not
+/// learn from `notes` that another bank exists or which codes it carries. The
+/// scope and the principal together pick the pass at this call site, as they do
+/// for `doctor`.
 fn verify_result(
     state: &McpState,
     args: &Value,
     ctx: &OpContext,
     timestamp: &str,
 ) -> Result<Value, AmError> {
-    let bank = state.op_scope(ctx, opt_str(args, "bank"))?.bank();
-    if let Some(bank) = bank {
+    let scope = state.op_scope(ctx, opt_str(args, "bank"))?;
+    if let Some(bank) = scope.bank() {
         state.require_known_bank(bank)?;
     }
-    let report = clio_ops::verify(&clio_ops::VerifyArgs {
+    let verify_args = clio_ops::VerifyArgs {
         store: &*state.ops_store,
         index: &*state.index,
-        bank,
+        bank: scope.bank(),
         timestamp,
-    })?;
+    };
+    let report = match scope {
+        OpScope::Bank(bank) if state.principal.is_some() => {
+            clio_ops::verify_scoped(&verify_args, bank)?
+        }
+        _ => clio_ops::verify(&verify_args)?,
+    };
     Ok(to_value(&report))
 }
 
