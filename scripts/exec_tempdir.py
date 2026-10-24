@@ -36,12 +36,14 @@ exists to keep the two apart; do not collapse it.
 from __future__ import annotations
 
 import enum
+import errno
 import itertools
 import os
 import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -150,7 +152,21 @@ def _run_probe(directory: str) -> tuple[_ProbeOutcome, str]:
         # about execution. It is UNPROBED, never REFUSED.
         return _ProbeOutcome.UNPROBED, f"cannot write probe: {exc}"
     try:
-        done = subprocess.run([probe], capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
+        retries = 5
+        delay = 0.01
+        while True:
+            try:
+                done = subprocess.run(
+                    [probe], capture_output=True, text=True, timeout=10, check=False
+                )  # noqa: S603
+                break
+            except OSError as exc:
+                if getattr(exc, "errno", None) == errno.ETXTBSY and retries > 0:
+                    retries -= 1
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
     except PermissionError as exc:
         # Only a PermissionError raised while *starting* the probe is a refusal:
         # the kernel rejected the exec, which is what a `noexec` mount gives. A
