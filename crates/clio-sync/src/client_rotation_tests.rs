@@ -200,7 +200,7 @@ fn a_key_id_less_row_is_refused_and_the_cursor_freezes() {
         "the refusal names the missing identifier: {detail}"
     );
     assert!(
-        detail.contains("clio sync ack-skip"),
+        detail.contains("sync_ack_skip") && detail.contains("with confirm"),
         "the refusal names the deliberate discard: {detail}"
     );
 
@@ -270,7 +270,7 @@ fn a_row_sealed_under_an_absent_key_is_refused_and_the_cursor_freezes() {
         "the refusal names the recovery: {detail}"
     );
     assert!(
-        detail.contains("clio sync ack-skip"),
+        detail.contains("sync_ack_skip") && detail.contains("with confirm"),
         "the refusal names the deliberate discard: {detail}"
     );
     // No key bytes and no content in the refusal: the ids are derived, the
@@ -338,7 +338,7 @@ fn a_row_sealed_by_a_held_key_that_no_longer_opens_is_refused_and_the_cursor_fre
         "the refusal names the open failure: {detail}"
     );
     assert!(
-        detail.contains("clio sync ack-skip"),
+        detail.contains("sync_ack_skip") && detail.contains("with confirm"),
         "the refusal names the deliberate discard: {detail}"
     );
     server.stop();

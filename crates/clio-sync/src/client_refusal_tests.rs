@@ -32,7 +32,7 @@ fn the_sealed_mode_refusal_names_what_the_node_accepts() {
         "it says what the node accepts: {PLAINTEXT_REFUSED_REASON}"
     );
     assert!(
-        PLAINTEXT_REFUSED_REASON.contains("clio sync ack-skip"),
+        PLAINTEXT_REFUSED_REASON.contains("sync_ack_skip"),
         "it names the recovery: {PLAINTEXT_REFUSED_REASON}"
     );
 }
@@ -50,13 +50,13 @@ fn the_missing_key_refusal_names_the_stamped_key_and_the_held_ones() {
         "it names every key this node holds: {reason}"
     );
     assert!(
-        reason.contains("clio sync ack-skip"),
+        reason.contains("sync_ack_skip"),
         "it names the recovery: {reason}"
     );
 }
 
 #[test]
-fn the_failed_open_refusal_names_the_opening_key_and_the_damaged_bytes() {
+fn the_failed_open_refusal_names_the_opening_key_and_every_cause() {
     let reason = open_failed_reason("stamped-key");
     assert!(
         reason.contains(
@@ -65,7 +65,15 @@ fn the_failed_open_refusal_names_the_opening_key_and_the_damaged_bytes() {
         "it names the key that failed to open the row: {reason}"
     );
     assert!(
-        reason.contains("may be corrupted or tampered with"),
-        "it says the bytes are untrustworthy: {reason}"
+        reason.contains("used an older associated-data layout"),
+        "it names the older-layout cause first, so a valid old row is not read as damaged: {reason}"
+    );
+    assert!(
+        reason.contains("a different key sealed it"),
+        "it names the other-key cause: {reason}"
+    );
+    assert!(
+        reason.contains("may be damaged or tampered with"),
+        "it says the bytes may be untrustworthy: {reason}"
     );
 }

@@ -27,7 +27,7 @@
 /// than applied. Stable wording the receive tests pin.
 pub(crate) const PLAINTEXT_REFUSED_REASON: &str = "sealed mode refused plaintext content: this node holds a sync key, so it accepts only sealed \
      content, and a plaintext row carries no authenticated envelope. Discard the row deliberately \
-     with `clio sync ack-skip`";
+     with the `sync_ack_skip` MCP tool, passing its mutation id with confirm";
 
 /// The refusal for a row sealed under a key this node does not hold. It names
 /// the stamped identifier and the identifiers held, both derived and
@@ -38,19 +38,22 @@ pub(crate) fn missing_key_reason(stamped: &str, held: &[String]) -> String {
     format!(
         "sync content is sealed under key {stamped}, which this node does not hold; held keys: \
          {}. Add the missing key on this node and pull again, or discard the row deliberately \
-         with `clio sync ack-skip`",
+         with the `sync_ack_skip` MCP tool, passing its mutation id with confirm",
         held.join(", "),
     )
 }
 
-/// The refusal for a stamped row its own matching held key cannot open: a
-/// failed open means the bytes are damaged or were altered, so the message
-/// names the deliberate discard.
+/// The refusal for a stamped row its own matching held key cannot open. A
+/// failed open has three possible causes and the message names all of them in
+/// the order an operator should weigh them: the row predates this release and
+/// was sealed under the older associated-data layout, another key sealed it, or
+/// the bytes are damaged or were altered. It names the deliberate discard.
 pub(crate) fn open_failed_reason(stamped: &str) -> String {
     format!(
         "sync cipher stamped with key {stamped} could not be opened with the matching held key; \
-         the ciphertext may be corrupted or tampered with. Discard the row deliberately with \
-         `clio sync ack-skip`"
+         possible causes: a row sealed before this release used an older associated-data layout; \
+         a different key sealed it; the ciphertext may be damaged or tampered with. Discard the \
+         row deliberately with the `sync_ack_skip` MCP tool, passing its mutation id with confirm"
     )
 }
 

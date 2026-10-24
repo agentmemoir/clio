@@ -50,8 +50,8 @@ impl ResolveFailure {
             Self::MissingIdentifier => format!(
                 "encrypted {kind} row in bank {bank} carries an opaque identifier handle, but its \
                  decrypted payload holds no matching real identifier, so the record cannot be \
-                 applied; discard the row deliberately with `clio sync ack-skip` or re-push it \
-                 from the node that wrote it"
+                 applied; discard the row deliberately with the `sync_ack_skip` MCP tool, passing \
+                 its mutation id with confirm, or re-push it from the node that wrote it"
             ),
         }
     }

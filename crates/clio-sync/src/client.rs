@@ -356,7 +356,8 @@ fn decrypt_for_apply(
         return refuse(
             &m.bank,
             "sync cipher carries no key identifier; this release opens only ciphertext stamped \
-             with a held key identifier. Discard the row deliberately with `clio sync ack-skip`",
+             with a held key identifier. Discard the row deliberately with the `sync_ack_skip` MCP \
+             tool, passing its mutation id with confirm",
         );
     };
     // A row stamped with an identifier none of the held keys produce was
