@@ -155,6 +155,15 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     }
     let mut planner = Planner::new(args, &parsed.envelope);
     planner.run()?;
+    // A live run that stages nothing created and overwrote nothing only re-walked
+    // rows the bank already held; say so instead of reporting a silent success.
+    if !args.dry_run && planner.staged.is_empty() && planner.create == 0 && planner.overwrite == 0 {
+        let skipped = planner.skip;
+        planner.note(format!(
+            "nothing restored: every entity already existed or was skipped \
+             (created 0, overwrote 0, {skipped} skipped)"
+        ));
+    }
     let staged_len = planner.staged.len();
     let applied = if args.dry_run {
         false
@@ -261,3 +270,7 @@ mod import_secret_scrub_tests;
 #[cfg(test)]
 #[path = "import_gist_bound_tests.rs"]
 mod import_gist_bound_tests;
+
+#[cfg(test)]
+#[path = "import_nothing_restored_tests.rs"]
+mod import_nothing_restored_tests;

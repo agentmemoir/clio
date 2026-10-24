@@ -265,6 +265,13 @@ fn render_import(payload: &Value) -> String {
              reject {reject}, overwrite {overwrite}"
         );
     }
+    // A live run that created and overwrote nothing restored nothing, however
+    // many rows it walked; "created 0" alone reads like a successful restore.
+    if create == 0 && overwrite == 0 {
+        return format!(
+            "import: nothing restored: created 0, overwrote 0, skipped {skip}, rejected {reject}"
+        );
+    }
     format!("import: created {create}, skipped {skip}, rejected {reject}, overwrote {overwrite}")
 }
 
@@ -375,3 +382,7 @@ mod category_tests;
 #[cfg(test)]
 #[path = "cli_write_portability_subject_tests.rs"]
 mod subject_tests;
+
+#[cfg(test)]
+#[path = "cli_write_portability_import_render_tests.rs"]
+mod import_render_tests;
