@@ -44,6 +44,27 @@ pub(crate) fn postgres_url_from_env() -> String {
     postgres_url_or_default(clio_config::db_url_env::database_url_from_process_env())
 }
 
+/// Build the read-only connection URL used to check required bootstrap writes.
+#[cfg(test)]
+pub(crate) fn postgres_read_only_url(url: &str) -> String {
+    const OPTIONS: &str = "%20-c%20default_transaction_read_only%3Don";
+    let (base, query) = url
+        .split_once('?')
+        .map_or((url, None), |(base, query)| (base, Some(query)));
+    let mut pairs = query.map_or_else(Vec::new, |query| {
+        query.split('&').map(str::to_owned).collect()
+    });
+    if let Some(options) = pairs.iter_mut().find(|pair| {
+        pair.split_once('=')
+            .is_some_and(|(key, _)| key == "options")
+    }) {
+        options.push_str(OPTIONS);
+    } else {
+        pairs.push(format!("options={}", &OPTIONS[3..]));
+    }
+    format!("{base}?{}", pairs.join("&"))
+}
+
 /// Point a test database URL at a different database on the same server,
 /// keeping any `?options` suffix.
 #[cfg(test)]
@@ -141,5 +162,33 @@ mod tests {
             ),
             "postgres://u:p@h:5432/scratch?sslmode=require&connect_timeout=10"
         );
+    }
+
+    #[test]
+    fn read_only_url_adds_startup_options_without_dropping_query_values() {
+        use std::str::FromStr;
+
+        for (url, expected_query, expected_options) in [
+            (
+                "postgres://u:p@h:5432/clio",
+                "options=-c%20default_transaction_read_only%3Don",
+                "-c default_transaction_read_only=on",
+            ),
+            (
+                "postgres://u:p@h:5432/clio?sslmode=disable",
+                "sslmode=disable&options=-c%20default_transaction_read_only%3Don",
+                "-c default_transaction_read_only=on",
+            ),
+            (
+                "postgres://u:p@h:5432/clio?options=-c%20search_path%3Dfixture",
+                "options=-c%20search_path%3Dfixture%20-c%20default_transaction_read_only%3Don",
+                "-c search_path=fixture -c default_transaction_read_only=on",
+            ),
+        ] {
+            let result = postgres_read_only_url(url);
+            assert!(result.ends_with(expected_query), "{result}");
+            let config = tokio_postgres::Config::from_str(&result).expect("driver parses URL");
+            assert_eq!(config.get_options(), Some(expected_options));
+        }
     }
 }

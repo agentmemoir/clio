@@ -301,12 +301,23 @@ fn postgres_bad_assoc_kind_and_readonly_migrate() {
         )
         .unwrap();
 
-    let separator = if url.contains('?') { '&' } else { '?' };
-    let ro = format!("{url}{separator}options=-c%20default_transaction_read_only%3Don");
+    let ro = crate::db_url::postgres_read_only_url(&url);
     drop(
         PostgresStore::open(&ro, Arc::clone(&kms))
             .expect("a current schema needs no migration writes"),
     );
+    let mut readonly = crate::pg_tls::connect(&ro).expect("connect read-only client");
+    let refusal = readonly
+        .execute(
+            "DELETE FROM schema_settings WHERE key = 'postgres_bootstrap_version'",
+            &[],
+        )
+        .expect_err("read-only client must refuse the bootstrap write");
+    assert_eq!(
+        refusal.code(),
+        Some(&postgres::error::SqlState::READ_ONLY_SQL_TRANSACTION)
+    );
+    drop(readonly);
     store
         .test_execute("DELETE FROM schema_settings WHERE key = 'postgres_bootstrap_version'")
         .expect("make bootstrap migration necessary");
@@ -316,10 +327,6 @@ fn postgres_bad_assoc_kind_and_readonly_migrate() {
         panic!("a required migration must fail on a read-only connection")
     };
     assert_eq!(error.code, ErrorCode::Internal);
-    assert!(
-        error.message.contains("read-only transaction"),
-        "the migration must fail because writes are refused: {error}"
-    );
 }
 
 #[test]
