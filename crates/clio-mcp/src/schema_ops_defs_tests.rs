@@ -9,10 +9,11 @@
 //! unconditional whole-store scope wording this branch removed.
 //!
 //! ## Owns
-//! - The per-tool `bank` property assertions, and the argument-free `diagnose`
-//!   that names the grant in its description instead
+//! - The per-tool `bank` property assertions, including the `diagnose` property
+//!   its description once declined to publish
 //! - The assertions that no operator description still promises the whole store
-//!   for an omitted `bank`, or claims the tool takes no bank scope
+//!   for an omitted `bank`, in any letter case, or claims the tool takes no
+//!   bank scope
 //! - The unchanged tool names, empty `required` lists, and `object` roots
 //!
 //! ## Does not own
@@ -32,20 +33,22 @@ use serde_json::json;
 /// The operator tools, in the order the pack publishes them.
 const OPERATOR_TOOLS: [&str; 5] = ["diagnose", "verify", "doctor", "repair", "reindex"];
 
-/// The four operator tools that publish a `bank` argument; `diagnose` is the
-/// one that binds its scope without one.
-const BANK_SCOPED_TOOLS: [&str; 4] = ["verify", "doctor", "repair", "reindex"];
+/// The operator tools that publish a `bank` argument, which is all five: the
+/// schema closes each object, so a tool whose arm reads a runtime `bank` has to
+/// declare one for a validating client to send it.
+const BANK_SCOPED_TOOLS: [&str; 5] = ["diagnose", "verify", "doctor", "repair", "reindex"];
 
 /// Scope wording this branch retired: an omitted `bank` reaching the whole
 /// store (or every indexable bank) with no credential condition, an omitted
 /// `bank` described as the grant's own bank rather than the server default, a
 /// plan's bank promised as the omitted default, and any claim that an operator
-/// tool takes no bank scope at all.
-const SUPERSEDED_CLAIMS: [&str; 7] = [
+/// tool takes no bank scope at all. Matched without regard to letter case.
+const SUPERSEDED_CLAIMS: [&str; 8] = [
     "whole store when omitted",
     "every indexable bank when omitted",
     "omitted means the bank the caller's grant covers",
     "resolves to the plan's bank when it names one",
+    "Takes no `bank` argument",
     "takes no bank scope",
     "required for explicit actions",
     "Without a bank every action fails",
@@ -92,11 +95,13 @@ fn contract_text(def: &ToolDef) -> String {
     text
 }
 
-/// A scoped operator tool has to say, in the `bank` clause itself, that an
-/// omitted argument means the grant. `diagnose` publishes no such argument, so
-/// it has to say the same thing in its own description instead.
+/// Every operator tool whose arm reads a runtime `bank` has to publish that
+/// argument, because each `inputSchema` closes its object: an omitted property
+/// is one a schema-validating client cannot send at all. The clause has to say,
+/// in the property itself, that an omitted argument means the server default the
+/// grant must cover.
 #[test]
-fn every_operator_tool_publishes_a_bank_scope_or_explains_why_it_takes_none() {
+fn every_operator_tool_publishes_the_bank_scope_its_arm_reads() {
     let scoped: Vec<&str> = OPERATOR_TOOLS
         .iter()
         .copied()
@@ -113,19 +118,13 @@ fn every_operator_tool_publishes_a_bank_scope_or_explains_why_it_takes_none() {
         let tool = tool_def.to_tool();
         let bank = &tool["inputSchema"]["properties"]["bank"];
         assert_eq!(bank["type"], "string", "{name}: {bank}");
+        assert!(
+            !tool["inputSchema"]["required"]
+                .as_array()
+                .is_some_and(|req| req.iter().any(|r| r == "bank")),
+            "{name} must not require the bank argument: {tool}"
+        );
     }
-
-    let diagnose = def("diagnose");
-    let description = diagnose.description;
-    assert!(
-        description.contains("bank"),
-        "diagnose must name the argument it declines: {description}"
-    );
-    assert!(description.contains("grant"), "{description}");
-    assert!(
-        description.contains("without a credential"),
-        "diagnose must say which caller keeps whole-store reach: {description}"
-    );
 }
 
 /// A plan registered for a bank outside the credential's grant is answered as
@@ -143,7 +142,7 @@ fn repair_states_the_out_of_grant_plan_refusal_verbatim() {
 /// tool may describe the default as the grant's own bank instead.
 #[test]
 fn an_omitted_bank_names_the_server_default_the_grant_must_cover() {
-    for name in ["verify", "doctor", "reindex"] {
+    for name in ["diagnose", "verify", "doctor", "reindex"] {
         let tool_def = def(name);
         let clause = bank_clause(&tool_def).unwrap_or_else(|| panic!("{name} bank clause"));
         assert!(clause.contains(OMITTED_BANK_DEFAULT), "{name}: {clause}");
@@ -154,23 +153,22 @@ fn an_omitted_bank_names_the_server_default_the_grant_must_cover() {
     }
 }
 
-/// `diagnose` publishes no `bank` property, yet its arm reads whatever one the
-/// call carries through the same context resolver: a bound caller's `bank`
-/// selects inside its grant, while a caller without a credential gets the whole
-/// store. The description has to match that.
+/// `diagnose` reads whatever `bank` the call carries through the same context
+/// resolver: a bound caller's `bank` selects inside its grant, while a caller
+/// without a credential gets the whole store. It publishes that argument,
+/// because the schema closes the object, and states both reaches.
 #[test]
-fn diagnose_description_matches_the_argument_its_arm_reads() {
+fn diagnose_publishes_and_describes_the_bank_its_arm_reads() {
     let diagnose = def("diagnose");
+    let clause = bank_clause(&diagnose).expect("diagnose publishes the bank its arm reads");
     assert!(
-        bank_clause(&diagnose).is_none(),
-        "diagnose publishes no bank property"
+        clause.contains("without a credential") && clause.contains("whole store"),
+        "diagnose must state the reach a caller without a credential keeps: {clause}"
     );
     let description = diagnose.description;
     assert!(
-        description.contains("Honors a runtime `bank` argument it does not publish")
-            && !description.contains("Takes no `bank` argument"),
-        "diagnose must honour the runtime argument it does not publish, never deny taking \
-         one: {description}"
+        !description.contains("it does not publish"),
+        "diagnose publishes the `bank` argument it reads: {description}"
     );
     assert!(
         description.contains("selects the bank inside its grant"),
@@ -185,14 +183,17 @@ fn diagnose_description_matches_the_argument_its_arm_reads() {
 /// No operator tool may still describe an omitted `bank` as an unconditional
 /// whole-store scope, and none may claim it takes no bank scope. Where a
 /// description does mention whole-store (or every-indexable-bank) reach, that
-/// reach has to be conditioned on the caller holding no credential.
+/// reach has to be conditioned on the caller holding no credential. Retired
+/// wordings are matched without regard to letter case, so a reworded claim in
+/// another case still fails.
 #[test]
 fn no_operator_tool_claims_the_whole_store_for_an_omitted_bank() {
     for name in OPERATOR_TOOLS {
         let text = contract_text(&def(name));
+        let lowered = text.to_lowercase();
         for claim in SUPERSEDED_CLAIMS {
             assert!(
-                !text.contains(claim),
+                !lowered.contains(&claim.to_lowercase()),
                 "{name} still claims `{claim}`: {text}"
             );
         }

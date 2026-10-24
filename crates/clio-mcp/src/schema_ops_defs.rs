@@ -25,12 +25,23 @@
 
 use crate::schema_defs::{ToolDef, arr, b, en, s};
 
-/// The one wording every tool that accepts an omitted `bank` publishes: the
+/// The omitted-`bank` wording `verify`, `doctor` and `reindex` share: the
 /// argument then means the server default bank, and the credential's grant has
 /// to cover that bank or the call is refused. A caller without a credential has
-/// no default to fall back on, so each such tool states that reach itself.
+/// no default to fall back on, so each of those tools states that reach itself,
+/// while `diagnose` publishes its own sentence.
 const OMITTED_BANK: &str =
     "Bank scope; omitted means the server default bank, which the credential's grant must cover.";
+
+/// `diagnose`'s own `bank` clause: the shared omitted-bank sentence, then the
+/// reach only this tool keeps, since its arm reads the argument without ever
+/// narrowing an unbound caller to it.
+fn diagnose_bank_clause() -> String {
+    format!(
+        "{OMITTED_BANK} A caller without a credential reads the whole store, whether it names \
+         this or not."
+    )
+}
 
 /// The `repair` scope, which is the plan's when a plan is registered, so the
 /// grant has to cover the scope the tool acts on and not only the argument. A
@@ -52,12 +63,14 @@ pub fn ops_defs() -> Vec<ToolDef> {
             name: "diagnose",
             description: "Read-only install/database health snapshot: backend reachability, \
                           schema version, banks, index coverage counts, and embedding \
-                          readiness. Never mutates memory. Honors a runtime `bank` argument it \
-                          does not publish: a \
-                          bound caller's `bank`, when it passes one, selects the bank inside \
-                          its grant, and a caller without a credential gets the whole store.",
+                          readiness. Never mutates memory. A bound caller's `bank`, when it \
+                          passes one, selects the bank inside its grant, and a caller without \
+                          a credential gets the whole store whatever it passes.",
             required: &[],
-            props: vec![("timestamp", s("Snapshot time; defaults to now."))],
+            props: vec![
+                ("bank", s(&diagnose_bank_clause())),
+                ("timestamp", s("Snapshot time; defaults to now.")),
+            ],
         },
         ToolDef {
             name: "verify",

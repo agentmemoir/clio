@@ -8,8 +8,9 @@
 //! field names and PII-free findings.
 //!
 //! ## Owns
-//! - [`diagnose_whole_store`]: backend ping, schema version, bank list, vector
-//!   index presence, embedding readiness, coverage counts, and the `ok` bit
+//! - [`diagnose_unscoped`]: backend ping, schema version, bank list, vector
+//!   index presence, embedding readiness, coverage counts, and the `ok` bit,
+//!   over every bank in the store
 //! - [`diagnose_scoped`]: the same snapshot narrowed to one named bank, so a
 //!   scoped caller sees only that bank's name and volume
 //! - [`DiagnoseReport`] shape
@@ -38,7 +39,7 @@ use serde::Serialize;
 /// reader at the deeper pass instead of standing in for it.
 pub const VERIFY_POINTER: &str = "clio ops verify";
 
-/// Inputs for [`diagnose_whole_store`] and [`diagnose_scoped`].
+/// Inputs for [`diagnose_unscoped`] and [`diagnose_scoped`].
 pub struct DiagnoseArgs<'a> {
     /// Operator health repository.
     pub store: &'a dyn OpsStore,
@@ -94,8 +95,12 @@ pub struct DiagnoseReport {
 
 /// Run the read-only health snapshot for the whole store. Never fails: probe
 /// errors become findings.
+///
+/// [`DiagnoseArgs`] carries no bank, so whatever bank a call names is ignored
+/// here and the report covers every bank in the store. A caller with one bank
+/// to read uses [`diagnose_scoped`] instead.
 #[must_use]
-pub fn diagnose_whole_store(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
+pub fn diagnose_unscoped(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
     snapshot(args, None)
 }
 
@@ -104,7 +109,7 @@ pub fn diagnose_whole_store(args: &DiagnoseArgs<'_>) -> DiagnoseReport {
 /// A scoped snapshot lists `bank` only when it exists and reports the coverage
 /// counts for that bank, so a caller limited to one bank learns nothing about
 /// another's name or volume. There is no whole-store form here: a caller with no
-/// bank to name uses [`diagnose_whole_store`]. Never fails: probe errors become
+/// bank to name uses [`diagnose_unscoped`]. Never fails: probe errors become
 /// findings.
 #[must_use]
 pub fn diagnose_scoped(args: &DiagnoseArgs<'_>, bank: &str) -> DiagnoseReport {

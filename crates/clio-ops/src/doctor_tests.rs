@@ -24,7 +24,7 @@
 
 use crate::doctor::{
     ACTION_DROP_ORPHAN_ASSOC_EDGE, ACTION_REBUILD_DENSE_INDEX, ACTION_REBUILD_LEXICAL_INDEX,
-    DoctorArgs, PlanRegistry, doctor_scoped, doctor_whole_store, is_known_action, known_actions,
+    DoctorArgs, PlanRegistry, doctor_scoped, doctor_unscoped, is_known_action, known_actions,
 };
 use crate::finding::codes;
 use clio_store::{AssocEdgeRecord, AssocKind, SqliteStore, Store};
@@ -82,7 +82,7 @@ fn plan_for(
     dry_run: bool,
 ) -> (PlanRegistry, crate::doctor::DoctorPlan) {
     let registry = PlanRegistry::new();
-    let plan = doctor_whole_store(&DoctorArgs {
+    let plan = doctor_unscoped(&DoctorArgs {
         store,
         index: store,
         bank,

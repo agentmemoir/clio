@@ -128,7 +128,7 @@ fn diagnose_result(state: &McpState, ctx: &OpContext, timestamp: &str) -> Result
     };
     let report = match state.op_scope(ctx, None)? {
         OpScope::Bank(bank) => clio_ops::diagnose_scoped(&args, bank),
-        OpScope::WholeStore => clio_ops::diagnose_whole_store(&args),
+        OpScope::WholeStore => clio_ops::diagnose_unscoped(&args),
     };
     Ok(to_value(&report))
 }
@@ -186,7 +186,7 @@ fn doctor_result(
         OpScope::Bank(bank) if state.principal.is_some() => {
             clio_ops::doctor_scoped(&doctor_args, bank)?
         }
-        _ => clio_ops::doctor_whole_store(&doctor_args)?,
+        _ => clio_ops::doctor_unscoped(&doctor_args)?,
     };
     Ok(to_value(&plan))
 }

@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - `diagnose_scoped` bank inventory for an existing and an unknown bank
-//! - `diagnose_whole_store` listing every bank
+//! - `diagnose_unscoped` listing every bank
 //! - Scoped coverage counts and the disclosure boundary between banks
 //!
 //! ## Does not own
@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on scoped diagnose behavior.
 
-use crate::diagnose::{DiagnoseArgs, diagnose_scoped, diagnose_whole_store};
+use crate::diagnose::{DiagnoseArgs, diagnose_scoped, diagnose_unscoped};
 use crate::diagnose_fixtures::{TS, failed, item, sqlite};
 use crate::finding::{Severity, codes};
 use clio_store::{
@@ -110,7 +110,7 @@ fn unknown_bank_scope_lists_no_bank() {
 #[test]
 fn whole_store_snapshot_lists_every_bank() {
     let store = two_banks();
-    let report = diagnose_whole_store(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &store,
         index: &store,
         embedder: None,

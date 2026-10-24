@@ -8,8 +8,9 @@
 //! plan registry that lets a later `repair` call resolve a returned plan id.
 //!
 //! ## Owns
-//! - [`doctor_whole_store`]: finding-to-action mapping, risk/quiesce
-//!   annotations, non-repairable notes, and the store-wide note probe
+//! - [`doctor_unscoped`]: finding-to-action mapping, risk/quiesce
+//!   annotations, non-repairable notes, and the store-wide note probe, over the
+//!   bank the arguments name or the whole store when they name none
 //! - [`doctor_scoped`]: the same plan for one named bank, with the store-wide
 //!   note probe never run, so a caller whose grant covers one bank reads no
 //!   other bank
@@ -145,7 +146,7 @@ impl PlanRegistry {
     }
 }
 
-/// Inputs for [`doctor_whole_store`] and [`doctor_scoped`].
+/// Inputs for [`doctor_unscoped`] and [`doctor_scoped`].
 pub struct DoctorArgs<'a> {
     /// Operator health repository.
     pub store: &'a dyn OpsStore,
@@ -161,18 +162,21 @@ pub struct DoctorArgs<'a> {
     pub plans: &'a PlanRegistry,
 }
 
-/// Compose an ordered repair plan for the whole store. Never mutates the store.
+/// Compose an ordered repair plan with no credential scope: over the bank
+/// `args.bank` names, or over the whole store when it names none. Never mutates
+/// the store.
 ///
 /// When `dry_run=false` the plan is recorded in `args.plans` so a later
 /// `repair(plan_id)` can resolve it; the store itself is untouched either way.
 ///
-/// A bank-scoped request also reports the error codes other banks carry, so a
-/// reader does not mistake a clean plan for a clean store. A caller whose grant
-/// covers one bank must call [`doctor_scoped`] instead.
+/// This form reads the store-wide note probe, so a plan for a named bank also
+/// reports the error codes other banks carry, and a reader does not mistake a
+/// clean plan for a clean store. A caller whose grant covers one bank must call
+/// [`doctor_scoped`] instead, which never runs that probe.
 ///
 /// # Errors
 /// Storage/index read failures (an unreadable store cannot be planned for).
-pub fn doctor_whole_store(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
+pub fn doctor_unscoped(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> {
     compose_plan(args, args.bank, true)
 }
 
@@ -181,7 +185,7 @@ pub fn doctor_whole_store(args: &DoctorArgs<'_>) -> Result<DoctorPlan, AmError> 
 /// The store-wide note probe never runs here: a caller limited to one bank must
 /// not learn that another bank exists or which codes it carries. `bank` is the
 /// plan's scope whatever `args.bank` names. A caller with no bank to name uses
-/// [`doctor_whole_store`].
+/// [`doctor_unscoped`].
 ///
 /// # Errors
 /// Storage/index read failures (an unreadable store cannot be planned for).
