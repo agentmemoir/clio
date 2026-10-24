@@ -274,3 +274,7 @@ mod import_gist_bound_tests;
 #[cfg(test)]
 #[path = "import_nothing_restored_tests.rs"]
 mod import_nothing_restored_tests;
+
+#[cfg(test)]
+#[path = "import_round_trip_tests.rs"]
+mod import_round_trip_tests;
