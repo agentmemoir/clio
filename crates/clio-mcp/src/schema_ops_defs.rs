@@ -25,6 +25,25 @@
 
 use crate::schema_defs::{ToolDef, arr, b, en, s};
 
+/// The one wording every tool that accepts an omitted `bank` publishes: the
+/// argument then means the server default bank, and the credential's grant has
+/// to cover that bank or the call is refused. A caller without a credential has
+/// no default to fall back on, so each such tool states that reach itself.
+const OMITTED_BANK: &str =
+    "Bank scope; omitted means the server default bank, which the credential's grant must cover.";
+
+/// The `repair` scope, which is the plan's when a plan is registered, so the
+/// grant has to cover the scope the tool acts on and not only the argument. A
+/// plan outside the grant is answered as not found, in the words below, and an
+/// unbound caller keeps the plan-or-argument reach it had before the grant.
+const REPAIR_BANK: &str = "Bank scope; omitted means the registered plan's own bank, and \
+                           otherwise the bank this call resolves for the credential (the server \
+                           default when no `bank` is passed). A plan registered for a bank the \
+                           credential's grant does not cover is reported as not found, and none \
+                           of its actions run. A caller without a credential acts in its `bank` \
+                           argument when it passes one, and with neither a bank nor a registered \
+                           plan has no bank scope at all, where each action fails without mutating.";
+
 /// All operator tool definitions (three read-planning + two mutating rows).
 #[must_use]
 pub fn ops_defs() -> Vec<ToolDef> {
@@ -33,9 +52,10 @@ pub fn ops_defs() -> Vec<ToolDef> {
             name: "diagnose",
             description: "Read-only install/database health snapshot: backend reachability, \
                           schema version, banks, index coverage counts, and embedding \
-                          readiness. Never mutates memory. Takes no `bank` argument: a bound \
-                          caller reads only the bank its grant covers, a caller without a \
-                          credential reads the whole store.",
+                          readiness. Never mutates memory. Honors a runtime `bank` argument it \
+                          does not publish: a \
+                          bound caller's `bank`, when it passes one, selects the bank inside \
+                          its grant, and a caller without a credential gets the whole store.",
             required: &[],
             props: vec![("timestamp", s("Snapshot time; defaults to now."))],
         },
@@ -46,10 +66,10 @@ pub fn ops_defs() -> Vec<ToolDef> {
             props: vec![
                 (
                     "bank",
-                    s(
-                        "Bank scope; omitted means the bank the caller's grant covers, or the \
-                         whole store for a caller without a credential.",
-                    ),
+                    s(&format!(
+                        "{OMITTED_BANK} A caller without a credential reads the whole store \
+                         when it omits this."
+                    )),
                 ),
                 ("timestamp", s("Report time; defaults to now.")),
             ],
@@ -61,10 +81,10 @@ pub fn ops_defs() -> Vec<ToolDef> {
             props: vec![
                 (
                     "bank",
-                    s(
-                        "Bank scope; omitted means the bank the caller's grant covers, or the \
-                         whole store for a caller without a credential.",
-                    ),
+                    s(&format!(
+                        "{OMITTED_BANK} A caller without a credential composes over the whole \
+                         store when it omits this."
+                    )),
                 ),
                 (
                     "dry_run",
@@ -86,14 +106,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                         &s("One allowlisted action id."),
                     ),
                 ),
-                (
-                    "bank",
-                    s(
-                        "Bank scope; omitted resolves to the plan's bank when it names one, \
-                         otherwise to the bank the caller's grant covers; only a caller without \
-                         a credential ends with none, where every action fails without mutation.",
-                    ),
-                ),
+                ("bank", s(REPAIR_BANK)),
                 (
                     "confirm",
                     b("Perform the repairs; default false (refused)."),
@@ -115,11 +128,11 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "bank",
-                    s(
-                        "Bank scope; omitted means the bank the caller's grant covers, or every \
-                         indexable bank for a caller without a credential (rejected over MCP \
-                         while the shared bank surface is disabled).",
-                    ),
+                    s(&format!(
+                        "{OMITTED_BANK} A caller without a credential sweeps every indexable \
+                         bank when it omits this (rejected over MCP while the shared bank \
+                         surface is disabled)."
+                    )),
                 ),
                 ("dry_run", b("Report scope/cost only (default true).")),
                 ("confirm", b("Perform the rebuild; default false.")),
