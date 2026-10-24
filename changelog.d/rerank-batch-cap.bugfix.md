@@ -1,1 +1,0 @@
-The TEI reranker's documents-per-request cap is now configurable as `rerank.max_batch` (`CLIO_RERANK_MAX_BATCH`, settable through `config_set`), so a deployment can match its sidecar's own batch ceiling instead of always sending 32 documents per request; a document that omits the key keeps the 32-document default.

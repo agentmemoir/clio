@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - Every variable-to-config-path mapping the overlay applies
-//! - The overlay clear, the unparseable-number branch, and the repo-root field
+//! - The overlay clear, the unparseable-number branch, the out-of-range rerank
+//!   cap branch, and the repo-root field
 //! - Bearer credential precedence through both entry points
 //!
 //! ## Does not own
@@ -135,6 +136,68 @@ fn an_unparseable_dimension_leaves_the_path_alone() {
     let mut rt = Runtime::with_env(&|_| None);
     rt.apply_process_env(&mut env(&[("CLIO_EMBED_DIMS", "not-a-number")]));
     assert!(!rt.env_overlay.contains_key("embed.dims"));
+}
+
+/// A cap of zero would ask for one document per request, and the set-value rule
+/// refuses it, so the overlay drops it and the merged config keeps its default.
+#[test]
+fn a_zero_rerank_cap_leaves_the_path_alone() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.apply_process_env(&mut env(&[("CLIO_RERANK_MAX_BATCH", "0")]));
+    assert!(
+        !rt.env_overlay.contains_key("rerank.max_batch"),
+        "a zero cap reached the overlay: {:?}",
+        rt.env_overlay.get("rerank.max_batch")
+    );
+    assert_eq!(
+        crate::config::merge::system_defaults(&|_key: &str| None)
+            .pointer("/rerank/max_batch")
+            .cloned(),
+        Some(json!(32)),
+        "the default the dropped value falls back to moved"
+    );
+}
+
+/// Text where a count belongs is not a cap either, so the same default stands
+/// rather than a guessed value.
+#[test]
+fn an_unparseable_rerank_cap_leaves_the_path_alone() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.apply_process_env(&mut env(&[("CLIO_RERANK_MAX_BATCH", "many")]));
+    assert!(
+        !rt.env_overlay.contains_key("rerank.max_batch"),
+        "unparseable text reached the overlay: {:?}",
+        rt.env_overlay.get("rerank.max_batch")
+    );
+}
+
+/// A cap one above the per-request document limit is what `config_set` refuses,
+/// so the environment must not be a second door to it: the overlay drops it and
+/// the merged default stands instead of a value the service cannot honour.
+#[test]
+fn a_rerank_cap_above_the_service_limit_leaves_the_path_alone() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.apply_process_env(&mut env(&[("CLIO_RERANK_MAX_BATCH", "1001")]));
+    assert!(
+        !rt.env_overlay.contains_key("rerank.max_batch"),
+        "an over-ceiling cap reached the overlay: {:?}",
+        rt.env_overlay.get("rerank.max_batch")
+    );
+    assert_eq!(
+        crate::config::merge::system_defaults(&|_key: &str| None)
+            .pointer("/rerank/max_batch")
+            .cloned(),
+        Some(json!(32)),
+        "the default the dropped value falls back to moved"
+    );
+    // The last accepted value still gets through, so the bound is a ceiling and
+    // not a blanket refusal of large caps.
+    let mut accepted = Runtime::with_env(&|_| None);
+    accepted.apply_process_env(&mut env(&[("CLIO_RERANK_MAX_BATCH", "1000")]));
+    assert_eq!(
+        accepted.env_overlay.get("rerank.max_batch"),
+        Some(&json!(1000_u64))
+    );
 }
 
 /// The database URL is the one variable every code path has to agree on, so the

@@ -31,6 +31,7 @@ mod profile_ops;
 mod retention_ops;
 mod types;
 mod validate;
+mod validate_set;
 
 #[cfg(test)]
 mod tests;
