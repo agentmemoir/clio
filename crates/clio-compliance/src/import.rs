@@ -158,10 +158,10 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     // A live run that stages nothing created and overwrote nothing only re-walked
     // rows the bank already held; say so instead of reporting a silent success.
     if !args.dry_run && planner.staged.is_empty() && planner.create == 0 && planner.overwrite == 0 {
-        let skipped = planner.skip;
+        let (skipped, rejected, invalid) = (planner.skip, planner.reject, planner.skip_invalid);
         planner.note(format!(
-            "nothing restored: every entity already existed or was skipped \
-             (created 0, overwrote 0, {skipped} skipped)"
+            "nothing restored: created 0, overwrote 0, {skipped} skipped, \
+             {rejected} rejected, {invalid} skipped as invalid"
         ));
     }
     let staged_len = planner.staged.len();

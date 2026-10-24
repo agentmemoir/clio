@@ -50,6 +50,15 @@ mod keys;
 
 pub(super) use keys::{import_id, kind_key, masked_item};
 
+/// Why a deferred carrier cannot carry the dependent rows that hang off it.
+#[derive(Clone)]
+pub(super) enum CarrierBlock {
+    /// The carrier's own stored content failed validation and was skipped.
+    Invalid(String),
+    /// The admission gate rejected the carrier.
+    Rejected(String),
+}
+
 /// Per-entity import planner (see `run` for the entity order).
 pub(super) struct Planner<'a> {
     pub(super) args: &'a ImportArgs<'a>,
@@ -73,8 +82,8 @@ pub(super) struct Planner<'a> {
     pub(super) consumed: HashSet<String>,
     /// Admission-stamped carriers for rows whose executor re-inserts them.
     pub(super) admitted_carriers: HashMap<String, MemoryItem>,
-    /// Carriers rejected by the admission gate (reason per carrier id).
-    pub(super) rejected_carriers: HashMap<String, String>,
+    /// Carriers that cannot carry their dependent rows, with the masked reason.
+    pub(super) blocked_carriers: HashMap<String, CarrierBlock>,
     pub(super) noted_triple_force: bool,
 }
 
@@ -99,7 +108,7 @@ impl<'a> Planner<'a> {
             deferred: HashSet::new(),
             consumed: HashSet::new(),
             admitted_carriers: HashMap::new(),
-            rejected_carriers: HashMap::new(),
+            blocked_carriers: HashMap::new(),
             noted_triple_force: false,
         }
     }
@@ -161,12 +170,14 @@ impl<'a> Planner<'a> {
 
     /// Record one entity this run reports and skips instead of failing the
     /// whole import. A skipped deferred carrier also becomes unusable, so the
-    /// row that depends on it takes the existing carrier-missing path.
+    /// row that depends on it reports the carrier as skipped and does not
+    /// restore.
     fn record_skip_invalid(&mut self, id: &str, carrier: bool, err: &AmError) {
         self.skip_invalid += 1;
         let reason = scrub_inline_secrets(&err.message);
         if carrier {
-            self.rejected_carriers.insert(id.to_owned(), reason.clone());
+            self.blocked_carriers
+                .insert(id.to_owned(), CarrierBlock::Invalid(reason.clone()));
         }
         if self.skipped_invalid.len() < 10 {
             self.skipped_invalid.push(SkippedInvalid {
@@ -220,12 +231,11 @@ impl<'a> Planner<'a> {
             bank.clone_into(&mut it.bank_id);
             let id = import_id(bank, &item.bank_id, &item.id).into_owned();
             it.id.clone_from(&id);
-            // A gist whose length predates the published cap must be reported
-            // and skipped, not abort the restore: the cap is a producer gate and
-            // the row already exists. The value is never truncated. Scoped to
-            // the gist alone — a structural `context` violation still fails the
-            // whole bundle, and this runs before the exists/force branch so the
-            // force path cannot stage a row the batch commit would reject.
+            // A gist whose length predates the published cap is reported and
+            // skipped, not aborted: the row may be new, which is why this runs
+            // before the exists/force branch. The value is never truncated.
+            // Gist only — a structural `context` violation still fails the whole
+            // bundle, and this keeps the force path from staging a bad row.
             if let Some(gist) = it.gist.as_deref()
                 && let Err(err) = clio_types::validate_gist(gist)
             {
@@ -324,12 +334,14 @@ impl<'a> Planner<'a> {
         if decision.pass {
             self.create += 1;
         } else {
-            self.rejected_carriers.insert(
+            self.blocked_carriers.insert(
                 it.id.clone(),
-                decision
-                    .rejection_reason
-                    .clone()
-                    .unwrap_or_else(|| "admission gate rejection".to_owned()),
+                CarrierBlock::Rejected(
+                    decision
+                        .rejection_reason
+                        .clone()
+                        .unwrap_or_else(|| "admission gate rejection".to_owned()),
+                ),
             );
             self.reject_reason(decision.rejection_reason.as_deref());
         }

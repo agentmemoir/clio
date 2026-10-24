@@ -28,7 +28,7 @@ use clio_store::{BatchWrite, OpaqueItemRecord};
 use clio_types::{AmError, BeliefObject, ErrorCode, MemoryItem};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::import_apply::{Planner, import_id};
+use super::import_apply::{CarrierBlock, Planner, import_id};
 use crate::bundle::OpaqueItem;
 use crate::export_mask::scrub_context;
 
@@ -62,11 +62,17 @@ impl Planner<'_> {
             .bundle_item(item_id)
             .map_or_else(|| bank.to_owned(), |i| i.bank_id.clone());
         let written = import_id(bank, &source_bank, item_id).into_owned();
-        if let Some(reason) = self.rejected_carriers.get(&written).cloned() {
+        if let Some(block) = self.blocked_carriers.get(&written).cloned() {
             self.skip += 1;
-            self.note(format!(
-                "{what} {key} restore skipped: carrier item rejected by admission gate ({reason})"
-            ));
+            let note = match block {
+                CarrierBlock::Invalid(reason) => format!(
+                    "{what} {key} restore skipped: carrier item skipped as invalid ({reason})"
+                ),
+                CarrierBlock::Rejected(reason) => format!(
+                    "{what} {key} restore skipped: carrier item rejected by admission gate ({reason})"
+                ),
+            };
+            self.note(note);
             return Ok(None);
         }
         if self.item_exists(&written)? || self.consumed.contains(&format!("carrier:{written}")) {

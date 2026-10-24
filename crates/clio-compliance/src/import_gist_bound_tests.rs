@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The oversized-gist skip on the create path and on the force path
 //! - The `skipped_invalid` report entries those skips produce
+//! - The note a dependent row gets when its carrier was skipped as invalid
 //!
 //! ## Does not own
 //! - Fixture builders (see `import_fixture.rs`)
@@ -24,7 +25,9 @@ use crate::bundle::ExportContentMode;
 use crate::import::import;
 use crate::import_fixture::{Harness, unique, write_bundle};
 use clio_store::Store;
-use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
+use clio_types::{
+    EpisodicType, EpistemicKind, ItemKind, MemoryItem, SemanticCategory, TripleRecord,
+};
 
 const SHORT_GIST: &str = "The deploy must run the smoke task checklist";
 
@@ -58,6 +61,39 @@ fn item(id: &str, gist: &str) -> MemoryItem {
 /// bank, so every row is re-keyed.
 fn written(h: &Harness, id: &str) -> String {
     format!("{id}#{}", h.bank)
+}
+
+/// The row a triple hangs off: an episodic item of the triple carrier kind.
+fn triple_carrier(id: &str, gist: &str) -> MemoryItem {
+    let mut it = item(id, gist);
+    it.kind = ItemKind::Episodic;
+    it.category = None;
+    it.episodic_type = Some(EpisodicType::Triple);
+    it
+}
+
+/// One triple pointing at the carrier row `item_id`.
+fn triple(item_id: &str) -> TripleRecord {
+    TripleRecord {
+        context: None,
+        id: format!("edge-{item_id}"),
+        bank_id: "exported-bank".into(),
+        item_id: item_id.into(),
+        subject: "sub-gist-bound".into(),
+        predicate: "prefers".into(),
+        object: "concise".into(),
+        epistemic_kind: EpistemicKind::Fact,
+        source_type: None,
+        confidence: Some(0.9),
+        valid_from: "2026-01-01T00:00:00Z".into(),
+        valid_until: None,
+        tx_from: "2026-01-01T00:00:00Z".into(),
+        tx_until: None,
+        snapshot_ref: None,
+        gist_ref: None,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        updated_at: None,
+    }
 }
 
 /// A row the target bank holds after `import`.
@@ -150,5 +186,41 @@ fn force_with_legacy_oversized_gist_skips_that_row_and_overwrites_the_rest() {
         trail.events.iter().any(|e| e.operation == "import_force"),
         "the overwrite is audited: {:?}",
         trail.events
+    );
+}
+
+#[test]
+fn dependent_row_of_a_gist_skipped_carrier_does_not_blame_the_admission_gate() {
+    let h = Harness::new();
+    let carrier_id = unique("gist-triple-carrier");
+    let bundle = write_bundle(
+        &crate::bundle::ExportEntities {
+            items: vec![triple_carrier(&carrier_id, &"g".repeat(1079))],
+            triples: vec![triple(&carrier_id)],
+            ..crate::bundle::ExportEntities::default()
+        },
+        ExportContentMode::DsarPlaintext,
+    );
+    let report = import(&h.args(&h.ctx(), h.policy(), bundle.path(), false, false, None))
+        .expect("a gist skip on a carrier must not abort the import");
+
+    assert_eq!(report.would_skip_invalid, 1);
+    assert!(stored(&h, &carrier_id).is_none(), "neither row is written");
+    let note = report
+        .notes
+        .iter()
+        .find(|note| note.contains("restore skipped"))
+        .unwrap_or_else(|| panic!("the dependent row is reported: {:?}", report.notes));
+    assert!(
+        note.contains("carrier item skipped as invalid"),
+        "the note names the real cause: {note}"
+    );
+    assert!(
+        note.contains("gist must be at most 250 characters"),
+        "the note keeps the reason the carrier was skipped: {note}"
+    );
+    assert!(
+        !note.contains("admission gate"),
+        "a gist skip is not an admission rejection: {note}"
     );
 }
