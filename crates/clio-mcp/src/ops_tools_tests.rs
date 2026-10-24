@@ -216,7 +216,8 @@ fn reindex_dry_run_reports_cost_and_rejects_unknown_target() {
         "reindex",
         &json!({ "bank": "bank-ops", "target": "all", "timestamp": TS }),
     );
-    assert_eq!(result["ok"], Value::Bool(true), "{result}");
+    // A dry run applies nothing, so its report is not `ok`.
+    assert_eq!(result["ok"], Value::Bool(false), "{result}");
     assert_eq!(result["dry_run"], Value::Bool(true), "{result}");
     assert!(result["indexable_items"].is_u64(), "{result}");
     assert!(result["dense_missing"].is_u64(), "{result}");
@@ -289,7 +290,8 @@ fn reindex_without_bank_with_shared_enabled_sweeps_whole_store() {
     )
     .expect("mcp state");
     let result = dispatch(&st, "reindex", &json!({ "timestamp": TS }));
-    assert_eq!(result["ok"], Value::Bool(true), "{result}");
+    // The default is a report, which applies nothing and is not `ok`.
+    assert_eq!(result["ok"], Value::Bool(false), "{result}");
     assert_eq!(result["dry_run"], Value::Bool(true), "{result}");
 }
 
