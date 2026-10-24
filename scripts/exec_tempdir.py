@@ -36,10 +36,14 @@ exists to keep the two apart; do not collapse it.
 from __future__ import annotations
 
 import enum
+import errno
+import itertools
 import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -59,6 +63,8 @@ SCRIPTS = Path(__file__).resolve().parent
 #: because of where the machine keeps its files has the defect this module exists
 #: to remove.
 CANDIDATE_PARENTS: tuple[str | None, ...] = (None, "/dev/shm", str(SCRIPTS.parent / "target"))
+
+_probe_ids = itertools.count()
 
 
 def _expand(parent: str | None) -> str | None:
@@ -121,7 +127,7 @@ class _ProbeOutcome(enum.Enum):
     UNPROBED = "unprobed"
 
 
-def _run_probe(directory: str) -> _ProbeOutcome:
+def _run_probe(directory: str) -> tuple[_ProbeOutcome, str]:
     """Write a probe executable into `directory`, run it, and report the outcome.
 
     The outcome keeps apart two failures that a plain yes or no would merge: a
@@ -131,35 +137,58 @@ def _run_probe(directory: str) -> _ProbeOutcome:
     a false answer. That mistake is the bug issue #60 records, so keep the two
     apart when editing this function.
     """
-    probe = os.path.join(directory, "_probe.sh")
+    # One name per thread, process, and invocation. Parallel callers probe the same
+    # directory, and sequential probes in one thread must not collide on the same name.
+    probe = os.path.join(
+        directory,
+        f"_probe-{os.getpid()}-{threading.get_ident()}-{next(_probe_ids)}.sh",
+    )
     try:
         with open(probe, "w", encoding="utf-8") as handle:
             handle.write("#!/bin/sh\nexit 0\n")
         os.chmod(probe, 0o755)
-    except OSError:
+    except OSError as exc:
         # A probe that could not be written was never run, so this says nothing
         # about execution. It is UNPROBED, never REFUSED.
-        return _ProbeOutcome.UNPROBED
+        return _ProbeOutcome.UNPROBED, f"cannot write probe: {exc}"
     try:
-        done = subprocess.run([probe], capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
-    except PermissionError:
+        retries = 5
+        delay = 0.01
+        while True:
+            try:
+                done = subprocess.run(
+                    [probe], capture_output=True, text=True, timeout=10, check=False
+                )  # noqa: S603
+                break
+            except OSError as exc:
+                if getattr(exc, "errno", None) == errno.ETXTBSY and retries > 0:
+                    retries -= 1
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
+    except PermissionError as exc:
         # Only a PermissionError raised while *starting* the probe is a refusal:
         # the kernel rejected the exec, which is what a `noexec` mount gives. A
         # timeout (`subprocess.TimeoutExpired`) or any other OSError means the
         # probe could not be run, which is not a refusal. Collapsing the two is
         # the defect issue #60 records — do not.
-        return _ProbeOutcome.REFUSED
-    except (OSError, subprocess.SubprocessError):
-        return _ProbeOutcome.UNPROBED
+        return _ProbeOutcome.REFUSED, f"kernel refused execution: {exc}"
+    except subprocess.TimeoutExpired:
+        return _ProbeOutcome.UNPROBED, "probe timed out after 10s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _ProbeOutcome.UNPROBED, f"probe execution error: {exc}"
     finally:
         try:
             os.remove(probe)
         except OSError:
             pass
-    return _ProbeOutcome.RUNS if done.returncode == 0 else _ProbeOutcome.UNPROBED
+    if done.returncode == 0:
+        return _ProbeOutcome.RUNS, ""
+    return _ProbeOutcome.UNPROBED, f"probe exited with returncode {done.returncode}: {done.stderr.strip()}"
 
 
-def can_execute(directory: str) -> bool:
+def can_execute(directory: str, details: list[str] | None = None) -> bool:
     """Return True when an executable file in `directory` can actually be run.
 
     A hook and a stand-in command are both executable files, so the filesystem
@@ -178,7 +207,10 @@ def can_execute(directory: str) -> bool:
     be usable, and the same False is what stops a `noexec` host from building
     fixtures that cannot run.
     """
-    return _run_probe(directory) is _ProbeOutcome.RUNS
+    outcome, detail = _run_probe(directory)
+    if details is not None and outcome is not _ProbeOutcome.RUNS:
+        details.append(detail)
+    return outcome is _ProbeOutcome.RUNS
 
 
 def refuses_execution(directory: str) -> bool:
@@ -192,7 +224,8 @@ def refuses_execution(directory: str) -> bool:
     run proves nothing either way, so it answers False. This is the only place a
     refusal is claimed; do not re-derive it from a bare False elsewhere.
     """
-    return _run_probe(directory) is _ProbeOutcome.REFUSED
+    outcome, _ = _run_probe(directory)
+    return outcome is _ProbeOutcome.REFUSED
 
 
 def _executable_candidates(
