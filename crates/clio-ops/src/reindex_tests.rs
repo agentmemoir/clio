@@ -105,7 +105,10 @@ fn dry_run_reports_counts_without_writing() {
         confirm: false,
     })
     .unwrap();
-    assert!(report.ok);
+    assert!(
+        !report.ok,
+        "a dry run applies nothing, so a no-op report is never ok"
+    );
     assert!(report.dry_run);
     assert_eq!(report.target, "all");
     assert_eq!(report.bank.as_deref(), Some("b"));
@@ -134,6 +137,7 @@ fn live_lexical_rebuild_needs_no_embedder() {
     })
     .unwrap();
     assert!(report.ok);
+    assert!(!report.dry_run);
     assert_eq!(report.lexical_applied, 1);
     assert_eq!(report.dense_applied, 0);
 }
@@ -172,6 +176,27 @@ fn mutating_without_confirm_fails_closed() {
     })
     .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+/// A dry run reports and a confirmed run applies, so asking for both is a
+/// contradiction rather than a request the report can honor.
+#[test]
+fn confirm_with_a_dry_run_is_refused() {
+    let store = store();
+    store.create_memory_item(&item("i1", "b"), "actor").unwrap();
+    let err = reindex(&ReindexArgs {
+        store: &store,
+        index: &store,
+        embedder: None,
+        bank: Some("b"),
+        target: RebuildTargets::Lexical,
+        dry_run: true,
+        confirm: true,
+    })
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    let cov = clio_store::IndexStore::index_coverage(&store, Some("b")).unwrap();
+    assert_eq!(cov.lexical_rows, 0, "the refused call wrote nothing");
 }
 
 #[test]

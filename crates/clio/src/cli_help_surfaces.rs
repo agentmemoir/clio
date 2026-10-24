@@ -206,7 +206,7 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     (
         "ops reindex",
         "clio ops reindex [--db PATH] [--backend sqlite|postgres] [--bank BANK] \
-         [--target dense|lexical|all] [--dry-run false] [--confirm]",
+         [--target dense|lexical|all] [--dry-run] [--confirm]",
     ),
     (
         "status",

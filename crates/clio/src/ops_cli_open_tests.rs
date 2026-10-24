@@ -105,10 +105,11 @@ fn unreachable_postgres_backend_exits_1() {
 }
 
 /// The five operator subcommands against a real Postgres store, each with its
-/// documented exit code: diagnose, verify, doctor, and a dry-run reindex
-/// succeed; the unconfirmed repair is refused with 2; and a mismatched
-/// embedding space fails the postgres open closed with 1. Serialized on the
-/// shared Postgres test lock, rows isolated in a scoped schema.
+/// documented exit code: diagnose, verify, and doctor succeed, a dry-run
+/// reindex reports `ok:false` with 3, the unconfirmed repair is refused with
+/// 2, and a mismatched embedding space fails the postgres open closed with 1.
+/// Serialized on the shared Postgres test lock, rows isolated in a scoped
+/// schema.
 #[test]
 fn postgres_ops_subcommands_exit_with_the_documented_codes() {
     let _guard = lock_pg_test();
@@ -148,7 +149,8 @@ fn postgres_ops_subcommands_exit_with_the_documented_codes() {
     assert_eq!(super::ops_with(refused, &env), ExitCode::from(2));
     let mut dry = postgres("reindex");
     dry.push("--dry-run".to_owned());
-    assert_eq!(super::ops_with(dry, &env), ExitCode::SUCCESS);
+    // A report-only run applies nothing, so it is not `ok` and exits 3.
+    assert_eq!(super::ops_with(dry, &env), ExitCode::from(3));
 
     let half_space = |key: &str| match key {
         "CLIO_EMBED_MODEL" => Some("other/model".to_owned()),

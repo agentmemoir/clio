@@ -37,21 +37,22 @@ use std::sync::Arc;
 /// Exit-code contract for the operator commands.
 ///
 /// - `0`: success — `diagnose` and `verify` are healthy, `doctor` composed a
-///   clean plan, `repair` applied, or `reindex` completed.
+///   clean plan, `repair` applied, or `reindex` applied its sweep.
 /// - `1`: operator findings, store/index or key-store failures, missing repair
 ///   plans, unreachable diagnose backends, or failed repair actions.
 /// - `2`: a repair was refused (missing confirm or unknown action), the
 ///   backend value is invalid, or the `clio ops` subcommand is unknown.
-/// - `3`: `reindex` failed or aborted (including a dense target with no
-///   embedding sidecar).
+/// - `3`: `reindex` refused, failed, or ran report-only (`--dry-run`): a report
+///   applies nothing, so it is never `ok`.
 /// - `75`: a Postgres lock conflict is temporary; retry the command.
 ///
-/// `doctor` never mutates the store under any `--dry-run` value; `repair` and
-/// `reindex` mutate only when `--confirm` is given.
+/// `doctor` never mutates the store under any `--dry-run` value. `repair` and
+/// `reindex` mutate only with `--confirm`, and `reindex` reads that flag by
+/// value: a bare `--confirm` starts the live rebuild, `--confirm false` does not,
+/// and pairing it with `--dry-run` is refused.
 ///
-/// Plan ids are process-local: `doctor` and `repair` run as separate CLI
-/// processes, so a `--plan` id from an earlier invocation is not resolvable.
-/// Cross-invocation repairs pass an explicit `--actions` list instead.
+/// Plan ids are process-local: `doctor` and `repair` run as separate processes,
+/// so pass an explicit `--actions` list for a cross-invocation repair.
 pub(crate) fn ops(args: impl IntoIterator<Item = String>) -> ExitCode {
     ops_with(args, &|key| std::env::var(key).ok())
 }
@@ -125,11 +126,6 @@ fn ops_usage(sub: &str) -> String {
 trait OpsRepos: Store + OpsStore + IndexStore {}
 impl<T: Store + OpsStore + IndexStore> OpsRepos for T {}
 
-/// Subcommands that decrypt item content and therefore need the real key store.
-fn needs_store_keys(sub: &str) -> bool {
-    matches!(sub, "reindex" | "repair")
-}
-
 /// Open the selected backend through the shared precedence resolver and run
 /// the command against its concrete store.
 fn run_backend<F>(sub: &str, flags: &HashMap<String, String>, get: &F) -> ExitCode
@@ -157,7 +153,7 @@ where
     // every item unreadable, so a rebuild reported success while rewriting
     // nothing. Read-only health commands keep a process-local KMS, so they
     // still answer on a store whose key file is absent or damaged.
-    let kms: Arc<dyn DekProvider> = if needs_store_keys(sub) {
+    let kms: Arc<dyn DekProvider> = if matches!(sub, "reindex" | "repair") {
         match clio_config::kms_path::resolve_kms_path(get, database) {
             Some(path) => match LocalDevKms::open_persistent(path) {
                 Ok(kms) => Arc::new(kms),
@@ -375,7 +371,14 @@ fn run_reindex<S: OpsRepos>(
         },
         None => clio_index::RebuildTargets::All,
     };
-    let dry_run = flags.get("dry-run").is_none_or(|v| v != "false");
+    // `--confirm` alone starts the live rebuild, the way `repair` treats it. The
+    // value decides, not presence: the parser stores the token after a bare flag,
+    // so `--confirm false` is not a confirmation. `--dry-run true` asks for a report.
+    let confirm = flags.get("confirm").is_some_and(|v| v != "false");
+    let dry_run = match flags.get("dry-run") {
+        Some(v) => v != "false",
+        None => !confirm,
+    };
     match clio_ops::reindex(&clio_ops::ReindexArgs {
         store,
         index: store,
@@ -383,7 +386,7 @@ fn run_reindex<S: OpsRepos>(
         bank,
         target,
         dry_run,
-        confirm: flags.contains_key("confirm"),
+        confirm,
     }) {
         Ok(report) => {
             print_json(&report);
@@ -424,10 +427,8 @@ fn emit_usage_error(message: impl AsRef<str>) -> ExitCode {
 
 /// Print a serializable value as one JSON line.
 fn print_json(value: &impl serde::Serialize) {
-    println!(
-        "{}",
-        serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
-    );
+    let line = serde_json::to_string(value).unwrap_or_else(|_| "{}".into());
+    println!("{line}");
 }
 
 /// Strip credentials from any URL embedded in a driver error message (shared

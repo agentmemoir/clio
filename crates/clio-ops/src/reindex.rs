@@ -25,7 +25,7 @@
 
 use clio_index::{Embedder, RebuildReport, RebuildTargets};
 use clio_store::{IndexStore, Store};
-use clio_types::AmError;
+use clio_types::{AmError, ErrorCode};
 use serde::Serialize;
 
 /// Inputs for [`reindex`].
@@ -49,7 +49,8 @@ pub struct ReindexArgs<'a> {
 /// Result of one `reindex` call (dry-run or live).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReindexReport {
-    /// True when the call completed (dry-run always; live when apply succeeded).
+    /// True only for a live apply. A dry run writes nothing, so a no-op report
+    /// is never `ok`.
     pub ok: bool,
     /// Scope bank (`None` = whole store).
     pub bank: Option<String>,
@@ -74,9 +75,19 @@ pub struct ReindexReport {
 /// Report scope/cost (`dry_run=true`) or rebuild derived indexes (confirmed).
 ///
 /// # Errors
-/// Missing/empty bank, refused confirmation, missing embedder for a dense
-/// target, embed failures, or storage failures.
+/// Missing/empty bank, refused confirmation, a contradictory dry-run plus
+/// confirm, missing embedder for a dense target, embed failures, or storage
+/// failures.
 pub fn reindex(args: &ReindexArgs<'_>) -> Result<ReindexReport, AmError> {
+    // A dry run reports and a confirmed run applies, so the pair contradicts.
+    // Refuse it instead of letting the report path quietly apply nothing.
+    if args.dry_run && args.confirm {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "confirm contradicts a dry run: a dry run applies nothing, so only \
+             one of the two may be set",
+        ));
+    }
     let report: RebuildReport = clio_index::rebuild(
         args.store,
         args.index,
@@ -87,7 +98,7 @@ pub fn reindex(args: &ReindexArgs<'_>) -> Result<ReindexReport, AmError> {
         args.confirm,
     )?;
     Ok(ReindexReport {
-        ok: true,
+        ok: !report.dry_run,
         bank: report.bank.clone(),
         target: target_label(args.target).to_owned(),
         dry_run: report.dry_run,

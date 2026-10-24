@@ -216,7 +216,8 @@ fn reindex_dry_run_reports_cost_and_rejects_unknown_target() {
         "reindex",
         &json!({ "bank": "bank-ops", "target": "all", "timestamp": TS }),
     );
-    assert_eq!(result["ok"], Value::Bool(true), "{result}");
+    // A dry run applies nothing, so its report is not `ok`.
+    assert_eq!(result["ok"], Value::Bool(false), "{result}");
     assert_eq!(result["dry_run"], Value::Bool(true), "{result}");
     assert!(result["indexable_items"].is_u64(), "{result}");
     assert!(result["dense_missing"].is_u64(), "{result}");
@@ -226,6 +227,33 @@ fn reindex_dry_run_reports_cost_and_rejects_unknown_target() {
         &json!({ "bank": "bank-ops", "target": "bogus", "timestamp": TS }),
     );
     assert_eq!(bogus["ok"], Value::Bool(false), "{bogus}");
+}
+
+/// `confirm` alone is the live switch over MCP, as it is on the CLI.
+#[test]
+fn reindex_confirm_alone_runs_live() {
+    let st = state();
+    seed_item(&st, "ops-reindex-live");
+    let r = dispatch(
+        &st,
+        "reindex",
+        &json!({ "bank": "bank-ops", "target": "lexical", "confirm": true, "timestamp": TS }),
+    );
+    assert_eq!(r["ok"], Value::Bool(true), "{r}");
+    assert!(r["lexical_applied"].as_u64().is_some_and(|n| n > 0), "{r}");
+}
+
+/// `confirm` with an explicit `dry_run` is the contradictory pair, refused.
+#[test]
+fn reindex_confirm_with_dry_run_true_is_refused() {
+    let st = state();
+    let r = dispatch(
+        &st,
+        "reindex",
+        &json!({ "bank": "bank-ops", "confirm": true, "dry_run": true, "timestamp": TS }),
+    );
+    assert_eq!(r["code"], "invalid_argument", "{r}");
+    assert_eq!(r["ok"], Value::Bool(false), "{r}");
 }
 
 #[test]
@@ -289,7 +317,8 @@ fn reindex_without_bank_with_shared_enabled_sweeps_whole_store() {
     )
     .expect("mcp state");
     let result = dispatch(&st, "reindex", &json!({ "timestamp": TS }));
-    assert_eq!(result["ok"], Value::Bool(true), "{result}");
+    // The default is a report, which applies nothing and is not `ok`.
+    assert_eq!(result["ok"], Value::Bool(false), "{result}");
     assert_eq!(result["dry_run"], Value::Bool(true), "{result}");
 }
 

@@ -266,7 +266,8 @@ fn unbound_reindex_without_bank_and_shared_enabled_sweeps_the_whole_store() {
     seed_item(&st, "bank-b", "itm-b");
 
     let out = dispatch(&st, "reindex", &json!({ "timestamp": TS }));
-    assert_eq!(out["ok"], Value::Bool(true), "{out}");
+    // A report-only run applies nothing, so its report is not `ok`.
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
     assert_eq!(out["dry_run"], Value::Bool(true), "{out}");
     assert!(
         out["bank"].is_null(),
