@@ -323,7 +323,17 @@ pub fn build_reranker_from(
                     "rerank.model is required when rerank.url is set",
                 ));
             }
-            HttpReranker::new(url, bearer).map(|r| Some(Arc::new(r) as Arc<dyn Reranker>))
+            let mut client = HttpReranker::new(url, bearer)?;
+            // An absent key keeps `DEFAULT_RERANK_MAX_BATCH`; a key of `0` is
+            // not a cap the sidecar could accept, so the setter clamps it.
+            if let Some(max_batch) = effective
+                .pointer("/rerank/max_batch")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+            {
+                client.set_max_batch(max_batch);
+            }
+            Ok(Some(Arc::new(client) as Arc<dyn Reranker>))
         }
         "cohere" => {
             let Some(key) = bearer else {

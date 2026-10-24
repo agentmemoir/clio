@@ -11,6 +11,8 @@
 //! ## Owns
 //! - The documents-per-request split, the per-chunk wire body, the global index
 //!   offset applied to each merged entry, and the fail-closed chunk error
+//! - The configured cap the factory reads from the document, and the default it
+//!   keeps when that key is absent
 //!
 //! ## Does not own
 //! - Response parsing rules (`rerank_parse`) or the single-request wire shape
@@ -21,7 +23,7 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::rerank::rerank_tests::indices;
-use crate::rerank::{DEFAULT_RERANK_MAX_BATCH, HttpReranker, Reranker};
+use crate::rerank::{DEFAULT_RERANK_MAX_BATCH, HttpReranker, Reranker, build_reranker_from};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -259,4 +261,48 @@ fn zero_max_batch_is_clamped_to_one_document_per_request() {
     assert_eq!(texts(&captured[0]), vec!["doc-0".to_owned()]);
     assert_eq!(texts(&captured[1]), vec!["doc-1".to_owned()]);
     assert_eq!(indices(&merged), vec![0, 1]);
+}
+
+/// The cap an operator configures reaches the built adapter, so a sidecar with
+/// its own smaller ceiling can be matched from the config document.
+#[test]
+fn factory_applies_the_configured_batch_cap() {
+    let (url, handle) = batch_server(vec![
+        http_ok(&chunk_body(0, 7, false)),
+        http_ok(&chunk_body(7, 2, false)),
+    ]);
+    let document = json!({"rerank": {"url": url, "model": "m", "max_batch": 7}});
+    let reranker = build_reranker_from(&document, None)
+        .expect("build")
+        .expect("a configured url builds a reranker");
+    let merged = reranker.rerank("needle", &docs(9), 9).expect("rerank");
+    let captured = handle.join().expect("server join");
+
+    assert_eq!(captured.len(), 2, "nine documents over a cap of seven");
+    assert_eq!(texts(&captured[0]), docs(9)[..7].to_vec());
+    assert_eq!(texts(&captured[1]), docs(9)[7..].to_vec());
+    assert_eq!(indices(&merged), (0..9_usize).collect::<Vec<usize>>());
+}
+
+/// A document that does not name a cap keeps the adapter's own default.
+#[test]
+fn factory_without_a_configured_cap_keeps_the_default() {
+    let (url, handle) = batch_server(vec![
+        http_ok(&chunk_body(0, DEFAULT_RERANK_MAX_BATCH, false)),
+        http_ok(&chunk_body(DEFAULT_RERANK_MAX_BATCH, 28, false)),
+    ]);
+    let document = json!({"rerank": {"url": url, "model": "m"}});
+    let reranker = build_reranker_from(&document, None)
+        .expect("build")
+        .expect("a configured url builds a reranker");
+    let merged = reranker.rerank("needle", &docs(60), 60).expect("rerank");
+    let captured = handle.join().expect("server join");
+
+    assert_eq!(captured.len(), 2);
+    assert_eq!(texts(&captured[0]).len(), DEFAULT_RERANK_MAX_BATCH);
+    assert_eq!(
+        texts(&captured[1]),
+        docs(60)[DEFAULT_RERANK_MAX_BATCH..].to_vec()
+    );
+    assert_eq!(indices(&merged), (0..60_usize).collect::<Vec<usize>>());
 }

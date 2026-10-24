@@ -65,6 +65,7 @@ fn all_pairs() -> Vec<(&'static str, &'static str)> {
         ("CLIO_RERANK_URL", "http://127.0.0.1:1/rerank"),
         ("CLIO_RERANK_MODEL", "some/rerank-model"),
         ("CLIO_RERANK_PROVIDER", "cohere"),
+        ("CLIO_RERANK_MAX_BATCH", "16"),
         ("CLIO_RERANK_API_KEY", "rk-rerank-token-0123456789"),
         ("CLIO_EXTRACT_PROVIDER", "template"),
         ("CLIO_EXTRACT_URL", "http://127.0.0.1:1/extract"),
@@ -100,6 +101,10 @@ fn every_variable_reaches_the_path_it_owns() {
         let found = text(&rt, path);
         assert_eq!(found.as_deref(), Some(value), "got the wrong value");
     }
+
+    // A batch cap cannot stay text any more than a dimension can, so it is
+    // folded in as the number that was read.
+    assert_eq!(rt.env_overlay.get("rerank.max_batch"), Some(&json!(16_u64)));
 
     let secrets = [
         ("credentials.embed_api_key", "sk-embed-token-0123456789"),

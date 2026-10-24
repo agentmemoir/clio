@@ -82,6 +82,10 @@ impl Runtime {
             self.env_overlay
                 .insert("rerank.provider".into(), Value::String(provider));
         }
+        if let Some(max_batch) = get("CLIO_RERANK_MAX_BATCH").and_then(|b| b.parse::<u64>().ok()) {
+            self.env_overlay
+                .insert("rerank.max_batch".into(), Value::from(max_batch));
+        }
         if let Some(key) = get("CLIO_RERANK_API_KEY") {
             self.env_overlay
                 .insert("credentials.rerank_api_key".into(), Value::String(key));
