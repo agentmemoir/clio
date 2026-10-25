@@ -25,8 +25,8 @@
 //! Keep this module focused on rendering one restore.
 
 use crate::backup_restore_flow::{
-    Counts, Plan, PreRestore, RESULT_COUNT_MISMATCH, RESULT_PARTIAL, RESULT_PLANNED,
-    RESULT_RESTORED, Report,
+    Counts, Plan, PreRestore, RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT, RESULT_PARTIAL,
+    RESULT_PLANNED, RESULT_RESTORED, Report,
 };
 use crate::backup_restore_schema::Schema;
 use crate::count_noun::count_noun;
@@ -131,6 +131,16 @@ fn result_text(report: &Report) -> String {
             }
             text
         }
+        RESULT_DERIVED_DIFFERENT => {
+            // No failed step and no failure: the restore did its job, and the
+            // line says which rebuildable table says otherwise.
+            let mut text = format!("  result: {}", report.result);
+            if let Some(difference) = &report.failure {
+                text.push_str("\n  ");
+                text.push_str(difference);
+            }
+            text
+        }
         RESULT_PLANNED => "  result: planned (dry run; nothing was changed)".to_owned(),
         other => format!("  result: {other}"),
     }
@@ -218,7 +228,10 @@ pub(super) fn payload(report: &Report) -> Value {
         // `ok` means the restore succeeded and nothing about it is flagged as
         // not durable. A count-mismatched restore and a failed key swap are both
         // failures, and so is a rename whose directory entry could not be
-        // fsynced: a script reading `ok` must not record that run as clean.
+        // fsynced: a script reading `ok` must not record that run as clean. A
+        // run whose only difference is a derived table is not ok either: it
+        // exits 75, and `ok` agrees with the exit code, so `ok` is true only
+        // where the code is 0.
         "ok": matches!(report.result, RESULT_RESTORED | RESULT_PLANNED) && is_durable(report),
         "snapshot_id": report.snapshot_id,
         "target": {

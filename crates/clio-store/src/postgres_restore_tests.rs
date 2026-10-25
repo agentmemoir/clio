@@ -158,7 +158,9 @@ fn dump_into_scratch(url: &str, tag: &str) -> (PostgresDumpFacts, Vec<PathBuf>, 
 }
 
 /// A seeded source schema with its store dumped into staged members.
-pub(super) fn seeded_source(tag: &str) -> (ScopedSchema, PostgresDumpFacts, Vec<PathBuf>, ScratchDir) {
+pub(super) fn seeded_source(
+    tag: &str,
+) -> (ScopedSchema, PostgresDumpFacts, Vec<PathBuf>, ScratchDir) {
     let base = base_url();
     let source = ScopedSchema::new(&base);
     let store = source.open();

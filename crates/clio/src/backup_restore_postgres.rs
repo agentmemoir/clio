@@ -27,16 +27,17 @@
 //!
 //! Keep this module focused on the Postgres restore halves.
 
+use crate::backup_restore_counts::{
+    count_mismatch_message, derived_difference_message, result_for,
+};
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
-    Counts, FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, Plan, RESULT_COUNT_MISMATCH, RESULT_PARTIAL,
-    RESULT_RESTORED, Report, RestorePlanInput, classify_refusal, pre_restore_decision,
-    pre_restore_from,
+    Counts, FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, Plan, Report, RestorePlanInput,
+    classify_refusal, pre_restore_decision, pre_restore_from,
 };
 use crate::backup_restore_space::{key_destination, preflight};
 use crate::backup_restore_sqlite::{RestorePlacement, merge_settle_failure};
 use crate::cli_error::CliError;
-use crate::count_noun::count_noun;
 use clio_backup::dump_meta::DumpMeta;
 use clio_store::{PostgresRestoreRequest, RestoreTable, compare_table_sets};
 use std::path::Path;
@@ -277,11 +278,12 @@ pub(crate) fn place_postgres(
     let key_failure = key_swap.as_ref().and_then(|report| report.failure.clone());
     let counts_after = Counts::of_rows(&restored.table_counts, &restored.banks);
     let mismatch = count_mismatch_message(meta, &restored.table_counts);
-    let result = match (&mismatch, &key_failure) {
-        (Some(_), _) => RESULT_COUNT_MISMATCH,
-        (None, Some(_)) => RESULT_PARTIAL,
-        (None, None) => RESULT_RESTORED,
-    };
+    let derived = derived_difference_message(meta, &restored.table_counts);
+    let result = result_for(
+        mismatch.as_deref(),
+        derived.as_deref(),
+        key_failure.as_deref(),
+    );
     // The load and the key swap are the effects the guard authorizes. The store
     // is already reloaded, so a failed outcome write leaves a pending action for
     // reconciliation and is surfaced on the report, never returned: the report
@@ -296,7 +298,7 @@ pub(crate) fn place_postgres(
         (None, Some(_)) => Some(FAILED_STEP_KEY_SWAP.to_owned()),
         (None, None) => None,
     };
-    let failure = match (mismatch, key_failure) {
+    let failure = match (mismatch.or(derived), key_failure) {
         (Some(counts), Some(key)) => Some(format!("{counts}; the key store: {key}")),
         (Some(counts), None) => Some(counts),
         (None, Some(key)) => Some(key),
@@ -323,41 +325,6 @@ pub(crate) fn place_postgres(
         // No file was renamed, so there is no directory fsync to report.
         directory_synced: None,
     })
-}
-
-/// What differs between the archive's counts and the observed ones, when they
-/// do. The message names only tables and counts, never row content.
-fn count_mismatch_message(meta: &DumpMeta, observed: &[(String, u64)]) -> Option<String> {
-    let differing: Vec<String> = meta
-        .tables
-        .iter()
-        .filter_map(|table| {
-            let seen = observed
-                .iter()
-                .find(|(name, _)| name == &table.table)
-                .map(|(_, count)| *count);
-            match seen {
-                Some(count) if count == table.rows => None,
-                Some(count) => Some(format!(
-                    "table {:?}: archive {}, restored {count}",
-                    table.table,
-                    count_noun(table.rows, "row", "rows")
-                )),
-                None => Some(format!(
-                    "table {:?}: archive {}, restored: not counted",
-                    table.table,
-                    count_noun(table.rows, "row", "rows")
-                )),
-            }
-        })
-        .collect();
-    if differing.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "the restored table counts do not match the archive's: {}",
-        differing.join("; ")
-    ))
 }
 
 #[cfg(test)]
@@ -415,8 +382,3 @@ fn projected_snapshot_bytes(state: &clio_store::PostgresTargetState, meta: &Dump
 #[cfg(test)]
 #[path = "backup_restore_postgres_footprint_tests.rs"]
 mod footprint_tests;
-
-/// The count-mismatch message's arms and its row-count wording.
-#[cfg(test)]
-#[path = "backup_restore_postgres_counts_tests.rs"]
-mod counts_tests;

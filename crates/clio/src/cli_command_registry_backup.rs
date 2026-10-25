@@ -266,7 +266,7 @@ pub(crate) const BACKUP_PRUNE: CommandSpec = CommandSpec {
 pub(crate) const BACKUP_RESTORE: CommandSpec = CommandSpec {
     name: "backup restore",
     aliases: &[],
-    summary: "Replace the selected store with the archive (never a merge); a pre-restore snapshot is taken first unless --no-pre-backup; for a SQLite store the swap removes the target's write-ahead log before it renames the new store in, so a crash in that window loses whatever that log had not yet written; a Postgres restore replaces the target in one transaction and has no such window; --no-pre-backup is what leaves that window with no way back. Exit codes: 0 clean restore, 1 operational failure, 2 refused, 3 partial or not-durable restore",
+    summary: "Replace the selected store with the archive (never a merge); a pre-restore snapshot is taken first unless --no-pre-backup; for a SQLite store the swap removes the target's write-ahead log before it renames the new store in, so a crash in that window loses whatever that log had not yet written; a Postgres restore replaces the target in one transaction and has no such window; --no-pre-backup is what leaves that window with no way back. Exit codes: 0 clean restore, 1 operational failure, 2 refused, 3 partial or not-durable restore, 75 every user-data row loaded with a table the store rebuilds holding a different count, which a rebuild closes and a retry confirms",
     notes: &[RESTORE_NOTE],
     positionals: &[ID],
     documented: &[

@@ -23,11 +23,11 @@
 //!
 //! Keep this module focused on the restore count under a waiting writer.
 
+use super::tests::{base_url, empty_target, restore_tables, seeded_source};
 use crate::pg_lock::lock_pg_test;
 use crate::pg_tls;
 use crate::postgres_backup_model::quote_ident;
-use crate::postgres_restore::{PostgresRestoreRequest, PostgresRestoreReport, restore_postgres};
-use super::tests::{base_url, empty_target, restore_tables, seeded_source};
+use crate::postgres_restore::{PostgresRestoreReport, PostgresRestoreRequest, restore_postgres};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 

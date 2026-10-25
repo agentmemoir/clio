@@ -43,14 +43,13 @@ use clio_compliance::{ArchiveClaim, AuthorityRefusal, JournalHold, MemberFacts};
 use clio_store::{KeyPlacement, SpaceCheck, SqliteFileState, SwapReport};
 use std::path::{Path, PathBuf};
 
-// The report results: a dry run, a completed restore, a partial restore, or a
-// restore whose post-commit count check failed.
-pub(crate) const RESULT_PLANNED: &str = "planned";
-pub(crate) const RESULT_PARTIAL: &str = "partial";
-pub(crate) const RESULT_RESTORED: &str = "restored";
-pub(crate) const RESULT_COUNT_MISMATCH: &str = "count-mismatch";
-pub(crate) const FAILED_STEP_KEY_SWAP: &str = "key-store swap";
-pub(crate) const FAILED_STEP_COUNTS: &str = "post-restore count check";
+// The result and failed-step words live in one module of their own; they are
+// re-exported here so the halves and the views keep importing them from this
+// module and no two of them can spell an outcome differently.
+pub(crate) use crate::backup_restore_result::{
+    FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT,
+    RESULT_PARTIAL, RESULT_PLANNED, RESULT_RESTORED,
+};
 // The hints the restore's refusals carry. Which hint a failure gets is decided
 // by the exit-code table from the condition, not chosen at the call site.
 //
