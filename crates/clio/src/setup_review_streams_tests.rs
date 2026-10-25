@@ -87,7 +87,14 @@ fn last_loop<R: io::BufRead, W: Write>(
         &crate::setup_preview_scripts::no_env,
         false,
     );
-    review(&mut ctx, answers, &|_path: &str| None, None, full_store())
+    review(
+        &mut ctx,
+        answers,
+        &|_path: &str| None,
+        None,
+        Some(crate::setup_preview_fixtures::ABSENT_COMPOSE_ROOT),
+        full_store(),
+    )
 }
 
 /// A writer that fails on the first write carrying [`NOTICE`].

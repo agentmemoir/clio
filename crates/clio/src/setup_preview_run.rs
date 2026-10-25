@@ -118,11 +118,15 @@ impl crate::setup_preview_fixtures::Harness {
         let preflight = self.preflight();
         let outcome = steps::drive(&mut ctx, preflight);
         let current = &self.effective;
+        let compose_dir = self.compose_dir.clone();
         let view = outcome.as_ref().ok().map(|answers| {
             preview::view(
                 answers,
                 &|path| report::value_at(current, path),
                 will_back_up,
+                crate::setup_extract_model::preview_line(answers, compose_dir.as_deref(), &|key| {
+                    env(key)
+                }),
                 &env,
             )
         });
@@ -162,6 +166,7 @@ impl crate::setup_preview_fixtures::Harness {
         let preflight = self.preflight();
         let effective = self.effective.clone();
         let store = self.store;
+        let compose_dir = self.compose_dir.clone();
         let mut verdict = None;
         let outcome = steps::drive(&mut ctx, preflight).and_then(|answers| {
             review::review(
@@ -169,6 +174,7 @@ impl crate::setup_preview_fixtures::Harness {
                 answers,
                 &|path| report::value_at(&effective, path),
                 will_back_up.as_deref(),
+                compose_dir.as_deref(),
                 store,
             )
             .map(|(answers, chosen)| {
@@ -181,6 +187,9 @@ impl crate::setup_preview_fixtures::Harness {
                 answers,
                 &|path| report::value_at(&effective, path),
                 will_back_up.clone(),
+                crate::setup_extract_model::preview_line(answers, compose_dir.as_deref(), &|key| {
+                    env(key)
+                }),
                 &env,
             )
         });

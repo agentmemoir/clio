@@ -15,6 +15,7 @@
 //!   chunk at a time, renamed into place only after the byte count matches
 //! - The lines a run prints while it fetches: present, downloading, progress, and
 //!   downloaded
+//! - The cheap presence check the preview announces the download with
 //!
 //! ## Does not own
 //! - The host path the container opens (see `compose_model`)
@@ -56,6 +57,13 @@ pub(crate) const GGUF_URL: &str = "https://huggingface.co/DevQuasar-3/numind.NuE
 /// The size the Hub advertises, in bytes. A display hint for the preview line and
 /// the progress denominator; the real check is the size the response reports.
 pub(crate) const GGUF_BYTES: u64 = 397_807_776;
+
+/// The name the compose environment may give the extract model instead of the
+/// shipped one.
+const GGUF_NAME_ENV: &str = "CLIO_EXTRACT_GGUF";
+
+/// The directory under the compose root the extract service mounts.
+const MODELS_DIR: &str = "models";
 
 /// The read size for one chunk of the response body.
 const CHUNK: usize = 64 * 1024;
@@ -218,6 +226,38 @@ fn part_path(dest: &Path) -> PathBuf {
     dest.with_file_name(name)
 }
 
+/// What the preview announces a run will download, or `None` when it downloads
+/// nothing.
+///
+/// A presence check and a sentence, nothing else. It answers for a local extract
+/// role, and for a file that is not already at `<compose root>/models/<name>`,
+/// where the name is the one the compose environment chose or the shipped one.
+///
+/// It creates no directory, asks Docker nothing, and opens no socket: this runs
+/// while a preview is being drawn, before the operator has agreed to anything, so
+/// it must not be able to change the machine it reports on. The root is the
+/// `--compose-dir` value, or the working directory, and it is joined rather than
+/// resolved, for the same reason.
+#[must_use]
+pub(crate) fn preview_line(
+    answers: &Answers,
+    dir: Option<&str>,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if answers.extract != Some(ServiceRole::Local) {
+        return None;
+    }
+    let name = env(GGUF_NAME_ENV).unwrap_or_else(|| GGUF_FILE_NAME.to_owned());
+    let root = dir.map_or_else(|| PathBuf::from("."), PathBuf::from);
+    if root.join(MODELS_DIR).join(&name).is_file() {
+        return None;
+    }
+    Some(format!(
+        "{name} ({} MB) from the Hugging Face Hub, before it writes the config",
+        size_mb(GGUF_BYTES)
+    ))
+}
+
 /// Put the extract model on the host for this machine, printing what it does.
 ///
 /// # Errors
@@ -355,3 +395,8 @@ fn percent(written: u64) -> u64 {
 #[cfg(test)]
 #[path = "setup_extract_model_tests.rs"]
 pub(crate) mod tests;
+
+/// The real fetcher's transport, driven against a local server rather than the Hub.
+#[cfg(test)]
+#[path = "setup_extract_model_http_tests.rs"]
+pub(crate) mod http_tests;

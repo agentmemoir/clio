@@ -197,13 +197,21 @@ pub(crate) struct Tested {
 
 /// The whole preview, as a read model.
 ///
-/// Built from the entry vector and the current effective values only. The
-/// renderer draws this and never looks at an answer, so a value cannot appear
-/// in the preview that was not in the vector the apply path writes.
+/// Built from the entry vector and the current effective values, plus the two
+/// facts the caller already knows: what the apply backs up, and what it
+/// downloads. Both arrive as values rather than being derived here, so the
+/// renderer draws a preview without reading a file or a directory. The renderer
+/// draws this and never looks at an answer, so a value cannot appear in the
+/// preview that was not in the vector the apply path writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PreviewView {
     /// The blocks, in the order the plan prints them.
     pub blocks: Vec<Block>,
+    /// What `Will fetch` will say, or `None` when the run downloads nothing.
+    ///
+    /// Drawn immediately before `Will start`, because a download happens before
+    /// anything is written and the operator is agreeing to it at this moment.
+    pub will_fetch: Option<String>,
     /// What `Will start` will say.
     pub will_start: Vec<&'static str>,
     /// What `Will remove` will say.
@@ -217,7 +225,9 @@ pub(crate) struct PreviewView {
 /// Draw the preview.
 ///
 /// The layout is the plan's: a title, one block per configured section, then
-/// `Will start`, `Will remove`, `Will back up`, and `Tested`. Only configured
+/// `Will fetch`, `Will start`, `Will remove`, `Will back up`, and `Tested`. The
+/// `Will fetch` line appears only when there is a download to announce, and a
+/// run that needed none has no line rather than an empty one. Only configured
 /// sections appear, so a run that skipped reranking has no `Reranking` block
 /// rather than an empty one.
 ///
@@ -265,6 +275,9 @@ pub(crate) fn preview(
         }
     }
     line(String::new())?;
+    if let Some(what) = &view.will_fetch {
+        line(format!("Will fetch    {what}"))?;
+    }
     line(format!(
         "Will start    {} after you apply",
         join_or_nothing(&view.will_start)

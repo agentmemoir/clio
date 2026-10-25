@@ -53,12 +53,21 @@ fn draw(answers: &Answers, current: &Value, will_back_up: Option<String>) -> Str
 }
 
 /// The same preview, with the run's environment the key lines resolve against.
+///
+/// The extract model is checked under the fixture's compose root, which does not
+/// exist, so the presence check is about the answers rather than about the machine
+/// this suite runs on.
 fn draw_with_env(
     answers: &Answers,
     current: &Value,
     will_back_up: Option<String>,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> String {
+    let will_fetch = crate::setup_extract_model::preview_line(
+        answers,
+        Some(crate::setup_preview_fixtures::ABSENT_COMPOSE_ROOT),
+        env,
+    );
     let mut out: Vec<u8> = Vec::new();
     crate::setup_report::preview(
         &mut out,
@@ -67,6 +76,7 @@ fn draw_with_env(
             answers,
             &|path| crate::setup_report::value_at(current, path),
             will_back_up,
+            will_fetch,
             env,
         ),
     )
@@ -222,6 +232,7 @@ fn a_watched_field_the_run_drops_is_shown_as_removed() {
     let current_view = view(
         run.answers(),
         &|path| crate::setup_report::value_at(&current, path),
+        None,
         None,
         &|_| None,
     );
@@ -409,6 +420,10 @@ fn a_multi_host_run_previews_the_sync_key_under_the_encryption_key() {
         "with no run environment, the line must not invent a path: {drawn}"
     );
 }
+
+#[cfg(test)]
+#[path = "setup_preview_tests_fetch_tests.rs"]
+mod fetch_tests;
 
 #[cfg(test)]
 #[path = "setup_preview_tests_service_tests.rs"]

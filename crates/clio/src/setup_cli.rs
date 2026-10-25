@@ -242,6 +242,7 @@ fn run<R: BufRead, W: Write, E: Write>(
         answers,
         &|path: &str| runtime.deployment_field(path).cloned(),
         will_back_up.as_deref(),
+        compose_dir,
         store,
     )
     .map_err(signal_error)?;

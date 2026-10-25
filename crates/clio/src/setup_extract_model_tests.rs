@@ -10,6 +10,8 @@
 //! - Download, presence, and refusal behaviour under test for `setup_extract_model`
 //!
 //! ## Does not own
+//! - The streaming write, the size check, and the rename (see
+//!   `setup_extract_model_stream_tests`)
 //! - The host-path derivation from a resolved stack (see `compose_model_tests`)
 //! - The run order around the fetch (see `setup_cli_fail_tests`)
 //!
@@ -24,7 +26,6 @@ use crate::setup_services::ServiceRole;
 use crate::setup_steps::Answers;
 use crate::setup_support_tests::temp_dir;
 use std::cell::RefCell;
-use std::io::Cursor;
 
 /// A `ModelFetcher` stub: records the address and destination of every download
 /// and either writes filler bytes or refuses.
@@ -306,94 +307,10 @@ fn a_refused_download_keeps_the_manual_command_and_names_the_directory() {
     );
 }
 
-/// A body that hands over `remaining` bytes and then fails, the way a dropped
-/// connection does.
-struct BreakingReader {
-    remaining: usize,
-}
+#[cfg(test)]
+#[path = "setup_extract_model_preview_tests.rs"]
+mod preview_tests;
 
-impl Read for BreakingReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.remaining == 0 {
-            return Err(std::io::Error::other("the connection dropped"));
-        }
-        let count = buf.len().min(self.remaining);
-        buf[..count].fill(b'z');
-        self.remaining -= count;
-        Ok(count)
-    }
-}
-
-#[test]
-fn a_download_that_breaks_leaves_neither_a_part_file_nor_a_model() {
-    let dir = temp_dir("stream-breaks");
-    let dest = dir.join(GGUF_FILE_NAME);
-    let mut progress = Vec::new();
-
-    let err = stream_to_file(
-        &mut BreakingReader { remaining: 1_000 },
-        &dest,
-        Some(10_000),
-        &mut |written| progress.push(written),
-    )
-    .expect_err("a body that stops early must fail the download");
-
-    assert!(err.contains("the download stopped"), "{err}");
-    assert_eq!(progress, vec![1_000], "progress is reported per chunk");
-    assert!(
-        !part_path(&dest).exists(),
-        "the partial file is removed on the error path"
-    );
-    assert!(!dest.exists(), "a failed download never becomes the model");
-}
-
-#[test]
-fn a_download_shorter_than_advertised_is_refused_and_leaves_no_part_file() {
-    let dir = temp_dir("stream-short");
-    let dest = dir.join(GGUF_FILE_NAME);
-
-    let err = stream_to_file(
-        &mut Cursor::new(vec![b'z'; 500]),
-        &dest,
-        Some(1_000),
-        &mut |_| {},
-    )
-    .expect_err("a short body must fail the download");
-
-    assert!(err.contains("500 of 1000 bytes"), "{err}");
-    assert!(
-        !part_path(&dest).exists(),
-        "the partial file is removed when the length does not match"
-    );
-    assert!(!dest.exists(), "a short download never becomes the model");
-}
-
-#[test]
-fn a_complete_download_is_renamed_into_place() {
-    let dir = temp_dir("stream-complete");
-    let dest = dir.join(GGUF_FILE_NAME);
-    let mut progress = Vec::new();
-    let body = vec![b'z'; 200_000];
-
-    let written = stream_to_file(&mut Cursor::new(body), &dest, Some(200_000), &mut |bytes| {
-        progress.push(bytes);
-    })
-    .expect("a matching body is written");
-
-    assert_eq!(written, 200_000);
-    assert_eq!(
-        progress,
-        vec![65_536, 131_072, 196_608, 200_000],
-        "one report per 64 KiB chunk, ending on the last byte"
-    );
-    assert!(
-        !part_path(&dest).exists(),
-        "the partial file was renamed away"
-    );
-    assert_eq!(
-        std::fs::metadata(&dest)
-            .expect("the model is on disk")
-            .len(),
-        200_000
-    );
-}
+#[cfg(test)]
+#[path = "setup_extract_model_stream_tests.rs"]
+mod stream_tests;

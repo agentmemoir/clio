@@ -130,7 +130,7 @@ fn the_current_document_reaches_the_preview() {
         .typing(TYPED)
         .typing(SERVICES)
         .run();
-    let fresh = view(run.answers(), &|_| None, None, &|_| None);
+    let fresh = view(run.answers(), &|_| None, None, None, &|_| None);
     let stored_document = json!({
         "backend": "postgres",
         "store": { "database_url": "postgres://clio:pw@db.example.com:5432/clio?sslmode=prefer" }
@@ -138,6 +138,7 @@ fn the_current_document_reaches_the_preview() {
     let stored = view(
         run.answers(),
         &|path| crate::setup_report::value_at(&stored_document, path),
+        None,
         None,
         &|_| None,
     );

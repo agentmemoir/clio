@@ -138,6 +138,11 @@ impl StoreState {
 /// question at a time, and the preview is redrawn so the change is visible before
 /// anything is agreed to.
 ///
+/// `compose_dir` is the `--compose-dir` value: the root the extract model's
+/// presence is checked under here, and the same root the download uses once the
+/// operator has agreed. The check is a presence test, so the preview names a
+/// download without performing one.
+///
 /// # Errors
 /// The stream could not be written or read, the amend question named no
 /// section, or the `switch` confirmation was not typed.
@@ -150,11 +155,22 @@ pub(crate) fn review(
     mut answers: Answers,
     current: &dyn Fn(&str) -> Option<Value>,
     will_back_up: Option<&str>,
+    compose_dir: Option<&str>,
     store: StoreState,
 ) -> Result<(Answers, Verdict), Signal> {
     loop {
         let env = &|key: &str| ctx.env(key);
-        let view = preview::view(&answers, current, will_back_up.map(str::to_owned), env);
+        // The download is announced before the operator accepts it, and the
+        // presence check runs with the answers as they stand, so an amendment that
+        // turns the extractor on or off changes this line with the redraw.
+        let will_fetch = crate::setup_extract_model::preview_line(&answers, compose_dir, env);
+        let view = preview::view(
+            &answers,
+            current,
+            will_back_up.map(str::to_owned),
+            will_fetch,
+            env,
+        );
         let palette = ctx.palette();
         report::preview(ctx.writer(), palette, &view).map_err(Signal::Refused)?;
         // The consequence is drawn under the preview as well as at the typed

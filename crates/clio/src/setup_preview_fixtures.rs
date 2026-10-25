@@ -79,7 +79,17 @@ pub(crate) struct Harness {
     pub(crate) store: StoreState,
     pub(crate) docker: DockerStatus,
     pub(crate) key_file: Option<PathBuf>,
+    /// The compose root a run checks the extract model under.
+    ///
+    /// A path that does not exist, so the presence check can only report the model
+    /// as absent: a fixture that named a real directory would make the preview
+    /// depend on the machine running the suite.
+    pub(crate) compose_dir: Option<String>,
 }
+
+/// The compose root a harness checks the extract model under: a path that is not
+/// there, so the check is about the code rather than about the machine.
+pub(crate) const ABSENT_COMPOSE_ROOT: &str = "/nonexistent/clio-stage5/compose";
 
 /// The key store a run uses when the test does not care which one.
 ///
@@ -116,7 +126,18 @@ impl Harness {
             // data directory. `None` names no key file at all, which is the
             // one-time case where the question is asked.
             key_file: None,
+            compose_dir: Some(ABSENT_COMPOSE_ROOT.to_owned()),
         }
+    }
+
+    /// The compose root this run reads the extract model's presence under.
+    ///
+    /// Set only by a test that is about that file: the default names a path that
+    /// does not exist, so no other route depends on what is on the machine.
+    #[must_use]
+    pub(crate) fn with_compose_dir(mut self, dir: &str) -> Self {
+        self.compose_dir = Some(dir.to_owned());
+        self
     }
 
     /// A run whose key file is at `path`, and whose key-store marker therefore
