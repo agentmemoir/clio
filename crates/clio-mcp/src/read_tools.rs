@@ -160,20 +160,10 @@ fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
         item_id,
         item.snapshot.as_ref(),
     )?;
-    // The identity read excludes a discarded row, so `None` here (with the
-    // item present) is the discard marker.
-    let discarded = state
-        .store
-        .get_item_identity(ctx.bank.as_str(), item_id)?
-        .is_none();
-    let archived = state.store.item_is_archived(ctx.bank.as_str(), item_id)?;
     let mut value = serde_json::to_value(&item).expect("serialize memory item");
-    if let Some(object) = value.as_object_mut() {
-        object.insert("discarded".into(), Value::from(discarded));
-        object.insert("archived".into(), Value::from(archived));
-        if let Some(block) = block {
-            object.insert(read_freshness::FRESHNESS_KEY.into(), block);
-        }
+    crate::read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    if let (Some(block), Some(object)) = (block, value.as_object_mut()) {
+        object.insert(read_freshness::FRESHNESS_KEY.into(), block);
     }
     Ok(value)
 }
@@ -183,14 +173,12 @@ fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn get_snapshot(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let item_id = req_str(args, "item_id")?;
-    match state.store.get_snapshot(ctx.bank.as_str(), item_id)? {
-        Some(snapshot) => Ok(json!({
-            "item_id": item_id,
-            "authoritative": true,
-            "snapshot": snapshot
-        })),
-        None => Err(item_not_found(item_id)),
-    }
+    let Some(snapshot) = state.store.get_snapshot(ctx.bank.as_str(), item_id)? else {
+        return Err(item_not_found(item_id));
+    };
+    let mut value = json!({"item_id": item_id, "authoritative": true, "snapshot": snapshot});
+    crate::read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    Ok(value)
 }
 
 /// `get_gist(item_id)`: non-authoritative prose half only.
@@ -198,14 +186,12 @@ fn get_snapshot(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn get_gist(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let item_id = req_str(args, "item_id")?;
-    match state.store.get_gist(ctx.bank.as_str(), item_id)? {
-        Some(gist) => Ok(json!({
-            "item_id": item_id,
-            "authoritative": false,
-            "gist": gist
-        })),
-        None => Err(item_not_found(item_id)),
-    }
+    let Some(gist) = state.store.get_gist(ctx.bank.as_str(), item_id)? else {
+        return Err(item_not_found(item_id));
+    };
+    let mut value = json!({"item_id": item_id, "authoritative": false, "gist": gist});
+    crate::read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    Ok(value)
 }
 
 /// `maintenance_status(item_id?)`: leaf queryability, dirty ancestors, the
@@ -443,3 +429,7 @@ mod read_tools_bank_tests;
 #[cfg(test)]
 #[path = "read_tools_inspect_time_tests.rs"]
 mod read_tools_inspect_time_tests;
+
+#[cfg(test)]
+#[path = "read_tools_lifecycle_tests.rs"]
+mod read_tools_lifecycle_tests;

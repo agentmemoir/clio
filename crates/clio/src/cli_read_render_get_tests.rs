@@ -27,6 +27,10 @@ fn render_get(payload: &Value) -> String {
     render_text("get", payload, Palette::new(false))
 }
 
+/// The text view's own fields, in print order, for one lifecycle marking.
+const UNMARKED_VIEW: &str =
+    "id: itm-1\ncategory: persona\nepistemic_kind: fact\ngist: User prefers dark mode";
+
 /// The payload shape `get_item` returns, minus the fields this view does not
 /// print. The lifecycle flags are additive top-level keys.
 fn item(discarded: bool, archived: bool) -> Value {
@@ -40,13 +44,10 @@ fn item(discarded: bool, archived: bool) -> Value {
     })
 }
 
-/// Issue #276: a discarded item is still returned by id, so without this line
-/// the human text view reported a soft-deleted item as a live one.
 #[test]
 fn a_discarded_item_says_it_is_discarded() {
     let text = render_get(&item(true, false));
-    assert!(text.contains("discarded: true"), "{text}");
-    assert!(!text.contains("archived"), "{text}");
+    assert_eq!(text, format!("{UNMARKED_VIEW}\ndiscarded: true"));
 }
 
 /// The archive marker is the other lifecycle flag the payload carries, and it
@@ -54,16 +55,12 @@ fn a_discarded_item_says_it_is_discarded() {
 #[test]
 fn an_archived_item_says_it_is_archived() {
     let text = render_get(&item(false, true));
-    assert!(text.contains("archived: true"), "{text}");
-    assert!(!text.contains("discarded"), "{text}");
+    assert_eq!(text, format!("{UNMARKED_VIEW}\narchived: true"));
 }
 
 /// A live item's view must not change at all: the new lines are additive only
 /// where a marker is set, so no blank lines and no `discarded: false`.
 #[test]
 fn a_live_item_gains_no_lifecycle_line() {
-    assert_eq!(
-        render_get(&item(false, false)),
-        "id: itm-1\ncategory: persona\nepistemic_kind: fact\ngist: User prefers dark mode"
-    );
+    assert_eq!(render_get(&item(false, false)), UNMARKED_VIEW);
 }

@@ -384,3 +384,7 @@ mod group_tests;
 #[cfg(test)]
 #[path = "cli_read_output_tests.rs"]
 mod cli_read_output_tests;
+
+#[cfg(test)]
+#[path = "cli_read_discarded_tests.rs"]
+mod cli_read_discarded_tests;
