@@ -23,6 +23,7 @@
 //!
 //! Keep this module focused on Runtime config/ranking tool orchestration.
 
+mod cli_state;
 mod dispatch;
 mod env;
 mod merge;
@@ -82,6 +83,7 @@ pub struct Runtime {
     repo_root: Option<String>,
     default_actor: Actor,
     deployment_path: Option<PathBuf>,
+    cli_state_path: Option<PathBuf>,
     retention: RetentionStore,
     retention_path: Option<PathBuf>,
 }
@@ -99,6 +101,7 @@ impl Runtime {
             &|key| std::env::var(key).ok(),
             resolve_deployment_path(None),
             resolve_retention_path(None),
+            cli_state::resolve_cli_state_path(None),
         )
     }
 
@@ -116,6 +119,7 @@ impl Runtime {
             get,
             resolve_deployment_path_with(None, get),
             resolve_retention_path(None),
+            cli_state::resolve_cli_state_path_with(None, get),
         )
     }
 
@@ -139,13 +143,14 @@ impl Runtime {
     ) -> Self {
         // The lookup is borrowed, so it is re-borrowed through a closure to reach
         // `boot_with`, which takes it by a concrete type.
-        Self::boot_with(&|key| get(key), Some(path.into()), None)
+        Self::boot_with(&|key| get(key), Some(path.into()), None, None)
     }
 
     fn boot_with<F>(
         get: &F,
         deployment_path: Option<PathBuf>,
         retention_path: Option<PathBuf>,
+        cli_state_path: Option<PathBuf>,
     ) -> Self
     where
         F: Fn(&str) -> Option<String>,
@@ -164,6 +169,7 @@ impl Runtime {
             repo_root: None,
             default_actor: Actor::Agent,
             deployment_path,
+            cli_state_path,
             retention: RetentionStore::default(),
             retention_path,
         };
@@ -184,6 +190,7 @@ impl Runtime {
         if let Some(path) = self.retention_path.clone() {
             self.retention = RetentionStore::load_lossy(&path);
         }
+        self.load_cli_state();
         self.sync_log_level();
     }
 
@@ -324,14 +331,6 @@ impl Runtime {
         }
     }
 
-    fn bank_fixed_from_effective(&self) -> Option<String> {
-        self.effective_raw()
-            .pointer("/bank/fixed")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .filter(|s| !s.is_empty())
-    }
-
     /// Resolve operation context.
     ///
     /// Bank precedence: explicit → `bank.fixed` / `CLIO_BANK` → active profile policy.
@@ -343,7 +342,12 @@ impl Runtime {
         bank: Option<&str>,
         actor: Option<&str>,
     ) -> Result<OpContext, AmError> {
-        let fixed = self.bank_fixed_from_effective();
+        let fixed = self
+            .effective_raw()
+            .pointer("/bank/fixed")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .filter(|s| !s.is_empty());
         let bank = resolve_bank(
             &self.bank_policy,
             bank,

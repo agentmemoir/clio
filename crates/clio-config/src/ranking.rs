@@ -212,9 +212,11 @@ impl Default for MaintenanceTriggerKnobs {
 
 /// Full ranking-environment surface returned by `ranking_env_get`.
 ///
-/// The env is only built in code (`system_defaults`, patch application) and
-/// serialized out; JSON input goes through `RankingEnvPatch`.
-#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+/// The env is built in code (`system_defaults`, patch application) and
+/// serialized out; the CLI state file reads one back whole, so the type
+/// deserializes exactly the shape it serializes, with no per-field defaults.
+/// JSON *patches* still go through `RankingEnvPatch`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RankingEnv {
     pub retrieval: RetrievalWeights,
     pub admission: AdmissionWeights,

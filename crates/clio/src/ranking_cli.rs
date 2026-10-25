@@ -10,9 +10,12 @@
 //! ## Owns
 //! - The `ranking get|set` verbs and their text views
 //! - Decoding the `--patch` / `--patch-file` JSON object
+//! - Flushing a non-dry-run set to the durable CLI state file, and refusing to
+//!   report a set that could not be saved
 //!
 //! ## Does not own
 //! - Ranking weight math or validation (`clio-config`)
+//! - The CLI state file's location or format (`clio-config`, see `cli_state`)
 //! - The verbs' static records and verb list (see
 //!   `cli_command_registry_ranking_retention`)
 //! - The runtime-backed command engine (see `runtime_cli`)
@@ -59,6 +62,25 @@ impl RuntimeGroup for RankingGroup {
                 Ok(("ranking_env_get", json!({})))
             }
             _ => set_call(parsed),
+        }
+    }
+
+    /// A non-dry-run `set` is durable, so the CLI writes the environment the
+    /// next process boots from. A run that cannot save it must not report the
+    /// set as a success.
+    fn commit(&self, verb: &str, payload: &Value, runtime: &mut Runtime) -> Result<(), CliError> {
+        let dry_run = payload.get("dry_run").and_then(Value::as_bool) == Some(true);
+        if verb == "ranking get" || dry_run {
+            return Ok(());
+        }
+        match runtime.flush_cli_state() {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(CliError::operational(
+                "no_config_dir",
+                "the ranking change applied to this process but was not saved: no clio config \
+                 directory resolves, so later commands read the previous environment",
+            )),
+            Err(error) => Err(CliError::from_am_error(&error)),
         }
     }
 
@@ -130,19 +152,14 @@ fn render_set(payload: &Value) -> String {
     let mode = if dry_run {
         "dry-run (not applied)"
     } else if applied {
-        "applied to this session"
+        "applied and saved for later commands"
     } else {
         "not applied"
     };
     let weights = payload
         .get("ranking")
         .map_or_else(|| "{}".to_owned(), Value::to_string);
-    let mut text = format!("ranking set {mode}: normalized weights\n{weights}");
-    if applied && !dry_run {
-        // A one-shot process cannot keep a session change; say so plainly.
-        text.push_str("\nnote: a session ranking change lasts only for this process; use --dry-run to preview");
-    }
-    text
+    format!("ranking set {mode}: normalized weights\n{weights}")
 }
 
 #[cfg(test)]

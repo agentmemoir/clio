@@ -1,0 +1,161 @@
+// Copyright 2026 Agent Memoir (https://agentmemoir.com/)
+// SPDX-License-Identifier: Apache-2.0
+//
+//! # Responsibility
+//!
+//! This module tests the durable CLI state file: path resolution, the ranking
+//! round trip across two `Runtime` boots, and the missing, corrupt, and dry-run
+//! cases.
+//!
+//! ## Owns
+//! - Behavior tests for the CLI state file and its `Runtime` hooks
+//!
+//! ## Does not own
+//! - The implementation under test (`cli_state`)
+//! - Ranking weight math (see `crate::ranking`)
+//!
+//! ## Boundary
+//!
+//! Test-only. Never compiled into production builds.
+
+use super::*;
+use crate::error::ToolResult;
+use crate::ranking::RankingEnvPatch;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-test scratch directory, removed on drop and unique by process and order.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new() -> Self {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("clio-cli-state-{}-{seq}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create scratch dir");
+        Self(dir)
+    }
+
+    fn state_file(&self) -> PathBuf {
+        self.0.join(CLI_STATE_FILE_NAME)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A patch that changes only the admission threshold.
+fn theta_patch(theta: f64) -> RankingEnvPatch {
+    RankingEnvPatch {
+        theta_admit: Some(theta),
+        ..RankingEnvPatch::default()
+    }
+}
+
+/// Boot a runtime over `path` with no host environment and no deployment overlay.
+fn boot(path: PathBuf) -> Runtime {
+    Runtime::with_env_and_cli_state_file(&|_key: &str| None, path)
+}
+
+/// The ranking environment a runtime reports.
+fn ranking_of(rt: &Runtime) -> RankingEnv {
+    let ToolResult::Ok { data, .. } = rt.ranking_env_get() else {
+        panic!("ranking_env_get must succeed");
+    };
+    data
+}
+
+/// Set `theta_admit` on a runtime, both in memory and on disk.
+fn set_and_flush(rt: &mut Runtime, theta: f64) {
+    let ToolResult::Ok { data, .. } = rt.ranking_env_set(&theta_patch(theta), false) else {
+        panic!("ranking_env_set must succeed");
+    };
+    assert!(data.applied, "a non-dry-run set applies in memory");
+    assert!(rt.flush_cli_state().expect("flush"), "flush must write");
+}
+
+#[test]
+fn explicit_path_wins_and_the_default_hangs_off_the_config_dir() {
+    let explicit = PathBuf::from("/state/cli-state.json");
+    assert_eq!(
+        resolve_cli_state_path(Some(explicit.clone())),
+        Some(explicit.clone())
+    );
+    assert_eq!(
+        resolve_cli_state_path_with(Some(explicit.clone()), &|_| None),
+        Some(explicit)
+    );
+    let xdg = |key: &str| (key == "XDG_CONFIG_HOME").then(|| "/xdg".to_owned());
+    assert_eq!(
+        resolve_cli_state_path_with(None, &xdg),
+        Some(PathBuf::from("/xdg/clio/cli-state.json"))
+    );
+    assert_eq!(resolve_cli_state_path_with(None, &|_| None), None);
+}
+
+#[test]
+fn missing_file_boots_the_system_defaults() {
+    let scratch = Scratch::new();
+    assert_eq!(
+        ranking_of(&boot(scratch.state_file())),
+        RankingEnv::system_defaults()
+    );
+}
+
+#[test]
+fn corrupt_file_is_ignored() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    for text in ["not json", "[]", r#"{"ranking": {"theta_admit": "high"}}"#] {
+        fs::write(&path, text).expect("write corrupt cli state");
+        assert_eq!(
+            ranking_of(&boot(path.clone())),
+            RankingEnv::system_defaults(),
+            "corrupt file {text} must be ignored"
+        );
+    }
+}
+
+#[test]
+fn a_later_boot_reads_the_ranking_a_flush_saved() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    set_and_flush(&mut boot(path.clone()), 0.61);
+
+    let reloaded = ranking_of(&boot(path));
+    assert!((reloaded.theta_admit - 0.61).abs() < 1e-9, "{reloaded:?}");
+    assert_eq!(
+        reloaded.retrieval,
+        RankingEnv::system_defaults().retrieval,
+        "the whole environment round-trips, not just the patched field"
+    );
+}
+
+#[test]
+fn a_dry_run_writes_nothing_and_leaves_the_saved_value_alone() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    let mut rt = boot(path.clone());
+
+    // No file yet: a dry run never creates one.
+    let ToolResult::Ok { data, .. } = rt.ranking_env_set(&theta_patch(0.7), true) else {
+        panic!("dry run must succeed");
+    };
+    assert!(!data.applied, "a dry run reports applied false");
+    assert!(!path.exists(), "a dry run must not create the file");
+
+    // With a saved value, a dry run leaves the stored bytes untouched.
+    set_and_flush(&mut rt, 0.61);
+    let saved = fs::read_to_string(&path).expect("read cli state");
+    let _ = rt.ranking_env_set(&theta_patch(0.7), true);
+    assert_eq!(fs::read_to_string(&path).expect("read cli state"), saved);
+    assert!((ranking_of(&boot(path)).theta_admit - 0.61).abs() < 1e-9);
+}
+
+#[test]
+fn flushing_without_a_resolved_path_writes_nothing() {
+    let rt = Runtime::with_env(&|_key: &str| None);
+    assert!(!rt.flush_cli_state().expect("no path is not an error"));
+}

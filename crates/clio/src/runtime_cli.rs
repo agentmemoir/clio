@@ -50,6 +50,18 @@ pub(crate) trait RuntimeGroup: Sync {
     /// Decode `verb` into its `Runtime` tool name and argument object.
     fn build(&self, verb: &str, parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError>;
 
+    /// Side effects the verb must complete before its payload is reported,
+    /// called once the tool call succeeded and before rendering. The default
+    /// verb has none.
+    ///
+    /// # Errors
+    /// The side effect could not be completed, so the payload must not be
+    /// reported as a success.
+    fn commit(&self, verb: &str, payload: &Value, runtime: &mut Runtime) -> Result<(), CliError> {
+        let _ = (verb, payload, runtime);
+        Ok(())
+    }
+
     /// Render a success payload as deterministic human text.
     fn render(&self, verb: &str, payload: &Value) -> String;
 }
@@ -92,6 +104,9 @@ pub(crate) fn run(
     };
     let response = runtime.call_tool(tool, &tool_args);
     if response.get("ok").and_then(Value::as_bool) == Some(true) {
+        if let Err(error) = group.commit(&verb, &response, runtime) {
+            return fail(io, mode, &error);
+        }
         let text = group.render(&verb, &response);
         emit(io, mode, &response, &text);
         ExitCode::from(EXIT_OK)

@@ -21,6 +21,7 @@
 use super::*;
 use crate::runtime_cli::tests::{run_group, runtime};
 use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Run one `ranking` verb against an injected runtime.
 fn run(args: &[&str], runtime: &mut Runtime, is_tty: bool) -> (ExitCode, String, String) {
@@ -29,6 +30,38 @@ fn run(args: &[&str], runtime: &mut Runtime, is_tty: bool) -> (ExitCode, String,
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text.trim()).expect("json output")
+}
+
+/// A runtime whose CLI state file lives in a fresh scratch directory, so the
+/// test never reads or writes the developer's own config directory.
+fn runtime_with_state_file() -> (Runtime, std::path::PathBuf, ScratchDir) {
+    let dir = ScratchDir::new();
+    let path = dir.join("cli-state.json");
+    let rt = Runtime::with_env_and_cli_state_file(&|_key: &str| None, path.clone());
+    (rt, path, dir)
+}
+
+/// Per-test scratch directory, removed on drop.
+struct ScratchDir(std::path::PathBuf);
+
+impl ScratchDir {
+    fn new() -> Self {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("clio-ranking-cli-{}-{seq}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        Self(dir)
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 #[test]
@@ -82,8 +115,8 @@ fn ranking_set_dry_run_renormalizes_weights_without_applying() {
 }
 
 #[test]
-fn ranking_set_applies_and_notes_session_scope() {
-    let mut rt = runtime();
+fn ranking_set_applies_and_saves_for_later_commands() {
+    let (mut rt, path, _dir) = runtime_with_state_file();
     let (code, out, err) = run(
         &["set", "--patch", r#"{"theta_admit":0.6}"#],
         &mut rt,
@@ -93,10 +126,48 @@ fn ranking_set_applies_and_notes_session_scope() {
     let payload = json_of(&out);
     assert_eq!(payload["applied"], json!(true), "{payload}");
     assert!((payload["ranking"]["theta_admit"].as_f64().unwrap() - 0.6).abs() < 1e-9);
+    assert!(path.is_file(), "a non-dry-run set writes the state file");
 
     let (_, text, _) = run(&["set", "--patch", r#"{"theta_admit":0.7}"#], &mut rt, true);
-    assert!(text.contains("applied to this session"), "{text}");
-    assert!(text.contains("lasts only for this process"), "{text}");
+    assert!(
+        text.contains("applied and saved for later commands"),
+        "{text}"
+    );
+    assert!(!text.contains("lasts only for this process"), "{text}");
+}
+
+#[test]
+fn a_later_process_boot_reads_the_value_the_cli_saved() {
+    let (mut rt, path, _dir) = runtime_with_state_file();
+    let (code, _, err) = run(
+        &["set", "--patch", r#"{"theta_admit":0.61}"#],
+        &mut rt,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+
+    // The next `clio` run: a fresh runtime booted from the same state file.
+    let mut later = Runtime::with_env_and_cli_state_file(&|_key: &str| None, path);
+    let (code, out, err) = run(&["get"], &mut later, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(
+        (json_of(&out)["theta_admit"].as_f64().unwrap() - 0.61).abs() < 1e-9,
+        "{out}"
+    );
+}
+
+#[test]
+fn a_set_that_cannot_be_saved_is_not_reported_as_applied() {
+    // No CLI state path resolves, so nothing can be saved for later commands.
+    let mut rt = runtime();
+    let (code, out, err) = run(
+        &["set", "--patch", r#"{"theta_admit":0.6}"#],
+        &mut rt,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(err.contains("was not saved"), "{err}");
+    assert!(!out.contains("applied"), "{out}");
 }
 
 #[test]
@@ -169,6 +240,10 @@ fn render_set_defaults_and_modes() {
     assert_eq!(
         render_set(&json!({"dry_run": true, "ranking": {"a": 1}})),
         "ranking set dry-run (not applied): normalized weights\n{\"a\":1}"
+    );
+    assert_eq!(
+        render_set(&json!({"dry_run": false, "applied": true, "ranking": {"a": 1}})),
+        "ranking set applied and saved for later commands: normalized weights\n{\"a\":1}"
     );
     assert_eq!(
         render_set(&json!({"dry_run": false, "applied": false, "ranking": {}})),
