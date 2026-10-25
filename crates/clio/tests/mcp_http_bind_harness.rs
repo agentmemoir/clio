@@ -86,6 +86,30 @@ fn kill_and_collect_stdout(mut child: Child) -> Vec<u8> {
     out
 }
 
+/// Read a child's stderr lines as they arrive, up to `want` of them, so a start
+/// that prints the listening line and then a warning can assert on both without
+/// one racing the other. Fewer lines than asked for means the child stopped
+/// talking.
+fn stderr_lines_until(child: &mut Child, want: usize) -> Vec<String> {
+    let stderr = child.stderr.take().expect("stderr piped");
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let mut lines = Vec::new();
+    while lines.len() < want {
+        match rx.recv_timeout(Duration::from_secs(15)) {
+            Ok(line) => lines.push(line),
+            Err(_) => break,
+        }
+    }
+    lines
+}
+
 fn port_of(addr: &str) -> u16 {
     addr.rsplit(':')
         .next()
@@ -194,6 +218,78 @@ fn non_loopback_without_a_credential_fails_closed() {
             String::from_utf8_lossy(&out.stdout)
         );
     }
+}
+
+/// `--insecure-no-auth` alone is the loopback answer: a non-loopback bind that
+/// names only it is refused, and the refusal names the flag that unlocks the
+/// wider bind rather than leaving the operator to guess.
+#[test]
+fn non_loopback_with_insecure_no_auth_alone_names_the_bind_any_flag() {
+    let out = spawn_http(&[
+        "--bind",
+        "0.0.0.0:0",
+        "--db",
+        "sqlite::memory:",
+        "--insecure-no-auth",
+    ])
+    .wait_with_output()
+    .expect("wait");
+    assert!(
+        !out.status.success(),
+        "a non-loopback bind with one opt-out must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--insecure-bind-any"),
+        "the refusal must name the second opt-out: {stderr}"
+    );
+    assert!(
+        !stderr.contains("listening on"),
+        "a rejected bind was announced as listening: {stderr}"
+    );
+}
+
+/// Both opt-outs admit the bind, and the start then says plainly that the
+/// listener has no credential: the warning names the address it resolved and
+/// follows the listening line, which stays the first stderr line.
+#[test]
+fn both_opt_outs_start_and_warn_that_the_listener_is_unauthenticated() {
+    let mut child = spawn_http(&[
+        "--bind",
+        "0.0.0.0:0",
+        "--db",
+        "sqlite::memory:",
+        "--insecure-no-auth",
+        "--insecure-bind-any",
+    ]);
+    let lines = stderr_lines_until(&mut child, 2);
+    let stdout = kill_and_collect_stdout(child);
+    assert_eq!(lines.len(), 2, "expected two stderr lines, got {lines:?}");
+    let addr = lines[0]
+        .strip_prefix("mcp http listening on ")
+        .expect("the listening line must come first");
+    assert!(
+        addr.starts_with("0.0.0.0:"),
+        "not the bound address: {addr}"
+    );
+    let warning = &lines[1];
+    assert!(
+        warning.starts_with("mcp http warning:"),
+        "expected the warning second: {warning}"
+    );
+    assert!(
+        warning.contains(addr),
+        "the warning must name {addr}: {warning}"
+    );
+    assert!(
+        warning.contains("without authentication"),
+        "the warning must say the listener is unauthenticated: {warning}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "stdout must carry only MCP data, got {:?}",
+        String::from_utf8_lossy(&stdout)
+    );
 }
 
 /// The legacy environment source is removed: a non-loopback bind with the old

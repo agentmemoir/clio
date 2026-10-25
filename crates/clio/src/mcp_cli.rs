@@ -27,6 +27,7 @@
 
 use super::cli_top_level::database_help_block;
 use super::cli_top_level::parse_flags;
+use clio_mcp::http_start_guard::{BindRefusal, bind_refusal};
 use std::process::ExitCode;
 
 #[path = "mcp_cli_credentials.rs"]
@@ -279,23 +280,33 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
                     let addr = listener
                         .local_addr()
                         .expect("bound listener has an address");
-                    // `--insecure-no-auth` is the one opt-out. Without it every
-                    // bind needs a credential: a token store named by
-                    // `--token-file`. A loopback bind with no token store is
-                    // refused here, so the operator creates a credential with
-                    // `clio auth token add` rather than receiving a secret on
-                    // stderr, and a rejected bind is not announced as listening.
-                    if !clio_mcp::http::has_credential_source(&cfg) && !cfg.insecure_no_auth {
-                        eprintln!(
-                            "mcp http error: bind requires an auth token: point \
-                             --token-file at a store holding at least one record \
-                             (see `clio auth token add`), or pass --insecure-no-auth \
-                             to serve without authentication"
-                        );
+                    // `--insecure-no-auth` alone is the loopback answer; a
+                    // non-loopback bind additionally needs `--insecure-bind-any`.
+                    // Without them every bind needs a credential: a token store
+                    // named by `--token-file`. A rejected bind is not announced
+                    // as listening.
+                    let loopback = addr.ip().is_loopback();
+                    if let Some(refusal) = bind_refusal(&cfg, loopback) {
+                        let message = match refusal {
+                            BindRefusal::Loopback => {
+                                "bind requires an auth token: point --token-file at a store holding at least one record (see `clio auth token add`), or pass --insecure-no-auth to serve without authentication"
+                            }
+                            BindRefusal::NonLoopback => {
+                                "non-loopback bind requires an auth token: point --token-file at a store holding at least one record (see `clio auth token add`), or pass --insecure-no-auth together with --insecure-bind-any to serve without authentication"
+                            }
+                        };
+                        eprintln!("mcp http error: {message}");
                         return ExitCode::from(1);
                     }
                     cfg.bind = addr.to_string();
                     eprintln!("mcp http listening on {addr}");
+                    // After the listening line on purpose: parsers take the
+                    // first stderr line of a successful start.
+                    if !loopback && !clio_mcp::http::has_credential_source(&cfg) {
+                        eprintln!(
+                            "mcp http warning: serving without authentication on non-loopback address {addr}; any host that can reach this port can call every tool on every bank this server exposes; pass --token-file to require a credential"
+                        );
+                    }
                     match mcp_http_serve(&serving, state, cfg, listener) {
                         Ok(()) => ExitCode::SUCCESS,
                         Err(e) => {
@@ -345,6 +356,9 @@ pub(crate) fn http_config(
         insecure_no_auth: flags
             .get("insecure-no-auth")
             .is_some_and(|value| value == "true"),
+        insecure_bind_any: flags
+            .get("insecure-bind-any")
+            .is_some_and(|value| value == "true"),
         ..clio_mcp::http::HttpConfig::default()
     }
 }
@@ -375,7 +389,8 @@ pub(crate) fn mcp_http_help() -> String {
     format!(
         "{}\n\n--bind ADDR  Bind address. With no flag, or with a bare `--bind`, scan 127.0.0.1:{range}
              for the first free port. An explicit `--bind HOST:PORT` binds exactly
-             that address; a non-loopback address also requires a credential.
+             that address; a non-loopback address also requires a credential, or
+             both --insecure-no-auth and --insecure-bind-any.
 
 --token-file PATH
              Credential store whose records name an actor and the banks it may reach
@@ -387,7 +402,14 @@ pub(crate) fn mcp_http_help() -> String {
              Permit a bind with no credential. Without it a credential is
              required everywhere, including loopback: name a --token-file store,
              or the start is refused. A --token-file store, when given, is still
-             enforced.
+             enforced. It does not permit a non-loopback bind: that needs
+             --insecure-bind-any as well.
+
+--insecure-bind-any
+             Permit --insecure-no-auth to bind a non-loopback address. The start
+             then warns that every host that can reach the port can use every
+             tool. Without it a non-loopback bind with no credential is refused
+             even with --insecure-no-auth.
 
 {}",
         crate::cli_help_usage::usage_line("mcp http")

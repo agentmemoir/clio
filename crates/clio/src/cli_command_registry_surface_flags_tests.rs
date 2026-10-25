@@ -90,6 +90,7 @@ fn the_derived_names_keep_each_surfaces_accepted_set() {
             "bank",
             "bind",
             "db",
+            "insecure-bind-any",
             "insecure-no-auth",
             "sessions",
             "shared-bank",
