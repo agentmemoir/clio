@@ -147,6 +147,17 @@ fn bind_source(service: &serde_json::Value, container: &str) -> Option<PathBuf> 
     None
 }
 
+/// The directory a fetch command must download the model into: the one that
+/// holds the file the stack mounts. A literal would name a directory under
+/// whatever directory the operator happens to be in, which is not the directory
+/// the stack mounts once the materialized root lives anywhere else.
+fn model_directory(model: &Path) -> String {
+    match model.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.display().to_string(),
+        _ => "./models".to_string(),
+    }
+}
+
 /// The failure the user sees. The fetch command is printed only for the model
 /// the project ships a source for: for any other name it would name a file that
 /// repository does not hold, which is worse than no suggestion at all.
@@ -158,8 +169,9 @@ fn missing_model_error(model: &Path) -> String {
     if name == GGUF_FILE_NAME {
         return format!(
             "missing extract model {}; fetch it with `hf download \
-             DevQuasar/numind.NuExtract-tiny-v1.5-GGUF {name} --local-dir ./models`",
-            model.display()
+             DevQuasar/numind.NuExtract-tiny-v1.5-GGUF {name} --local-dir {}`",
+            model.display(),
+            model_directory(model)
         );
     }
     format!(
