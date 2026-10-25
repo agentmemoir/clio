@@ -58,6 +58,54 @@ fn materialize_writes_every_asset_for_the_target() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// The README materialized into `models/` has to be true for both paths:
+/// `clio setup` downloads the missing model itself, so setup needs no manual
+/// step, while the compose and Makefile starts still need the file present and
+/// print how to fetch it. A README that presents the fetch as always manual
+/// sends the operator to do work the tool already does.
+#[test]
+fn models_readme_covers_the_automatic_and_the_manual_path() {
+    let readme = models_readme();
+    // The shipped name, spelled exactly as the container opens it.
+    assert!(readme.contains(GGUF_FILE_NAME), "{readme}");
+    // The automatic path: setup fetches the missing file before it writes.
+    assert!(readme.contains("`clio setup` fetches it"), "{readme}");
+    assert!(
+        readme.contains("setup downloads the model from the Hugging Face Hub"),
+        "{readme}"
+    );
+    // The two ways a machine without the Hub completes the same step.
+    assert!(readme.contains("CLIO_EXTRACT_MODEL_URL"), "{readme}");
+    assert!(readme.contains("CLIO_EXTRACT_MODEL_FILE"), "{readme}");
+    // The manual path survives for the compose and Makefile starts, and names the
+    // one repository the download itself uses.
+    assert!(
+        readme.contains(&format!("hf download {GGUF_REPO}")),
+        "{readme}"
+    );
+    assert!(
+        readme.contains(&format!("{GGUF_FILE_NAME} --local-dir")),
+        "{readme}"
+    );
+    assert!(
+        readme.contains("refuse to start the extract service while the file is absent"),
+        "{readme}"
+    );
+    // It no longer asks for the fetch as a step every start needs.
+    assert!(
+        !readme.contains("place it here before selecting"),
+        "the README must not present the fetch as always manual: {readme}"
+    );
+    // The file the operator reads is this text, byte for byte.
+    let root = temp_root("readme-text");
+    materialize(&root, ComposeTarget::MacArm64).expect("materialize");
+    assert_eq!(
+        std::fs::read_to_string(root.join("models/README.md")).unwrap(),
+        readme
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn materialize_amd64_overlay_for_linux_target() {
     let root = temp_root("amd64");

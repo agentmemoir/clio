@@ -37,7 +37,7 @@
 //! or refuse one whose model is present. Asking Compose removes the second
 //! resolver rather than trying to keep two of them in step.
 
-use crate::compose_assets::GGUF_FILE_NAME;
+use crate::compose_assets::{GGUF_FILE_NAME, GGUF_REPO};
 use crate::compose_docker::{ComposeTarget, DockerRunner, Stack, compose_args};
 use std::path::{Path, PathBuf};
 
@@ -60,6 +60,32 @@ pub(crate) fn verify_extract_model(
     stack: Stack,
     runner: &dyn DockerRunner,
 ) -> Result<(), String> {
+    let Some(model) = resolved_host_model_path(root, target, stack, runner)? else {
+        return Ok(());
+    };
+    if model.is_file() {
+        return Ok(());
+    }
+    Err(missing_model_error(&model))
+}
+
+/// The host path of the model the resolved stack will open, or `None` when the
+/// resolved stack holds no `extract` service.
+///
+/// The one place the resolved stack is asked and read: the check in
+/// [`verify_extract_model`] and the wizard's fetch both need the same answer, and
+/// two readers of the same output would eventually disagree about which file the
+/// container opens.
+///
+/// # Errors
+/// Compose could not be asked or refused to resolve the stack, or the resolved
+/// stack no longer has the shape the check reads.
+pub(crate) fn resolved_host_model_path(
+    root: &Path,
+    target: ComposeTarget,
+    stack: Stack,
+    runner: &dyn DockerRunner,
+) -> Result<Option<PathBuf>, String> {
     let args = compose_args(target, stack, "config", &["--format", "json"]);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let (code, output) = runner
@@ -72,13 +98,7 @@ pub(crate) fn verify_extract_model(
             root.display()
         ));
     }
-    let Some(model) = host_model_path(&output)? else {
-        return Ok(());
-    };
-    if model.is_file() {
-        return Ok(());
-    }
-    Err(missing_model_error(&model))
+    host_model_path(&output)
 }
 
 /// The host path of the model the resolved stack will mount, or `None` when the
@@ -147,19 +167,26 @@ fn bind_source(service: &serde_json::Value, container: &str) -> Option<PathBuf> 
     None
 }
 
+/// The directory a fetch command must download the model into: the one that
+/// holds the file the stack mounts. A literal would name a directory under
+/// whatever directory the operator happens to be in, which is not the directory
+/// the stack mounts once the materialized root lives anywhere else.
+fn model_directory(model: &Path) -> String {
+    match model.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.display().to_string(),
+        _ => "./models".to_string(),
+    }
+}
+
 /// The failure the user sees. The fetch command is printed only for the model
 /// the project ships a source for: for any other name it would name a file that
 /// repository does not hold, which is worse than no suggestion at all.
-fn missing_model_error(model: &Path) -> String {
-    let name = model
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    if name == GGUF_FILE_NAME {
+pub(crate) fn missing_model_error(model: &Path) -> String {
+    if file_name(model) == GGUF_FILE_NAME {
         return format!(
-            "missing extract model {}; fetch it with `hf download \
-             DevQuasar/numind.NuExtract-tiny-v1.5-GGUF {name} --local-dir ./models`",
-            model.display()
+            "missing extract model {}; {}",
+            model.display(),
+            manual_fetch(model)
         );
     }
     format!(
@@ -167,6 +194,25 @@ fn missing_model_error(model: &Path) -> String {
          {GGUF_FILE_NAME}, so place that file in the directory the compose file mounts",
         model.display()
     )
+}
+
+/// The command an operator can run by hand instead of the automatic fetch, aimed
+/// at the directory that actually holds the model.
+pub(crate) fn manual_fetch(model: &Path) -> String {
+    format!(
+        "fetch it with `hf download {GGUF_REPO} {} --local-dir {}`",
+        file_name(model),
+        model_directory(model)
+    )
+}
+
+/// The last path segment of a model path, or an empty string for a path that has
+/// none.
+fn file_name(model: &Path) -> &str {
+    model
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
 }
 
 #[cfg(test)]

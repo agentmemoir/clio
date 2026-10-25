@@ -23,7 +23,8 @@
 //! Keep this module focused on setup usage errors.
 
 use super::*;
-use crate::setup_support_tests::{StubDocker, invoke_setup};
+use crate::setup_extract_model::tests::StubFetcher;
+use crate::setup_support_tests::{StubDocker, invoke_setup, invoke_setup_with_fetcher, temp_dir};
 use std::io::{self, BufRead};
 
 /// One `clio setup` run over injected streams and a Docker stub.
@@ -348,6 +349,7 @@ fn a_prompt_whose_output_fails_is_reported() {
         true,
         &crate::setup_preview_fixtures::no_env,
         &StubDocker::ok(),
+        &StubFetcher::writing(0),
         &crate::setup_test_seam::Probes::ok(),
     );
     assert_eq!(code, ExitCode::from(1));
@@ -367,8 +369,68 @@ fn a_prompt_whose_input_fails_is_reported() {
         true,
         &crate::setup_preview_fixtures::no_env,
         &StubDocker::ok(),
+        &StubFetcher::writing(0),
         &crate::setup_test_seam::Probes::ok(),
     );
     assert_eq!(code, ExitCode::from(1));
     assert!(String::from_utf8_lossy(&err).contains("prompt failed"));
+}
+
+/// The whole point of the piece: the fetch happens before the config write, so a
+/// refused download leaves no deployment config and prints no summary.
+#[test]
+fn a_refused_download_writes_no_config_and_prints_no_applied_line() {
+    let dir = temp_dir("fetch-before-apply");
+    let config = dir.join("deployment.json");
+    let compose = dir.join("compose");
+    let runner = StubDocker::with_extract_model(&compose);
+    let fetcher = StubFetcher::failing("the address answered status 503");
+    let config_text = config.to_string_lossy().into_owned();
+    let compose_text = compose.to_string_lossy().into_owned();
+    let args: Vec<String> = [
+        "--database",
+        "sqlite",
+        "--embed",
+        "local",
+        "--rerank",
+        "skip",
+        "--extract",
+        "local",
+        "--allow-untested",
+        "--config",
+        config_text.as_str(),
+        "--compose-dir",
+        compose_text.as_str(),
+    ]
+    .iter()
+    .map(|part| (*part).to_owned())
+    .collect();
+
+    let run = invoke_setup_with_fetcher(
+        &args,
+        "",
+        false,
+        &config,
+        &runner,
+        &fetcher,
+        &crate::setup_test_seam::Probes::ok(),
+    );
+
+    assert_eq!(run.code, ExitCode::from(1), "err: {}", run.err);
+    assert_eq!(fetcher.calls().len(), 1, "the fetch was attempted once");
+    assert!(
+        run.err.contains("cannot download the extract model into"),
+        "the failure is the download, not the write: {}",
+        run.err
+    );
+    assert!(
+        !config.exists(),
+        "a failed fetch must leave no deployment config behind"
+    );
+    assert!(
+        !run.out.contains("Applied"),
+        "nothing was applied, so no summary may claim it was: {}",
+        run.out
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

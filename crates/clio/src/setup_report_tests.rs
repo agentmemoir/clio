@@ -141,6 +141,8 @@ fn the_block_names_come_out_in_the_plans_order() {
                 }],
             },
         ],
+        will_fetch: None,
+        will_stop: None,
         will_start: vec!["postgres"],
         will_remove: vec!["rerank model".to_owned()],
         will_back_up: None,
@@ -169,6 +171,8 @@ fn the_block_names_come_out_in_the_plans_order() {
 fn an_untested_line_is_visibly_different_from_a_tested_one() {
     let view = PreviewView {
         blocks: Vec::new(),
+        will_fetch: None,
+        will_stop: None,
         will_start: Vec::new(),
         will_remove: Vec::new(),
         will_back_up: Some("/tmp/deployment.json".to_owned()),
@@ -203,6 +207,8 @@ fn an_untested_line_is_visibly_different_from_a_tested_one() {
 fn nothing_to_start_or_remove_says_nothing_rather_than_an_empty_cell() {
     let view = PreviewView {
         blocks: Vec::new(),
+        will_fetch: None,
+        will_stop: None,
         will_start: Vec::new(),
         will_remove: Vec::new(),
         will_back_up: None,
@@ -214,6 +220,97 @@ fn nothing_to_start_or_remove_says_nothing_rather_than_an_empty_cell() {
     assert!(printed.contains("Will start    nothing"), "{printed}");
     assert!(printed.contains("Will remove   nothing"), "{printed}");
     assert!(!printed.contains("Tested"), "{printed}");
+}
+
+/// The view a fetch line is drawn from: one service to start, and one file to
+/// download.
+fn view_with_fetch(what: Option<&str>) -> PreviewView {
+    PreviewView {
+        blocks: Vec::new(),
+        will_fetch: what.map(str::to_owned),
+        will_stop: None,
+        will_start: vec!["extract"],
+        will_remove: Vec::new(),
+        will_back_up: None,
+        tested: Vec::new(),
+    }
+}
+
+/// Where `needle` starts in the rendered line that contains it.
+///
+/// Read as a column rather than as a substring, because the whole point of the
+/// line is that its value lines up with the values above and below it.
+fn column_of(printed: &str, heading: &str, needle: &str) -> usize {
+    let line = printed
+        .lines()
+        .find(|line| line.contains(heading))
+        .unwrap_or_else(|| panic!("no `{heading}` line in:\n{printed}"));
+    line.find(needle)
+        .unwrap_or_else(|| panic!("no `{needle}` in `{line}`"))
+}
+
+#[test]
+fn the_fetch_line_is_drawn_before_the_start_line_in_the_same_column() {
+    let what = "numind.NuExtract-tiny-v1.5.Q4_K_M.gguf (397 MB) from the Hugging Face Hub";
+    let mut out: Vec<u8> = Vec::new();
+    preview(&mut out, Palette::new(false), &view_with_fetch(Some(what))).expect("a Vec");
+    let printed = String::from_utf8(out).expect("utf8");
+
+    let fetch = printed
+        .find("Will fetch")
+        .unwrap_or_else(|| panic!("the fetch line is missing:\n{printed}"));
+    let start = printed
+        .find("Will start")
+        .unwrap_or_else(|| panic!("the start line is missing:\n{printed}"));
+    assert!(
+        fetch < start,
+        "the download happens before anything starts, so its line comes first:\n{printed}"
+    );
+    assert_eq!(
+        column_of(&printed, "Will fetch", what),
+        column_of(&printed, "Will start", "extract"),
+        "the value starts in the column every heading in this block uses:\n{printed}"
+    );
+}
+
+#[test]
+fn a_run_with_nothing_to_fetch_has_no_fetch_line() {
+    let mut out: Vec<u8> = Vec::new();
+    preview(&mut out, Palette::new(false), &view_with_fetch(None)).expect("a Vec");
+    let printed = String::from_utf8(out).expect("utf8");
+
+    assert!(!printed.contains("Will fetch"), "{printed}");
+    assert!(printed.contains("Will start"), "{printed}");
+}
+
+/// A run that will refuse before writing says so in the same column, and never
+/// promises a start it will not reach.
+#[test]
+fn a_run_that_will_stop_prints_no_start_line() {
+    let notice = "before it writes the config: missing extract model custom.gguf";
+    let view = PreviewView {
+        blocks: Vec::new(),
+        will_fetch: None,
+        will_stop: Some(notice.to_owned()),
+        will_start: vec!["extract"],
+        will_remove: Vec::new(),
+        will_back_up: None,
+        tested: Vec::new(),
+    };
+    let mut out: Vec<u8> = Vec::new();
+    preview(&mut out, Palette::new(false), &view).expect("a Vec");
+    let printed = String::from_utf8(out).expect("utf8");
+
+    assert!(printed.contains("Will stop"), "{printed}");
+    assert!(
+        !printed.contains("Will start"),
+        "a run that stops before writing starts nothing:\n{printed}"
+    );
+    assert_eq!(
+        column_of(&printed, "Will stop", notice),
+        column_of(&printed, "Will remove", "nothing"),
+        "the notice starts in the column every heading in this block uses:\n{printed}"
+    );
 }
 
 #[test]
@@ -228,6 +325,8 @@ fn a_second_column_is_printed_after_the_state() {
                 note: Some("not shown".to_owned()),
             }],
         }],
+        will_fetch: None,
+        will_stop: None,
         will_start: Vec::new(),
         will_remove: Vec::new(),
         will_back_up: None,

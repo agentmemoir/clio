@@ -98,6 +98,8 @@ fn the_engine_answer_wins_over_another_name_on_disk() {
 #[test]
 fn a_missing_model_names_the_shipped_fetch_command() {
     let root = temp_root("missing-default");
+    // The root is under the temporary directory, never the directory the test
+    // process runs in, so a relative suggestion can only come from the code.
     let runner = RecordingRunner::succeeding().with_config(extract_config(&root));
     let err = check(&root, Stack::LocalRft, &runner).expect_err("a missing model must fail");
     assert!(err.contains(GGUF_FILE_NAME), "{err}");
@@ -109,7 +111,25 @@ fn a_missing_model_names_the_shipped_fetch_command() {
         err.contains(&root.display().to_string()),
         "the error must name the host path: {err}"
     );
+    let models = root.join("models");
+    assert!(
+        err.contains(&format!("--local-dir {}", models.display())),
+        "the fetch command must download into the directory that holds the model: {err}"
+    );
+    assert!(
+        !err.contains("--local-dir ./models"),
+        "a relative directory names a place under the caller's own directory, not the stack's \
+         root: {err}"
+    );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The fetch command is the only suggestion printed, so a name with no parent
+/// must keep the directory the project's own instructions use.
+#[test]
+fn a_model_name_without_a_parent_keeps_the_shipped_directory() {
+    let err = missing_model_error(Path::new(GGUF_FILE_NAME));
+    assert!(err.contains("--local-dir ./models"), "{err}");
 }
 
 #[test]

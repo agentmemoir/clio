@@ -133,6 +133,12 @@ pub(crate) fn local_services(answers: &Answers) -> Vec<&'static str> {
 /// renderer: probing the filesystem to decide what to print makes the preview
 /// depend on a state it does not own.
 ///
+/// `will_fetch` arrives the same way and for the same reason: whether the extract
+/// model is already on disk is a question the caller answered, so this stays a
+/// builder over the answers instead of a reader of the filesystem. `will_stop` is
+/// the same answer's other half: the run refuses before it writes, so the preview
+/// says why instead of promising a start.
+///
 /// `env` is the run's own environment, the same one the apply records the store
 /// choices through, so the key paths this prints are the ones the run will use.
 #[must_use]
@@ -140,6 +146,8 @@ pub(crate) fn view(
     answers: &Answers,
     current: &dyn Fn(&str) -> Option<Value>,
     will_back_up: Option<String>,
+    will_fetch: Option<String>,
+    will_stop: Option<String>,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> PreviewView {
     let planned = planned_entries(answers);
@@ -181,6 +189,8 @@ pub(crate) fn view(
     }
     PreviewView {
         blocks: all,
+        will_fetch,
+        will_stop,
         will_start: local_services(answers),
         will_remove: removals(&planned, &watched, current),
         will_back_up,

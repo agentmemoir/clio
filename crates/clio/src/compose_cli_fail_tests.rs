@@ -107,7 +107,9 @@ fn extract_without_gguf_fails_before_docker() {
 fn prepare_root_reports_the_missing_extract_model() {
     let root = temp_root("gguf-message");
     // The process-level tests can only read the exit code, so the message itself
-    // is asserted here, where `prepare_root` returns it.
+    // is asserted here, where `prepare_root` returns it. The root is under the
+    // temporary directory, so the suggested directory can only be correct if it
+    // is derived from the model path rather than fixed.
     let runner = extract_runner(&root);
     let err = prepare_root(&root, ComposeTarget::MacArm64, Stack::LocalRft, &runner)
         .expect_err("a missing model must be reported, not warned about");
@@ -115,6 +117,14 @@ fn prepare_root_reports_the_missing_extract_model() {
     assert!(
         err.contains("hf download"),
         "the error must name the command that fetches the model: {err}"
+    );
+    assert!(
+        err.contains(&format!("--local-dir {}", root.join("models").display())),
+        "the fetch command must download into the directory that holds the model: {err}"
+    );
+    assert!(
+        !err.contains("--local-dir ./models"),
+        "a relative directory does not name the directory the stack mounts: {err}"
     );
     let _ = std::fs::remove_dir_all(&root);
 }

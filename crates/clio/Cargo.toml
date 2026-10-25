@@ -49,6 +49,15 @@ rpassword = { workspace = true }
 # expose. Already in the workspace through `clio-store`; promoted here because
 # the check runs in the binary.
 rusqlite = { workspace = true }
+# `clio setup` downloads the extract model itself rather than printing a command,
+# so the binary streams one HTTPS response to disk. Already in the workspace
+# through `clio-index`; promoted here for that download.
+ureq = { workspace = true }
+# The extract model is checked against the digest the Hub publishes for it, the
+# same check `hf download` makes. Already the workspace's file hashing crate
+# through `clio-backup`; promoted here so the download can be verified while it
+# streams rather than after.
+sha2 = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # The one signal the process sets itself: restoring the default `SIGPIPE`

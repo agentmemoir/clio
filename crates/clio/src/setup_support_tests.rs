@@ -35,6 +35,10 @@ pub(crate) struct StubDocker {
     probe_ok: bool,
     run_code: i32,
     fail_matching: Option<String>,
+    /// When set, a `config` query answers with a resolved stack whose `extract`
+    /// service mounts `models/` under this root, the shape a `local-rft` selection
+    /// resolves to.
+    extract_root: Option<PathBuf>,
 }
 
 impl StubDocker {
@@ -46,6 +50,16 @@ impl StubDocker {
             probe_ok: true,
             run_code: 0,
             fail_matching: None,
+            extract_root: None,
+        }
+    }
+
+    /// Probe succeeds and the resolved stack holds an `extract` service whose model
+    /// lives under `root/models`.
+    pub(crate) fn with_extract_model(root: &Path) -> Self {
+        Self {
+            extract_root: Some(root.to_path_buf()),
+            ..Self::ok()
         }
     }
 
@@ -106,10 +120,15 @@ impl StubDocker {
 impl DockerRunner for StubDocker {
     fn capture(&self, args: &[&str], _dir: &Path) -> io::Result<(i32, String)> {
         // A resolved-stack query answers with a resolved stack. The selections
-        // these tests start hold no `extract` service, and an empty body is a
-        // shape the engine never prints.
+        // these tests start normally hold no `extract` service, and an empty body is
+        // a shape the engine never prints; a stub built with `with_extract_model`
+        // answers with the extract service and its model instead.
         if args.contains(&"config") {
-            return Ok((0, crate::compose_docker::tests::no_extract_config()));
+            let body = match &self.extract_root {
+                Some(root) => crate::compose_docker::tests::extract_config(root),
+                None => crate::compose_docker::tests::no_extract_config(),
+            };
+            return Ok((0, body));
         }
         Ok((i32::from(!self.probe_ok), String::new()))
     }
@@ -294,6 +313,31 @@ pub(crate) fn invoke_setup(
     runner: &dyn DockerRunner,
     probes: &crate::setup_test_seam::Probes,
 ) -> SetupRun {
+    // A run that reaches the fetch gets its bytes from the shared stub, so no call
+    // site here needs to know that a model can be downloaded at all. A kilobyte is
+    // enough to prove the file arrived and keeps the suite off the operator's disk.
+    invoke_setup_with_fetcher(
+        args,
+        input,
+        is_tty,
+        config,
+        runner,
+        &crate::setup_extract_model::tests::StubFetcher::writing(1_024),
+        probes,
+    )
+}
+
+/// [`invoke_setup`] with the model fetcher chosen by the caller, for the runs that
+/// are about the download itself.
+pub(crate) fn invoke_setup_with_fetcher(
+    args: &[String],
+    input: &str,
+    is_tty: bool,
+    config: &Path,
+    runner: &dyn DockerRunner,
+    fetcher: &dyn crate::setup_extract_model::ModelFetcher,
+    probes: &crate::setup_test_seam::Probes,
+) -> SetupRun {
     let mut reader = std::io::Cursor::new(input.as_bytes().to_vec());
     let mut out = Vec::new();
     let mut err = Vec::new();
@@ -316,6 +360,7 @@ pub(crate) fn invoke_setup(
         is_tty,
         &env,
         runner,
+        fetcher,
         probes,
     );
     SetupRun {

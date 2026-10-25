@@ -154,6 +154,8 @@ mod setup_connect;
 mod setup_db_fields;
 mod setup_db_options;
 mod setup_defaults;
+/// The extract model's automatic download, and the seam a test replaces it with.
+mod setup_extract_model;
 mod setup_flags;
 mod setup_flows_db;
 mod setup_flows_db_fields;
