@@ -306,7 +306,9 @@ fn restore_and_verify_are_the_only_overridden_lines() {
              crash in that window loses whatever that log had not yet written; a Postgres \
              restore replaces the target in one transaction and has no such window; \
              --no-pre-backup is what leaves that window with no way back. Exit codes: 0 clean \
-             restore, 1 operational failure, 2 refused, 3 partial or not-durable restore",
+             restore, 1 operational failure, 2 refused, 3 partial or not-durable restore, 75 \
+             every user-data row loaded with a table the store rebuilds holding a different \
+             count, which a rebuild closes and a retry confirms",
         ),
         (
             "backup verify",

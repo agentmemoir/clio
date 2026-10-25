@@ -33,7 +33,7 @@ fn the_work_queue_is_the_derived_table() {
 #[test]
 fn every_derived_table_says_why_it_is_derived() {
     for (name, reason) in DERIVED_TABLES {
-        assert!(!name.is_empty());
+        assert_ne!(*name, "", "a derived table needs a name to classify");
         assert!(
             reason.len() > 20,
             "{name} needs a real reason, not a placeholder"

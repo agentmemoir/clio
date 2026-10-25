@@ -22,9 +22,9 @@
 //! is written in this file or read from the ops registry's own record; none of
 //! it comes from the host the test runs on.
 
-use super::{REINDEX_COMMAND, REINDEX_NOTICE, render, payload};
+use super::{REINDEX_COMMAND, REINDEX_NOTICE, payload, render};
 use crate::backup_cli::ResolvedTarget;
-use crate::backup_restore_flow::{Counts, PreRestore, Report, RESULT_RESTORED};
+use crate::backup_restore_flow::{Counts, PreRestore, RESULT_RESTORED, Report};
 use crate::backup_restore_schema::{ACTION_NONE, Schema};
 use std::path::PathBuf;
 
