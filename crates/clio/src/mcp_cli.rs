@@ -396,7 +396,8 @@ pub(crate) fn mcp_http_help() -> String {
              Credential store whose records name an actor and the banks it may reach
              (see `clio auth token add`). Loaded once at start; a path that is
              absent, unreadable, malformed, or holds no record refuses the start.
-             Required on every bind unless --insecure-no-auth is given.
+             Required on every bind unless --insecure-no-auth is given; outside
+             loopback that opt-out also needs --insecure-bind-any.
 
 --insecure-no-auth
              Permit a bind with no credential. Without it a credential is

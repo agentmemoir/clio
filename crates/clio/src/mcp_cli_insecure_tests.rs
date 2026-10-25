@@ -74,8 +74,10 @@ fn help_block<'a>(help: &'a str, flag: &str) -> &'a str {
 }
 
 /// The help names the second opt-out where an operator looks for it: the
-/// `--bind` paragraph says a non-loopback bind needs it, and the
-/// `--insecure-no-auth` paragraph says it does not reach past loopback.
+/// `--bind` paragraph says a non-loopback bind needs it, the `--token-file`
+/// paragraph says the store is required except under the opt-out and that the
+/// opt-out needs it outside loopback, and the `--insecure-no-auth` paragraph
+/// says it does not reach past loopback.
 #[test]
 fn the_help_says_a_non_loopback_bind_needs_the_bind_any_flag() {
     let help = mcp_http_help();
@@ -88,6 +90,15 @@ fn the_help_says_a_non_loopback_bind_needs_the_bind_any_flag() {
     assert!(
         bind_para.contains("credential"),
         "the --bind text must still name the credential rule: {bind_para}"
+    );
+    let token_para = help_block(&help, "--token-file");
+    assert!(
+        token_para.contains("--insecure-no-auth"),
+        "the --token-file text must name the opt-out: {token_para}"
+    );
+    assert!(
+        token_para.contains("--insecure-bind-any"),
+        "the --token-file text must name the non-loopback rule too: {token_para}"
     );
     let no_auth_para = help_block(&help, "--insecure-no-auth");
     assert!(

@@ -89,8 +89,10 @@ fn kill_and_collect_stdout(mut child: Child) -> Vec<u8> {
 /// Read a child's stderr lines as they arrive, up to `want` of them, so a start
 /// that prints the listening line and then a warning can assert on both without
 /// one racing the other. Fewer lines than asked for means the child stopped
-/// talking.
-fn stderr_lines_until(child: &mut Child, want: usize) -> Vec<String> {
+/// talking. After the last wanted line it keeps listening for `linger`, which
+/// proves the absence of a further line (a `Duration::ZERO` linger stops at
+/// once).
+fn stderr_lines_until(child: &mut Child, want: usize, linger: Duration) -> Vec<String> {
     let stderr = child.stderr.take().expect("stderr piped");
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -107,6 +109,9 @@ fn stderr_lines_until(child: &mut Child, want: usize) -> Vec<String> {
             Err(_) => break,
         }
     }
+    while let Ok(line) = rx.recv_timeout(linger) {
+        lines.push(line);
+    }
     lines
 }
 
@@ -120,13 +125,27 @@ fn port_of(addr: &str) -> u16 {
 #[test]
 fn auto_bind_announces_on_stderr_and_keeps_stdout_pure() {
     let mut child = spawn_http(&["--db", "sqlite::memory:", "--insecure-no-auth"]);
-    let addr = announced_addr(&mut child);
-    assert!(!addr.is_empty(), "no listening line on stderr");
+    // The listening line first, then a short beat for anything after it: a
+    // loopback start warns about nothing (the non-loopback warning is proven in
+    // `both_opt_outs_start_and_warn_that_the_listener_is_unauthenticated`).
+    let lines = stderr_lines_until(&mut child, 1, Duration::from_millis(750));
+    let addr = lines
+        .first()
+        .and_then(|line| line.strip_prefix("mcp http listening on "))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(!addr.is_empty(), "no listening line on stderr: {lines:?}");
     assert!(addr.starts_with("127.0.0.1:"), "not loopback: {addr}");
     let port = port_of(&addr);
     assert!(
         (FIRST_PORT..=LAST_PORT).contains(&port),
         "auto bind left the range: {addr}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.starts_with("mcp http warning:")),
+        "a loopback start must not warn: {lines:?}"
     );
     let stdout = kill_and_collect_stdout(child);
     assert!(
@@ -262,7 +281,7 @@ fn both_opt_outs_start_and_warn_that_the_listener_is_unauthenticated() {
         "--insecure-no-auth",
         "--insecure-bind-any",
     ]);
-    let lines = stderr_lines_until(&mut child, 2);
+    let lines = stderr_lines_until(&mut child, 2, Duration::ZERO);
     let stdout = kill_and_collect_stdout(child);
     assert_eq!(lines.len(), 2, "expected two stderr lines, got {lines:?}");
     let addr = lines[0]
