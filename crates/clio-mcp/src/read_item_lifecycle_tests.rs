@@ -168,7 +168,11 @@ fn a_discarded_item_reports_the_discarded_marker() {
             "timestamp": "2024-02-01T00:00:00Z"
         }),
     );
-    assert_eq!(discarded["ok"], json!(true), "discard itm-gone: {discarded}");
+    assert_eq!(
+        discarded["ok"],
+        json!(true),
+        "discard itm-gone: {discarded}"
+    );
 
     let mut payload = json!({"item_id": "itm-gone"});
     attach(&*s.store, "bank-a", "itm-gone", &mut payload).expect("attach on a discarded item");
@@ -219,7 +223,10 @@ fn a_store_failure_is_an_error_and_never_a_false() {
     let mut payload = json!({"item_id": "itm-1"});
     let failed = attach(&FailingStore, "bank-a", "itm-1", &mut payload);
 
-    assert!(failed.is_err(), "a failed marker read must not answer false");
+    assert!(
+        failed.is_err(),
+        "a failed marker read must not answer false"
+    );
     assert!(payload.get(DISCARDED_KEY).is_none(), "{payload}");
     assert!(payload.get(ARCHIVED_KEY).is_none(), "{payload}");
 }
