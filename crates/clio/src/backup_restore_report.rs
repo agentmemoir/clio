@@ -152,7 +152,7 @@ fn result_text(report: &Report) -> String {
             // No failed step and no failure: the restore did its job, and the
             // line says which rebuildable table says otherwise.
             let mut text = format!("  result: {}", report.result);
-            if let Some(difference) = &report.failure {
+            if let Some(difference) = &report.derived_difference {
                 text.push_str("\n  ");
                 text.push_str(difference);
             }
@@ -289,6 +289,7 @@ pub(super) fn payload(report: &Report) -> Value {
         "result": report.result,
         "failed_step": report.failed_step,
         "failure": report.failure,
+        "derived_difference": report.derived_difference,
         "dry_run": report.dry_run,
         "directory_synced": report.directory_synced,
     });

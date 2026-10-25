@@ -3,10 +3,13 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the Postgres restore's count-mismatch
-//! message: which tables it names, and how it words a count of rows.
+//! This module is responsible for the Postgres restore's count comparison, over
+//! hand-built facts: which arm each difference lands on, how a count of rows is
+//! worded, and which result the observation produces.
 //!
 //! ## Owns
+//! - The direction rule's four arms: a deficit anywhere, a user-data surplus, a
+//!   derived surplus, and equal counts
 //! - The mismatch message's two arms: a table the target counted differently,
 //!   and a table the target never counted at all
 //! - The row count's noun, which goes through the one shared helper so a
@@ -19,12 +22,11 @@
 //!
 //! ## Boundary
 //!
-//! Test-only. Never compiled into production builds. These two tests are pure:
-//! they build a `DumpMeta` and a count list by hand and call the message
-//! builder, so unlike their siblings they take no Postgres test lock and need
-//! no database.
+//! Test-only. Never compiled into production builds. These tests are pure: they
+//! build a `DumpMeta` and a count list by hand and call the comparison, so
+//! unlike their siblings they take no Postgres test lock and need no database.
 
-use super::{count_mismatch_message, derived_difference_message, result_for};
+use super::comparison;
 use crate::backup_restore_flow::{
     RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT, RESULT_PARTIAL, RESULT_RESTORED,
 };
@@ -60,19 +62,21 @@ fn a_count_mismatch_names_a_table_the_target_never_counted() {
     // The target's measurement has no `items` row at all: the mismatch says
     // the table was not counted, not that it held zero rows.
     let observed_without_items = vec![("triples".to_owned(), 1u64)];
-    let message = count_mismatch_message(&meta, &observed_without_items).expect("a mismatch");
+    let message = comparison(&meta, &observed_without_items, None)
+        .1
+        .expect("a mismatch");
     assert!(message.contains("items"), "{message}");
     assert!(message.contains("not counted"), "{message}");
 
     let observed_matching = vec![("items".to_owned(), 3u64)];
-    assert_eq!(count_mismatch_message(&meta, &observed_matching), None);
+    assert_eq!(comparison(&meta, &observed_matching, None).1, None);
 }
 
 #[test]
 fn a_count_mismatch_of_one_row_names_the_row_in_the_singular() {
     // The counts phrase goes through the one shared helper, and a table that
     // differed by a single row is the case where the noun was wrong: "archive 1
-    // rows" is the same defect #54 was filed for, on a restore line.
+    // rows" is the same defect, on a restore line.
     let meta = DumpMeta {
         kind: DUMP_KIND.to_owned(),
         format_version: DUMP_FORMAT_VERSION,
@@ -98,7 +102,7 @@ fn a_count_mismatch_of_one_row_names_the_row_in_the_singular() {
     };
 
     let counted = vec![("items".to_owned(), 2u64)];
-    let counted_message = count_mismatch_message(&meta, &counted).expect("a mismatch");
+    let counted_message = comparison(&meta, &counted, None).1.expect("a mismatch");
 
     assert!(
         counted_message.contains("archive 1 row, restored 2"),
@@ -109,8 +113,9 @@ fn a_count_mismatch_of_one_row_names_the_row_in_the_singular() {
         "the plural must not come back: {counted_message}"
     );
 
-    let uncounted =
-        count_mismatch_message(&meta, &[("triples".to_owned(), 1u64)]).expect("a mismatch");
+    let uncounted = comparison(&meta, &[("triples".to_owned(), 1u64)], None)
+        .1
+        .expect("a mismatch");
     assert!(
         uncounted.contains("archive 1 row, restored: not counted"),
         "and the not-counted arm says the same: {uncounted}"
@@ -153,43 +158,93 @@ fn two_table_meta() -> DumpMeta {
     }
 }
 
-/// A difference confined to a derived table is not the count mismatch: the
-/// user-data message is silent, the derived message names the table and both
-/// counts, and the comparison produces the derived result rather than the
-/// mismatch result.
-#[test]
-fn a_derived_table_difference_is_not_a_count_mismatch() {
-    let meta = two_table_meta();
-    let observed = vec![
-        ("items".to_owned(), 3u64),
-        ("index_pending".to_owned(), 0u64),
-    ];
+/// A count list holding one observation per archived table.
+fn observed(items: u64, derived: u64) -> Vec<(String, u64)> {
+    vec![
+        ("items".to_owned(), items),
+        ("index_pending".to_owned(), derived),
+    ]
+}
 
-    assert_eq!(count_mismatch_message(&meta, &observed), None);
-    let derived = derived_difference_message(&meta, &observed).expect("a derived difference");
+/// Equal counts on both tables are the clean restore: no message from either
+/// arm and no failed step behind the result.
+#[test]
+fn equal_counts_are_the_clean_restore() {
+    let meta = two_table_meta();
+    let (result, mismatch, derived) = comparison(&meta, &observed(3, 2), None);
+    assert_eq!(result, RESULT_RESTORED);
+    assert_eq!(mismatch, None);
+    assert_eq!(derived, None);
+}
+
+/// A derived table the restore over-filled is the one benign difference: the
+/// user-data message is silent, the derived message names the table and both
+/// counts, and the result is the derived one rather than the mismatch.
+#[test]
+fn a_derived_surplus_is_the_benign_derived_difference() {
+    let meta = two_table_meta();
+    let (result, mismatch, derived) = comparison(&meta, &observed(3, 5), None);
+
+    assert_eq!(mismatch, None);
+    let derived = derived.expect("a derived difference");
     assert!(
         derived.contains("every user-data row was loaded"),
         "{derived}"
     );
     assert!(derived.contains("index_pending"), "{derived}");
-    assert!(derived.contains("archive 2 rows, restored 0"), "{derived}");
-    assert_eq!(
-        result_for(None, Some(&derived), None),
-        RESULT_DERIVED_DIFFERENT
-    );
+    assert!(derived.contains("archive 2 rows, restored 5"), "{derived}");
+    assert_eq!(result, RESULT_DERIVED_DIFFERENT);
 }
 
-/// A difference in a user-data table is still the count mismatch, worded
-/// exactly as before, and it still wins over a derived difference beside it.
+/// A derived table the restore under-filled is rows the archive held and the
+/// restore did not load: the hard count mismatch, for a rebuildable table as
+/// much as for a user-data one.
 #[test]
-fn a_user_data_difference_is_still_the_count_mismatch() {
+fn a_derived_deficit_is_a_hard_count_mismatch() {
     let meta = two_table_meta();
-    let observed = vec![
-        ("items".to_owned(), 2u64),
-        ("index_pending".to_owned(), 0u64),
-    ];
+    let (result, mismatch, derived) = comparison(&meta, &observed(3, 1), None);
 
-    let mismatch = count_mismatch_message(&meta, &observed).expect("a mismatch");
+    let mismatch = mismatch.expect("the deficit is a mismatch");
+    assert!(
+        mismatch.starts_with(
+            "the restored table counts do not match the archive's: table \"index_pending\""
+        ),
+        "{mismatch}"
+    );
+    assert!(
+        mismatch.contains("archive 2 rows, restored 1"),
+        "{mismatch}"
+    );
+    assert_eq!(derived, None, "a deficit is never the benign difference");
+    assert_eq!(result, RESULT_COUNT_MISMATCH);
+}
+
+/// A user-data table holding more rows than the archive recorded is invented
+/// data, not a rebuildable difference: the hard count mismatch both ways.
+#[test]
+fn a_user_data_surplus_is_a_hard_count_mismatch() {
+    let meta = two_table_meta();
+    let (result, mismatch, derived) = comparison(&meta, &observed(4, 2), None);
+
+    let mismatch = mismatch.expect("a surplus is a mismatch");
+    assert!(mismatch.contains("table \"items\""), "{mismatch}");
+    assert!(
+        mismatch.contains("archive 3 rows, restored 4"),
+        "{mismatch}"
+    );
+    assert_eq!(derived, None);
+    assert_eq!(result, RESULT_COUNT_MISMATCH);
+}
+
+/// A user-data table holding fewer rows than the archive recorded is lost data,
+/// worded exactly as it always was, and it wins over a derived surplus beside
+/// it: a benign difference never masks a lost row.
+#[test]
+fn a_user_data_deficit_is_a_hard_count_mismatch() {
+    let meta = two_table_meta();
+    let (result, mismatch, derived) = comparison(&meta, &observed(2, 5), None);
+
+    let mismatch = mismatch.expect("a deficit is a mismatch");
     assert!(
         mismatch
             .starts_with("the restored table counts do not match the archive's: table \"items\""),
@@ -203,10 +258,27 @@ fn a_user_data_difference_is_still_the_count_mismatch() {
         !mismatch.contains("index_pending"),
         "the derived table is not the user-data message: {mismatch}"
     );
+    assert!(derived.is_some(), "the derived surplus is still worded");
+    assert_eq!(result, RESULT_COUNT_MISMATCH);
+}
+
+/// The key store outranks a benign derived difference and not a lost row: the
+/// result is the partial restore only when no count is a hard mismatch.
+#[test]
+fn a_failed_key_store_is_partial_until_a_count_is_mismatched() {
+    let meta = two_table_meta();
     assert_eq!(
-        result_for(Some(&mismatch), Some("derived"), None),
-        RESULT_COUNT_MISMATCH
+        comparison(&meta, &observed(3, 2), Some("key")).0,
+        RESULT_PARTIAL
     );
-    assert_eq!(result_for(None, None, None), RESULT_RESTORED);
-    assert_eq!(result_for(None, None, Some("key")), RESULT_PARTIAL);
+    assert_eq!(
+        comparison(&meta, &observed(3, 5), Some("key")).0,
+        RESULT_PARTIAL,
+        "the derived surplus does not outrank the key store"
+    );
+    assert_eq!(
+        comparison(&meta, &observed(3, 1), Some("key")).0,
+        RESULT_COUNT_MISMATCH,
+        "the lost row does outrank the key store"
+    );
 }

@@ -130,7 +130,7 @@ fn restore_reports_its_own_rows_while_a_writer_waits_on_its_lock() {
     insert_probe_bank(target.url(), &schema);
     let report = restore.join().expect("the restore thread");
     assert_eq!(report.rows_loaded, archived, "the report holds the load");
-    assert!(report.counts_match, "counts must match: {report:?}");
+    assert!(report.counts_ok, "counts must match: {report:?}");
     assert_eq!(
         count_rows(target.url(), &schema, "banks"),
         archived_banks + 1,

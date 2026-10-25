@@ -141,6 +141,7 @@ fn the_json_payload_is_pinned_field_for_field() {
             "result": "restored",
             "failed_step": null,
             "failure": null,
+            "derived_difference": null,
             "dry_run": false,
             "directory_synced": true,
         }),

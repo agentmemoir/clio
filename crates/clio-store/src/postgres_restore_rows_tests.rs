@@ -204,7 +204,7 @@ fn rows_loaded_reports_the_observed_rows_not_the_declared_ones() {
         "the reported total is the observation, not the declaration: {report:?}"
     );
     assert!(
-        !report.counts_match,
+        !report.counts_ok,
         "the inflated declaration is a mismatch: {report:?}"
     );
     let items = report

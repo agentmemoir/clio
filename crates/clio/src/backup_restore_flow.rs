@@ -143,8 +143,7 @@ pub(crate) struct Plan {
     pub(crate) store_schema: Option<String>,
     pub(crate) pre_restore: PreRestore,
     /// Whether the operator asked for no pre-restore snapshot. Carried into
-    /// `place` because the skip decision is taken again there, after the
-    /// prompt, and it has to consult the same flag.
+    /// `place` because the skip decision is taken again there, after the prompt.
     pub(crate) no_pre_backup: bool,
     pub(crate) dry_run: bool,
     pub(crate) key: Option<KeyPlacement>,
@@ -171,17 +170,16 @@ pub(crate) struct Report {
     pub(crate) result: &'static str,
     pub(crate) failed_step: Option<String>,
     pub(crate) failure: Option<String>,
+    /// The derived tables the restore over-filled, worded for an operator: not a failure.
+    pub(crate) derived_difference: Option<String>,
     pub(crate) dry_run: bool,
-    /// Whether the archive carries a key store the restore places. `true` when
-    /// the plan has a key placement to make.
+    /// Whether the archive carries a key store the restore places.
     pub(crate) key_restored: bool,
     /// What the swap did to the key store: `None` when no key store was part of
-    /// the restore (including a dry run, which places nothing), `Some(true)`
-    /// when it was replaced, `Some(false)` when it was not.
+    /// the restore, `Some(true)` when it was replaced.
     pub(crate) key_replaced: Option<bool>,
     /// Whether the target's directory was fsynced after the rename; `None`
-    /// when nothing was renamed (a dry run, or a Postgres restore, which
-    /// renames no file).
+    /// when nothing was renamed.
     pub(crate) directory_synced: Option<bool>,
 }
 
@@ -292,6 +290,7 @@ pub(crate) fn planned(plan: Plan) -> Report {
         result: RESULT_PLANNED,
         failed_step: None,
         failure: None,
+        derived_difference: None,
         dry_run: true,
         key_restored: plan.key.is_some(),
         key_replaced: None,

@@ -237,6 +237,7 @@ fn not_durable_report() -> Report {
         result: RESULT_RESTORED,
         failed_step: None,
         failure: None,
+        derived_difference: None,
         dry_run: false,
         key_restored: false,
         key_replaced: None,
@@ -252,7 +253,7 @@ fn a_derived_table_difference_exits_75_without_a_failed_step() {
     let mut report = not_durable_report();
     report.directory_synced = Some(true);
     report.result = RESULT_DERIVED_DIFFERENT;
-    report.failure = Some(
+    report.derived_difference = Some(
         "every user-data row was loaded; a table the store rebuilds differs: \
          table \"index_pending\": archive 2 rows, restored 0"
             .to_owned(),
@@ -263,6 +264,19 @@ fn a_derived_table_difference_exits_75_without_a_failed_step() {
     let json = payload(&report);
     assert_eq!(json["ok"], json!(false), "{json}");
     assert_eq!(json["failed_step"], json!(null), "{json}");
+    assert_eq!(
+        json["failure"],
+        json!(null),
+        "no failure on this run: {json}"
+    );
+    assert_eq!(
+        json["derived_difference"],
+        json!(
+            "every user-data row was loaded; a table the store rebuilds \
+               differs: table \"index_pending\": archive 2 rows, restored 0"
+        ),
+        "{json}"
+    );
     assert_eq!(json["result"], json!(RESULT_DERIVED_DIFFERENT), "{json}");
     let text = render(&report);
     assert!(text.contains("result: derived-difference"), "{text}");

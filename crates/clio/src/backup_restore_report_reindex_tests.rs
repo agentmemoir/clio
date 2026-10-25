@@ -76,6 +76,7 @@ fn report(backend: &str, dry_run: bool) -> Report {
         result: RESULT_RESTORED,
         failed_step: None,
         failure: None,
+        derived_difference: None,
         dry_run,
         key_restored: false,
         key_replaced: None,

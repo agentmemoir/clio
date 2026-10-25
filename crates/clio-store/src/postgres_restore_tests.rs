@@ -240,7 +240,7 @@ fn assert_counts_match_archive(report: &PostgresRestoreReport, facts: &PostgresD
         .sum::<u64>();
     assert_eq!(report.rows_loaded, observed, "the total is measured");
     assert_eq!(report.rows_loaded, archived, "and it matches the archive");
-    assert!(report.counts_match, "counts must match: {report:?}");
+    assert!(report.counts_ok, "counts must match: {report:?}");
     for table in &facts.tables {
         let observed = report
             .table_counts
@@ -378,7 +378,7 @@ fn table_set_mismatches_refuse_before_truncating() {
 }
 
 /// Rows the target gains outside the archive show up as
-/// `counts_match == false`. The only statement the restore runs with triggers
+/// `counts_ok == false`. The only statement the restore runs with triggers
 /// still enabled is the `TRUNCATE`, so the poison is an `AFTER TRUNCATE`
 /// trigger on `items` that adds a `banks` row; an `AFTER INSERT` poison cannot
 /// fire because the load runs with every trigger disabled.
@@ -399,7 +399,7 @@ fn post_commit_count_mismatch_is_reported() {
         ))
         .expect("create the poison trigger");
     let report = run_restore(target.url(), &schema, restore_tables(&facts, &paths));
-    assert!(!report.counts_match, "poisoned counts: {report:?}");
+    assert!(!report.counts_ok, "poisoned counts: {report:?}");
     let archived = facts
         .tables
         .iter()

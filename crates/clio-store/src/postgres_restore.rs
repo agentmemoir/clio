@@ -85,15 +85,17 @@ pub struct PostgresRestoreReport {
     /// Rows the restore transaction was observed to hold, summed over every
     /// counted table — a measurement, never the archive's claim. A
     /// restore that loaded fewer rows than the archive records reports the
-    /// smaller figure, and `counts_match` then reports `false`.
+    /// smaller figure, and `counts_ok` then reports `false`.
     pub rows_loaded: u64,
     /// Every loaded table with its observed row count, read before the commit.
     pub table_counts: Vec<(String, u64)>,
     /// The distinct bank ids of the restored `items` table, sorted.
     pub banks: Vec<String>,
-    /// Whether every observed count equals the archive's recorded count.
-    /// `false` is a failed restore the caller must report as such.
-    pub counts_match: bool,
+    /// Whether the observation is clean under the direction rule: no table came
+    /// back with fewer rows than the archive holds, and no table the caller's
+    /// data lives in came back with more. A surplus in a table the store
+    /// rebuilds is the one difference a rebuild absorbs and leaves this `true`.
+    pub counts_ok: bool,
 }
 
 /// Restore one dump into its target, all-or-nothing.
@@ -316,10 +318,20 @@ fn restore_report(
     table_counts: Vec<(String, u64)>,
     banks: Vec<String>,
 ) -> PostgresRestoreReport {
-    let counts_match = request.tables.iter().all(|table| {
-        table_counts
+    let counts_ok = request.tables.iter().all(|table| {
+        let observed = table_counts
             .iter()
-            .any(|(name, count)| name == &table.table && count == &table.rows)
+            .find(|(name, _)| name == &table.table)
+            .map(|(_, count)| *count);
+        match observed {
+            Some(count) if count == table.rows => true,
+            // Over the archive's count only a table the store rebuilds is
+            // benign work; every other difference is a row lost or invented.
+            Some(count) if count > table.rows => {
+                crate::table_data_class(&table.table) == crate::TableDataClass::Derived
+            }
+            _ => false,
+        }
     });
     let rows_loaded = table_counts.iter().map(|(_, count)| count).sum();
     PostgresRestoreReport {
@@ -327,7 +339,7 @@ fn restore_report(
         rows_loaded,
         table_counts,
         banks,
-        counts_match,
+        counts_ok,
     }
 }
 

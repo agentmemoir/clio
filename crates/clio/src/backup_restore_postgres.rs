@@ -27,9 +27,7 @@
 //!
 //! Keep this module focused on the Postgres restore halves.
 
-use crate::backup_restore_counts::{
-    count_mismatch_message, derived_difference_message, result_for,
-};
+use crate::backup_restore_counts::comparison;
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
     Counts, FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, Plan, Report, RestorePlanInput,
@@ -277,13 +275,8 @@ pub(crate) fn place_postgres(
     let key_replaced = key_swap.as_ref().map(|report| report.replaced);
     let key_failure = key_swap.as_ref().and_then(|report| report.failure.clone());
     let counts_after = Counts::of_rows(&restored.table_counts, &restored.banks);
-    let mismatch = count_mismatch_message(meta, &restored.table_counts);
-    let derived = derived_difference_message(meta, &restored.table_counts);
-    let result = result_for(
-        mismatch.as_deref(),
-        derived.as_deref(),
-        key_failure.as_deref(),
-    );
+    let (result, mismatch, derived_difference) =
+        comparison(meta, &restored.table_counts, key_failure.as_deref());
     // The load and the key swap are the effects the guard authorizes. The store
     // is already reloaded, so a failed outcome write leaves a pending action for
     // reconciliation and is surfaced on the report, never returned: the report
@@ -298,7 +291,9 @@ pub(crate) fn place_postgres(
         (None, Some(_)) => Some(FAILED_STEP_KEY_SWAP.to_owned()),
         (None, None) => None,
     };
-    let failure = match (mismatch.or(derived), key_failure) {
+    // A derived difference is not a failure: no step failed and nothing was
+    // lost, so it travels in its own field and never through `failure`.
+    let failure = match (mismatch, key_failure) {
         (Some(counts), Some(key)) => Some(format!("{counts}; the key store: {key}")),
         (Some(counts), None) => Some(counts),
         (None, Some(key)) => Some(key),
@@ -319,6 +314,7 @@ pub(crate) fn place_postgres(
         result,
         failed_step,
         failure,
+        derived_difference,
         dry_run: false,
         key_restored,
         key_replaced,
