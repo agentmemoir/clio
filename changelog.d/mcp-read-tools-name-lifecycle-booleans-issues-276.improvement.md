@@ -1,0 +1,1 @@
+The MCP `get_snapshot` and `get_gist` tool descriptions now name the `discarded` and `archived` booleans that those payloads carry, so a client that reads the tool list learns the lifecycle markers without calling `get` first.

@@ -84,6 +84,30 @@ class SelectionTests(unittest.TestCase):
         absorbed = quick.merge([Term("p", modules=("a",)), Term("p", reason="why"), Term("p", binary="t")])
         self.assertEqual(absorbed, [Term("p", reason="why")])
 
+    def test_a_clio_mcp_change_selects_the_golden_help_test_it_reaches(self) -> None:
+        packages = [
+            {
+                "name": "clio",
+                "dir": "crates/clio",
+                "deps": set(),
+                "targets": ["clio"],
+                "tests": ["golden_repeatability_test"],
+            },
+            {"name": "clio-mcp", "dir": "crates/clio-mcp", "deps": set(), "targets": [], "tests": []},
+        ]
+        rel = "crates/clio-mcp/src/schema_read_defs.rs"
+        lookup = fake_lookup({rel: owned.OwnedSelection(rel, None, ["schema_read_defs::schema_read_defs_tests"])})
+        found = quick.select([rel], packages, lookup)
+        self.assertIn(Term("clio", binary="golden_repeatability_test"), found.terms)
+        self.assertEqual(sorted({term.package for term in found.terms}), ["clio", "clio-mcp"])
+        self.assertIn("golden_repeatability_test", quick.target_flags(found.terms, packages))
+        self.assertIn(f"{rel} -> clio: test target golden_repeatability_test", " ".join(found.notes))
+        other = "crates/clio-mcp/tests/integration.rs"
+        untouched = quick.select(
+            [other], packages, fake_lookup({other: owned.OwnedSelection(other, "integration", [""])})
+        )
+        self.assertEqual(sorted({term.package for term in untouched.terms}), ["clio-mcp"])
+
     def test_a_file_no_package_owns_fails_closed(self) -> None:
         packages = [{"name": "c", "dir": "crates/c", "deps": set(), "targets": []}]
         with self.assertRaises(runner.RunError):
