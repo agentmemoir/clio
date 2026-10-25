@@ -13,5 +13,6 @@ example.com
 github.com
 h
 host
+huggingface.co
 localhost
 x

@@ -43,16 +43,21 @@ pub(crate) const SQL_VECTORS: &str = include_str!("../../../sql/002_vectors_post
 pub(crate) const SQL_SLOTS: &str = include_str!("../../../sql/003_local_compliance_slots.sql");
 
 /// Guidance materialized into `models/`. The GGUF itself is large and MUST
-/// NOT be embedded; the operator places it here (known limits).
+/// NOT be embedded. `clio setup` fetches it when a local extract service is
+/// selected and the file is missing; the compose path needs it already present.
 pub(crate) const MODELS_README: &str = "\
 # models/ — extract service model directory
 
-The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its GGUF model file in this directory. The file is intentionally NOT shipped with `clio compose up` (it is large); place it here before selecting `extract`:
+The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its GGUF model file in this directory. The file is large and is not shipped with the compose material.
+
+`clio setup` fetches it: when extraction is local and the file is missing, setup downloads the model from the Hugging Face Hub before it writes the config, so setup needs no manual step.
+
+`clio compose up` and `make compose up` with the `local-rft` profile do not download it. Both refuse to start the extract service while the file is absent, and print the command that fetches it:
 
     hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \\
       numind.NuExtract-tiny-v1.5.Q4_K_M.gguf --local-dir ./models
 
-The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf` (configurable via CLIO_EXTRACT_GGUF in .env). `clio compose up` and `make compose up` with the `local-rft` profile both refuse to start the extract service while the file is absent.
+The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf` (configurable via CLIO_EXTRACT_GGUF in .env).
 ";
 
 struct Asset {
