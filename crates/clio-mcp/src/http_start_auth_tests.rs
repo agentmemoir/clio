@@ -10,10 +10,11 @@
 //!
 //! ## Owns
 //! - The loopback refusal message and its pinned substrings
+//! - The non-loopback refusal message and the empty-store case
 //! - `insecure_no_auth` restoring the unauthenticated loopback server
 //!
 //! ## Does not own
-//! - The non-loopback refusal (`http_tests`)
+//! - The admission truth table itself (`http_start_guard_tests`)
 //! - The credential-edge rules themselves (`http_auth_tests`)
 //! - The shared socket harness (`http_test_support_tests`)
 //!
@@ -98,5 +99,59 @@ fn insecure_no_auth_with_a_credential_store_still_requires_the_credential() {
         post_json(port, INIT, &auth).status,
         200,
         "the store's own credential is accepted"
+    );
+}
+
+#[test]
+fn non_loopback_without_a_usable_store_fails_closed() {
+    let state = crate::runtime::McpState::open_with_effective(
+        &crate::runtime::McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
+    let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
+    let err = serve_with_listener(state, HttpConfig::default(), listener);
+    let message = err
+        .expect_err("non-loopback bind without a credential must fail closed")
+        .to_string();
+
+    // The opening phrase is the substring an operator's runbook and a search
+    // hold, and it is pinned separately; the removed flag and environment
+    // sources must not come back into the wording.
+    assert!(
+        message.contains("non-loopback bind requires an auth token"),
+        "the pinned phrase must survive: {message}"
+    );
+    assert!(
+        message.contains("--token-file"),
+        "the refusal must name the token store: {message}"
+    );
+    for removed in ["--auth-token", "CLIO_MCP_TOKEN"] {
+        assert!(
+            !message.contains(removed),
+            "the removed source {removed} must leave the wording: {message}"
+        );
+    }
+}
+
+/// A store path holding no usable record authorizes nothing, so it must not
+/// satisfy the non-loopback credential startup rule: the server fails closed
+/// exactly as it would with no store at all.
+#[test]
+fn non_loopback_with_an_empty_store_fails_closed() {
+    let state = crate::runtime::McpState::open_with_effective(
+        &crate::runtime::McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
+    let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
+    let cfg = HttpConfig {
+        credentials: Some(Arc::new(CredentialStore::default())),
+        ..HttpConfig::default()
+    };
+    let err = serve_with_listener(state, cfg, listener);
+    assert!(
+        err.is_err(),
+        "an empty store must not satisfy a non-loopback bind"
     );
 }

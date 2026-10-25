@@ -48,6 +48,10 @@ const INSECURE_NO_AUTH: Flag = Flag::toggle(
     "insecure-no-auth",
     "Serves `mcp_cli` http without a credential.",
 );
+const INSECURE_BIND_ANY: Flag = Flag::toggle(
+    "insecure-bind-any",
+    "Lets `--insecure-no-auth` bind a non-loopback address.",
+);
 
 /// The flags `mcp schema-export` documents; `--path` is the accepted alias
 /// its handler resolves in place of `--out`.
@@ -134,6 +138,7 @@ pub(crate) const MCP_HTTP: CommandSpec = CommandSpec {
         TOKEN_FILE,
         SESSIONS,
         INSECURE_NO_AUTH,
+        INSECURE_BIND_ANY,
     ],
     accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
     flag_aliases: &[],
