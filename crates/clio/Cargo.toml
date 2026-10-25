@@ -49,6 +49,10 @@ rpassword = { workspace = true }
 # expose. Already in the workspace through `clio-store`; promoted here because
 # the check runs in the binary.
 rusqlite = { workspace = true }
+# `clio setup` downloads the extract model itself rather than printing a command,
+# so the binary streams one HTTPS response to disk. Already in the workspace
+# through `clio-index`; promoted here for that download.
+ureq = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # The one signal the process sets itself: restoring the default `SIGPIPE`

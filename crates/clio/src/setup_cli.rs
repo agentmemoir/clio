@@ -42,6 +42,7 @@ use crate::cli_style::Palette;
 use crate::compose_docker::{DockerRunner, RealDocker};
 use crate::setup_cli_flows::Ctx;
 use crate::setup_defaults::Defaults;
+use crate::setup_extract_model::{ModelFetcher, RealFetcher};
 use crate::setup_flags::{parse_setup_args, print_help};
 use crate::setup_review::Verdict;
 use crate::setup_test_seam::Probes;
@@ -101,6 +102,7 @@ pub(crate) fn setup(args: impl IntoIterator<Item = String>) -> ExitCode {
         is_tty,
         &real_env,
         &RealDocker,
+        &RealFetcher,
         &probes,
     )
 }
@@ -135,6 +137,7 @@ pub(crate) fn setup_core<R: BufRead, W: Write, E: Write>(
     is_tty: bool,
     env: &dyn Fn(&str) -> Option<String>,
     runner: &dyn DockerRunner,
+    fetcher: &dyn ModelFetcher,
     probes: &Probes,
 ) -> ExitCode {
     let raw: Vec<String> = args.into_iter().collect();
@@ -146,7 +149,9 @@ pub(crate) fn setup_core<R: BufRead, W: Write, E: Write>(
         Ok(flags) => flags,
         Err(message) => return fail(err, &CliError::usage(message)),
     };
-    match run(&flags, reader, out, err, is_tty, env, runner, probes) {
+    match run(
+        &flags, reader, out, err, is_tty, env, runner, fetcher, probes,
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => fail(err, &e),
     }
@@ -181,6 +186,7 @@ fn run<R: BufRead, W: Write, E: Write>(
     is_tty: bool,
     env: &dyn Fn(&str) -> Option<String>,
     runner: &dyn DockerRunner,
+    fetcher: &dyn ModelFetcher,
     probes: &Probes,
 ) -> Result<(), CliError> {
     let interactive = interactive_mode(flags, is_tty)?;
@@ -242,6 +248,12 @@ fn run<R: BufRead, W: Write, E: Write>(
     if verdict == Verdict::Quit {
         return Ok(());
     }
+    // The extract model is put on the host before anything is written: a refused
+    // download then leaves no config naming a stack whose model is absent, and no
+    // `Applied` line for a run that did not apply.
+    let writer = ctx.writer();
+    crate::setup_extract_model::ensure_present(writer, &answers, runner, compose_dir, fetcher)
+        .map_err(CliError::failed)?;
     // Every remaining line goes through `ctx`, because `ctx` holds the only
     // mutable borrow of the output stream. The write happens first, so the
     // summary and the checks are all reporting on a config that is already there.
