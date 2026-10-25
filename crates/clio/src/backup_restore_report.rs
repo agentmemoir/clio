@@ -38,6 +38,19 @@ use std::path::PathBuf;
 const NOT_DURABLE: &str = "the target's directory could not be fsynced, so the rename is not \
                            durable against a crash right now";
 
+/// The command that rebuilds the one derived index a Postgres restore emptied.
+/// The restore truncates the vector table with the rest of the schema and loads
+/// no rows back into it, so its rows have to be derived again from the content
+/// the restore placed; the dense leg is the one that writes them.
+const REINDEX_COMMAND: &str = "clio ops reindex --target dense --confirm --backend postgres";
+
+/// Where that command must be pointed. It is never printed with the store
+/// address: on this backend `--db` is a URL that can carry a password, so the
+/// line names the database the operator already restored instead of repeating
+/// an address a report must not hold.
+const REINDEX_NOTICE: &str =
+    "point it at the restored database: pass the same `--db` this restore used";
+
 /// The blast radius, before the operator is asked to confirm.
 pub(super) fn render_plan(plan: &Plan) -> String {
     let mut lines = vec![format!(
@@ -98,6 +111,10 @@ pub(super) fn render(report: &Report) -> String {
     }
     lines.push("  the store is replaced, not merged".to_owned());
     lines.push(key_store_text(report));
+    if let Some(command) = reindex_command(report) {
+        lines.push(format!("  rebuild the derived index: {command}"));
+        lines.push(format!("  {REINDEX_NOTICE}"));
+    }
     if report.dry_run {
         lines.push(format!(
             "  would replace: {}",
@@ -144,6 +161,13 @@ fn result_text(report: &Report) -> String {
         RESULT_PLANNED => "  result: planned (dry run; nothing was changed)".to_owned(),
         other => format!("  result: {other}"),
     }
+}
+
+/// The rebuild command, when the run emptied the derived vector table: only a
+/// placed Postgres restore truncates it. A dry run places nothing, and a SQLite
+/// restore keeps its index inside the store file it just replaced.
+fn reindex_command(report: &Report) -> Option<&'static str> {
+    (!report.dry_run && report.target.is_postgres()).then_some(REINDEX_COMMAND)
 }
 
 /// The schema comparison, in one line.
@@ -274,6 +298,12 @@ pub(super) fn payload(report: &Report) -> Value {
     if !is_durable(report) {
         payload["durability_warning"] = Value::String(NOT_DURABLE.to_owned());
     }
+    // The distinct field for the rebuild a Postgres restore leaves behind:
+    // present only when the run emptied the derived vector table, so a script
+    // can tell the run that needs one from every other.
+    if let Some(command) = reindex_command(report) {
+        payload["reindex_command"] = Value::String(command.to_owned());
+    }
     payload
 }
 
@@ -326,3 +356,8 @@ fn counts_json(counts: &Counts) -> Value {
         "banks": counts.banks,
     })
 }
+
+/// The rebuild line and field a placed Postgres restore carries.
+#[cfg(test)]
+#[path = "backup_restore_report_reindex_tests.rs"]
+mod reindex_tests;
