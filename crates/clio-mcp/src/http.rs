@@ -11,9 +11,9 @@
 //! - Minimal HTTP/1.1 request parsing and response writing for `/mcp`
 //! - The accept loop, connection cap, and per-request dispatch through the
 //!   bound protocol entry point
-//! - The credential source this server accepts (the operator's token store) and
+//! - The credential source this server accepts (the operator's token store);
 //!   the startup rule that requires one on every bind unless the operator
-//!   explicitly opted out
+//!   explicitly opted out lives in `http_start_guard`
 //! - The transport resource bounds (values defined below):
 //!   - 64 KiB head cap (`MAX_HEAD_BYTES`) and 10 MiB body cap (`MAX_BODY`),
 //!     capped separately because a client controls the header block and the
@@ -47,6 +47,7 @@ use crate::conn_pool::{ConnPool, MAX_CONNECTIONS};
 use crate::http_auth::{AuthOutcome, CredentialStore, authorize_request};
 use crate::http_guard::{HttpShared, check_origin, handle_delete, mint_session};
 use crate::http_read::{HttpRequest, read_request};
+use crate::http_start_guard::{BindRefusal, bind_refusal};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use serde_json::Value;
@@ -103,6 +104,8 @@ pub struct HttpConfig {
     /// set. It is the explicit operator opt-out behind `--insecure-no-auth`; a
     /// loopback bind with no `--token-file` is otherwise refused at start.
     pub insecure_no_auth: bool,
+    /// Also allow a non-loopback bind under `insecure_no_auth`; off by default.
+    pub insecure_bind_any: bool,
     /// Extra allowed Origin hosts (localhost is always allowed).
     pub allowed_origins: Vec<String>,
     /// Total request deadline override in seconds, bounding the *read* of one
@@ -121,6 +124,7 @@ impl Default for HttpConfig {
             credentials: None,
             sessions_enabled: false,
             insecure_no_auth: false,
+            insecure_bind_any: false,
             allowed_origins: vec![],
             deadline_secs: None,
         }
@@ -130,8 +134,8 @@ impl Default for HttpConfig {
 /// Serve MCP over Streamable HTTP until the listener fails.
 ///
 /// # Errors
-/// Listener setup failures; a bind without a credential fails closed unless
-/// `insecure_no_auth` is set.
+/// Listener setup failures; a bind without a credential fails closed unless the
+/// operator opted out (both opt-outs outside loopback).
 pub fn serve(state: Arc<McpState>, cfg: HttpConfig) -> std::io::Result<()> {
     let listener = TcpListener::bind(&cfg.bind)?;
     serve_with_listener(state, cfg, listener)
@@ -148,19 +152,21 @@ pub fn serve_with_listener(
     listener: TcpListener,
 ) -> std::io::Result<()> {
     let loopback = listener.local_addr().is_ok_and(|a| a.ip().is_loopback());
-    if !cfg.insecure_no_auth && !has_credential_source(&cfg) {
-        // Auth is required on every bind, and a store holding no record
-        // authorizes nothing, so it is not a source. Each refusal names the one
-        // way an operator satisfies the rule, so it reads the same as the CLI's
-        // own refusal. The opening phrases are the pinned substrings an
-        // operator's runbook and a search hold.
-        let message = if loopback {
-            "mcp http: loopback bind requires an auth token: point --token-file at a store \
-             holding at least one record, or pass --insecure-no-auth to serve without \
-             authentication"
-        } else {
-            "mcp http: non-loopback bind requires an auth token: point --token-file \
-             at a store holding at least one record"
+    if let Some(refusal) = bind_refusal(&cfg, loopback) {
+        // A store with no record authorizes nothing, so it is not a source. Each
+        // refusal names the one way an operator satisfies the rule, and the
+        // opening phrases are pinned substrings a runbook and a search hold.
+        let message = match refusal {
+            BindRefusal::Loopback => {
+                "mcp http: loopback bind requires an auth token: point --token-file at a store \
+                 holding at least one record, or pass --insecure-no-auth to serve without \
+                 authentication"
+            }
+            BindRefusal::NonLoopback => {
+                "mcp http: non-loopback bind requires an auth token: point --token-file at a \
+                 store holding at least one record, or pass --insecure-no-auth with \
+                 --insecure-bind-any to serve without authentication"
+            }
         };
         return Err(std::io::Error::other(message));
     }
@@ -430,6 +436,9 @@ mod http_request_bounds_tests;
 #[cfg(test)]
 #[path = "http_start_auth_tests.rs"]
 mod http_start_auth_tests;
+#[cfg(test)]
+#[path = "http_start_guard_tests.rs"]
+mod http_start_guard_tests;
 #[cfg(test)]
 #[path = "http_test_support_tests.rs"]
 mod http_test_support_tests;
