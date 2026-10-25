@@ -11,7 +11,10 @@
 //! - The `config get|set|profiles|use` verbs and their text views
 //! - Decoding the `VALUE` positional into the tool's JSON value
 //! - Refusing the session scope, which a one-command process cannot observe
-//! - Flushing a profile activation or profile-scoped set to the CLI state file
+//! - Refusing a profile-scoped secret, which the unsealed CLI state file cannot
+//!   hold, before the value is applied
+//! - Flushing a profile activation or profile-scoped set to the CLI state file,
+//!   and refusing a deployment set that has no file to go in
 //!
 //! ## Does not own
 //! - Config merge order, validation, masking, or persistence (`clio-config`)
@@ -32,6 +35,7 @@ use crate::cli_output;
 use crate::cli_read::CliIo;
 use crate::runtime_cli::{RuntimeGroup, no_positionals, pretty_without_ok};
 use clio::Runtime;
+use clio::secret::path_is_secret;
 use serde_json::{Map, Value, json};
 use std::process::ExitCode;
 
@@ -66,27 +70,52 @@ impl RuntimeGroup for ConfigGroup {
         }
     }
 
-    /// `config use` and a profile-scoped `config set` are the two writes a later
-    /// command can observe, so the CLI saves them. A run that cannot save must
-    /// not report the change as a success.
+    /// A deployment-scoped set needs a file to go in, and the two writes a later
+    /// command can observe are saved. A run that cannot save must not report the
+    /// change as a success.
     fn commit(&self, verb: &str, payload: &Value, runtime: &mut Runtime) -> Result<(), CliError> {
+        let scope = payload.get("scope").and_then(Value::as_str);
+        if verb == "config set" && scope == Some(SCOPE_DEPLOYMENT) {
+            if !runtime.has_deployment_path() {
+                return Err(CliError::operational(
+                    "no_config_dir",
+                    "the deployment-scoped value was not saved: no deployment config file \
+                     resolves, so this command has nowhere to write it; set HOME or \
+                     XDG_CONFIG_HOME, or name the file with CLIO_DEPLOYMENT_CONFIG",
+                ));
+            }
+            return Ok(());
+        }
         let durable = match verb {
             VERB_USE => true,
-            "config set" => payload.get("scope").and_then(Value::as_str) == Some(SCOPE_PROFILE),
+            "config set" => scope == Some(SCOPE_PROFILE),
             _ => false,
         };
         if !durable {
             return Ok(());
         }
-        match runtime.flush_cli_state() {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(CliError::operational(
+        let flushed = runtime
+            .flush_cli_state()
+            .map_err(|error| CliError::from_am_error(&error))?;
+        if !flushed.written() {
+            return Err(CliError::operational(
                 "no_config_dir",
                 "the config change applied to this process but was not saved: no clio config \
                  directory resolves, so later commands read the previous profile and values",
-            )),
-            Err(error) => Err(CliError::from_am_error(&error)),
+            ));
         }
+        if !flushed.dropped().is_empty() {
+            return Err(CliError::operational(
+                "invalid_argument",
+                format!(
+                    "the config change applied to this process, but {} cannot be saved in the \
+                     unsealed CLI state file and a later command will not read it; use \
+                     `--scope deployment` to persist it, because deployment.json seals values",
+                    flushed.dropped().join(", ")
+                ),
+            ));
+        }
+        Ok(())
     }
 
     fn render(&self, verb: &str, payload: &Value) -> String {
@@ -138,6 +167,8 @@ fn get_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
 const VERB_USE: &str = "config use";
 /// The profile scope: the one `config set` scope this process can save.
 pub(crate) const SCOPE_PROFILE: &str = "profile";
+/// The deployment scope: saved in the deployment file, which seals its values.
+pub(crate) const SCOPE_DEPLOYMENT: &str = "deployment";
 /// The session scope: in-memory only, so the CLI refuses it.
 pub(crate) const SCOPE_SESSION: &str = "session";
 
@@ -149,7 +180,9 @@ pub(crate) const SCOPE_SESSION: &str = "session";
 ///
 /// A session-scoped write is never sent: it would live in this process only,
 /// which a one-command process ends immediately, so reporting it as applied
-/// would be a promise nothing can keep.
+/// would be a promise nothing can keep. A secret at profile scope is refused for
+/// the same reason: the CLI state file it would go in seals nothing, so the
+/// value would have to be dropped.
 fn set_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let [path, value] = parsed.positionals() else {
         return Err(CliError::usage_hint(
@@ -164,6 +197,17 @@ fn set_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
             "a session-scoped value applies to the running process only, is discarded when this \
              command ends, and cannot be read by a later command; use `--scope deployment` to \
              persist the value in deployment.json, or `--scope profile` for the active profile",
+        ));
+    }
+    if scope == SCOPE_PROFILE && path_is_secret(path) {
+        return Err(CliError::operational(
+            "invalid_argument",
+            format!(
+                "`{path}` carries a secret, which cannot be saved in the unsealed CLI state file \
+                 at the profile scope: that file is written in the clear, so the value would be \
+                 dropped and a later command would not read it; use `--scope deployment`, which \
+                 persists it in deployment.json with the value sealed"
+            ),
         ));
     }
     let mut args = Map::new();

@@ -16,6 +16,8 @@
 //! - The boot order they are restored in: profile, then its overlay, then the
 //!   ranking, so an explicit ranking set wins over the profile's own ranking
 //! - Writing the current three-part state owner-only and atomically
+//! - Reporting which overlay keys a write had to leave out, because the file
+//!   seals nothing and a secret cannot be written there
 //!
 //! ## Does not own
 //! - The ranking schema itself (see `crate::ranking`)
@@ -82,6 +84,29 @@ pub(crate) struct CliState {
     pub(crate) ranking: Option<RankingEnv>,
 }
 
+/// What one CLI state write saved: whether a file was written, and the overlay
+/// keys the unsealed file could not hold.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CliStateFlush {
+    written: bool,
+    dropped: Vec<String>,
+}
+
+impl CliStateFlush {
+    /// Whether a state file was written at all.
+    #[must_use]
+    pub fn written(&self) -> bool {
+        self.written
+    }
+
+    /// The overlay keys left out of the file, so a caller cannot report the
+    /// whole change as saved.
+    #[must_use]
+    pub fn dropped(&self) -> &[String] {
+        &self.dropped
+    }
+}
+
 impl Runtime {
     /// Boot with an injected environment lookup and an explicit CLI state file,
     /// and no deployment overlay.
@@ -131,34 +156,48 @@ impl Runtime {
     /// Write the active profile, the profile overlay, and the ranking
     /// environment to the resolved CLI state file, atomically and owner-only.
     ///
-    /// Returns whether a file was written: `Ok(false)` means no path resolved,
-    /// so nothing could be saved and the caller must not claim it was.
+    /// A file that cannot be written reports itself: an unwritten file has
+    /// [`CliStateFlush::written`] false, and every overlay key the unsealed file
+    /// cannot hold is listed in [`CliStateFlush::dropped`] and logged, so no
+    /// caller can report the whole change as saved.
     ///
     /// # Errors
     /// I/O failures creating parent directories or writing the file.
-    pub fn flush_cli_state(&self) -> Result<bool, AmError> {
+    pub fn flush_cli_state(&self) -> Result<CliStateFlush, AmError> {
         let Some(path) = self.cli_state_path.clone() else {
-            return Ok(false);
+            return Ok(CliStateFlush::default());
         };
-        save_state(&path, &self.cli_state())?;
-        Ok(true)
+        let (state, dropped) = self.saved_state();
+        for key in &dropped {
+            crate::log::warn("cli state value not saved", &[("key", key)]);
+        }
+        save_state(&path, &state)?;
+        Ok(CliStateFlush {
+            written: true,
+            dropped,
+        })
     }
 
-    /// The three-part state this runtime would flush.
-    fn cli_state(&self) -> CliState {
-        // A secret cannot be sealed here, so it stays in the profile overlay of
-        // the running process and out of the file rather than in the clear.
-        let profile_overlay = self
-            .profile_overlay
-            .iter()
-            .filter(|(key, _)| !path_is_secret(key))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        CliState {
+    /// The state a flush writes, plus the overlay keys it had to leave out.
+    fn saved_state(&self) -> (CliState, Vec<String>) {
+        let mut dropped = Vec::new();
+        let mut profile_overlay = Overlay::new();
+        for (key, value) in &self.profile_overlay {
+            // A secret cannot be sealed here, so it stays in the profile overlay
+            // of the running process and out of the file rather than in the
+            // clear. The caller is told, so it cannot report a full save.
+            if path_is_secret(key) {
+                dropped.push(key.clone());
+            } else {
+                profile_overlay.insert(key.clone(), value.clone());
+            }
+        }
+        let state = CliState {
             active_profile: self.active_profile.clone(),
             profile_overlay,
             ranking: Some(self.ranking.clone()),
-        }
+        };
+        (state, dropped)
     }
 }
 

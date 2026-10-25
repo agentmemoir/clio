@@ -73,15 +73,17 @@ impl RuntimeGroup for RankingGroup {
         if verb == "ranking get" || dry_run {
             return Ok(());
         }
-        match runtime.flush_cli_state() {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(CliError::operational(
-                "no_config_dir",
-                "the ranking change applied to this process but was not saved: no clio config \
-                 directory resolves, so later commands read the previous environment",
-            )),
-            Err(error) => Err(CliError::from_am_error(&error)),
+        let flushed = runtime
+            .flush_cli_state()
+            .map_err(|error| CliError::from_am_error(&error))?;
+        if flushed.written() {
+            return Ok(());
         }
+        Err(CliError::operational(
+            "no_config_dir",
+            "the ranking change applied to this process but was not saved: no clio config \
+             directory resolves, so later commands read the previous environment",
+        ))
     }
 
     fn render(&self, verb: &str, payload: &Value) -> String {

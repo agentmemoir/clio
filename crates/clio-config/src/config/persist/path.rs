@@ -10,6 +10,8 @@
 //! - The `CLIO_DEPLOYMENT_CONFIG` override and its empty-value disable rule
 //! - The XDG default directory (`$XDG_CONFIG_HOME`, fallback `$HOME/.config`)
 //! - The default deployment overlay file name
+//! - Whether a runtime resolved a deployment path at all, which a caller needs
+//!   before promising a deployment-scoped value will be saved
 //!
 //! ## Does not own
 //! - Reading or writing the overlay file (see `load`, `save`)
@@ -22,7 +24,19 @@
 //!
 //! Keep this module focused on resolving deployment and config paths.
 
+use crate::config::Runtime;
 use std::path::{Path, PathBuf};
+
+impl Runtime {
+    /// Whether a durable deployment overlay path resolved for this runtime.
+    ///
+    /// The path itself stays private: a caller only needs to know whether a
+    /// deployment-scoped value has somewhere to go.
+    #[must_use]
+    pub fn has_deployment_path(&self) -> bool {
+        self.deployment_path.is_some()
+    }
+}
 
 /// Env var naming the durable deployment overlay file.
 pub const DEPLOYMENT_CONFIG_ENV: &str = "CLIO_DEPLOYMENT_CONFIG";

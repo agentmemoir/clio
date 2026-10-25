@@ -32,7 +32,7 @@ const SECRET: &str = "sk-abcdef0123456789";
 
 #[test]
 fn config_get_masks_a_planted_secret_in_path_and_full_views() {
-    let mut rt = runtime();
+    let (mut rt, _dir) = runtime_with_deployment_file();
     let (code, _, err) = run(
         &[
             "set",
@@ -125,7 +125,7 @@ fn config_set_profile_scope_requires_an_active_profile() {
 
 #[test]
 fn config_set_scope_deployment_updates_the_effective_value() {
-    let mut rt = runtime();
+    let (mut rt, _dir) = runtime_with_deployment_file();
     let (code, _, err) = run(
         &["set", "backend", "postgres", "--scope", "deployment"],
         &mut rt,
@@ -135,6 +135,53 @@ fn config_set_scope_deployment_updates_the_effective_value() {
     let (code, out, err) = run(&["get", "backend"], &mut rt, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert_eq!(json_of(&out)["value"], json!("postgres"), "{out}");
+}
+
+#[test]
+fn config_set_scope_deployment_without_a_resolved_path_exits_one() {
+    let mut rt = runtime();
+    let (code, out, err) = run(
+        &["set", "log.level", "debug", "--scope", "deployment"],
+        &mut rt,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(err.contains("no_config_dir"), "{err}");
+    assert!(err.contains("not saved"), "{err}");
+    assert!(
+        !out.contains("debug"),
+        "a refused set reports no applied value"
+    );
+}
+
+#[test]
+fn config_set_profile_scope_refuses_a_secret_before_applying_or_writing() {
+    let (mut rt, path, _dir) = runtime_with_state_file();
+    let (code, _, err) = run(&["use", "coding_local"], &mut rt, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let before = std::fs::read(&path).expect("the profile activation wrote the state file");
+
+    let (code, out, err) = run(
+        &["set", "credentials.api_key", SECRET, "--scope", "profile"],
+        &mut rt,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(err.contains("invalid_argument"), "{err}");
+    assert!(err.contains("secret"), "{err}");
+    assert!(err.contains("unsealed CLI state file"), "{err}");
+    assert!(err.contains("--scope deployment"), "{err}");
+    assert_eq!(
+        std::fs::read(&path).expect("state file"),
+        before,
+        "a refused set writes nothing"
+    );
+
+    let (_, got, err) = run(&["get", "credentials.api_key"], &mut rt, false);
+    assert!(
+        !got.contains(SECRET),
+        "a refused set applies nothing: {got}{err}"
+    );
 }
 
 #[test]
@@ -293,6 +340,20 @@ fn runtime_with_state_file() -> (Runtime, std::path::PathBuf, ScratchDir) {
     let path = dir.join("cli-state.json");
     let rt = Runtime::with_env_and_cli_state_file(&|_key: &str| None, path.clone());
     (rt, path, dir)
+}
+
+/// The key a test seals under, installed for its own thread only, so no test
+/// reaches the machine's key store and none shares a key with another.
+const TEST_SEAL_KEY: [u8; clio_config::secret_key::KEY_LEN] =
+    [0x5a; clio_config::secret_key::KEY_LEN];
+
+/// A runtime whose deployment overlay lives in a fresh scratch directory, with a
+/// test seal key installed so a secret can be saved and read back.
+fn runtime_with_deployment_file() -> (Runtime, ScratchDir) {
+    clio_config::secret_seal::test_key::use_key(TEST_SEAL_KEY);
+    let dir = ScratchDir::new();
+    let rt = Runtime::with_env_and_deployment_file(&|_key: &str| None, dir.join("deployment.json"));
+    (rt, dir)
 }
 
 /// Per-test scratch directory, removed on drop.

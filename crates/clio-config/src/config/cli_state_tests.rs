@@ -75,7 +75,12 @@ fn set_and_flush(rt: &mut Runtime, theta: f64) {
         panic!("ranking_env_set must succeed");
     };
     assert!(data.applied, "a non-dry-run set applies in memory");
-    assert!(rt.flush_cli_state().expect("flush"), "flush must write");
+    let flushed = rt.flush_cli_state().expect("flush");
+    assert!(flushed.written(), "flush must write");
+    assert!(
+        flushed.dropped().is_empty(),
+        "a ranking flush drops nothing"
+    );
 }
 
 #[test]
@@ -159,7 +164,41 @@ fn a_dry_run_writes_nothing_and_leaves_the_saved_value_alone() {
 #[test]
 fn flushing_without_a_resolved_path_writes_nothing() {
     let rt = Runtime::with_env(&|_key: &str| None);
-    assert!(!rt.flush_cli_state().expect("no path is not an error"));
+    let flushed = rt.flush_cli_state().expect("no path is not an error");
+    assert!(!flushed.written());
+    assert_eq!(flushed.dropped().len(), 0, "no path means nothing to drop");
+}
+
+#[test]
+fn a_flush_reports_the_secret_profile_value_it_cannot_save() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    let mut rt = boot(path.clone());
+    let ToolResult::Ok { .. } = rt.config_profile_apply("coding_local") else {
+        panic!("the profile applies");
+    };
+    let ToolResult::Ok { .. } = rt.config_set(
+        "credentials.api_key",
+        json!("sk-abcdef0123456789"),
+        ConfigScope::Profile,
+    ) else {
+        panic!("a profile-scoped secret still applies in memory");
+    };
+
+    let flushed = rt.flush_cli_state().expect("flush");
+    assert!(flushed.written(), "the rest of the state is saved");
+    assert_eq!(
+        flushed
+            .dropped()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["credentials.api_key"],
+        "the caller is told which key was left out"
+    );
+    let saved = fs::read_to_string(&path).expect("read cli state");
+    assert!(!saved.contains("sk-abcdef0123456789"), "{saved}");
+    assert!(!saved.contains("credentials.api_key"), "{saved}");
 }
 
 /// The profile an `effective_raw` read reports as active.
