@@ -12,7 +12,10 @@
 //!   `--no-pre-backup`, `--allow-missing-keys`, `--dry-run`; the accepted set
 //!   is the `backup restore` registry record's) and the selector rule
 //! - The confirmation prompt and the exit codes: 0 for a restore or a plan,
-//!   3 for a partial, count-mismatched, or not-durable restore
+//!   3 for a partial, count-mismatched, or not-durable restore, and 75 for a
+//!   restore whose only difference is a derived table (every user-data row
+//!   loaded; retrying the restore does not clear it, and the index pipeline
+//!   reconciles it on its next pass)
 //!
 //! ## Does not own
 //! - The restore sequence and its refusals (see `backup_restore_flow`)
@@ -31,7 +34,7 @@
 
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
-    self, Plan, PreRestore, RESULT_COUNT_MISMATCH, RESULT_PARTIAL, Report,
+    self, Plan, PreRestore, RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT, RESULT_PARTIAL, Report,
 };
 use crate::backup_restore_report::{payload, render, render_plan};
 use crate::cli_args::{self, FlagSpec, ParsedArgs};
@@ -223,12 +226,17 @@ fn strip_newline(answer: &str) -> &str {
         .unwrap_or(answer)
 }
 
-/// The process exit code one report maps to. A partial restore or a failed count
-/// check is not success; a rename that could not be fsynced is a degraded
-/// restore and uses the command-specific exit code 3.
+/// The process exit code one report maps to. A partial restore or a failed
+/// user-data count check is not success; a rename that could not be fsynced is
+/// a degraded restore and uses the command-specific exit code 3. A run whose
+/// only difference is a derived table loaded every user-data row and lost
+/// nothing, so it takes the temporary code rather than either of those, and the
+/// report's own derived-difference text says a retry does not clear it.
 fn exit_code(report: &Report) -> u8 {
     let condition = if report.result == RESULT_PARTIAL || report.result == RESULT_COUNT_MISMATCH {
         RestoreFailure::PartialOrCountMismatch
+    } else if report.result == RESULT_DERIVED_DIFFERENT {
+        RestoreFailure::DerivedTableDiffers
     } else if report.directory_synced == Some(false) {
         RestoreFailure::RestoredNotDurable
     } else {

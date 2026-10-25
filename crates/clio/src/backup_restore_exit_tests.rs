@@ -31,6 +31,12 @@
 use super::*;
 use clio_types::AmError;
 
+/// Whether `code` is one of the documented contract's codes: the four command
+/// codes, contiguous from `EXIT_OK` to `EXIT_PARTIAL`, and the temporary 75.
+fn is_documented(code: u8) -> bool {
+    code <= EXIT_PARTIAL || code == EXIT_TEMPORARY
+}
+
 /// The message `df` failing to run produces: the operator is shown the error's
 /// own text, never a paraphrase.
 const DF_FAILED: &str =
@@ -51,7 +57,8 @@ fn each_condition(mut visit: impl FnMut(RestoreFailure)) {
         match next {
             RestoredOrPlanned => walk(RestoredNotDurable, visit),
             RestoredNotDurable => walk(PartialOrCountMismatch, visit),
-            PartialOrCountMismatch => walk(BadArguments, visit),
+            PartialOrCountMismatch => walk(DerivedTableDiffers, visit),
+            DerivedTableDiffers => walk(BadArguments, visit),
             BadArguments => walk(ArchiveDamaged, visit),
             ArchiveDamaged => walk(BackendMismatch, visit),
             BackendMismatch => walk(SchemaTooNew, visit),
@@ -111,6 +118,7 @@ fn every_condition_maps_to_the_documented_code() {
         (RestoreFailure::RestoredOrPlanned, EXIT_OK),
         (RestoreFailure::RestoredNotDurable, EXIT_PARTIAL),
         (RestoreFailure::PartialOrCountMismatch, EXIT_PARTIAL),
+        (RestoreFailure::DerivedTableDiffers, EXIT_TEMPORARY),
         (RestoreFailure::BadArguments, EXIT_USAGE),
         (RestoreFailure::ArchiveDamaged, EXIT_USAGE),
         (RestoreFailure::BackendMismatch, EXIT_USAGE),
@@ -171,13 +179,10 @@ fn every_condition_has_exactly_one_row_and_no_row_is_extra() {
 }
 
 #[test]
-fn every_row_is_one_of_the_four_documented_codes() {
+fn every_row_is_one_of_the_documented_codes() {
     for (condition, code) in RESTORE_EXIT_CODES {
         assert!(
-            matches!(
-                *code,
-                EXIT_OK | EXIT_OPERATIONAL | EXIT_USAGE | EXIT_PARTIAL
-            ),
+            is_documented(*code),
             "{condition:?} maps to {code}, which is outside the documented contract"
         );
     }
@@ -368,7 +373,7 @@ fn a_condition_with_no_row_would_fail_to_compile_rather_than_panic_at_run_time()
     for condition in all_conditions() {
         let code = exit_code_for(condition);
         assert!(
-            matches!(code, EXIT_OK | EXIT_OPERATIONAL | EXIT_USAGE | EXIT_PARTIAL),
+            is_documented(code),
             "{condition:?} maps to {code}, which is outside the documented contract"
         );
     }

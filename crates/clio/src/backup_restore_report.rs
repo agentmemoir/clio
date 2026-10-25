@@ -25,8 +25,8 @@
 //! Keep this module focused on rendering one restore.
 
 use crate::backup_restore_flow::{
-    Counts, Plan, PreRestore, RESULT_COUNT_MISMATCH, RESULT_PARTIAL, RESULT_PLANNED,
-    RESULT_RESTORED, Report,
+    Counts, Plan, PreRestore, RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT, RESULT_PARTIAL,
+    RESULT_PLANNED, RESULT_RESTORED, Report,
 };
 use crate::backup_restore_schema::Schema;
 use crate::count_noun::count_noun;
@@ -37,6 +37,20 @@ use std::path::PathBuf;
 /// Named once so the text warning and the JSON field cannot drift apart.
 const NOT_DURABLE: &str = "the target's directory could not be fsynced, so the rename is not \
                            durable against a crash right now";
+
+/// The command that refills the two derived indexes a Postgres restore empties.
+/// The truncate clears the vector table with the rest of the schema and loads no
+/// rows back into it, so the vector and lexical index are empty afterwards and
+/// this command derives both again from the content the restore placed. It does
+/// not touch the work queue, so it clears no surplus there.
+const REINDEX_COMMAND: &str = "clio ops reindex --target dense --confirm --backend postgres";
+
+/// Where that command must be pointed, and what it needs to run. It is never
+/// printed with the store address: on this backend `--db` is a URL that can
+/// carry a password, so the line names the database the operator already
+/// restored instead of repeating an address a report must not hold.
+const REINDEX_NOTICE: &str = "point it at the restored database: pass the same `--db` this restore used, with an embedder \
+     configured, because the dense leg fails closed without one";
 
 /// The blast radius, before the operator is asked to confirm.
 pub(super) fn render_plan(plan: &Plan) -> String {
@@ -98,6 +112,10 @@ pub(super) fn render(report: &Report) -> String {
     }
     lines.push("  the store is replaced, not merged".to_owned());
     lines.push(key_store_text(report));
+    if let Some(command) = reindex_command(report) {
+        lines.push(format!("  rebuild the derived index: {command}"));
+        lines.push(format!("  {REINDEX_NOTICE}"));
+    }
     if report.dry_run {
         lines.push(format!(
             "  would replace: {}",
@@ -131,9 +149,31 @@ fn result_text(report: &Report) -> String {
             }
             text
         }
+        RESULT_DERIVED_DIFFERENT => {
+            // No failed step and no failure: the restore did its job, and the
+            // line says which rebuildable table says otherwise.
+            let mut text = format!("  result: {}", report.result);
+            if let Some(difference) = &report.derived_difference {
+                text.push_str("\n  ");
+                text.push_str(difference);
+            }
+            text
+        }
         RESULT_PLANNED => "  result: planned (dry run; nothing was changed)".to_owned(),
         other => format!("  result: {other}"),
     }
+}
+
+/// The rebuild command, when this run's truncate emptied the derived index.
+///
+/// The fact comes from the restore's own report — whether its truncate included
+/// a table the store derives — never from the backend name: a Postgres target
+/// whose schema carries no derived table keeps its index, and a dry run truncates
+/// nothing at all. It is deliberately independent of the result: a user-data
+/// count mismatch, or a failed key swap that left the store placed and the index
+/// empty, still needs the rebuild, so the notice belongs on those runs too.
+fn reindex_command(report: &Report) -> Option<&'static str> {
+    report.derived_index_emptied.then_some(REINDEX_COMMAND)
 }
 
 /// The schema comparison, in one line.
@@ -218,7 +258,10 @@ pub(super) fn payload(report: &Report) -> Value {
         // `ok` means the restore succeeded and nothing about it is flagged as
         // not durable. A count-mismatched restore and a failed key swap are both
         // failures, and so is a rename whose directory entry could not be
-        // fsynced: a script reading `ok` must not record that run as clean.
+        // fsynced: a script reading `ok` must not record that run as clean. A
+        // run whose only difference is a derived table is not ok either: it
+        // exits 75, and `ok` agrees with the exit code, so `ok` is true only
+        // where the code is 0.
         "ok": matches!(report.result, RESULT_RESTORED | RESULT_PLANNED) && is_durable(report),
         "snapshot_id": report.snapshot_id,
         "target": {
@@ -252,6 +295,7 @@ pub(super) fn payload(report: &Report) -> Value {
         "result": report.result,
         "failed_step": report.failed_step,
         "failure": report.failure,
+        "derived_difference": report.derived_difference,
         "dry_run": report.dry_run,
         "directory_synced": report.directory_synced,
     });
@@ -260,6 +304,13 @@ pub(super) fn payload(report: &Report) -> Value {
     // case from both a clean restore and a partial one.
     if !is_durable(report) {
         payload["durability_warning"] = Value::String(NOT_DURABLE.to_owned());
+    }
+    // The distinct field for the rebuild a Postgres restore leaves behind:
+    // present only when the run's own truncate emptied the derived index, which
+    // is the fact the text line reads too, so a script can tell the run that
+    // needs one from every other.
+    if let Some(command) = reindex_command(report) {
+        payload["reindex_command"] = Value::String(command.to_owned());
     }
     payload
 }
@@ -313,3 +364,8 @@ fn counts_json(counts: &Counts) -> Value {
         "banks": counts.banks,
     })
 }
+
+/// The rebuild line and field a placed Postgres restore carries.
+#[cfg(test)]
+#[path = "backup_restore_report_reindex_tests.rs"]
+mod reindex_tests;

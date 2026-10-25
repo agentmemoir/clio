@@ -211,6 +211,11 @@ pub(crate) fn place_sqlite(
         },
         failed_step,
         failure,
+        // Nothing about a file swap derives rows; only a Postgres load can
+        // leave a rebuilt table holding a different count.
+        derived_difference: None,
+        // A swapped-in store file carries its own index, so nothing was emptied.
+        derived_index_emptied: false,
         dry_run: false,
         key_restored,
         key_replaced,

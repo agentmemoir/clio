@@ -372,7 +372,7 @@ fn a_repaired_store_restores_into_a_fresh_database() {
     })
     .expect("restore a repaired store into a fresh schema");
     assert!(
-        report.counts_match,
+        report.counts_ok,
         "the restored counts match the archive: {report:?}"
     );
 

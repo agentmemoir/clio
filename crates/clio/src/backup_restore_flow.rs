@@ -43,14 +43,13 @@ use clio_compliance::{ArchiveClaim, AuthorityRefusal, JournalHold, MemberFacts};
 use clio_store::{KeyPlacement, SpaceCheck, SqliteFileState, SwapReport};
 use std::path::{Path, PathBuf};
 
-// The report results: a dry run, a completed restore, a partial restore, or a
-// restore whose post-commit count check failed.
-pub(crate) const RESULT_PLANNED: &str = "planned";
-pub(crate) const RESULT_PARTIAL: &str = "partial";
-pub(crate) const RESULT_RESTORED: &str = "restored";
-pub(crate) const RESULT_COUNT_MISMATCH: &str = "count-mismatch";
-pub(crate) const FAILED_STEP_KEY_SWAP: &str = "key-store swap";
-pub(crate) const FAILED_STEP_COUNTS: &str = "post-restore count check";
+// The result and failed-step words live in one module of their own; they are
+// re-exported here so the halves and the views keep importing them from this
+// module and no two of them can spell an outcome differently.
+pub(crate) use crate::backup_restore_result::{
+    FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT,
+    RESULT_PARTIAL, RESULT_PLANNED, RESULT_RESTORED,
+};
 // The hints the restore's refusals carry. Which hint a failure gets is decided
 // by the exit-code table from the condition, not chosen at the call site.
 //
@@ -144,8 +143,7 @@ pub(crate) struct Plan {
     pub(crate) store_schema: Option<String>,
     pub(crate) pre_restore: PreRestore,
     /// Whether the operator asked for no pre-restore snapshot. Carried into
-    /// `place` because the skip decision is taken again there, after the
-    /// prompt, and it has to consult the same flag.
+    /// `place` because the skip decision is taken again there, after the prompt.
     pub(crate) no_pre_backup: bool,
     pub(crate) dry_run: bool,
     pub(crate) key: Option<KeyPlacement>,
@@ -172,17 +170,16 @@ pub(crate) struct Report {
     pub(crate) result: &'static str,
     pub(crate) failed_step: Option<String>,
     pub(crate) failure: Option<String>,
+    /// The derived tables the restore over-filled, worded for an operator: not a failure.
+    pub(crate) derived_difference: Option<String>,
+    /// Whether this run's truncate emptied the derived index, from the restore's own report.
+    pub(crate) derived_index_emptied: bool,
     pub(crate) dry_run: bool,
-    /// Whether the archive carries a key store the restore places. `true` when
-    /// the plan has a key placement to make.
+    /// Whether the archive carries a key store the restore places.
     pub(crate) key_restored: bool,
-    /// What the swap did to the key store: `None` when no key store was part of
-    /// the restore (including a dry run, which places nothing), `Some(true)`
-    /// when it was replaced, `Some(false)` when it was not.
+    /// The swap's key-store outcome: `None` when no key store was part of this restore.
     pub(crate) key_replaced: Option<bool>,
-    /// Whether the target's directory was fsynced after the rename; `None`
-    /// when nothing was renamed (a dry run, or a Postgres restore, which
-    /// renames no file).
+    /// Whether the target's directory was fsynced after the rename; `None` when nothing renamed.
     pub(crate) directory_synced: Option<bool>,
 }
 
@@ -293,6 +290,8 @@ pub(crate) fn planned(plan: Plan) -> Report {
         result: RESULT_PLANNED,
         failed_step: None,
         failure: None,
+        derived_difference: None,
+        derived_index_emptied: false,
         dry_run: true,
         key_restored: plan.key.is_some(),
         key_replaced: None,

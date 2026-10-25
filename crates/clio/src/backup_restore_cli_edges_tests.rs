@@ -26,10 +26,11 @@
 use super::*;
 use crate::backup_cli_fixtures::{Scratch, run_backup, run_json_in};
 use crate::backup_restore_flow::{
-    Counts, PreRestore, RESULT_RESTORED, Report, SKIP_NO_PRE_BACKUP, SKIP_TARGET_EMPTY,
-    SKIP_TARGET_MISSING,
+    Counts, FAILED_STEP_COUNTS, PreRestore, RESULT_COUNT_MISMATCH, RESULT_DERIVED_DIFFERENT,
+    RESULT_RESTORED, Report, SKIP_NO_PRE_BACKUP, SKIP_TARGET_EMPTY, SKIP_TARGET_MISSING,
 };
 use crate::backup_restore_schema::{ACTION_NONE, Schema};
+use crate::cli_error::{EXIT_PARTIAL, EXIT_TEMPORARY};
 use serde_json::json;
 
 #[test]
@@ -236,9 +237,80 @@ fn not_durable_report() -> Report {
         result: RESULT_RESTORED,
         failed_step: None,
         failure: None,
+        derived_difference: None,
+        derived_index_emptied: false,
         dry_run: false,
         key_restored: false,
         key_replaced: None,
         directory_synced: Some(false),
     }
+}
+
+/// The archived counts and the observed ones differ only in a derived table:
+/// the run exits 75, `ok` is false because the code is not 0, no step failed,
+/// and the line says every user-data row loaded and names the table.
+#[test]
+fn a_derived_table_difference_exits_75_without_a_failed_step() {
+    let mut report = not_durable_report();
+    report.directory_synced = Some(true);
+    report.result = RESULT_DERIVED_DIFFERENT;
+    report.derived_difference = Some(
+        "every user-data row was loaded; a table the store rebuilds holds a surplus that neither \
+         the reindex a restore prints nor a retry of the restore clears, and the index pipeline \
+         reconciles it on its next pass: table \"index_pending\": archive 2 rows, restored 0"
+            .to_owned(),
+    );
+
+    assert_eq!(exit_code(&report), EXIT_TEMPORARY);
+    assert_eq!(exit_code(&report), 75, "the temporary-failure code");
+    let json = payload(&report);
+    assert_eq!(json["ok"], json!(false), "{json}");
+    assert_eq!(json["failed_step"], json!(null), "{json}");
+    assert_eq!(
+        json["failure"],
+        json!(null),
+        "no failure on this run: {json}"
+    );
+    assert_eq!(
+        json["derived_difference"],
+        json!(
+            "every user-data row was loaded; a table the store rebuilds holds a \
+               surplus that neither the reindex a restore prints nor a retry of the \
+               restore clears, and the index pipeline reconciles it on its next pass: \
+               table \"index_pending\": archive 2 rows, restored 0"
+        ),
+        "{json}"
+    );
+    assert_eq!(json["result"], json!(RESULT_DERIVED_DIFFERENT), "{json}");
+    let text = render(&report);
+    assert!(text.contains("result: derived-difference"), "{text}");
+    assert!(!text.contains("failed step"), "{text}");
+    assert!(text.contains("every user-data row was loaded"), "{text}");
+    assert!(text.contains("index_pending"), "{text}");
+}
+
+/// The user-data mismatch is unchanged: the count-mismatch result, the failed
+/// step, exit 3, and `ok` false.
+#[test]
+fn a_user_data_count_mismatch_keeps_its_result_and_exit_three() {
+    let mut report = not_durable_report();
+    report.directory_synced = Some(true);
+    report.result = RESULT_COUNT_MISMATCH;
+    report.failed_step = Some(FAILED_STEP_COUNTS.to_owned());
+    report.failure = Some(
+        "the restored table counts do not match the archive's: \
+         table \"items\": archive 3 rows, restored 2"
+            .to_owned(),
+    );
+
+    assert_eq!(exit_code(&report), EXIT_PARTIAL);
+    assert_eq!(exit_code(&report), 3);
+    let json = payload(&report);
+    assert_eq!(json["ok"], json!(false), "{json}");
+    assert_eq!(json["failed_step"], json!(FAILED_STEP_COUNTS), "{json}");
+    let text = render(&report);
+    assert!(
+        text.contains("result: count-mismatch (failed step: post-restore count check)"),
+        "{text}"
+    );
 }

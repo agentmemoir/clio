@@ -1,0 +1,1 @@
+A Postgres restore that loaded every user-data row but found a table the store rebuilds holding a different count now reports a derived difference and exits 75 instead of failing, because `clio ops reindex` rebuilds that table from the rows already restored.

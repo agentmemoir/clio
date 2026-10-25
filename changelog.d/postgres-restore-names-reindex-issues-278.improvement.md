@@ -1,0 +1,1 @@
+A Postgres restore now prints the exact `clio ops reindex` command that rebuilds the derived vector index the restore emptied, and carries it as `reindex_command` in the JSON report, because the restore truncates that table with the rest of the schema and loads nothing back into it.

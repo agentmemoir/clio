@@ -6,7 +6,7 @@
 //! This module is responsible for the Postgres-backed scenario tests of the
 //! restore transaction: the round trip into an empty target, the rollback on
 //! members that fail to load, every pre-flight refusal, the trigger-disabled
-//! load, and the post-commit count report — against the shared Compose DB.
+//! load, and the count report measured inside the transaction — against the shared Compose DB.
 //!
 //! ## Owns
 //! - Restore scenario coverage for `restore_postgres` and `postgres_target_state`
@@ -44,7 +44,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn base_url() -> String {
+pub(super) fn base_url() -> String {
     postgres_url_from_env()
 }
 
@@ -123,7 +123,7 @@ fn seed(store: &PostgresStore, tag: &str) -> Vec<(String, String)> {
 }
 
 /// A scratch directory for staged members, removed on drop.
-struct ScratchDir {
+pub(super) struct ScratchDir {
     path: PathBuf,
 }
 
@@ -158,7 +158,9 @@ fn dump_into_scratch(url: &str, tag: &str) -> (PostgresDumpFacts, Vec<PathBuf>, 
 }
 
 /// A seeded source schema with its store dumped into staged members.
-fn seeded_source(tag: &str) -> (ScopedSchema, PostgresDumpFacts, Vec<PathBuf>, ScratchDir) {
+pub(super) fn seeded_source(
+    tag: &str,
+) -> (ScopedSchema, PostgresDumpFacts, Vec<PathBuf>, ScratchDir) {
     let base = base_url();
     let source = ScopedSchema::new(&base);
     let store = source.open();
@@ -169,7 +171,7 @@ fn seeded_source(tag: &str) -> (ScopedSchema, PostgresDumpFacts, Vec<PathBuf>, S
 }
 
 /// The restore input the archive's facts describe.
-fn restore_tables(facts: &PostgresDumpFacts, paths: &[PathBuf]) -> Vec<RestoreTable> {
+pub(super) fn restore_tables(facts: &PostgresDumpFacts, paths: &[PathBuf]) -> Vec<RestoreTable> {
     facts
         .tables
         .iter()
@@ -219,7 +221,7 @@ fn schema_of(url: &str) -> String {
 
 /// A second scoped schema whose store tables exist and hold zero rows, with
 /// the schema name the restore loads into.
-fn empty_target(base: &str) -> (ScopedSchema, String) {
+pub(super) fn empty_target(base: &str) -> (ScopedSchema, String) {
     let target = ScopedSchema::new(base);
     target.open();
     let schema = schema_of(target.url());
@@ -238,7 +240,7 @@ fn assert_counts_match_archive(report: &PostgresRestoreReport, facts: &PostgresD
         .sum::<u64>();
     assert_eq!(report.rows_loaded, observed, "the total is measured");
     assert_eq!(report.rows_loaded, archived, "and it matches the archive");
-    assert!(report.counts_match, "counts must match: {report:?}");
+    assert!(report.counts_ok, "counts must match: {report:?}");
     for table in &facts.tables {
         let observed = report
             .table_counts
@@ -376,7 +378,7 @@ fn table_set_mismatches_refuse_before_truncating() {
 }
 
 /// Rows the target gains outside the archive show up as
-/// `counts_match == false`. The only statement the restore runs with triggers
+/// `counts_ok == false`. The only statement the restore runs with triggers
 /// still enabled is the `TRUNCATE`, so the poison is an `AFTER TRUNCATE`
 /// trigger on `items` that adds a `banks` row; an `AFTER INSERT` poison cannot
 /// fire because the load runs with every trigger disabled.
@@ -397,7 +399,7 @@ fn post_commit_count_mismatch_is_reported() {
         ))
         .expect("create the poison trigger");
     let report = run_restore(target.url(), &schema, restore_tables(&facts, &paths));
-    assert!(!report.counts_match, "poisoned counts: {report:?}");
+    assert!(!report.counts_ok, "poisoned counts: {report:?}");
     let archived = facts
         .tables
         .iter()

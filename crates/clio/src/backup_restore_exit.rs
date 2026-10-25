@@ -30,7 +30,9 @@
 use crate::backup_restore_flow::{
     HINT_ARCHIVE_DAMAGED, HINT_STAGING_FAILED, HINT_TARGET_UNMEASURABLE,
 };
-use crate::cli_error::{CliError, EXIT_OK, EXIT_OPERATIONAL, EXIT_PARTIAL, EXIT_USAGE};
+use crate::cli_error::{
+    CliError, EXIT_OK, EXIT_OPERATIONAL, EXIT_PARTIAL, EXIT_TEMPORARY, EXIT_USAGE,
+};
 use clio_types::{AmError, ErrorCode};
 
 /// One condition a `clio backup restore` run can fail or degrade on.
@@ -51,6 +53,13 @@ pub(crate) enum RestoreFailure {
     RestoredNotDurable,
     /// The database was replaced but the run did not fully complete.
     PartialOrCountMismatch,
+    /// Every user-data row was loaded, and only a derived table the store can
+    /// rebuild holds a different number of rows than the archive recorded. The
+    /// restore did its job, so this is not a failure; it takes the temporary
+    /// code because the run could not report a clean success, and retrying it
+    /// reloads the same archive and reproduces the same count, so the retry that
+    /// clears a lock conflict clears nothing here.
+    DerivedTableDiffers,
 
     // Refusals: the input was understood and deliberately not acted on, so
     // nothing live was touched. Exit 2.
@@ -116,12 +125,16 @@ pub(crate) enum RestoreFailure {
 ///
 /// Data rather than a chain of `if`s, so the whole contract is readable in one
 /// place and a test can assert one row at a time. The codes are the documented
-/// `0` ok / `1` operational / `2` usage / `3` degraded contract; this phase routes
-/// conditions to that contract and does not add to it.
+/// `0` ok / `1` operational / `2` usage / `3` degraded / `75` not-a-clean-success
+/// contract, and `75` carries the one meaning `EXIT_TEMPORARY_MEANING` states.
+/// `DerivedTableDiffers` is the one row on the reused `75` here: the restore
+/// loaded every user-data row, lost nothing, and invalidated nothing, and the
+/// difference it reports is not something a retry of the restore clears.
 const RESTORE_EXIT_CODES: &[(RestoreFailure, u8)] = &[
     (RestoreFailure::RestoredOrPlanned, EXIT_OK),
     (RestoreFailure::RestoredNotDurable, EXIT_PARTIAL),
     (RestoreFailure::PartialOrCountMismatch, EXIT_PARTIAL),
+    (RestoreFailure::DerivedTableDiffers, EXIT_TEMPORARY),
     (RestoreFailure::BadArguments, EXIT_USAGE),
     (RestoreFailure::ArchiveDamaged, EXIT_USAGE),
     (RestoreFailure::BackendMismatch, EXIT_USAGE),

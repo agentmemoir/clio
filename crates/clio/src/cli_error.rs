@@ -39,8 +39,26 @@ pub(crate) const EXIT_USAGE: u8 = 2;
 /// Process exit code for a command-specific degraded outcome. Distinct from
 /// success and a refusal so scripts can identify partial or incomplete work.
 pub(crate) const EXIT_PARTIAL: u8 = 3;
-/// Process exit code for a transient storage lock conflict that can be retried.
+/// Process exit code for a condition that is not an error and that lost or
+/// invalidated nothing, where the command's own message says whether a retry
+/// helps. Every surface that names the code repeats that meaning in one
+/// sentence, and `EXIT_TEMPORARY_MEANING` is the canonical copy the test holds
+/// them to, so no surface can promise a retry the command does not clear.
 pub(crate) const EXIT_TEMPORARY: u8 = 75;
+
+/// What exit 75 means, in the one sentence each surface that names the code
+/// carries word for word: the run could not report a clean success, nothing was
+/// lost or invalid, and whether a retry helps is in the command's own message —
+/// a storage lock conflict is cleared by retrying, a restore that left a
+/// derived difference is not.
+///
+/// The surfaces register their summaries as literals, so this copy is the
+/// canonical text rather than their input: the module's own test holds every
+/// summary to it, and changing the sentence without changing them fails there.
+#[cfg(test)]
+pub(crate) const EXIT_TEMPORARY_MEANING: &str = "75 means the command could not report a clean success and that nothing was lost or invalid, \
+     and the command's own message says whether a retry helps: a storage lock conflict is cleared \
+     by retrying, and a restore that left a derived difference is not";
 
 /// One CLI failure: a machine code, a human message, an optional hint, an
 /// optional raw help block, and the process exit code it maps to.
@@ -98,7 +116,8 @@ impl CliError {
     }
 
     /// An operational failure with an explicit machine code.
-    /// Storage lock conflicts exit 75; other operational failures exit 1.
+    /// Storage lock conflicts exit 75; other operational failures exit 1. A
+    /// command whose table maps a condition to 75 sets it with `with_exit`.
     pub(crate) fn operational(code: impl Into<String>, message: impl Into<String>) -> Self {
         let code = code.into();
         let exit = if code == "storage_busy" {
@@ -319,6 +338,10 @@ pub(crate) fn cross_process_dek_hint(message: &str) -> Option<&'static str> {
     )
 }
 
+/// The one meaning exit 75 carries, and the surfaces that must repeat it.
+#[cfg(test)]
+#[path = "cli_error_exit_meaning_tests.rs"]
+mod exit_meaning_tests;
 #[cfg(test)]
 #[path = "cli_error_tests.rs"]
 mod tests;

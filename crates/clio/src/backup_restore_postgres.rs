@@ -27,16 +27,15 @@
 //!
 //! Keep this module focused on the Postgres restore halves.
 
+use crate::backup_restore_counts::comparison;
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
-    Counts, FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, Plan, RESULT_COUNT_MISMATCH, RESULT_PARTIAL,
-    RESULT_RESTORED, Report, RestorePlanInput, classify_refusal, pre_restore_decision,
-    pre_restore_from,
+    Counts, FAILED_STEP_COUNTS, FAILED_STEP_KEY_SWAP, Plan, Report, RestorePlanInput,
+    classify_refusal, pre_restore_decision, pre_restore_from,
 };
 use crate::backup_restore_space::{key_destination, preflight};
 use crate::backup_restore_sqlite::{RestorePlacement, merge_settle_failure};
 use crate::cli_error::CliError;
-use crate::count_noun::count_noun;
 use clio_backup::dump_meta::DumpMeta;
 use clio_store::{PostgresRestoreRequest, RestoreTable, compare_table_sets};
 use std::path::Path;
@@ -276,33 +275,13 @@ pub(crate) fn place_postgres(
     let key_replaced = key_swap.as_ref().map(|report| report.replaced);
     let key_failure = key_swap.as_ref().and_then(|report| report.failure.clone());
     let counts_after = Counts::of_rows(&restored.table_counts, &restored.banks);
-    let mismatch = count_mismatch_message(meta, &restored.table_counts);
-    let result = match (&mismatch, &key_failure) {
-        (Some(_), _) => RESULT_COUNT_MISMATCH,
-        (None, Some(_)) => RESULT_PARTIAL,
-        (None, None) => RESULT_RESTORED,
-    };
+    let answer = observation(meta, &restored.table_counts, key_failure.as_deref());
     // The load and the key swap are the effects the guard authorizes. The store
     // is already reloaded, so a failed outcome write leaves a pending action for
     // reconciliation and is surfaced on the report, never returned: the report
     // carries the pre-restore snapshot id, the operator's only way back.
-    let settle = placement.settle(guard, true, result).err();
-    // Both failures are reported when both happened. A key store that was not
-    // placed is a separate problem from a count that did not match, and an
-    // operator who reads only one line is sent to the wrong fix.
-    let failed_step = match (&mismatch, &key_failure) {
-        (Some(_), Some(_)) => Some(format!("{FAILED_STEP_COUNTS}, {FAILED_STEP_KEY_SWAP}")),
-        (Some(_), None) => Some(FAILED_STEP_COUNTS.to_owned()),
-        (None, Some(_)) => Some(FAILED_STEP_KEY_SWAP.to_owned()),
-        (None, None) => None,
-    };
-    let failure = match (mismatch, key_failure) {
-        (Some(counts), Some(key)) => Some(format!("{counts}; the key store: {key}")),
-        (Some(counts), None) => Some(counts),
-        (None, Some(key)) => Some(key),
-        (None, None) => None,
-    };
-    let (failed_step, failure) = merge_settle_failure(failed_step, failure, settle);
+    let settle = placement.settle(guard, true, answer.result).err();
+    let (failed_step, failure) = merge_settle_failure(answer.failed_step, answer.failure, settle);
     Ok(Report {
         snapshot_id: plan.snapshot_id,
         target: plan.target,
@@ -314,9 +293,13 @@ pub(crate) fn place_postgres(
         counts_incoming: None,
         schema: plan.schema,
         store_schema: plan.store_schema,
-        result,
+        result: answer.result,
         failed_step,
         failure,
+        derived_difference: answer.derived_difference,
+        // The one source of truth for the rebuild notice: the store half says
+        // whether its truncate emptied a table the store derives.
+        derived_index_emptied: restored.derived_index_emptied,
         dry_run: false,
         key_restored,
         key_replaced,
@@ -325,39 +308,53 @@ pub(crate) fn place_postgres(
     })
 }
 
-/// What differs between the archive's counts and the observed ones, when they
-/// do. The message names only tables and counts, never row content.
-fn count_mismatch_message(meta: &DumpMeta, observed: &[(String, u64)]) -> Option<String> {
-    let differing: Vec<String> = meta
-        .tables
-        .iter()
-        .filter_map(|table| {
-            let seen = observed
-                .iter()
-                .find(|(name, _)| name == &table.table)
-                .map(|(_, count)| *count);
-            match seen {
-                Some(count) if count == table.rows => None,
-                Some(count) => Some(format!(
-                    "table {:?}: archive {}, restored {count}",
-                    table.table,
-                    count_noun(table.rows, "row", "rows")
-                )),
-                None => Some(format!(
-                    "table {:?}: archive {}, restored: not counted",
-                    table.table,
-                    count_noun(table.rows, "row", "rows")
-                )),
-            }
-        })
-        .collect();
-    if differing.is_empty() {
-        return None;
+/// The answer a placement's observation produces: the result the exit code
+/// reads, the step that failed, the failure text, and the derived difference
+/// that sits beside them.
+struct Observation {
+    /// The result string the report carries and the exit table maps.
+    result: &'static str,
+    /// The step that failed, when one did.
+    failed_step: Option<String>,
+    /// The text behind a failed result. A derived-only difference leaves this
+    /// empty: nothing failed and nothing was lost.
+    failure: Option<String>,
+    /// The benign derived difference, when the observation had one.
+    derived_difference: Option<String>,
+}
+
+/// Turn the counts one placement observed into the answer the report carries.
+///
+/// This is the one mapping from what the restore counted to what the operator
+/// and the exit code are told. Both failures are reported when both happened: a
+/// key store that was not placed is a separate problem from a count that did not
+/// match, and an operator who reads only one line is sent to the wrong fix. A
+/// derived difference is not a failure, so it travels in its own field and never
+/// through `failed_step` or `failure`.
+fn observation(
+    meta: &DumpMeta,
+    observed: &[(String, u64)],
+    key_failure: Option<&str>,
+) -> Observation {
+    let (result, mismatch, derived_difference) = comparison(meta, observed, key_failure);
+    let failed_step = match (&mismatch, &key_failure) {
+        (Some(_), Some(_)) => Some(format!("{FAILED_STEP_COUNTS}, {FAILED_STEP_KEY_SWAP}")),
+        (Some(_), None) => Some(FAILED_STEP_COUNTS.to_owned()),
+        (None, Some(_)) => Some(FAILED_STEP_KEY_SWAP.to_owned()),
+        (None, None) => None,
+    };
+    let failure = match (mismatch, key_failure) {
+        (Some(counts), Some(key)) => Some(format!("{counts}; the key store: {key}")),
+        (Some(counts), None) => Some(counts),
+        (None, Some(key)) => Some(key.to_owned()),
+        (None, None) => None,
+    };
+    Observation {
+        result,
+        failed_step,
+        failure,
+        derived_difference,
     }
-    Some(format!(
-        "the restored table counts do not match the archive's: {}",
-        differing.join("; ")
-    ))
 }
 
 #[cfg(test)]
@@ -375,6 +372,12 @@ mod refusal_tests;
 #[cfg(test)]
 #[path = "backup_restore_postgres_assemble_tests.rs"]
 mod assemble_tests;
+
+/// The mapping from a placement's observed counts to the report's result and
+/// failure fields, over hand-built facts and no database.
+#[cfg(test)]
+#[path = "backup_restore_postgres_mapping_tests.rs"]
+mod mapping_tests;
 
 /// The pre-restore snapshot footprint, projected from the target that was
 /// just measured rather than from the incoming archive.
@@ -415,8 +418,3 @@ fn projected_snapshot_bytes(state: &clio_store::PostgresTargetState, meta: &Dump
 #[cfg(test)]
 #[path = "backup_restore_postgres_footprint_tests.rs"]
 mod footprint_tests;
-
-/// The count-mismatch message's arms and its row-count wording.
-#[cfg(test)]
-#[path = "backup_restore_postgres_counts_tests.rs"]
-mod counts_tests;

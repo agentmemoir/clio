@@ -6,8 +6,8 @@
 //! This module is responsible for the Postgres logical restore: one
 //! transaction that clears the target, loads every dumped member back in
 //! `COPY` text format, and re-enables what it disabled — so a failure anywhere
-//! leaves the target exactly as it was. Every count it reports is observed
-//! after the commit, never the archive's own claim.
+//! leaves the target exactly as it was. Every count it reports is measured
+//! inside that transaction, before the commit, never the archive's own claim.
 //!
 //! ## Owns
 //! - `restore_postgres`: the one-transaction restore and its observed counts
@@ -45,7 +45,7 @@ use std::path::PathBuf;
 /// Chunk size for streaming a staged member into `COPY ... FROM STDIN`.
 const COPY_CHUNK: usize = 64 * 1024;
 
-/// The `am` step name for the restore's post-commit `SELECT COUNT(*)` pass.
+/// The `am` step name for the restore's own `SELECT COUNT(*)` pass.
 ///
 /// The target's read-only pass names its own step in `postgres_restore_state`.
 const RESTORE_COUNT: &str = "count a restored table";
@@ -82,18 +82,26 @@ pub struct PostgresRestoreRequest {
 pub struct PostgresRestoreReport {
     /// The schema the restore loaded into.
     pub schema: String,
-    /// Rows the target was observed to hold after the commit, summed over
-    /// every counted table — a measurement, never the archive's claim. A
+    /// Rows the restore transaction was observed to hold, summed over every
+    /// counted table — a measurement, never the archive's claim. A
     /// restore that loaded fewer rows than the archive records reports the
-    /// smaller figure, and `counts_match` then reports `false`.
+    /// smaller figure, and `counts_ok` then reports `false`.
     pub rows_loaded: u64,
-    /// Every loaded table with its observed row count, after the commit.
+    /// Every loaded table with its observed row count, read before the commit.
     pub table_counts: Vec<(String, u64)>,
     /// The distinct bank ids of the restored `items` table, sorted.
     pub banks: Vec<String>,
-    /// Whether every observed count equals the archive's recorded count.
-    /// `false` is a failed restore the caller must report as such.
-    pub counts_match: bool,
+    /// Whether the observation is clean under the direction rule: no table came
+    /// back with fewer rows than the archive holds, and no table the caller's
+    /// data lives in came back with more. A surplus in a table the store
+    /// rebuilds is the one difference a rebuild absorbs and leaves this `true`.
+    pub counts_ok: bool,
+    /// Whether this restore's truncate really included a table the store
+    /// derives from the content it loads (the vector table today), which is the
+    /// only fact that says the derived index is empty afterwards. A restore
+    /// whose truncate missed such a table, a dry run, and a backend that keeps
+    /// its index inside the store all leave this `false`.
+    pub derived_index_emptied: bool,
 }
 
 /// Restore one dump into its target, all-or-nothing.
@@ -112,9 +120,18 @@ pub struct PostgresRestoreReport {
 /// rebuilds, and it references `items`, so the single statement must include
 /// it or the truncate fails on a populated target.
 ///
-/// After the commit, every loaded table is counted again; that measurement is
-/// what the report carries, and the caller reports a mismatch as a failed
-/// restore.
+/// The last read before the commit counts every loaded table; that measurement
+/// is what the report carries, and the caller reports a mismatch as a failed
+/// restore. Counting before the commit is what makes the measurement stable:
+/// the transaction still holds the tables, so no other writer can land a row
+/// between the load and the count.
+///
+/// That stability is bought with a wider writer-block window: the count pass
+/// runs while the transaction still holds its exclusive locks, so every writer
+/// to the target waits for a scan it did not wait for when the measurement came
+/// after the commit. The trade is deliberate — a restore is a stop-the-store
+/// operation, and an exact count from inside the transaction is the only
+/// measurement that can tell a lost row from a concurrent one.
 ///
 /// # Errors
 /// The target is unreachable, the schema does not match the target's tables,
@@ -136,12 +153,19 @@ pub fn restore_postgres(
     let discovered = discover_schema(&mut tx, &request.schema)?;
     refuse_non_owning_role(&mut tx, &request.schema)?;
     preflight_table_sets(&discovered, &request.tables)?;
-    truncate(&mut tx, &discovered)?;
+    let derived_index_emptied = truncate(&mut tx, &discovered)?;
     set_triggers(&mut tx, &discovered, "DISABLE")?;
     load_members(&mut tx, &request.schema, &request.tables)?;
     set_triggers(&mut tx, &discovered, "ENABLE")?;
+    let table_counts = count_tables(&mut tx, &request.schema, &discovered, RESTORE_COUNT)?;
+    let banks = read_banks(&mut tx, &request.schema, &discovered)?;
     tx.commit().am("commit the restore transaction")?;
-    measure_restored(request, &discovered)
+    Ok(restore_report(
+        request,
+        table_counts,
+        banks,
+        derived_index_emptied,
+    ))
 }
 
 /// Prove the connected role owns every application table.
@@ -195,13 +219,18 @@ fn preflight_table_sets(
     compare_table_sets(&target, &archive)
 }
 
-/// Clear every base table of the schema in one statement.
+/// Clear every base table of the schema in one statement, and report whether
+/// that statement included a table the store derives from the content it loads.
 ///
 /// A per-table loop is refused by the foreign keys and can partially empty the
 /// target before it fails, so this is one statement or nothing. `RESTART
 /// IDENTITY` is harmless today (no owned sequences) and correct if one is
 /// ever added with the matching snapshot support.
-fn truncate(tx: &mut Transaction, discovered: &DiscoveredSchema) -> Result<(), AmError> {
+///
+/// The returned fact is the truncate's own: a table counts only when this
+/// statement really named it, so a target whose schema carries no derived table
+/// reports `false` no matter what its backend is called.
+fn truncate(tx: &mut Transaction, discovered: &DiscoveredSchema) -> Result<bool, AmError> {
     let mut names: Vec<String> = discovered
         .app_tables
         .iter()
@@ -217,7 +246,7 @@ fn truncate(tx: &mut Transaction, discovered: &DiscoveredSchema) -> Result<(), A
         .join(", ");
     tx.batch_execute(&format!("TRUNCATE TABLE {list} RESTART IDENTITY"))
         .am("truncate the target's tables")?;
-    Ok(())
+    Ok(!discovered.extension_dependent.is_empty())
 }
 
 /// Flip every application table's trigger enforcement off or on, always
@@ -251,7 +280,7 @@ fn set_triggers(
 /// The column list is the archive's, so a target column the archive does not
 /// carry cannot shift the load. The load counts nothing: `COPY`'s own tally is
 /// not an observation, so the report's total comes from the counts
-/// `measure_restored` reads.
+/// the restore transaction reads for itself.
 fn load_members(
     tx: &mut Transaction,
     schema: &str,
@@ -300,35 +329,47 @@ fn load_members(
     Ok(())
 }
 
-/// Count every loaded table after the commit and compare with the archive.
+/// Build the report from the counts the restore transaction read for itself.
 ///
-/// The report's total is the sum of these counts, so `rows_loaded` is what
-/// the database was observed to hold and never the archive's own arithmetic.
-fn measure_restored(
+/// The counts arrive already measured, from inside the transaction the load
+/// ran in, so this assembles them and never reads the database: there is no
+/// window between the load and the count for another writer to land a row in.
+/// The report's total is the sum of those counts, so `rows_loaded` is what the
+/// database was observed to hold and never the archive's own arithmetic.
+///
+/// `derived_index_emptied` is carried through unchanged: it is what the
+/// transaction's truncate reported, and this function never infers it from a
+/// count, a backend name, or the shape of the archive.
+fn restore_report(
     request: &PostgresRestoreRequest,
-    discovered: &DiscoveredSchema,
-) -> Result<PostgresRestoreReport, AmError> {
-    let mut client = crate::pg_tls::connect(&request.url).am("postgres connect to measure")?;
-    let mut tx = client
-        .transaction()
-        .am("begin the measurement transaction")?;
-    let measured = count_tables(&mut tx, &request.schema, discovered, RESTORE_COUNT);
-    let banks = read_banks(&mut tx, &request.schema, discovered);
-    let (table_counts, banks) = (measured?, banks?);
-    tx.commit().am("commit the measurement transaction")?;
-    let counts_match = request.tables.iter().all(|table| {
-        table_counts
+    table_counts: Vec<(String, u64)>,
+    banks: Vec<String>,
+    derived_index_emptied: bool,
+) -> PostgresRestoreReport {
+    let counts_ok = request.tables.iter().all(|table| {
+        let observed = table_counts
             .iter()
-            .any(|(name, count)| name == &table.table && count == &table.rows)
+            .find(|(name, _)| name == &table.table)
+            .map(|(_, count)| *count);
+        match observed {
+            Some(count) if count == table.rows => true,
+            // Over the archive's count only a table the store rebuilds is
+            // benign work; every other difference is a row lost or invented.
+            Some(count) if count > table.rows => {
+                crate::table_data_class(&table.table) == crate::TableDataClass::Derived
+            }
+            _ => false,
+        }
     });
     let rows_loaded = table_counts.iter().map(|(_, count)| count).sum();
-    Ok(PostgresRestoreReport {
+    PostgresRestoreReport {
         schema: request.schema.clone(),
         rows_loaded,
         table_counts,
         banks,
-        counts_match,
-    })
+        counts_ok,
+        derived_index_emptied,
+    }
 }
 
 /// A `COPY` or trigger-statement failure that names the table and never the
@@ -340,6 +381,14 @@ fn copy_error(step: &str, table: &str, error: impl std::fmt::Display) -> AmError
     )
 }
 
+/// The report's truncation fact: the rebuild notice's one source of truth.
+#[cfg(test)]
+#[path = "postgres_restore_index_tests.rs"]
+mod index_tests;
+/// The restore's count while a second connection waits on its lock.
+#[cfg(test)]
+#[path = "postgres_restore_race_tests.rs"]
+mod race_tests;
 /// The restore report's `rows_loaded`: the observation, not the claim.
 #[cfg(test)]
 #[path = "postgres_restore_rows_tests.rs"]
