@@ -70,13 +70,17 @@ pub(crate) fn read_defs() -> Vec<ToolDef> {
         ),
         read(
             "get_snapshot",
-            "Return the authoritative structured snapshot only.",
+            "Return the authoritative structured snapshot only. The payload also carries two \
+             top-level booleans: `discarded` (operations removal) and `archived` (hygiene \
+             archive).",
             &["item_id"],
             vec![("item_id", s("Item id."))],
         ),
         read(
             "get_gist",
-            "Return the non-authoritative prose gist only.",
+            "Return the non-authoritative prose gist only. The payload also carries two \
+             top-level booleans: `discarded` (operations removal) and `archived` (hygiene \
+             archive).",
             &["item_id"],
             vec![("item_id", s("Item id."))],
         ),
