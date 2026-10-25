@@ -189,10 +189,7 @@ fn load_state(path: &Path) -> Option<CliState> {
             .and_then(|value| serde_json::from_value(value).ok()),
     };
     if state.ranking.is_none() {
-        crate::log::warn(
-            "cli state not loaded",
-            &[("path", &path.to_string_lossy())],
-        );
+        crate::log::warn("cli state not loaded", &[("path", &path.to_string_lossy())]);
     }
     Some(state)
 }

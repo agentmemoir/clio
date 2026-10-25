@@ -212,10 +212,18 @@ fn a_persisted_profile_that_no_longer_exists_is_skipped() {
         "profile_overlay": {"log.level": "debug"},
         "ranking": ranking,
     });
-    fs::write(&path, serde_json::to_string(&saved).expect("serialize state")).expect("write state");
+    fs::write(
+        &path,
+        serde_json::to_string(&saved).expect("serialize state"),
+    )
+    .expect("write state");
 
     let rt = boot(path);
-    assert_eq!(active_of(&rt), None, "an unknown profile leaves no active one");
+    assert_eq!(
+        active_of(&rt),
+        None,
+        "an unknown profile leaves no active one"
+    );
     assert!(
         (ranking_of(&rt).theta_admit - 0.61).abs() < 1e-9,
         "the rest of the state still loads"

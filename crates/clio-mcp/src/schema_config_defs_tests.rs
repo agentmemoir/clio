@@ -8,8 +8,8 @@
 //! retention shaping group and its `half_life_days` knob, the
 //! maintenance-trigger group and its inclusive/zero-disables threshold
 //! semantics, and the corrected `ranking_env_set` and `config_profile_apply`
-//! sentences (process-exit discard, governs-next-retrieval,
-//! push-to-retrieval).
+//! sentences (server-process lifetime, the tool writing nothing while the CLI
+//! persists, governs-next-retrieval, push-to-retrieval).
 //!
 //! ## Owns
 //! - `ranking_env_get` / `ranking_env_set` description assertions
@@ -157,15 +157,26 @@ fn published_maintenance_knob_zero_semantics_are_stated() {
     }
 }
 
-/// The published `ranking_env_set` sentence keeps both true halves: the
-/// process-exit discard and the governs-next-retrieval push, with the `trust`
-/// group named so a caller knows trust ratios are patchable, and the
+/// The published `ranking_env_set` sentence keeps every true half: the patch
+/// lasts for the server process's lifetime and the tool writes it nowhere,
+/// while the CLI persists it; the governs-next-retrieval push with the
+/// `trust` group named so a caller knows trust ratios are patchable; and the
 /// admission and intent-gate half staying on the process-open environment.
 #[test]
 fn ranking_env_set_description_states_the_patch_governs_the_next_retrieval() {
     let description = def("ranking_env_set").description;
     assert!(
-        description.contains("discarded at process exit"),
+        description.contains("for this server process's lifetime"),
+        "{description}"
+    );
+    assert!(
+        description.contains("this tool does not write it anywhere"),
+        "{description}"
+    );
+    assert!(
+        description.contains(
+            "`clio ranking set` on the command line persists the same environment for later commands"
+        ),
         "{description}"
     );
     assert!(
@@ -202,10 +213,12 @@ fn ranking_env_set_description_names_the_live_and_fixed_groups() {
     );
 }
 
-/// The published `config_profile_apply` sentence keeps both true halves: the
-/// push-to-retrieval half (a successful apply retunes the already-open
-/// retrieval snapshot) and the admission half (admission and the intent gate
-/// stay on the process-open environment), with the process-exit discard.
+/// The published `config_profile_apply` sentence keeps every true half: the
+/// server-process lifetime of the activation with the tool writing nothing
+/// while the CLI persists the profile, the push-to-retrieval half (a
+/// successful apply retunes the already-open retrieval snapshot), and the
+/// admission half (admission and the intent gate stay on the process-open
+/// environment).
 #[test]
 fn config_profile_apply_description_states_the_push_to_the_live_retrieval() {
     let description = def("config_profile_apply").description;
@@ -215,7 +228,17 @@ fn config_profile_apply_description_states_the_push_to_the_live_retrieval() {
     );
     assert!(description.contains("next retrieval"), "{description}");
     assert!(
-        description.contains("discarded at process exit"),
+        description.contains("for this server process for its lifetime"),
+        "{description}"
+    );
+    assert!(
+        description.contains("this tool does not write it anywhere"),
+        "{description}"
+    );
+    assert!(
+        description.contains(
+            "`clio config use` on the command line persists the same profile for later commands"
+        ),
         "{description}"
     );
     assert!(

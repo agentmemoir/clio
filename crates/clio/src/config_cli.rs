@@ -71,7 +71,7 @@ impl RuntimeGroup for ConfigGroup {
     /// not report the change as a success.
     fn commit(&self, verb: &str, payload: &Value, runtime: &mut Runtime) -> Result<(), CliError> {
         let durable = match verb {
-            "config use" => true,
+            VERB_USE => true,
             "config set" => payload.get("scope").and_then(Value::as_str) == Some(SCOPE_PROFILE),
             _ => false,
         };
@@ -134,6 +134,8 @@ fn get_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     Ok(("config_get", Value::Object(args)))
 }
 
+/// The `config use` verb: activating a profile is a write a later command sees.
+const VERB_USE: &str = "config use";
 /// The profile scope: the one `config set` scope this process can save.
 pub(crate) const SCOPE_PROFILE: &str = "profile";
 /// The session scope: in-memory only, so the CLI refuses it.

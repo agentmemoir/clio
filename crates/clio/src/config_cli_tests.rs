@@ -34,7 +34,13 @@ const SECRET: &str = "sk-abcdef0123456789";
 fn config_get_masks_a_planted_secret_in_path_and_full_views() {
     let mut rt = runtime();
     let (code, _, err) = run(
-        &["set", "credentials.api_key", SECRET, "--scope", "deployment"],
+        &[
+            "set",
+            "credentials.api_key",
+            SECRET,
+            "--scope",
+            "deployment",
+        ],
         &mut rt,
         false,
     );
@@ -63,7 +69,13 @@ fn config_get_masks_a_planted_secret_in_path_and_full_views() {
 fn config_set_rejects_invalid_type_and_range_before_apply() {
     let mut rt = runtime();
     let (code, _, err) = run(
-        &["set", "injection.budget_tokens", "0", "--scope", "deployment"],
+        &[
+            "set",
+            "injection.budget_tokens",
+            "0",
+            "--scope",
+            "deployment",
+        ],
         &mut rt,
         false,
     );
@@ -290,7 +302,8 @@ impl ScratchDir {
     fn new() -> Self {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("clio-config-cli-{}-{seq}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("clio-config-cli-{}-{seq}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         Self(dir)
     }
