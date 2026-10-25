@@ -70,7 +70,7 @@ pub fn config_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "config_profile_apply",
-            description: "Activate a profile in this process's config session and return the effective-config diff; the change is visible to config views for this process only, is discarded at process exit, and a successful apply pushes the profile's ranking environment into the already-open retrieval snapshot so the next retrieval uses it, while the admission policy and the intent gate stay on the ranking environment fixed at process open. Admission and category gates are never bypassed.",
+            description: "Activate a profile in this server process's config session and return the effective-config diff; the change is visible to config views for this server process for its lifetime and this tool does not write it anywhere, while `clio config use` on the command line persists the same profile for later commands, and a successful apply pushes the profile's ranking environment into the already-open retrieval snapshot so the next retrieval uses it, while the admission policy and the intent gate stay on the ranking environment fixed at process open. Admission and category gates are never bypassed.",
             required: &["name"],
             props: vec![("name", s("Profile name to activate."))],
         },
@@ -82,7 +82,7 @@ pub fn config_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "ranking_env_set",
-            description: "Patch the ranking/admission environment for this process's config session; the patch is readable back through `ranking_env_get` and `config_get`, is discarded at process exit, and governs the next retrieval: a successful set pushes the new retrieval weights, retention half-life, trust ratios, and co-activation constants into the already-open retrieval snapshot and its association engine, so a `coactivation` patch reaches the association hub, the retriever's own query expansion, and the graph tools, while the admission policy, the intent gate, and the hygiene weights stay on the ranking environment fixed at process open. `dry_run=true` returns the normalized weights that would apply. Weights that must sum to 1.0 are renormalized or rejected with a clear error.",
+            description: "Patch the ranking/admission environment for this server process's config session; the patch is readable back through `ranking_env_get` and `config_get` for this server process's lifetime and this tool does not write it anywhere, while `clio ranking set` on the command line persists the same environment for later commands, and the patch governs the next retrieval: a successful set pushes the new retrieval weights, retention half-life, trust ratios, and co-activation constants into the already-open retrieval snapshot and its association engine, so a `coactivation` patch reaches the association hub, the retriever's own query expansion, and the graph tools, while the admission policy, the intent gate, and the hygiene weights stay on the ranking environment fixed at process open. `dry_run=true` returns the normalized weights that would apply. Weights that must sum to 1.0 are renormalized or rejected with a clear error.",
             required: &["patch"],
             props: vec![
                 (

@@ -4,12 +4,14 @@
 //! # Responsibility
 //!
 //! This module is responsible for the `clio config` CLI surface: reading the
-//! effective configuration, setting a validated value at session/profile/
-//! deployment scope, listing named profiles, and applying one.
+//! effective configuration, setting a validated value at profile/deployment
+//! scope, listing named profiles, and applying one.
 //!
 //! ## Owns
 //! - The `config get|set|profiles|use` verbs and their text views
 //! - Decoding the `VALUE` positional into the tool's JSON value
+//! - Refusing the session scope, which a one-command process cannot observe
+//! - Flushing a profile activation or profile-scoped set to the CLI state file
 //!
 //! ## Does not own
 //! - Config merge order, validation, masking, or persistence (`clio-config`)
@@ -64,6 +66,29 @@ impl RuntimeGroup for ConfigGroup {
         }
     }
 
+    /// `config use` and a profile-scoped `config set` are the two writes a later
+    /// command can observe, so the CLI saves them. A run that cannot save must
+    /// not report the change as a success.
+    fn commit(&self, verb: &str, payload: &Value, runtime: &mut Runtime) -> Result<(), CliError> {
+        let durable = match verb {
+            "config use" => true,
+            "config set" => payload.get("scope").and_then(Value::as_str) == Some(SCOPE_PROFILE),
+            _ => false,
+        };
+        if !durable {
+            return Ok(());
+        }
+        match runtime.flush_cli_state() {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(CliError::operational(
+                "no_config_dir",
+                "the config change applied to this process but was not saved: no clio config \
+                 directory resolves, so later commands read the previous profile and values",
+            )),
+            Err(error) => Err(CliError::from_am_error(&error)),
+        }
+    }
+
     fn render(&self, verb: &str, payload: &Value) -> String {
         match verb {
             "config get" => render_get(payload),
@@ -109,19 +134,36 @@ fn get_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     Ok(("config_get", Value::Object(args)))
 }
 
-/// `config set PATH VALUE [--scope session|profile|deployment]` → `config_set`.
+/// The profile scope: the one `config set` scope this process can save.
+pub(crate) const SCOPE_PROFILE: &str = "profile";
+/// The session scope: in-memory only, so the CLI refuses it.
+pub(crate) const SCOPE_SESSION: &str = "session";
+
+/// `config set PATH VALUE [--scope profile|deployment]` → `config_set`.
 ///
 /// `VALUE` is decoded as JSON when it parses (so numbers, booleans, null, and
 /// quoted strings keep their type) and as a plain string otherwise. The tool
 /// validates the path/value and the scope before any apply.
+///
+/// A session-scoped write is never sent: it would live in this process only,
+/// which a one-command process ends immediately, so reporting it as applied
+/// would be a promise nothing can keep.
 fn set_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let [path, value] = parsed.positionals() else {
         return Err(CliError::usage_hint(
             "`config set` requires PATH and VALUE arguments",
-            "try `clio config set backend postgres`",
+            "try `clio config set backend postgres --scope deployment`",
         ));
     };
-    let scope = parsed.value("scope").unwrap_or("session");
+    let scope = parsed.value("scope").unwrap_or(SCOPE_SESSION);
+    if scope == SCOPE_SESSION {
+        return Err(CliError::operational(
+            "invalid_argument",
+            "a session-scoped value applies to the running process only, is discarded when this \
+             command ends, and cannot be read by a later command; use `--scope deployment` to \
+             persist the value in deployment.json, or `--scope profile` for the active profile",
+        ));
+    }
     let mut args = Map::new();
     args.insert("path".into(), Value::from(path.as_str()));
     args.insert("value".into(), parse_value(value));

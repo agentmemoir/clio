@@ -21,6 +21,7 @@
 use super::*;
 use crate::runtime_cli::tests::{run_group, runtime};
 use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Run one `config` verb against an injected runtime.
 fn run(args: &[&str], runtime: &mut Runtime, is_tty: bool) -> (ExitCode, String, String) {
@@ -32,7 +33,11 @@ const SECRET: &str = "sk-abcdef0123456789";
 #[test]
 fn config_get_masks_a_planted_secret_in_path_and_full_views() {
     let mut rt = runtime();
-    let (code, _, err) = run(&["set", "credentials.api_key", SECRET], &mut rt, false);
+    let (code, _, err) = run(
+        &["set", "credentials.api_key", SECRET, "--scope", "deployment"],
+        &mut rt,
+        false,
+    );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
 
     let (code, out, err) = run(&["get", "credentials.api_key"], &mut rt, false);
@@ -57,11 +62,19 @@ fn config_get_masks_a_planted_secret_in_path_and_full_views() {
 #[test]
 fn config_set_rejects_invalid_type_and_range_before_apply() {
     let mut rt = runtime();
-    let (code, _, err) = run(&["set", "injection.budget_tokens", "0"], &mut rt, false);
+    let (code, _, err) = run(
+        &["set", "injection.budget_tokens", "0", "--scope", "deployment"],
+        &mut rt,
+        false,
+    );
     assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("budget_tokens"), "{err}");
 
-    let (code, _, err) = run(&["set", "log.level", "verbose"], &mut rt, false);
+    let (code, _, err) = run(
+        &["set", "log.level", "verbose", "--scope", "deployment"],
+        &mut rt,
+        false,
+    );
     assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("log.level"), "{err}");
 }
@@ -69,11 +82,19 @@ fn config_set_rejects_invalid_type_and_range_before_apply() {
 #[test]
 fn config_set_rejects_forbidden_and_unknown_paths() {
     let mut rt = runtime();
-    let (code, _, err) = run(&["set", "ranking.theta_admit", "0.5"], &mut rt, false);
+    let (code, _, err) = run(
+        &["set", "ranking.theta_admit", "0.5", "--scope", "deployment"],
+        &mut rt,
+        false,
+    );
     assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("forbidden"), "{err}");
 
-    let (code, _, err) = run(&["set", "nope.path", "1"], &mut rt, false);
+    let (code, _, err) = run(
+        &["set", "nope.path", "1", "--scope", "deployment"],
+        &mut rt,
+        false,
+    );
     assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(err.contains("nope.path"), "{err}");
 }
@@ -137,7 +158,7 @@ fn config_profiles_lists_builtins() {
 
 #[test]
 fn config_use_applies_a_profile_and_reports_no_gate_bypass() {
-    let mut rt = runtime();
+    let (mut rt, _path, _dir) = runtime_with_state_file();
     let (code, out, err) = run(&["use", "coding_local"], &mut rt, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     let payload = json_of(&out);
@@ -251,4 +272,87 @@ fn render_use_covers_missing_bank_policy_and_present_diff() {
 /// Parse a JSON output line (test helper).
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text.trim()).expect("json output")
+}
+
+/// A runtime whose CLI state file lives in a fresh scratch directory, so the
+/// test never reads or writes the developer's own config directory.
+fn runtime_with_state_file() -> (Runtime, std::path::PathBuf, ScratchDir) {
+    let dir = ScratchDir::new();
+    let path = dir.join("cli-state.json");
+    let rt = Runtime::with_env_and_cli_state_file(&|_key: &str| None, path.clone());
+    (rt, path, dir)
+}
+
+/// Per-test scratch directory, removed on drop.
+struct ScratchDir(std::path::PathBuf);
+
+impl ScratchDir {
+    fn new() -> Self {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("clio-config-cli-{}-{seq}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        Self(dir)
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn config_use_persists_the_active_profile_a_later_boot_reports() {
+    let (mut rt, path, _dir) = runtime_with_state_file();
+    let (code, _, err) = run(&["use", "coding_local"], &mut rt, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(path.is_file(), "a profile activation writes the state file");
+
+    // The next `clio` run: a fresh runtime booted from the same state file.
+    let mut later = Runtime::with_env_and_cli_state_file(&|_key: &str| None, path.clone());
+    let (code, out, err) = run(&["profiles"], &mut later, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert_eq!(json_of(&out)["active"], json!("coding_local"), "{out}");
+
+    // The persisted profile makes a profile-scoped write acceptable, and that
+    // write is itself saved for the command after it.
+    let (code, _, err) = run(
+        &["set", "log.level", "debug", "--scope", "profile"],
+        &mut later,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let mut third = Runtime::with_env_and_cli_state_file(&|_key: &str| None, path);
+    let (code, out, err) = run(&["get", "log.level"], &mut third, false);
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert_eq!(json_of(&out)["value"], json!("debug"), "{out}");
+}
+
+#[test]
+fn config_set_scope_session_is_refused_and_saves_nothing() {
+    let (mut rt, path, _dir) = runtime_with_state_file();
+    let (code, out, err) = run(
+        &["set", "log.level", "debug", "--scope", "session"],
+        &mut rt,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(err.contains("invalid_argument"), "{err}");
+    assert!(err.contains("running process only"), "{err}");
+    assert!(err.contains("discarded when this command ends"), "{err}");
+    assert!(err.contains("cannot be read by a later command"), "{err}");
+    assert!(err.contains("--scope deployment"), "{err}");
+    assert!(!path.exists(), "a refused session set writes nothing");
+    assert!(!out.contains("debug"), "a refusal reports no applied value");
+
+    // The scope the flag falls back to is refused too, so a bare set cannot
+    // report a value that dies with this process.
+    let (code, _, err) = run(&["set", "log.level", "debug"], &mut rt, false);
+    assert_eq!(code, ExitCode::from(1), "{err}");
+    assert!(err.contains("running process only"), "{err}");
 }

@@ -4,17 +4,22 @@
 //! # Responsibility
 //!
 //! This module is responsible for the durable CLI state file: resolving its
-//! path beside the deployment overlay, reading the ranking environment a
-//! previous command saved, and writing the current one back atomically.
+//! path beside the deployment overlay, reading the ranking environment, the
+//! active profile, and the profile overlay a previous command saved, and
+//! writing all three back atomically.
 //!
 //! ## Owns
 //! - The `cli-state.json` file name and its path resolution under the clio
 //!   config directory
-//! - Reading the stored `ranking` object, ignoring a missing or corrupt file
-//! - Writing the current ranking environment owner-only and atomically
+//! - Reading the stored `active_profile`, `profile_overlay`, and `ranking`
+//!   objects, ignoring a missing or corrupt file
+//! - The boot order they are restored in: profile, then its overlay, then the
+//!   ranking, so an explicit ranking set wins over the profile's own ranking
+//! - Writing the current three-part state owner-only and atomically
 //!
 //! ## Does not own
 //! - The ranking schema itself (see `crate::ranking`)
+//! - The profile catalog or what applying one sets (see `profile_ops`)
 //! - The deployment overlay file or its sealed values (see `persist`)
 //! - Deciding when to flush (the CLI layer owns that; the tool handlers stay
 //!   in memory, because the MCP server shares them)
@@ -27,9 +32,12 @@
 //! Keep this module focused on the durable CLI state file.
 
 use super::Runtime;
+use super::merge::Overlay;
 use super::persist::{default_config_dir, write_private_atomic};
 use crate::error::{AmError, ErrorCode};
+use crate::profile::lookup_profile;
 use crate::ranking::RankingEnv;
+use crate::secret::path_is_secret;
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,8 +45,12 @@ use std::path::{Path, PathBuf};
 /// Durable CLI state file name under the clio config directory.
 pub const CLI_STATE_FILE_NAME: &str = "cli-state.json";
 
-/// The one key the file holds: the full ranking environment.
+/// The full ranking environment, which wins over a profile's own ranking.
 const RANKING_KEY: &str = "ranking";
+/// The profile a previous `clio config use` activated.
+const ACTIVE_PROFILE_KEY: &str = "active_profile";
+/// The flat key/value overlay a previous `config set --scope profile` wrote.
+const PROFILE_OVERLAY_KEY: &str = "profile_overlay";
 
 /// Resolve the CLI state path: explicit override, else the XDG default under
 /// `$XDG_CONFIG_HOME/clio/` (fallback `$HOME/.config/clio/`), else `None` when
@@ -61,6 +73,15 @@ pub(crate) fn resolve_cli_state_path_with(
     Some(default_config_dir(get)?.join(CLI_STATE_FILE_NAME))
 }
 
+/// One file's worth of durable CLI state; every part is optional, so a file
+/// written by an older version boots exactly as before.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct CliState {
+    pub(crate) active_profile: Option<String>,
+    pub(crate) profile_overlay: Overlay,
+    pub(crate) ranking: Option<RankingEnv>,
+}
+
 impl Runtime {
     /// Boot with an injected environment lookup and an explicit CLI state file,
     /// and no deployment overlay.
@@ -72,19 +93,43 @@ impl Runtime {
         Self::boot_with(&|key| get(key), None, None, Some(path.into()))
     }
 
-    /// Load the persisted ranking environment over the boot default. A missing,
-    /// unreadable, or corrupt file leaves the boot value in place.
+    /// Load the persisted profile, profile overlay, and ranking environment over
+    /// the boot defaults. A missing, unreadable, or corrupt file leaves the boot
+    /// value in place, and a profile name the catalog no longer has is skipped
+    /// rather than failing the boot.
     pub(super) fn load_cli_state(&mut self) {
         let Some(path) = self.cli_state_path.clone() else {
             return;
         };
-        if let Some(ranking) = load_ranking(&path) {
+        let Some(state) = load_state(&path) else {
+            return;
+        };
+        self.restore_profile(state.active_profile.as_deref(), state.profile_overlay);
+        if let Some(ranking) = state.ranking {
             self.ranking = ranking;
         }
     }
 
-    /// Write the current ranking environment to the resolved CLI state file,
-    /// atomically and owner-only.
+    /// Apply the persisted profile the way `config use` does, then put the
+    /// persisted overlay back on top of it. The overlay belongs to the profile,
+    /// so a profile the catalog no longer has leaves it unapplied.
+    fn restore_profile(&mut self, name: Option<&str>, overlay: Overlay) {
+        let Some(name) = name else {
+            return;
+        };
+        let Some(profile) = lookup_profile(name) else {
+            crate::log::warn("cli state profile not found", &[("profile", name)]);
+            return;
+        };
+        // Applying a profile clears the overlay, so it is restored afterwards.
+        self.apply_profile(&profile);
+        for (key, value) in overlay {
+            self.profile_overlay.insert(key, value);
+        }
+    }
+
+    /// Write the active profile, the profile overlay, and the ranking
+    /// environment to the resolved CLI state file, atomically and owner-only.
     ///
     /// Returns whether a file was written: `Ok(false)` means no path resolved,
     /// so nothing could be saved and the caller must not claim it was.
@@ -95,31 +140,65 @@ impl Runtime {
         let Some(path) = self.cli_state_path.clone() else {
             return Ok(false);
         };
-        save_ranking(&path, &self.ranking)?;
+        save_state(&path, &self.cli_state())?;
         Ok(true)
+    }
+
+    /// The three-part state this runtime would flush.
+    fn cli_state(&self) -> CliState {
+        // A secret cannot be sealed here, so it stays in the profile overlay of
+        // the running process and out of the file rather than in the clear.
+        let profile_overlay = self
+            .profile_overlay
+            .iter()
+            .filter(|(key, _)| !path_is_secret(key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        CliState {
+            active_profile: self.active_profile.clone(),
+            profile_overlay,
+            ranking: Some(self.ranking.clone()),
+        }
     }
 }
 
-/// The ranking environment stored in `path`, or `None` when the file is
-/// missing, unreadable, not JSON, or does not carry one.
-fn load_ranking(path: &Path) -> Option<RankingEnv> {
+/// The state stored in `path`, or `None` when the file is missing, unreadable,
+/// not JSON, or carries nothing this version understands.
+fn load_state(path: &Path) -> Option<CliState> {
     // A missing or unreadable file is simply "nothing saved yet".
     let text = fs::read_to_string(path).ok()?;
-    let ranking = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|root| root.get(RANKING_KEY).cloned())
-        .and_then(|value| serde_json::from_value(value).ok());
-    if ranking.is_none() {
+    let root = serde_json::from_str::<Value>(&text).ok()?;
+    let state = CliState {
+        active_profile: root
+            .get(ACTIVE_PROFILE_KEY)
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        profile_overlay: root
+            .get(PROFILE_OVERLAY_KEY)
+            .and_then(Value::as_object)
+            .map(|object| {
+                object
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        ranking: root
+            .get(RANKING_KEY)
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok()),
+    };
+    if state.ranking.is_none() {
         crate::log::warn(
             "cli state not loaded",
             &[("path", &path.to_string_lossy())],
         );
     }
-    ranking
+    Some(state)
 }
 
-/// Write `ranking` as the file's sole key.
-fn save_ranking(path: &Path, ranking: &RankingEnv) -> Result<(), AmError> {
+/// Write `state` as the file's keys.
+fn save_state(path: &Path, state: &CliState) -> Result<(), AmError> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| {
             AmError::new(
@@ -130,9 +209,28 @@ fn save_ranking(path: &Path, ranking: &RankingEnv) -> Result<(), AmError> {
     }
     let mut root = Map::new();
     root.insert(
-        RANKING_KEY.into(),
-        serde_json::to_value(ranking).expect("RankingEnv serializes"),
+        ACTIVE_PROFILE_KEY.into(),
+        state
+            .active_profile
+            .as_ref()
+            .map_or(Value::Null, |name| Value::String(name.clone())),
     );
+    root.insert(
+        PROFILE_OVERLAY_KEY.into(),
+        Value::Object(
+            state
+                .profile_overlay
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        ),
+    );
+    if let Some(ranking) = &state.ranking {
+        root.insert(
+            RANKING_KEY.into(),
+            serde_json::to_value(ranking).expect("RankingEnv serializes"),
+        );
+    }
     let text = serde_json::to_string_pretty(&Value::Object(root)).expect("serialize cli state");
     write_private_atomic(path, &text).map_err(|e| {
         AmError::new(

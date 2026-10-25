@@ -19,8 +19,10 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
+use crate::config::ConfigScope;
 use crate::error::ToolResult;
 use crate::ranking::RankingEnvPatch;
+use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Per-test scratch directory, removed on drop and unique by process and order.
@@ -158,4 +160,79 @@ fn a_dry_run_writes_nothing_and_leaves_the_saved_value_alone() {
 fn flushing_without_a_resolved_path_writes_nothing() {
     let rt = Runtime::with_env(&|_key: &str| None);
     assert!(!rt.flush_cli_state().expect("no path is not an error"));
+}
+
+/// The profile an `effective_raw` read reports as active.
+fn active_of(rt: &Runtime) -> Option<String> {
+    rt.effective_raw()
+        .pointer("/profile/active")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// The `log.level` a runtime's effective config carries.
+fn log_level_of(rt: &Runtime) -> Value {
+    rt.effective_raw()
+        .pointer("/log/level")
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn a_later_boot_reports_the_profile_and_profile_value_a_flush_saved() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+
+    let mut first = boot(path.clone());
+    let ToolResult::Ok { .. } = first.config_profile_apply("coding_local") else {
+        panic!("the profile applies");
+    };
+    let ToolResult::Ok { .. } = first.config_set("log.level", json!("debug"), ConfigScope::Profile)
+    else {
+        panic!("a profile-scoped set applies once a profile is active");
+    };
+    // An explicit ranking set wins over the profile's own ranking.
+    set_and_flush(&mut first, 0.61);
+
+    let second = boot(path);
+    assert_eq!(active_profile_of(&second).as_deref(), Some("coding_local"));
+    assert_eq!(active_of(&second).as_deref(), Some("coding_local"));
+    assert_eq!(log_level_of(&second), json!("debug"));
+    assert!((ranking_of(&second).theta_admit - 0.61).abs() < 1e-9);
+}
+
+#[test]
+fn a_persisted_profile_that_no_longer_exists_is_skipped() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    let mut ranking = serde_json::to_value(RankingEnv::system_defaults()).expect("serialize");
+    ranking["theta_admit"] = json!(0.61);
+    let saved = json!({
+        "active_profile": "a_profile_that_was_removed",
+        "profile_overlay": {"log.level": "debug"},
+        "ranking": ranking,
+    });
+    fs::write(&path, serde_json::to_string(&saved).expect("serialize state")).expect("write state");
+
+    let rt = boot(path);
+    assert_eq!(active_of(&rt), None, "an unknown profile leaves no active one");
+    assert!(
+        (ranking_of(&rt).theta_admit - 0.61).abs() < 1e-9,
+        "the rest of the state still loads"
+    );
+    // A runtime with no state file at all: the comparison the stale profile needs.
+    let default_level = log_level_of(&boot(scratch.0.join("absent.json")));
+    assert_eq!(
+        log_level_of(&rt),
+        default_level,
+        "a vanished profile's overlay is not applied"
+    );
+}
+
+/// The active profile `config_profiles` reports.
+fn active_profile_of(rt: &Runtime) -> Option<String> {
+    let ToolResult::Ok { data, .. } = rt.config_profiles() else {
+        panic!("config_profiles must succeed");
+    };
+    data.active
 }
