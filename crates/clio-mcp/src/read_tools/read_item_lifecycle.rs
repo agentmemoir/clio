@@ -55,3 +55,7 @@ pub(crate) fn attach(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../read_item_lifecycle_tests.rs"]
+mod tests;

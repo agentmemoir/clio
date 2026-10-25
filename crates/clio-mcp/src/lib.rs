@@ -63,7 +63,6 @@ pub mod protocol;
 pub mod provider_adapter;
 pub mod read_explain;
 mod read_history;
-mod read_item_lifecycle;
 mod read_read_policy;
 mod read_retrieve;
 pub mod read_tools;

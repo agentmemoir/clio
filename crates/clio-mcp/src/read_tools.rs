@@ -37,6 +37,8 @@ mod read_freshness;
 #[path = "read_inspect_supersession.rs"]
 mod read_inspect_supersession;
 
+mod read_item_lifecycle;
+
 /// Route one bound read tool to its in-process handler.
 pub(crate) fn dispatch(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
     // Config reads and caller-supplied previews do not imply a stored bank.
@@ -161,7 +163,7 @@ fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
         item.snapshot.as_ref(),
     )?;
     let mut value = serde_json::to_value(&item).expect("serialize memory item");
-    crate::read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
     if let (Some(block), Some(object)) = (block, value.as_object_mut()) {
         object.insert(read_freshness::FRESHNESS_KEY.into(), block);
     }
@@ -177,7 +179,7 @@ fn get_snapshot(state: &McpState, args: &Value) -> Result<Value, AmError> {
         return Err(item_not_found(item_id));
     };
     let mut value = json!({"item_id": item_id, "authoritative": true, "snapshot": snapshot});
-    crate::read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
     Ok(value)
 }
 
@@ -190,7 +192,7 @@ fn get_gist(state: &McpState, args: &Value) -> Result<Value, AmError> {
         return Err(item_not_found(item_id));
     };
     let mut value = json!({"item_id": item_id, "authoritative": false, "gist": gist});
-    crate::read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
     Ok(value)
 }
 
