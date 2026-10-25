@@ -65,37 +65,43 @@ fn materialize_writes_every_asset_for_the_target() {
 /// sends the operator to do work the tool already does.
 #[test]
 fn models_readme_covers_the_automatic_and_the_manual_path() {
+    let readme = models_readme();
     // The shipped name, spelled exactly as the container opens it.
-    assert!(MODELS_README.contains(GGUF_FILE_NAME), "{MODELS_README}");
+    assert!(readme.contains(GGUF_FILE_NAME), "{readme}");
     // The automatic path: setup fetches the missing file before it writes.
+    assert!(readme.contains("`clio setup` fetches it"), "{readme}");
     assert!(
-        MODELS_README.contains("`clio setup` fetches it"),
-        "{MODELS_README}"
+        readme.contains("setup downloads the model from the Hugging Face Hub"),
+        "{readme}"
+    );
+    // The two ways a machine without the Hub completes the same step.
+    assert!(readme.contains("CLIO_EXTRACT_MODEL_URL"), "{readme}");
+    assert!(readme.contains("CLIO_EXTRACT_MODEL_FILE"), "{readme}");
+    // The manual path survives for the compose and Makefile starts, and names the
+    // one repository the download itself uses.
+    assert!(
+        readme.contains(&format!("hf download {GGUF_REPO}")),
+        "{readme}"
     );
     assert!(
-        MODELS_README.contains("setup downloads the model from the Hugging Face Hub"),
-        "{MODELS_README}"
-    );
-    // The manual path survives for the compose and Makefile starts.
-    assert!(
-        MODELS_README.contains("hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF"),
-        "{MODELS_README}"
+        readme.contains(&format!("{GGUF_FILE_NAME} --local-dir")),
+        "{readme}"
     );
     assert!(
-        MODELS_README.contains("refuse to start the extract service while the file is absent"),
-        "{MODELS_README}"
+        readme.contains("refuse to start the extract service while the file is absent"),
+        "{readme}"
     );
     // It no longer asks for the fetch as a step every start needs.
     assert!(
-        !MODELS_README.contains("place it here before selecting"),
-        "the README must not present the fetch as always manual: {MODELS_README}"
+        !readme.contains("place it here before selecting"),
+        "the README must not present the fetch as always manual: {readme}"
     );
     // The file the operator reads is this text, byte for byte.
     let root = temp_root("readme-text");
     materialize(&root, ComposeTarget::MacArm64).expect("materialize");
     assert_eq!(
         std::fs::read_to_string(root.join("models/README.md")).unwrap(),
-        MODELS_README
+        readme
     );
     let _ = std::fs::remove_dir_all(&root);
 }

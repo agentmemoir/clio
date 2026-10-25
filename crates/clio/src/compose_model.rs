@@ -37,7 +37,7 @@
 //! or refuse one whose model is present. Asking Compose removes the second
 //! resolver rather than trying to keep two of them in step.
 
-use crate::compose_assets::GGUF_FILE_NAME;
+use crate::compose_assets::{GGUF_FILE_NAME, GGUF_REPO};
 use crate::compose_docker::{ComposeTarget, DockerRunner, Stack, compose_args};
 use std::path::{Path, PathBuf};
 
@@ -200,7 +200,7 @@ pub(crate) fn missing_model_error(model: &Path) -> String {
 /// at the directory that actually holds the model.
 pub(crate) fn manual_fetch(model: &Path) -> String {
     format!(
-        "fetch it with `hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF {} --local-dir {}`",
+        "fetch it with `hf download {GGUF_REPO} {} --local-dir {}`",
         file_name(model),
         model_directory(model)
     )

@@ -63,7 +63,7 @@ fn draw_with_env(
     will_back_up: Option<String>,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> String {
-    let will_fetch = crate::setup_extract_model::preview_line(
+    let announced = crate::setup_extract_model::announcement(
         answers,
         Some(crate::setup_preview_fixtures::ABSENT_COMPOSE_ROOT),
         env,
@@ -76,7 +76,8 @@ fn draw_with_env(
             answers,
             &|path| crate::setup_report::value_at(current, path),
             will_back_up,
-            will_fetch,
+            announced.will_fetch,
+            announced.will_stop,
             env,
         ),
     )
@@ -232,6 +233,7 @@ fn a_watched_field_the_run_drops_is_shown_as_removed() {
     let current_view = view(
         run.answers(),
         &|path| crate::setup_report::value_at(&current, path),
+        None,
         None,
         None,
         &|_| None,

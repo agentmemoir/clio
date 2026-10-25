@@ -45,24 +45,32 @@ pub(crate) const SQL_SLOTS: &str = include_str!("../../../sql/003_local_complian
 /// Guidance materialized into `models/`. The GGUF itself is large and MUST
 /// NOT be embedded. `clio setup` fetches it when a local extract service is
 /// selected and the file is missing; the compose path needs it already present.
-pub(crate) const MODELS_README: &str = "\
+///
+/// The repository and the file name are interpolated from the constants below
+/// rather than written twice, so the command this file tells an operator to run
+/// cannot name a repository a `clio setup` run never downloads from.
+pub(crate) fn models_readme() -> String {
+    format!(
+        "\
 # models/ — extract service model directory
 
 The `extract` service (NuExtract-1.5-tiny via llama.cpp server) expects its GGUF model file in this directory. The file is large and is not shipped with the compose material.
 
-`clio setup` fetches it: when extraction is local and the file is missing, setup downloads the model from the Hugging Face Hub before it writes the config, so setup needs no manual step.
+`clio setup` fetches it: when extraction is local and the file is missing, setup downloads the model from the Hugging Face Hub before it writes the config, so setup needs no manual step. `CLIO_EXTRACT_MODEL_URL` points that download at a mirror, and `CLIO_EXTRACT_MODEL_FILE` installs a local copy of the file instead of downloading it.
 
 `clio compose up` and `make compose up` with the `local-rft` profile do not download it. Both refuse to start the extract service while the file is absent, and print the command that fetches it:
 
-    hf download DevQuasar/numind.NuExtract-tiny-v1.5-GGUF \\
-      numind.NuExtract-tiny-v1.5.Q4_K_M.gguf --local-dir ./models
+    hf download {GGUF_REPO} \\
+      {GGUF_FILE_NAME} --local-dir ./models
 
-The expected file name is `numind.NuExtract-tiny-v1.5.Q4_K_M.gguf` (configurable via CLIO_EXTRACT_GGUF in .env).
-";
+The expected file name is `{GGUF_FILE_NAME}` (configurable via CLIO_EXTRACT_GGUF in .env).
+"
+    )
+}
 
 struct Asset {
     path: &'static str,
-    contents: &'static str,
+    contents: String,
 }
 
 /// The full materialized asset set for one target: base compose, arch overlay,
@@ -71,30 +79,30 @@ fn assets(target: ComposeTarget) -> Vec<Asset> {
     vec![
         Asset {
             path: "compose.yml",
-            contents: BASE_COMPOSE,
+            contents: BASE_COMPOSE.to_owned(),
         },
         Asset {
             path: target.overlay(),
             contents: match target {
-                ComposeTarget::MacArm64 => OVERLAY_ARM64,
-                ComposeTarget::LinuxAmd64 => OVERLAY_AMD64,
+                ComposeTarget::MacArm64 => OVERLAY_ARM64.to_owned(),
+                ComposeTarget::LinuxAmd64 => OVERLAY_AMD64.to_owned(),
             },
         },
         Asset {
             path: "sql/001_core.sql",
-            contents: SQL_CORE,
+            contents: SQL_CORE.to_owned(),
         },
         Asset {
             path: "sql/002_vectors_postgres.sql",
-            contents: SQL_VECTORS,
+            contents: SQL_VECTORS.to_owned(),
         },
         Asset {
             path: "sql/003_local_compliance_slots.sql",
-            contents: SQL_SLOTS,
+            contents: SQL_SLOTS.to_owned(),
         },
         Asset {
             path: "models/README.md",
-            contents: MODELS_README,
+            contents: models_readme(),
         },
     ]
 }
@@ -123,14 +131,14 @@ pub(crate) fn materialize(root: &Path, target: ComposeTarget) -> Result<Vec<Stri
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
-        if let Some(backup) = backup_edited(&path, asset.contents)? {
+        if let Some(backup) = backup_edited(&path, &asset.contents)? {
             eprintln!(
                 "warning: {} was modified by hand; saved the previous version to {}",
                 asset.path,
                 backup.display()
             );
         }
-        std::fs::write(&path, asset.contents)
+        std::fs::write(&path, &asset.contents)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         written.push(asset.path.to_string());
     }
@@ -176,10 +184,22 @@ pub(crate) fn verify_bind_mounts(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The one Hugging Face repository the shipped model is published in. The
+/// download address, the manual `hf download` sentence, and the materialized
+/// `models/` README all derive from it, so no two of them can name a different
+/// repository.
+pub(crate) const GGUF_REPO: &str = "DevQuasar-3/numind.NuExtract-tiny-v1.5-GGUF";
+
 /// The GGUF file name the extract service expects by default (matches
 /// `compose.yml` and the materialized `models/` README). The name the running
 /// stack actually mounts comes from Compose; see `compose_model`.
 pub(crate) const GGUF_FILE_NAME: &str = "numind.NuExtract-tiny-v1.5.Q4_K_M.gguf";
+
+/// The SHA-256 the Hub publishes for the bytes of [`GGUF_FILE_NAME`], which is
+/// what `hf download` checks and what a download here must match before the
+/// file becomes the model.
+pub(crate) const GGUF_SHA256: &str =
+    "e7a702d86a480e77669679d497ce20c7d8e52b0dc4cb6c828c35090d05472524";
 
 #[cfg(test)]
 #[path = "compose_assets_tests.rs"]

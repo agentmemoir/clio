@@ -3,15 +3,16 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the tests of the preview's presence check: what
-//! the run announces it will download, and when it announces nothing.
+//! This module is responsible for the tests of the preview's announcement about
+//! the model: the download it promises, the run it says will stop instead, and the
+//! cases where it says nothing.
 //!
 //! ## Owns
-//! - `preview_line` behavior under test for `setup_extract_model`
+//! - `announcement` behavior under test for `setup_extract_model`
 //!
 //! ## Does not own
 //! - The download itself, and its progress lines (see `setup_extract_model_tests`)
-//! - The rendered preview around the line (see `setup_preview_tests`)
+//! - The rendered preview around the line (see `setup_preview_tests_fetch_tests`)
 //!
 //! ## Boundary
 //!
@@ -22,19 +23,17 @@
 
 use super::*;
 
-/// An environment that names no model of its own, so the shipped one is meant.
-fn no_env(_key: &str) -> Option<String> {
-    None
-}
-
+/// The line a run announces for a shipped model that is absent.
 #[test]
-fn the_preview_announces_the_download_when_the_model_is_absent() {
+fn an_absent_shipped_model_is_announced_as_a_download() {
     let dir = temp_dir("preview-absent");
     let root = dir.to_string_lossy().into_owned();
 
-    let line = preview_line(&answers(Some(ServiceRole::Local)), Some(&root), &no_env)
-        .expect("an absent model is announced");
+    let announced = announcement(&answers(Some(ServiceRole::Local)), Some(&root), &no_env);
 
+    let line = announced
+        .will_fetch
+        .expect("an absent shipped model is announced");
     assert!(
         line.starts_with("numind.NuExtract-tiny-v1.5.Q4_K_M.gguf (397 MB)"),
         "the line names the file and the size the Hub advertises: {line}"
@@ -46,6 +45,10 @@ fn the_preview_announces_the_download_when_the_model_is_absent() {
     assert!(
         line.contains("before it writes the config"),
         "the line says when the download happens: {line}"
+    );
+    assert_eq!(
+        announced.will_stop, None,
+        "a run that will fetch has no reason to say it stops"
     );
     assert!(
         !dir.join("models").exists(),
@@ -61,9 +64,50 @@ fn a_model_already_on_the_host_is_not_announced() {
     std::fs::create_dir_all(&models).expect("create models");
     std::fs::write(models.join(GGUF_FILE_NAME), b"stub").expect("write the model");
 
-    let line = preview_line(&answers(Some(ServiceRole::Local)), Some(&root), &no_env);
+    assert_eq!(
+        announcement(&answers(Some(ServiceRole::Local)), Some(&root), &no_env),
+        Announced::default(),
+        "there is nothing to announce"
+    );
+}
 
-    assert_eq!(line, None, "there is nothing to announce");
+/// A name the code will not fetch must not be announced as a fetch: the preview
+/// says the run stops before it writes the config, and why.
+#[test]
+fn a_name_the_project_does_not_ship_is_announced_as_a_stop() {
+    let dir = temp_dir("preview-named");
+    let root = dir.to_string_lossy().into_owned();
+    let env = |key: &str| (key == "CLIO_EXTRACT_GGUF").then(|| "custom.gguf".to_owned());
+
+    let announced = announcement(&answers(Some(ServiceRole::Local)), Some(&root), &env);
+
+    assert_eq!(
+        announced.will_fetch, None,
+        "a name with no source is never announced as a download"
+    );
+    let notice = announced.will_stop.expect("the run stops instead");
+    assert!(notice.contains("before it writes the config"), "{notice}");
+    assert!(notice.contains("custom.gguf"), "{notice}");
+    assert!(
+        notice.contains(GGUF_FILE_NAME),
+        "the notice names the model the project ships instead: {notice}"
+    );
+}
+
+/// The shipped name, one directory up: the run refuses, so the preview says so
+/// rather than promising a download outside `models/`.
+#[test]
+fn a_name_that_leaves_the_models_directory_is_announced_as_a_stop() {
+    let dir = temp_dir("preview-escapes");
+    let root = dir.to_string_lossy().into_owned();
+    let escaped = format!("../{GGUF_FILE_NAME}");
+    let env = move |key: &str| (key == "CLIO_EXTRACT_GGUF").then(|| escaped.clone());
+
+    let announced = announcement(&answers(Some(ServiceRole::Local)), Some(&root), &env);
+
+    assert_eq!(announced.will_fetch, None, "nothing is downloaded");
+    let notice = announced.will_stop.expect("the run stops instead");
+    assert!(notice.contains("outside models/"), "{notice}");
 }
 
 #[test]
@@ -72,8 +116,11 @@ fn an_extract_role_that_is_not_local_announces_nothing() {
     let root = dir.to_string_lossy().into_owned();
 
     for role in [ServiceRole::Skip, ServiceRole::Hosted] {
-        let line = preview_line(&answers(Some(role)), Some(&root), &no_env);
-        assert_eq!(line, None, "a {role:?} extract downloads nothing");
+        assert_eq!(
+            announcement(&answers(Some(role)), Some(&root), &no_env),
+            Announced::default(),
+            "a {role:?} extract downloads nothing and stops for nothing"
+        );
     }
 }
 
@@ -85,21 +132,8 @@ fn an_extract_role_nobody_chose_announces_nothing() {
     let root = dir.to_string_lossy().into_owned();
 
     assert_eq!(
-        preview_line(&answers(None), Some(&root), &no_env),
-        None,
+        announcement(&answers(None), Some(&root), &no_env),
+        Announced::default(),
         "no answer means no announcement"
     );
-}
-
-#[test]
-fn the_announced_name_is_the_one_the_compose_environment_chose() {
-    let dir = temp_dir("preview-named");
-    let root = dir.to_string_lossy().into_owned();
-    let env = |key: &str| (key == "CLIO_EXTRACT_GGUF").then(|| "custom.gguf".to_owned());
-
-    let line = preview_line(&answers(Some(ServiceRole::Local)), Some(&root), &env)
-        .expect("an absent model is announced");
-
-    assert!(line.starts_with("custom.gguf (397 MB)"), "{line}");
-    assert!(!line.contains(GGUF_FILE_NAME), "{line}");
 }

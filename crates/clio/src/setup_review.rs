@@ -163,12 +163,13 @@ pub(crate) fn review(
         // The download is announced before the operator accepts it, and the
         // presence check runs with the answers as they stand, so an amendment that
         // turns the extractor on or off changes this line with the redraw.
-        let will_fetch = crate::setup_extract_model::preview_line(&answers, compose_dir, env);
+        let announced = crate::setup_extract_model::announcement(&answers, compose_dir, env);
         let view = preview::view(
             &answers,
             current,
             will_back_up.map(str::to_owned),
-            will_fetch,
+            announced.will_fetch,
+            announced.will_stop,
             env,
         );
         let palette = ctx.palette();

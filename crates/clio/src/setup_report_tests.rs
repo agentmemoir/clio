@@ -142,6 +142,7 @@ fn the_block_names_come_out_in_the_plans_order() {
             },
         ],
         will_fetch: None,
+        will_stop: None,
         will_start: vec!["postgres"],
         will_remove: vec!["rerank model".to_owned()],
         will_back_up: None,
@@ -171,6 +172,7 @@ fn an_untested_line_is_visibly_different_from_a_tested_one() {
     let view = PreviewView {
         blocks: Vec::new(),
         will_fetch: None,
+        will_stop: None,
         will_start: Vec::new(),
         will_remove: Vec::new(),
         will_back_up: Some("/tmp/deployment.json".to_owned()),
@@ -206,6 +208,7 @@ fn nothing_to_start_or_remove_says_nothing_rather_than_an_empty_cell() {
     let view = PreviewView {
         blocks: Vec::new(),
         will_fetch: None,
+        will_stop: None,
         will_start: Vec::new(),
         will_remove: Vec::new(),
         will_back_up: None,
@@ -225,6 +228,7 @@ fn view_with_fetch(what: Option<&str>) -> PreviewView {
     PreviewView {
         blocks: Vec::new(),
         will_fetch: what.map(str::to_owned),
+        will_stop: None,
         will_start: vec!["extract"],
         will_remove: Vec::new(),
         will_back_up: None,
@@ -279,6 +283,36 @@ fn a_run_with_nothing_to_fetch_has_no_fetch_line() {
     assert!(printed.contains("Will start"), "{printed}");
 }
 
+/// A run that will refuse before writing says so in the same column, and never
+/// promises a start it will not reach.
+#[test]
+fn a_run_that_will_stop_prints_no_start_line() {
+    let notice = "before it writes the config: missing extract model custom.gguf";
+    let view = PreviewView {
+        blocks: Vec::new(),
+        will_fetch: None,
+        will_stop: Some(notice.to_owned()),
+        will_start: vec!["extract"],
+        will_remove: Vec::new(),
+        will_back_up: None,
+        tested: Vec::new(),
+    };
+    let mut out: Vec<u8> = Vec::new();
+    preview(&mut out, Palette::new(false), &view).expect("a Vec");
+    let printed = String::from_utf8(out).expect("utf8");
+
+    assert!(printed.contains("Will stop"), "{printed}");
+    assert!(
+        !printed.contains("Will start"),
+        "a run that stops before writing starts nothing:\n{printed}"
+    );
+    assert_eq!(
+        column_of(&printed, "Will stop", notice),
+        column_of(&printed, "Will remove", "nothing"),
+        "the notice starts in the column every heading in this block uses:\n{printed}"
+    );
+}
+
 #[test]
 fn a_second_column_is_printed_after_the_state() {
     let view = PreviewView {
@@ -292,6 +326,7 @@ fn a_second_column_is_printed_after_the_state() {
             }],
         }],
         will_fetch: None,
+        will_stop: None,
         will_start: Vec::new(),
         will_remove: Vec::new(),
         will_back_up: None,

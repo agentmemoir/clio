@@ -212,7 +212,12 @@ pub(crate) struct PreviewView {
     /// Drawn immediately before `Will start`, because a download happens before
     /// anything is written and the operator is agreeing to it at this moment.
     pub will_fetch: Option<String>,
-    /// What `Will start` will say.
+    /// What `Will stop` will say, or `None` when the run goes on to write.
+    ///
+    /// Set when the run will refuse before it writes the config: the reason is
+    /// printed here instead of promising a start that will not happen.
+    pub will_stop: Option<String>,
+    /// What `Will start` will say, when the run reaches a start at all.
     pub will_start: Vec<&'static str>,
     /// What `Will remove` will say.
     pub will_remove: Vec<String>,
@@ -278,10 +283,14 @@ pub(crate) fn preview(
     if let Some(what) = &view.will_fetch {
         line(format!("Will fetch    {what}"))?;
     }
-    line(format!(
-        "Will start    {} after you apply",
-        join_or_nothing(&view.will_start)
-    ))?;
+    if let Some(what) = &view.will_stop {
+        line(format!("Will stop     {what}"))?;
+    } else {
+        line(format!(
+            "Will start    {} after you apply",
+            join_or_nothing(&view.will_start)
+        ))?;
+    }
     line(format!(
         "Will remove   {}",
         join_or_nothing(&view.will_remove)

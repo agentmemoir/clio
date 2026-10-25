@@ -7,11 +7,12 @@
 //! bytes, and the streaming path is driven with an in-memory reader.
 //!
 //! ## Owns
-//! - Download, presence, and refusal behaviour under test for `setup_extract_model`
+//! - Download, presence, refusal, and environment overrides under test for
+//!   `setup_extract_model`
 //!
 //! ## Does not own
-//! - The streaming write, the size check, and the rename (see
-//!   `setup_extract_model_stream_tests`)
+//! - The streaming write, the length and digest checks, and the rename (see
+//!   `setup_extract_model_download`)
 //! - The host-path derivation from a resolved stack (see `compose_model_tests`)
 //! - The run order around the fetch (see `setup_cli_fail_tests`)
 //!
@@ -27,13 +28,18 @@ use crate::setup_steps::Answers;
 use crate::setup_support_tests::temp_dir;
 use std::cell::RefCell;
 
+/// An environment that sets nothing, so the shipped model and the Hub are meant.
+fn no_env(_key: &str) -> Option<String> {
+    None
+}
+
 /// A `ModelFetcher` stub: records the address and destination of every download
 /// and either writes filler bytes or refuses.
 ///
 /// It never opens a socket, so a suite that drives the fetch runs on a machine with
 /// no network at all. The bytes are written to the destination directly rather than
-/// through a `.part` file: the atomic rename is the real fetcher's, and its failure
-/// paths are covered where it is implemented.
+/// through a temporary file: the atomic rename is the real fetcher's, and its
+/// failure paths are covered where it is implemented.
 pub(crate) struct StubFetcher {
     bytes: u64,
     failure: Option<String>,
@@ -70,6 +76,7 @@ impl crate::setup_extract_model::ModelFetcher for StubFetcher {
         &self,
         url: &str,
         dest: &Path,
+        _sha256: &str,
         progress: &mut dyn FnMut(u64),
     ) -> Result<u64, String> {
         self.calls
@@ -114,6 +121,14 @@ fn answers(extract: Option<ServiceRole>) -> Answers {
     }
 }
 
+/// The temporary file this process writes, named the same way the transfer names
+/// it.
+fn part_of(dest: &Path) -> PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.part", std::process::id()));
+    dest.with_file_name(name)
+}
+
 #[test]
 fn an_extract_role_that_is_not_local_needs_no_model() {
     let dir = temp_dir("fetch-not-local");
@@ -122,17 +137,17 @@ fn an_extract_role_that_is_not_local_needs_no_model() {
     let fetcher = StubFetcher::writing(1_024);
     let mut out = Vec::new();
 
-    let outcome = ensure_present_in(
+    ensure_present_in(
         &mut out,
         &answers(Some(ServiceRole::Skip)),
         &runner,
         Some(&root),
         TARGET,
         &fetcher,
+        &no_env,
     )
     .expect("a skipped extract needs nothing");
 
-    assert_eq!(outcome, Outcome::NotNeeded);
     assert!(
         fetcher.calls().is_empty(),
         "no download may be attempted: {:?}",
@@ -161,22 +176,17 @@ fn a_model_already_on_the_host_is_reported_and_not_fetched() {
     let fetcher = StubFetcher::writing(1_024);
     let mut out = Vec::new();
 
-    let outcome = ensure_present_in(
+    ensure_present_in(
         &mut out,
         &answers(Some(ServiceRole::Local)),
         &runner,
         Some(&root),
         TARGET,
         &fetcher,
+        &no_env,
     )
     .expect("a present model needs nothing");
 
-    assert_eq!(
-        outcome,
-        Outcome::Present {
-            path: models.join(GGUF_FILE_NAME)
-        }
-    );
     assert!(fetcher.calls().is_empty(), "nothing may be downloaded");
     let text = String::from_utf8(out).expect("utf8");
     assert!(text.contains("is already at"), "{text}");
@@ -188,35 +198,30 @@ fn a_missing_shipped_model_is_downloaded_into_the_compose_root() {
     let dir = temp_dir("fetch-absent");
     let root = dir.to_string_lossy().into_owned();
     let runner = RecordingRunner::succeeding().with_config(extract_config(&dir));
-    // More than one chunk, so the streaming path is exercised rather than one read.
-    let fetcher = StubFetcher::writing(200_000);
+    // More than one chunk and more than a megabyte, so the streaming path is
+    // exercised rather than one read and the byte count is not rounded to zero.
+    let fetcher = StubFetcher::writing(1_200_000);
     let mut out = Vec::new();
 
-    let outcome = ensure_present_in(
+    ensure_present_in(
         &mut out,
         &answers(Some(ServiceRole::Local)),
         &runner,
         Some(&root),
         TARGET,
         &fetcher,
+        &no_env,
     )
     .expect("an absent shipped model is fetched");
 
     let dest = dir.join("models").join(GGUF_FILE_NAME);
     assert_eq!(
-        outcome,
-        Outcome::Fetched {
-            path: dest.clone(),
-            bytes: 200_000
-        }
-    );
-    assert_eq!(
         fetcher.calls(),
-        vec![(GGUF_URL.to_owned(), dest.clone())],
+        vec![(download_url(), dest.clone())],
         "the Hub address and the compose-resolved destination"
     );
     let written = std::fs::metadata(&dest).expect("the model is on disk");
-    assert_eq!(written.len(), 200_000, "the file holds the bytes written");
+    assert_eq!(written.len(), 1_200_000, "the file holds the bytes written");
     let text = String::from_utf8(out).expect("utf8");
     assert!(
         text.contains("downloading numind.NuExtract-tiny-v1.5.Q4_K_M.gguf (397 MB)"),
@@ -227,7 +232,7 @@ fn a_missing_shipped_model_is_downloaded_into_the_compose_root() {
         "a progress line carries the bytes of the total and a percent: {text}"
     );
     assert!(
-        text.contains(&format!("downloaded 0 MB to {}", dest.display())),
+        text.contains(&format!("downloaded 1 MB to {}", dest.display())),
         "the closing line names where the file landed: {text}"
     );
     assert!(
@@ -252,6 +257,7 @@ fn a_model_name_the_project_does_not_ship_is_refused_without_a_download() {
         Some(&root),
         TARGET,
         &fetcher,
+        &no_env,
     )
     .expect_err("a name the project does not ship must fail the run");
 
@@ -261,6 +267,40 @@ fn a_model_name_the_project_does_not_ship_is_refused_without_a_download() {
         fetcher.calls().is_empty(),
         "only the shipped file has a source: {:?}",
         fetcher.calls()
+    );
+}
+
+#[test]
+fn a_model_name_that_leaves_the_models_directory_is_refused() {
+    let dir = temp_dir("fetch-escapes");
+    let root = dir.to_string_lossy().into_owned();
+    // The shipped name, one directory up: the shipped-name check alone would pass
+    // this and download outside `models/`.
+    let escaped = format!("../{GGUF_FILE_NAME}");
+    let runner = RecordingRunner::succeeding().with_config(extract_config_with(&dir, &escaped));
+    let fetcher = StubFetcher::writing(1_024);
+    let mut out = Vec::new();
+
+    let err = ensure_present_in(
+        &mut out,
+        &answers(Some(ServiceRole::Local)),
+        &runner,
+        Some(&root),
+        TARGET,
+        &fetcher,
+        &no_env,
+    )
+    .expect_err("a model outside models/ must fail the run");
+
+    assert!(err.contains("outside models/"), "{err}");
+    assert!(
+        fetcher.calls().is_empty(),
+        "nothing may be downloaded outside models/: {:?}",
+        fetcher.calls()
+    );
+    assert!(
+        !dir.join(GGUF_FILE_NAME).exists(),
+        "nothing may be written outside models/"
     );
 }
 
@@ -280,6 +320,7 @@ fn a_refused_download_keeps_the_manual_command_and_names_the_directory() {
         Some(&root),
         TARGET,
         &fetcher,
+        &no_env,
     )
     .expect_err("a refused download must fail the run");
 
@@ -302,15 +343,45 @@ fn a_refused_download_keeps_the_manual_command_and_names_the_directory() {
          root: {err}"
     );
     assert!(
-        !models.join(format!("{GGUF_FILE_NAME}.part")).exists(),
+        !part_of(&models.join(GGUF_FILE_NAME)).exists(),
         "no partial file may survive a refused download"
     );
 }
 
+/// The failure names every way forward in one sentence, so a machine that cannot
+/// download is not left with the manual command as its only exit.
+#[test]
+fn a_refused_download_names_every_way_forward() {
+    let dir = temp_dir("fetch-ways-forward");
+    let root = dir.to_string_lossy().into_owned();
+    let runner = RecordingRunner::succeeding().with_config(extract_config(&dir));
+    let fetcher = StubFetcher::failing("the request failed: no route to host");
+    let mut out = Vec::new();
+
+    let err = ensure_present_in(
+        &mut out,
+        &answers(Some(ServiceRole::Local)),
+        &runner,
+        Some(&root),
+        TARGET,
+        &fetcher,
+        &no_env,
+    )
+    .expect_err("a refused download must fail the run");
+
+    assert!(
+        err.contains("check the network and rerun"),
+        "the network is the first thing to check: {err}"
+    );
+    assert!(err.contains("`CLIO_EXTRACT_MODEL_FILE`"), "{err}");
+    assert!(err.contains("`CLIO_EXTRACT_MODEL_URL`"), "{err}");
+    assert!(err.contains("`--extract skip`"), "{err}");
+}
+
+#[cfg(test)]
+#[path = "setup_extract_model_env_tests.rs"]
+mod env_tests;
+
 #[cfg(test)]
 #[path = "setup_extract_model_preview_tests.rs"]
 mod preview_tests;
-
-#[cfg(test)]
-#[path = "setup_extract_model_stream_tests.rs"]
-mod stream_tests;

@@ -251,9 +251,10 @@ fn run<R: BufRead, W: Write, E: Write>(
     }
     // The extract model is put on the host before anything is written: a refused
     // download then leaves no config naming a stack whose model is absent, and no
-    // `Applied` line for a run that did not apply.
+    // `Applied` line for a run that did not apply. The lines it prints are the
+    // whole record of what it did, so nothing further is carried out of it.
     let writer = ctx.writer();
-    crate::setup_extract_model::ensure_present(writer, &answers, runner, compose_dir, fetcher)
+    crate::setup_extract_model::ensure_present(writer, &answers, runner, compose_dir, fetcher, env)
         .map_err(CliError::failed)?;
     // Every remaining line goes through `ctx`, because `ctx` holds the only
     // mutable borrow of the output stream. The write happens first, so the

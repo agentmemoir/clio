@@ -6,28 +6,33 @@
 //! This module is responsible for putting the extract service's model file on the
 //! host before `clio setup` writes anything: it asks the resolved stack which file
 //! the container will open and, when that file is the one the project ships and it
-//! is absent, downloads it.
+//! is absent, downloads it or installs a local copy of it.
 //!
 //! ## Owns
-//! - The `ModelFetcher` seam, its real HTTP implementation, and the download
-//!   address and advertised size of the shipped model
-//! - The atomic download: a `<dest>.part` file beside the destination, one 64 KiB
-//!   chunk at a time, renamed into place only after the byte count matches
+//! - The download address, the published digest, and the advertised size of the
+//!   shipped model
+//! - The environment values that replace the download with a mirror or with a
+//!   local copy of the file
 //! - The lines a run prints while it fetches: present, downloading, progress, and
 //!   downloaded
-//! - The cheap presence check the preview announces the download with
+//! - The preview's announcement: the fetch it will make, or the reason the run
+//!   will stop before it writes the config
 //!
 //! ## Does not own
 //! - The host path the container opens (see `compose_model`)
-//! - The compose root, the materialized assets, and the service list (see
-//!   `compose_cli`, `compose_assets`, `setup_preview`)
-//! - When the fetch runs, or what a failure does to the run (see `setup_cli`)
+//! - The embedded asset set, the backup guard, and the bind-mount check (see
+//!   `compose_assets`), which this module asks for the compose files it needs
+//!   before it resolves a model path
+//! - The service list (see `setup_preview`), the root resolution (see
+//!   `compose_cli`), and when the fetch runs (see `setup_cli`)
+//! - The transfer itself, its length and digest checks, and the rename (see
+//!   `setup_extract_model_download`)
 //!
 //! ## Boundary
 //!
-//! Changes to what is downloaded, or to how a download is written, should normally
-//! require changes here. Changes to the host path, the compose root, or the run's
-//! order should not.
+//! Changes to what is downloaded, or to when a run refuses to fetch, should
+//! normally require changes here. Changes to the host path, the compose root, or
+//! the run's order should not.
 //!
 //! Keep this module focused on the model file's arrival.
 //!
@@ -39,20 +44,20 @@
 //! model is already on disk. The manual command survives only in the failure
 //! message, for a machine where the download cannot reach the Hub.
 
-use crate::compose_assets::{self, GGUF_FILE_NAME};
+use crate::compose_assets::{self, GGUF_FILE_NAME, GGUF_REPO, GGUF_SHA256};
 use crate::compose_cli;
 use crate::compose_docker::{ComposeTarget, DockerRunner, Stack};
 use crate::compose_model;
 use crate::setup_preview;
 use crate::setup_services::ServiceRole;
 use crate::setup_steps::Answers;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-/// The Hub address of the shipped model. The repository moved owners, and the Hub
-/// redirects the old name, so redirects are left alone on the request.
-pub(crate) const GGUF_URL: &str = "https://huggingface.co/DevQuasar-3/numind.NuExtract-tiny-v1.5-GGUF/resolve/main/numind.NuExtract-tiny-v1.5.Q4_K_M.gguf";
+#[path = "setup_extract_model_download.rs"]
+mod download;
+
+pub(crate) use download::{ModelFetcher, RealFetcher, install_local};
 
 /// The size the Hub advertises, in bytes. A display hint for the preview line and
 /// the progress denominator; the real check is the size the response reports.
@@ -62,217 +67,121 @@ pub(crate) const GGUF_BYTES: u64 = 397_807_776;
 /// shipped one.
 const GGUF_NAME_ENV: &str = "CLIO_EXTRACT_GGUF";
 
+/// A mirror to download the model from instead of the Hub.
+const URL_ENV: &str = "CLIO_EXTRACT_MODEL_URL";
+
+/// A local copy of the model to install instead of downloading one.
+const FILE_ENV: &str = "CLIO_EXTRACT_MODEL_FILE";
+
 /// The directory under the compose root the extract service mounts.
 const MODELS_DIR: &str = "models";
-
-/// The read size for one chunk of the response body.
-const CHUNK: usize = 64 * 1024;
 
 /// How many bytes between two progress lines: roughly twenty-five lines for the
 /// shipped model.
 const PROGRESS_EVERY: u64 = 16 * 1024 * 1024;
 
-/// How long a connection, and then the response headers, may take. The body has no
-/// deadline of its own: a slow link is not a failure, and a stall is visible in the
-/// progress lines.
-const TIMEOUT: Duration = Duration::from_secs(30);
-
-/// What a run did about the extract model file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Outcome {
-    /// The run does not need a local extract model.
-    NotNeeded,
-    /// The file was already on the host; nothing was downloaded.
-    Present { path: PathBuf },
-    /// The file was downloaded, checked, and renamed into place.
-    Fetched { path: PathBuf, bytes: u64 },
+/// The Hub address of the shipped model, derived from the one repository id and
+/// the one file name the rest of the project prints.
+#[must_use]
+pub(crate) fn download_url() -> String {
+    format!("https://huggingface.co/{GGUF_REPO}/resolve/main/{GGUF_FILE_NAME}")
 }
 
-/// The download seam, shaped like the `DockerRunner` seam: production passes
-/// [`RealFetcher`], and a test passes a stub that writes its own bytes, so the
-/// suite never opens a socket.
-pub(crate) trait ModelFetcher {
-    /// Stream `url` into `dest` by way of `<dest>.part`, reporting the running byte
-    /// count after each chunk. Returns the number of bytes written.
-    ///
-    /// # Errors
-    /// A refused request, a byte count that does not match what was advertised, or
-    /// a filesystem failure. Any partial file is removed before the error returns.
-    fn fetch_to(
-        &self,
-        url: &str,
-        dest: &Path,
-        progress: &mut dyn FnMut(u64),
-    ) -> Result<u64, String>;
+/// What the preview says about the model: the download the run will make, and,
+/// when the run will refuse instead, the reason it will print.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Announced {
+    /// What `Will fetch` says, or `None` when the run downloads nothing.
+    pub(crate) will_fetch: Option<String>,
+    /// What `Will stop` says, or `None` when the run goes on to write the config.
+    pub(crate) will_stop: Option<String>,
 }
 
-/// The real fetcher: one `ureq` agent per download, over the platform's trust
-/// store.
-pub(crate) struct RealFetcher;
-
-impl ModelFetcher for RealFetcher {
-    fn fetch_to(
-        &self,
-        url: &str,
-        dest: &Path,
-        progress: &mut dyn FnMut(u64),
-    ) -> Result<u64, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            // A non-2xx answer is a fact to report, not a transport failure, so the
-            // status is read below rather than thrown here.
-            .http_status_as_error(false)
-            // The size check compares the bytes on disk with the advertised size,
-            // and a compressed body would make `content-length` a length the file
-            // never reaches.
-            .accept_encoding("identity")
-            .timeout_connect(Some(TIMEOUT))
-            .timeout_recv_response(Some(TIMEOUT))
-            // No deadline for the whole transfer: it is hundreds of megabytes, and a
-            // healthy slow download must not be aborted for being slow.
-            .timeout_global(None)
-            .build()
-            .into();
-        let response = agent
-            .get(url)
-            .call()
-            .map_err(|e| format!("the request failed: {e}"))?;
-        let status = response.status().as_u16();
-        if !(200..300).contains(&status) {
-            return Err(format!("the address answered status {status}"));
-        }
-        // The Hub's own length first, then the transport's. Either may be absent on
-        // a chunked response, and an absent length is not a failure.
-        let expected = ["x-linked-size", "content-length"].iter().find_map(|name| {
-            response
-                .headers()
-                .get(*name)?
-                .to_str()
-                .ok()?
-                .trim()
-                .parse::<u64>()
-                .ok()
-        });
-        let mut body = response.into_body().into_reader();
-        stream_to_file(&mut body, dest, expected, progress)
-    }
-}
-
-/// A downloaded file that has not been renamed into place yet. Dropping it removes
-/// it, so every error path between the first byte and the rename leaves no partial
-/// file behind. After a successful rename the removal finds nothing and is
-/// ignored.
-struct PartFile(PathBuf);
-
-impl Drop for PartFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-/// Stream `body` into `dest` through `<dest>.part`, then rename it into place.
-///
-/// The destination's own directory is used for the temporary file, so the rename
-/// is within one filesystem and either replaces the file or leaves the old one
-/// alone.
-fn stream_to_file(
-    body: &mut dyn Read,
-    dest: &Path,
-    expected: Option<u64>,
-    progress: &mut dyn FnMut(u64),
-) -> Result<u64, String> {
-    let part = part_path(dest);
-    let _partial = PartFile(part.clone());
-    let mut file = std::fs::File::create(&part)
-        .map_err(|e| format!("cannot create {}: {e}", part.display()))?;
-    let mut written = 0u64;
-    let mut buffer = vec![0u8; CHUNK];
-    loop {
-        let read = body
-            .read(&mut buffer)
-            .map_err(|e| format!("the download stopped after {written} bytes: {e}"))?;
-        if read == 0 {
-            break;
-        }
-        file.write_all(&buffer[..read])
-            .map_err(|e| format!("cannot write {}: {e}", part.display()))?;
-        written += read as u64;
-        progress(written);
-    }
-    file.sync_all()
-        .map_err(|e| format!("cannot flush {}: {e}", part.display()))?;
-    drop(file);
-    if let Some(expected) = expected
-        && written != expected
-    {
-        return Err(format!(
-            "the download ended after {written} of {expected} bytes, so the file was \
-             discarded; run `clio setup` again"
-        ));
-    }
-    std::fs::rename(&part, dest).map_err(|e| {
-        format!(
-            "cannot move the download into place at {}: {e}",
-            dest.display()
-        )
-    })?;
-    Ok(written)
-}
-
-/// The half-written sibling of `dest`, on the same filesystem so the rename is one
-/// filesystem operation.
-fn part_path(dest: &Path) -> PathBuf {
-    let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(".part");
-    dest.with_file_name(name)
-}
-
-/// What the preview announces a run will download, or `None` when it downloads
-/// nothing.
+/// What the preview announces a run will do about the model file.
 ///
 /// A presence check and a sentence, nothing else. It answers for a local extract
-/// role, and for a file that is not already at `<compose root>/models/<name>`,
-/// where the name is the one the compose environment chose or the shipped one.
+/// role: a file that is not already at `<compose root>/models/<name>` is announced
+/// as a download only when it is the file the project ships, because any other
+/// name is one the run refuses to fetch.
 ///
 /// It creates no directory, asks Docker nothing, and opens no socket: this runs
 /// while a preview is being drawn, before the operator has agreed to anything, so
-/// it must not be able to change the machine it reports on. The root is the
-/// `--compose-dir` value, or the working directory, and it is joined rather than
-/// resolved, for the same reason.
+/// it must not be able to change the machine it reports on. The root is resolved
+/// the way the download resolves it — the `--compose-dir` value, or the working
+/// directory — and joined rather than created, for the same reason.
 #[must_use]
-pub(crate) fn preview_line(
+pub(crate) fn announcement(
     answers: &Answers,
     dir: Option<&str>,
     env: &dyn Fn(&str) -> Option<String>,
-) -> Option<String> {
+) -> Announced {
     if answers.extract != Some(ServiceRole::Local) {
-        return None;
+        return Announced::default();
     }
+    let Some(root) = preview_root(dir) else {
+        return Announced::default();
+    };
     let name = env(GGUF_NAME_ENV).unwrap_or_else(|| GGUF_FILE_NAME.to_owned());
-    let root = dir.map_or_else(|| PathBuf::from("."), PathBuf::from);
-    if root.join(MODELS_DIR).join(&name).is_file() {
-        return None;
+    let path = root.join(MODELS_DIR).join(&name);
+    if path.is_file() {
+        return Announced::default();
     }
-    Some(format!(
-        "{name} ({} MB) from the Hugging Face Hub, before it writes the config",
-        size_mb(GGUF_BYTES)
-    ))
+    if outside_models(&path) {
+        return Announced {
+            will_fetch: None,
+            will_stop: Some(format!(
+                "before it writes the config: the stack names an extract model outside {MODELS_DIR}/, \
+                 at {}, so nothing would be downloaded",
+                path.display()
+            )),
+        };
+    }
+    if name != GGUF_FILE_NAME {
+        return Announced {
+            will_fetch: None,
+            will_stop: Some(format!(
+                "before it writes the config: {}",
+                compose_model::missing_model_error(&path)
+            )),
+        };
+    }
+    Announced {
+        will_fetch: Some(format!(
+            "{name} ({} MB) from the Hugging Face Hub, before it writes the config",
+            size_mb(GGUF_BYTES)
+        )),
+        will_stop: None,
+    }
+}
+
+/// The root the preview joins: the `--compose-dir` value, or the working
+/// directory the download resolves its own root from.
+///
+/// Not `compose_cli::resolve_root`, which creates the directory: a preview must
+/// not make the machine it reports on.
+fn preview_root(dir: Option<&str>) -> Option<PathBuf> {
+    match dir {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => std::env::current_dir().ok(),
+    }
 }
 
 /// Put the extract model on the host for this machine, printing what it does.
 ///
 /// # Errors
 /// The compose root or its files could not be prepared, the resolved stack could
-/// not be read, the stack names a model the project does not ship, or the download
-/// failed.
+/// not be read, the stack names a model the project does not ship or one outside
+/// `models/`, or the download failed.
 pub(crate) fn ensure_present(
     out: &mut dyn Write,
     answers: &Answers,
     runner: &dyn DockerRunner,
     dir: Option<&str>,
     fetcher: &dyn ModelFetcher,
-) -> Result<Outcome, String> {
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), String> {
     let target = ComposeTarget::detect(std::env::consts::OS, std::env::consts::ARCH)?;
-    ensure_present_in(out, answers, runner, dir, target, fetcher)
+    ensure_present_in(out, answers, runner, dir, target, fetcher, env)
 }
 
 /// [`ensure_present`] with the platform injected, so no test depends on the host
@@ -280,7 +189,9 @@ pub(crate) fn ensure_present(
 ///
 /// The order is the point: the role decides whether anything is needed, the
 /// resolved stack decides where the file goes, and only an absent file the project
-/// ships is downloaded.
+/// ships is fetched. The two environment values are read here rather than earlier
+/// because each of them replaces the transfer for a missing file, and a present
+/// file needs neither.
 ///
 /// # Errors
 /// As [`ensure_present`].
@@ -291,17 +202,21 @@ pub(crate) fn ensure_present_in(
     dir: Option<&str>,
     target: ComposeTarget,
     fetcher: &dyn ModelFetcher,
-) -> Result<Outcome, String> {
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), String> {
     if answers.extract != Some(ServiceRole::Local) {
-        return Ok(Outcome::NotNeeded);
+        return Ok(());
     }
     let stack = Stack::from_services(&setup_preview::local_services(answers))?;
     let root = compose_cli::resolve_root(dir)
         .map_err(|e| format!("cannot resolve the compose root: {e}"))?;
+    // The compose files the query below reads have to exist before Compose is
+    // asked, so this asks `compose_assets` for them; the asset set is still that
+    // module's to own.
     compose_assets::materialize(&root, target)
         .map_err(|e| format!("cannot prepare the compose files: {e}"))?;
     let Some(path) = compose_model::resolved_host_model_path(&root, target, stack, runner)? else {
-        return Ok(Outcome::NotNeeded);
+        return Ok(());
     };
     if path.is_file() {
         let _ = writeln!(
@@ -310,7 +225,16 @@ pub(crate) fn ensure_present_in(
             file_name(&path),
             path.display()
         );
-        return Ok(Outcome::Present { path });
+        return Ok(());
+    }
+    // A name from the environment is joined onto `models/`, so one carrying its own
+    // parent segments would put the file anywhere on the host.
+    if outside_models(&path) {
+        return Err(format!(
+            "the stack names an extract model outside {MODELS_DIR}/, at {}; a model name must be a \
+             file in {MODELS_DIR}/, not a path",
+            path.display()
+        ));
     }
     // Any other name is a file the project has no source for, and a download would
     // either 404 or fetch a file the container does not open.
@@ -322,10 +246,21 @@ pub(crate) fn ensure_present_in(
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
     let total = size_mb(GGUF_BYTES);
-    let _ = writeln!(
-        out,
-        "  Extract model: downloading {GGUF_FILE_NAME} ({total} MB) from the Hugging Face Hub"
-    );
+    // The two ways a missing file arrives. The local copy replaces the download
+    // entirely: an air-gapped or metered machine has no socket to open, so neither
+    // the fetcher nor the address is touched.
+    let local_copy = env(FILE_ENV);
+    if let Some(source) = &local_copy {
+        let _ = writeln!(
+            out,
+            "  Extract model: installing {GGUF_FILE_NAME} from {source}"
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "  Extract model: downloading {GGUF_FILE_NAME} ({total} MB) from the Hugging Face Hub"
+        );
+    }
     let mut shown = 0u64;
     let mut announced = false;
     let mut report = |written: u64| {
@@ -340,17 +275,27 @@ pub(crate) fn ensure_present_in(
             );
         }
     };
-    let bytes = fetcher
-        .fetch_to(GGUF_URL, &path, &mut report)
-        .map_err(|reason| fetch_error(&path, &reason))?;
+    let (bytes, verb) = if let Some(source) = &local_copy {
+        let bytes = install_local(Path::new(source), &path, GGUF_SHA256, &mut report)
+            .map_err(|reason| fetch_error(&path, &reason))?;
+        (bytes, "installed")
+    } else {
+        let url = env(URL_ENV).unwrap_or_else(download_url);
+        let bytes = fetcher
+            .fetch_to(&url, &path, GGUF_SHA256, &mut report)
+            .map_err(|reason| fetch_error(&path, &reason))?;
+        (bytes, "downloaded")
+    };
     drop(report);
+    // A transfer that wrote nothing is refused inside the streaming helper, so a
+    // zero byte count cannot reach this line.
     let _ = writeln!(
         out,
-        "  Extract model: downloaded {} MB to {}",
+        "  Extract model: {verb} {} MB to {}",
         size_mb(bytes),
         path.display()
     );
-    Ok(Outcome::Fetched { path, bytes })
+    Ok(())
 }
 
 /// The last path segment of a model path, or an empty string for a path that has
@@ -361,11 +306,23 @@ fn file_name(path: &Path) -> &str {
         .unwrap_or("")
 }
 
+/// Whether a model path leaves the `<root>/models` directory the compose file
+/// mounts. Read from the path's own parent rather than from the name, so a name
+/// carrying `..` or an absolute path is caught wherever it came from.
+fn outside_models(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .is_none_or(|dir| dir != MODELS_DIR)
+}
+
 /// The failure an operator sees after a refused or incomplete download: the
-/// directory that actually holds the model, and the manual command that fills it.
+/// directory that actually holds the model, every way forward, and the manual
+/// command that fills it.
 fn fetch_error(dest: &Path, reason: &str) -> String {
     format!(
-        "cannot download the extract model into {}: {reason}; {}",
+        "cannot download the extract model into {}: {reason}; check the network and rerun, point \
+         `{URL_ENV}` at a mirror, set `{FILE_ENV}` to a local copy of the same file, or choose \
+         `--extract skip`. {}",
         destination_directory(dest),
         compose_model::manual_fetch(dest)
     )
@@ -395,8 +352,3 @@ fn percent(written: u64) -> u64 {
 #[cfg(test)]
 #[path = "setup_extract_model_tests.rs"]
 pub(crate) mod tests;
-
-/// The real fetcher's transport, driven against a local server rather than the Hub.
-#[cfg(test)]
-#[path = "setup_extract_model_http_tests.rs"]
-pub(crate) mod http_tests;

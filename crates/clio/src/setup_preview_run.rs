@@ -120,13 +120,16 @@ impl crate::setup_preview_fixtures::Harness {
         let current = &self.effective;
         let compose_dir = self.compose_dir.clone();
         let view = outcome.as_ref().ok().map(|answers| {
+            let announced =
+                crate::setup_extract_model::announcement(answers, compose_dir.as_deref(), &|key| {
+                    env(key)
+                });
             preview::view(
                 answers,
                 &|path| report::value_at(current, path),
                 will_back_up,
-                crate::setup_extract_model::preview_line(answers, compose_dir.as_deref(), &|key| {
-                    env(key)
-                }),
+                announced.will_fetch,
+                announced.will_stop,
                 &env,
             )
         });
@@ -183,13 +186,16 @@ impl crate::setup_preview_fixtures::Harness {
             })
         });
         let view = outcome.as_ref().ok().map(|answers| {
+            let announced =
+                crate::setup_extract_model::announcement(answers, compose_dir.as_deref(), &|key| {
+                    env(key)
+                });
             preview::view(
                 answers,
                 &|path| report::value_at(&effective, path),
                 will_back_up.clone(),
-                crate::setup_extract_model::preview_line(answers, compose_dir.as_deref(), &|key| {
-                    env(key)
-                }),
+                announced.will_fetch,
+                announced.will_stop,
                 &env,
             )
         });

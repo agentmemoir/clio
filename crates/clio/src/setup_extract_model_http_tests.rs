@@ -11,6 +11,8 @@
 //! - The fake Hub: a bounded accept loop on a port the OS assigns, one reply per
 //!   connection, so the exact number of requests is observable
 //! - The transport behaviour under test for `RealFetcher::fetch_to`
+//! - That a body the redirect chain delivers is only installed when its digest is
+//!   the expected one
 //!
 //! ## Does not own
 //! - The presence and refusal decisions above the fetcher (see
@@ -28,11 +30,17 @@
 //! lives.
 
 use super::*;
+use crate::compose_assets::GGUF_FILE_NAME;
 use crate::setup_support_tests::temp_dir;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+/// The lowercase-hex SHA-256 of `bytes`, the form a caller passes in.
+fn digest_of(bytes: &[u8]) -> String {
+    to_hex(&Sha256::digest(bytes))
+}
 
 /// How long the fake Hub waits for a connection it was told to expect. A test that
 /// fails before its request arrives leaves the thread with a deadline rather than a
@@ -190,7 +198,7 @@ fn a_redirect_chain_is_followed_and_the_body_lands_at_the_destination() {
     let mut progress = Vec::new();
 
     let written = RealFetcher
-        .fetch_to(&hub.path("/first"), &dest, &mut |bytes| {
+        .fetch_to(&hub.path("/first"), &dest, &digest_of(body), &mut |bytes| {
             progress.push(bytes);
         })
         .expect("a chain that ends in a whole body is a download");
@@ -221,9 +229,14 @@ fn a_404_answer_is_refused_by_status_and_leaves_no_file() {
     let mut progress = Vec::new();
 
     let err = RealFetcher
-        .fetch_to(&hub.path("/missing"), &dest, &mut |bytes| {
-            progress.push(bytes);
-        })
+        .fetch_to(
+            &hub.path("/missing"),
+            &dest,
+            &"0".repeat(64),
+            &mut |bytes| {
+                progress.push(bytes);
+            },
+        )
         .expect_err("a 404 is not a download");
 
     assert_eq!(hub.served(), vec!["/missing"], "one request, no retry");
@@ -248,9 +261,14 @@ fn a_body_shorter_than_the_advertised_size_is_refused_and_leaves_no_file() {
     let mut progress = Vec::new();
 
     let err = RealFetcher
-        .fetch_to(&hub.path("/short"), &dest, &mut |bytes| {
-            progress.push(bytes);
-        })
+        .fetch_to(
+            &hub.path("/short"),
+            &dest,
+            &digest_of(&body),
+            &mut |bytes| {
+                progress.push(bytes);
+            },
+        )
         .expect_err("a body shorter than the advertised size is not a download");
 
     assert_eq!(hub.served(), vec!["/short"]);
@@ -276,7 +294,7 @@ fn a_body_larger_than_the_advertised_size_is_refused_by_the_same_check() {
     let mut progress = Vec::new();
 
     let err = RealFetcher
-        .fetch_to(&hub.path("/long"), &dest, &mut |bytes| {
+        .fetch_to(&hub.path("/long"), &dest, &digest_of(&body), &mut |bytes| {
             progress.push(bytes);
         })
         .expect_err("a body longer than the advertised size is not a download");
