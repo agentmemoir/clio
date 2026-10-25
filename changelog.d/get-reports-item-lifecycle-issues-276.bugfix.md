@@ -1,0 +1,1 @@
+`clio get <id>`, `clio show <id>`, and the MCP `get` tool now carry two top-level booleans, `discarded` and `archived`, so a soft-deleted item reads as deleted instead of looking live; the payload keys that were already there are unchanged. [Issue #276](https://github.com/agentmemoir/clio/issues/276)

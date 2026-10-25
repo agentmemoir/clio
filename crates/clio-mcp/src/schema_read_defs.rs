@@ -64,7 +64,7 @@ pub(crate) fn read_defs() -> Vec<ToolDef> {
     vec![
         read(
             "get",
-            "Exact fetch by id (metadata + refs). A hub-distilled unit also carries a `freshness` key: its proof count, last reconciliation, stale state and reason, and the per-revision evidence trail (source ids and times only).",
+            "Exact fetch by id (metadata + refs). A soft-deleted item is still returned, marked by two top-level booleans: `discarded` (operations removal) and `archived` (hygiene archive). A hub-distilled unit also carries a `freshness` key: its proof count, last reconciliation, stale state and reason, and the per-revision evidence trail (source ids and times only).",
             &["item_id"],
             vec![("item_id", s("Item id."))],
         ),

@@ -144,6 +144,8 @@ fn get_existing_and_missing() {
     let value = json_of(&out);
     assert_eq!(value["id"], json!("itm-1"));
     assert_eq!(value["category"], json!("task_spec"));
+    assert_eq!(value["discarded"], json!(false));
+    assert_eq!(value["archived"], json!(false));
     assert!(err.is_empty(), "stderr: {err}");
 
     let (code, out, err) = run_state("get", &["ghost", "--bank", "bank-a"], &state, false);

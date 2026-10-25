@@ -142,11 +142,11 @@ pub(crate) fn require_item(state: &McpState, bank: &str, item_id: &str) -> Resul
 
 /// `get(item_id)`: full metadata + content references.
 ///
-/// A distilled unit carries one extra key, `freshness`: its proof count, last
-/// reconciliation, stale state and reason, and its per-revision evidence trail
-/// (ids and times only). Every other item is returned exactly as the store
-/// serialized it, so a read that is not a unit is byte-identical to what it was
-/// before.
+/// Two additive keys carry the stored row's lifecycle state, so a soft-deleted
+/// item still reads by id with its delete marker: `discarded` (operations
+/// removal) and `archived` (hygiene marker). A distilled unit carries one more
+/// key, `freshness`: its proof count, last reconciliation, stale state and
+/// reason, and its per-revision evidence trail (ids and times only).
 #[inline(never)]
 fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -160,11 +160,20 @@ fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
         item_id,
         item.snapshot.as_ref(),
     )?;
+    // The identity read excludes a discarded row, so `None` here (with the
+    // item present) is the discard marker.
+    let discarded = state
+        .store
+        .get_item_identity(ctx.bank.as_str(), item_id)?
+        .is_none();
+    let archived = state.store.item_is_archived(ctx.bank.as_str(), item_id)?;
     let mut value = serde_json::to_value(&item).expect("serialize memory item");
-    if let Some(block) = block
-        && let Some(object) = value.as_object_mut()
-    {
-        object.insert(read_freshness::FRESHNESS_KEY.into(), block);
+    if let Some(object) = value.as_object_mut() {
+        object.insert("discarded".into(), Value::from(discarded));
+        object.insert("archived".into(), Value::from(archived));
+        if let Some(block) = block {
+            object.insert(read_freshness::FRESHNESS_KEY.into(), block);
+        }
     }
     Ok(value)
 }
