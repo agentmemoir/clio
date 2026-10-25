@@ -12,6 +12,7 @@
 //! - The default deployment overlay file name
 //! - Whether a runtime resolved a deployment path at all, which a caller needs
 //!   before promising a deployment-scoped value will be saved
+//! - Overriding or clearing the resolved path on `Runtime`
 //!
 //! ## Does not own
 //! - Reading or writing the overlay file (see `load`, `save`)
@@ -35,6 +36,16 @@ impl Runtime {
     #[must_use]
     pub fn has_deployment_path(&self) -> bool {
         self.deployment_path.is_some()
+    }
+
+    /// Override the durable deployment config path (tests / embedding).
+    pub fn set_deployment_path(&mut self, path: impl Into<PathBuf>) {
+        self.deployment_path = Some(path.into());
+    }
+
+    /// Drop the durable deployment path so deployment-scoped sets stay in-memory only.
+    pub fn clear_deployment_path(&mut self) {
+        self.deployment_path = None;
     }
 }
 
@@ -102,3 +113,7 @@ fn nonempty(value: Option<String>) -> Option<String> {
         .map(|raw| raw.trim().to_owned())
         .filter(|v| !v.is_empty())
 }
+
+#[cfg(test)]
+#[path = "path_tests.rs"]
+mod tests;
