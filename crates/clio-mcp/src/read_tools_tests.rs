@@ -52,6 +52,8 @@ fn item_reads_roundtrip_and_not_found() {
     assert_eq!(get["id"], json!("itm-1"));
     assert_eq!(get["category"], json!("task_spec"));
     assert_eq!(get["epistemic_kind"], json!("fact"));
+    assert_eq!(get["discarded"], json!(false), "{get}");
+    assert_eq!(get["archived"], json!(false), "{get}");
 
     let snap = call(
         &s,
@@ -162,6 +164,11 @@ fn inspect_filters_pagination_and_discard_visibility() {
     );
     let hidden = call(&s, "inspect", json!({"bank": "bank-a"}));
     assert_eq!(hidden["items"].as_array().expect("items").len(), 1);
+    // A discarded item still reads by id; the delete marker rides on the payload.
+    let discarded = call(&s, "get", json!({"bank": "bank-a", "item_id": "itm-1"}));
+    assert_eq!(discarded["ok"], json!(true), "{discarded}");
+    assert_eq!(discarded["discarded"], json!(true), "{discarded}");
+    assert_eq!(discarded["archived"], json!(false), "{discarded}");
     let shown = call(
         &s,
         "inspect",

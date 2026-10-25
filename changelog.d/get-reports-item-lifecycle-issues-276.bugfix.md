@@ -1,0 +1,1 @@
+`clio get <id>`, `clio show <id>` (including `--snapshot` and `--gist`), and the MCP `get`, `get_snapshot`, and `get_gist` tools now carry two top-level booleans, `discarded` and `archived`, so a soft-deleted or archived item reads as marked instead of looking live; the payload keys that were already there are unchanged.

@@ -315,6 +315,11 @@ fn render_get(payload: &Value) -> String {
     if let Some(authoritative) = payload.get("authoritative").and_then(Value::as_bool) {
         lines.push(format!("authoritative: {authoritative}"));
     }
+    for key in ["discarded", "archived"] {
+        if payload.get(key).and_then(Value::as_bool) == Some(true) {
+            lines.push(format!("{key}: true"));
+        }
+    }
     if let Some(context) = payload
         .get("context")
         .and_then(Value::as_str)
@@ -366,6 +371,10 @@ fn render_stats(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_read_render_rerank_tests.rs"]
 mod cli_read_render_rerank_tests;
+
+#[cfg(test)]
+#[path = "cli_read_render_get_tests.rs"]
+mod cli_read_render_get_tests;
 
 #[cfg(test)]
 #[path = "cli_read_render_scores_tests.rs"]

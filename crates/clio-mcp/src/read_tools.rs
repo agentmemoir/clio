@@ -37,6 +37,8 @@ mod read_freshness;
 #[path = "read_inspect_supersession.rs"]
 mod read_inspect_supersession;
 
+mod read_item_lifecycle;
+
 /// Route one bound read tool to its in-process handler.
 pub(crate) fn dispatch(state: &McpState, name: &str, args: &Value) -> Result<Value, AmError> {
     // Config reads and caller-supplied previews do not imply a stored bank.
@@ -142,11 +144,11 @@ pub(crate) fn require_item(state: &McpState, bank: &str, item_id: &str) -> Resul
 
 /// `get(item_id)`: full metadata + content references.
 ///
-/// A distilled unit carries one extra key, `freshness`: its proof count, last
-/// reconciliation, stale state and reason, and its per-revision evidence trail
-/// (ids and times only). Every other item is returned exactly as the store
-/// serialized it, so a read that is not a unit is byte-identical to what it was
-/// before.
+/// Two additive keys carry the stored row's lifecycle state, so a soft-deleted
+/// item still reads by id with its delete marker: `discarded` (operations
+/// removal) and `archived` (hygiene marker). A distilled unit carries one more
+/// key, `freshness`: its proof count, last reconciliation, stale state and
+/// reason, and its per-revision evidence trail (ids and times only).
 #[inline(never)]
 fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -161,9 +163,8 @@ fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
         item.snapshot.as_ref(),
     )?;
     let mut value = serde_json::to_value(&item).expect("serialize memory item");
-    if let Some(block) = block
-        && let Some(object) = value.as_object_mut()
-    {
+    read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    if let (Some(block), Some(object)) = (block, value.as_object_mut()) {
         object.insert(read_freshness::FRESHNESS_KEY.into(), block);
     }
     Ok(value)
@@ -174,14 +175,12 @@ fn get_item(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn get_snapshot(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let item_id = req_str(args, "item_id")?;
-    match state.store.get_snapshot(ctx.bank.as_str(), item_id)? {
-        Some(snapshot) => Ok(json!({
-            "item_id": item_id,
-            "authoritative": true,
-            "snapshot": snapshot
-        })),
-        None => Err(item_not_found(item_id)),
-    }
+    let Some(snapshot) = state.store.get_snapshot(ctx.bank.as_str(), item_id)? else {
+        return Err(item_not_found(item_id));
+    };
+    let mut value = json!({"item_id": item_id, "authoritative": true, "snapshot": snapshot});
+    read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    Ok(value)
 }
 
 /// `get_gist(item_id)`: non-authoritative prose half only.
@@ -189,14 +188,12 @@ fn get_snapshot(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn get_gist(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let item_id = req_str(args, "item_id")?;
-    match state.store.get_gist(ctx.bank.as_str(), item_id)? {
-        Some(gist) => Ok(json!({
-            "item_id": item_id,
-            "authoritative": false,
-            "gist": gist
-        })),
-        None => Err(item_not_found(item_id)),
-    }
+    let Some(gist) = state.store.get_gist(ctx.bank.as_str(), item_id)? else {
+        return Err(item_not_found(item_id));
+    };
+    let mut value = json!({"item_id": item_id, "authoritative": false, "gist": gist});
+    read_item_lifecycle::attach(&*state.store, ctx.bank.as_str(), item_id, &mut value)?;
+    Ok(value)
 }
 
 /// `maintenance_status(item_id?)`: leaf queryability, dirty ancestors, the
@@ -434,3 +431,7 @@ mod read_tools_bank_tests;
 #[cfg(test)]
 #[path = "read_tools_inspect_time_tests.rs"]
 mod read_tools_inspect_time_tests;
+
+#[cfg(test)]
+#[path = "read_tools_lifecycle_tests.rs"]
+mod read_tools_lifecycle_tests;
