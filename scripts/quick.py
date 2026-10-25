@@ -71,7 +71,7 @@ HISTORY = (
 NO_CHANGE = "quick: no changed Rust file"
 NO_TEST = "quick: no test selected, so nothing runs"
 SCHEMA_CHECK = runner.ROOT / "scripts" / "schema_args_check.py"
-# Test targets a change reaches across a package boundary. `crates/clio/tests/golden_cli_help.json`
+# Test targets a change reaches across a package boundary. `crates/clio/tests/fixtures/golden_cli_help.json`
 # embeds every MCP tool description, so a `clio-mcp` source change can stale a byte comparison in
 # `clio` that the changed file reaches and does not own, and no module declaration can say so. A
 # path prefix, the package that holds the target, and the target.
