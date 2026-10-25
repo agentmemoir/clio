@@ -28,7 +28,7 @@ fn a_mirror_from_the_environment_is_the_address_downloaded() {
     let runner = RecordingRunner::succeeding().with_config(extract_config(&dir));
     let fetcher = StubFetcher::writing(1_200_000);
     let env = |key: &str| {
-        (key == "CLIO_EXTRACT_MODEL_URL").then(|| "https://mirror.example/m.gguf".to_owned())
+        (key == "CLIO_EXTRACT_MODEL_URL").then(|| "https://example.com/m.gguf".to_owned())
     };
     let mut out = Vec::new();
 
@@ -45,7 +45,7 @@ fn a_mirror_from_the_environment_is_the_address_downloaded() {
 
     assert_eq!(
         fetcher.calls().first().map(|(url, _)| url.clone()),
-        Some("https://mirror.example/m.gguf".to_owned()),
+        Some("https://example.com/m.gguf".to_owned()),
         "the mirror replaces the Hub address: {:?}",
         fetcher.calls()
     );
