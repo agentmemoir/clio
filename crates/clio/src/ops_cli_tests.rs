@@ -134,16 +134,19 @@ fn missing_ops_subcommand_exits_2() {
     assert_eq!(run_ops(&[]), ExitCode::from(2));
 }
 
+/// A report-only run applies nothing, so it is never `ok` and never exits 0: a
+/// no-op must not look like a completed rebuild.
 #[test]
-fn reindex_dry_run_exits_0() {
+fn reindex_dry_run_reports_not_ok_exits_3() {
     let mut args = memory("reindex");
     args.push("--dry-run".to_owned());
-    assert_eq!(run_ops_args(args), ExitCode::SUCCESS);
+    assert_eq!(run_ops_args(args), ExitCode::from(3));
 }
 
+/// No flags is still the read-only default, which now reports `ok:false`.
 #[test]
-fn reindex_defaults_to_dry_run_exits_0() {
-    assert_eq!(run_ops_args(memory("reindex")), ExitCode::SUCCESS);
+fn reindex_defaults_to_dry_run_reports_not_ok_exits_3() {
+    assert_eq!(run_ops_args(memory("reindex")), ExitCode::from(3));
 }
 
 #[test]
@@ -158,6 +161,95 @@ fn reindex_dense_confirmed_without_embedder_exits_3() {
     let mut args = memory("reindex");
     args.extend(["--target", "dense", "--dry-run", "false", "--confirm"].map(str::to_owned));
     assert_eq!(run_ops_args(args), ExitCode::from(3));
+}
+
+/// Reopen a store file through its sibling key store and report
+/// `(indexable items, lexical rows)`: what the CLI actually wrote.
+fn coverage_of(db: &Path) -> (u64, u64) {
+    let kms: Arc<dyn DekProvider> = Arc::new(
+        LocalDevKms::open_persistent(crate::backup_cli_fixtures::key_store_path(db))
+            .expect("open the sibling key store"),
+    );
+    let store = SqliteStore::open(db, kms).expect("reopen the store");
+    let cov = IndexStore::index_coverage(&store, None).expect("coverage");
+    (cov.indexable_items, cov.lexical_rows)
+}
+
+/// The `clio ops reindex` argv for one flag set over a scratch database.
+fn reindex_args(db: &Path, flags: &[&str]) -> Vec<String> {
+    let mut args = vec![
+        "reindex".to_owned(),
+        "--backend".to_owned(),
+        "sqlite".to_owned(),
+        "--db".to_owned(),
+        db.display().to_string(),
+        "--target".to_owned(),
+        "lexical".to_owned(),
+    ];
+    args.extend(flags.iter().map(|f| (*f).to_owned()));
+    args
+}
+
+/// `--confirm` alone is the live switch, the way `repair` treats it: the sweep
+/// runs and rewrites every item row instead of reporting a cost.
+#[test]
+fn reindex_confirm_alone_runs_the_live_rebuild() {
+    let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-confirm");
+    let db = scratch.join("clio.db");
+    crate::backup_cli_fixtures::populated_store(&db, 3, 1);
+    let (items, before) = coverage_of(&db);
+    assert_eq!(items, 3);
+    assert_eq!(
+        run_ops_args(reindex_args(&db, &["--confirm"])),
+        ExitCode::SUCCESS
+    );
+    let (_, after) = coverage_of(&db);
+    assert_eq!(after, items, "every item row was rewritten");
+    assert!(
+        after > before,
+        "the live run wrote rows: {before} -> {after}"
+    );
+}
+
+/// The parser stores the token after a bare flag, so `--confirm false` is a
+/// value the run must honour, not a presence: it stays a report and writes
+/// nothing.
+#[test]
+fn reindex_confirm_false_reports_and_writes_nothing() {
+    let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-confirm-false");
+    let db = scratch.join("clio.db");
+    crate::backup_cli_fixtures::populated_store(&db, 2, 1);
+    let before = coverage_of(&db);
+    assert_eq!(
+        run_ops_args(reindex_args(&db, &["--confirm", "false"])),
+        ExitCode::from(3)
+    );
+    assert_eq!(coverage_of(&db), before, "`--confirm false` wrote nothing");
+}
+
+/// `--confirm` with an explicit `--dry-run true` asks for two opposite things,
+/// so it is refused instead of quietly reporting.
+#[test]
+fn reindex_confirm_with_dry_run_true_is_refused() {
+    let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-contradiction");
+    let db = scratch.join("clio.db");
+    crate::backup_cli_fixtures::populated_store(&db, 2, 1);
+    let before = coverage_of(&db);
+    let args = reindex_args(&db, &["--confirm", "--dry-run", "true"]);
+    assert_eq!(run_ops_args(args), ExitCode::from(3));
+    assert_eq!(coverage_of(&db), before, "the refused call wrote nothing");
+}
+
+/// `--dry-run true` is a report, so it applies nothing and is not `ok`.
+#[test]
+fn reindex_dry_run_true_applies_nothing() {
+    let scratch = crate::backup_cli_fixtures::Scratch::new("ops-reindex-dry-true");
+    let db = scratch.join("clio.db");
+    crate::backup_cli_fixtures::populated_store(&db, 2, 1);
+    let before = coverage_of(&db);
+    let args = reindex_args(&db, &["--dry-run", "true"]);
+    assert_eq!(run_ops_args(args), ExitCode::from(3));
+    assert_eq!(coverage_of(&db), before, "a dry run applies nothing");
 }
 
 #[test]
@@ -287,6 +379,16 @@ fn unknown_backend_exits_2() {
     assert_eq!(
         run_ops(&["diagnose", "--backend", "mysql"]),
         ExitCode::from(2)
+    );
+}
+
+#[test]
+fn temporary_storage_errors_use_the_shared_temporary_exit_code() {
+    let error = AmError::new(clio_types::ErrorCode::StorageBusy, "Postgres lock conflict");
+
+    assert_eq!(
+        super::emit_error(&error, 1),
+        ExitCode::from(crate::cli_error::EXIT_TEMPORARY)
     );
 }
 

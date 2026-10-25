@@ -205,7 +205,9 @@ fn postgres_half_recorded_space_fails_closed() {
             "DELETE FROM schema_settings WHERE key = '{SETTING_EMBEDDING_DIM}'"
         ))
         .unwrap();
-    let err = store.with_client(crate::postgres::read_space).unwrap_err();
+    let err = store
+        .with_client(crate::postgres_bootstrap::read_space)
+        .unwrap_err();
     assert_eq!(err.code, clio_types::ErrorCode::ConfigCorrupt);
 }
 

@@ -11,7 +11,7 @@
 //! ## Owns
 //! - `DurableRequestStore`, the save/load contract, and `DurableRequestRow`
 //! - The per-backend SQL for the insert-or-refuse save and the restart reads
-//!   (both drivers, in this module)
+//! - The conditional-write contract, with SQL in `durable_requests_cas.rs`
 //!
 //! ## Does not own
 //! - The `durable_requests` DDL text (`sql/003_local_compliance_slots.sql`,
@@ -34,6 +34,9 @@ use crate::postgres::PostgresStore;
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode};
 use rusqlite::OptionalExtension;
+
+#[path = "durable_requests_cas.rs"]
+mod durable_requests_cas;
 
 /// One durable request row, as saved and read back.
 ///
@@ -77,6 +80,21 @@ pub trait DurableRequestStore: Send + Sync {
     /// Blank required fields, a reused id bound to a different scope or kind,
     /// or storage failures.
     fn save(&self, row: &DurableRequestRow) -> Result<(), AmError>;
+
+    /// Atomically save only if the stored row still matches `expected`.
+    ///
+    /// `None` inserts only when the id is absent. `Some` compares every column
+    /// before replacing the row. A missing or changed row returns `false`
+    /// without mutation. The replacement must keep the expected id, kind, and
+    /// scope. Callers must not acknowledge a write that returned `false`.
+    ///
+    /// # Errors
+    /// Invalid fields, changed identity, or storage failures.
+    fn compare_and_save(
+        &self,
+        expected: Option<&DurableRequestRow>,
+        row: &DurableRequestRow,
+    ) -> Result<bool, AmError>;
 
     /// The stored row for `request_id`, if any.
     ///
@@ -161,6 +179,14 @@ fn sqlite_read(
 }
 
 impl DurableRequestStore for SqliteStore {
+    fn compare_and_save(
+        &self,
+        expected: Option<&DurableRequestRow>,
+        row: &DurableRequestRow,
+    ) -> Result<bool, AmError> {
+        durable_requests_cas::save_sqlite(self, expected, row)
+    }
+
     fn save(&self, row: &DurableRequestRow) -> Result<(), AmError> {
         validate_row(row)?;
         self.with_conn(|conn| {
@@ -228,6 +254,14 @@ impl DurableRequestStore for SqliteStore {
 }
 
 impl DurableRequestStore for PostgresStore {
+    fn compare_and_save(
+        &self,
+        expected: Option<&DurableRequestRow>,
+        row: &DurableRequestRow,
+    ) -> Result<bool, AmError> {
+        durable_requests_cas::save_pg(self, expected, row)
+    }
+
     fn save(&self, row: &DurableRequestRow) -> Result<(), AmError> {
         validate_row(row)?;
         self.with_client(|client| {

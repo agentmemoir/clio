@@ -8,13 +8,15 @@
 //! non-blocking maintenance dispatch hook.
 //!
 //! ## Owns
-//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` on `McpState`
+//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` / `require_bank_grant`
+//!   on `McpState`
 //! - `dispatch_maintenance` (off-path maintenance handoff)
 //! - `now_utc` (RFC 3339 UTC stamping; the calendar arithmetic is the shared
 //!   `clio_types::civil_from_days`)
 //!
 //! ## Does not own
 //! - Share-path semantics or the shared-bank deployment permission (`runtime`)
+//! - The credential's bank list itself (`principal`)
 //! - Maintenance consumers (`clio-write`)
 //!
 //! ## Boundary
@@ -159,13 +161,54 @@ impl McpState {
         ))
     }
 
+    /// Refuse an operator scope the bound credential's grant does not cover.
+    ///
+    /// Some operator tools resolve their scope after the request is authorized:
+    /// a registered plan names its own bank, and a bank-less scope would
+    /// otherwise widen to every bank in the store. The grant must therefore
+    /// cover the scope the tool actually acts on, not only the `bank` argument.
+    /// An unbound local caller is allowed, because the process owner already
+    /// holds the store, and the deployment's shared-bank permission is never
+    /// consulted: enablement is not a grant.
+    ///
+    /// The message names neither the bank nor a plan id, so a caller that
+    /// omitted `bank` cannot learn from the refusal that the scope it reached
+    /// exists.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] when a bound credential's list omits `bank`.
+    pub(crate) fn require_bank_grant(&self, bank: &str) -> Result<(), AmError> {
+        let Some(principal) = &self.principal else {
+            return Ok(());
+        };
+        if principal.covers_bank(bank) {
+            return Ok(());
+        }
+        Err(AmError::new(
+            ErrorCode::Forbidden,
+            "the operator scope for this request is outside this credential's banks",
+        ))
+    }
+
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.
-    #[must_use]
-    pub fn resolve_timestamp(&self, args: &Value) -> String {
-        args.get("timestamp")
+    ///
+    /// The value is returned in the store's canonical form — UTC RFC 3339 at
+    /// second precision — because every item time column is compared as text.
+    /// Doing it here, at the one resolver every write tool shares, keeps a
+    /// caller's fractional or offset stamp from reaching a column the rest of
+    /// the store compares as `YYYY-MM-DDThh:mm:ssZ`.
+    ///
+    /// # Errors
+    /// [`ErrorCode::InvalidArgument`] when the caller's value is not a stamp
+    /// this build can place: it is refused rather than stored verbatim, since a
+    /// literal string in a time column compares as one.
+    pub fn resolve_timestamp(&self, args: &Value) -> Result<String, AmError> {
+        let raw = args
+            .get("timestamp")
             .and_then(Value::as_str)
             .filter(|t| !t.is_empty())
-            .map_or_else(now_utc, str::to_owned)
+            .map_or_else(now_utc, str::to_owned);
+        crate::runtime_context::canonical_write_stamp(&raw)
     }
 
     /// Dispatch maintenance signals off the write path (never gates the response).
@@ -174,6 +217,20 @@ impl McpState {
             dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
         }
     }
+}
+
+/// The canonical form of a caller-supplied stamp, or the refusal for one this
+/// build cannot place.
+///
+/// A stamp that cannot be placed (not RFC 3339, a month the year does not have,
+/// an offset of `+24:00`) would be stored and compared as a literal string, so
+/// it is refused with the same invalid-argument code the argument contract uses
+/// rather than written.
+///
+/// # Errors
+/// [`ErrorCode::InvalidArgument`] naming the value that cannot be placed.
+pub(crate) fn canonical_write_stamp(raw: &str) -> Result<String, AmError> {
+    clio_store::canonical_write_stamp(raw)
 }
 
 /// Nanoseconds since the Unix epoch, or `0` when the clock predates it.

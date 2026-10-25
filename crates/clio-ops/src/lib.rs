@@ -46,12 +46,15 @@ pub mod reindex;
 pub mod repair;
 pub mod verify;
 
-pub use diagnose::{DiagnoseArgs, DiagnoseReport, VERIFY_POINTER, diagnose};
+pub use diagnose::{
+    DiagnoseArgs, DiagnoseReport, VERIFY_POINTER, diagnose_scoped, diagnose_unscoped,
+};
 pub use doctor::{
     ACTION_DROP_ORPHAN_ASSOC_EDGE, ACTION_REBUILD_DENSE_INDEX, ACTION_REBUILD_LEXICAL_INDEX,
-    DoctorArgs, DoctorPlan, PlanRegistry, RepairAction, doctor, is_known_action, known_actions,
+    DoctorArgs, DoctorPlan, PlanRegistry, RepairAction, doctor_scoped, doctor_unscoped,
+    is_known_action, known_actions,
 };
 pub use finding::{Findings, OpsFinding, Severity, codes, redact_credentials, scope_label};
 pub use reindex::{ReindexArgs, ReindexReport, reindex, target_label};
 pub use repair::{ActionOutcome, ActionStatus, RepairArgs, RepairOutcome, repair};
-pub use verify::{VerifyArgs, VerifyReport, error_codes, verify};
+pub use verify::{VerifyArgs, VerifyReport, error_codes, store_wide_note, verify, verify_scoped};

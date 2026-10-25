@@ -49,11 +49,11 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
     }
 }
 
-/// Shared `update` facade: discrete invalidation vs continuous EMA.
+/// Shared `update` facade: discrete supersession vs continuous EMA.
 #[inline(never)]
 fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let rule_raw = req_str(args, "update_rule")?;
     let new_value = args
         .get("new_value")
@@ -70,6 +70,7 @@ fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
         target: req_str(args, "target")?,
         new_value: &new_value,
         update_rule: UpdateRule::parse(rule_raw)?,
+        new_item_id: &state.next_item_id(),
         timestamp: &ts,
         continuous_sink: &StderrSinks,
         triple_sink: &StderrSinks,
@@ -78,12 +79,23 @@ fn update(state: &McpState, args: &Value) -> Result<Value, AmError> {
         clio_write::UpdateOutcome::Continuous(state) => Ok(
             json!({"rule": "continuous", "state": serde_json::to_value(&state).expect("serialize tool payload")}),
         ),
-        clio_write::UpdateOutcome::Discrete(end) => Ok(json!({
-            "rule": "discrete",
-            "closed_ids": end.closed_ids,
-            "already_ended": end.already_ended,
-            "replacement_id": end.replacement_id
-        })),
+        clio_write::UpdateOutcome::Discrete(end) => {
+            // A discrete update that stored nothing must never read as success:
+            // the caller's value would be lost with no way to notice. The write
+            // layer fills the id on every stored supersession, so this is a
+            // defensive guard against a payload that lost it.
+            if end.replacement_id.is_none() {
+                return Err(AmError::new(
+                    ErrorCode::InvalidArgument,
+                    "discrete update stored no replacement item; nothing was written",
+                ));
+            }
+            Ok(json!({
+                "rule": "discrete",
+                "closed_ids": end.closed_ids,
+                "replacement_id": end.replacement_id
+            }))
+        }
     }
 }
 
@@ -96,7 +108,7 @@ fn invalidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
     if let Some(replacement) = opt_str(args, "replacement_id") {
         crate::read_tools::require_item(state, ctx.bank.as_str(), replacement)?;
     }
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let outcome = clio_write::triple::invalidate(
         &*state.store,
         &ctx,
@@ -113,7 +125,7 @@ fn invalidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn discard(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let confirm = opt_bool(args, "confirm", false)?;
     let d_args = clio_write::DiscardArgs {
         store: &*state.store,
@@ -164,7 +176,7 @@ fn has_nonempty_new_value(args: &Value) -> bool {
 #[inline(never)]
 fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let confirm = opt_bool(args, "confirm", false)?;
     let item_id = req_str(args, "item_id")?.to_owned();
     let reason = req_str(args, "reason")?.to_owned();
@@ -293,7 +305,7 @@ fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let salt = clio_compliance::tombstone_salt();
     let journal = clio_compliance::JournalHold::resolve_journal_path(
         state.journal_path.as_deref(),
@@ -401,3 +413,7 @@ mod mutator_tools_audit_tests;
 #[cfg(test)]
 #[path = "mutator_tools_tests.rs"]
 mod mutator_tools_tests;
+
+#[cfg(test)]
+#[path = "mutator_tools_correct_tests.rs"]
+mod mutator_tools_correct_tests;

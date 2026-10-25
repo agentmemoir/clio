@@ -76,7 +76,7 @@ const SCOPE_CHANGE_REFUSAL: Refusal = Refusal {
 const UNKNOWN_PRODUCT_PATH_REFUSAL: Refusal = Refusal {
     exit: 1,
     code: ErrorCode::Forbidden.as_str(),
-    message: "request closure refused: UnknownProductPath",
+    message: "request closure refused: no product path is recorded on this request",
 };
 
 /// One deployment: a scratch directory, the journal and backup paths the

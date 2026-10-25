@@ -34,7 +34,9 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Run the benchmark suite
         run: python3 -m unittest discover -s benchmarks/tests -t .

@@ -48,10 +48,10 @@ fn loopback_names_and_addresses_are_this_machine() {
 fn remote_names_and_addresses_are_not_this_machine() {
     for host in [
         "db.example.com",
-        "localhost.com",
+        "localhost.example.com",
         // A name that merely ends in `.localhost` is fine; one that merely
         // starts with `localhost` is a different host.
-        "localhost.evil.example",
+        "localhost.evil.example.com",
         "notlocalhost",
         "10.0.0.1",
         "192.168.1.10",
@@ -76,11 +76,11 @@ fn userinfo_is_never_a_loopback_name() {
     // The last `@` ends the userinfo, so what follows is the real host. None of
     // these may be accepted just because a loopback-looking name sits in front.
     for host in [
-        "trusted@evil.example",
-        "localhost@evil.example",
-        "box.localhost@evil.example",
-        "127.0.0.1@evil.example",
-        "evil.example@localhost",
+        "trusted@evil.example.com",
+        "localhost@evil.example.com",
+        "box.localhost@evil.example.com",
+        "127.0.0.1@evil.example.com",
+        "evil.example.com@localhost",
         "localhost@",
     ] {
         assert!(!is_loopback_host(host), "{host} must not be loopback");
@@ -98,9 +98,9 @@ fn split_reads_scheme_and_the_host_that_would_be_reached() {
     assert_eq!(host, "127.0.0.1");
 
     // The smuggled case: the userinfo is not the host.
-    let (scheme, host) = parse_scheme_host("http://trusted@evil.example/x").unwrap();
+    let (scheme, host) = parse_scheme_host("http://trusted@evil.example.com/x").unwrap();
     assert_eq!(scheme, "http");
-    assert_eq!(host, "evil.example");
+    assert_eq!(host, "evil.example.com");
 
     // A `?` or `#` ends the authority even without a `/`.
     let (_, host) = parse_scheme_host("http://box.localhost?a=b").unwrap();
@@ -118,7 +118,7 @@ fn split_reads_scheme_and_the_host_that_would_be_reached() {
 #[test]
 fn split_refuses_what_it_cannot_read() {
     for bad in [
-        "no-scheme.example",
+        "no-scheme.example.com",
         "://missing-scheme",
         "ht tp://spaced",
         "http://",

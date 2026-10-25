@@ -63,6 +63,7 @@ mod apply_records;
 mod bind_warning;
 pub mod client;
 mod client_feed;
+mod client_refusal;
 pub mod clock;
 mod conn_pool;
 mod credential;
@@ -70,6 +71,7 @@ pub mod crypto;
 pub mod delivery;
 pub mod denial;
 pub(crate) mod denial_guard;
+mod envelope;
 mod handle_resolution;
 pub(crate) mod http;
 mod journal_row;
@@ -89,6 +91,8 @@ mod credential_fixtures;
 mod delivery_tests;
 #[cfg(test)]
 mod denial_fixtures;
+#[cfg(test)]
+mod envelope_fixtures;
 #[cfg(test)]
 mod field_documentation_test_support;
 #[cfg(test)]

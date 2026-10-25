@@ -59,7 +59,7 @@ where
             "url": "",
             "model": "",
             "provider": "",
-            "max_client_batch": 32
+            "max_batch": 32
         },
         "log": { "level": "info" },
         "injection": { "budget_tokens": 2048 },

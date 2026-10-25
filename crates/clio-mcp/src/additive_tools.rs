@@ -53,6 +53,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         | "subject_request_copy"
         | "subject_request_exception"
         | "subject_request_events"
+        | "subject_request_path_complete"
         | "subject_request_close"
         | "subject_request_peer_status"
         | "subject_request_peer_retry"
@@ -141,7 +142,7 @@ fn scratchpad_clear(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[allow(clippy::too_many_lines)]
 fn canonical_put(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let key = req_str(args, "key")?;
     let value = req_str(args, "value")?;
     let category = clio_types::SemanticCategory::parse(req_str(args, "category")?)?;
@@ -302,7 +303,7 @@ fn shared_discard(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn validate_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let action = ValidateAction::parse(req_str(args, "action")?)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let v_args = clio_compliance::ValidateArgs {
         store: &*state.store,
         continuous: &*state.continuous,
@@ -338,7 +339,7 @@ const FLAG_BAND_MIN_SCORE: f64 = 0.40;
 /// zero, and never fails the whole tool.
 fn stats_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let now = state.resolve_timestamp(args);
+    let now = state.resolve_timestamp(args)?;
     let pressure = stats_pressure(state, ctx.bank.as_str(), &now);
     let report = clio_compliance::stats(
         &*state.store,

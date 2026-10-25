@@ -7,6 +7,9 @@
 //! adapter (compatibility): sealing content with a local
 //! sync key before push and opening it after pull. DEK material never leaves
 //! the node; the sync server stays able to store ciphertext without keys.
+//! The associated data is supplied by the caller — the canonical execution
+//! envelope of the mutation being sealed — so ciphertext is bound to the
+//! envelope it travels in and a relay cannot retarget it.
 //!
 //! ## Owns
 //! - `SyncCipher` ciphertext container (alg, key id, nonce, base64 payload)
@@ -113,10 +116,13 @@ impl SyncCipherKey {
     /// digest role and the handle role derive their own subkeys, so nothing
     /// the AEAD touches shares key material with either of them.
     ///
+    /// `aad` must be the associated data the writer sealed under, which is the
+    /// execution envelope of the mutation as received.
+    ///
     /// # Errors
     /// Unknown algorithm, bad base64, or authentication failure.
-    pub fn open(&self, cipher: &SyncCipher) -> Result<Vec<u8>, AmError> {
-        Self::open_under(&self.seal_key(), cipher)
+    pub fn open(&self, cipher: &SyncCipher, aad: &[u8]) -> Result<Vec<u8>, AmError> {
+        Self::open_under(&self.seal_key(), cipher, aad)
     }
 
     /// The non-reversible wire identifier of this key: truncated,
@@ -135,13 +141,14 @@ impl SyncCipherKey {
         )
     }
 
-    /// Seal plaintext content bytes; returns the wire-safe ciphertext, stamped
-    /// with this key's identifier so a receiving node can tell which of its
-    /// keys opens it.
+    /// Seal plaintext content bytes under `aad`; returns the wire-safe
+    /// ciphertext, stamped with this key's identifier so a receiving node can
+    /// tell which of its keys opens it. The caller supplies the associated
+    /// data, which authenticates the envelope the ciphertext travels in.
     ///
     /// # Errors
     /// AEAD failure (should not happen for this shape).
-    pub fn seal(&self, plaintext: &[u8]) -> Result<SyncCipher, AmError> {
+    pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<SyncCipher, AmError> {
         // The nonce is 24 raw bytes drawn fresh from the thread-local CSPRNG
         // on every call: reusing a nonce under one key is the failure this
         // prevents. `open` reads the nonce back from the wire, so nothing
@@ -155,7 +162,7 @@ impl SyncCipherKey {
                 XNonce::from_slice(&nonce_bytes),
                 Payload {
                     msg: plaintext,
-                    aad: b"am-sync-v1",
+                    aad,
                 },
             )
             .expect("sync cipher seal");
@@ -167,7 +174,7 @@ impl SyncCipherKey {
         })
     }
 
-    fn open_under(key: &[u8], cipher: &SyncCipher) -> Result<Vec<u8>, AmError> {
+    fn open_under(key: &[u8], cipher: &SyncCipher, aad: &[u8]) -> Result<Vec<u8>, AmError> {
         if cipher.alg != "xchacha20poly1305" {
             return Err(AmError::new(
                 ErrorCode::InvalidArgument,
@@ -186,17 +193,11 @@ impl SyncCipherKey {
                 "sync cipher nonce must be 24 bytes",
             ));
         };
-        let aead = XChaCha20Poly1305::new(key.into());
-        let opened = aead
-            .decrypt(
-                XNonce::from_slice(&nonce_arr),
-                Payload {
-                    msg: &body,
-                    aad: b"am-sync-v1",
-                },
-            )
+        let opener = XChaCha20Poly1305::new(key.into());
+        let plaintext = opener
+            .decrypt(XNonce::from_slice(&nonce_arr), Payload { msg: &body, aad })
             .map_err(|_| AmError::new(ErrorCode::Internal, "sync cipher open failed"))?;
-        Ok(opened)
+        Ok(plaintext)
     }
 }
 

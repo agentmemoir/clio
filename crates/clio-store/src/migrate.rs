@@ -1,7 +1,26 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
-//! Schema bootstrap from the portable SQL files under `sql/`.
+//
+//! # Responsibility
+//!
+//! This module supplies schema assets and shared database error conversion.
+//!
+//! ## Owns
+//! - Embedded schema SQL and portable timestamp formatting
+//! - Driver error classification and context
+//!
+//! ## Does not own
+//! - Store startup order or schema convergence
+//! - CLI output or exit codes
+//!
+//! ## Boundary
+//!
+//! Changes to database error conversion should normally require changes here.
+//! Changes to store commands should not require changes here.
+//!
+//! Keep this module focused on shared schema and driver primitives.
 
+use crate::distilled_freshness::stamp_millis;
 use clio_types::{AmError, ErrorCode, civil_from_days};
 
 /// Schema version this build expects (kept in lockstep with `SQL_CORE`).
@@ -21,7 +40,7 @@ pub const SQL_COMPLIANCE_SLOTS: &str = include_str!("../../../sql/003_local_comp
 /// string `db error`. The reason an operator can act on — the constraint name,
 /// the `DETAIL`, the `HINT` — sits behind that in the error's source chain, so
 /// using `Display` alone left every statement-level failure reporting as
-/// `items insert: db error` and nothing else (#63). This function is the single
+/// `items insert: db error` and nothing else. This function is the single
 /// mapping every statement goes through, so the walk belongs here; the connect
 /// and probe paths already did it locally, which is why the same failure said
 /// three different things depending on how far it got.
@@ -34,9 +53,14 @@ pub fn map_db_err<E>(context: &str, err: E) -> AmError
 where
     E: std::fmt::Display + 'static,
 {
-    let reason = (&err as &dyn std::any::Any)
-        .downcast_ref::<postgres::Error>()
-        .map_or_else(|| err.to_string(), crate::pg_tls::describe);
+    let postgres_error = (&err as &dyn std::any::Any).downcast_ref::<postgres::Error>();
+    if postgres_error.is_some_and(|error| {
+        matches!(error.code(), Some(code) if *code == postgres::error::SqlState::T_R_DEADLOCK_DETECTED
+            || *code == postgres::error::SqlState::LOCK_NOT_AVAILABLE)
+    }) {
+        return AmError::new(ErrorCode::StorageBusy, "Postgres lock conflict; retry the command");
+    }
+    let reason = postgres_error.map_or_else(|| err.to_string(), crate::pg_tls::describe);
     AmError::new(ErrorCode::Internal, format!("{context}: {reason}"))
 }
 
@@ -99,6 +123,175 @@ pub fn now_iso8601() -> String {
     )
 }
 
+/// The canonical item timestamp: UTC RFC 3339, second precision, `Z` suffix.
+///
+/// Every item time column is compared as text, so the whole column has to be
+/// one form at one precision: `2026-10-12T08:30:01.500Z` sorts before
+/// `2026-10-12T08:30:01Z` even though it is later, and an epoch-millis stamp
+/// sorts after every date string.
+#[must_use]
+pub fn millis_to_rfc3339(millis: i64) -> String {
+    let secs = millis.div_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+/// Whether a timestamp is an all-digit epoch stamp rather than a date string.
+///
+/// This is the one test the backfill and the inspector share, so "needs
+/// rewriting" and "cannot be compared as text" can never disagree.
+#[must_use]
+pub fn is_epoch_stamp(raw: &str) -> bool {
+    !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Rewrite a timestamp this store writes into [`millis_to_rfc3339`]'s form.
+///
+/// Two inputs are placed on the canonical clock:
+///
+/// - an all-digit value, read as epoch millis (the form [`now_iso`] produces);
+/// - an RFC 3339 date-time `YYYY-MM-DDThh:mm:ss[.fraction](Z|±hh:mm)`,
+///   converted to UTC by applying its offset and cut to whole seconds.
+///
+/// The calendar is validated by the store's own portable stamp reader, so
+/// "placeable" means the same thing here as it does on a read: a month the year
+/// does not have, a day the month does not have, an hour of 24, or an offset of
+/// `+24:00` is not a stamp and is not rewritten. Anything this build cannot
+/// place is returned unchanged, and nothing it does place lands on a different
+/// instant — an earlier build cut a value at its 19th byte, which dropped
+/// `+02:00` instead of applying it and moved
+/// `2026-10-12T08:30:01.500+02:00` two hours later on every open.
+#[must_use]
+pub fn canonical_ts(raw: &str) -> String {
+    canonical_stamp(raw).unwrap_or_else(|| raw.to_owned())
+}
+
+/// The canonical form of a stamp this build can place, or `None` when it cannot.
+///
+/// This is the placeability test [`canonical_ts`] is built on, and the one a
+/// write path needs: a caller-supplied stamp must be refused rather than stored
+/// verbatim, and "refused" has to mean the same thing as "the backfill cannot
+/// place it", or the two disagree about which rows are on the shared clock.
+#[must_use]
+pub fn canonical_stamp(raw: &str) -> Option<String> {
+    if is_epoch_stamp(raw) {
+        return raw.parse::<i64>().ok().map(millis_to_rfc3339);
+    }
+    let (millis, offset_secs) = stamp_offset(raw)?;
+    Some(millis_to_rfc3339(millis - offset_secs * 1_000))
+}
+
+/// The canonical form of a caller-supplied stamp, or the refusal for one this
+/// build cannot place.
+///
+/// Every write path that accepts a timestamp from a caller goes through here, so
+/// "placeable" is decided once: a value [`canonical_stamp`] rewrites is stored in
+/// its canonical form, and one it cannot place is refused rather than written and
+/// compared as a literal string.
+///
+/// # Errors
+/// [`ErrorCode::InvalidArgument`] naming the value that cannot be placed.
+pub fn canonical_write_stamp(raw: &str) -> Result<String, AmError> {
+    canonical_stamp(raw).ok_or_else(|| {
+        AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("timestamp `{raw}` is not a timestamp this build can place"),
+        )
+    })
+}
+
+/// Canonical form of an optional stamp: absent stays absent, present is
+/// canonicalised under [`canonical_write_stamp`]'s rule.
+///
+/// An empty value is a caller convention for "absent", so it stays absent
+/// rather than being stored as an empty string in a nullable time column.
+///
+/// # Errors
+/// [`ErrorCode::InvalidArgument`] when a present, non-empty value cannot be
+/// placed.
+pub fn canonical_optional_stamp(raw: Option<&str>) -> Result<Option<String>, AmError> {
+    match raw.filter(|value| !value.is_empty()) {
+        Some(value) => canonical_write_stamp(value).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// `YYYY-MM-DDThh:mm:ss[.fraction](Z|±hh:mm)` → (instant, offset in seconds east
+/// of UTC).
+///
+/// The shape is checked here and the calendar is not: the date-time and its
+/// fraction are handed to the store's portable stamp reader with a `Z` suffix,
+/// so the month length, the leap rule and the clock ranges are read by the same
+/// code that reads a stored stamp on the read path. Only the offset arithmetic
+/// is new, and [`canonical_ts`] applies it.
+fn stamp_offset(raw: &str) -> Option<(i64, i64)> {
+    let bytes = raw.as_bytes();
+    let shaped = bytes.len() >= 20
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[..19]
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit());
+    if !shaped {
+        return None;
+    }
+    let rest = &raw[19..];
+    let (fraction, zone) = match rest.strip_prefix('.') {
+        Some(after) => {
+            let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+            if digits == 0 {
+                return None;
+            }
+            (&rest[..=digits], &after[digits..])
+        }
+        None => ("", rest),
+    };
+    let offset_secs = match zone {
+        "" | "Z" => 0,
+        _ => zone_offset(zone)?,
+    };
+    let stamp = format!("{}{fraction}Z", &raw[..19]);
+    Some((stamp_millis(&stamp)?, offset_secs))
+}
+
+/// `±hh:mm` → seconds east of UTC; `None` for anything else, including an hour
+/// or minute the zone range does not have.
+fn zone_offset(zone: &str) -> Option<i64> {
+    let bytes = zone.as_bytes();
+    if bytes.len() != 6 || bytes[3] != b':' {
+        return None;
+    }
+    let sign = match bytes[0] {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let hours: i64 = zone.get(1..3)?.parse().ok()?;
+    let minutes: i64 = zone.get(4..6)?.parse().ok()?;
+    if hours > 23 || minutes > 59 {
+        return None;
+    }
+    Some(sign * (hours * 3_600 + minutes * 60))
+}
+
+#[path = "migrate_ts_backfill.rs"]
+pub(crate) mod ts_backfill;
+
+#[cfg(test)]
+#[path = "migrate_canonical_tests.rs"]
+mod canonical_tests;
+
 #[cfg(test)]
 #[path = "migrate_reason_tests.rs"]
 mod reason_tests;
@@ -108,95 +301,5 @@ mod reason_tests;
 mod migrate_compliance_slots_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use clio_types::SemanticCategory;
-
-    #[test]
-    fn core_sql_category_check_matches_the_whitelist() {
-        // The `items` CHECK constraint lists the categories; keep it tied
-        // to the single-source whitelist so a new category cannot be missed.
-        let expected = SemanticCategory::WIRE
-            .iter()
-            .map(|category| format!("'{category}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        assert!(
-            SQL_CORE.contains(&expected),
-            "sql/001_core.sql (items category CHECK) is missing the whitelist list: {expected}"
-        );
-    }
-
-    #[test]
-    fn sql_assets_and_error_mappers() {
-        assert!(SQL_CORE.contains("CREATE TABLE IF NOT EXISTS items"));
-        assert!(SQL_CORE.contains("epistemic_kind"));
-        assert!(SQL_CORE.contains("schema_version"));
-        assert!(SQL_CORE.contains("ON CONFLICT (key) DO UPDATE SET"));
-        assert!(SQL_CORE.contains("assoc_edges"));
-        assert!(SQL_CORE.contains("memtree_nodes"));
-        assert!(SQL_CORE.contains("interval_start"));
-        assert!(!SQL_CORE.contains("episodic_type IN\n      (\n       'triple', 'gist', 'task', 'failure', 'temporal', 'belief', 'other'"));
-        assert!(SQL_CORE.contains("'triple', 'gist', 'task', 'failure', 'temporal'"));
-        assert!(SQL_CORE.contains("'schema_version', '1'"));
-        assert!(SQL_CORE.contains("proposition_ciphertext"));
-        // The asserted triple VALUE is sealed under the subject DEK;
-        // `subject` + `predicate` stay plain because makes them the
-        // identity key. There must be no plaintext `object` column to fall back to.
-        assert!(SQL_CORE.contains("object_ciphertext"));
-        assert!(!SQL_CORE.contains("\n  object  "));
-        assert!(
-            SQL_VECTORS_POSTGRES
-                .contains("ALTER TABLE triples ADD COLUMN IF NOT EXISTS object_ciphertext text")
-        );
-        assert!(SQL_CORE.contains("triples_bank_id_tx_from_tx_until_inx"));
-        assert!(SQL_CORE.contains(
-            "CREATE UNIQUE INDEX IF NOT EXISTS triples_open_uniq\n\
-             ON triples (bank_id, subject, predicate)\n\
-             WHERE valid_until IS NULL AND tx_until IS NULL"
-        ));
-        assert!(
-            SQL_CORE
-                .contains("DROP INDEX IF EXISTS triples_bank_id_subject_predicate_open_both_inx")
-        );
-        assert!(SQL_VECTORS_POSTGRES.contains("vector"));
-        assert!(SQL_VECTORS_SQLITE.contains("fts5"));
-        // The vector table and its index are width-parameterized in Rust now, so
-        // neither static asset may pin a width or create the vector table.
-        assert!(!SQL_VECTORS_POSTGRES.contains("vector(384)"));
-        assert!(!SQL_VECTORS_POSTGRES.contains("CREATE TABLE IF NOT EXISTS item_embeddings"));
-        assert!(!SQL_VECTORS_SQLITE.contains("USING vec0"));
-        assert!(!SQL_VECTORS_SQLITE.contains("CREATE VIRTUAL TABLE IF NOT EXISTS item_embeddings"));
-        let iso = now_iso();
-        assert!(!iso.is_empty(), "{iso}");
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(19_723), (2024, 1, 1));
-        let stamp = now_iso8601();
-        assert!(stamp.starts_with("20"), "{stamp}");
-        assert!(stamp.len() >= 20, "{stamp}");
-        assert_eq!(map_db_err("ctx", "boom").code, ErrorCode::Internal);
-        assert_eq!(sqlite_vec_missing("x").code, ErrorCode::ConfigCorrupt);
-        assert_eq!(Result::<(), &str>::Ok(()).am("ok").unwrap(), ());
-        assert_eq!(
-            Result::<(), &str>::Err("nope").am("bad").unwrap_err().code,
-            ErrorCode::Internal
-        );
-        assert!(crate::vec_register::map_register_outcome(&Ok(())).is_ok());
-        assert_eq!(
-            crate::vec_register::map_register_outcome(&Err("boom".into()))
-                .unwrap_err()
-                .code,
-            ErrorCode::ConfigCorrupt
-        );
-        assert!(crate::vec_register::interpret_auto_extension_rc(0).is_ok());
-        assert!(crate::vec_register::interpret_auto_extension_rc(1).is_err());
-        assert_eq!(
-            crate::db_url::postgres_url_or_default(Ok("postgres://x".into())),
-            "postgres://x"
-        );
-        assert_eq!(
-            crate::db_url::postgres_url_or_default(Err(std::env::VarError::NotPresent)),
-            crate::db_url::DEFAULT_DATABASE_URL
-        );
-    }
-}
+#[path = "migrate_tests.rs"]
+mod tests;

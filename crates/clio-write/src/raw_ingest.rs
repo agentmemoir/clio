@@ -86,7 +86,7 @@ impl SignalSource for EmptySignals {
     }
 }
 
-fn item_shell(options: &RawIngestOptions<'_>) -> MemoryItem {
+fn item_shell(options: &RawIngestOptions<'_>, timestamp: &str) -> MemoryItem {
     let base_id = format!("{}-0", options.item_id_prefix);
     let (category, episodic_type) = match options.candidate {
         Candidate::Semantic(c) => (Some(c), None),
@@ -106,12 +106,12 @@ fn item_shell(options: &RawIngestOptions<'_>) -> MemoryItem {
         source_ref: None,
         snapshot: None,
         gist: None,
-        valid_from: options.timestamp.to_owned(),
+        valid_from: timestamp.to_owned(),
         valid_until: None,
-        tx_from: options.timestamp.to_owned(),
+        tx_from: timestamp.to_owned(),
         tx_until: None,
-        created_at: options.timestamp.to_owned(),
-        updated_at: options.timestamp.to_owned(),
+        created_at: timestamp.to_owned(),
+        updated_at: timestamp.to_owned(),
         context: options.context.clone(),
     }
 }
@@ -126,8 +126,9 @@ fn item_shell(options: &RawIngestOptions<'_>) -> MemoryItem {
 /// written.
 ///
 /// # Errors
-/// Invalid source `context` (empty or oversized); bank isolation failures;
-/// gated store structural errors.
+/// Invalid source `context` (empty or oversized); an event timestamp this build
+/// cannot place (refused before extraction, so nothing is written); bank
+/// isolation failures; gated store structural errors.
 pub fn ingest_raw_with_extractor(
     options: &RawIngestOptions<'_>,
     extractor: &(dyn Extractor + Sync),
@@ -135,6 +136,11 @@ pub fn ingest_raw_with_extractor(
     if let Some(context) = &options.context {
         clio_types::validate_context(context)?;
     }
+    // Canonicalise the event timestamp once, here: it stamps every time column
+    // the shell item and the admitted items carry, and every caller of this
+    // entry point shares this one seam. An unplaceable value is refused rather
+    // than written into a column the store compares as text.
+    let timestamp = clio_store::canonical_write_stamp(options.timestamp)?;
     let fields: Vec<FieldSpec> = default_event_fields();
     let verify = VerifyConfig::default();
     let env = RankingEnv::system_defaults();
@@ -152,14 +158,14 @@ pub fn ingest_raw_with_extractor(
             schema_template: options.schema_template.clone(),
             fields: &fields,
             verify: &verify,
-            item_base: item_shell(options),
+            item_base: item_shell(options, &timestamp),
             candidate: options.candidate,
             signal_source: options.signal_source,
             ctx: options.ctx,
             policy: AdmissionPolicy::new(&env),
             admit_sink: &admit_sink,
             verify_sink: &verify_sink,
-            timestamp: options.timestamp,
+            timestamp: &timestamp,
             config: options.config.clone(),
             leaves: options.leaves,
             maintenance: options.maintenance.clone(),

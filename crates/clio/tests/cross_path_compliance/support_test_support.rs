@@ -9,7 +9,8 @@
 //! an item and its subject key back to classify what survived.
 //!
 //! ## Owns
-//! - `Archive`, `archive_sqlite`, and `archive_sqlite_with_authority`
+//! - `Archive`, `archive_sqlite`, `archive_sqlite_keyless`, and
+//!   `archive_sqlite_with_authority`
 //! - `restore_sqlite`, `extract_into`, `key_source`, and `publish`
 //! - `current_authority`, `file_sha256`, and `items`
 //! - `erase_subject`, `Readback`, `readback`, and `subject_key_destroyed`
@@ -70,6 +71,30 @@ pub fn archive_sqlite_with_authority(
     slug: &str,
     authority: Option<ManifestAuthority>,
 ) -> Archive {
+    build_sqlite_archive(backup_dir, db, kms_path, slug, authority, true)
+}
+
+/// Assemble a SQLite archive that records no key member, so a restore leaves
+/// the target's key store in place.
+pub fn archive_sqlite_keyless(
+    backup_dir: &Path,
+    db: &Path,
+    kms_path: &Path,
+    slug: &str,
+    authority: Option<ManifestAuthority>,
+) -> Archive {
+    build_sqlite_archive(backup_dir, db, kms_path, slug, authority, false)
+}
+
+/// The shared SQLite archive assembly, with or without the key member.
+fn build_sqlite_archive(
+    backup_dir: &Path,
+    db: &Path,
+    kms_path: &Path,
+    slug: &str,
+    authority: Option<ManifestAuthority>,
+    with_keys: bool,
+) -> Archive {
     staging::ensure_backup_dir(backup_dir).expect("create the backup directory");
     let staged = backup_dir.join("payload.stage");
     let facts = clio::store::snapshot_sqlite_into(db, &staged).expect("snapshot the sqlite store");
@@ -91,7 +116,11 @@ pub fn archive_sqlite_with_authority(
         started_at: facts.started_at.clone(),
         duration_ms: facts.duration_ms,
         counts_complete: true,
-        keys: key_source(kms_path),
+        keys: if with_keys {
+            key_source(kms_path)
+        } else {
+            None
+        },
         label: None,
         note: None,
         authority,

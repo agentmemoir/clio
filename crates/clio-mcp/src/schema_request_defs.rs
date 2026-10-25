@@ -35,6 +35,7 @@ pub fn request_defs() -> Vec<ToolDef> {
         copy_def(),
         exception_def(),
         events_def(),
+        path_complete_def(),
         close_def(),
         peer_status_def(),
         peer_retry_def(),
@@ -177,6 +178,22 @@ fn events_def() -> ToolDef {
     }
 }
 
+/// Explicitly attest that a product-controlled path has a verified result.
+fn path_complete_def() -> ToolDef {
+    ToolDef {
+        name: "subject_request_path_complete",
+        description: "Record a verified Done result for one product-controlled path and report the request. Requires a harness or system actor in the request bank. Terminal requests cannot change.",
+        required: &["request_id", "product_path"],
+        props: props(vec![
+            ("request_id", s("Durable request id.")),
+            (
+                "product_path",
+                s("Product-controlled path with a verified result."),
+            ),
+        ]),
+    }
+}
+
 /// `subject_request_close`: accept closure for one request.
 fn close_def() -> ToolDef {
     ToolDef {
@@ -254,4 +271,33 @@ fn props(
 ) -> Vec<(&'static str, serde_json::Value)> {
     base.extend(bank_actor());
     base
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn completion_schema_requires_path_without_state_or_owner_controls() {
+        let definitions = request_defs();
+        for definition in &definitions {
+            let defects = crate::schema::validate_tool_schema(&definition.to_tool());
+            assert!(defects.is_empty(), "{}: {defects:?}", definition.name);
+        }
+        let tool = definitions
+            .iter()
+            .find(|definition| definition.name == "subject_request_path_complete")
+            .expect("completion tool is published")
+            .to_tool();
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["required"], json!(["request_id", "product_path"]));
+        assert_eq!(schema["additionalProperties"], json!(false));
+        let properties = schema["properties"].as_object().expect("properties");
+        assert_eq!(
+            properties.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["actor", "bank", "product_path", "request_id"]
+        );
+        assert_eq!(properties["product_path"]["type"], json!("string"));
+    }
 }

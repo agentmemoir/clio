@@ -35,9 +35,9 @@ fn endpoint_parse_accepts_http_and_https() {
         (e.host.as_str(), e.port, e.path.as_str()),
         ("127.0.0.1", 34311, "/")
     );
-    let e = HttpEndpoint::parse("https://secure.example/embed").unwrap();
+    let e = HttpEndpoint::parse("https://secure.example.com/embed").unwrap();
     assert_eq!((e.port, e.path.as_str()), (443, "/embed"));
-    let e = HttpEndpoint::parse("http://host.example").unwrap();
+    let e = HttpEndpoint::parse("http://host.example.com").unwrap();
     assert_eq!(e.port, 80);
 }
 

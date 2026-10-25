@@ -1,0 +1,17 @@
+127.0.0.1
+127.1.2.3
+127.9.9.9
+192.0.2.1
+agentmemoir.com
+agentmemour.com
+api
+api.cohere.com
+api.mem0.ai
+api.openai.com
+api2
+example.com
+github.com
+h
+host
+localhost
+x

@@ -54,7 +54,7 @@ fn wave_claims_hub_before_working_and_completes_with_revision() {
         "the first revision names the unit id"
     );
     assert_eq!(
-        intent.claimed_at, "0",
+        intent.claimed_at, "1970-01-01T00:00:00Z",
         "the claim is stamped in the wave clock"
     );
 }

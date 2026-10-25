@@ -15,7 +15,9 @@
 //!
 //! ## Does not own
 //! - Overlay flatten/set/merge primitives (see `merge`)
-//! - Env variable validation rules (see `validate`)
+//! - Env variable validation rules (see `validate`); a value the overlay cannot
+//!   use at all is dropped here so the config default stands, and the one bound it
+//!   shares with the set-value rule is read from `validate_set`, not restated
 //! - Other `Runtime` tool handlers (see `config`)
 //!
 //! ## Boundary
@@ -27,6 +29,7 @@
 //! Keep this module focused on env overlay wiring and bearer lookup.
 
 use super::Runtime;
+use super::validate_set::MAX_RERANK_BATCH;
 use crate::db_url_env::database_url_from;
 use serde_json::Value;
 
@@ -82,13 +85,16 @@ impl Runtime {
             self.env_overlay
                 .insert("rerank.provider".into(), Value::String(provider));
         }
-        if let Some(max_client_batch) =
-            get("CLIO_RERANK_MAX_CLIENT_BATCH").and_then(|value| value.parse::<u64>().ok())
+        // A cap of zero is not a cap, text is not a number, and a cap above the
+        // service ceiling would be refused by `config_set`: every one of them is
+        // dropped here so the config default stands, which is the same range the
+        // set-value validation applies rather than a second, weaker one.
+        if let Some(max_batch) = get("CLIO_RERANK_MAX_BATCH")
+            .and_then(|b| b.parse::<u64>().ok())
+            .filter(|n| (1..=MAX_RERANK_BATCH).contains(n))
         {
-            self.env_overlay.insert(
-                "rerank.max_client_batch".into(),
-                Value::from(max_client_batch),
-            );
+            self.env_overlay
+                .insert("rerank.max_batch".into(), Value::from(max_batch));
         }
         if let Some(key) = get("CLIO_RERANK_API_KEY") {
             self.env_overlay

@@ -150,8 +150,8 @@ impl HttpEndpoint {
 /// that makes it honest.
 ///
 /// The check reads the host [`HttpEndpoint::parse`] already computed, not a
-/// split of the string. `http://trusted@evil.example` parses to the host
-/// `trusted@evil.example`, which is not loopback, so it is refused; a
+/// split of the string. `http://trusted@evil.example.com` parses to the host
+/// `trusted@evil.example.com`, which is not loopback, so it is refused; a
 /// hand-rolled split on `://` and `/` is exactly the sort of thing that lets
 /// that through.
 ///

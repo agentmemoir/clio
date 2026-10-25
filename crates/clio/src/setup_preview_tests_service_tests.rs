@@ -78,7 +78,7 @@ fn a_skipped_service_writes_nothing_and_owns_nothing() {
 fn a_hosted_service_writes_its_key_and_owns_it_even_when_it_skips_it() {
     let service = Service {
         role: ServiceRole::Hosted,
-        url: "https://embed.example.test".to_owned(),
+        url: "https://embed.example.com".to_owned(),
         model: "m".to_owned(),
         key: None,
         provider: Some("openai".to_owned()),
@@ -95,7 +95,7 @@ fn a_hosted_service_writes_its_key_and_owns_it_even_when_it_skips_it() {
 fn the_dimension_count_is_written_only_for_a_hosted_embedding_service() {
     let hosted = Service {
         role: ServiceRole::Hosted,
-        url: "https://embed.example.test".to_owned(),
+        url: "https://embed.example.com".to_owned(),
         model: "m".to_owned(),
         key: None,
         provider: None,

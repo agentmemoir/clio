@@ -383,11 +383,12 @@ fn an_encrypted_push_leaves_no_score_anywhere_on_the_relay() {
             .as_deref()
             .expect("a sealed row stores its envelope");
         let envelope: SyncMutation = serde_json::from_str(sealed).expect("envelope");
-        let SyncContent::Cipher(cipher) = envelope.content else {
+        let SyncContent::Cipher(ref cipher) = envelope.content else {
             panic!("{kind}: the stored envelope is ciphertext");
         };
+        let aad = envelope.execution_view().aad();
         let document: Value =
-            serde_json::from_slice(&key.open(&cipher).expect("open")).expect("document");
+            serde_json::from_slice(&key.open(cipher, &aad).expect("open")).expect("document");
         assert_eq!(
             document[crate::client_feed::package::ADMISSION_RECEIPT_KEY]["admitted"],
             true,

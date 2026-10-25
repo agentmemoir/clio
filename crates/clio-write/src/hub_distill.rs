@@ -155,6 +155,15 @@ impl HubDistillEngine {
         })
     }
 
+    /// The same instant as [`Self::now_millis`] in the canonical item form.
+    ///
+    /// The item time columns are compared as text, so they carry one form at
+    /// second precision; the millis clock itself keeps feeding the decay and
+    /// freshness maths, which need the millisecond it holds.
+    fn now_canonical(&self) -> String {
+        clio_store::millis_to_rfc3339(self.now_millis())
+    }
+
     /// Node ids whose above-threshold effective coactivation degree exceeds the
     /// configured `hub_degree_limit` (read-only; no decay prune here).
     ///
@@ -205,13 +214,14 @@ impl HubDistillEngine {
         // The claim is an evidence trail only: it never routes. Whether this
         // wave resumed a claim an earlier wave left incomplete only annotates
         // the outcome below.
+        let claimed_at = self.now_canonical();
         let resumed = claim_before_work(
             self.store.as_ref(),
             bank,
             hub_id,
             &item_id,
             ctx.actor.as_str(),
-            &self.now_millis().to_string(),
+            &claimed_at,
         )?;
         let hub = match self.store.get_memory_item(bank, hub_id) {
             Ok(Some(hub)) => hub,
@@ -292,7 +302,7 @@ impl HubDistillEngine {
             });
         }
         let category = modal_category(&hub, &neighbors);
-        let ts = self.now_millis().to_string();
+        let ts = self.now_canonical();
         let record = build_distill_record(bank, &hub, &item_id, &neighbors, &ts);
         let item = build_distill_item(bank, &hub, category, &record, &neighbors, &ts);
         let source = HubSignalSource {

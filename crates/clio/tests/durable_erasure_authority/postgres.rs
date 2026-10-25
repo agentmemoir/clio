@@ -5,12 +5,14 @@
 //!
 //! This module is responsible for the store-backed scenarios on loopback
 //! Postgres: the durable denial surviving a restart with no content key
-//! minted by the journal query, and the refusal of denied membership derived
-//! from a destroyed slot, a tombstone, and a ciphertext-only row.
+//! minted by the journal query, the content-free records a destroyed erase
+//! leaves behind passing the authority check, and usable key material for the
+//! denied subject still refusing it.
 //!
 //! ## Owns
 //! - The Postgres restart scenario and its key-store inventory comparison
-//! - The Postgres denied-membership scenario and its journal-bytes hash
+//! - The Postgres membership scenario: content-free records pass, and usable
+//!   key material refuses, with its journal-bytes hash
 //!
 //! ## Does not own
 //! - The fixtures and probes (see `support`)
@@ -120,7 +122,7 @@ fn postgres_restart_keeps_the_durable_denial_and_the_journal_query_mints_no_key(
 }
 
 #[test]
-fn postgres_denied_membership_from_a_tombstone_refuses_with_the_journal_unchanged() {
+fn postgres_content_free_membership_passes_while_usable_key_material_refuses() {
     let Some(base) = require_postgres() else {
         return;
     };
@@ -166,7 +168,10 @@ fn postgres_denied_membership_from_a_tombstone_refuses_with_the_journal_unchange
     };
     let journal_before = file_sha256(&journal);
 
-    let denied = check_archive_authority(
+    // The tombstone is a content-free record: it names the denied subject but
+    // carries nothing that could make the erased content readable, so a backup
+    // that carries it restores.
+    let content_free = check_archive_authority(
         &state,
         Some(&state),
         &claim,
@@ -175,7 +180,21 @@ fn postgres_denied_membership_from_a_tombstone_refuses_with_the_journal_unchange
         }],
     );
     assert_eq!(
-        denied.expect_err("a tombstone reference to the denied subject must refuse"),
+        content_free,
+        Ok(()),
+        "a content-free tombstone reference to the denied subject must pass"
+    );
+    // Usable key material for the same subject still refuses.
+    let denied = check_archive_authority(
+        &state,
+        Some(&state),
+        &claim,
+        &[MemberFacts::LiveKey {
+            subject_hash: subject_hash.clone(),
+        }],
+    );
+    assert_eq!(
+        denied.expect_err("usable key material for the denied subject must refuse"),
         AuthorityRefusal::DeniedSubject
     );
     let unknown = check_archive_authority(&state, Some(&state), &claim, &[MemberFacts::Unknown]);

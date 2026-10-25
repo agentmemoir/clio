@@ -21,7 +21,7 @@
 //! Changes to SQLite hygiene SQL should not require changes here.
 
 use crate::hygiene_store::{HygieneLogEntry, validate_log_action};
-use crate::migrate::{IntoAmError, now_iso};
+use crate::migrate::{IntoAmError, now_iso, now_iso8601};
 use crate::model::ItemIdentity;
 use crate::postgres::PostgresStore;
 use clio_types::{AmError, ErrorCode};
@@ -78,7 +78,7 @@ impl PostgresStore {
                     "UPDATE items SET archived_at = $1, updated_at = $2
                      WHERE id = $3 AND bank_id = $4 AND discarded_at IS NULL
                        AND archived_at IS NULL",
-                    &[&archived_at, &now_iso(), &item_id, &bank_id],
+                    &[&archived_at, &now_iso8601(), &item_id, &bank_id],
                 )
                 .am("hygiene archive update")?;
             Ok(n)
@@ -96,7 +96,7 @@ impl PostgresStore {
                 .execute(
                     "UPDATE items SET archived_at = NULL, updated_at = $1
                      WHERE id = $2 AND bank_id = $3 AND archived_at IS NOT NULL",
-                    &[&now_iso(), &item_id, &bank_id],
+                    &[&now_iso8601(), &item_id, &bank_id],
                 )
                 .am("hygiene unarchive update")?;
             Ok(n)

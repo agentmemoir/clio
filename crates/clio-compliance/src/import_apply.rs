@@ -29,20 +29,35 @@
 use std::collections::{HashMap, HashSet};
 
 use clio_admission::gated::{GateRequest, gated_create_raw};
-use clio_config::secret::{masked_clone, scrub_inline_secrets};
+use clio_config::secret::scrub_inline_secrets;
 use clio_store::BatchWrite;
-use clio_types::{AmError, ItemKind, MemoryItem, SemanticCategory, TaskRecord};
+use clio_types::{AmError, MemoryItem, TaskRecord};
 use serde_json::json;
 
-use super::ImportArgs;
 use super::import_rows::opaque_record;
+use super::{ImportArgs, SkippedInvalid};
 use crate::bundle::BundleEnvelope;
-use crate::export_mask::scrub_context;
 
 // Persona row planning lives in its own module (extracted to keep this file
 // within the source-size bound); it shares the same `Planner` state.
 #[path = "import_apply_persona.rs"]
 mod persona;
+
+// The pure key and masking helpers live in their own module for the same
+// reason; the row planners reach them through this re-export.
+#[path = "import_apply_keys.rs"]
+mod keys;
+
+pub(super) use keys::{import_id, kind_key, masked_item};
+
+/// Why a deferred carrier cannot carry the dependent rows that hang off it.
+#[derive(Clone)]
+pub(super) enum CarrierBlock {
+    /// The carrier's own stored content failed validation and was skipped.
+    Invalid(String),
+    /// The admission gate rejected the carrier.
+    Rejected(String),
+}
 
 /// Per-entity import planner (see `run` for the entity order).
 pub(super) struct Planner<'a> {
@@ -53,7 +68,11 @@ pub(super) struct Planner<'a> {
     pub(super) skip: usize,
     pub(super) reject: usize,
     pub(super) overwrite: usize,
+    /// Rows skipped because their own stored content failed validation.
+    pub(super) skip_invalid: usize,
     pub(super) samples: Vec<String>,
+    /// One `(id, code, masked reason)` entry per skipped row (capped at 10).
+    pub(super) skipped_invalid: Vec<SkippedInvalid>,
     pub(super) notes: Vec<String>,
     pub(super) item_exists: HashMap<String, bool>,
     pub(super) edge_seen: HashMap<String, bool>,
@@ -63,8 +82,8 @@ pub(super) struct Planner<'a> {
     pub(super) consumed: HashSet<String>,
     /// Admission-stamped carriers for rows whose executor re-inserts them.
     pub(super) admitted_carriers: HashMap<String, MemoryItem>,
-    /// Carriers rejected by the admission gate (reason per carrier id).
-    pub(super) rejected_carriers: HashMap<String, String>,
+    /// Carriers that cannot carry their dependent rows, with the masked reason.
+    pub(super) blocked_carriers: HashMap<String, CarrierBlock>,
     pub(super) noted_triple_force: bool,
 }
 
@@ -78,7 +97,9 @@ impl<'a> Planner<'a> {
             skip: 0,
             reject: 0,
             overwrite: 0,
+            skip_invalid: 0,
             samples: Vec::new(),
+            skipped_invalid: Vec::new(),
             notes: Vec::new(),
             item_exists: HashMap::new(),
             edge_seen: HashMap::new(),
@@ -87,7 +108,7 @@ impl<'a> Planner<'a> {
             deferred: HashSet::new(),
             consumed: HashSet::new(),
             admitted_carriers: HashMap::new(),
-            rejected_carriers: HashMap::new(),
+            blocked_carriers: HashMap::new(),
             noted_triple_force: false,
         }
     }
@@ -147,6 +168,26 @@ impl<'a> Planner<'a> {
         }
     }
 
+    /// Record one entity this run reports and skips instead of failing the
+    /// whole import. A skipped deferred carrier also becomes unusable, so the
+    /// row that depends on it reports the carrier as skipped and does not
+    /// restore.
+    fn record_skip_invalid(&mut self, id: &str, carrier: bool, err: &AmError) {
+        self.skip_invalid += 1;
+        let reason = scrub_inline_secrets(&err.message);
+        if carrier {
+            self.blocked_carriers
+                .insert(id.to_owned(), CarrierBlock::Invalid(reason.clone()));
+        }
+        if self.skipped_invalid.len() < 10 {
+            self.skipped_invalid.push(SkippedInvalid {
+                id: id.to_owned(),
+                code: err.code.as_str().to_owned(),
+                reason,
+            });
+        }
+    }
+
     pub(super) fn item_exists(&mut self, id: &str) -> Result<bool, AmError> {
         if let Some(seen) = self.item_exists.get(id) {
             return Ok(*seen);
@@ -164,6 +205,21 @@ impl<'a> Planner<'a> {
         self.envelope.entities.items.iter().find(|i| i.id == id)
     }
 
+    /// True when `id` names a row the bundle itself carries — an item or an
+    /// opaque (`content_mode = ciphertext_backup`) row — so a pointer at it has
+    /// to be re-keyed alongside the row. `ciphertext_backup` bundles carry an
+    /// empty `items` array and put every row in `opaque_items`, so both arrays
+    /// have to count.
+    pub(super) fn bundle_owns(&self, id: &str) -> bool {
+        self.bundle_item(id).is_some()
+            || self
+                .envelope
+                .entities
+                .opaque_items
+                .iter()
+                .any(|o| o.id == id)
+    }
+
     fn plan_items(&mut self) -> Result<(), AmError> {
         let args = self.args;
         let bank = args.ctx.bank.as_str();
@@ -173,7 +229,21 @@ impl<'a> Planner<'a> {
             // restored into ctx.bank, so the entity bank_id is rewritten here.
             let mut it = item.clone();
             bank.clone_into(&mut it.bank_id);
-            if self.item_exists(&it.id)? {
+            let id = import_id(bank, &item.bank_id, &item.id).into_owned();
+            it.id.clone_from(&id);
+            // A gist whose length predates the published cap is reported and
+            // skipped, not aborted: the row may be new, which is why this runs
+            // before the exists/force branch. The value is never truncated.
+            // Gist only — a structural `context` violation still fails the whole
+            // bundle, and this keeps the force path from staging a bad row.
+            if let Some(gist) = it.gist.as_deref()
+                && let Err(err) = clio_types::validate_gist(gist)
+            {
+                let carrier = self.deferred.contains(&item.id);
+                self.record_skip_invalid(&id, carrier, &err);
+                continue;
+            }
+            if self.item_exists(&id)? {
                 if args.force {
                     self.overwrite += 1;
                     let masked = masked_item(&it);
@@ -181,7 +251,7 @@ impl<'a> Planner<'a> {
                         item: masked,
                         actor: actor.to_owned(),
                     });
-                    self.stage_force_audit(bank, &it.id, actor);
+                    self.stage_force_audit(bank, &id, actor);
                 } else {
                     self.skip += 1;
                 }
@@ -190,7 +260,7 @@ impl<'a> Planner<'a> {
             // Deferred carriers still pass the gates here; the
             // Commit* row executor later inserts the admitted (score-stamped)
             // clone instead of a CreateItem effect.
-            if self.deferred.contains(&it.id) {
+            if self.deferred.contains(&item.id) {
                 self.gate_carrier(&it)?;
                 continue;
             }
@@ -264,12 +334,14 @@ impl<'a> Planner<'a> {
         if decision.pass {
             self.create += 1;
         } else {
-            self.rejected_carriers.insert(
+            self.blocked_carriers.insert(
                 it.id.clone(),
-                decision
-                    .rejection_reason
-                    .clone()
-                    .unwrap_or_else(|| "admission gate rejection".to_owned()),
+                CarrierBlock::Rejected(
+                    decision
+                        .rejection_reason
+                        .clone()
+                        .unwrap_or_else(|| "admission gate rejection".to_owned()),
+                ),
             );
             self.reject_reason(decision.rejection_reason.as_deref());
         }
@@ -280,6 +352,16 @@ impl<'a> Planner<'a> {
         let args = self.args;
         let bank = args.ctx.bank.as_str();
         let actor = args.ctx.actor.as_str();
+        // `OpaqueItem` carries no bank provenance, so "same bank?" is provable
+        // only when the manifest names exactly the target bank — what every
+        // exporter emits. A multi-bank or empty `bank_ids` fails closed to the
+        // derived id: an unkeyed id would hit the opaque upsert
+        // (`ON CONFLICT (id) DO UPDATE SET bank_id = EXCLUDED.bank_id`) and
+        // move the source bank's row into this bank.
+        let same_bank = {
+            let bank_ids = &self.envelope.manifest.bank_ids;
+            bank_ids.len() == 1 && bank_ids[0] == bank
+        };
         if !self.envelope.entities.opaque_items.is_empty() {
             self.note(
                 "ciphertext_backup items restore content opaque under the local KMS; \
@@ -288,15 +370,17 @@ impl<'a> Planner<'a> {
             );
         }
         for opaque in &self.envelope.entities.opaque_items {
-            let record = opaque_record(opaque, bank);
-            if args.store.get_item_identity(bank, &opaque.id)?.is_some() {
+            let mut record = opaque_record(opaque, bank);
+            record.id = import_id(bank, if same_bank { bank } else { "" }, &opaque.id).into_owned();
+            if args.store.get_item_identity(bank, &record.id)?.is_some() {
                 if args.force {
                     self.overwrite += 1;
+                    let record_id = record.id.clone();
                     self.staged.push(BatchWrite::PutOpaqueItem {
                         item: record,
                         actor: actor.to_owned(),
                     });
-                    self.stage_force_audit(bank, &opaque.id, actor);
+                    self.stage_force_audit(bank, &record_id, actor);
                 } else {
                     self.skip += 1;
                 }
@@ -318,6 +402,13 @@ impl<'a> Planner<'a> {
         for edge in &self.envelope.entities.assoc_edges {
             let mut e = edge.clone();
             bank.clone_into(&mut e.bank_id);
+            e.id = import_id(bank, &edge.bank_id, &edge.id).into_owned();
+            if self.bundle_owns(&edge.source_id) {
+                e.source_id = import_id(bank, &edge.bank_id, &edge.source_id).into_owned();
+            }
+            if self.bundle_owns(&edge.target_id) {
+                e.target_id = import_id(bank, &edge.bank_id, &edge.target_id).into_owned();
+            }
             if args.store.get_assoc_edge(bank, &e.id)?.is_some() {
                 if args.force {
                     self.overwrite += 1;
@@ -351,32 +442,6 @@ impl<'a> Planner<'a> {
     }
 }
 
-/// Candidate discriminator strings for the gated create path.
-pub(super) fn kind_key(item: &MemoryItem) -> (&'static str, &'static str) {
-    match item.kind {
-        ItemKind::Semantic => (
-            "semantic",
-            item.category.map_or("", SemanticCategory::as_str),
-        ),
-        ItemKind::Episodic => (
-            "episodic",
-            item.episodic_type
-                .map_or("", clio_types::EpisodicType::as_str),
-        ),
-    }
-}
-
-/// Defensive masking pass before a force overwrite (diagnostics-grade masking
-/// on top of the export-time masking already present in the bundle). A context
-/// that scrubs to an empty string is treated as absent, never written as `Some("")`.
-fn masked_item(item: &MemoryItem) -> MemoryItem {
-    let mut out = item.clone();
-    if let Some(snapshot) = out.snapshot.as_mut() {
-        *snapshot = masked_clone(snapshot);
-    }
-    if let Some(gist) = out.gist.as_mut() {
-        *gist = scrub_inline_secrets(gist);
-    }
-    out.context = scrub_context(out.context.as_deref());
-    out
-}
+#[cfg(test)]
+#[path = "import_apply_tests.rs"]
+mod import_apply_tests;

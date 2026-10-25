@@ -308,6 +308,111 @@ fn extract_available_matches_ingest_fail_closed() {
     assert!(!ready(unknown), "unknown provider");
 }
 
+/// A request-scoped copy differs only in who it acts as: the credential lands on
+/// the copy, the original stays unbound, and every shared field is still the one
+/// instance because each already sits behind an `Arc`.
+#[test]
+fn with_principal_scopes_one_copy_of_the_state() {
+    let base = state();
+    let scoped = base.with_principal(Principal::new(
+        "ops-key".to_owned(),
+        Actor::Harness,
+        vec!["bank-a".to_owned()],
+    ));
+    let attached = scoped
+        .principal
+        .as_deref()
+        .expect("the copy carries the credential");
+    assert_eq!(
+        attached.label, "ops-key",
+        "the copy acts as the named record"
+    );
+    assert_eq!(
+        attached.actor,
+        Actor::Harness,
+        "the copy acts as the credential's actor"
+    );
+    assert!(
+        Arc::ptr_eq(&scoped.store, &base.store),
+        "a shallow copy shares one store instead of forking it"
+    );
+    assert!(base.principal.is_none(), "the original stays unbound");
+}
+
+/// An unbound state administers: a local transport has no credential edge, and
+/// the process owner already holds the store.
+#[test]
+fn authorize_admin_allows_an_unbound_state() {
+    let base = state();
+    assert!(
+        base.principal.is_none(),
+        "premise: the helper opens unbound"
+    );
+    base.authorize_admin()
+        .expect("a local, unbound state administers");
+}
+
+/// Only `harness` and `system` carry the privilege, so an `agent` or `user`
+/// credential is refused — and the refusal is the code, not the message text.
+#[test]
+fn authorize_admin_refuses_a_non_administrative_credential() {
+    for actor in [Actor::Agent, Actor::User] {
+        let bound = state().with_principal(Principal::new(
+            format!("{}-key", actor.as_str()),
+            actor,
+            vec!["default".to_owned()],
+        ));
+        let err = bound
+            .authorize_admin()
+            .expect_err("a non-administrative credential must not administer");
+        assert_eq!(err.code, ErrorCode::Forbidden, "{actor:?} credential");
+    }
+}
+
+/// An administrative credential administers; `with_principal` is the only way a
+/// state becomes bound, so this pins the allow side of the same match arm.
+#[test]
+fn authorize_admin_allows_an_administrative_credential() {
+    for actor in [Actor::Harness, Actor::System] {
+        state()
+            .with_principal(Principal::new(
+                format!("{}-key", actor.as_str()),
+                actor,
+                vec!["default".to_owned()],
+            ))
+            .authorize_admin()
+            .expect("an administrative credential administers");
+    }
+}
+
+/// The deployment constructor opens over the ambient configuration and the
+/// default in-memory backend, and it leaves the state unbound.
+#[test]
+fn open_reads_the_deployment_runtime() {
+    let opened = McpState::open(&McpOpenOptions::default()).expect("deployment open");
+    assert_eq!(opened.default_bank, "default");
+    assert!(
+        opened.principal.is_none(),
+        "a deployment state opens unbound"
+    );
+}
+
+/// A one-shot process joins its `consolidate` wave instead of queueing it,
+/// because a detached wave would die with the process; the long-lived
+/// constructor keeps the queued default.
+#[test]
+fn open_one_shot_joins_the_consolidate_wave() {
+    let one_shot = McpState::open_one_shot(&McpOpenOptions::default()).expect("one-shot open");
+    assert!(
+        one_shot.join_consolidate_wave,
+        "a one-shot process joins its wave"
+    );
+    assert!(
+        !state().join_consolidate_wave,
+        "the long-lived open queues its wave"
+    );
+}
+
 #[test]
 fn file_backed_kms_persists_across_state_opens() {
     // Hermetic sealing: the process test key, never the machine's key store.

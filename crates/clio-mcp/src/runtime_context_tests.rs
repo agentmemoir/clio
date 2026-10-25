@@ -167,3 +167,108 @@ fn clean_batch_ids_do_not_repeat() {
     let s = state();
     assert_ne!(s.next_clean_batch_id(), s.next_clean_batch_id());
 }
+
+/// Store one item through the shared write tool and report its stored stamps.
+///
+/// The item travels the ordinary path — `dispatch` → `store` → the store's
+/// insert — so what is asserted is the column a later text comparison reads,
+/// not the resolver's return value.
+fn stored_stamps(id: &str, timestamp: &str) -> (String, String) {
+    let s = state();
+    let args = json!({
+        "item": {
+            "id": id,
+            "subject_id": format!("subj-{id}"),
+            "gist": format!("prefers terse answers {id}"),
+            "snapshot": {"entity": "terse answers", "amount": 1, "date": "2024-01-01"}
+        },
+        "category": "persona",
+        "epistemic_kind": "fact",
+        "source_text": format!("The user prefers terse answers {id} (1 note since 2024-01-01)."),
+        "bank": "bank-a",
+        "actor": "agent",
+        "timestamp": timestamp
+    });
+    let out = crate::write_tools::dispatch(&s, "store", &args);
+    assert_eq!(out["ok"], json!(true), "store refused {timestamp}: {out}");
+    let rows = s
+        .store
+        .inspect_items(&clio_store::ItemInspectFilter {
+            bank_id: "bank-a".to_owned(),
+            category: None,
+            epistemic_kind: None,
+            source_type: None,
+            validity: clio_store::InspectValidity::All,
+            time_start: None,
+            time_end: None,
+            include_discarded: false,
+            limit: 10,
+            offset: 0,
+        })
+        .expect("inspect");
+    let row = rows
+        .into_iter()
+        .find(|row| row.item_id == id)
+        .expect("the item the write reported");
+    (row.created_at, row.valid_from)
+}
+
+#[test]
+fn a_fractional_timestamp_is_stored_as_the_second_it_names() {
+    let (created_at, valid_from) = stored_stamps("itm-frac", "2026-10-12T08:30:01.500Z");
+    assert_eq!(created_at, "2026-10-12T08:30:01Z");
+    assert_eq!(valid_from, "2026-10-12T08:30:01Z");
+    // The bound the fix exists for: a second-precision bound now keeps the row.
+    assert!(
+        created_at.as_str() <= "2026-10-12T08:30:01Z",
+        "{created_at}"
+    );
+}
+
+#[test]
+fn an_offset_timestamp_is_stored_as_its_utc_instant() {
+    let (created_at, valid_from) = stored_stamps("itm-offset", "2026-10-12T08:30:01+02:00");
+    assert_eq!(created_at, "2026-10-12T06:30:01Z");
+    assert_eq!(valid_from, "2026-10-12T06:30:01Z");
+}
+
+#[test]
+fn a_canonical_timestamp_is_stored_unchanged() {
+    let (created_at, valid_from) = stored_stamps("itm-plain", "2026-10-12T08:30:01Z");
+    assert_eq!(created_at, "2026-10-12T08:30:01Z");
+    assert_eq!(valid_from, "2026-10-12T08:30:01Z");
+}
+
+#[test]
+fn a_timestamp_that_cannot_be_placed_is_refused_with_invalid_argument() {
+    let s = state();
+    let args = json!({
+        "item": {
+            "id": "itm-bad",
+            "subject_id": "subj-itm-bad",
+            "gist": "prefers terse answers itm-bad",
+            "snapshot": {"entity": "terse answers", "amount": 1, "date": "2024-01-01"}
+        },
+        "category": "persona",
+        "epistemic_kind": "fact",
+        "source_text": "The user prefers terse answers itm-bad (1 note since 2024-01-01).",
+        "bank": "bank-a",
+        "actor": "agent",
+        // A month the year does not have: the store cannot place it, so the
+        // write must refuse rather than store a literal string in a time column.
+        "timestamp": "2026-13-01T00:00:00Z"
+    });
+    let out = crate::write_tools::dispatch(&s, "store", &args);
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(
+        out["code"],
+        json!("invalid_argument"),
+        "refusal must reuse the invalid-argument code: {out}"
+    );
+    assert_eq!(
+        canonical_write_stamp("not a stamp")
+            .expect_err("unplaceable")
+            .code,
+        ErrorCode::InvalidArgument
+    );
+}

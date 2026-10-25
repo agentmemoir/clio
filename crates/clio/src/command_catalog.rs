@@ -58,7 +58,7 @@ pub(crate) const AUTHORED_ROW_REFERENCES: &[(&str, &str)] = &[
     ),
     (
         "ops reindex",
-        "Rebuild derived indexes (live run requires --confirm); a lexical rebuild replaces legacy plaintext index rows with keyed term digests. Ops exit codes: 0 healthy or completed, 1 domain/runtime failure or findings, 2 usage or repair refusal, 3 reindex failed",
+        "Rebuild derived indexes (live run requires --confirm); `--dry-run` is report-only and applies nothing, so a report-only run is not reported as ok. A lexical rebuild replaces legacy plaintext index rows with keyed term digests. Ops exit codes: 0 healthy or completed, 1 domain/runtime failure or findings, 2 usage or repair refusal, 3 reindex failed or ran report-only",
     ),
 ];
 

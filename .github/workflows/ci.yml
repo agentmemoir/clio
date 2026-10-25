@@ -107,8 +107,9 @@ jobs:
       # the runner treats the missing base as "measure everything", and the job
       # silently turns back into the full-workspace gate this file exists to
       # avoid. This is the one checkout setting the scoped gate depends on.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # What the scoped changelog check measures against, and the exact spelling
@@ -142,7 +143,7 @@ jobs:
       # and a second project found the opposite. Setting both removes the
       # question. The step after this one fails the job if the two ever drift.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy, llvm-tools-preview
@@ -158,7 +159,7 @@ jobs:
           echo "rustc $actual matches the pin"
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -172,11 +173,11 @@ jobs:
       #
       # --workspace is named here rather than left to the root manifest. This step once read as workspace-wide and was not: with `default-members` set to a single crate and no selector on the command, it linted that crate alone and returned success. A lint denied by `.cargo/config.toml` in any of the other sixteen crates, including their test targets, could not fail this job.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D unsafe_code
 
       - name: Install nextest
         id: install_nextest
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: nextest
 
@@ -187,7 +188,7 @@ jobs:
       # llvm-cov`, which reads as a defect in the change rather than a missing
       # tool, and one check group skipped under a green run.
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: cargo-llvm-cov
 
@@ -321,6 +322,12 @@ jobs:
           CHANGELOG_BASE: ${{ env.SCOPED_BASE }}
         run: make scripts-check-changelog
 
+      # The executable-directory helper: parallel probes of one directory do not
+      # collide (issue #323).
+      - name: Executable-directory helper self-test
+        if: always()
+        run: make scripts-check-exec-tempdir
+
       # Whether prose stays one paragraph per line. Runs no build.
       - name: Prose check
         if: always()
@@ -386,8 +393,9 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # Same base resolution the check job uses: a detached checkout has no local
@@ -404,7 +412,7 @@ jobs:
       # The same pin the other jobs use. Two jobs on different compilers would
       # give two different answers about the same tree.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy, llvm-tools-preview
@@ -420,15 +428,15 @@ jobs:
           echo "rustc $actual matches the pin"
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install nextest
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: nextest
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: cargo-llvm-cov
 
@@ -461,7 +469,7 @@ jobs:
           && steps.scoped_coverage.outcome != 'skipped'
           && (hashFiles('target/nextest/ci/junit.xml') != ''
           || hashFiles('target/coverage/coverage-scoped.json') != '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: nextest-junit
           path: target/nextest/ci/junit.xml
@@ -488,7 +496,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # The suite, run directly. The target in mk/scripts.mk runs these two
       # commands, so nothing is lost, and the Makefile is not read: reading it

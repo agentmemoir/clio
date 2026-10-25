@@ -61,7 +61,7 @@ enum ItemOutcome {
 /// reporting, gating, `provider:<id>` provenance, and external-id idempotency.
 pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let dry_run = opt_bool(args, "dry_run", false)?;
     let options = args.get("options").unwrap_or(&Value::Null);
 
@@ -154,6 +154,10 @@ pub(crate) fn import_provider_mem0(state: &McpState, args: &Value) -> Result<Val
         would_skip,
         would_reject,
         would_overwrite: 0,
+        // Provider rows are scored item by item, so no entity is skipped for
+        // invalid stored content here.
+        would_skip_invalid: 0,
+        skipped_invalid: Vec::new(),
         // The provider adapter is reached through MCP only, never through the
         // one-shot CLI drain, so it reports no per-item ids.
         created_ids: Vec::new(),

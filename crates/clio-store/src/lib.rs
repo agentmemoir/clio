@@ -108,6 +108,7 @@ mod postgres_attribute;
 mod postgres_audit;
 mod postgres_backup_model;
 mod postgres_belief;
+mod postgres_bootstrap;
 mod postgres_correct;
 mod postgres_coverage;
 mod postgres_discard;
@@ -249,7 +250,10 @@ pub use index_store::IndexStore;
 pub use keyed_digest::{keyed_digest, keyed_digest_hex};
 pub use local_events::{LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView};
 pub use memtree_model::{MemTreeNodeRecord, MemTreeQuery};
-pub use migrate::{SCHEMA_VERSION, sqlite_vec_missing};
+pub use migrate::{
+    SCHEMA_VERSION, canonical_optional_stamp, canonical_stamp, canonical_ts, canonical_write_stamp,
+    is_epoch_stamp, millis_to_rfc3339, sqlite_vec_missing,
+};
 pub use model::{
     AssocEdgeRecord, AssocKind, EMBEDDING_DIMS, EmbeddingDims, IndexCoverage, IndexJob,
     InspectSource, InspectValidity, ItemIdentity, ItemInspectFilter, ItemInspectRow, KnnHit,

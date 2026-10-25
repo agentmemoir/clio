@@ -4,32 +4,32 @@
 //! # Responsibility
 //!
 //! This module is responsible for proving that each artifact kind a
-//! post-erasure archive carries for an erased subject is a presence the
-//! restore authority check counts on its own: the subject's tombstone, its
-//! shredded subject key, its destroyed key slot, and its ciphertext-only item
-//! row each refuse the whole archive when they are the only artifact left in
-//! it, so none of them can be carried by the others.
+//! post-erasure archive carries for an erased subject is content-free on its
+//! own: the subject's tombstone, its shredded subject key, its destroyed key
+//! slot, and its ciphertext-only item row each restore cleanly when they are
+//! the only artifact left in the archive, because none carries a usable key.
+//! The denied subject never becomes readable again.
 //!
 //! It also measures the one artifact kind the check reads from the payload's
 //! item table: the subject's ciphertext-only item row. The authority check
 //! reads `compliance_tombstones`, `subject_keys`, and `items` in the payload
 //! and `slots` in the key member, so an archive carrying that row alone names
-//! the denied subject and is refused as a whole, before anything is placed.
+//! the denied subject but carries no key for it.
 //!
 //! ## Owns
 //! - The single-artifact archives and the artifact kind each one carries alone
-//! - The per-artifact refusal assertion and the unchanged-target check
+//! - The per-artifact restore assertion and the unreadable-subject check
 //!
 //! ## Does not own
-//! - The whole-archive presence case and the unclassifiable member (see
+//! - The whole-archive case and the unclassifiable member (see
 //!   `scenario_archive_presence`)
 //! - The archive assembly and the read-back probes (see `support_test_support`
 //!   and `support_pg_test_support`)
 //!
 //! ## Boundary
 //!
-//! Changes to which artifact kinds count as presence should normally require
-//! changes here. Changes to the archive format should not.
+//! Changes to which artifact kinds count as content-free should normally
+//! require changes here. Changes to the archive format should not.
 //!
 //! Keep this module focused on the one-artifact-at-a-time isolation.
 
@@ -37,13 +37,13 @@ use crate::case_fixtures::{
     BANK, CONTROL_ITEM, CONTROL_SUBJECT, DENIED_ITEM, DENIED_SUBJECT, backup_dir, journal_file,
     open_pg, open_sqlite, scratch, seed_pg, seed_sqlite, unique,
 };
-use crate::cli_test_support::{DENIED_SUBJECT_REFUSAL, assert_refused, denied_hash, run_cli};
+use crate::cli_test_support::{denied_hash, run_cli};
 use crate::common;
 use crate::support_pg_test_support::{
     archive_postgres_with_authority, lock_pg, pg_url, postgres_reachable, require_postgres,
 };
 use crate::support_test_support::{
-    Archive, archive_sqlite_with_authority, current_authority, erase_subject, file_sha256, items,
+    Archive, Readback, archive_sqlite_with_authority, current_authority, erase_subject, readback,
 };
 use clio::store::ScopedSchema;
 use clio_compliance::{initialize_new_empty, record_denial};
@@ -64,10 +64,13 @@ enum Artifact {
 }
 
 /// The artifact kinds the archive-kind loop drives, in the order the cases
-/// drive them. Each one refuses the whole archive when it is left alone. The
-/// ciphertext-only item row is driven by its own arm.
-const REFUSING_ARTIFACTS: [Artifact; 3] =
-    [Artifact::Tombstone, Artifact::SubjectKey, Artifact::KeySlot];
+/// drive them. Each one is content-free on its own, so it restores.
+const CONTENT_FREE_ARTIFACTS: [Artifact; 4] = [
+    Artifact::Tombstone,
+    Artifact::SubjectKey,
+    Artifact::KeySlot,
+    Artifact::ItemRow,
+];
 
 /// The artifact kinds the store itself holds, in the order they are removed.
 const STORE_ARTIFACTS: [Artifact; 3] =
@@ -208,10 +211,10 @@ fn postgres_archive(
     )
 }
 
-/// The SQLite arm: one archive per artifact kind, each carrying one kind
-/// alone, and each refused as a whole before it places anything.
+/// The SQLite arm: one archive per content-free artifact kind, each carrying
+/// one kind alone, and each restoring because it carries no usable key.
 #[test]
-fn sqlite_each_artifact_kind_alone_refuses_the_whole_archive() {
+fn sqlite_each_content_free_artifact_kind_alone_restores() {
     let scratch = scratch("scenario-artifacts-sqlite");
     let backups = backup_dir(&scratch);
     let journal = journal_file(&scratch, "journal/erasure-journal.json");
@@ -229,9 +232,8 @@ fn sqlite_each_artifact_kind_alone_refuses_the_whole_archive() {
         .to_str()
         .expect("the target path is UTF-8")
         .to_owned();
-    let target_before = file_sha256(&target_db);
 
-    for kind in REFUSING_ARTIFACTS {
+    for kind in CONTENT_FREE_ARTIFACTS {
         let archive = sqlite_archive(&scratch, &backups, &journal, kind);
         let output = run_cli(
             &journal,
@@ -248,47 +250,43 @@ fn sqlite_each_artifact_kind_alone_refuses_the_whole_archive() {
                 "json",
             ],
         );
-        assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
-            file_sha256(&target_db),
-            target_before,
-            "the {} archive placed bytes",
+            output.code,
+            Some(0),
+            "the {} archive carries no usable key and must restore: {}",
+            kind.tag(),
+            output.stderr
+        );
+        let store = open_sqlite(&target_db, &target_kms);
+        assert_eq!(
+            readback(&store, CONTROL_ITEM),
+            Readback::Readable,
+            "the permitted subject stays readable after the {} archive",
             kind.tag()
         );
+        let denied = readback(&store, DENIED_ITEM);
+        let expected = if kind == Artifact::ItemRow {
+            // The row is restored, but the archive carried no key slot for it.
+            Readback::KeyMissing
+        } else {
+            // The archive carried no item row for the denied subject.
+            Readback::Absent
+        };
+        assert_eq!(
+            denied,
+            expected,
+            "the denied subject must not become readable after the {} archive: {denied:?}",
+            kind.tag()
+        );
+        drop(store);
     }
 
-    // The ciphertext-only item row keeps the denied subject's link, so the
-    // archive carrying that row alone names the subject and is refused as a
-    // whole, before anything is placed.
-    let archive = sqlite_archive(&scratch, &backups, &journal, Artifact::ItemRow);
-    let output = run_cli(
-        &journal,
-        &target_kms,
-        &backups,
-        &[
-            "backup",
-            "restore",
-            archive.id.as_str(),
-            "--yes",
-            "--db",
-            target.as_str(),
-            "--output",
-            "json",
-        ],
-    );
-    assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
-    assert_eq!(
-        file_sha256(&target_db),
-        target_before,
-        "the item-row archive placed bytes"
-    );
-
-    println!("REFUSED sqlite artifacts=4 item_row=refused");
+    println!("RESTORED sqlite artifacts=4");
 }
 
 /// The Postgres arm: the same isolation, against the dump's own tables.
 #[test]
-fn postgres_each_artifact_kind_alone_refuses_the_whole_archive() {
+fn postgres_each_content_free_artifact_kind_alone_restores() {
     let base = pg_url();
     if !require_postgres(postgres_reachable(&base)) {
         return;
@@ -308,9 +306,8 @@ fn postgres_each_artifact_kind_alone_refuses_the_whole_archive() {
         &[(CONTROL_ITEM, CONTROL_SUBJECT, "control sentinel gist")],
     );
     let target_url = target.url().to_owned();
-    let items_before = items(&target_url);
 
-    for kind in REFUSING_ARTIFACTS {
+    for kind in CONTENT_FREE_ARTIFACTS {
         let archive = postgres_archive(&base, &scratch, &backups, &journal, kind);
         let output = run_cli(
             &journal,
@@ -327,40 +324,36 @@ fn postgres_each_artifact_kind_alone_refuses_the_whole_archive() {
                 "json",
             ],
         );
-        assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
         assert_eq!(
-            items(&target_url),
-            items_before,
-            "the {} archive placed rows",
+            output.code,
+            Some(0),
+            "the {} archive carries no usable key and must restore: {}",
+            kind.tag(),
+            output.stderr
+        );
+        let store = open_pg(&target_url, &target_kms);
+        assert_eq!(
+            readback(&store, CONTROL_ITEM),
+            Readback::Readable,
+            "the permitted subject stays readable after the {} archive",
             kind.tag()
         );
+        let denied = readback(&store, DENIED_ITEM);
+        let expected = if kind == Artifact::ItemRow {
+            // The row is restored, but the archive carried no key slot for it.
+            Readback::KeyMissing
+        } else {
+            // The archive carried no item row for the denied subject.
+            Readback::Absent
+        };
+        assert_eq!(
+            denied,
+            expected,
+            "the denied subject must not become readable after the {} archive: {denied:?}",
+            kind.tag()
+        );
+        drop(store);
     }
 
-    // The ciphertext-only item row keeps the denied subject's link, so the
-    // archive carrying that row alone names the subject and is refused as a
-    // whole, before anything is placed.
-    let archive = postgres_archive(&base, &scratch, &backups, &journal, Artifact::ItemRow);
-    let output = run_cli(
-        &journal,
-        &target_kms,
-        &backups,
-        &[
-            "backup",
-            "restore",
-            archive.id.as_str(),
-            "--yes",
-            "--db",
-            target_url.as_str(),
-            "--output",
-            "json",
-        ],
-    );
-    assert_refused(&output, &DENIED_SUBJECT_REFUSAL);
-    assert_eq!(
-        items(&target_url),
-        items_before,
-        "the item-row archive placed rows"
-    );
-
-    println!("REFUSED postgres artifacts=4 item_row=refused");
+    println!("RESTORED postgres artifacts=4");
 }

@@ -69,6 +69,7 @@ pub const BOUND_WRITE_TOOLS: &[&str] = &[
     "subject_request_copy",
     "subject_request_exception",
     "subject_request_events",
+    "subject_request_path_complete",
     "subject_request_close",
     "subject_request_peer_status",
     "subject_request_peer_retry",
@@ -127,4 +128,22 @@ pub fn bound_tools() -> Vec<&'static str> {
 #[must_use]
 pub fn is_bound(name: &str) -> bool {
     BOUND_WRITE_TOOLS.contains(&name) || BOUND_READ_TOOLS.contains(&name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn completion_is_a_unique_bound_write_tool() {
+        let tools = bound_tools();
+        assert_eq!(tools.len(), tools.iter().collect::<BTreeSet<_>>().len());
+        assert!(BOUND_WRITE_TOOLS.contains(&"subject_request_path_complete"));
+        assert!(!BOUND_READ_TOOLS.contains(&"subject_request_path_complete"));
+        for tool in tools {
+            assert!(is_bound(tool), "published tool {tool} must be bound");
+        }
+        assert!(!is_bound("subject_request_path_uncomplete"));
+    }
 }

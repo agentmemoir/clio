@@ -170,12 +170,25 @@ fn plan_check_passes_for_a_same_deployment_claim_with_non_denied_members() {
 fn plan_check_refuses_a_denied_subject_member() {
     let scratch = Scratch::new();
     let (path, journal) = denied_journal(&scratch);
-    let members = [MemberFacts::Reference {
+    let members = [MemberFacts::LiveKey {
         subject_hash: DENIED.to_owned(),
     }];
     assert_eq!(
         check_restore_at_plan(&path, None, &claim_for(&journal), &members),
         Err(AuthorityRefusal::DeniedSubject)
+    );
+}
+
+#[test]
+fn plan_check_allows_a_content_free_denied_subject_member() {
+    let scratch = Scratch::new();
+    let (path, journal) = denied_journal(&scratch);
+    let members = [MemberFacts::Reference {
+        subject_hash: DENIED.to_owned(),
+    }];
+    assert!(
+        check_restore_at_plan(&path, None, &claim_for(&journal), &members).is_ok(),
+        "a content-free record cannot make the erased content readable"
     );
 }
 

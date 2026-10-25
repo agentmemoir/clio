@@ -63,7 +63,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
 #[inline(never)]
 fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let category = strict_opt_str(args, "category")?.map(str::to_owned);
     if let Some(category) = category.as_deref() {
         clio_types::SemanticCategory::parse(category)?;
@@ -140,7 +140,7 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let now = state.resolve_timestamp(args);
+    let now = state.resolve_timestamp(args)?;
     let destination = req_str(args, "destination")?;
     let query = LocalReviewQuery {
         limit: opt_usize(args, "limit").unwrap_or(DEFAULT_REVIEW_LIMIT),
@@ -181,7 +181,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
 #[inline(never)]
 fn import_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
     let i_args = ImportArgs {
         store: &*state.store,

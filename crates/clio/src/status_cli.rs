@@ -176,7 +176,7 @@ fn diagnose_view(
     embedder: Option<&dyn Embedder>,
     timestamp: &str,
 ) -> DiagnoseView {
-    let report = clio_ops::diagnose(&DiagnoseArgs {
+    let report = clio_ops::diagnose_unscoped(&DiagnoseArgs {
         store,
         index: store,
         embedder,

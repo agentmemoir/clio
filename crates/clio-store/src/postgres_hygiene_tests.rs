@@ -156,3 +156,39 @@ fn hygiene_store_parity() {
     let lite_id = unique("item-lite");
     parity_body(&lite, &lite_bank, &lite_id);
 }
+
+#[test]
+fn the_archive_writer_stores_a_canonical_updated_at() {
+    let _guard = crate::lock_pg_test();
+    let url = postgres_url_from_env();
+    let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
+    let pg = PostgresStore::open(url.as_str(), kms).expect("pg open");
+    let bank = unique("bank-hyg-stamp");
+    let id = unique("item-hyg-stamp");
+    pg.create_memory_item(&item(&id, &bank), "agent")
+        .expect("seed");
+
+    pg.archive_item(&bank, &id, "2026-09-20T00:00:00Z", "agent")
+        .expect("archive");
+
+    let updated_at: String = pg
+        .with_client(|client| {
+            client
+                .query_one(
+                    "SELECT updated_at FROM items WHERE id = $1 AND bank_id = $2",
+                    &[&id, &bank],
+                )
+                .map(|row| row.get(0))
+                .map_err(|error| crate::migrate::map_db_err("read stamps", error))
+        })
+        .expect("read stamps");
+    assert_eq!(
+        crate::migrate::canonical_ts(&updated_at),
+        updated_at,
+        "the archive stamp is already canonical: {updated_at}"
+    );
+    assert!(
+        !crate::migrate::is_epoch_stamp(&updated_at),
+        "epoch millis sorts before every canonical stamp: {updated_at}"
+    );
+}

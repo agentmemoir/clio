@@ -78,7 +78,10 @@ fn force_overwrites_opaque_envelope() {
     assert_eq!(report.would_overwrite, 1);
     assert_eq!(
         h.store
-            .inspect_content_ciphertext(&h.bank, &modified.opaque_items[0].id)
+            .inspect_content_ciphertext(
+                &h.bank,
+                &format!("{}#{}", modified.opaque_items[0].id, h.bank)
+            )
             .unwrap()
             .as_deref(),
         Some("rotated-ciphertext")
@@ -228,7 +231,7 @@ fn differing_existing_rows_skip_without_force() {
     let report = import(&h.args(&h.ctx(), h.policy(), bundle.path(), false, false, None))
         .expect("no-force re-import succeeds");
     assert_eq!(report.would_overwrite, 0);
-    let opaque_id = modified.opaque_items[0].id.clone();
+    let opaque_id = format!("{}#{}", modified.opaque_items[0].id, h.bank);
     assert_eq!(
         h.store
             .inspect_content_ciphertext(&h.bank, &opaque_id)
@@ -249,7 +252,7 @@ fn episodic_carrier_restores_through_the_gate() {
     assert_eq!(report.would_create, 1);
     assert!(
         h.store
-            .get_memory_item(&h.bank, &entities.items[0].id)
+            .get_memory_item(&h.bank, &format!("{}#{}", entities.items[0].id, h.bank))
             .unwrap()
             .is_some()
     );

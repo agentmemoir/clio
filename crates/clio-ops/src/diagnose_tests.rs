@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on diagnose behavior.
 
-use crate::diagnose::{DiagnoseArgs, VERIFY_POINTER, diagnose};
+use crate::diagnose::{DiagnoseArgs, VERIFY_POINTER, diagnose_unscoped};
 use crate::diagnose_fixtures::{TS, failed, item, sqlite};
 use crate::finding::{Severity, codes};
 use clio_index::Embedder;
@@ -240,7 +240,7 @@ fn healthy_store_snapshot_has_expected_fields() {
     store
         .create_memory_item(&item("i1", "b1"), "actor")
         .unwrap();
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &store,
         index: &store,
         embedder: None,
@@ -270,7 +270,7 @@ fn healthy_store_snapshot_has_expected_fields() {
 #[test]
 fn snapshot_points_at_the_verify_pass() {
     let store = sqlite();
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &store,
         index: &store,
         embedder: None,
@@ -285,7 +285,7 @@ fn exact_scan_space_is_reported() {
     let space = clio_store::EmbeddingSpace::new("wide/model", 4096).unwrap();
     // A fresh store has no derived rows, so no destructive-switch opt-in.
     store.apply_configured_space(&space, false).unwrap();
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &store,
         index: &store,
         embedder: None,
@@ -300,7 +300,7 @@ fn exact_scan_space_is_reported() {
 fn healthy_embedder_reports_ready() {
     let store = sqlite();
     let embedder = FakeEmbedder;
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &store,
         index: &store,
         embedder: Some(&embedder),
@@ -314,7 +314,7 @@ fn healthy_embedder_reports_ready() {
 fn failing_embedder_is_a_warning_not_a_failure() {
     let store = sqlite();
     let embedder = FailingEmbedder;
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &store,
         index: &store,
         embedder: Some(&embedder),
@@ -334,7 +334,7 @@ fn failing_embedder_is_a_warning_not_a_failure() {
 fn fake_backend_matching_schema_is_ok() {
     let ops = fake_ops(Some(SCHEMA_VERSION));
     let index = FakeIndex { coverage_ok: true };
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &ops,
         index: &index,
         embedder: None,
@@ -349,7 +349,7 @@ fn fake_backend_matching_schema_is_ok() {
 fn missing_schema_row_is_an_error() {
     let ops = fake_ops(None);
     let index = FakeIndex { coverage_ok: true };
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &ops,
         index: &index,
         embedder: None,
@@ -368,7 +368,7 @@ fn missing_schema_row_is_an_error() {
 fn schema_mismatch_is_an_error() {
     let ops = fake_ops(Some("0"));
     let index = FakeIndex { coverage_ok: true };
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &ops,
         index: &index,
         embedder: None,
@@ -393,7 +393,7 @@ fn dead_backend_reports_every_probe_failure() {
         space_ok: false,
     };
     let index = FakeIndex { coverage_ok: true };
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &ops,
         index: &index,
         embedder: None,
@@ -423,7 +423,7 @@ fn dead_backend_reports_every_probe_failure() {
 fn unreadable_index_state_is_a_finding() {
     let ops = fake_ops(Some(SCHEMA_VERSION));
     let index = FakeIndex { coverage_ok: false };
-    let report = diagnose(&DiagnoseArgs {
+    let report = diagnose_unscoped(&DiagnoseArgs {
         store: &ops,
         index: &index,
         embedder: None,

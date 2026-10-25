@@ -190,7 +190,7 @@ fn provider_value_validation() {
     validate_set_path("rerank.provider").unwrap();
     validate_set_path("rerank.url").unwrap();
     validate_set_path("rerank.model").unwrap();
-    validate_set_path("rerank.max_client_batch").unwrap();
+    validate_set_path("rerank.max_batch").unwrap();
     validate_set_path("credentials.rerank_api_key").unwrap();
 
     for ok in ["tei", "openai"] {
@@ -236,15 +236,15 @@ fn provider_value_validation() {
         ErrorCode::InvalidType
     );
 
-    validate_set_value("rerank.max_client_batch", &json!(32)).unwrap();
+    validate_set_value("rerank.max_batch", &json!(32)).unwrap();
     assert_eq!(
-        validate_set_value("rerank.max_client_batch", &json!(0))
+        validate_set_value("rerank.max_batch", &json!(0))
             .unwrap_err()
             .code,
-        ErrorCode::OutOfRange
+        ErrorCode::InvalidType
     );
     assert_eq!(
-        validate_set_value("rerank.max_client_batch", &json!("32"))
+        validate_set_value("rerank.max_batch", &json!("32"))
             .unwrap_err()
             .code,
         ErrorCode::InvalidType
@@ -267,6 +267,24 @@ fn provider_value_validation() {
     validate_set_value("credentials.rerank_api_key", &json!("sk")).unwrap();
     assert_eq!(
         validate_set_value("credentials.rerank_api_key", &json!(1))
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidType
+    );
+}
+
+#[test]
+fn rerank_max_batch_validation() {
+    validate_set_path("rerank.max_batch").unwrap();
+    validate_set_value("rerank.max_batch", &json!(7)).unwrap();
+    assert_eq!(
+        validate_set_value("rerank.max_batch", &json!(0))
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidType
+    );
+    assert_eq!(
+        validate_set_value("rerank.max_batch", &json!("7"))
             .unwrap_err()
             .code,
         ErrorCode::InvalidType

@@ -102,7 +102,6 @@ fn embed_rerank_env_knobs_reach_effective_config() {
         "CLIO_RERANK_URL" => Some("http://127.0.0.1:34312".into()),
         "CLIO_RERANK_MODEL" => Some("BAAI/bge-reranker-base".into()),
         "CLIO_RERANK_PROVIDER" => Some("cohere".into()),
-        "CLIO_RERANK_MAX_CLIENT_BATCH" => Some("17".into()),
         "CLIO_RERANK_API_KEY" => Some("sk-rerank-token-1234567890".into()),
         _ => None,
     });
@@ -116,7 +115,6 @@ fn embed_rerank_env_knobs_reach_effective_config() {
     assert_eq!(eff["rerank"]["url"], "http://127.0.0.1:34312");
     assert_eq!(eff["rerank"]["model"], "BAAI/bge-reranker-base");
     assert_eq!(eff["rerank"]["provider"], "cohere");
-    assert_eq!(eff["rerank"]["max_client_batch"], 17);
     assert_eq!(
         eff["credentials"]["rerank_api_key"],
         "sk-rerank-token-1234567890"
@@ -143,7 +141,7 @@ fn rerank_defaults_and_settable_all_scopes() {
     assert_eq!(eff["embed"]["provider"], "");
     assert_eq!(
         eff["rerank"],
-        json!({"url": "", "model": "", "provider": "", "max_client_batch": 32})
+        json!({"url": "", "model": "", "provider": "", "max_batch": 32})
     );
 
     let mut rt_set = Runtime::with_env(&|_| None);
@@ -164,10 +162,6 @@ fn rerank_defaults_and_settable_all_scopes() {
         let ToolResult::Ok { .. } = rt_set.config_set("rerank.provider", json!("tei"), scope)
         else {
             panic!("rerank.provider settable scope={}", scope.as_str());
-        };
-        let ToolResult::Ok { .. } = rt_set.config_set("rerank.max_client_batch", json!(17), scope)
-        else {
-            panic!("rerank.max_client_batch settable scope={}", scope.as_str());
         };
         let ToolResult::Ok { .. } = rt_set.config_set("embed.provider", json!("openai"), scope)
         else {

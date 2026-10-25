@@ -315,3 +315,28 @@ fn compliance_cli_retry_reconciles_a_pending_action_across_a_restart() {
         "the retry settles the pending action"
     );
 }
+
+/// Explicit completion survives a process restart and close consumes that record.
+#[test]
+fn compliance_cli_completed_product_path_survives_restart() {
+    let scratch = Scratch::new("path-complete");
+    let db = scratch.path().join("store.db");
+    let kms = scratch.path().join("keys.json");
+    let args = ["--request-id", "request", "--product-path", "copy"];
+    {
+        let first = open_file_state(&db, &kms);
+        let (code, out, err) = run_json(
+            "request-start",
+            &["--request-id", "request", "--kind", "copy"],
+            &first,
+        );
+        assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+        let (code, out, err) = run_json("request-path-complete", &args, &first);
+        assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+        assert_eq!(json_of(&out)["request_outcome"], json!("open"));
+    }
+    let second = open_file_state(&db, &kms);
+    let (code, out, err) = run_json("request-close", &args, &second);
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    assert_eq!(json_of(&out)["request_outcome"], json!("completed"));
+}

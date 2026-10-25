@@ -14,6 +14,7 @@
 //! - `record_to_row` / `row_to_record`, the canonical serialization of a
 //!   `SubjectRequestRecord` into a `DurableRequestRow` and back
 //! - `reload_ledger`, rebuilding the ledger from the store's restart read
+//! - `save_record_if_current`, refusing stale request record writes
 //! - `closure_inputs`, deriving the closure-acceptance facts from a stored
 //!   record
 //! - `copy_row_closure_facts` and `peer_row_closure_facts`, folding the stored
@@ -113,6 +114,22 @@ pub fn record_to_row(record: &SubjectRequestRecord) -> DurableRequestRow {
         deadline: record.deadline.clone(),
         record: encode(record, "record"),
     }
+}
+
+/// Save a request only while its original record still matches the stored row.
+pub(crate) fn save_record_if_current(
+    durable: &dyn DurableRequestStore,
+    expected: Option<&SubjectRequestRecord>,
+    record: &SubjectRequestRecord,
+) -> Result<(), AmError> {
+    let expected = expected.map(record_to_row);
+    if durable.compare_and_save(expected.as_ref(), &record_to_row(record))? {
+        return Ok(());
+    }
+    Err(AmError::new(
+        ErrorCode::Forbidden,
+        "request changed while saving; retry the operation",
+    ))
 }
 
 /// Decode a stored row back into its record.
@@ -343,9 +360,10 @@ pub fn record_retention_exception(
             format!("no durable request {request_id}"),
         )
     })?;
-    let mut record = row_to_record(&row)?;
+    let expected = row_to_record(&row)?;
+    let mut record = expected.clone();
     record.exception = Some(reason.to_owned());
-    durable.save(&record_to_row(&record))
+    save_record_if_current(durable, Some(&expected), &record)
 }
 
 #[cfg(test)]

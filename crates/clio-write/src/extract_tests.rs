@@ -145,7 +145,7 @@ impl Transport for CaptureTransport {
 #[test]
 fn template_egress_is_scrubbed_like_chat_path() {
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "m".into(),
         temperature: 0.0,
         transport: CaptureTransport::default(),
@@ -177,7 +177,7 @@ fn template_egress_is_scrubbed_like_chat_path() {
 #[test]
 fn template_egress_carries_scrubbed_caller_context() {
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "m".into(),
         temperature: 0.0,
         transport: CaptureTransport::default(),
@@ -207,7 +207,7 @@ fn template_egress_carries_scrubbed_caller_context() {
 #[test]
 fn template_egress_omits_absent_context() {
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "m".into(),
         temperature: 0.0,
         transport: CaptureTransport::default(),
@@ -284,7 +284,7 @@ fn template_rejects_non_object_snapshot() {
         }
     }
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "m".into(),
         temperature: 0.0,
         transport: BadShapeTransport,
@@ -315,7 +315,7 @@ fn template_rejects_an_oversized_gist() {
         }
     }
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "m".into(),
         temperature: 0.0,
         transport: LongGistTransport,
@@ -336,7 +336,7 @@ fn template_rejects_an_oversized_gist() {
 #[test]
 fn template_api_uses_transport() {
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "numind/NuExtract-1.5-tiny".into(),
         temperature: 0.0,
         transport: OkTransport,
@@ -393,7 +393,7 @@ fn template_adapter_rejects_invalid_context_before_transport() {
         }
     }
     let ex = TemplateApiExtractor {
-        url: "http://extract.local".into(),
+        url: "http://extract.example.com".into(),
         model: "m".into(),
         temperature: 0.0,
         transport: MustNotEgress,

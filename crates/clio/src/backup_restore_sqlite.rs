@@ -36,8 +36,8 @@
 
 use crate::backup_restore_exit::{self, RestoreFailure};
 use crate::backup_restore_flow::{
-    Counts, Plan, RESULT_PARTIAL, RESULT_RESTORED, Report, RestorePlanInput, pre_restore_decision,
-    pre_restore_from,
+    Counts, Plan, RESULT_PARTIAL, RESULT_RESTORED, Report, RestorePlanInput, classify_refusal,
+    pre_restore_decision, pre_restore_from,
 };
 use crate::backup_restore_space::{key_destination, preflight};
 use crate::cli_error::CliError;
@@ -81,6 +81,11 @@ pub(crate) fn plan_sqlite(input: RestorePlanInput<'_>) -> Result<Plan, CliError>
                 &error,
             )
         })?;
+    // The key member is not digest-bound by the manifest, so prove the member
+    // this plan will place is the one the authority check classified.
+    authority
+        .verify_key_member(extracted.key.as_ref())
+        .map_err(|refusal| classify_refusal(&refusal))?;
     // The payload was proved against the manifest's size and digest before it
     // was staged, so a staged payload that will not open as a database is the
     // archive's fault and not the machine's. This is deliberately not routed

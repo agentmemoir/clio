@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - `SubjectRequestEnv` and the request verbs `open`, `report`,
-//!   `apply_command`, `close`, `retry_erasure`, `peer_retry`, `record_copy`,
+//!   `apply_command`, `complete_path`, `close`, `retry_erasure`, `peer_retry`, `record_copy`,
 //!   `record_exception`, `review_events`, `peer_report`, `peer_disposition`,
 //!   `derive_peer_enablement`
 //! - `load_record` and `save_record`
@@ -35,15 +35,16 @@ use crate::erasure_reconcile::{ErasureRetryEnv, reconcile_erasure_actions};
 use crate::local_review::{LocalReviewPage, LocalReviewQuery, authorize, review_local_events};
 use crate::subject_peer::{derived_peer_states, record_disposition, snapshot_peers};
 use crate::subject_request::{
-    PeerEnablement, PeerState, RegisterOutcome, RequestCommand, RequestKind, RequestScope,
-    SubjectRequestLedger, SubjectRequestRecord, VerificationResult,
+    PathOwner, PathSlot, PathState, PeerEnablement, PeerState, RegisterOutcome, RequestCommand,
+    RequestKind, RequestScope, RequestState, SubjectRequestLedger, SubjectRequestRecord,
+    VerificationResult,
 };
 use crate::subject_request_events::{ClosureBlock, accept_closure};
 use crate::subject_request_report::report_of;
 use crate::subject_request_store_wiring::{
     closure_inputs, copy_row_closure_facts, erase_from_durable_store, peer_row_closure_facts,
-    record_copy_disposition, record_retention_exception, record_to_row, reload_ledger,
-    row_to_record,
+    record_copy_disposition, record_retention_exception, reload_ledger, row_to_record,
+    save_record_if_current,
 };
 use clio_store::{
     CopyInventoryRow, CopyInventoryStore, DurableRequestStore, LocalEventStore,
@@ -98,12 +99,15 @@ pub fn open(
         verification,
         deadline,
     )?;
-    save_record(env, &ledger, request_id)?;
+    if matches!(outcome, RegisterOutcome::Opened) {
+        save_record(env, &ledger, request_id, None)?;
+    }
     let record = load_record(env, request_id)?;
     snapshot_peers(env.peers, &record)?;
     if matches!(outcome, RegisterOutcome::Opened) {
+        ledger = SubjectRequestLedger::load(vec![record.clone()]);
         ledger.apply(request_id, &RequestCommand::Begin)?;
-        save_record(env, &ledger, request_id)?;
+        save_record(env, &ledger, request_id, Some(&record))?;
     }
     report_of(env, &load_record(env, request_id)?)
 }
@@ -125,9 +129,63 @@ pub fn apply_command(
     command: &RequestCommand,
 ) -> Result<RequestStatusReport, AmError> {
     let mut ledger = reload_ledger(env.durable)?;
+    let expected = ledger.record(request_id).cloned();
     ledger.apply(request_id, command)?;
-    save_record(env, &ledger, request_id)?;
+    save_record(env, &ledger, request_id, expected.as_ref())?;
     report_of(env, &load_record(env, request_id)?)
+}
+
+/// Record a privileged caller's verified completion of a product-controlled path.
+pub fn complete_path(
+    env: &SubjectRequestEnv<'_>,
+    ctx: &OpContext,
+    request_id: &str,
+    product_path: &str,
+) -> Result<RequestStatusReport, AmError> {
+    authorize(ctx.actor)?;
+    if product_path.trim().is_empty() {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            "a product path is required",
+        ));
+    }
+    let expected = load_record(env, request_id)?;
+    let mut record = expected.clone();
+    let (RequestScope::Bank { bank_id } | RequestScope::Subject { bank_id, .. }) = &record.scope;
+    if bank_id != ctx.bank.as_str() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "request belongs to another bank",
+        ));
+    }
+    if matches!(
+        record.state,
+        RequestState::Final(_) | RequestState::Refused { .. }
+    ) {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "a terminal request cannot change paths",
+        ));
+    }
+    if record
+        .paths
+        .get(product_path)
+        .is_some_and(|slot| slot.owner != PathOwner::Clio)
+    {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "only a product-controlled path can be completed",
+        ));
+    }
+    record.paths.insert(
+        product_path.to_owned(),
+        PathSlot {
+            owner: PathOwner::Clio,
+            state: PathState::Done,
+        },
+    );
+    save_record_if_current(env.durable, Some(&expected), &record)?;
+    report_of(env, &record)
 }
 
 /// Close one request: accept the closure, move it to final, and report it.
@@ -138,6 +196,12 @@ pub fn close(
     product_path: &str,
 ) -> Result<RequestStatusReport, AmError> {
     let record = load_record(env, request_id)?;
+    if record.paths.is_empty() {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "request closure refused: no product path is recorded on this request",
+        ));
+    }
     let copy_rows = env.copies.load_all()?;
     let peer_rows = env.peers.load_for_request(request_id)?;
     let base = closure_inputs(&record, product_path);
@@ -149,11 +213,11 @@ pub fn close(
         .open_copy_actions
         .saturating_sub(base.open_copy_actions);
     let outcome = accept_closure(&inputs).map_err(closure_refusal)?;
-    let mut ledger = reload_ledger(env.durable)?;
+    let mut ledger = SubjectRequestLedger::load(vec![record.clone()]);
     ledger.apply(request_id, &RequestCommand::MarkTechnicalComplete)?;
     ledger.apply(request_id, &RequestCommand::AwaitOperator)?;
     ledger.apply(request_id, &RequestCommand::Finalize { outcome })?;
-    save_record(env, &ledger, request_id)?;
+    save_record(env, &ledger, request_id, Some(&record))?;
     report_of(env, &load_record(env, request_id)?)
 }
 
@@ -318,11 +382,12 @@ fn save_record(
     env: &SubjectRequestEnv<'_>,
     ledger: &SubjectRequestLedger,
     request_id: &str,
+    expected: Option<&SubjectRequestRecord>,
 ) -> Result<(), AmError> {
     let record = ledger
         .record(request_id)
         .ok_or_else(|| AmError::new(ErrorCode::NotFound, format!("no request {request_id}")))?;
-    env.durable.save(&record_to_row(record))
+    save_record_if_current(env.durable, expected, record)
 }
 
 fn closure_refusal(block: ClosureBlock) -> AmError {
@@ -347,3 +412,7 @@ mod subject_request_service_pg_tests;
 #[cfg(test)]
 #[path = "subject_request_service_facade_tests.rs"]
 mod subject_request_service_facade_tests;
+
+#[cfg(test)]
+#[path = "subject_request_service_path_tests.rs"]
+mod subject_request_service_path_tests;

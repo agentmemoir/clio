@@ -36,7 +36,7 @@ use std::sync::Arc;
 #[inline(never)]
 pub(crate) fn triple_add(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let subject = req_str(args, "subject")?;
     let update_rule = match opt_str(args, "update_rule") {
         Some(raw) => Some(clio_types::UpdateRule::parse(raw)?),
@@ -93,7 +93,7 @@ pub(crate) fn triple_add(state: &McpState, args: &Value) -> Result<Value, AmErro
 #[inline(never)]
 pub(crate) fn triple_end(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let update_rule = match opt_str(args, "update_rule") {
         Some(raw) => Some(clio_types::UpdateRule::parse(raw)?),
         None => None,
@@ -116,7 +116,7 @@ pub(crate) fn triple_end(state: &McpState, args: &Value) -> Result<Value, AmErro
 #[inline(never)]
 pub(crate) fn belief_observe(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
-    let ts = state.resolve_timestamp(args);
+    let ts = state.resolve_timestamp(args)?;
     let proposition = req_str(args, "proposition")?;
     let subject_default = format!("belief:{proposition}");
     let signals = StoreSignals::new(Arc::clone(&state.store), Arc::clone(&state.index));
@@ -156,3 +156,7 @@ pub(crate) fn graph_link(state: &McpState, args: &Value) -> Result<Value, AmErro
     )?;
     Ok(serde_json::to_value(&view).expect("serialize tool payload"))
 }
+
+#[cfg(test)]
+#[path = "write_tools_handlers_tests.rs"]
+mod write_tools_handlers_tests;

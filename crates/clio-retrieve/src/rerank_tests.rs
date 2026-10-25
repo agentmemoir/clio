@@ -346,8 +346,9 @@ fn factory_selects_teiranker_by_provider() {
         {"index": 1, "score": 0.9},
         {"index": 0, "score": 0.4}
     ])));
-    let tei =
-        json!({"rerank": {"url": url, "model": "m", "provider": "tei", "max_client_batch": 2}});
+    let tei = json!({
+        "rerank": {"url": url, "model": "m", "provider": "tei", "max_batch": 2}
+    });
     let r = build_reranker_from(&tei, None).expect("tei").expect("some");
     assert_eq!(r.max_batch_size(), 2);
     let order = r.rerank("query", &docs(), 3).expect("rerank");
@@ -386,11 +387,13 @@ fn factory_omitted_provider_uses_the_tei_default() {
 #[test]
 fn factory_selects_cohere_with_bearer() {
     let (url, rx, handle) = fx::fake_http_capture_server(http_ok(&cohere_body(&[(0, 0.9)])));
-    let cohere = json!({"rerank": {"url": url, "model": "rerank-v3.5", "provider": "cohere", "max_client_batch": 2}});
+    // The configurable cap belongs to the TEI sidecar. Cohere keeps one
+    // request for the shortlist because its API has a different request limit.
+    let cohere = json!({"rerank": {"url": url, "model": "rerank-v3.5", "provider": "cohere"}});
     let r = build_reranker_from(&cohere, Some("sk-factory-key".into()))
         .expect("cohere")
         .expect("some");
-    assert_eq!(r.max_batch_size(), 2);
+    assert_eq!(r.max_batch_size(), usize::MAX);
     r.rerank("query", &docs(), 3).expect("rerank");
     let request = rx.recv().expect("captured request");
     assert!(request.starts_with("POST /v1/rerank "));

@@ -4,12 +4,12 @@
 //! # Responsibility
 //!
 //! This module is responsible for the MCP binding of the durable subject-request
-//! verbs: it decodes the ten request/peer tool arguments, calls the shared
+//! verbs: it decodes the request/peer tool arguments, calls the shared
 //! `clio_compliance::subject_request_service` facade, and returns the separated
 //! request status report as JSON.
 //!
 //! ## Owns
-//! - Argument decoding and result shaping for the ten `subject_request_*` tools
+//! - Argument decoding and result shaping for the `subject_request_*` tools
 //! - Deriving the deployment peer-enablement fact from the effective config
 //! - The request-scope, request-kind, request-command, and peer-disposition
 //!   argument parsers
@@ -30,6 +30,7 @@
 
 use crate::read_tools::opt_usize;
 use crate::runtime::{McpState, StderrSinks};
+use crate::runtime_context::canonical_write_stamp;
 use crate::write_tools::{opt_bool, opt_str, req_str, strict_opt_str};
 use clio_compliance::subject_request_service as svc;
 use clio_compliance::{
@@ -51,6 +52,7 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         "subject_request_copy" => copy(state, args),
         "subject_request_exception" => exception(state, args),
         "subject_request_events" => events(state, args),
+        "subject_request_path_complete" => path_complete(state, args),
         "subject_request_close" => close(state, args),
         "subject_request_peer_status" => peer_status(state, args),
         "subject_request_peer_retry" => peer_retry(state, args),
@@ -115,7 +117,7 @@ fn retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
             "subject_request_retry requires confirm=true; unconfirmed calls never mutate",
         ));
     }
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     let salt = tombstone_salt();
     let journal = JournalHold::resolve_journal_path(state.journal_path.as_deref(), &|key| {
         std::env::var(key).ok()
@@ -164,8 +166,10 @@ fn copy(state: &McpState, args: &Value) -> Result<Value, AmError> {
         required_action: req_str(args, "required_action")?.to_owned(),
         state: req_str(args, "state")?.to_owned(),
         exception_reason: opt_str(args, "exception_reason").map(str::to_owned),
-        updated_at: opt_str(args, "updated_at")
-            .map_or_else(|| state.resolve_timestamp(args), str::to_owned),
+        updated_at: match opt_str(args, "updated_at") {
+            Some(supplied) => canonical_write_stamp(supplied)?,
+            None => state.resolve_timestamp(args)?,
+        },
     };
     let report = svc::record_copy(&env(state), &ctx, &row)?;
     Ok(serde_json::to_value(&report).expect("serialize request report"))
@@ -213,6 +217,18 @@ fn events(state: &McpState, args: &Value) -> Result<Value, AmError> {
     }))
 }
 
+/// Record a privileged caller's verified product-path completion.
+fn path_complete(state: &McpState, args: &Value) -> Result<Value, AmError> {
+    let ctx = state.resolve_ctx(args)?;
+    let report = svc::complete_path(
+        &env(state),
+        &ctx,
+        req_str(args, "request_id")?,
+        req_str(args, "product_path")?,
+    )?;
+    Ok(serde_json::to_value(&report).expect("serialize request report"))
+}
+
 /// `subject_request_close`: accept closure, finalize, and report the request.
 fn close(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -238,7 +254,7 @@ fn peer_status(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn peer_retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let request_id = req_str(args, "request_id")?.to_owned();
-    let timestamp = state.resolve_timestamp(args);
+    let timestamp = state.resolve_timestamp(args)?;
     let salt = tombstone_salt();
     let journal = JournalHold::resolve_journal_path(state.journal_path.as_deref(), &|key| {
         std::env::var(key).ok()

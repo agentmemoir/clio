@@ -25,22 +25,71 @@
 
 use crate::schema_defs::{ToolDef, arr, b, en, s};
 
+/// The omitted-`bank` wording `verify`, `doctor` and `reindex` share: the
+/// argument then means the server default bank, and the credential's grant has
+/// to cover that bank or the call is refused. A caller without a credential has
+/// no default to fall back on, so each of those tools states that reach itself,
+/// while `diagnose` publishes its own sentence.
+const OMITTED_BANK: &str =
+    "Bank scope; omitted means the server default bank, which the credential's grant must cover.";
+
+/// `diagnose`'s own `bank` clause: the shared omitted-bank sentence, then the
+/// reach only this tool keeps, since its arm reads the argument without ever
+/// narrowing an unbound caller to it.
+fn diagnose_bank_clause() -> String {
+    format!(
+        "{OMITTED_BANK} A caller without a credential reads the whole store, whether it names \
+         this or not."
+    )
+}
+
+/// The `repair` scope, which is the plan's when a plan is registered, so the
+/// grant has to cover the scope the tool acts on and not only the argument. A
+/// plan outside the grant is answered as not found, in the words below, and an
+/// unbound caller keeps the plan-or-argument reach it had before the grant.
+const REPAIR_BANK: &str = "Bank scope; omitted means the registered plan's own bank, and \
+                           otherwise the bank this call resolves for the credential (the server \
+                           default when no `bank` is passed). A plan registered for a bank the \
+                           credential's grant does not cover is reported as not found, and none \
+                           of its actions run. A caller without a credential acts in its `bank` \
+                           argument when it passes one, and with neither a bank nor a registered \
+                           plan has no bank scope at all, where each action fails without mutating.";
+
+/// `reindex`'s `dry_run` clause: absent, it follows `confirm`, and a `false`
+/// with nothing confirming it is refused as an unconfirmed mutating rebuild.
+const REINDEX_DRY_RUN: &str = "Report only; applies nothing and is not ok. Defaults to the \
+                               opposite of `confirm`. `false` without `confirm: true` is \
+                               refused.";
+
 /// All operator tool definitions (three read-planning + two mutating rows).
 #[must_use]
 pub fn ops_defs() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "diagnose",
-            description: "Read-only whole-store install/database health snapshot: backend reachability, schema version, banks, index coverage counts, and embedding readiness. Never mutates memory and takes no bank scope.",
+            description: "Read-only install/database health snapshot: backend reachability, \
+                          schema version, banks, index coverage counts, and embedding \
+                          readiness. Never mutates memory. A bound caller's `bank`, when it \
+                          passes one, selects the bank inside its grant, and a caller without \
+                          a credential gets the whole store whatever it passes.",
             required: &[],
-            props: vec![("timestamp", s("Snapshot time; defaults to now."))],
+            props: vec![
+                ("bank", s(&diagnose_bank_clause())),
+                ("timestamp", s("Snapshot time; defaults to now.")),
+            ],
         },
         ToolDef {
             name: "verify",
-            description: "Deeper read-only consistency pass over referential integrity and index coverage; aggregate ok is false when any error-severity finding exists.",
+            description: "Deeper read-only consistency pass over referential integrity and index coverage; aggregate ok is false when any error-severity finding exists. A pass for a named bank is also not ok while another bank carries an error finding, and names those codes in notes; a bound caller's pass reads no other bank and so carries no such note.",
             required: &[],
             props: vec![
-                ("bank", s("Bank scope; whole store when omitted.")),
+                (
+                    "bank",
+                    s(&format!(
+                        "{OMITTED_BANK} A caller without a credential reads the whole store \
+                         when it omits this."
+                    )),
+                ),
                 ("timestamp", s("Report time; defaults to now.")),
             ],
         },
@@ -49,7 +98,13 @@ pub fn ops_defs() -> Vec<ToolDef> {
             description: "Compose an ordered repair plan from verify findings. Default dry_run=true prints the plan and registers nothing; dry_run=false registers the plan and returns its id without touching the store.",
             required: &[],
             props: vec![
-                ("bank", s("Bank scope; whole store when omitted.")),
+                (
+                    "bank",
+                    s(&format!(
+                        "{OMITTED_BANK} A caller without a credential composes over the whole \
+                         store when it omits this."
+                    )),
+                ),
                 (
                     "dry_run",
                     b("Print the plan only (default true); false registers a concrete plan id."),
@@ -70,14 +125,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                         &s("One allowlisted action id."),
                     ),
                 ),
-                (
-                    "bank",
-                    s(
-                        "Bank scope; required for explicit actions (or when the plan \
-                         carries none). Without a bank every action fails with no \
-                         mutation.",
-                    ),
-                ),
+                ("bank", s(REPAIR_BANK)),
                 (
                     "confirm",
                     b("Perform the repairs; default false (refused)."),
@@ -87,7 +135,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "reindex",
-            description: "Rebuild derived dense and/or lexical indexes. dry_run=true (default) reports scope and cost only; a mutating run requires confirm=true and an embedding sidecar for the dense leg.",
+            description: "Rebuild derived dense and/or lexical indexes. confirm=true is the live switch and starts the rebuild; dry_run is report-only, defaulting to the opposite of confirm, so a report-only run applies nothing and is not reported as ok. A live dense rebuild also needs an embedding sidecar.",
             required: &[],
             props: vec![
                 (
@@ -99,15 +147,20 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "bank",
-                    s(
-                        "Bank scope; every indexable bank when omitted (rejected over \
-                         MCP while the shared bank surface is disabled).",
-                    ),
+                    s(&format!(
+                        "{OMITTED_BANK} A caller without a credential sweeps every indexable \
+                         bank when it omits this (rejected over MCP while the shared bank \
+                         surface is disabled)."
+                    )),
                 ),
-                ("dry_run", b("Report scope/cost only (default true).")),
-                ("confirm", b("Perform the rebuild; default false.")),
+                ("dry_run", b(REINDEX_DRY_RUN)),
+                ("confirm", b("Start the live rebuild; default false.")),
                 ("timestamp", s("Report time; defaults to now.")),
             ],
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_ops_defs_tests.rs"]
+mod schema_ops_defs_tests;

@@ -55,14 +55,14 @@ fn a_hosted_role_asks_for_the_endpoint_model_and_key() {
     let run = Harness::fresh()
         .with_pasted_secrets(&["sk-embed-value", "sk-rerank-value"])
         .typing(PASTED)
-        .typing("2\nhttps://embed.example.test\nbge\n")
-        .typing("2\nhttps://rerank.example.test\nbge-rerank\n")
+        .typing("2\nhttps://embed.example.com\nbge\n")
+        .typing("2\nhttps://rerank.example.com\nbge-rerank\n")
         .typing("1\n")
         .run();
     let answers = run.answers();
     let embed = answers.embed.as_ref().expect("a hosted embedding");
     assert_eq!(embed.role, ServiceRole::Hosted);
-    assert_eq!(embed.url, "https://embed.example.test");
+    assert_eq!(embed.url, "https://embed.example.com");
     assert_eq!(embed.model, "bge");
     assert_eq!(embed.key.as_deref(), Some("sk-embed-value"));
     let rerank = answers.rerank.as_ref().expect("a hosted rerank");
@@ -75,7 +75,7 @@ fn a_hosted_key_is_read_through_the_masked_reader_and_never_printed() {
     let run = Harness::fresh()
         .with_pasted_secrets(&[secret])
         .typing(PASTED)
-        .typing("2\nhttps://embed.example.test\nbge\n")
+        .typing("2\nhttps://embed.example.com\nbge\n")
         .typing("1\n1\n")
         .run();
     assert!(!run.out.contains(secret), "the key leaked: {}", run.out);
@@ -96,7 +96,7 @@ fn a_remote_endpoint_over_plain_http_is_refused_at_the_question() {
     let run = Harness::fresh()
         .with_pasted_secrets(&["pw", "k"])
         .typing(PASTED)
-        .typing("2\nhttp://embed.example.test\n")
+        .typing("2\nhttp://embed.example.com\n")
         .drive();
     assert!(
         run.out.contains("must use https for a remote host"),
@@ -119,7 +119,7 @@ fn a_failed_endpoint_probe_stops_the_run_and_reports_the_reason() {
         .with_pasted_secrets(&["k"])
         .endpoint_fails("the endpoint did not answer")
         .typing(PASTED)
-        .typing("2\nhttps://embed.example.test\nbge\n")
+        .typing("2\nhttps://embed.example.com\nbge\n")
         .expect_refusal();
     assert!(
         run.contains("the endpoint did not answer"),
@@ -193,7 +193,7 @@ fn a_hosted_service_with_no_key_and_no_terminal_is_refused() {
                 "postgres://clio:pw@db.example.com:5432/clio?sslmode=verify-full",
             ),
             ("embed", "online"),
-            ("embed-url", "https://embed.example.test"),
+            ("embed-url", "https://embed.example.com"),
             ("embed-model", "text-embedding-3-small"),
         ])
         .expect_refusal();
@@ -205,7 +205,7 @@ fn a_hosted_service_with_no_key_and_no_terminal_is_refused() {
 fn a_stored_service_value_becomes_the_question_default() {
     let run = Harness::fresh()
         .with_effective(json!({
-            "embed": { "url": "https://old.example.test", "model": "old-model" }
+            "embed": { "url": "https://old.example.com", "model": "old-model" }
         }))
         .with_pasted_secrets(&["pw"])
         .typing(PASTED)
@@ -213,12 +213,12 @@ fn a_stored_service_value_becomes_the_question_default() {
         .typing("3\n1\n")
         .run();
     assert!(
-        run.out.contains("([https://old.example.test])"),
+        run.out.contains("([https://old.example.com])"),
         "the stored endpoint was not offered as the default: {}",
         run.out
     );
     let service = run.answers().embed.as_ref().expect("a service");
-    assert_eq!(service.url, "https://old.example.test", "{}", run.out);
+    assert_eq!(service.url, "https://old.example.com", "{}", run.out);
     assert_eq!(service.model, "old-model");
 }
 
@@ -232,7 +232,7 @@ fn the_key_question_is_asked_on_a_first_run_and_reads_the_masked_reader() {
     let secret = "sk-typed-this-run";
     let run = Harness::fresh()
         .with_effective(json!({
-            "embed": { "url": "https://old.example.test", "model": "old" },
+            "embed": { "url": "https://old.example.com", "model": "old" },
             "credentials": { "embed_api_key": "sk-stored-value" }
         }))
         .with_pasted_secrets(&[secret])

@@ -84,6 +84,11 @@ pub struct ImportReport {
     pub would_reject: usize,
     /// Existing entities overwritten under `force`.
     pub would_overwrite: usize,
+    /// Entities reported and skipped because their own stored content failed
+    /// validation, instead of aborting the whole import.
+    pub would_skip_invalid: usize,
+    /// One entry per skipped entity (capped at 10).
+    pub skipped_invalid: Vec<SkippedInvalid>,
     /// Item ids this run created, in staging order. Empty on a dry run or a run
     /// that created nothing. A caller indexes these so a restored item is
     /// searchable without waiting on the whole index backlog.
@@ -96,6 +101,17 @@ pub struct ImportReport {
     pub applied: bool,
     /// Honest run notes (capped).
     pub notes: Vec<String>,
+}
+
+/// One entity an import reported and skipped instead of aborting the bundle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedInvalid {
+    /// The entity id in the target bank: the id this run would have written.
+    pub id: String,
+    /// The stable error code the entity failed with (`out_of_range`, ...).
+    pub code: String,
+    /// Masked reason, in the same form as `rejection_samples`.
+    pub reason: String,
 }
 
 /// Manifest-validated, idempotent, admission-gated bundle import.
@@ -139,6 +155,15 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
     }
     let mut planner = Planner::new(args, &parsed.envelope);
     planner.run()?;
+    // A live run that stages nothing created and overwrote nothing only re-walked
+    // rows the bank already held; say so instead of reporting a silent success.
+    if !args.dry_run && planner.staged.is_empty() && planner.create == 0 && planner.overwrite == 0 {
+        let (skipped, rejected, invalid) = (planner.skip, planner.reject, planner.skip_invalid);
+        planner.note(format!(
+            "nothing restored: created 0, overwrote 0, {skipped} skipped, \
+             {rejected} rejected, {invalid} skipped as invalid"
+        ));
+    }
     let staged_len = planner.staged.len();
     let applied = if args.dry_run {
         false
@@ -160,6 +185,8 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
         would_skip: planner.skip,
         would_reject: planner.reject,
         would_overwrite: planner.overwrite,
+        would_skip_invalid: planner.skip_invalid,
+        skipped_invalid: planner.skipped_invalid,
         created_ids: if applied {
             planner
                 .staged
@@ -233,5 +260,21 @@ mod import_context_persona_tests;
 mod import_restore_tests;
 
 #[cfg(test)]
+#[path = "import_rekey_tests.rs"]
+mod import_rekey_tests;
+
+#[cfg(test)]
 #[path = "import_secret_scrub_tests.rs"]
 mod import_secret_scrub_tests;
+
+#[cfg(test)]
+#[path = "import_gist_bound_tests.rs"]
+mod import_gist_bound_tests;
+
+#[cfg(test)]
+#[path = "import_nothing_restored_tests.rs"]
+mod import_nothing_restored_tests;
+
+#[cfg(test)]
+#[path = "import_round_trip_tests.rs"]
+mod import_round_trip_tests;

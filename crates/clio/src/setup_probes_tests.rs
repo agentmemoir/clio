@@ -60,7 +60,7 @@ fn a_database_without_the_vector_extension_is_refused() {
 #[test]
 fn the_endpoint_probe_maps_the_transport_message_through_unchanged() {
     // A scheme the request gate refuses before any connection is attempted.
-    let url = "ftp://embed.example.test";
+    let url = "ftp://embed.example.com";
     let from_index =
         clio_index::probe_endpoint(url, None).expect_err("the gate refuses a non-http scheme");
     let from_probe = real_probes()

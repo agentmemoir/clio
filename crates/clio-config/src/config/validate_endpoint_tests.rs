@@ -73,13 +73,16 @@ fn the_host_is_read_from_the_url_not_from_the_whole_string() {
     // first slash would call this `trusted`, which is not loopback, and reading
     // it as the whole authority would call it `trusted@box.localhost`, which is.
     for path in ENDPOINT_PATHS {
-        let err = validate_set_value(path, &json!("http://trusted@evil.example/v1"))
+        let err = validate_set_value(path, &json!("http://trusted@evil.example.com/v1"))
             .expect_err("userinfo must not hide the real host");
-        assert!(err.to_string().contains("evil.example"), "{path}: {err}");
+        assert!(
+            err.to_string().contains("evil.example.com"),
+            "{path}: {err}"
+        );
     }
     // And the loopback name in front of a remote host does not save it.
     for path in ENDPOINT_PATHS {
-        validate_set_value(path, &json!("http://box.localhost@evil.example/v1"))
+        validate_set_value(path, &json!("http://box.localhost@evil.example.com/v1"))
             .expect_err("a loopback-looking userinfo is not a loopback host");
     }
 }

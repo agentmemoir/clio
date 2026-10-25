@@ -38,7 +38,13 @@ type Store = Arc<clio_store::SqliteStore>;
 
 /// A push payload carrying one mutation the caller shaped by hand, so a test
 /// controls the wire shape exactly as any writer would have produced it.
-fn hand_pushed(addr: &str, cipher: SyncCipher, bank: &str, fixture: &clio_types::MemoryItem) {
+fn hand_pushed(
+    addr: &str,
+    key: &SyncCipherKey,
+    bank: &str,
+    fixture: &clio_types::MemoryItem,
+    adjust: impl FnOnce(&mut SyncCipher),
+) {
     let plain = serde_json::to_value(fixture).expect("serialize the item fixture");
     let mutation = SyncMutation {
         sync_mutation_id: sha256_hex(
@@ -51,13 +57,17 @@ fn hand_pushed(addr: &str, cipher: SyncCipher, bank: &str, fixture: &clio_types:
         op: OP_UPSERT.into(),
         transaction_time: fixture.tx_from.clone(),
         device_id: "dev-hand".into(),
-        content: SyncContent::Cipher(cipher),
+        content: SyncContent::Plain(serde_json::Value::Null),
         content_hash: sha256_hex(
             crate::keyed_roles::published_digest_salt(),
             &serde_json::to_string(&plain).expect("plain text"),
         ),
         admission_receipt: None,
     };
+    let mut mutation = crate::envelope_fixtures::seal_content_for(mutation, key, &plain);
+    if let SyncContent::Cipher(cipher) = &mut mutation.content {
+        adjust(cipher);
+    }
     let payload = SyncPayload {
         device_id: "dev-hand".into(),
         bank: bank.to_owned(),
@@ -159,19 +169,7 @@ fn a_key_id_less_row_is_refused_and_the_cursor_freezes() {
         "2026-01-01T00:00:00Z",
         "identifier-less",
     );
-    let plain = serde_json::to_value(&fixture).expect("serialize the item fixture");
-    let sealed = k1
-        .seal(&serde_json::to_vec(&plain).expect("serialize plain"))
-        .expect("seal");
-    hand_pushed(
-        &addr,
-        SyncCipher {
-            key_id: None,
-            ..sealed
-        },
-        "bt",
-        &fixture,
-    );
+    hand_pushed(&addr, &k1, "bt", &fixture, |cipher| cipher.key_id = None);
     let rows = srv.journal_list_since("bt", 0, 10).unwrap();
     assert!(
         !rows[0]
@@ -202,7 +200,7 @@ fn a_key_id_less_row_is_refused_and_the_cursor_freezes() {
         "the refusal names the missing identifier: {detail}"
     );
     assert!(
-        detail.contains("clio sync ack-skip"),
+        detail.contains("sync_ack_skip") && detail.contains("with confirm"),
         "the refusal names the deliberate discard: {detail}"
     );
 
@@ -272,7 +270,7 @@ fn a_row_sealed_under_an_absent_key_is_refused_and_the_cursor_freezes() {
         "the refusal names the recovery: {detail}"
     );
     assert!(
-        detail.contains("clio sync ack-skip"),
+        detail.contains("sync_ack_skip") && detail.contains("with confirm"),
         "the refusal names the deliberate discard: {detail}"
     );
     // No key bytes and no content in the refusal: the ids are derived, the
@@ -309,15 +307,11 @@ fn a_row_sealed_by_a_held_key_that_no_longer_opens_is_refused_and_the_cursor_fre
     let fixture = item("bw", "i-bad", "s1", "2026-01-01T00:00:00Z", "tampered");
     // Stamped with an identifier the reader holds, but the ciphertext bytes
     // are corrupted: the identifier matches, the open does not.
-    let plain = serde_json::to_value(&fixture).expect("serialize the item fixture");
-    let sealed = k1
-        .seal(&serde_json::to_vec(&plain).expect("serialize plain"))
-        .expect("seal");
-    let mut tampered = sealed;
-    let mut chars: Vec<char> = tampered.ciphertext_b64.chars().collect();
-    chars[0] = if chars[0] == 'A' { 'B' } else { 'A' };
-    tampered.ciphertext_b64 = chars.into_iter().collect::<String>();
-    hand_pushed(&addr, tampered, "bw", &fixture);
+    hand_pushed(&addr, &k1, "bw", &fixture, |cipher| {
+        let mut chars: Vec<char> = cipher.ciphertext_b64.chars().collect();
+        chars[0] = if chars[0] == 'A' { 'B' } else { 'A' };
+        cipher.ciphertext_b64 = chars.into_iter().collect::<String>();
+    });
     let stamped = k1.key_id();
 
     // The pull completes, the row is dead-lettered under its stamped
@@ -344,7 +338,7 @@ fn a_row_sealed_by_a_held_key_that_no_longer_opens_is_refused_and_the_cursor_fre
         "the refusal names the open failure: {detail}"
     );
     assert!(
-        detail.contains("clio sync ack-skip"),
+        detail.contains("sync_ack_skip") && detail.contains("with confirm"),
         "the refusal names the deliberate discard: {detail}"
     );
     server.stop();

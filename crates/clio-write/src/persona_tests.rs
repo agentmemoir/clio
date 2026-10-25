@@ -125,6 +125,7 @@ fn adapter_fails_closed() {
         target: "mood",
         new_value: "0.8",
         update_rule: UpdateRule::Continuous,
+        new_item_id: "itm-persona-replacement",
         timestamp: "2024-02-01",
         continuous_sink: &sink,
         triple_sink: &crate::triple::TripleVecSink::default(),
