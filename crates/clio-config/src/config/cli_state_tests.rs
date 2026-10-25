@@ -4,14 +4,16 @@
 //! # Responsibility
 //!
 //! This module tests the durable CLI state file: path resolution, the ranking
-//! round trip across two `Runtime` boots, and the missing, corrupt, and dry-run
-//! cases.
+//! round trip across two `Runtime` boots, the missing and corrupt cases, and
+//! what a hand-written file may and may not restore.
 //!
 //! ## Owns
 //! - Behavior tests for the CLI state file and its `Runtime` hooks
+//! - Behavior tests for the checks a loaded overlay entry has to pass
 //!
 //! ## Does not own
 //! - The implementation under test (`cli_state`)
+//! - The path and value rules themselves (see `validate`)
 //! - Ranking weight math (see `crate::ranking`)
 //!
 //! ## Boundary
@@ -282,4 +284,132 @@ fn active_profile_of(rt: &Runtime) -> Option<String> {
         panic!("config_profiles must succeed");
     };
     data.active
+}
+
+/// Write a state file carrying `overlay`, under the profile that overlay
+/// belongs to, so the restore path actually applies it.
+fn write_overlay_state(path: &Path, overlay: &Value) {
+    let saved = json!({
+        "active_profile": "coding_local",
+        "profile_overlay": overlay,
+    });
+    fs::write(
+        path,
+        serde_json::to_string(&saved).expect("serialize state"),
+    )
+    .expect("write state");
+}
+
+/// The effective value at `pointer`, for comparing a loaded file with a boot
+/// that had no file at all.
+fn value_at(rt: &Runtime, pointer: &str) -> Value {
+    rt.effective_raw()
+        .pointer(pointer)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// A file that carries a gate key, a packaging claim, or a secret path must not
+/// reach the effective config through the overlay: `config set` refuses those
+/// paths, and this file is not sealed.
+#[test]
+fn a_forbidden_or_secret_overlay_entry_is_not_restored_from_the_file() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    write_overlay_state(
+        &path,
+        &json!({
+            "gates.admission_enabled": false,
+            "gates.admission.enabled": false,
+            "fr10_satisfied": true,
+            "credentials.api_key": "sk-handwritten-0123456789",
+            "log.level": "debug",
+        }),
+    );
+
+    let rt = boot(path);
+    let baseline = boot(scratch.0.join("absent.json"));
+    assert_eq!(
+        value_at(&rt, "/gates/admission_enabled"),
+        value_at(&baseline, "/gates/admission_enabled"),
+        "a forbidden gate path leaves the default in place"
+    );
+    assert_eq!(
+        value_at(&rt, "/gates/admission/enabled"),
+        Value::Null,
+        "a forbidden gate path is not created at all"
+    );
+    assert_eq!(
+        value_at(&rt, "/fr10_satisfied"),
+        value_at(&baseline, "/fr10_satisfied"),
+        "a packaging claim cannot be written through the file"
+    );
+    assert_eq!(
+        value_at(&rt, "/credentials/api_key"),
+        Value::Null,
+        "the unsealed file must never carry a secret"
+    );
+    assert_eq!(
+        value_at(&rt, "/log/level"),
+        json!("debug"),
+        "the valid entry beside them still loads"
+    );
+}
+
+/// A well-allowlisted key with a value of the wrong type is dropped, and the
+/// rest of the overlay still applies.
+#[test]
+fn a_wrong_typed_overlay_value_is_dropped_and_the_valid_entry_loads() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    write_overlay_state(
+        &path,
+        &json!({
+            "history.default_limit": "many",
+            "log.level": "debug",
+        }),
+    );
+
+    let rt = boot(path);
+    let baseline = boot(scratch.0.join("absent.json"));
+    assert_eq!(
+        value_at(&rt, "/history/default_limit"),
+        value_at(&baseline, "/history/default_limit"),
+        "a wrong-typed value leaves the default in place"
+    );
+    assert_eq!(
+        value_at(&rt, "/log/level"),
+        json!("debug"),
+        "the valid entry beside it still loads"
+    );
+}
+
+/// A ranking object that predates a knob still restores the values it carries
+/// instead of being thrown away whole.
+#[test]
+fn a_saved_ranking_env_missing_a_group_still_loads_from_the_file() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    let mut ranking = serde_json::to_value(RankingEnv::system_defaults()).expect("serialize");
+    ranking["theta_admit"] = json!(0.61);
+    ranking
+        .as_object_mut()
+        .expect("the ranking env is an object")
+        .remove("maintenance_triggers");
+    fs::write(
+        &path,
+        serde_json::to_string(&json!({ "ranking": ranking })).expect("serialize state"),
+    )
+    .expect("write state");
+
+    let restored = ranking_of(&boot(path));
+    assert!(
+        (restored.theta_admit - 0.61).abs() < 1e-9,
+        "the present value survives: {restored:?}"
+    );
+    assert_eq!(
+        restored.maintenance_triggers,
+        RankingEnv::system_defaults().maintenance_triggers,
+        "the omitted group falls back to its default"
+    );
 }

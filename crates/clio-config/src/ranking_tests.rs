@@ -386,7 +386,7 @@ fn retention_knobs_fill_defaults_and_reject_unknown_fields() {
     );
 }
 
-/// The ranking patch still rejects unknown fields at both levels.
+/// A ranking patch still rejects unknown fields at both levels.
 #[test]
 fn ranking_patch_rejects_unknown_fields() {
     assert!(
@@ -399,4 +399,35 @@ fn ranking_patch_rejects_unknown_fields() {
         )
         .is_err()
     );
+}
+
+/// A saved environment that omits one group loads every value it does carry and
+/// fills the omission from that group's own default, so a file written before a
+/// knob existed is not discarded whole.
+#[test]
+fn a_saved_ranking_env_missing_a_group_keeps_the_values_it_carries() {
+    let env: RankingEnv = serde_json::from_value(serde_json::json!({
+        "retrieval": {"dense": 0.5, "lexical": 0.25, "importance": 0.25},
+        "theta_admit": 0.61,
+        "theta_overrides": {"note": 0.5},
+    }))
+    .expect("a missing group must not discard the environment");
+
+    assert!((env.theta_admit - 0.61).abs() < 1e-9, "{env:?}");
+    assert!((env.retrieval.dense - 0.5).abs() < 1e-9, "{env:?}");
+    assert_eq!(
+        env.theta_overrides,
+        HashMap::from([("note".to_owned(), 0.5)])
+    );
+    assert_eq!(env.maintenance_triggers, MaintenanceTriggerKnobs::default());
+    assert_eq!(env.trust, TrustRatios::default());
+    assert_eq!(env.hygiene, HygieneWeights::default());
+}
+
+/// Every group omitted is the system default, so the defaults a load fills in
+/// are the ones the code builds rather than the zeroed `Default` derive.
+#[test]
+fn an_empty_saved_ranking_env_loads_the_system_defaults() {
+    let env: RankingEnv = serde_json::from_value(serde_json::json!({})).expect("all omitted");
+    assert_eq!(env, RankingEnv::system_defaults());
 }

@@ -12,15 +12,21 @@
 //! - The `cli-state.json` file name and its path resolution under the clio
 //!   config directory
 //! - Reading the stored `active_profile`, `profile_overlay`, and `ranking`
-//!   objects, ignoring a missing or corrupt file
+//!   objects, one part at a time, so a part that is present but unusable costs
+//!   only itself and a missing file costs nothing at all
+//! - Re-checking every loaded overlay entry against the `config set` path and
+//!   value validators, and refusing a secret-bearing path outright, because
+//!   this file is hand-writable and seals nothing
 //! - The boot order they are restored in: profile, then its overlay, then the
 //!   ranking, so an explicit ranking set wins over the profile's own ranking
-//! - Writing the current three-part state owner-only and atomically
+//! - Writing the current three-part state owner-only, into an owner-only
+//!   directory, atomically
 //! - Reporting which overlay keys a write had to leave out, because the file
 //!   seals nothing and a secret cannot be written there
 //!
 //! ## Does not own
 //! - The ranking schema itself (see `crate::ranking`)
+//! - What `config set` accepts (see `validate`)
 //! - The profile catalog or what applying one sets (see `profile_ops`)
 //! - The deployment overlay file or its sealed values (see `persist`)
 //! - Deciding when to flush (the CLI layer owns that; the tool handlers stay
@@ -35,13 +41,15 @@
 
 use super::Runtime;
 use super::merge::Overlay;
-use super::persist::{default_config_dir, write_private_atomic};
+use super::persist::{default_config_dir, restrict_dir, write_private_atomic};
+use super::validate::{validate_set_path, validate_set_value};
 use crate::error::{AmError, ErrorCode};
 use crate::profile::lookup_profile;
 use crate::ranking::RankingEnv;
 use crate::secret::path_is_secret;
 use serde_json::{Map, Value};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 /// Durable CLI state file name under the clio config directory.
@@ -201,39 +209,137 @@ impl Runtime {
     }
 }
 
-/// The state stored in `path`, or `None` when the file is missing, unreadable,
-/// not JSON, or carries nothing this version understands.
+/// The state stored in `path`, or `None` when the file is absent or cannot be
+/// read or parsed whole.
+///
+/// An absent file is the ordinary "nothing saved yet" and says nothing. A file
+/// this cannot read or parse warns with its path and the reason, because a
+/// silent `None` there loses the active profile and the overlay with no trace.
+/// Each part that is present but unusable is dropped on its own, so one bad key
+/// never costs the other two.
 fn load_state(path: &Path) -> Option<CliState> {
-    // A missing or unreadable file is simply "nothing saved yet".
-    let text = fs::read_to_string(path).ok()?;
-    let root = serde_json::from_str::<Value>(&text).ok()?;
-    let state = CliState {
-        active_profile: root
-            .get(ACTIVE_PROFILE_KEY)
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        profile_overlay: root
-            .get(PROFILE_OVERLAY_KEY)
-            .and_then(Value::as_object)
-            .map(|object| {
-                object
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        ranking: root
-            .get(RANKING_KEY)
-            .cloned()
-            .and_then(|value| serde_json::from_value(value).ok()),
+    let shown = path.to_string_lossy().into_owned();
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == ErrorKind::NotFound => return None,
+        Err(e) => {
+            crate::log::warn(
+                "cli state unreadable",
+                &[("path", &shown), ("error", &e.to_string())],
+            );
+            return None;
+        }
     };
-    if state.ranking.is_none() {
-        crate::log::warn("cli state not loaded", &[("path", &path.to_string_lossy())]);
+    let root = match serde_json::from_str::<Value>(&text) {
+        Ok(root) => root,
+        Err(e) => {
+            crate::log::warn(
+                "cli state not parsed",
+                &[("path", &shown), ("error", &e.to_string())],
+            );
+            return None;
+        }
+    };
+    if !root.is_object() {
+        crate::log::warn(
+            "cli state not parsed",
+            &[("path", &shown), ("error", "the file is not a JSON object")],
+        );
+        return None;
     }
-    Some(state)
+    Some(CliState {
+        active_profile: load_active_profile(&root, &shown),
+        profile_overlay: load_profile_overlay(&root, &shown),
+        ranking: load_ranking(&root, &shown),
+    })
 }
 
-/// Write `state` as the file's keys.
+/// The saved active profile, when the file carries a usable name.
+///
+/// A `null` value is what a flush writes when no profile is active, so it means
+/// "none" rather than a defect.
+fn load_active_profile(root: &Value, shown: &str) -> Option<String> {
+    let value = root.get(ACTIVE_PROFILE_KEY)?;
+    if value.is_null() {
+        return None;
+    }
+    if let Some(name) = value.as_str() {
+        return Some(name.to_owned());
+    }
+    crate::log::warn(
+        "cli state active profile not loaded",
+        &[("path", shown), ("error", "active_profile is not a string")],
+    );
+    None
+}
+
+/// The saved ranking environment, when the file carries one this version reads.
+fn load_ranking(root: &Value, shown: &str) -> Option<RankingEnv> {
+    let value = root.get(RANKING_KEY)?;
+    if value.is_null() {
+        return None;
+    }
+    match serde_json::from_value::<RankingEnv>(value.clone()) {
+        Ok(ranking) => Some(ranking),
+        Err(e) => {
+            crate::log::warn(
+                "cli state ranking not loaded",
+                &[("path", shown), ("error", &e.to_string())],
+            );
+            None
+        }
+    }
+}
+
+/// The saved profile overlay, keeping only the entries `config set` would have
+/// accepted and dropping the rest with a warning naming the key and the reason.
+///
+/// This file is hand-writable and seals nothing, so it must not become a second,
+/// unchecked write channel into the effective configuration: an entry is read
+/// back only after the same path and value checks a `config set` call passes,
+/// and a secret-bearing path is refused even when its value is well typed.
+fn load_profile_overlay(root: &Value, shown: &str) -> Overlay {
+    let Some(value) = root.get(PROFILE_OVERLAY_KEY) else {
+        return Overlay::new();
+    };
+    let Some(object) = value.as_object() else {
+        crate::log::warn(
+            "cli state overlay not loaded",
+            &[
+                ("path", shown),
+                ("error", "profile_overlay is not an object"),
+            ],
+        );
+        return Overlay::new();
+    };
+    let mut overlay = Overlay::new();
+    for (key, value) in object {
+        match checked_overlay_entry(key, value) {
+            Ok(()) => {
+                overlay.insert(key.clone(), value.clone());
+            }
+            Err(e) => crate::log::warn(
+                "cli state overlay entry dropped",
+                &[("path", shown), ("key", key), ("reason", &e.message)],
+            ),
+        }
+    }
+    overlay
+}
+
+/// The check one saved overlay entry must pass to be restored.
+fn checked_overlay_entry(key: &str, value: &Value) -> Result<(), AmError> {
+    if path_is_secret(key) {
+        return Err(AmError::new(
+            ErrorCode::Forbidden,
+            "a secret cannot be stored in the unsealed cli state file",
+        ));
+    }
+    validate_set_path(key)?;
+    validate_set_value(key, value)
+}
+
+/// Write `state` as the file's keys, into an owner-only directory.
 fn save_state(path: &Path, state: &CliState) -> Result<(), AmError> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| {
@@ -242,6 +348,7 @@ fn save_state(path: &Path, state: &CliState) -> Result<(), AmError> {
                 format!("failed to create {}: {e}", parent.display()),
             )
         })?;
+        restrict_dir(parent);
     }
     let mut root = Map::new();
     root.insert(
