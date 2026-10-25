@@ -1,0 +1,1 @@
+A Postgres restore now counts the rows it loaded inside the restore transaction, so a concurrent writer can no longer land a row between the load and the count and make a complete restore report a mismatch.

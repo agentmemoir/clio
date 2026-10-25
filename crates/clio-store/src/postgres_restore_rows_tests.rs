@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module tests what one Postgres restore report's `rows_loaded` means:
-//! the rows the target was observed to hold after the commit, never the
+//! the rows the restore transaction counted for itself, never the
 //! archive's own arithmetic. It restores an archive whose declared per-table
 //! counts exceed the rows its members carry, so the declared total and the
 //! observed total differ, and pins which of the two the field reports.

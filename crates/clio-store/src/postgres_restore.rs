@@ -6,8 +6,8 @@
 //! This module is responsible for the Postgres logical restore: one
 //! transaction that clears the target, loads every dumped member back in
 //! `COPY` text format, and re-enables what it disabled — so a failure anywhere
-//! leaves the target exactly as it was. Every count it reports is observed
-//! after the commit, never the archive's own claim.
+//! leaves the target exactly as it was. Every count it reports is measured
+//! inside that transaction, before the commit, never the archive's own claim.
 //!
 //! ## Owns
 //! - `restore_postgres`: the one-transaction restore and its observed counts
@@ -45,7 +45,7 @@ use std::path::PathBuf;
 /// Chunk size for streaming a staged member into `COPY ... FROM STDIN`.
 const COPY_CHUNK: usize = 64 * 1024;
 
-/// The `am` step name for the restore's post-commit `SELECT COUNT(*)` pass.
+/// The `am` step name for the restore's own `SELECT COUNT(*)` pass.
 ///
 /// The target's read-only pass names its own step in `postgres_restore_state`.
 const RESTORE_COUNT: &str = "count a restored table";
@@ -82,12 +82,12 @@ pub struct PostgresRestoreRequest {
 pub struct PostgresRestoreReport {
     /// The schema the restore loaded into.
     pub schema: String,
-    /// Rows the target was observed to hold after the commit, summed over
-    /// every counted table — a measurement, never the archive's claim. A
+    /// Rows the restore transaction was observed to hold, summed over every
+    /// counted table — a measurement, never the archive's claim. A
     /// restore that loaded fewer rows than the archive records reports the
     /// smaller figure, and `counts_match` then reports `false`.
     pub rows_loaded: u64,
-    /// Every loaded table with its observed row count, after the commit.
+    /// Every loaded table with its observed row count, read before the commit.
     pub table_counts: Vec<(String, u64)>,
     /// The distinct bank ids of the restored `items` table, sorted.
     pub banks: Vec<String>,
@@ -112,9 +112,11 @@ pub struct PostgresRestoreReport {
 /// rebuilds, and it references `items`, so the single statement must include
 /// it or the truncate fails on a populated target.
 ///
-/// After the commit, every loaded table is counted again; that measurement is
-/// what the report carries, and the caller reports a mismatch as a failed
-/// restore.
+/// The last read before the commit counts every loaded table; that measurement
+/// is what the report carries, and the caller reports a mismatch as a failed
+/// restore. Counting before the commit is what makes the measurement stable:
+/// the transaction still holds the tables, so no other writer can land a row
+/// between the load and the count.
 ///
 /// # Errors
 /// The target is unreachable, the schema does not match the target's tables,
@@ -140,8 +142,10 @@ pub fn restore_postgres(
     set_triggers(&mut tx, &discovered, "DISABLE")?;
     load_members(&mut tx, &request.schema, &request.tables)?;
     set_triggers(&mut tx, &discovered, "ENABLE")?;
+    let table_counts = count_tables(&mut tx, &request.schema, &discovered, RESTORE_COUNT)?;
+    let banks = read_banks(&mut tx, &request.schema, &discovered)?;
     tx.commit().am("commit the restore transaction")?;
-    measure_restored(request, &discovered)
+    Ok(restore_report(request, table_counts, banks))
 }
 
 /// Prove the connected role owns every application table.
@@ -251,7 +255,7 @@ fn set_triggers(
 /// The column list is the archive's, so a target column the archive does not
 /// carry cannot shift the load. The load counts nothing: `COPY`'s own tally is
 /// not an observation, so the report's total comes from the counts
-/// `measure_restored` reads.
+/// the restore transaction reads for itself.
 fn load_members(
     tx: &mut Transaction,
     schema: &str,
@@ -300,35 +304,31 @@ fn load_members(
     Ok(())
 }
 
-/// Count every loaded table after the commit and compare with the archive.
+/// Build the report from the counts the restore transaction read for itself.
 ///
-/// The report's total is the sum of these counts, so `rows_loaded` is what
-/// the database was observed to hold and never the archive's own arithmetic.
-fn measure_restored(
+/// The counts arrive already measured, from inside the transaction the load
+/// ran in, so this assembles them and never reads the database: there is no
+/// window between the load and the count for another writer to land a row in.
+/// The report's total is the sum of those counts, so `rows_loaded` is what the
+/// database was observed to hold and never the archive's own arithmetic.
+fn restore_report(
     request: &PostgresRestoreRequest,
-    discovered: &DiscoveredSchema,
-) -> Result<PostgresRestoreReport, AmError> {
-    let mut client = crate::pg_tls::connect(&request.url).am("postgres connect to measure")?;
-    let mut tx = client
-        .transaction()
-        .am("begin the measurement transaction")?;
-    let measured = count_tables(&mut tx, &request.schema, discovered, RESTORE_COUNT);
-    let banks = read_banks(&mut tx, &request.schema, discovered);
-    let (table_counts, banks) = (measured?, banks?);
-    tx.commit().am("commit the measurement transaction")?;
+    table_counts: Vec<(String, u64)>,
+    banks: Vec<String>,
+) -> PostgresRestoreReport {
     let counts_match = request.tables.iter().all(|table| {
         table_counts
             .iter()
             .any(|(name, count)| name == &table.table && count == &table.rows)
     });
     let rows_loaded = table_counts.iter().map(|(_, count)| count).sum();
-    Ok(PostgresRestoreReport {
+    PostgresRestoreReport {
         schema: request.schema.clone(),
         rows_loaded,
         table_counts,
         banks,
         counts_match,
-    })
+    }
 }
 
 /// A `COPY` or trigger-statement failure that names the table and never the
@@ -340,6 +340,10 @@ fn copy_error(step: &str, table: &str, error: impl std::fmt::Display) -> AmError
     )
 }
 
+/// The restore's count while a second connection waits on its lock.
+#[cfg(test)]
+#[path = "postgres_restore_race_tests.rs"]
+mod race_tests;
 /// The restore report's `rows_loaded`: the observation, not the claim.
 #[cfg(test)]
 #[path = "postgres_restore_rows_tests.rs"]
