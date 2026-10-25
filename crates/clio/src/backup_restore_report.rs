@@ -49,8 +49,7 @@ const REINDEX_COMMAND: &str = "clio ops reindex --target dense --confirm --backe
 /// printed with the store address: on this backend `--db` is a URL that can
 /// carry a password, so the line names the database the operator already
 /// restored instead of repeating an address a report must not hold.
-const REINDEX_NOTICE: &str =
-    "point it at the restored database: pass the same `--db` this restore used, with an embedder \
+const REINDEX_NOTICE: &str = "point it at the restored database: pass the same `--db` this restore used, with an embedder \
      configured, because the dense leg fails closed without one";
 
 /// The blast radius, before the operator is asked to confirm.

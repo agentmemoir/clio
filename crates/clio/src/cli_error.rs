@@ -56,8 +56,7 @@ pub(crate) const EXIT_TEMPORARY: u8 = 75;
 /// canonical text rather than their input: the module's own test holds every
 /// summary to it, and changing the sentence without changing them fails there.
 #[cfg(test)]
-pub(crate) const EXIT_TEMPORARY_MEANING: &str =
-    "75 means the command could not report a clean success and that nothing was lost or invalid, \
+pub(crate) const EXIT_TEMPORARY_MEANING: &str = "75 means the command could not report a clean success and that nothing was lost or invalid, \
      and the command's own message says whether a retry helps: a storage lock conflict is cleared \
      by retrying, and a restore that left a derived difference is not";
 
@@ -339,10 +338,10 @@ pub(crate) fn cross_process_dek_hint(message: &str) -> Option<&'static str> {
     )
 }
 
-#[cfg(test)]
-#[path = "cli_error_tests.rs"]
-mod tests;
 /// The one meaning exit 75 carries, and the surfaces that must repeat it.
 #[cfg(test)]
 #[path = "cli_error_exit_meaning_tests.rs"]
 mod exit_meaning_tests;
+#[cfg(test)]
+#[path = "cli_error_tests.rs"]
+mod tests;
