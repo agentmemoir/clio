@@ -93,43 +93,11 @@ fn t09_missing_auth_rejected_when_a_store_record_is_configured() {
     assert_eq!(good.status, 200);
 }
 
+/// `insecure_no_auth` alone must not admit a bind outside loopback, and the
+/// refusal has to name the second opt-out an operator needs to serve without a
+/// credential on every interface.
 #[test]
-fn non_loopback_without_a_usable_store_fails_closed() {
-    let state = crate::runtime::McpState::open_with_effective(
-        &McpOpenOptions::default(),
-        &serde_json::json!({}),
-    )
-    .expect("state");
-    let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
-    let err = serve_with_listener(state, HttpConfig::default(), listener);
-    let message = err
-        .expect_err("non-loopback bind without a credential must fail closed")
-        .to_string();
-
-    // The opening phrase is the substring an operator's runbook and a search
-    // hold, and it is pinned separately; the removed flag and environment
-    // sources must not come back into the wording.
-    assert!(
-        message.contains("non-loopback bind requires an auth token"),
-        "the pinned phrase must survive: {message}"
-    );
-    assert!(
-        message.contains("--token-file"),
-        "the refusal must name the token store: {message}"
-    );
-    for removed in ["--auth-token", "CLIO_MCP_TOKEN"] {
-        assert!(
-            !message.contains(removed),
-            "the removed source {removed} must leave the wording: {message}"
-        );
-    }
-}
-
-/// A store path holding no usable record authorizes nothing, so it must not
-/// satisfy the non-loopback credential startup rule: the server fails closed
-/// exactly as it would with no store at all.
-#[test]
-fn non_loopback_with_an_empty_store_fails_closed() {
+fn non_loopback_without_insecure_bind_any_is_refused() {
     let state = crate::runtime::McpState::open_with_effective(
         &McpOpenOptions::default(),
         &serde_json::json!({}),
@@ -137,13 +105,48 @@ fn non_loopback_with_an_empty_store_fails_closed() {
     .expect("state");
     let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
     let cfg = HttpConfig {
-        credentials: Some(Arc::new(CredentialStore::default())),
+        insecure_no_auth: true,
         ..HttpConfig::default()
     };
-    let err = serve_with_listener(state, cfg, listener);
+    let message = serve_with_listener(state, cfg, listener)
+        .expect_err("insecure_no_auth alone must not admit a non-loopback bind")
+        .to_string();
+
     assert!(
-        err.is_err(),
-        "an empty store must not satisfy a non-loopback bind"
+        message.contains("non-loopback bind requires an auth token"),
+        "the pinned phrase must survive: {message}"
+    );
+    assert!(
+        message.contains("--insecure-bind-any"),
+        "the refusal must name the second opt-out: {message}"
+    );
+}
+
+/// Both opt-outs admit the bind, so the listener serves every interface and
+/// answers an unauthenticated request: what the pair is for, and the only way
+/// the non-loopback case is reachable.
+#[test]
+fn non_loopback_with_both_opt_outs_serves_unauthenticated() {
+    let state = crate::runtime::McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &serde_json::json!({}),
+    )
+    .expect("state");
+    let listener = TcpListener::bind("0.0.0.0:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let cfg = HttpConfig {
+        insecure_no_auth: true,
+        insecure_bind_any: true,
+        ..HttpConfig::default()
+    };
+    std::thread::spawn(move || {
+        let _ = serve_with_listener(state, cfg, listener);
+    });
+    let res = post_json(port, INIT, "");
+    assert_eq!(
+        res.status, 200,
+        "both opt-outs admit the bind: {}",
+        res.body
     );
 }
 

@@ -244,6 +244,12 @@ fn http_config_reads_flags() {
     let default = http_config(&flags_of(&[]));
     assert_eq!(default.bind, "127.0.0.1:0");
     assert!(!default.sessions_enabled);
+    assert!(!default.insecure_bind_any, "off unless the flag says true");
+
+    let opted_in = http_config(&flags_of(&["--insecure-bind-any"]));
+    assert!(opted_in.insecure_bind_any, "the bare flag turns it on");
+    let spelled_off = http_config(&flags_of(&["--insecure-bind-any=false"]));
+    assert!(!spelled_off.insecure_bind_any, "a false value stays off");
 }
 
 #[test]
