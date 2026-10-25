@@ -4,29 +4,80 @@
 //! # Responsibility
 //!
 //! This module is responsible for the derived-table classification's own
-//! coverage: that the one derived table is derived, that every user-data table
-//! the store writes is not, and that a table the classification does not name
-//! falls on the user-data side.
+//! coverage: that the classification names exactly the tables the schema marks
+//! derived, that every user-data table the store writes is not derived, and that
+//! a table the classification does not name falls on the user-data side.
 //!
 //! ## Owns
-//! - The classification's positive and negative cases, and its default
+//! - The classification's positive and negative cases, against the schema's own
+//!   markers rather than a list copied into this file
+//! - The default for a table the classification does not name
 //!
 //! ## Does not own
 //! - What a caller does with the class (see the restore's count comparison)
 //!
 //! ## Boundary
 //!
-//! Test-only. Never compiled into production builds. Every test here is pure.
+//! Test-only. Never compiled into production builds. Every test here is pure:
+//! the schema text is embedded at compile time, so nothing is read from the host.
 //!
 //! Keep this module focused on the classification.
 
 use super::{DERIVED_TABLES, TableDataClass, table_data_class};
+use crate::migrate::SQL_CORE;
 
+/// The tables the schema itself marks derived, sorted.
+///
+/// `sql/001_core.sql` states each table's class in the comment above its
+/// `CREATE`: the work queue carries `Derived state`, and nothing else does. That
+/// comment is the schema's own answer, so the classification is checked against
+/// it and not against a second copy of the list written here, which would let a
+/// table the schema marks derived stay silent when the list missed it.
+fn schema_derived_tables() -> Vec<String> {
+    let mut named: Vec<String> = SQL_CORE
+        .split("Derived state")
+        .skip(1)
+        .filter_map(|after_marker| {
+            // The marker sits in the comment block directly above its table.
+            let after_create = after_marker.split("CREATE TABLE IF NOT EXISTS ").nth(1)?;
+            let name: String = after_create
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            assert!(
+                !name.is_empty(),
+                "the schema marks a derived table but no CREATE follows it"
+            );
+            Some(name)
+        })
+        .collect();
+    named.sort_unstable();
+    named
+}
+
+/// The classification and the schema agree on which tables are derived, in both
+/// directions: a derived table the schema added and the list missed fails here,
+/// and so does a list entry the schema does not mark.
 #[test]
-fn the_work_queue_is_the_derived_table() {
-    assert_eq!(table_data_class("index_pending"), TableDataClass::Derived);
-    let named: Vec<&str> = DERIVED_TABLES.iter().map(|(name, _)| *name).collect();
-    assert_eq!(named, vec!["index_pending"]);
+fn the_classification_matches_the_tables_the_schema_marks_derived() {
+    let mut named: Vec<String> = DERIVED_TABLES
+        .iter()
+        .map(|(name, _)| (*name).to_owned())
+        .collect();
+    named.sort_unstable();
+
+    assert_eq!(
+        named,
+        schema_derived_tables(),
+        "the derived list and the schema's own markers must agree"
+    );
+    for name in &named {
+        assert_eq!(
+            table_data_class(name),
+            TableDataClass::Derived,
+            "{name} is marked derived in the schema, so the lookup must classify it so"
+        );
+    }
 }
 
 /// Every entry states why it is derived, so the list cannot grow by name alone.

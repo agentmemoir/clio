@@ -39,6 +39,12 @@ use std::path::PathBuf;
 /// whatever the address is, it never reaches the report.
 const ADDRESS_MARKER: &str = "store-address-marker";
 
+/// The command the rebuild line tells an operator to run, word for word as this
+/// file writes it. The expected value is a literal here and not the constant the
+/// renderer prints: a command spelled wrong in that constant has to fail these
+/// tests, and a test that compares the constant with itself cannot tell anyone.
+const REBUILD_COMMAND: &str = "clio ops reindex --target dense --confirm --backend postgres";
+
 /// A target on the given backend, addressed by `ADDRESS_MARKER`.
 fn target(backend: &str) -> ResolvedTarget {
     ResolvedTarget {
@@ -94,15 +100,19 @@ fn report(backend: &str, dry_run: bool, derived_index_emptied: bool) -> Report {
 
 /// A Postgres restore truncates the derived vector table and loads nothing back
 /// into it, so the report names the command that rebuilds it: one line in the
-/// text, one field in the JSON.
+/// text, one field in the JSON. The expected line is this file's own literal, so
+/// the words an operator copies are pinned here and not by the constant the
+/// renderer happens to print.
 #[test]
 fn a_placed_postgres_restore_reports_the_rebuild_command() {
     let report = report("postgres", false, true);
 
     let text = render(&report);
     assert!(
-        text.contains(&format!("  rebuild the derived index: {REINDEX_COMMAND}\n")),
-        "the command line: {text}"
+        text.contains(&format!(
+            "\n  rebuild the derived index: {REBUILD_COMMAND}\n"
+        )),
+        "the line an operator copies into a shell: {text}"
     );
     assert!(
         text.contains(&format!("  {REINDEX_NOTICE}\n")),
@@ -112,7 +122,7 @@ fn a_placed_postgres_restore_reports_the_rebuild_command() {
     let json = payload(&report);
     assert_eq!(
         json["reindex_command"],
-        serde_json::json!(REINDEX_COMMAND),
+        serde_json::json!(REBUILD_COMMAND),
         "{json}"
     );
 }
@@ -173,12 +183,12 @@ fn a_count_mismatch_after_a_placed_restore_still_reports_the_rebuild_command() {
 
     let text = render(&report);
     assert!(
-        text.contains(&format!("  rebuild the derived index: {REINDEX_COMMAND}\n")),
+        text.contains(&format!("  rebuild the derived index: {REBUILD_COMMAND}\n")),
         "the index is empty, so the command is still owed: {text}"
     );
     assert_eq!(
         payload(&report)["reindex_command"],
-        serde_json::json!(REINDEX_COMMAND),
+        serde_json::json!(REBUILD_COMMAND),
         "the field travels with the same fact"
     );
 }
@@ -195,7 +205,7 @@ fn a_failed_key_swap_with_the_store_placed_still_reports_the_rebuild_command() {
 
     let text = render(&report);
     assert!(
-        text.contains(&format!("  rebuild the derived index: {REINDEX_COMMAND}\n")),
+        text.contains(&format!("  rebuild the derived index: {REBUILD_COMMAND}\n")),
         "the index is empty, so the command is still owed: {text}"
     );
 }

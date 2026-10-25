@@ -80,7 +80,10 @@ fn a_count_difference_leaves_the_truncation_fact_alone() {
     let request = request();
 
     let report = restore_report(&request, observed(1), Vec::new(), true);
-    assert!(!report.counts_ok, "a lost row is not a clean count: {report:?}");
+    assert!(
+        !report.counts_ok,
+        "a lost row is not a clean count: {report:?}"
+    );
     assert!(
         report.derived_index_emptied,
         "the index is empty whatever the counts say: {report:?}"

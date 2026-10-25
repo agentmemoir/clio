@@ -4,20 +4,25 @@
 //! # Responsibility
 //!
 //! This module is responsible for the Postgres restore's count comparison, over
-//! hand-built facts: which arm each difference lands on, how a count of rows is
-//! worded, and which result the observation produces.
+//! hand-built facts: which arm each difference lands on, how the two difference
+//! reports word it, and which result the observation produces.
 //!
 //! ## Owns
 //! - The direction rule's four arms: a deficit anywhere, a user-data surplus, a
 //!   derived surplus, and equal counts
-//! - The mismatch message's two arms: a table the target counted differently,
-//!   and a table the target never counted at all
+//! - Both difference reports: the hard count mismatch, on a table the target
+//!   counted differently and on one it never counted at all, and the benign
+//!   derived difference with the remedy text it carries
+//! - The result each observation produces, including the order a failed key
+//!   store sits in behind a hard mismatch and ahead of a derived difference
 //! - The row count's noun, which goes through the one shared helper so a
 //!   one-row table reads "1 row" on both arms
 //!
 //! ## Does not own
 //! - The Postgres restore's refusals and its rollback (see
 //!   `backup_restore_postgres_refusal_tests`)
+//! - The mapping from an observation to the report's result and failure fields
+//!   (see `backup_restore_postgres_mapping_tests`)
 //! - The counts the SQLite restore prints (see `backup_restore_report`)
 //!
 //! ## Boundary

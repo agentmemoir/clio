@@ -126,6 +126,13 @@ pub struct PostgresRestoreReport {
 /// the transaction still holds the tables, so no other writer can land a row
 /// between the load and the count.
 ///
+/// That stability is bought with a wider writer-block window: the count pass
+/// runs while the transaction still holds its exclusive locks, so every writer
+/// to the target waits for a scan it did not wait for when the measurement came
+/// after the commit. The trade is deliberate — a restore is a stop-the-store
+/// operation, and an exact count from inside the transaction is the only
+/// measurement that can tell a lost row from a concurrent one.
+///
 /// # Errors
 /// The target is unreachable, the schema does not match the target's tables,
 /// the connected role does not own the tables, a member is unreadable or its
@@ -374,6 +381,10 @@ fn copy_error(step: &str, table: &str, error: impl std::fmt::Display) -> AmError
     )
 }
 
+/// The report's truncation fact: the rebuild notice's one source of truth.
+#[cfg(test)]
+#[path = "postgres_restore_index_tests.rs"]
+mod index_tests;
 /// The restore's count while a second connection waits on its lock.
 #[cfg(test)]
 #[path = "postgres_restore_race_tests.rs"]
@@ -382,10 +393,6 @@ mod race_tests;
 #[cfg(test)]
 #[path = "postgres_restore_rows_tests.rs"]
 mod rows_tests;
-/// The report's truncation fact: the rebuild notice's one source of truth.
-#[cfg(test)]
-#[path = "postgres_restore_index_tests.rs"]
-mod index_tests;
 /// The target measurement's no-store-schema cases.
 #[cfg(test)]
 #[path = "postgres_restore_state_tests.rs"]
