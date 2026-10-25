@@ -1,0 +1,1 @@
+A restore that loaded every user-data row but left a rebuilt table holding a different count no longer tells you that a retry confirms the rebuild: exit 75 now says a retry of the restore reproduces the same count, because it reloads the same archive, and that the index pipeline reconciles the surplus on its next pass.

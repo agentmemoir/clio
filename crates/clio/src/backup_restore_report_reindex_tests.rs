@@ -4,11 +4,14 @@
 //! # Responsibility
 //!
 //! This module tests the rebuild line a restore reports: the command that
-//! refills the derived index a Postgres restore empties, and the two cases in
-//! which no such command is printed.
+//! refills the derived index a Postgres restore empties, the fact that gates the
+//! line, and the runs that print no such command.
 //!
 //! ## Owns
 //! - The text line and the JSON field, over hand-built reports
+//! - The gate: the line appears only when the run's own truncate emptied the
+//!   derived index, never because the target's backend is Postgres
+//! - That the notice names the embedder the dense leg needs
 //! - That the printed command names no store address
 //! - That every flag the command carries is one the ops reindex parser accepts
 //!
@@ -24,7 +27,10 @@
 
 use super::{REINDEX_COMMAND, REINDEX_NOTICE, payload, render};
 use crate::backup_cli::ResolvedTarget;
-use crate::backup_restore_flow::{Counts, PreRestore, RESULT_RESTORED, Report};
+use crate::backup_restore_flow::{
+    Counts, FAILED_STEP_COUNTS, PreRestore, RESULT_COUNT_MISMATCH, RESULT_PARTIAL, RESULT_RESTORED,
+    Report,
+};
 use crate::backup_restore_schema::{ACTION_NONE, Schema};
 use std::path::PathBuf;
 
@@ -45,8 +51,9 @@ fn target(backend: &str) -> ResolvedTarget {
     }
 }
 
-/// One placed restore of a store that holds an item, on the given backend.
-fn report(backend: &str, dry_run: bool) -> Report {
+/// One placed restore of a store that holds an item, on the given backend, with
+/// the given truncation fact.
+fn report(backend: &str, dry_run: bool, derived_index_emptied: bool) -> Report {
     Report {
         snapshot_id: "snap-1".to_owned(),
         target: target(backend),
@@ -77,6 +84,7 @@ fn report(backend: &str, dry_run: bool) -> Report {
         failed_step: None,
         failure: None,
         derived_difference: None,
+        derived_index_emptied,
         dry_run,
         key_restored: false,
         key_replaced: None,
@@ -89,7 +97,7 @@ fn report(backend: &str, dry_run: bool) -> Report {
 /// text, one field in the JSON.
 #[test]
 fn a_placed_postgres_restore_reports_the_rebuild_command() {
-    let report = report("postgres", false);
+    let report = report("postgres", false, true);
 
     let text = render(&report);
     assert!(
@@ -114,7 +122,7 @@ fn a_placed_postgres_restore_reports_the_rebuild_command() {
 /// so the report says where to point it rather than repeating it.
 #[test]
 fn the_rebuild_command_prints_no_store_address() {
-    let report = report("postgres", false);
+    let report = report("postgres", false, true);
 
     let text = render(&report);
     assert!(!text.contains(ADDRESS_MARKER), "the text: {text}");
@@ -128,7 +136,7 @@ fn the_rebuild_command_prints_no_store_address() {
 /// derived table, so it prints no command and carries no field.
 #[test]
 fn a_sqlite_restore_reports_no_rebuild_command() {
-    let report = report("sqlite", false);
+    let report = report("sqlite", false, false);
 
     let text = render(&report);
     assert!(!text.contains("reindex"), "the text: {text}");
@@ -139,10 +147,79 @@ fn a_sqlite_restore_reports_no_rebuild_command() {
     );
 }
 
+/// A Postgres target whose truncate emptied no derived table keeps its index, so
+/// the line is not printed: the backend alone is not the fact the notice claims.
+#[test]
+fn a_postgres_target_that_emptied_no_derived_table_reports_no_rebuild_command() {
+    let report = report("postgres", false, false);
+
+    let text = render(&report);
+    assert!(!text.contains("reindex"), "the text: {text}");
+    let json = payload(&report);
+    assert!(
+        json.get("reindex_command").is_none(),
+        "no table was emptied, so nothing needs rebuilding: {json}"
+    );
+}
+
+/// The notice belongs on a run that placed the store and left the index empty
+/// even though a user-data count did not match: the rebuild is still owed.
+#[test]
+fn a_count_mismatch_after_a_placed_restore_still_reports_the_rebuild_command() {
+    let mut report = report("postgres", false, true);
+    report.result = RESULT_COUNT_MISMATCH;
+    report.failed_step = Some(FAILED_STEP_COUNTS.to_owned());
+    report.failure = Some("the restored table counts do not match the archive's".to_owned());
+
+    let text = render(&report);
+    assert!(
+        text.contains(&format!("  rebuild the derived index: {REINDEX_COMMAND}\n")),
+        "the index is empty, so the command is still owed: {text}"
+    );
+    assert_eq!(
+        payload(&report)["reindex_command"],
+        serde_json::json!(REINDEX_COMMAND),
+        "the field travels with the same fact"
+    );
+}
+
+/// A failed key swap beside a placed store is the same case: the index is empty,
+/// so the rebuild is owed and the notice is not withdrawn by the partial result.
+#[test]
+fn a_failed_key_swap_with_the_store_placed_still_reports_the_rebuild_command() {
+    let mut report = report("postgres", false, true);
+    report.result = RESULT_PARTIAL;
+    report.failed_step = Some(crate::backup_restore_flow::FAILED_STEP_KEY_SWAP.to_owned());
+    report.key_restored = true;
+    report.key_replaced = Some(false);
+
+    let text = render(&report);
+    assert!(
+        text.contains(&format!("  rebuild the derived index: {REINDEX_COMMAND}\n")),
+        "the index is empty, so the command is still owed: {text}"
+    );
+}
+
+/// The notice says what the printed command needs: the dense leg fails closed
+/// without an embedder, so an operator on a lexical-only install is told before
+/// they run it.
+#[test]
+fn the_rebuild_notice_names_the_embedder_the_dense_leg_needs() {
+    let report = report("postgres", false, true);
+    let notice = "point it at the restored database: pass the same `--db` this restore used, \
+                  with an embedder configured, because the dense leg fails closed without one";
+
+    let text = render(&report);
+    assert!(
+        text.contains(&format!("  {notice}\n")),
+        "the notice the operator reads: {text}"
+    );
+}
+
 /// A dry run truncates nothing, so it prints no command and carries no field.
 #[test]
 fn a_postgres_dry_run_reports_no_rebuild_command() {
-    let report = report("postgres", true);
+    let report = report("postgres", true, false);
 
     let text = render(&report);
     assert!(!text.contains("reindex"), "the text: {text}");

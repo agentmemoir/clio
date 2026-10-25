@@ -96,6 +96,12 @@ pub struct PostgresRestoreReport {
     /// data lives in came back with more. A surplus in a table the store
     /// rebuilds is the one difference a rebuild absorbs and leaves this `true`.
     pub counts_ok: bool,
+    /// Whether this restore's truncate really included a table the store
+    /// derives from the content it loads (the vector table today), which is the
+    /// only fact that says the derived index is empty afterwards. A restore
+    /// whose truncate missed such a table, a dry run, and a backend that keeps
+    /// its index inside the store all leave this `false`.
+    pub derived_index_emptied: bool,
 }
 
 /// Restore one dump into its target, all-or-nothing.
@@ -140,14 +146,19 @@ pub fn restore_postgres(
     let discovered = discover_schema(&mut tx, &request.schema)?;
     refuse_non_owning_role(&mut tx, &request.schema)?;
     preflight_table_sets(&discovered, &request.tables)?;
-    truncate(&mut tx, &discovered)?;
+    let derived_index_emptied = truncate(&mut tx, &discovered)?;
     set_triggers(&mut tx, &discovered, "DISABLE")?;
     load_members(&mut tx, &request.schema, &request.tables)?;
     set_triggers(&mut tx, &discovered, "ENABLE")?;
     let table_counts = count_tables(&mut tx, &request.schema, &discovered, RESTORE_COUNT)?;
     let banks = read_banks(&mut tx, &request.schema, &discovered)?;
     tx.commit().am("commit the restore transaction")?;
-    Ok(restore_report(request, table_counts, banks))
+    Ok(restore_report(
+        request,
+        table_counts,
+        banks,
+        derived_index_emptied,
+    ))
 }
 
 /// Prove the connected role owns every application table.
@@ -201,13 +212,18 @@ fn preflight_table_sets(
     compare_table_sets(&target, &archive)
 }
 
-/// Clear every base table of the schema in one statement.
+/// Clear every base table of the schema in one statement, and report whether
+/// that statement included a table the store derives from the content it loads.
 ///
 /// A per-table loop is refused by the foreign keys and can partially empty the
 /// target before it fails, so this is one statement or nothing. `RESTART
 /// IDENTITY` is harmless today (no owned sequences) and correct if one is
 /// ever added with the matching snapshot support.
-fn truncate(tx: &mut Transaction, discovered: &DiscoveredSchema) -> Result<(), AmError> {
+///
+/// The returned fact is the truncate's own: a table counts only when this
+/// statement really named it, so a target whose schema carries no derived table
+/// reports `false` no matter what its backend is called.
+fn truncate(tx: &mut Transaction, discovered: &DiscoveredSchema) -> Result<bool, AmError> {
     let mut names: Vec<String> = discovered
         .app_tables
         .iter()
@@ -223,7 +239,7 @@ fn truncate(tx: &mut Transaction, discovered: &DiscoveredSchema) -> Result<(), A
         .join(", ");
     tx.batch_execute(&format!("TRUNCATE TABLE {list} RESTART IDENTITY"))
         .am("truncate the target's tables")?;
-    Ok(())
+    Ok(!discovered.extension_dependent.is_empty())
 }
 
 /// Flip every application table's trigger enforcement off or on, always
@@ -313,10 +329,15 @@ fn load_members(
 /// window between the load and the count for another writer to land a row in.
 /// The report's total is the sum of those counts, so `rows_loaded` is what the
 /// database was observed to hold and never the archive's own arithmetic.
+///
+/// `derived_index_emptied` is carried through unchanged: it is what the
+/// transaction's truncate reported, and this function never infers it from a
+/// count, a backend name, or the shape of the archive.
 fn restore_report(
     request: &PostgresRestoreRequest,
     table_counts: Vec<(String, u64)>,
     banks: Vec<String>,
+    derived_index_emptied: bool,
 ) -> PostgresRestoreReport {
     let counts_ok = request.tables.iter().all(|table| {
         let observed = table_counts
@@ -340,6 +361,7 @@ fn restore_report(
         table_counts,
         banks,
         counts_ok,
+        derived_index_emptied,
     }
 }
 
@@ -360,6 +382,10 @@ mod race_tests;
 #[cfg(test)]
 #[path = "postgres_restore_rows_tests.rs"]
 mod rows_tests;
+/// The report's truncation fact: the rebuild notice's one source of truth.
+#[cfg(test)]
+#[path = "postgres_restore_index_tests.rs"]
+mod index_tests;
 /// The target measurement's no-store-schema cases.
 #[cfg(test)]
 #[path = "postgres_restore_state_tests.rs"]

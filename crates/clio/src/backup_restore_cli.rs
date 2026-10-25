@@ -14,7 +14,8 @@
 //! - The confirmation prompt and the exit codes: 0 for a restore or a plan,
 //!   3 for a partial, count-mismatched, or not-durable restore, and 75 for a
 //!   restore whose only difference is a derived table (every user-data row
-//!   loaded, and a rebuild closes the difference)
+//!   loaded; retrying the restore does not clear it, and the index pipeline
+//!   reconciles it on its next pass)
 //!
 //! ## Does not own
 //! - The restore sequence and its refusals (see `backup_restore_flow`)
@@ -228,8 +229,9 @@ fn strip_newline(answer: &str) -> &str {
 /// The process exit code one report maps to. A partial restore or a failed
 /// user-data count check is not success; a rename that could not be fsynced is
 /// a degraded restore and uses the command-specific exit code 3. A run whose
-/// only difference is a derived table loaded every user-data row, so it takes
-/// the retryable temporary code rather than either of those.
+/// only difference is a derived table loaded every user-data row and lost
+/// nothing, so it takes the temporary code rather than either of those, and the
+/// report's own derived-difference text says a retry does not clear it.
 fn exit_code(report: &Report) -> u8 {
     let condition = if report.result == RESULT_PARTIAL || report.result == RESULT_COUNT_MISMATCH {
         RestoreFailure::PartialOrCountMismatch

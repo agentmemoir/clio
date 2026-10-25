@@ -55,9 +55,10 @@ pub(crate) enum RestoreFailure {
     PartialOrCountMismatch,
     /// Every user-data row was loaded, and only a derived table the store can
     /// rebuild holds a different number of rows than the archive recorded. The
-    /// restore did its job, so this is not a failure; it takes the retryable
-    /// temporary code because the rebuild that closes the difference has not
-    /// happened yet.
+    /// restore did its job, so this is not a failure; it takes the temporary
+    /// code because the run could not report a clean success, and retrying it
+    /// reloads the same archive and reproduces the same count, so the retry that
+    /// clears a lock conflict clears nothing here.
     DerivedTableDiffers,
 
     // Refusals: the input was understood and deliberately not acted on, so
@@ -124,10 +125,11 @@ pub(crate) enum RestoreFailure {
 ///
 /// Data rather than a chain of `if`s, so the whole contract is readable in one
 /// place and a test can assert one row at a time. The codes are the documented
-/// `0` ok / `1` operational / `2` usage / `3` degraded / `75` retryable
-/// contract. `DerivedTableDiffers` is the one row on the reused `75`: the
-/// restore loaded every user-data row, so nothing failed, and the difference a
-/// rebuild will close is a condition to retry rather than an error to fix.
+/// `0` ok / `1` operational / `2` usage / `3` degraded / `75` not-a-clean-success
+/// contract, and `75` carries the one meaning `EXIT_TEMPORARY_MEANING` states.
+/// `DerivedTableDiffers` is the one row on the reused `75` here: the restore
+/// loaded every user-data row, lost nothing, and invalidated nothing, and the
+/// difference it reports is not something a retry of the restore clears.
 const RESTORE_EXIT_CODES: &[(RestoreFailure, u8)] = &[
     (RestoreFailure::RestoredOrPlanned, EXIT_OK),
     (RestoreFailure::RestoredNotDurable, EXIT_PARTIAL),

@@ -38,18 +38,20 @@ use std::path::PathBuf;
 const NOT_DURABLE: &str = "the target's directory could not be fsynced, so the rename is not \
                            durable against a crash right now";
 
-/// The command that rebuilds the one derived index a Postgres restore emptied.
-/// The restore truncates the vector table with the rest of the schema and loads
-/// no rows back into it, so its rows have to be derived again from the content
-/// the restore placed; the dense leg is the one that writes them.
+/// The command that refills the two derived indexes a Postgres restore empties.
+/// The truncate clears the vector table with the rest of the schema and loads no
+/// rows back into it, so the vector and lexical index are empty afterwards and
+/// this command derives both again from the content the restore placed. It does
+/// not touch the work queue, so it clears no surplus there.
 const REINDEX_COMMAND: &str = "clio ops reindex --target dense --confirm --backend postgres";
 
-/// Where that command must be pointed. It is never printed with the store
-/// address: on this backend `--db` is a URL that can carry a password, so the
-/// line names the database the operator already restored instead of repeating
-/// an address a report must not hold.
+/// Where that command must be pointed, and what it needs to run. It is never
+/// printed with the store address: on this backend `--db` is a URL that can
+/// carry a password, so the line names the database the operator already
+/// restored instead of repeating an address a report must not hold.
 const REINDEX_NOTICE: &str =
-    "point it at the restored database: pass the same `--db` this restore used";
+    "point it at the restored database: pass the same `--db` this restore used, with an embedder \
+     configured, because the dense leg fails closed without one";
 
 /// The blast radius, before the operator is asked to confirm.
 pub(super) fn render_plan(plan: &Plan) -> String {
@@ -163,11 +165,16 @@ fn result_text(report: &Report) -> String {
     }
 }
 
-/// The rebuild command, when the run emptied the derived vector table: only a
-/// placed Postgres restore truncates it. A dry run places nothing, and a SQLite
-/// restore keeps its index inside the store file it just replaced.
+/// The rebuild command, when this run's truncate emptied the derived index.
+///
+/// The fact comes from the restore's own report — whether its truncate included
+/// a table the store derives — never from the backend name: a Postgres target
+/// whose schema carries no derived table keeps its index, and a dry run truncates
+/// nothing at all. It is deliberately independent of the result: a user-data
+/// count mismatch, or a failed key swap that left the store placed and the index
+/// empty, still needs the rebuild, so the notice belongs on those runs too.
 fn reindex_command(report: &Report) -> Option<&'static str> {
-    (!report.dry_run && report.target.is_postgres()).then_some(REINDEX_COMMAND)
+    report.derived_index_emptied.then_some(REINDEX_COMMAND)
 }
 
 /// The schema comparison, in one line.
@@ -300,8 +307,9 @@ pub(super) fn payload(report: &Report) -> Value {
         payload["durability_warning"] = Value::String(NOT_DURABLE.to_owned());
     }
     // The distinct field for the rebuild a Postgres restore leaves behind:
-    // present only when the run emptied the derived vector table, so a script
-    // can tell the run that needs one from every other.
+    // present only when the run's own truncate emptied the derived index, which
+    // is the fact the text line reads too, so a script can tell the run that
+    // needs one from every other.
     if let Some(command) = reindex_command(report) {
         payload["reindex_command"] = Value::String(command.to_owned());
     }

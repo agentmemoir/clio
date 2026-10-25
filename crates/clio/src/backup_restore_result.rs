@@ -39,7 +39,9 @@ pub(crate) const RESULT_RESTORED: &str = "restored";
 pub(crate) const RESULT_COUNT_MISMATCH: &str = "count-mismatch";
 /// A restore that loaded every user-data row, where only a derived table the
 /// store rebuilds holds a different number of rows than the archive recorded.
-/// Not a failure: the user data arrived, and a rebuild closes the difference.
+/// Not a failure: the user data arrived. The surplus is in a table the reindex
+/// a restore prints does not write, so neither that command nor a retry of the
+/// restore clears it, and the index pipeline reconciles it on its next pass.
 pub(crate) const RESULT_DERIVED_DIFFERENT: &str = "derived-difference";
 
 /// The step that did not complete when a restore's counts did not match.

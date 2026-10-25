@@ -172,14 +172,14 @@ pub(crate) struct Report {
     pub(crate) failure: Option<String>,
     /// The derived tables the restore over-filled, worded for an operator: not a failure.
     pub(crate) derived_difference: Option<String>,
+    /// Whether this run's truncate emptied the derived index, from the restore's own report.
+    pub(crate) derived_index_emptied: bool,
     pub(crate) dry_run: bool,
     /// Whether the archive carries a key store the restore places.
     pub(crate) key_restored: bool,
-    /// What the swap did to the key store: `None` when no key store was part of
-    /// the restore, `Some(true)` when it was replaced.
+    /// The swap's key-store outcome: `None` when no key store was part of this restore.
     pub(crate) key_replaced: Option<bool>,
-    /// Whether the target's directory was fsynced after the rename; `None`
-    /// when nothing was renamed.
+    /// Whether the target's directory was fsynced after the rename; `None` when nothing renamed.
     pub(crate) directory_synced: Option<bool>,
 }
 
@@ -291,6 +291,7 @@ pub(crate) fn planned(plan: Plan) -> Report {
         failed_step: None,
         failure: None,
         derived_difference: None,
+        derived_index_emptied: false,
         dry_run: true,
         key_restored: plan.key.is_some(),
         key_replaced: None,

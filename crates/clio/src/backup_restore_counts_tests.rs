@@ -187,12 +187,14 @@ fn a_derived_surplus_is_the_benign_derived_difference() {
 
     assert_eq!(mismatch, None);
     let derived = derived.expect("a derived difference");
-    assert!(
-        derived.contains("every user-data row was loaded"),
-        "{derived}"
+    assert_eq!(
+        derived,
+        "every user-data row was loaded; a table the store rebuilds holds a surplus that \
+         neither the reindex a restore prints nor a retry of the restore clears, and the index \
+         pipeline reconciles it on its next pass: table \"index_pending\": archive 2 rows, \
+         restored 5",
+        "the operator reads what a retry does and does not clear"
     );
-    assert!(derived.contains("index_pending"), "{derived}");
-    assert!(derived.contains("archive 2 rows, restored 5"), "{derived}");
     assert_eq!(result, RESULT_DERIVED_DIFFERENT);
 }
 

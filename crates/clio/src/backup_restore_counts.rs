@@ -125,7 +125,10 @@ pub(crate) fn count_mismatch_message(
 /// The derived tables the restore over-filled, when any. This is not the count
 /// mismatch: every user-data row loaded, and the store rebuilds these rows from
 /// it, so the text says both things and names what differs, so an operator can
-/// tell work a rebuild will do from a restore that lost data.
+/// tell work the index pipeline will do from a restore that lost data. It also
+/// says what does not clear the surplus: the reindex a restore prints writes the
+/// vector and lexical index and never the work queue, and a retry of the restore
+/// reloads the same archive and reproduces the same count.
 pub(crate) fn derived_difference_message(
     meta: &DumpMeta,
     observed: &[(String, u64)],
@@ -134,7 +137,9 @@ pub(crate) fn derived_difference_message(
         meta,
         observed,
         Outcome::DerivedSurplus,
-        "every user-data row was loaded; a table the store rebuilds differs:",
+        "every user-data row was loaded; a table the store rebuilds holds a surplus that neither \
+         the reindex a restore prints nor a retry of the restore clears, and the index pipeline \
+         reconciles it on its next pass:",
     )
 }
 

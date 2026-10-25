@@ -238,6 +238,7 @@ fn not_durable_report() -> Report {
         failed_step: None,
         failure: None,
         derived_difference: None,
+        derived_index_emptied: false,
         dry_run: false,
         key_restored: false,
         key_replaced: None,
@@ -254,8 +255,9 @@ fn a_derived_table_difference_exits_75_without_a_failed_step() {
     report.directory_synced = Some(true);
     report.result = RESULT_DERIVED_DIFFERENT;
     report.derived_difference = Some(
-        "every user-data row was loaded; a table the store rebuilds differs: \
-         table \"index_pending\": archive 2 rows, restored 0"
+        "every user-data row was loaded; a table the store rebuilds holds a surplus that neither \
+         the reindex a restore prints nor a retry of the restore clears, and the index pipeline \
+         reconciles it on its next pass: table \"index_pending\": archive 2 rows, restored 0"
             .to_owned(),
     );
 
@@ -272,8 +274,10 @@ fn a_derived_table_difference_exits_75_without_a_failed_step() {
     assert_eq!(
         json["derived_difference"],
         json!(
-            "every user-data row was loaded; a table the store rebuilds \
-               differs: table \"index_pending\": archive 2 rows, restored 0"
+            "every user-data row was loaded; a table the store rebuilds holds a \
+               surplus that neither the reindex a restore prints nor a retry of the \
+               restore clears, and the index pipeline reconciles it on its next pass: \
+               table \"index_pending\": archive 2 rows, restored 0"
         ),
         "{json}"
     );

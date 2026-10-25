@@ -307,8 +307,12 @@ fn restore_and_verify_are_the_only_overridden_lines() {
              restore replaces the target in one transaction and has no such window; \
              --no-pre-backup is what leaves that window with no way back. Exit codes: 0 clean \
              restore, 1 operational failure, 2 refused, 3 partial or not-durable restore, 75 \
-             every user-data row loaded with a table the store rebuilds holding a different \
-             count, which a rebuild closes and a retry confirms",
+             means the command could not report a clean success and that nothing was lost or \
+             invalid, and the command's own message says whether a retry helps: a storage lock \
+             conflict is cleared by retrying, and a restore that left a derived difference is \
+             not. Here that code is a restore that loaded every user-data row and differs in a \
+             table the store rebuilds; retrying it reloads the same archive and reproduces the \
+             same count, and the index pipeline reconciles it on its next pass",
         ),
         (
             "backup verify",

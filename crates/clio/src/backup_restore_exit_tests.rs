@@ -32,7 +32,7 @@ use super::*;
 use clio_types::AmError;
 
 /// Whether `code` is one of the documented contract's codes: the four command
-/// codes, contiguous from `EXIT_OK` to `EXIT_PARTIAL`, and the retryable 75.
+/// codes, contiguous from `EXIT_OK` to `EXIT_PARTIAL`, and the temporary 75.
 fn is_documented(code: u8) -> bool {
     code <= EXIT_PARTIAL || code == EXIT_TEMPORARY
 }

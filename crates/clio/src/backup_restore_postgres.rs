@@ -315,6 +315,9 @@ pub(crate) fn place_postgres(
         failed_step,
         failure,
         derived_difference,
+        // The one source of truth for the rebuild notice: the store half says
+        // whether its truncate emptied a table the store derives.
+        derived_index_emptied: restored.derived_index_emptied,
         dry_run: false,
         key_restored,
         key_replaced,
