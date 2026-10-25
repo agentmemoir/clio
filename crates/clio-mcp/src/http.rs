@@ -44,10 +44,10 @@
 //! Keep this module focused on the Streamable HTTP transport.
 
 use crate::conn_pool::{ConnPool, MAX_CONNECTIONS};
+use crate::http::http_start_guard::{BindRefusal, bind_refusal};
 use crate::http_auth::{AuthOutcome, CredentialStore, authorize_request};
 use crate::http_guard::{HttpShared, check_origin, handle_delete, mint_session};
 use crate::http_read::{HttpRequest, read_request};
-use crate::http_start_guard::{BindRefusal, bind_refusal};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use serde_json::Value;
@@ -56,6 +56,9 @@ use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+#[path = "http_start_guard.rs"]
+pub mod http_start_guard;
 
 /// Maximum accepted request body, 10 MiB. Guards unbounded reads: a client
 /// controls the header block and the body independently, and without this cap
@@ -436,9 +439,6 @@ mod http_request_bounds_tests;
 #[cfg(test)]
 #[path = "http_start_auth_tests.rs"]
 mod http_start_auth_tests;
-#[cfg(test)]
-#[path = "http_start_guard_tests.rs"]
-mod http_start_guard_tests;
 #[cfg(test)]
 #[path = "http_test_support_tests.rs"]
 mod http_test_support_tests;

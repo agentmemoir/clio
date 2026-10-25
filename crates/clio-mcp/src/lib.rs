@@ -43,7 +43,6 @@ pub mod http;
 pub mod http_auth;
 mod http_guard;
 mod http_read;
-pub mod http_start_guard;
 pub mod hygiene_tools;
 pub mod index_drain;
 pub mod maintenance_trigger;

@@ -143,7 +143,11 @@ fn non_loopback_with_both_opt_outs_serves_unauthenticated() {
         let _ = serve_with_listener(state, cfg, listener);
     });
     let res = post_json(port, INIT, "");
-    assert_eq!(res.status, 200, "both opt-outs admit the bind: {}", res.body);
+    assert_eq!(
+        res.status, 200,
+        "both opt-outs admit the bind: {}",
+        res.body
+    );
 }
 
 #[test]

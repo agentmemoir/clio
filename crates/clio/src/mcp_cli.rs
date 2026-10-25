@@ -27,7 +27,7 @@
 
 use super::cli_top_level::database_help_block;
 use super::cli_top_level::parse_flags;
-use clio_mcp::http_start_guard::{BindRefusal, bind_refusal};
+use clio_mcp::http::http_start_guard::{BindRefusal, bind_refusal};
 use std::process::ExitCode;
 
 #[path = "mcp_cli_credentials.rs"]

@@ -53,3 +53,7 @@ pub fn bind_refusal(cfg: &HttpConfig, loopback: bool) -> Option<BindRefusal> {
     let opted_out = cfg.insecure_no_auth && cfg.insecure_bind_any;
     (!opted_out).then_some(BindRefusal::NonLoopback)
 }
+
+#[cfg(test)]
+#[path = "http_start_guard_tests.rs"]
+mod http_start_guard_tests;

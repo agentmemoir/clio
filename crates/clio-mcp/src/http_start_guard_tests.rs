@@ -20,10 +20,12 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::*;
-use crate::http_start_guard::{BindRefusal, bind_refusal};
+use crate::http::HttpConfig;
+use crate::http::http_start_guard::{BindRefusal, bind_refusal};
+use crate::http_auth::CredentialStore;
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
+use std::sync::Arc;
 
 /// A config with no credential store and the two opt-outs as given.
 fn config(insecure_no_auth: bool, insecure_bind_any: bool) -> HttpConfig {
@@ -36,15 +38,13 @@ fn config(insecure_no_auth: bool, insecure_bind_any: bool) -> HttpConfig {
 
 /// A store holding one record: the only shape that counts as a source.
 fn usable_store() -> Arc<CredentialStore> {
-    Arc::new(CredentialStore::from_records(vec![
-        AuthTokenRecord {
-            label: "ci".into(),
-            secret_sha256: digest_hex("secret-token"),
-            actor: Actor::Harness,
-            banks: vec!["demo".into()],
-            created_at: "2026-01-01T00:00:00Z".into(),
-        },
-    ]))
+    Arc::new(CredentialStore::from_records(vec![AuthTokenRecord {
+        label: "ci".into(),
+        secret_sha256: digest_hex("secret-token"),
+        actor: Actor::Harness,
+        banks: vec!["demo".into()],
+        created_at: "2026-01-01T00:00:00Z".into(),
+    }]))
 }
 
 #[test]
