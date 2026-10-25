@@ -146,7 +146,7 @@ const SCOPE: Flag = Flag {
     ..Flag::choice(
         "scope",
         "session|profile|deployment",
-        "Selects the configuration scope that `config_cli::set_call` passes to the `config_set` tool; it accepts `profile` or `deployment` for a value a later command can read, and refuses `session`, which is also the default, because a session-scoped value dies with the command that set it.",
+        "Selects the configuration scope that `config_cli::set_call` passes to the `config_set` tool; `session` is process-local, living only for this command, and the CLI refuses it even though it stays the fallback when the flag is omitted, while `profile` persists the value in the CLI state file and `deployment` persists it in the deployment config file, so a later command reads both.",
         &["session", "profile", "deployment"],
     )
 };

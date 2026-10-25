@@ -43,7 +43,7 @@ pub fn config_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "config_set",
-            description: "Validate and change a config value at session, profile, or deployment scope; secret values are echoed masked.",
+            description: "Validate and change a config value at session, profile, or deployment scope; secret values are echoed masked. A session-scoped value lives in this server process's memory for its lifetime and this tool does not write it anywhere. A profile-scoped value applies to the active profile for this server process, and this tool does not write it anywhere either. Deployment is the scope the persistence layer writes: the value goes into the deployment config file when one resolves. On the command line `clio config set` persists the `profile` and `deployment` scopes for later commands and refuses `session`, because a one-command process cannot observe a session-scoped value.",
             required: &["path", "value"],
             props: vec![
                 ("path", s("Dotted config path to set.")),
@@ -55,7 +55,7 @@ pub fn config_defs() -> Vec<ToolDef> {
                     "scope",
                     json!({
                         "type": "string",
-                        "description": "Where the change applies (default session).",
+                        "description": "Where the change applies: `session` (default here) keeps the value in this server process's memory for its lifetime and writes it nowhere, and the CLI refuses it; `profile` applies the value to the active profile for this server process and writes it nowhere; `deployment` is the scope the persistence layer writes.",
                         "enum": CONFIG_SCOPES,
                         "default": "session"
                     }),

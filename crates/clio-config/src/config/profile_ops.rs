@@ -67,6 +67,7 @@ impl Runtime {
         let before = self.effective_masked();
         let omit_sync = profile.omit_sync;
         self.apply_profile(&profile);
+        log::info("config_profile_apply", &[("name", &profile.name)]);
         let after = self.effective_masked();
         Ok(ConfigProfileApplyData {
             name: profile.name,
@@ -103,7 +104,6 @@ impl Runtime {
         self.profile_bundle
             .insert("fr10_satisfied".into(), json!(false));
         self.sync_log_level();
-        log::info("config_profile_apply", &[("name", &profile.name)]);
     }
 
     #[must_use]

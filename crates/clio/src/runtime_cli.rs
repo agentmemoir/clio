@@ -64,6 +64,12 @@ pub(crate) trait RuntimeGroup: Sync {
 
     /// Render a success payload as deterministic human text.
     fn render(&self, verb: &str, payload: &Value) -> String;
+
+    /// Add the sentences this verb's output must carry beyond the tool payload,
+    /// for both the JSON document and the text view. The default verb adds none.
+    fn annotate(&self, verb: &str, payload: &mut Value) {
+        let _ = (verb, payload);
+    }
 }
 
 /// Resolve, parse, and run one runtime-backed command group.
@@ -102,11 +108,12 @@ pub(crate) fn run(
         Ok(call) => call,
         Err(error) => return fail(io, mode, &error),
     };
-    let response = runtime.call_tool(tool, &tool_args);
+    let mut response = runtime.call_tool(tool, &tool_args);
     if response.get("ok").and_then(Value::as_bool) == Some(true) {
         if let Err(error) = group.commit(&verb, &response, runtime) {
             return fail(io, mode, &error);
         }
+        group.annotate(&verb, &mut response);
         let text = group.render(&verb, &response);
         emit(io, mode, &response, &text);
         ExitCode::from(EXIT_OK)

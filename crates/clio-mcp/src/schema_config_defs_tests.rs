@@ -265,3 +265,48 @@ fn published_pack_carries_the_retention_knob_text() {
     let defects = validate_tool_schema(&def("ranking_env_get").to_tool());
     assert!(defects.is_empty(), "{defects:?}");
 }
+
+/// The published `config_set` sentence agrees with the CLI it describes: a
+/// session-scoped value lives in the server process's memory and this tool
+/// writes it nowhere, a profile-scoped value applies to the active profile for
+/// this server process, deployment is the scope the persistence layer writes,
+/// and the CLI persists `profile` and `deployment` while refusing `session`.
+#[test]
+fn config_set_description_states_each_scope_lifetime_and_the_cli_refusal() {
+    let description = def("config_set").description;
+    for clause in [
+        "A session-scoped value lives in this server process's memory for its lifetime and this tool does not write it anywhere",
+        "A profile-scoped value applies to the active profile for this server process, and this tool does not write it anywhere either",
+        "Deployment is the scope the persistence layer writes",
+        "`clio config set` persists the `profile` and `deployment` scopes for later commands and refuses `session`",
+    ] {
+        assert!(description.contains(clause), "{description}");
+    }
+}
+
+/// The `scope` property keeps `session` as its default and in the enum (the
+/// long-lived server still uses it) while the description names the same
+/// lifetimes the tool description does, so neither text contradicts the CLI.
+#[test]
+fn config_set_scope_property_states_the_scope_lifetimes() {
+    let tool = def("config_set").to_tool();
+    let scope = &tool["inputSchema"]["properties"]["scope"];
+    let description = scope["description"].as_str().expect("scope description");
+    assert_eq!(
+        scope["default"], "session",
+        "a server keeps session as default"
+    );
+    assert_eq!(
+        scope["enum"],
+        serde_json::json!(["session", "profile", "deployment"]),
+        "session stays a valid scope for the server"
+    );
+    for clause in [
+        "`session` (default here)",
+        "writes it nowhere",
+        "and the CLI refuses it",
+        "`deployment` is the scope the persistence layer writes",
+    ] {
+        assert!(description.contains(clause), "{description}");
+    }
+}

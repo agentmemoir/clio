@@ -126,6 +126,17 @@ impl RuntimeGroup for ConfigGroup {
             _ => render_use(payload),
         }
     }
+
+    /// A profile activation outranks the environment for the knobs it carries,
+    /// so every later command reads its `log.level` and `backend` rather than
+    /// `CLIO_LOG_LEVEL` and `CLIO_BACKEND`; the payload says so in both views.
+    fn annotate(&self, verb: &str, payload: &mut Value) {
+        if verb == VERB_USE
+            && let Some(object) = payload.as_object_mut()
+        {
+            object.insert("precedence_note".to_owned(), Value::from(PRECEDENCE_NOTE));
+        }
+    }
 }
 
 /// Dispatch `clio config <subcommand>`.
@@ -165,6 +176,12 @@ fn get_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
 
 /// The `config use` verb: activating a profile is a write a later command sees.
 const VERB_USE: &str = "config use";
+
+/// The precedence sentence `config use` prints: a persisted profile's own
+/// `log.level` and `backend` are merged above the environment, so in every later
+/// command they outrank `CLIO_LOG_LEVEL` and `CLIO_BACKEND`.
+const PRECEDENCE_NOTE: &str = "note: this profile carries `log.level` and `backend`, and it is applied above the environment, so in every later command its values win over `CLIO_LOG_LEVEL` and `CLIO_BACKEND`.";
+
 /// The profile scope: the one `config set` scope this process can save.
 pub(crate) const SCOPE_PROFILE: &str = "profile";
 /// The deployment scope: saved in the deployment file, which seals its values.
@@ -307,6 +324,9 @@ fn render_use(payload: &Value) -> String {
     let mut lines = vec![format!(
         "applied profile {name} (bank policy {bank_policy}); {note}"
     )];
+    if let Some(precedence) = payload.get("precedence_note").and_then(Value::as_str) {
+        lines.push(precedence.to_owned());
+    }
     if let Some(diff) = payload.get("diff") {
         lines.push(pretty_without_ok(diff));
     }

@@ -280,6 +280,13 @@ impl Runtime {
 
     /// Effective merged configuration as JSON (callers must mask for display).
     ///
+    /// The layers merge in this order: file, environment, profile bundle,
+    /// profile overlay, deployment overlay, session overlay. A restored or
+    /// applied profile therefore outranks the environment for the knobs its
+    /// bundle carries (`log.level`, `backend`), and the deployment file outranks
+    /// both, so `CLIO_LOG_LEVEL` and `CLIO_BACKEND` stop applying once a profile
+    /// is persisted.
+    ///
     /// # Panics
     /// Panics if ranking or bank policy fails to serialize (both are `Serialize` by construction).
     #[must_use]

@@ -413,3 +413,25 @@ fn a_saved_ranking_env_missing_a_group_still_loads_from_the_file() {
         "the omitted group falls back to its default"
     );
 }
+
+#[test]
+fn a_persisted_profile_outranks_the_environment_log_level_at_boot() {
+    let scratch = Scratch::new();
+    let path = scratch.state_file();
+    let mut first = boot(path.clone());
+    let ToolResult::Ok { .. } = first.config_profile_apply("coding_local") else {
+        panic!("the profile applies");
+    };
+    assert!(first.flush_cli_state().expect("flush").written());
+
+    let second = Runtime::with_env_and_cli_state_file(
+        &|key: &str| (key == "CLIO_LOG_LEVEL").then(|| "trace".to_owned()),
+        path,
+    );
+    let profile = lookup_profile("coding_local").expect("coding_local exists");
+    assert_eq!(
+        log_level_of(&second),
+        json!(profile.log_level),
+        "the restored profile's log.level wins over CLIO_LOG_LEVEL"
+    );
+}
