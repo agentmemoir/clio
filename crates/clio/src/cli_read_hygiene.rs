@@ -172,7 +172,9 @@ fn render_audit(payload: &Value) -> String {
 }
 
 /// Human text for the log rows: one count line, then timestamp, bank, action,
-/// and item id per row (rows carry ids and labels only by construction).
+/// state, and item id per row (rows carry ids and labels only by construction).
+/// The state is the row's `detail.result`, so a previewed row and an applied one
+/// cannot read alike; a row that recorded none reads `unknown`.
 fn render_log(payload: &Value) -> String {
     let rows = payload.get("rows").and_then(Value::as_array);
     let count = rows.map_or(0, Vec::len);
@@ -187,8 +189,15 @@ fn render_log(payload: &Value) -> String {
             let timestamp = row.get("timestamp").and_then(Value::as_str).unwrap_or("?");
             let bank = row.get("bank").and_then(Value::as_str).unwrap_or("?");
             let action = row.get("action").and_then(Value::as_str).unwrap_or("?");
+            let result = row
+                .get("detail")
+                .and_then(|detail| detail.get("result"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
             let item_id = row.get("item_id").and_then(Value::as_str).unwrap_or("?");
-            lines.push(format!("{timestamp}  {bank}  {action}  {item_id}"));
+            lines.push(format!(
+                "{timestamp}  {bank}  {action}  {result}  {item_id}"
+            ));
         }
     }
     lines.join("\n")
