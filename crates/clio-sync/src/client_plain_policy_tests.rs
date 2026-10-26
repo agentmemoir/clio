@@ -23,8 +23,13 @@
 //! change it.
 //!
 //! Keep this module focused on the plaintext receive policy.
+//!
+//! A plaintext row is planted in the relay's journal with the server's own
+//! journal write rather than pushed: the push route refuses plaintext content,
+//! so a relay that fabricates or downgrades a row is what a test can model.
 
-use crate::client::client_envelope_tests::{BANK, Receiver, VICTIM, hand_push, held_key, receiver};
+use crate::apply::ApplyEngine;
+use crate::client::client_envelope_tests::{BANK, Receiver, VICTIM, hand_push, held_key};
 use crate::client::client_tests::{TOKEN, cfg, create_item, serve, sqlite};
 use crate::client::{pull, pull_with_denial};
 use crate::client_refusal::{PLAINTEXT_REFUSED_KEYLESS_REASON, PLAINTEXT_REFUSED_REASON};
@@ -51,18 +56,43 @@ const PLAIN_STAMP: &str = "2026-01-02T00:00:00Z";
 /// relay's own denial marker cannot hide the row being refused.
 const COVERED_BANK: &str = "bank-covered";
 
-/// The same receiving node with no key at all: `cfg.cipher` empty.
-fn keyless_receiver(banks: &[&str]) -> Receiver {
-    let (server, _srv, _kms) = serve(banks);
+/// A receiving node and the relay journal it pulls from. The journal handle is
+/// what lets a test plant a row the push route would never accept.
+fn node(banks: &[&str], cipher: Vec<SyncCipherKey>) -> (Receiver, Arc<SqliteStore>) {
+    let (server, relay, _kms) = serve(banks);
     let addr = server.addr().to_owned();
     let store = sqlite();
-    let cfg = cfg("dev-a", &store, &addr, Vec::new());
-    Receiver {
-        server,
-        addr,
-        store,
-        cfg,
-    }
+    let cfg = cfg("dev-a", &store, &addr, cipher);
+    (
+        Receiver {
+            server,
+            addr,
+            store,
+            cfg,
+        },
+        relay,
+    )
+}
+
+/// Plant `m` in the relay's journal as the plaintext row a hostile relay would
+/// serve: the same row builder and append the server's own apply path uses,
+/// with no KMS, so the row stores no sealed content and a puller receives it as
+/// plaintext.
+fn plant_plain(relay: &Arc<SqliteStore>, m: &SyncMutation) {
+    let engine = ApplyEngine {
+        store: relay.as_ref(),
+        sync: relay.as_ref(),
+        device_id: "srv-1".into(),
+        kms: None,
+    };
+    let row = crate::journal_row::journal_row(&engine, m).expect("journal row");
+    assert!(
+        relay
+            .journal_append(&row)
+            .expect("plant the relay row")
+            .inserted,
+        "the relay journal took exactly the planted row"
+    );
 }
 
 /// A relay that carries the deny role, so it accepts a denial operation on push
@@ -152,10 +182,9 @@ fn refused_plain(r: &Receiver, bank: &str, reason: &str) {
 /// A sealed node pulled a plaintext row for the live victim and kept the victim
 /// live: the refusal is the sealed-mode one and it left no durable trace.
 fn sealed_node_refuses_plain(op: &str) {
-    let key = held_key("plain-policy-key");
-    let r = receiver(&[BANK], &key);
+    let (r, relay) = node(&[BANK], vec![held_key("plain-policy-key")]);
     create_item(&r.store, BANK, VICTIM, "victim gist");
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, op));
+    plant_plain(&relay, &plain(BANK, VICTIM, op));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
     refused_plain(&r, BANK, PLAINTEXT_REFUSED_REASON);
     let identity = r
@@ -232,9 +261,9 @@ fn sealed_node_refuses_a_plaintext_denial_carrier() {
 /// victim live: with no key it cannot verify the row, so it refuses it too.
 #[test]
 fn keyless_node_refuses_a_plaintext_discard() {
-    let r = keyless_receiver(&[BANK]);
+    let (r, relay) = node(&[BANK], Vec::new());
     create_item(&r.store, BANK, VICTIM, "victim gist");
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, OP_DISCARD));
+    plant_plain(&relay, &plain(BANK, VICTIM, OP_DISCARD));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
     refused_plain(&r, BANK, PLAINTEXT_REFUSED_KEYLESS_REASON);
     let identity = r
@@ -250,9 +279,9 @@ fn keyless_node_refuses_a_plaintext_discard() {
 /// the row was refused, never applied.
 #[test]
 fn keyless_node_refuses_a_plaintext_invalidate() {
-    let r = keyless_receiver(&[BANK]);
+    let (r, relay) = node(&[BANK], Vec::new());
     create_item(&r.store, BANK, VICTIM, "victim gist");
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, OP_INVALIDATE));
+    plant_plain(&relay, &plain(BANK, VICTIM, OP_INVALIDATE));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
     refused_plain(&r, BANK, PLAINTEXT_REFUSED_KEYLESS_REASON);
     let got = r
@@ -271,8 +300,8 @@ fn keyless_node_refuses_a_plaintext_invalidate() {
 /// the deliberate discard, so the operator can unblock the frozen cursor.
 #[test]
 fn keyless_refusal_reason_names_the_remedy() {
-    let r = keyless_receiver(&[BANK]);
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, OP_DISCARD));
+    let (r, relay) = node(&[BANK], Vec::new());
+    plant_plain(&relay, &plain(BANK, VICTIM, OP_DISCARD));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
     let open = r
         .store

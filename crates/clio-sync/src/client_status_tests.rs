@@ -34,8 +34,8 @@ fn sync_status_reports_cursors_and_never_the_token() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     a.create_memory_item(
         &item("b1", "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
         "actor",
@@ -47,7 +47,7 @@ fn sync_status_reports_cursors_and_never_the_token() {
     assert_eq!(report.device_id, "dev-a");
     assert!(report.remote.as_deref().is_some_and(|r| r.contains(':')));
     assert_eq!(report.auth, "token");
-    assert!(!report.encryption);
+    assert!(report.encryption, "the held key is what the flag reports");
     assert_eq!(report.last_error, None);
     let bank = &report.banks[0];
     assert_eq!(bank.bank_id, "b1");
@@ -63,17 +63,11 @@ fn sync_status_reports_cursors_and_never_the_token() {
     );
     let text = serde_json::to_string(&report).expect("serialize report");
     assert!(!text.contains(TOKEN));
-    // The encryption flag reflects the configured cipher key only.
-    let cfg_e = cfg(
-        "dev-e",
-        &b,
-        &addr,
-        vec![SyncCipherKey::from_secret(
-            &crate::credential_fixtures::secret("k"),
-        )],
-    );
+    // The encryption flag reflects the configured cipher key in both
+    // directions: the node above holds one, and an empty list reports off.
+    let cfg_plain = cfg("dev-e", &b, &addr, Vec::new());
     assert!(
-        sync_status(&cfg_e, &["b1".to_owned()])
+        !sync_status(&cfg_plain, &["b1".to_owned()])
             .expect("status")
             .encryption
     );

@@ -33,6 +33,7 @@ use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, denial_mutation, denied_bank_marker,
 };
 use crate::denial_fixtures::{FakeDenial, FileDenial, PausingDenial};
+use crate::envelope_fixtures::seal_own_content;
 use crate::protocol::{SyncContent, SyncMutation};
 use crate::server::server_tests::{http, item_value, mutation, push_body, sqlite, wait_closed};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve_with_denial};
@@ -170,6 +171,7 @@ fn a_denied_bank_is_refused_while_an_unrelated_bank_serves() {
         let mut m = mutation(mid, bank, "2026-01-01T00:00:00Z", "g");
         m.entity_id = item.into();
         m.content = SyncContent::Plain(item_value(bank, item, "2026-01-01T00:00:00Z", "g"));
+        let m = seal_own_content(m);
         let (status, value) = push(&addr, &token, bank, &[m]);
         assert_eq!(status, 200, "push {bank}: {value}");
     }

@@ -359,7 +359,7 @@ fn discard_feed_packages_and_replicates_discard_op() {
     let (server, srv, _kms) = serve(&["bd"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
     a.create_memory_item(
         &crate::client::client_tests::item("bd", "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
         "actor",

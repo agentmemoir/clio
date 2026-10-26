@@ -206,25 +206,71 @@ fn an_authorized_carrier_records_every_covered_banks_marker() {
 /// A push the authority refuses mid-batch answers with the refusal's own code
 /// and message, so a client can tell a damaged authority (`config_corrupt`)
 /// from a transient storage failure; nothing is applied behind the refusal.
+/// The row rides as a denial carrier, the one plaintext shape the route
+/// accepts, so the authority is consulted and the refusal under test is its
+/// own rather than the route's.
 #[test]
 fn a_push_refused_by_an_unreadable_authority_answers_its_own_code() {
     let (server, store, denial, _scratch, _token_narrow, token_wide) = serve_scoped();
     let addr = server.addr().to_owned();
     denial.damage();
-    let item = mutation("m-refused", "b-a", "2026-01-01T00:00:00Z", "g");
-    let (status, value) = push(&addr, &token_wide, "b-a", std::slice::from_ref(&item));
+    let op = denial_op("b-a", "s-held", "req-refused", &["b-a"]);
+    let (status, value) = push(&addr, &token_wide, "b-a", std::slice::from_ref(&op));
     assert_eq!(status, 500, "{value}");
     assert_eq!(
         value["code"], "config_corrupt",
         "the authority refusal keeps its code: {value}"
     );
-    assert_eq!(
-        value["message"], "the local erasure-denial authority is unreadable; refusing the mutation",
-        "{value}"
+    let message = value["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("denial authority is unavailable"),
+        "the authority's own refusal travels, not a generic one: {value}"
     );
     assert!(
-        store.journal_get("b-a", "m-refused").unwrap().is_none(),
+        store
+            .journal_get("b-a", &op.sync_mutation_id)
+            .unwrap()
+            .is_none(),
         "a refusal writes nothing durably"
+    );
+    server.stop();
+}
+
+/// A peer holding a bank token cannot push a plaintext content row into the
+/// serving node's memory: content crosses the push route only as client-sealed
+/// bytes, so the row is quarantined under the authorized envelope bank and the
+/// acknowledgement rejects it.
+#[test]
+fn a_pushed_plaintext_content_row_is_refused_and_never_applied() {
+    let (server, store) = serve(&["b-a"], Some(TOKEN), false, None, None);
+    let addr = server.addr().to_owned();
+    let fabricated = mutation("m-plain", "b-a", "2026-01-01T00:00:00Z", "fabricated");
+    let (status, ack) = push(&addr, TOKEN, "b-a", std::slice::from_ref(&fabricated));
+    assert_eq!(status, 200, "{ack}");
+    assert_eq!(
+        ack["accepted"],
+        json!([]),
+        "a plaintext row is not accepted: {ack}"
+    );
+    assert_eq!(
+        ack["rejected"],
+        json!(["m-plain"]),
+        "the refusal is reported, never silent: {ack}"
+    );
+    assert!(
+        store.get_memory_item("b-a", "i-1").unwrap().is_none(),
+        "unauthenticated content never reaches this node's memory"
+    );
+    assert!(
+        store.journal_get("b-a", "m-plain").unwrap().is_none(),
+        "a refused row is never journaled"
+    );
+    assert_eq!(
+        store
+            .dead_letter_count("b-a", DeadLetterStatus::Open)
+            .unwrap(),
+        1,
+        "the refusal is quarantined for the operator"
     );
     server.stop();
 }

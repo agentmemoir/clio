@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on the stored content digest.
 
-use crate::client::client_tests::{cfg, item, serve, sqlite};
+use crate::client::client_tests::{cfg, item, paired_cfg, serve, sqlite};
 use crate::client::push;
 use crate::client_wire_fixtures::{
     ATTR_NAME, FAILURE_ID, RELATIONSHIP, TASK_ID, belief, seed_explicit_edge, seed_persona,
@@ -79,15 +79,18 @@ fn the_stored_content_digest_confirms_no_guessed_plaintext() {
     server.stop();
 }
 
-/// With no cipher configured, the identifier and the digest the relay stores are
-/// exactly what a plaintext deployment has always stored, so every existing
-/// apply-guard comparison against a stored row still matches.
+/// With a cipher configured, every produced kind still reaches the relay, and
+/// the two values it stores are the sealed forms of what a plaintext deployment
+/// stores: a machine-generated identifier travels as is, a caller-chosen one
+/// travels as the keyed handle, and the digest keeps the 64-character hex shape
+/// the apply guard compares. The plaintext parity of both values is pinned at
+/// the packager, which is now the only place a plaintext package exists.
 #[test]
 fn plaintext_mode_stores_the_real_identifier_and_the_plain_digest() {
     let (server, srv, _kms) = serve(&["bp"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
     seed_persona(&a, "bp");
     seed_task_and_failure(&a, "bp");
     seed_explicit_edge(&a, "bp", RELATIONSHIP);
@@ -103,9 +106,19 @@ fn plaintext_mode_stores_the_real_identifier_and_the_plain_digest() {
             .find(|r| r.entity_kind == want)
             .unwrap_or_else(|| panic!("a {want} row reaches the relay"))
     };
-    assert_eq!(kind_of("persona").entity_id, ATTR_NAME, "attr key as is");
-    assert_eq!(kind_of("task").entity_id, TASK_ID, "task id as is");
-    assert_eq!(kind_of("failure").entity_id, FAILURE_ID, "failure id as is");
+    let handle = |kind: &str, real: &str| {
+        crate::keyed_roles::identifier_handle(
+            Some(&crate::client::client_tests::paired_key()),
+            kind,
+            "bp",
+            real,
+        )
+    };
+    let edge = clio_store::explicit_id("bp", "i-1", "i-2", RELATIONSHIP);
+    assert_eq!(kind_of("persona").entity_id, handle("persona", ATTR_NAME));
+    assert_eq!(kind_of("task").entity_id, handle("task", TASK_ID));
+    assert_eq!(kind_of("failure").entity_id, handle("failure", FAILURE_ID));
+    // A machine-generated identifier is one the relay learns nothing new from.
     assert_eq!(
         kind_of("belief").entity_id,
         "bel-plain-1",
@@ -113,18 +126,24 @@ fn plaintext_mode_stores_the_real_identifier_and_the_plain_digest() {
     );
     assert_eq!(
         kind_of("assoc_edge").entity_id,
-        clio_store::explicit_id("bp", "i-1", "i-2", RELATIONSHIP),
-        "the edge id, relationship label included"
+        handle("assoc_edge", &edge),
+        "the edge travels as the keyed handle"
     );
-    // The digest is the unkeyed hash a plaintext deployment has always stored.
+    assert_ne!(
+        kind_of("assoc_edge").entity_id,
+        edge,
+        "a relay cannot read the edge's real identifier out of the row"
+    );
+    // The digest is a keyed SHA-256 in the same 64-hex-character shape the
+    // plaintext digest has always had, so every guard comparison still lines up.
     let item_row = kind_of("item");
-    assert_eq!(item_row.content_hash.len(), 64, "an unkeyed SHA-256 hex");
+    assert_eq!(item_row.content_hash.len(), 64, "a keyed SHA-256 hex");
     assert!(
         item_row
             .content_hash
             .chars()
             .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
-        "plaintext mode keeps the 64-hex-character plain digest"
+        "the stored digest keeps the 64-hex-character shape"
     );
     server.stop();
 }

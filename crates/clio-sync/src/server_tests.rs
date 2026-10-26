@@ -25,6 +25,7 @@
 //! Keep this module focused on sync server transport tests.
 
 use crate::credential_fixtures::scoped_store;
+use crate::envelope_fixtures::{opened_document, seal_own_content};
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation, decode_cursor};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve};
 use clio_store::{DekProvider, LocalDevKms, SqliteStore, Store, SyncJournalRow, SyncStore};
@@ -234,7 +235,9 @@ fn t24_04_refuses_anonymous_bind_outside_dev_mode() {
 fn t24_04_token_enforced_and_routes_scoped() {
     let (server, store) = serve(&["b1"], Some("s3cret"), false, None, None);
     let addr = server.addr().to_owned();
-    let m = mutation("m-1", "b1", "2026-01-01T00:00:00Z", "g");
+    // The route admits content only sealed, so the push under test carries a
+    // sealed row and the token guard is what the assertions reach.
+    let m = seal_own_content(mutation("m-1", "b1", "2026-01-01T00:00:00Z", "g"));
     let body = push_body("b1", &[m]);
     // Missing and wrong tokens: 401 and nothing applied.
     let (status, _) = http(&addr, "POST", "/sync/push", None, Some(&body));
@@ -286,7 +289,7 @@ fn dev_mode_accepts_anonymous_requests() {
 fn t24_04_push_applies_replays_noop_rejects_reported() {
     let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();
-    let m = mutation("m-1", "b1", "2026-01-01T00:00:00Z", "server gist");
+    let m = seal_own_content(mutation("m-1", "b1", "2026-01-01T00:00:00Z", "server gist"));
     let (status, ack) = http(
         &addr,
         "POST",
@@ -299,10 +302,16 @@ fn t24_04_push_applies_replays_noop_rejects_reported() {
     assert_eq!(ack["rejected"], json!([]));
     let seq = decode_cursor(ack["cursor"].as_str().expect("cursor"), "b1").expect("decode cursor");
     assert!(seq > 0);
-    assert!(store.get_memory_item("b1", "i-1").unwrap().is_some());
+    // A blind relay journals the pushed seal and holds no plaintext item.
+    assert!(store.get_memory_item("b1", "i-1").unwrap().is_none());
+    let kept = store.journal_list_since("b1", 0, 1).unwrap();
+    assert!(
+        kept[0].client_encrypted,
+        "the kept row is the seal: {kept:?}"
+    );
     assert_eq!(store.journal_max_seq("b1").unwrap(), 1);
     // Replay: same accepted ids, no new journal rows, no second durable row.
-    let replay = mutation("m-1", "b1", "2026-01-01T00:00:00Z", "server gist");
+    let replay = seal_own_content(mutation("m-1", "b1", "2026-01-01T00:00:00Z", "server gist"));
     let (status, ack) = http(
         &addr,
         "POST",
@@ -336,8 +345,8 @@ fn t24_04_push_applies_replays_noop_rejects_reported() {
 fn pull_returns_commit_ordered_pages_and_decrypts_server_seal() {
     let (server, _store) = serve(&["b1"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();
-    let m1 = mutation("m-1", "b1", "2026-01-01T00:00:00Z", "first");
-    let m2 = mutation("m-2", "b1", "2026-01-01T01:00:00Z", "second");
+    let m1 = seal_own_content(mutation("m-1", "b1", "2026-01-01T00:00:00Z", "first"));
+    let m2 = seal_own_content(mutation("m-2", "b1", "2026-01-01T01:00:00Z", "second"));
     let (status, _) = http(
         &addr,
         "POST",
@@ -352,7 +361,8 @@ fn pull_returns_commit_ordered_pages_and_decrypts_server_seal() {
     let rows = page["mutations"].as_array().expect("rows");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["sync_mutation_id"], "m-1");
-    assert_eq!(rows[0]["content"]["data"]["gist"], "first");
+    // The page carries the pusher's own seal, which a blind relay never read.
+    assert_eq!(opened_document(&rows[0])["gist"], "first");
     assert_eq!(page["has_more"], json!(true));
     let next = page["next_cursor"]
         .as_str()

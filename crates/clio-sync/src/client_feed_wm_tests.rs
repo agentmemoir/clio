@@ -24,7 +24,7 @@
 //!
 //! Keep this module focused on the push watermark contract tests.
 
-use crate::client::client_tests::{TOKEN, cfg, item, serve, sqlite};
+use crate::client::client_tests::{TOKEN, cfg, item, paired_cfg, paired_key, serve, sqlite};
 use crate::client::{SyncClientConfig, push, sync_status};
 use crate::protocol::encode_watermark;
 use clio_store::{HistoryStore, SqliteStore, Store, SyncStore};
@@ -53,7 +53,7 @@ fn full_item_page_drains_across_consecutive_pushes() {
     let (server, srv, _kms) = serve(&["bdrain"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
     let n = crate::PULL_PAGE_LIMIT + 5;
     seed_items(&a, "bdrain", n, "");
 
@@ -84,7 +84,7 @@ fn stamp_ties_across_page_boundary_deliver_exactly_once() {
     let (server, srv, _kms) = serve(&["btie"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
     let n = crate::PULL_PAGE_LIMIT + 5;
     // Every item shares the same change stamp: the old strict `>` watermark
     // skipped the tie forever once the page filled.
@@ -153,7 +153,7 @@ fn missing_carrier_holds_task_cursor_but_not_other_kinds() {
         sync: feed_store,
         remote: Some(addr),
         token: Some(TOKEN.to_owned()),
-        cipher: Vec::new(),
+        cipher: vec![paired_key()],
     };
 
     push(&cfg, &["bhold".to_owned()]).expect("push with missing carrier");
