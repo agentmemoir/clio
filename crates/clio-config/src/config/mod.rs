@@ -24,6 +24,7 @@
 //! Keep this module focused on Runtime config/ranking tool orchestration.
 
 mod cli_state;
+mod config_ops;
 mod dispatch;
 mod env;
 mod merge;
@@ -49,23 +50,17 @@ pub use types::{
 pub use validate::{CONFIG_SCHEMA_VERSION, ConfigScope};
 
 use crate::context::{Actor, BankDefaultPolicy, OpContext, resolve_bank};
-use crate::error::{AmError, ErrorCode, ToolResult};
+use crate::error::{AmError, ErrorCode};
 use crate::history_knobs::HistoryKnobs;
 use crate::log::{self, LogLevel};
 use crate::ranking::RankingEnv;
 use crate::retention_store::{RetentionStore, resolve_retention_path};
-use crate::secret::{masked_at_path, masked_clone, path_is_secret};
+use crate::secret::masked_clone;
 use clio_types::HistoryPolicy;
-use merge::{
-    Overlay, apply_overlay, flatten_object, path_to_pointer, set_path, system_defaults,
-    value_as_string,
-};
-use persist::{
-    ensure_overwritable, load_overlay_file, resolve_deployment_path_with, save_overlay_file,
-};
+use merge::{Overlay, apply_overlay, flatten_object, set_path, system_defaults};
+use persist::{load_overlay_file, resolve_deployment_path_with, save_overlay_file};
 use serde_json::Value;
 use std::path::PathBuf;
-use validate::{validate_set_path, validate_set_value};
 
 /// Process runtime: effective config + config/ranking tool handlers.
 #[derive(Debug)]
@@ -368,89 +363,5 @@ impl Runtime {
         Ok(OpContext::new(bank, actor))
     }
 
-    #[must_use]
-    pub fn config_get(&self, path: Option<&str>) -> ToolResult<ConfigGetData> {
-        ToolResult::from_result(self.config_get_inner(path))
-    }
-
-    fn config_get_inner(&self, path: Option<&str>) -> Result<ConfigGetData, AmError> {
-        // Resolve the pointer on the unmasked tree: masking renames keys that
-        // themselves look secret, so a pointer such as `credentials.api_key`
-        // would otherwise stop at a name the masked view no longer has.
-        let raw = self.effective_raw();
-        let value = match path {
-            None | Some("") => masked_clone(&raw),
-            Some(p) => {
-                let pointer = path_to_pointer(p);
-                let found = raw.pointer(&pointer).ok_or_else(|| {
-                    AmError::new(ErrorCode::UnknownPath, format!("unknown config path `{p}`"))
-                })?;
-                masked_at_path(p, found)
-            }
-        };
-        Ok(ConfigGetData {
-            path: path.unwrap_or("").to_owned(),
-            value,
-            active_profile: self.active_profile.clone(),
-        })
-    }
-
-    pub fn config_set(
-        &mut self,
-        path: &str,
-        value: Value,
-        scope: ConfigScope,
-    ) -> ToolResult<ConfigSetData> {
-        ToolResult::from_result(self.config_set_inner(path, value, scope))
-    }
-
-    fn config_set_inner(
-        &mut self,
-        path: &str,
-        value: Value,
-        scope: ConfigScope,
-    ) -> Result<ConfigSetData, AmError> {
-        validate_set_path(path)?;
-        validate_set_value(path, &value)?;
-        {
-            let overlay = match scope {
-                ConfigScope::Session => &mut self.session_overlay,
-                ConfigScope::Profile => {
-                    if self.active_profile.is_none() {
-                        return Err(AmError::new(
-                            ErrorCode::InvalidArgument,
-                            "config_set scope=profile requires an active profile",
-                        ));
-                    }
-                    &mut self.profile_overlay
-                }
-                ConfigScope::Deployment => &mut self.deployment_overlay,
-            };
-            overlay.insert(path.to_owned(), value.clone());
-        }
-        if path == "log.level" {
-            self.sync_log_level();
-        }
-        if path == "bank.policy" {
-            // Validated above; deserialize cannot fail for allowlisted shapes.
-            self.bank_policy =
-                serde_json::from_value(value.clone()).expect("bank.policy after validate");
-        }
-        if scope == ConfigScope::Deployment
-            && let Some(path_buf) = self.deployment_path.clone()
-        {
-            ensure_overwritable(&path_buf)?;
-            save_overlay_file(&path_buf, &self.deployment_overlay)?;
-        }
-        log::info("config_set", &[("path", path), ("scope", scope.as_str())]);
-        Ok(ConfigSetData {
-            path: path.to_owned(),
-            scope: scope.as_str().to_owned(),
-            value: if path_is_secret(path) {
-                Value::String(crate::secret::mask_secret(&value_as_string(&value)))
-            } else {
-                value
-            },
-        })
-    }
 }
+

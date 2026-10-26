@@ -22,93 +22,9 @@
 
 use super::*;
 use crate::context::Actor;
-use crate::error::ErrorCode;
-use crate::ranking::{AdmissionWeights, RankingEnvPatch, RetrievalWeights};
+use crate::error::{ErrorCode, ToolResult};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[test]
-fn config_get_masks_secrets_from_file() {
-    let mut rt = Runtime::with_env(&|_| None);
-    rt.load_file_json(r#"{"credentials":{"api_key":"sk-ABCDEFG1234"}}"#)
-        .expect("load");
-    let ToolResult::Ok { data, .. } = rt.config_get(Some("credentials.api_key")) else {
-        panic!("expected ok");
-    };
-    assert_eq!(data.value, json!("****1234"));
-}
-
-#[test]
-fn config_set_rejects_invalid_log_level() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } =
-        rt.config_set("log.level", json!("loud"), ConfigScope::Session)
-    else {
-        panic!("expected err");
-    };
-    assert_eq!(code, ErrorCode::OutOfRange);
-}
-
-#[test]
-fn config_set_rejects_gate_disable() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } = rt.config_set(
-        "gates.admission_enabled",
-        json!(false),
-        ConfigScope::Session,
-    ) else {
-        panic!("expected err");
-    };
-    assert_eq!(code, ErrorCode::Forbidden);
-}
-
-#[test]
-fn config_set_rejects_ranking_path() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } =
-        rt.config_set("ranking.theta_admit", json!(0.1), ConfigScope::Session)
-    else {
-        panic!("expected err");
-    };
-    assert_eq!(code, ErrorCode::Forbidden);
-}
-
-#[test]
-fn config_set_rejects_unknown_path() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } = rt.config_set("not.real", json!(1), ConfigScope::Session)
-    else {
-        panic!("expected err");
-    };
-    assert_eq!(code, ErrorCode::UnknownPath);
-}
-
-#[test]
-fn config_set_cannot_reach_the_retention_store() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } = rt.config_set(
-        "retention.banks.bank-a.verbosity",
-        json!("selective"),
-        ConfigScope::Session,
-    ) else {
-        panic!("expected forbidden");
-    };
-    assert_eq!(code, ErrorCode::Forbidden);
-}
-
-#[test]
-fn profile_apply_sets_per_repo_bank_policy() {
-    let mut rt = Runtime::with_env(&|_| None);
-    rt.set_repo_root("/tmp/demo-repo");
-    let ToolResult::Ok { data, .. } = rt.config_profile_apply("coding_local") else {
-        panic!("apply");
-    };
-    assert_eq!(data.name, "coding_local");
-    assert!(!data.fr10_satisfied);
-    assert!(matches!(data.bank_policy, BankDefaultPolicy::PerRepository));
-    let ctx = rt.resolve_context(None, None).expect("bank");
-    assert_eq!(ctx.bank.as_str(), "repo:/tmp/demo-repo");
-}
 
 #[test]
 fn bank_fixed_beats_per_repo_policy() {
@@ -125,61 +41,11 @@ fn bank_fixed_beats_per_repo_policy() {
 }
 
 #[test]
-fn ranking_dry_run_does_not_apply() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let before = rt.ranking.clone();
-    let patch = RankingEnvPatch {
-        retrieval: Some(RetrievalWeights {
-            dense: 2.0,
-            lexical: 2.0,
-            importance: 0.0,
-        }),
-        ..RankingEnvPatch::default()
-    };
-    let ToolResult::Ok { data, .. } = rt.ranking_env_set(&patch, true) else {
-        panic!("dry");
-    };
-    assert!(data.dry_run);
-    assert!(!data.applied);
-    assert!((data.ranking.retrieval.dense - 0.5).abs() < 1e-9);
-    assert_eq!(rt.ranking, before);
-}
-
-#[test]
-fn ranking_set_renormalizes_admission() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let patch = RankingEnvPatch {
-        admission: Some(AdmissionWeights {
-            w1: 1.0,
-            w2: 1.0,
-            w3: 1.0,
-            w4: 1.0,
-        }),
-        ..RankingEnvPatch::default()
-    };
-    let ToolResult::Ok { data, .. } = rt.ranking_env_set(&patch, false) else {
-        panic!("apply");
-    };
-    assert!(data.applied);
-    assert!((data.ranking.admission.w1 - 0.25).abs() < 1e-9);
-}
-
-#[test]
 fn stub_tool_returns_not_implemented() {
     let mut rt = Runtime::with_env(&|_| None);
     let v = rt.call_tool("store", &json!({}));
     assert_eq!(v["ok"], json!(false));
     assert_eq!(v["code"], json!("not_implemented"));
-}
-
-#[test]
-fn unknown_profile_leaves_state() {
-    let mut rt = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } = rt.config_profile_apply("nope") else {
-        panic!("err");
-    };
-    assert_eq!(code, ErrorCode::UnknownProfile);
-    assert!(rt.active_profile.is_none());
 }
 
 #[test]
@@ -247,18 +113,6 @@ fn deployment_error_and_context_actor_paths() {
         ErrorCode::ConfigCorrupt
     );
 
-    // config_set Deployment propagates save Err when path is not writable.
-    let dir = std::env::temp_dir().join(format!("am-deploy-dir-{nanos}"));
-    std::fs::create_dir_all(&dir).expect("dir");
-    let mut rt2 = Runtime::with_env(&|_| None);
-    rt2.set_deployment_path(dir.clone());
-    let ToolResult::Err { code, .. } =
-        rt2.config_set("backend", json!("postgres"), ConfigScope::Deployment)
-    else {
-        panic!("expected save err");
-    };
-    assert_eq!(code, ErrorCode::Internal);
-
     // resolve_context propagates Actor::parse Err via `?`.
     let rt3 = Runtime::with_env(&|_| None);
     assert_eq!(
@@ -268,26 +122,7 @@ fn deployment_error_and_context_actor_paths() {
         ErrorCode::InvalidArgument
     );
 
-    // ranking_env_set propagates preview_patch Err via `?`.
-    let mut rt4 = Runtime::with_env(&|_| None);
-    let ToolResult::Err { code, .. } = rt4.ranking_env_set(
-        &RankingEnvPatch {
-            admission: Some(AdmissionWeights {
-                w1: -1.0,
-                w2: 0.0,
-                w3: 0.0,
-                w4: 0.0,
-            }),
-            ..RankingEnvPatch::default()
-        },
-        false,
-    ) else {
-        panic!("expected ranking err");
-    };
-    assert_eq!(code, ErrorCode::OutOfRange);
-
     let _ = std::fs::remove_file(bad);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -301,9 +136,6 @@ fn runtime_paths_for_full_surface() {
 
     let ToolResult::Ok { .. } = rt.config_profiles() else {
         panic!("profiles");
-    };
-    let ToolResult::Err { .. } = rt.config_get(Some("missing.path")) else {
-        panic!("unknown path");
     };
     let ToolResult::Ok { .. } = rt.config_profile_apply("coding_ci") else {
         panic!("ci");

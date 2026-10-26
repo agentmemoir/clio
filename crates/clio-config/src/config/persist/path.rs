@@ -102,3 +102,7 @@ fn nonempty(value: Option<String>) -> Option<String> {
         .map(|raw| raw.trim().to_owned())
         .filter(|v| !v.is_empty())
 }
+
+#[cfg(test)]
+#[path = "path_tests.rs"]
+mod path_tests;
