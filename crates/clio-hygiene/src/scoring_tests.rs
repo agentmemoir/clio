@@ -82,9 +82,12 @@ fn secret_scores_vary_by_kind() {
     let known = secret_score("known_secret_format");
     let named = secret_score("named_credential_key");
     let bearer = secret_score("bearer_token");
-    assert!(pem > known, "pem {pem} > known format {known}");
-    assert!(known > named, "known format {known} > named key {named}");
-    assert!(named > bearer, "named key {named} > bearer token {bearer}");
+    assert!(pem > known, "pem outranks known secret format");
+    assert!(
+        known > named,
+        "known secret format outranks named credential key"
+    );
+    assert!(named > bearer, "named credential key outranks bearer token");
 }
 
 #[test]

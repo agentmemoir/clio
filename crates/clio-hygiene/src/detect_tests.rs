@@ -38,7 +38,11 @@ fn secret_classes_are_detected() {
 fn token_shaped_run_is_not_a_credential() {
     let bare = "Zx3_9kQ2-wLp7RtYvBnM4cDf8GhJ5KmNpQrStUvWx12";
     let signals = detect_noise(bare);
-    assert!(!signals.secret_hit(), "{:?}", signals.secret_kinds);
+    assert!(
+        signals.secret_kinds.is_empty(),
+        "bare token run is not secret-class"
+    );
+    assert!(!signals.secret_hit());
     assert_eq!(signals.token_run_len, Some(bare.len()));
     assert_eq!(signals.secret_run_len, 0, "no credential value measured");
 }
@@ -47,10 +51,18 @@ fn token_shaped_run_is_not_a_credential() {
 fn long_hyphenated_id_is_not_a_credential() {
     let id = "failure-item-agents-clb016-long-id-probe-task-with-long-identifier-1792665330634632000-1792665446249679000-0";
     let bare = detect_noise(id);
-    assert!(!bare.secret_hit(), "{:?}", bare.secret_kinds);
+    assert!(
+        bare.secret_kinds.is_empty(),
+        "long hyphenated id is not secret-class"
+    );
+    assert!(!bare.secret_hit());
     assert!(bare.token_run_len.is_some());
     let prose = detect_noise(&format!("clb016 ordinary failure text {id}"));
-    assert!(!prose.secret_hit(), "{:?}", prose.secret_kinds);
+    assert!(
+        prose.secret_kinds.is_empty(),
+        "prose with long id is not secret-class"
+    );
+    assert!(!prose.secret_hit());
 }
 
 #[test]
