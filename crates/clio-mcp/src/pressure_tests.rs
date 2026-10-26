@@ -110,6 +110,8 @@ pub(crate) fn status_with(dirty: usize, refreshing: usize) -> MaintenanceStatusD
         dirty_ancestors: (0..dirty).map(|i| format!("dirty-{i}")).collect(),
         refreshing: (0..refreshing).map(|i| format!("refresh-{i}")).collect(),
         last_error: None,
+        persist_failures: 0,
+        last_persist_error: None,
         item_id: None,
     }
 }
