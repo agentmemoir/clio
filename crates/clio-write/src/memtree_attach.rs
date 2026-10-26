@@ -41,6 +41,10 @@ impl BankMemTree {
             ));
         }
 
+        // Only the moves this attach makes are pending afterwards: whatever an
+        // earlier attach re-parented has been persisted or is stale.
+        self.reparented.clear();
+
         let leaf_id = self.next_id("leaf");
         let node = MemTreeNode {
             id: leaf_id.clone(),
@@ -219,6 +223,7 @@ impl BankMemTree {
             for rid in &right_ids {
                 self.nodes.get_mut(rid).expect("child").parent_id = Some(sibling_id.clone());
             }
+            self.reparented.extend(right_ids.iter().cloned());
             let sibling = MemTreeNode {
                 id: sibling_id.clone(),
                 bank_id: self.bank_id.clone(),
@@ -256,6 +261,10 @@ impl BankMemTree {
                     Some(new_root_id.clone());
                 self.nodes.get_mut(&sibling_id).expect("right").parent_id =
                     Some(new_root_id.clone());
+                // Both halves hang under a node that did not exist before this
+                // attach, so both parent links are new.
+                self.reparented.push(current_id.clone());
+                self.reparented.push(sibling_id.clone());
                 let new_root = MemTreeNode {
                     id: new_root_id.clone(),
                     bank_id: self.bank_id.clone(),

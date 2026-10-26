@@ -23,7 +23,9 @@
 use crate::chunk::{DEFAULT_MAX_TURNS_PER_CHUNK, Turn, partition_session};
 use crate::consolidate::{CanonicalUnit, VerifiedCandidate, consolidate};
 use crate::extract::Extractor;
-use crate::maintenance::{LeafIndex, MaintenanceSignal, SharedMaintenanceHook, dispatch_async};
+use crate::maintenance::{
+    LeafIndex, MAINTENANCE_DRAIN_BUDGET, MaintenanceSignal, SharedMaintenanceHook, dispatch_async,
+};
 use crate::parallel::{ChunkWorkerResult, ParallelExtractAggregate, extract_chunks_parallel};
 use crate::pipeline::NonAuthoritativeRetention;
 use crate::schema::FieldSpec;
@@ -170,7 +172,8 @@ pub struct ParallelIngestArgs<'a> {
     pub config: WriteIngestConfig,
     /// Leaf index for immediate get-by-id.
     pub leaves: &'a LeafIndex,
-    /// Maintenance handoff (dispatched off the write path; must not gate readability).
+    /// Maintenance handoff: dispatched off the write path, then waited for under
+    /// the drain budget so its leaf rows land before this call returns.
     pub maintenance: SharedMaintenanceHook,
 }
 
@@ -285,9 +288,12 @@ fn admit_canonical_units(
 /// `chunk_results` and do not poison successful admits.
 /// All-or-nothing: any refuse/error skips admit entirely.
 ///
-/// Maintenance handoff is dispatched to a detached thread after leaf publish
-/// (see [`crate::maintenance::dispatch_async`]), so a slow hook never gates the
-/// write response. Leaf get uses [`LeafIndex`] and does not wait on ancestor refresh.
+/// Maintenance handoff runs on a dispatched thread after leaf publish (see
+/// [`crate::maintenance::dispatch_async`]), and this path waits for it under
+/// [`MAINTENANCE_DRAIN_BUDGET`] before it returns: a one-shot ingest must not
+/// exit over leaf rows that never landed. A wait that expires is a degradation
+/// and is logged; structural ancestor refresh stays off this path either way,
+/// and leaf get uses [`LeafIndex`], so it never waits on that refresh.
 ///
 /// # Errors
 /// Bank isolation failures; gated store structural errors.
@@ -355,11 +361,24 @@ pub fn parallel_ingest(
         args.leaves
             .record_time_to_queryable(args.ctx.bank.as_str(), time_to_queryable_ms);
     }
-    // Non-blocking handoff: the hook runs on a detached thread so a slow
-    // maintenance consumer can never gate the write response or leaf get. The
-    // handle is dropped on purpose here; a caller that must answer over durable
-    // rows drains it instead.
-    let _ = dispatch_async(args.maintenance.clone(), maintenance_signals.clone());
+    // The leaves are published and queryable; what is not yet true is that their
+    // rows are stored. Waiting here is what makes a one-shot ingest honest, and
+    // an expired wait is a degradation this crate has no engine handle to record
+    // on, so it is logged rather than dropped.
+    if let Some(job) = dispatch_async(args.maintenance.clone(), maintenance_signals.clone())
+        && !job.drain(MAINTENANCE_DRAIN_BUDGET)
+    {
+        clio_config::log::warn(
+            "memtree_persist_failed",
+            &[
+                ("code", "internal"),
+                (
+                    "error",
+                    "maintenance hook did not finish inside the drain budget, so the ingested leaves' memtree rows may be unwritten",
+                ),
+            ],
+        );
+    }
 
     Ok(IngestOutcome {
         leaf_queryable: !admitted.is_empty(),

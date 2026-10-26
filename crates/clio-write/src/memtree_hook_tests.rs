@@ -211,6 +211,39 @@ fn a_split_attach_persists_every_node_the_split_moved() {
 }
 
 #[test]
+fn a_split_attach_stores_the_new_parent_of_every_child_it_moved() {
+    let store = store();
+    let (engine, leaves, forest) = engine(&store);
+    for n in 0..=DEFAULT_FANOUT {
+        let id = format!("item-{n}");
+        leaves.publish(item(&id));
+        engine.on_leaf_attached(MaintenanceSignal::leaf_attached(&id, BANK));
+        let _ = engine.refresh_bank(BANK);
+    }
+    let tree = forest.lock().unwrap();
+    let nodes = tree
+        .tree(BANK)
+        .expect("bank tree")
+        .query(&crate::memtree::MemTreeQueryFilter::default());
+    let parented: Vec<_> = nodes.iter().filter(|n| n.parent_id.is_some()).collect();
+    assert!(
+        !parented.is_empty(),
+        "the split left children under a parent"
+    );
+    for node in parented {
+        let stored = store
+            .get_memtree_node(BANK, &node.id)
+            .expect("stored node")
+            .unwrap_or_else(|| panic!("no stored row for {}", node.id));
+        assert_eq!(
+            stored.parent_id, node.parent_id,
+            "the stored row of {} names the parent the split moved it to",
+            node.id
+        );
+    }
+}
+
+#[test]
 fn a_refresh_wave_stores_the_cleared_dirty_flag() {
     let store = store();
     let (engine, leaves, _forest) = engine(&store);

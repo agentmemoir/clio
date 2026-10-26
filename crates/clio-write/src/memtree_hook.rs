@@ -26,6 +26,18 @@
 //! Changes to refresh scheduling or the SQL behind a row should not require
 //! changes here.
 //!
+//! ## Lock order
+//!
+//! Every persist section takes the persist gate, then the forest mutex only long
+//! enough to build its record list, releases the forest mutex, and only then
+//! calls the store. That is the one order in which the three are ever taken
+//! together: no path takes the gate while it holds the forest mutex, and no path
+//! calls the store while it holds the forest mutex. A waiter on the gate
+//! therefore waits for a section that already holds the gate ahead of it, never
+//! for one that holds the forest and wants the gate, so the wait graph has no
+//! cycle. The gate is what keeps two dispatcher threads from interleaving an
+//! older snapshot's upserts after a newer one's.
+//!
 //! Keep this module focused on making the in-memory tree durable.
 
 use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
@@ -35,7 +47,7 @@ use crate::memtree_record::record_from_node;
 use clio_store::{MemTreeNodeRecord, Store};
 use clio_types::AmError;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Persistence failures the write path hit, kept so a later status read reports
@@ -46,6 +58,16 @@ pub(crate) struct PersistErrors {
     count: AtomicU64,
     /// The message of the most recent failure.
     last_error: Mutex<Option<String>>,
+    /// Serializes each record build with the upserts that follow it, so a later
+    /// snapshot of the forest can never land before an earlier one.
+    gate: Mutex<()>,
+}
+
+impl PersistErrors {
+    /// Hold every other persist section out until the returned guard drops.
+    fn gate(&self) -> MutexGuard<'_, ()> {
+        self.gate.lock().expect("persist gate")
+    }
 }
 
 impl std::fmt::Debug for MemTreeMaint {
@@ -72,9 +94,11 @@ impl MemTreeMaint {
     ///
     /// Reads under the forest lock and writes outside it: the stored row is the
     /// node's state at the moment it was read, and no store call runs while the
-    /// structural lock is held. A store-less engine does nothing apart from the
-    /// empty-list short circuit. Returns the first store error, which the caller
-    /// records on the engine rather than discarding.
+    /// structural lock is held. The persist gate is held across both halves, so
+    /// a wave's snapshot cannot land after a later one's. A store-less engine
+    /// does nothing apart from the empty-list short circuit. Returns the first
+    /// store error, which the caller records on the engine rather than
+    /// discarding.
     pub(crate) fn persist_nodes(&self, bank_id: &str, node_ids: &[String]) -> Result<(), AmError> {
         let Some(store) = self.store.as_deref() else {
             return Ok(());
@@ -83,6 +107,7 @@ impl MemTreeMaint {
             return Ok(());
         }
         let now = now_stamp();
+        let _gate = self.persist_errors.gate();
         let records: Vec<MemTreeNodeRecord> = {
             let forest = self.forest.lock().expect("forest");
             let Some(tree) = forest.tree(bank_id) else {
@@ -97,13 +122,15 @@ impl MemTreeMaint {
         upsert_all(store, records)
     }
 
-    /// Upsert the leaf an attach placed plus every node the attach changed.
+    /// Upsert the leaf an attach placed plus every row the attach changed.
     ///
-    /// The attach reports the ancestors it dirtied, which is not the whole
-    /// change set: a fan-out split also re-parents the children it moved and can
-    /// insert a sibling and a new root. So the leaf, the dirtied ids, the leaf's
-    /// ancestor chain and each of those nodes' children are persisted. Anything
-    /// outside that set kept its row's columns, and a stale row for a node no
+    /// The attach reports the ancestors it dirtied, and the tree reports the
+    /// child ids a fan-out split re-parented; those with the leaf are the whole
+    /// change set. A node that only gained a child keeps its own stored row
+    /// correct by the child's row being in the set, so no node's children are
+    /// persisted merely because it has children. The set is therefore the leaf's
+    /// depth plus what one split moved, not the width of the bank. Anything
+    /// outside the set kept its row's columns, and a stale row for a node no
     /// longer reachable is unreachable for a reader too.
     fn persist_attach(
         &self,
@@ -115,21 +142,17 @@ impl MemTreeMaint {
             return Ok(());
         };
         let now = now_stamp();
+        let _gate = self.persist_errors.gate();
         let records: Vec<MemTreeNodeRecord> = {
             let forest = self.forest.lock().expect("forest");
             let Some(tree) = forest.tree(bank_id) else {
                 return Ok(());
             };
-            let mut ids = Vec::with_capacity(dirty.len().saturating_mul(2).saturating_add(2));
+            let mut ids = Vec::with_capacity(dirty.len().saturating_add(tree.reparented.len() + 4));
             ids.push(leaf_id.to_owned());
             ids.extend(dirty.iter().cloned());
             ids.extend(tree.ancestors_of(leaf_id));
-            let moved: Vec<String> = ids
-                .iter()
-                .filter_map(|id| tree.get(id))
-                .flat_map(|node| node.child_ids.iter().cloned())
-                .collect();
-            ids.extend(moved);
+            ids.extend(tree.reparented.iter().cloned());
             ids.sort();
             ids.dedup();
             ids.iter()

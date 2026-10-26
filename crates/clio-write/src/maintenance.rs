@@ -67,9 +67,12 @@ pub type SharedMaintenanceHook = Arc<dyn MaintenanceHook + Send + Sync>;
 
 /// Delivery budget a write uses when it waits for its own signals.
 ///
-/// Generous enough for a leaf attach plus a handful of row upserts on a loaded
-/// host, short enough that a stuck store delays one write instead of hanging it.
-pub const MAINTENANCE_DRAIN_BUDGET: Duration = Duration::from_secs(5);
+/// The hook's own work is one leaf attach plus a row set bounded by the leaf's
+/// depth, so 1500 ms is generous for it on a loaded host while staying inside
+/// the window a leaf write has to become queryable in: a wait that could outlast
+/// that window would let a slow store break the readability promise instead of
+/// only delaying one write.
+pub const MAINTENANCE_DRAIN_BUDGET: Duration = Duration::from_millis(1500);
 
 /// Handle that reports when the dispatched signals have all been consumed.
 ///
