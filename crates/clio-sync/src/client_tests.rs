@@ -26,14 +26,13 @@ use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
 use crate::client::{SyncClientConfig, ack_skip, pull, push, sync_status};
 use crate::credential_fixtures::scoped_store;
 use crate::crypto::SyncCipherKey;
-use crate::protocol::{SyncContent, SyncMutation, decode_cursor};
+use crate::protocol::{SyncMutation, decode_cursor};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve};
 use clio_store::{
-    AssocEdgeRecord, AssocKind, CiphertextEnvelope, DekProvider, LocalDevKms, SqliteStore, Store,
-    SyncStore,
+    AssocEdgeRecord, AssocKind, DekProvider, LocalDevKms, SqliteStore, Store, SyncStore,
 };
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::sync::Arc;
 
 pub(crate) const TOKEN: &str = "tok-shared";
@@ -79,6 +78,24 @@ pub(crate) fn cfg(
         token: Some(TOKEN.to_owned()),
         cipher,
     }
+}
+
+/// The one sync key every paired-transfer test shares: the sender seals with it
+/// and the receiver opens with it, so a roundtrip in those tests cannot pass by
+/// shipping plaintext. One key is derived per process, so every call hands out
+/// the same one.
+pub(crate) fn paired_key() -> SyncCipherKey {
+    static KEY: std::sync::OnceLock<SyncCipherKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("paired-transfer-key"))
+    })
+    .clone()
+}
+
+/// One node's config in a paired transfer: it holds [`paired_key`], so the two
+/// configs a test builds against the one relay seal and open each other's rows.
+pub(crate) fn paired_cfg(device: &str, store: &Arc<SqliteStore>, addr: &str) -> SyncClientConfig {
+    cfg(device, store, addr, vec![paired_key()])
 }
 
 pub(crate) fn item(bank: &str, id: &str, subject: &str, stamp: &str, gist: &str) -> MemoryItem {
@@ -139,15 +156,26 @@ fn t24_01_push_then_pull_replicates_item_content() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     let item = item("b1", "i-1", "s1", "2026-01-01T00:00:00Z", "memoir gist");
     a.create_memory_item(&item, "actor").expect("create item");
     // (adjacent): device A never ran a local sync_serve; push works
     // purely as a client against the remote endpoint.
     assert_eq!(a.journal_max_seq("b1").unwrap(), 0);
     push(&cfg_a, &["b1".to_owned()]).expect("push");
-    assert!(srv.get_memory_item("b1", "i-1").unwrap().is_some());
+    // The relay journals the sealed envelope and stays blind to the content, so
+    // it can never materialize the item it relayed.
+    let relayed = srv.journal_list_since("b1", 0, 10).expect("relay journal");
+    assert_eq!(relayed.len(), 1, "the row reached the relay");
+    assert!(
+        relayed[0].client_encrypted,
+        "the relay holds ciphertext only"
+    );
+    assert!(
+        srv.get_memory_item("b1", "i-1").unwrap().is_none(),
+        "a sealed row never materializes on the relay"
+    );
     pull(&cfg_b, &["b1".to_owned()]).expect("pull");
     let got = b
         .get_memory_item("b1", "i-1")
@@ -165,8 +193,8 @@ fn t24_02_replay_push_and_pull_create_no_duplicates() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     a.create_memory_item(
         &item("b1", "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
         "actor",
@@ -195,8 +223,8 @@ fn t24_06_assoc_edge_syncs_and_lists_on_peer() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     for id in ["i-1", "i-2"] {
         a.create_memory_item(&item("b1", id, "s1", "2026-01-01T00:00:00Z", id), "actor")
             .unwrap();
@@ -219,8 +247,8 @@ fn bank_scope_unconfigured_bank_is_403_and_b1_flows() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     a.create_memory_item(
         &item("b1", "i-b1", "s1", "2026-01-01T00:00:00Z", "b1 item"),
         "actor",
@@ -302,12 +330,12 @@ fn t24_07_client_encryption_server_blind_keyless_dead_letters() {
 
 #[test]
 fn t24_08_crash_between_page_and_cursor_is_idempotent() {
-    let (server, srv, kms) = serve(&["b8"]);
+    let (server, srv, _kms) = serve(&["b8"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     a.create_memory_item(
         &item("b8", "i-1", "s1", "2026-01-01T00:00:00Z", "one"),
         "actor",
@@ -323,32 +351,20 @@ fn t24_08_crash_between_page_and_cursor_is_idempotent() {
     // before the pull cursor is persisted.
     let page = srv.journal_list_since("b8", 0, 1).unwrap();
     assert_eq!(page.len(), 1);
-    let envelope =
-        CiphertextEnvelope::from_storage_string(page[0].content_sealed.as_deref().expect("sealed"))
-            .expect("envelope decode");
-    let bytes = kms.decrypt(&envelope).expect("server-seal decrypt");
-    let content: Value = serde_json::from_slice(&bytes).expect("content json");
-    let m = SyncMutation {
-        sync_mutation_id: page[0].sync_mutation_id.clone(),
-        bank: page[0].bank_id.clone(),
-        entity_kind: page[0].entity_kind.clone(),
-        entity_id: page[0].entity_id.clone(),
-        op: page[0].op.clone(),
-        transaction_time: page[0].transaction_time.clone(),
-        device_id: page[0].device_id.clone(),
-        content: SyncContent::Plain(content),
-        content_hash: page[0].content_hash.clone(),
-        admission_receipt: None,
-    };
+    let sealed = page[0].content_sealed.as_deref().expect("sealed content");
+    let relayed: SyncMutation = serde_json::from_str(sealed).expect("relay envelope");
+    let envelope = serde_json::to_string(&relayed).expect("envelope text");
+    let m = super::decrypt_for_apply(&cfg_b, &relayed, &envelope)
+        .expect("open the held row")
+        .expect("the held key opens the row");
     let engine = ApplyEngine {
         store: b.as_ref(),
         sync: b.as_ref(),
         device_id: "dev-b".into(),
         kms: None,
     };
-    let text = serde_json::to_string(&m).expect("envelope text");
     assert_eq!(
-        apply_mutation(&engine, &m, &text).expect("apply page"),
+        apply_mutation(&engine, &m, &envelope).expect("apply page"),
         ApplyOutcome::Applied
     );
     // Restart: a fresh pull re-fetches page 1 and absorbs it idempotently.
@@ -373,9 +389,11 @@ fn p_dlq_blocks_pull_cursor_until_key_or_ack_context() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
-    // The peer shreds the subject, so the incoming create must dead-letter.
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
+    // The peer shreds the subject, so the incoming create must dead-letter on
+    // the erasure check rather than on the wire refusal: both nodes hold the
+    // sync key, so the row opens and apply is what rejects it.
     b.upsert_subject_key_ref("s-victim", "shredded", "shredded")
         .expect("shred marker");
     a.create_memory_item(

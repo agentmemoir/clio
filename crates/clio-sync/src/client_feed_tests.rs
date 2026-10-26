@@ -21,7 +21,7 @@
 //!
 //! Keep this module focused on change-feed packaging tests.
 
-use crate::client::client_tests::{cfg, serve, sqlite};
+use crate::client::client_tests::{cfg, paired_cfg, serve, sqlite};
 use crate::client::{pull, push};
 use clio_store::{BeliefStore, PersonaStore, Store, SyncStore};
 use clio_types::{
@@ -84,8 +84,8 @@ fn triple_close_packages_as_invalidate_and_replicates() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     // A owns the triple; B independently holds the same SPO identity.
     a.commit_triple_add(
         &carrier("car-a", "bt", "Boston"),
@@ -137,8 +137,8 @@ fn persona_and_belief_records_replicate_end_to_end() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     // Seed the domain records on host A (persona stable + preference, belief).
     let entry = PersonaStableEntry {
         bank_id: "br".into(),
@@ -235,8 +235,8 @@ fn task_and_failure_records_replicate_end_to_end() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
 
     let mut task_item = carrier("car-task", "btf", "obj");
     task_item.episodic_type = Some(EpisodicType::Task);

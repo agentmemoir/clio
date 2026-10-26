@@ -294,10 +294,9 @@ fn pull_bank(
 /// Decrypt a pulled cipher mutation with the local sync keys before apply,
 /// restore its origin admission receipt, and resolve its identifier handle back
 /// to the real identifier from the opened payload. Returns `None` when the row
-/// was quarantined (unusable content, a plaintext row at a sealed node, or an
-/// identifier that cannot be resolved). Rows the operator already ack-skipped
-/// pass through unchanged so apply treats them as duplicates and the cursor may
-/// advance.
+/// was quarantined (unusable content, plaintext content, or an identifier that
+/// cannot be resolved). Rows the operator already ack-skipped pass through
+/// unchanged so apply treats them as duplicates and the cursor may advance.
 fn decrypt_for_apply(
     cfg: &SyncClientConfig,
     m: &SyncMutation,
@@ -331,15 +330,15 @@ fn decrypt_for_apply(
         Ok(None)
     };
     let SyncContent::Cipher(cipher) = &m.content else {
-        // A node configured with a sync key is in sealed mode and accepts only
-        // sealed content. A plaintext row carries no authenticated envelope, so
-        // a relay can fabricate it or downgrade a sealed row to it freely;
-        // refusing here is what stops both. A node with no key keeps the
-        // plaintext passthrough its peers rely on.
-        if cfg.cipher.is_empty() {
-            return Ok(Some(m.clone()));
-        }
-        return refuse(&m.bank, PLAINTEXT_REFUSED_REASON);
+        // A plaintext row carries no authenticated envelope, so a relay can
+        // fabricate it or downgrade a sealed row to it freely. Without a key
+        // this node cannot tell either apart, so it refuses the row too.
+        let reason = if cfg.cipher.is_empty() {
+            crate::client_refusal::PLAINTEXT_REFUSED_KEYLESS_REASON
+        } else {
+            PLAINTEXT_REFUSED_REASON
+        };
+        return refuse(&m.bank, reason);
     };
     if cfg.cipher.is_empty() {
         return refuse(&m.bank, "no sync cipher key configured");

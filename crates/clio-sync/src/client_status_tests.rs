@@ -20,7 +20,7 @@
 //!
 //! Keep this module focused on status/mode/feed edge-case tests.
 
-use crate::client::client_tests::{TOKEN, cfg, item, serve, sqlite};
+use crate::client::client_tests::{TOKEN, cfg, item, paired_cfg, serve, sqlite};
 use crate::client::{
     SyncClientConfig, SyncModes, ack_skip, bidirectional, pull, push, sync_status,
 };
@@ -86,8 +86,8 @@ fn status_pull_side_and_modes_parse() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     a.create_memory_item(
         &item("b1", "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
         "actor",
@@ -109,7 +109,7 @@ fn status_pull_side_and_modes_parse() {
         assert_eq!(SyncModes::parse(raw).is_ok(), expected);
     }
     // Bidirectional mode applies the same pull-then-push order.
-    let empty = cfg("dev-empty", &sqlite(), &addr, Vec::new());
+    let empty = paired_cfg("dev-empty", &sqlite(), &addr);
     bidirectional(&empty, &["b1".to_owned()]).expect("bidirectional");
     server.stop();
 }
@@ -120,8 +120,8 @@ fn invalidated_feed_packages_non_upsert_ops_and_errors_are_honest() {
     let addr = server.addr().to_owned();
     let a = sqlite();
     let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-b", &b, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    let cfg_b = paired_cfg("dev-b", &b, &addr);
     a.create_memory_item(
         &item("b1", "i-1", "s1", "2026-01-01T00:00:00Z", "g"),
         "actor",

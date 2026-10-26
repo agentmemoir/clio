@@ -270,34 +270,6 @@ fn the_same_conflict_without_the_score_falls_back_to_the_device_id() {
     server.stop();
 }
 
-/// The same conflict in plaintext mode reaches the same winner, so the two
-/// modes are compared rather than each trusted alone.
-#[test]
-fn plaintext_mode_resolves_the_same_conflict_to_the_same_winner() {
-    let (server, _srv, _kms) = serve(&[BANK]);
-    let addr = server.addr().to_owned();
-    let a = sqlite();
-    let b = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
-    let cfg_b = cfg("dev-z", &b, &addr, Vec::new());
-    let mut incoming = item(BANK, "i-1", "s1", STAMP, "incoming");
-    incoming.admission_score = Some(0.9);
-    a.create_memory_item(&incoming, "seed").expect("incoming");
-    let mut local = item(BANK, "i-1", "s1", STAMP, "local");
-    local.admission_score = Some(0.0);
-    b.create_memory_item(&local, "seed").expect("local");
-    push(&cfg_a, &[BANK.to_owned()]).expect("push");
-    pull(&cfg_b, &[BANK.to_owned()]).expect("pull");
-    let got = b.get_memory_item(BANK, "i-1").expect("get").expect("row");
-    assert_eq!(
-        got.gist.as_deref(),
-        Some("incoming"),
-        "plaintext mode picks the same winner as the sealed mode"
-    );
-    assert_eq!(b.conflict_count(BANK).expect("conflict count"), 0);
-    server.stop();
-}
-
 /// A row sealed without a document receipt, the shape an old writer produces,
 /// still applies on a fresh peer.
 #[test]

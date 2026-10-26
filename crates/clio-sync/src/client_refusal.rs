@@ -7,7 +7,7 @@
 //! receive path records on a dead letter when it cannot trust a pulled row.
 //!
 //! ## Owns
-//! - The sealed-mode refusal of plaintext content
+//! - The refusal of plaintext content, at a sealed and at a keyless node
 //! - The missing-key and failed-open refusals of a sealed row
 //!
 //! ## Does not own
@@ -28,6 +28,15 @@
 pub(crate) const PLAINTEXT_REFUSED_REASON: &str = "sealed mode refused plaintext content: this node holds a sync key, so it accepts only sealed \
      content, and a plaintext row carries no authenticated envelope. Discard the row deliberately \
      with the `sync_ack_skip` MCP tool, passing its mutation id with confirm";
+
+/// The refusal a plaintext row gets at a node holding no sync key: nothing
+/// authenticates the row, so the node cannot tell a fabricated row from a
+/// downgraded sealed one and quarantines it rather than applies it. Names the
+/// remedy that unblocks the transfer and the deliberate discard.
+pub(crate) const PLAINTEXT_REFUSED_KEYLESS_REASON: &str = "refused plaintext content: this node holds no sync key, so nothing authenticates \
+     the row and it cannot be told apart from one a relay fabricated or downgraded from sealed \
+     content. Run `clio sync keygen` to record a key on this node and pull again, or discard the \
+     row deliberately with the `sync_ack_skip` MCP tool, passing its mutation id with confirm";
 
 /// The refusal for a row sealed under a key this node does not hold. It names
 /// the stamped identifier and the identifiers held, both derived and
