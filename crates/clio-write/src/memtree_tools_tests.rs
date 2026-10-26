@@ -57,7 +57,8 @@ fn item(id: &str) -> MemoryItem {
 }
 
 fn store() -> Arc<dyn Store> {
-    let sqlite = SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store");
+    let sqlite =
+        SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store");
     Arc::new(sqlite)
 }
 
@@ -76,11 +77,8 @@ fn leaf(item_id: &str, bank: &str) -> AttachLeaf {
 fn attached_durably(store: &Arc<dyn Store>) -> Arc<Mutex<MemForest>> {
     let leaves = Arc::new(LeafIndex::new());
     let forest: Arc<Mutex<MemForest>> = Arc::new(Mutex::new(MemForest::new()));
-    let engine = MemTreeMaint::with_store(
-        Arc::clone(&forest),
-        Arc::clone(&leaves),
-        Arc::clone(store),
-    );
+    let engine =
+        MemTreeMaint::with_store(Arc::clone(&forest), Arc::clone(&leaves), Arc::clone(store));
     leaves.publish(item("item-1"));
     engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", BANK));
     forest
@@ -131,7 +129,9 @@ fn query_prefers_stored_rows_over_the_forest_this_process_holds() {
     ));
     assert_eq!(nodes.len(), 2, "the stored rows only: {nodes:?}");
     assert!(
-        nodes.iter().all(|n| n.item_id.as_deref() != Some("unflushed")),
+        nodes
+            .iter()
+            .all(|n| n.item_id.as_deref() != Some("unflushed")),
         "an unflushed forest node must not displace the stored rows: {nodes:?}"
     );
 }
@@ -280,12 +280,7 @@ fn both_reads_require_a_bank() {
         ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         ToolResult::Ok { .. } => panic!("expected missing bank"),
     }
-    match memtree_query(
-        store.as_ref(),
-        &forest,
-        "",
-        &MemTreeQueryFilter::default(),
-    ) {
+    match memtree_query(store.as_ref(), &forest, "", &MemTreeQueryFilter::default()) {
         ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         ToolResult::Ok { .. } => panic!("expected missing bank"),
     }

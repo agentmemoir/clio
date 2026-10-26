@@ -295,7 +295,9 @@ pub fn memtree_query(
     };
     let nodes: Vec<MemTreeNode> = if rows.is_empty() {
         let guard = forest.lock().expect("forest");
-        guard.tree(bank_id).map_or_else(Vec::new, |t| t.query(filter))
+        guard
+            .tree(bank_id)
+            .map_or_else(Vec::new, |t| t.query(filter))
     } else {
         rows.into_iter().map(node_from_record).collect()
     };

@@ -154,12 +154,8 @@ fn memtree_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
         task_id: opt_str(args, "task_id").map(str::to_owned),
         limit: opt_usize(args, "limit"),
     };
-    let result = clio_write::memtree_query(
-        &*state.store,
-        &state.forest,
-        ctx.bank.as_str(),
-        &filter,
-    );
+    let result =
+        clio_write::memtree_query(&*state.store, &state.forest, ctx.bank.as_str(), &filter);
     let nodes = crate::read_tools::tool_result_value(result)?;
     Ok(json!({ "nodes": nodes }))
 }
@@ -289,6 +285,10 @@ fn belief_history(state: &McpState, args: &Value) -> Result<Value, AmError> {
     )?;
     Ok(serde_json::to_value(&history).expect("serialize belief history"))
 }
+
+#[cfg(test)]
+#[path = "read_history_memtree_tests.rs"]
+mod read_history_memtree_tests;
 
 #[cfg(test)]
 #[path = "read_history_temporal_context_tests.rs"]

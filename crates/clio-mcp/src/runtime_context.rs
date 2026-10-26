@@ -222,8 +222,7 @@ impl McpState {
     /// [`MAINTENANCE_DRAIN_BUDGET`], so a stuck store costs one write that
     /// budget instead of hanging it.
     pub fn dispatch_maintenance(&self, signals: Vec<MaintenanceSignal>) {
-        let job =
-            dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
+        let job = dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
         if let Some(job) = job {
             let _ = job.drain(MAINTENANCE_DRAIN_BUDGET);
         }

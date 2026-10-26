@@ -63,7 +63,11 @@ fn depths_and_generations_beyond_the_column_width_saturate() {
     node.generation = u64::MAX;
     let record = record_from_node(&node, "t0");
     assert_eq!(record.depth, i32::MAX, "depth widened without wrapping");
-    assert_eq!(record.generation, i64::MAX, "generation widened without wrapping");
+    assert_eq!(
+        record.generation,
+        i64::MAX,
+        "generation widened without wrapping"
+    );
 }
 
 #[test]

@@ -22,7 +22,7 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
-use crate::memtree::{AttachLeaf, MemForest, DEFAULT_FANOUT};
+use crate::memtree::{AttachLeaf, DEFAULT_FANOUT, MemForest};
 use crate::memtree_maint::MemTreeMaint;
 use clio_store::{LocalDevKms, MemTreeNodeRecord, MemTreeQuery, SqliteStore, Store};
 use clio_types::{EpisodicType, EpistemicKind, ItemKind, MemoryItem};
@@ -56,7 +56,8 @@ fn item(id: &str) -> MemoryItem {
 }
 
 fn store() -> Arc<dyn Store> {
-    let sqlite = SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store");
+    let sqlite =
+        SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store");
     Arc::new(sqlite)
 }
 
@@ -73,11 +74,8 @@ fn rows(store: &dyn Store) -> Vec<MemTreeNodeRecord> {
 fn engine(store: &Arc<dyn Store>) -> (Arc<MemTreeMaint>, Arc<LeafIndex>, Arc<Mutex<MemForest>>) {
     let leaves = Arc::new(LeafIndex::new());
     let forest: Arc<Mutex<MemForest>> = Arc::new(Mutex::new(MemForest::new()));
-    let engine = MemTreeMaint::with_store(
-        Arc::clone(&forest),
-        Arc::clone(&leaves),
-        Arc::clone(store),
-    );
+    let engine =
+        MemTreeMaint::with_store(Arc::clone(&forest), Arc::clone(&leaves), Arc::clone(store));
     (engine, leaves, forest)
 }
 
@@ -87,7 +85,10 @@ fn debug_names_the_durability_of_the_engine() {
     let forest: Arc<Mutex<MemForest>> = Arc::new(Mutex::new(MemForest::new()));
     let durable = MemTreeMaint::with_store(Arc::clone(&forest), Arc::clone(&leaves), store());
     let transient = MemTreeMaint::new(Arc::clone(&forest), leaves);
-    assert!(format!("{durable:?}").contains("durable: true"), "{durable:?}");
+    assert!(
+        format!("{durable:?}").contains("durable: true"),
+        "{durable:?}"
+    );
     assert!(
         format!("{transient:?}").contains("durable: false"),
         "{transient:?}"
@@ -118,7 +119,11 @@ fn a_signal_for_an_unpublished_item_writes_nothing() {
     let store = store();
     let (engine, _leaves, _forest) = engine(&store);
     engine.on_leaf_attached(MaintenanceSignal::leaf_attached("ghost", BANK));
-    assert_eq!(rows(store.as_ref()).len(), 0, "an unpublished leaf stores nothing");
+    assert_eq!(
+        rows(store.as_ref()).len(),
+        0,
+        "an unpublished leaf stores nothing"
+    );
 }
 
 #[test]
@@ -145,7 +150,11 @@ fn a_signal_for_an_already_placed_leaf_still_persists_the_tree() {
     engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", BANK));
 
     let rows = rows(store.as_ref());
-    assert_eq!(rows.len(), 2, "leaf + root despite the earlier attach: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "leaf + root despite the earlier attach: {rows:?}"
+    );
     assert!(
         rows.iter().any(|r| r.item_id.as_deref() == Some("item-1")),
         "the placed leaf is stored: {rows:?}"
@@ -161,7 +170,11 @@ fn an_engine_without_a_store_writes_nothing() {
     leaves.publish(item("item-1"));
     engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", BANK));
     engine.refresh_bank(BANK);
-    assert_eq!(rows(store.as_ref()).len(), 0, "a store-less engine stores nothing");
+    assert_eq!(
+        rows(store.as_ref()).len(),
+        0,
+        "a store-less engine stores nothing"
+    );
 }
 
 #[test]

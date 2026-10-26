@@ -123,8 +123,9 @@ fn coverage_maint_tools_and_force() {
         clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         clio_types::ToolResult::Ok { .. } => panic!("expected missing bank"),
     }
-    let store: Arc<dyn Store> =
-        Arc::new(SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store"));
+    let store: Arc<dyn Store> = Arc::new(
+        SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store"),
+    );
     match memtree_get(store.as_ref(), &forest, "", "x") {
         clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         clio_types::ToolResult::Ok { .. } => panic!("expected missing bank"),

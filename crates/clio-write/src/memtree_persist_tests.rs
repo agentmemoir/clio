@@ -59,7 +59,8 @@ fn item(id: &str) -> MemoryItem {
 }
 
 fn store() -> Arc<dyn Store> {
-    let sqlite = SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store");
+    let sqlite =
+        SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store");
     Arc::new(sqlite)
 }
 
