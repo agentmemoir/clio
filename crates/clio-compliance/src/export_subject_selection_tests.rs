@@ -98,7 +98,13 @@ fn a_subject_selection_without_a_backend_is_refused() {
     let facts = fixture.facts();
     let context = ctx(&fixture.bank);
     let Err(error) = build_subject_selection(
-        &args(&fixture, &context, ExportFilter::default(), Some(&facts), None),
+        &args(
+            &fixture,
+            &context,
+            ExportFilter::default(),
+            Some(&facts),
+            None,
+        ),
         &fixture.bank,
         SELECTED,
     ) else {
@@ -119,7 +125,13 @@ fn the_default_selection_delivers_only_the_selected_subjects_records() {
     let facts = fixture.facts();
     let context = ctx(&fixture.bank);
     let payload = build_subject_selection(
-        &args(&fixture, &context, ExportFilter::default(), Some(&facts), Some(InventoryBackend::Sqlite)),
+        &args(
+            &fixture,
+            &context,
+            ExportFilter::default(),
+            Some(&facts),
+            Some(InventoryBackend::Sqlite),
+        ),
         &fixture.bank,
         SELECTED,
     )
@@ -130,10 +142,16 @@ fn the_default_selection_delivers_only_the_selected_subjects_records() {
         .iter()
         .find(|(name, _)| name == "items")
         .expect("the manifest carries the items count");
-    assert_eq!(items.1, 5, "the manifest count is the selected mapping's count");
+    assert_eq!(
+        items.1, 5,
+        "the manifest count is the selected mapping's count"
+    );
     let text = String::from_utf8(payload.bytes).expect("the payload bytes are text");
     assert!(text.contains(SELECTED), "the payload carries the subject");
-    assert!(!text.contains(OTHER), "no other subject's record enters the payload");
+    assert!(
+        !text.contains(OTHER),
+        "no other subject's record enters the payload"
+    );
 }
 
 /// A selection under every narrowing records each narrowing it applied, so
@@ -152,7 +170,13 @@ fn the_manifest_records_every_narrowing_the_selection_applies() {
         ..ExportFilter::default()
     };
     let payload = build_subject_selection(
-        &args(&fixture, &context, filter, Some(&facts), Some(InventoryBackend::Sqlite)),
+        &args(
+            &fixture,
+            &context,
+            filter,
+            Some(&facts),
+            Some(InventoryBackend::Sqlite),
+        ),
         &fixture.bank,
         SELECTED,
     )
@@ -164,11 +188,18 @@ fn the_manifest_records_every_narrowing_the_selection_applies() {
         "archived items excluded",
     ] {
         assert!(
-            payload.manifest.omissions.iter().any(|omission| omission == note),
+            payload
+                .manifest
+                .omissions
+                .iter()
+                .any(|omission| omission == note),
             "the manifest records the applied narrowing: {note}"
         );
     }
-    assert!(!payload.manifest.complete, "a narrowed selection is not complete");
+    assert!(
+        !payload.manifest.complete,
+        "a narrowed selection is not complete"
+    );
     assert_eq!(
         payload.manifest.filter["subject_id"], SELECTED,
         "the manifest names the selected subject"
