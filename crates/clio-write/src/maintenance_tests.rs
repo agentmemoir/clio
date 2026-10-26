@@ -1,10 +1,33 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
+//
+//! # Responsibility
+//!
+//! This module is responsible for the maintenance handoff tests: the in-process
+//! leaf index and the verdict a bounded wait on the detached hook returns.
+//!
+//! ## Owns
+//! - Leaf publish, lookup, listing order, and removal
+//! - `DispatchJob::drain` for a panicking hook and for one that outlasts its budget
+//!
+//! ## Does not own
+//! - The dispatcher and the hook contract under test
+//! - What a durable hook writes (`memtree_hook_tests`)
+//!
+//! ## Boundary
+//!
+//! Changes to what a drain wait reports should normally require changes here.
+//! Changes to the rows a hook writes should not require changes here.
+//!
+//! Test-only. Never compiled into production builds.
 
 use crate::maintenance::{
     BufferMaintenance, LeafIndex, MaintenanceHook, MaintenanceSignal, NoopMaintenance,
+    dispatch_async,
 };
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 fn item(id: &str, created: &str) -> MemoryItem {
     MemoryItem {
@@ -57,4 +80,88 @@ fn buffer_and_noop_hooks() {
     assert_eq!(hook.signals().len(), 1);
     let noop = NoopMaintenance;
     noop.on_leaf_attached(MaintenanceSignal::leaf_attached("i2", "b"));
+}
+
+/// A hook that panics, so the dispatcher drops its sender before it reports.
+#[derive(Debug)]
+struct PanicHook;
+
+impl MaintenanceHook for PanicHook {
+    fn on_leaf_attached(&self, _signal: MaintenanceSignal) {
+        panic!("hook refuses the signal");
+    }
+}
+
+/// A hook that holds the signal until the test releases it.
+#[derive(Debug, Default)]
+struct BlockingHook {
+    released: Mutex<bool>,
+    ready: Condvar,
+}
+
+impl BlockingHook {
+    fn release(&self) {
+        *self.released.lock().expect("release flag") = true;
+        self.ready.notify_all();
+    }
+}
+
+impl MaintenanceHook for BlockingHook {
+    fn on_leaf_attached(&self, _signal: MaintenanceSignal) {
+        let mut released = self.released.lock().expect("release flag");
+        while !*released {
+            // The timeout only keeps a hook the test never releases from
+            // blocking its thread forever; the drain's own budget is the bound
+            // this test measures.
+            let (guard, timed_out) = self
+                .ready
+                .wait_timeout(released, Duration::from_secs(10))
+                .expect("wait for release");
+            released = guard;
+            if timed_out.timed_out() {
+                return;
+            }
+        }
+    }
+}
+
+#[test]
+fn drain_reports_a_panicking_hook_as_undelivered() {
+    let job = dispatch_async(
+        Arc::new(PanicHook),
+        vec![MaintenanceSignal::leaf_attached("i1", "b")],
+    )
+    .expect("a signal starts the dispatcher");
+
+    let started = Instant::now();
+    assert!(
+        !job.drain(Duration::from_secs(5)),
+        "a hook that panicked never reported delivery"
+    );
+    let waited = started.elapsed();
+    assert!(
+        waited < Duration::from_secs(1),
+        "the verdict came with the panic, not when the budget ran out: {waited:?}"
+    );
+}
+
+#[test]
+fn drain_stops_at_the_budget_when_the_hook_never_finishes() {
+    let hook = Arc::new(BlockingHook::default());
+    let job = dispatch_async(
+        Arc::clone(&hook) as Arc<dyn MaintenanceHook + Send + Sync>,
+        vec![MaintenanceSignal::leaf_attached("i1", "b")],
+    )
+    .expect("a signal starts the dispatcher");
+
+    let started = Instant::now();
+    let delivered = job.drain(Duration::from_millis(20));
+    let waited = started.elapsed();
+    hook.release();
+
+    assert!(!delivered, "an unfinished hook proves no delivery");
+    assert!(
+        waited < Duration::from_secs(1),
+        "the wait ended at its budget, not when the hook finished: {waited:?}"
+    );
 }

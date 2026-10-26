@@ -8,6 +8,7 @@
 //! ## Owns
 //! - SQLite + Postgres parity tests for memtree node upsert / get / query
 //! - Missing-bank and filter-miss error-arm coverage for MemTree CRUD
+//! - The creation time a re-persisted node keeps from its first write
 //!
 //! ## Does not own
 //! - MemTree engine or attach logic (lives in `clio-write`)
@@ -96,6 +97,34 @@ fn sqlite_memtree_upsert_get_query() {
         .test_execute("UPDATE memtree_nodes SET child_ids_json = 'not-json' WHERE id = 'n1'")
         .unwrap();
     assert!(store.get_memtree_node("bank-a", "n1").is_err());
+}
+
+#[test]
+fn a_re_persisted_node_keeps_its_first_created_at() {
+    let store = SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).unwrap();
+    let mut node = sample_node("bank-a", "n1");
+    node.created_at = "2026-06-01T00:00:00Z".into();
+    node.updated_at = "2026-06-01T00:00:00Z".into();
+    store.upsert_memtree_node(&node).unwrap();
+
+    // A later write carries its own stamps and a recomputed gist, which is what
+    // a refresh wave sends for a row that already exists.
+    node.summary_gist = Some("refreshed".into());
+    node.created_at = "2026-06-02T00:00:00Z".into();
+    node.updated_at = "2026-06-02T00:00:00Z".into();
+    store.upsert_memtree_node(&node).unwrap();
+
+    let stored = store.get_memtree_node("bank-a", "n1").unwrap().unwrap();
+    assert_eq!(
+        stored.created_at, "2026-06-01T00:00:00Z",
+        "the first creation time survives the later write"
+    );
+    assert_eq!(stored.updated_at, "2026-06-02T00:00:00Z");
+    assert_eq!(
+        stored.summary_gist.as_deref(),
+        Some("refreshed"),
+        "the later write still replaces the gist"
+    );
 }
 
 #[test]

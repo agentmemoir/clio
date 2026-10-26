@@ -235,8 +235,8 @@ impl McpState {
             self.maint.record_persist_failure(&AmError::new(
                 ErrorCode::Internal,
                 format!(
-                    "maintenance hook did not finish within {}s, so its memtree rows may be unwritten",
-                    MAINTENANCE_DRAIN_BUDGET.as_secs()
+                    "maintenance hook did not finish within {}ms, so its memtree rows may be unwritten",
+                    MAINTENANCE_DRAIN_BUDGET.as_millis()
                 ),
             ));
         }

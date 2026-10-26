@@ -441,7 +441,3 @@ mod memtree_maint_erase_tests;
 #[cfg(test)]
 #[path = "memtree_maint_wave_tests.rs"]
 mod memtree_maint_wave_tests;
-
-#[cfg(test)]
-#[path = "memtree_persist_tests.rs"]
-mod memtree_persist_tests;

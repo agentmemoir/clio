@@ -315,3 +315,7 @@ impl BankMemTree {
         dirty
     }
 }
+
+#[cfg(test)]
+#[path = "memtree_attach_tests.rs"]
+mod memtree_attach_tests;

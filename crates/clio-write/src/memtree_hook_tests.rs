@@ -162,19 +162,23 @@ fn a_signal_for_an_already_placed_leaf_still_persists_the_tree() {
 }
 
 #[test]
-fn an_engine_without_a_store_writes_nothing() {
-    let store = store();
+fn an_engine_without_a_store_still_places_the_leaf() {
     let leaves = Arc::new(LeafIndex::new());
     let forest: Arc<Mutex<MemForest>> = Arc::new(Mutex::new(MemForest::new()));
     let engine = MemTreeMaint::new(Arc::clone(&forest), Arc::clone(&leaves));
     leaves.publish(item("item-1"));
     engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", BANK));
     engine.refresh_bank(BANK);
-    assert_eq!(
-        rows(store.as_ref()).len(),
-        0,
-        "a store-less engine stores nothing"
+
+    let guard = forest.lock().expect("forest");
+    let tree = guard
+        .tree(BANK)
+        .expect("a transient engine still grows a tree");
+    assert!(
+        tree.leaf_node_id_for_item("item-1").is_some(),
+        "the leaf is placed in memory even with nothing to write it to"
     );
+    assert!(tree.root_id().is_some(), "and the tree has its root");
 }
 
 #[test]
@@ -244,23 +248,40 @@ fn a_split_attach_stores_the_new_parent_of_every_child_it_moved() {
 }
 
 #[test]
-fn a_refresh_wave_stores_the_cleared_dirty_flag() {
+fn a_refresh_wave_stores_the_cleared_dirty_flag_and_the_new_gist() {
     let store = store();
     let (engine, leaves, _forest) = engine(&store);
     leaves.publish(item("item-1"));
     engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", BANK));
-    assert!(
-        rows(store.as_ref()).iter().any(|r| r.dirty),
-        "the root starts dirty in the store"
-    );
-    engine.refresh_bank(BANK);
-    let rows = rows(store.as_ref());
-    let root = rows
+    let attached = rows(store.as_ref());
+    let before = attached
         .iter()
         .find(|r| r.parent_id.is_none())
         .expect("stored root");
+    assert!(before.dirty, "the root starts dirty in the store");
+    assert!(
+        before.summary_gist.is_none(),
+        "an attach stores no gist for the root: {before:?}"
+    );
+
+    engine.refresh_bank(BANK);
+
+    let after = rows(store.as_ref());
+    let root = after
+        .iter()
+        .find(|r| r.parent_id.is_none())
+        .expect("stored root");
+    assert_eq!(
+        after.len(),
+        attached.len(),
+        "the wave rewrote rows, not added"
+    );
+    assert_eq!(root.id, before.id, "the same root row was re-persisted");
     assert!(!root.dirty, "the wave stored the cleared flag: {root:?}");
-    assert!(root.summary_gist.is_some(), "{root:?}");
+    assert!(
+        root.summary_gist.is_some(),
+        "the wave stored the recomputed gist over the attach's row: {root:?}"
+    );
 }
 
 #[test]
