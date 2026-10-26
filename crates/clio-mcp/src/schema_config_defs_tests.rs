@@ -8,8 +8,8 @@
 //! retention shaping group and its `half_life_days` knob, the
 //! maintenance-trigger group and its inclusive/zero-disables threshold
 //! semantics, and the corrected `ranking_env_set` and `config_profile_apply`
-//! sentences (process-exit discard, governs-next-retrieval,
-//! push-to-retrieval).
+//! sentences (server-process lifetime, the tool writing nothing while the CLI
+//! persists, governs-next-retrieval, push-to-retrieval).
 //!
 //! ## Owns
 //! - `ranking_env_get` / `ranking_env_set` description assertions
@@ -157,15 +157,26 @@ fn published_maintenance_knob_zero_semantics_are_stated() {
     }
 }
 
-/// The published `ranking_env_set` sentence keeps both true halves: the
-/// process-exit discard and the governs-next-retrieval push, with the `trust`
-/// group named so a caller knows trust ratios are patchable, and the
+/// The published `ranking_env_set` sentence keeps every true half: the patch
+/// lasts for the server process's lifetime and the tool writes it nowhere,
+/// while the CLI persists it; the governs-next-retrieval push with the
+/// `trust` group named so a caller knows trust ratios are patchable; and the
 /// admission and intent-gate half staying on the process-open environment.
 #[test]
 fn ranking_env_set_description_states_the_patch_governs_the_next_retrieval() {
     let description = def("ranking_env_set").description;
     assert!(
-        description.contains("discarded at process exit"),
+        description.contains("for this server process's lifetime"),
+        "{description}"
+    );
+    assert!(
+        description.contains("this tool does not write it anywhere"),
+        "{description}"
+    );
+    assert!(
+        description.contains(
+            "`clio ranking set` on the command line persists the same environment for later commands"
+        ),
         "{description}"
     );
     assert!(
@@ -202,10 +213,12 @@ fn ranking_env_set_description_names_the_live_and_fixed_groups() {
     );
 }
 
-/// The published `config_profile_apply` sentence keeps both true halves: the
-/// push-to-retrieval half (a successful apply retunes the already-open
-/// retrieval snapshot) and the admission half (admission and the intent gate
-/// stay on the process-open environment), with the process-exit discard.
+/// The published `config_profile_apply` sentence keeps every true half: the
+/// server-process lifetime of the activation with the tool writing nothing
+/// while the CLI persists the profile, the push-to-retrieval half (a
+/// successful apply retunes the already-open retrieval snapshot), and the
+/// admission half (admission and the intent gate stay on the process-open
+/// environment).
 #[test]
 fn config_profile_apply_description_states_the_push_to_the_live_retrieval() {
     let description = def("config_profile_apply").description;
@@ -215,7 +228,17 @@ fn config_profile_apply_description_states_the_push_to_the_live_retrieval() {
     );
     assert!(description.contains("next retrieval"), "{description}");
     assert!(
-        description.contains("discarded at process exit"),
+        description.contains("for this server process for its lifetime"),
+        "{description}"
+    );
+    assert!(
+        description.contains("this tool does not write it anywhere"),
+        "{description}"
+    );
+    assert!(
+        description.contains(
+            "`clio config use` on the command line persists the same profile for later commands"
+        ),
         "{description}"
     );
     assert!(
@@ -241,4 +264,49 @@ fn published_pack_carries_the_retention_knob_text() {
     assert_eq!(tool["inputSchema"]["type"], "object");
     let defects = validate_tool_schema(&def("ranking_env_get").to_tool());
     assert!(defects.is_empty(), "{defects:?}");
+}
+
+/// The published `config_set` sentence agrees with the CLI it describes: a
+/// session-scoped value lives in the server process's memory and this tool
+/// writes it nowhere, a profile-scoped value applies to the active profile for
+/// this server process, deployment is the scope the persistence layer writes,
+/// and the CLI persists `profile` and `deployment` while refusing `session`.
+#[test]
+fn config_set_description_states_each_scope_lifetime_and_the_cli_refusal() {
+    let description = def("config_set").description;
+    for clause in [
+        "A session-scoped value lives in this server process's memory for its lifetime and this tool does not write it anywhere",
+        "A profile-scoped value applies to the active profile for this server process, and this tool does not write it anywhere either",
+        "Deployment is the scope the persistence layer writes",
+        "`clio config set` persists the `profile` and `deployment` scopes for later commands and refuses `session`",
+    ] {
+        assert!(description.contains(clause), "{description}");
+    }
+}
+
+/// The `scope` property keeps `session` as its default and in the enum (the
+/// long-lived server still uses it) while the description names the same
+/// lifetimes the tool description does, so neither text contradicts the CLI.
+#[test]
+fn config_set_scope_property_states_the_scope_lifetimes() {
+    let tool = def("config_set").to_tool();
+    let scope = &tool["inputSchema"]["properties"]["scope"];
+    let description = scope["description"].as_str().expect("scope description");
+    assert_eq!(
+        scope["default"], "session",
+        "a server keeps session as default"
+    );
+    assert_eq!(
+        scope["enum"],
+        serde_json::json!(["session", "profile", "deployment"]),
+        "session stays a valid scope for the server"
+    );
+    for clause in [
+        "`session` (default here)",
+        "writes it nowhere",
+        "and the CLI refuses it",
+        "`deployment` is the scope the persistence layer writes",
+    ] {
+        assert!(description.contains(clause), "{description}");
+    }
 }

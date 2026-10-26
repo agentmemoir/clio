@@ -139,14 +139,14 @@ const REVOKE_NOTE: &str = "removes the record; servers load the store at start, 
 /// pair cannot be assembled without changing the printed bytes.
 const ADD_USAGE: &str = "clio auth token add --label LABEL --actor ACTOR --bank BANK [--bank BANK] [--output json|text]";
 
-/// The `config set` scope: one of three named scopes, and `config_cli::set_call`
-/// falls back to `session` when it is absent.
+/// The `config set` scope: one of three named scopes, of which `config_cli`
+/// accepts the two a later command can read.
 const SCOPE: Flag = Flag {
     default: Some("session"),
     ..Flag::choice(
         "scope",
         "session|profile|deployment",
-        "Selects the configuration scope that `config_cli::set_call` passes to the `config_set` tool; it accepts `session`, `profile`, or `deployment` and falls back to `session`.",
+        "Selects the configuration scope that `config_cli::set_call` passes to the `config_set` tool; `session` is process-local, living only for this command, and the CLI refuses it even though it stays the fallback when the flag is omitted, while `profile` persists the value in the CLI state file and `deployment` persists it in the deployment config file, so a later command reads both.",
         &["session", "profile", "deployment"],
     )
 };
@@ -277,12 +277,12 @@ pub(crate) const CONFIG_SET: CommandSpec = CommandSpec {
     usage_alternates: &[],
     examples: &[
         Example {
-            command: "clio config set sync.omit true",
-            comment: Some("Write one path at the session scope."),
+            command: "clio config set sync.omit true --scope deployment",
+            comment: Some("Write one path at the deployment scope."),
         },
         Example {
-            command: "clio config set sync.omit true --scope session -o json",
-            comment: Some("Write the same path at the session scope and report as JSON."),
+            command: "clio config set sync.omit true --scope profile -o json",
+            comment: Some("Write the same path at the active profile's scope and report as JSON."),
         },
         Example {
             command: "clio config set sync.omit false --scope deployment -o json",

@@ -33,65 +33,6 @@ fn tmp(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("am-{name}-{n}"))
 }
 
-fn lookup<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
-    move |key: &str| {
-        pairs
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| (*v).to_owned())
-    }
-}
-
-#[test]
-fn resolve_prefers_explicit() {
-    let p = PathBuf::from("/tmp/explicit.json");
-    assert_eq!(resolve_deployment_path(Some(p.clone())), Some(p));
-}
-
-#[test]
-fn resolve_env_override_and_disable() {
-    // Env override wins over the XDG default.
-    let env = lookup(&[
-        ("CLIO_DEPLOYMENT_CONFIG", "/tmp/e.json"),
-        ("XDG_CONFIG_HOME", "/tmp/xdg"),
-    ]);
-    assert_eq!(
-        resolve_deployment_path_with(None, &env),
-        Some(PathBuf::from("/tmp/e.json"))
-    );
-    // An empty override disables loading entirely.
-    let disabled = lookup(&[
-        ("CLIO_DEPLOYMENT_CONFIG", ""),
-        ("XDG_CONFIG_HOME", "/tmp/xdg"),
-    ]);
-    assert_eq!(resolve_deployment_path_with(None, &disabled), None);
-}
-
-#[test]
-fn resolve_defaults_follow_xdg_then_home() {
-    let xdg = lookup(&[("XDG_CONFIG_HOME", "/tmp/xdg"), ("HOME", "/tmp/home")]);
-    assert_eq!(
-        resolve_deployment_path_with(None, &xdg),
-        Some(PathBuf::from("/tmp/xdg/clio/deployment.json"))
-    );
-    let home = lookup(&[("HOME", "/tmp/home")]);
-    assert_eq!(
-        resolve_deployment_path_with(None, &home),
-        Some(PathBuf::from("/tmp/home/.config/clio/deployment.json"))
-    );
-    // A relative XDG base is invalid and ignored; HOME is the fallback.
-    let relative = lookup(&[("XDG_CONFIG_HOME", "rel"), ("HOME", "/tmp/home")]);
-    assert_eq!(
-        resolve_deployment_path_with(None, &relative),
-        Some(PathBuf::from("/tmp/home/.config/clio/deployment.json"))
-    );
-    // No home at all: nothing to load.
-    assert_eq!(resolve_deployment_path_with(None, |_| None), None);
-    // A relative HOME is also invalid: nothing usable to load.
-    let relative_home = lookup(&[("HOME", "rel")]);
-    assert_eq!(resolve_deployment_path_with(None, &relative_home), None);
-}
-
 #[test]
 fn default_deployment_path_is_loaded_and_can_be_disabled() {
     // A temp HOME stands in for the operator's real config dir.

@@ -4,12 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for the `clio config` CLI surface: reading the
-//! effective configuration, setting a validated value at session/profile/
-//! deployment scope, listing named profiles, and applying one.
+//! effective configuration, setting a validated value at profile/deployment
+//! scope, listing named profiles, and applying one.
 //!
 //! ## Owns
 //! - The `config get|set|profiles|use` verbs and their text views
 //! - Decoding the `VALUE` positional into the tool's JSON value
+//! - Refusing the session scope, which a one-command process cannot observe
+//! - Refusing a profile-scoped secret, which the unsealed CLI state file cannot
+//!   hold, before the value is applied
+//! - Flushing a profile activation or profile-scoped set to the CLI state file,
+//!   and refusing a deployment set that has no file to go in
 //!
 //! ## Does not own
 //! - Config merge order, validation, masking, or persistence (`clio-config`)
@@ -30,6 +35,7 @@ use crate::cli_output;
 use crate::cli_read::CliIo;
 use crate::runtime_cli::{RuntimeGroup, no_positionals, pretty_without_ok};
 use clio::Runtime;
+use clio::secret::path_is_secret;
 use serde_json::{Map, Value, json};
 use std::process::ExitCode;
 
@@ -64,12 +70,71 @@ impl RuntimeGroup for ConfigGroup {
         }
     }
 
+    /// A deployment-scoped set needs a file to go in, and the two writes a later
+    /// command can observe are saved. A run that cannot save must not report the
+    /// change as a success.
+    fn commit(&self, verb: &str, payload: &Value, runtime: &mut Runtime) -> Result<(), CliError> {
+        let scope = payload.get("scope").and_then(Value::as_str);
+        if verb == "config set" && scope == Some(SCOPE_DEPLOYMENT) {
+            if !runtime.has_deployment_path() {
+                return Err(CliError::operational(
+                    "no_config_dir",
+                    "the deployment-scoped value was not saved: no deployment config file \
+                     resolves, so this command has nowhere to write it; set HOME or \
+                     XDG_CONFIG_HOME, or name the file with CLIO_DEPLOYMENT_CONFIG",
+                ));
+            }
+            return Ok(());
+        }
+        let durable = match verb {
+            VERB_USE => true,
+            "config set" => scope == Some(SCOPE_PROFILE),
+            _ => false,
+        };
+        if !durable {
+            return Ok(());
+        }
+        let flushed = runtime
+            .flush_cli_state()
+            .map_err(|error| CliError::from_am_error(&error))?;
+        if !flushed.written() {
+            return Err(CliError::operational(
+                "no_config_dir",
+                "the config change applied to this process but was not saved: no clio config \
+                 directory resolves, so later commands read the previous profile and values",
+            ));
+        }
+        if !flushed.dropped().is_empty() {
+            return Err(CliError::operational(
+                "invalid_argument",
+                format!(
+                    "the config change applied to this process, but {} cannot be saved in the \
+                     unsealed CLI state file and a later command will not read it; use \
+                     `--scope deployment` to persist it, because deployment.json seals values",
+                    flushed.dropped().join(", ")
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn render(&self, verb: &str, payload: &Value) -> String {
         match verb {
             "config get" => render_get(payload),
             "config set" => render_set(payload),
             "config profiles" => render_profiles(payload),
             _ => render_use(payload),
+        }
+    }
+
+    /// A profile activation outranks the environment for the knobs it carries,
+    /// so every later command reads its `log.level` and `backend` rather than
+    /// `CLIO_LOG_LEVEL` and `CLIO_BACKEND`; the payload says so in both views.
+    fn annotate(&self, verb: &str, payload: &mut Value) {
+        if verb == VERB_USE
+            && let Some(object) = payload.as_object_mut()
+        {
+            object.insert("precedence_note".to_owned(), Value::from(PRECEDENCE_NOTE));
         }
     }
 }
@@ -109,19 +174,59 @@ fn get_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     Ok(("config_get", Value::Object(args)))
 }
 
-/// `config set PATH VALUE [--scope session|profile|deployment]` → `config_set`.
+/// The `config use` verb: activating a profile is a write a later command sees.
+const VERB_USE: &str = "config use";
+
+/// The precedence sentence `config use` prints: a persisted profile's own
+/// `log.level` and `backend` are merged above the environment, so in every later
+/// command they outrank `CLIO_LOG_LEVEL` and `CLIO_BACKEND`.
+const PRECEDENCE_NOTE: &str = "note: this profile carries `log.level` and `backend`, and it is applied above the environment, so in every later command its values win over `CLIO_LOG_LEVEL` and `CLIO_BACKEND`.";
+
+/// The profile scope: the one `config set` scope this process can save.
+pub(crate) const SCOPE_PROFILE: &str = "profile";
+/// The deployment scope: saved in the deployment file, which seals its values.
+pub(crate) const SCOPE_DEPLOYMENT: &str = "deployment";
+/// The session scope: in-memory only, so the CLI refuses it.
+pub(crate) const SCOPE_SESSION: &str = "session";
+
+/// `config set PATH VALUE [--scope profile|deployment]` → `config_set`.
 ///
 /// `VALUE` is decoded as JSON when it parses (so numbers, booleans, null, and
 /// quoted strings keep their type) and as a plain string otherwise. The tool
 /// validates the path/value and the scope before any apply.
+///
+/// A session-scoped write is never sent: it would live in this process only,
+/// which a one-command process ends immediately, so reporting it as applied
+/// would be a promise nothing can keep. A secret at profile scope is refused for
+/// the same reason: the CLI state file it would go in seals nothing, so the
+/// value would have to be dropped.
 fn set_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let [path, value] = parsed.positionals() else {
         return Err(CliError::usage_hint(
             "`config set` requires PATH and VALUE arguments",
-            "try `clio config set backend postgres`",
+            "try `clio config set backend postgres --scope deployment`",
         ));
     };
-    let scope = parsed.value("scope").unwrap_or("session");
+    let scope = parsed.value("scope").unwrap_or(SCOPE_SESSION);
+    if scope == SCOPE_SESSION {
+        return Err(CliError::operational(
+            "invalid_argument",
+            "a session-scoped value applies to the running process only, is discarded when this \
+             command ends, and cannot be read by a later command; use `--scope deployment` to \
+             persist the value in deployment.json, or `--scope profile` for the active profile",
+        ));
+    }
+    if scope == SCOPE_PROFILE && path_is_secret(path) {
+        return Err(CliError::operational(
+            "invalid_argument",
+            format!(
+                "`{path}` carries a secret, which cannot be saved in the unsealed CLI state file \
+                 at the profile scope: that file is written in the clear, so the value would be \
+                 dropped and a later command would not read it; use `--scope deployment`, which \
+                 persists it in deployment.json with the value sealed"
+            ),
+        ));
+    }
     let mut args = Map::new();
     args.insert("path".into(), Value::from(path.as_str()));
     args.insert("value".into(), parse_value(value));
@@ -219,6 +324,9 @@ fn render_use(payload: &Value) -> String {
     let mut lines = vec![format!(
         "applied profile {name} (bank policy {bank_policy}); {note}"
     )];
+    if let Some(precedence) = payload.get("precedence_note").and_then(Value::as_str) {
+        lines.push(precedence.to_owned());
+    }
     if let Some(diff) = payload.get("diff") {
         lines.push(pretty_without_ok(diff));
     }

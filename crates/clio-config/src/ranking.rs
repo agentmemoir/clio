@@ -210,31 +210,53 @@ impl Default for MaintenanceTriggerKnobs {
     }
 }
 
+/// Serde default for `theta_admit` when a saved environment omits it.
+#[must_use]
+pub const fn default_theta_admit() -> f64 {
+    DEFAULT_THETA_ADMIT
+}
+
 /// Full ranking-environment surface returned by `ranking_env_get`.
 ///
-/// The env is only built in code (`system_defaults`, patch application) and
-/// serialized out; JSON input goes through `RankingEnvPatch`.
-#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+/// The env is built in code (`system_defaults`, patch application) and
+/// serialized out; the CLI state file reads one back, so every field carries the
+/// default its type already defines: a saved environment that predates a field
+/// loads with the rest of its values intact instead of being discarded whole.
+/// JSON *patches* still go through `RankingEnvPatch`, which keeps its own
+/// strictness.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RankingEnv {
+    #[serde(default)]
     pub retrieval: RetrievalWeights,
+    #[serde(default)]
     pub admission: AdmissionWeights,
+    #[serde(default)]
     pub coactivation: CoactivationConstants,
+    #[serde(default)]
     pub intent_gate: IntentGateThresholds,
     /// Admission threshold `θ_admit` default (per-key overrides win).
+    #[serde(default = "default_theta_admit")]
     pub theta_admit: f64,
     /// Per-key `θ_admit` overrides keyed by category or episodic type.
+    #[serde(default)]
     pub theta_overrides: HashMap<String, f64>,
     /// Per-key content-type prior overrides keyed by category or episodic type.
+    #[serde(default)]
     pub type_prior_overrides: HashMap<String, f64>,
     /// Hygiene noise-score weights (appendix defaults).
+    #[serde(default)]
     pub hygiene: HygieneWeights,
     /// Staleness half-life for hygiene scoring, in days.
+    #[serde(default = "default_hygiene_stale_half_life")]
     pub hygiene_stale_half_life_days: f64,
     /// Retention shaping knobs (floored age-factor half-life).
+    #[serde(default)]
     pub retention: RetentionKnobs,
     /// Trust ratios used by the trust multiplier (fact source weights).
+    #[serde(default)]
     pub trust: TrustRatios,
     /// Maintenance-trigger knobs: wave thresholds and rate limits.
+    #[serde(default)]
     pub maintenance_triggers: MaintenanceTriggerKnobs,
 }
 

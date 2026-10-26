@@ -21,7 +21,7 @@
 //! Keep this module focused on extraction config-key behavior.
 
 use crate::config::*;
-use crate::error::ErrorCode;
+use crate::error::{ErrorCode, ToolResult};
 use serde_json::json;
 
 #[test]

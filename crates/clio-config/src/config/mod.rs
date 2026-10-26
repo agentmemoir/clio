@@ -23,6 +23,8 @@
 //!
 //! Keep this module focused on Runtime config/ranking tool orchestration.
 
+mod cli_state;
+mod config_ops;
 mod dispatch;
 mod env;
 mod merge;
@@ -48,23 +50,17 @@ pub use types::{
 pub use validate::{CONFIG_SCHEMA_VERSION, ConfigScope};
 
 use crate::context::{Actor, BankDefaultPolicy, OpContext, resolve_bank};
-use crate::error::{AmError, ErrorCode, ToolResult};
+use crate::error::{AmError, ErrorCode};
 use crate::history_knobs::HistoryKnobs;
 use crate::log::{self, LogLevel};
 use crate::ranking::RankingEnv;
 use crate::retention_store::{RetentionStore, resolve_retention_path};
-use crate::secret::{masked_at_path, masked_clone, path_is_secret};
+use crate::secret::masked_clone;
 use clio_types::HistoryPolicy;
-use merge::{
-    Overlay, apply_overlay, flatten_object, path_to_pointer, set_path, system_defaults,
-    value_as_string,
-};
-use persist::{
-    ensure_overwritable, load_overlay_file, resolve_deployment_path_with, save_overlay_file,
-};
+use merge::{Overlay, apply_overlay, flatten_object, set_path, system_defaults};
+use persist::{load_overlay_file, resolve_deployment_path_with, save_overlay_file};
 use serde_json::Value;
 use std::path::PathBuf;
-use validate::{validate_set_path, validate_set_value};
 
 /// Process runtime: effective config + config/ranking tool handlers.
 #[derive(Debug)]
@@ -82,6 +78,7 @@ pub struct Runtime {
     repo_root: Option<String>,
     default_actor: Actor,
     deployment_path: Option<PathBuf>,
+    cli_state_path: Option<PathBuf>,
     retention: RetentionStore,
     retention_path: Option<PathBuf>,
 }
@@ -99,6 +96,7 @@ impl Runtime {
             &|key| std::env::var(key).ok(),
             resolve_deployment_path(None),
             resolve_retention_path(None),
+            cli_state::resolve_cli_state_path(None),
         )
     }
 
@@ -116,6 +114,7 @@ impl Runtime {
             get,
             resolve_deployment_path_with(None, get),
             resolve_retention_path(None),
+            cli_state::resolve_cli_state_path_with(None, get),
         )
     }
 
@@ -139,13 +138,14 @@ impl Runtime {
     ) -> Self {
         // The lookup is borrowed, so it is re-borrowed through a closure to reach
         // `boot_with`, which takes it by a concrete type.
-        Self::boot_with(&|key| get(key), Some(path.into()), None)
+        Self::boot_with(&|key| get(key), Some(path.into()), None, None)
     }
 
     fn boot_with<F>(
         get: &F,
         deployment_path: Option<PathBuf>,
         retention_path: Option<PathBuf>,
+        cli_state_path: Option<PathBuf>,
     ) -> Self
     where
         F: Fn(&str) -> Option<String>,
@@ -164,6 +164,7 @@ impl Runtime {
             repo_root: None,
             default_actor: Actor::Agent,
             deployment_path,
+            cli_state_path,
             retention: RetentionStore::default(),
             retention_path,
         };
@@ -184,6 +185,7 @@ impl Runtime {
         if let Some(path) = self.retention_path.clone() {
             self.retention = RetentionStore::load_lossy(&path);
         }
+        self.load_cli_state();
         self.sync_log_level();
     }
 
@@ -273,6 +275,13 @@ impl Runtime {
 
     /// Effective merged configuration as JSON (callers must mask for display).
     ///
+    /// The layers merge in this order: file, environment, profile bundle,
+    /// profile overlay, deployment overlay, session overlay. A restored or
+    /// applied profile therefore outranks the environment for the knobs its
+    /// bundle carries (`log.level`, `backend`), and the deployment file outranks
+    /// both, so `CLIO_LOG_LEVEL` and `CLIO_BACKEND` stop applying once a profile
+    /// is persisted.
+    ///
     /// # Panics
     /// Panics if ranking or bank policy fails to serialize (both are `Serialize` by construction).
     #[must_use]
@@ -324,14 +333,6 @@ impl Runtime {
         }
     }
 
-    fn bank_fixed_from_effective(&self) -> Option<String> {
-        self.effective_raw()
-            .pointer("/bank/fixed")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .filter(|s| !s.is_empty())
-    }
-
     /// Resolve operation context.
     ///
     /// Bank precedence: explicit → `bank.fixed` / `CLIO_BANK` → active profile policy.
@@ -343,7 +344,12 @@ impl Runtime {
         bank: Option<&str>,
         actor: Option<&str>,
     ) -> Result<OpContext, AmError> {
-        let fixed = self.bank_fixed_from_effective();
+        let fixed = self
+            .effective_raw()
+            .pointer("/bank/fixed")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .filter(|s| !s.is_empty());
         let bank = resolve_bank(
             &self.bank_policy,
             bank,
@@ -355,91 +361,5 @@ impl Runtime {
             None => self.default_actor,
         };
         Ok(OpContext::new(bank, actor))
-    }
-
-    #[must_use]
-    pub fn config_get(&self, path: Option<&str>) -> ToolResult<ConfigGetData> {
-        ToolResult::from_result(self.config_get_inner(path))
-    }
-
-    fn config_get_inner(&self, path: Option<&str>) -> Result<ConfigGetData, AmError> {
-        // Resolve the pointer on the unmasked tree: masking renames keys that
-        // themselves look secret, so a pointer such as `credentials.api_key`
-        // would otherwise stop at a name the masked view no longer has.
-        let raw = self.effective_raw();
-        let value = match path {
-            None | Some("") => masked_clone(&raw),
-            Some(p) => {
-                let pointer = path_to_pointer(p);
-                let found = raw.pointer(&pointer).ok_or_else(|| {
-                    AmError::new(ErrorCode::UnknownPath, format!("unknown config path `{p}`"))
-                })?;
-                masked_at_path(p, found)
-            }
-        };
-        Ok(ConfigGetData {
-            path: path.unwrap_or("").to_owned(),
-            value,
-            active_profile: self.active_profile.clone(),
-        })
-    }
-
-    pub fn config_set(
-        &mut self,
-        path: &str,
-        value: Value,
-        scope: ConfigScope,
-    ) -> ToolResult<ConfigSetData> {
-        ToolResult::from_result(self.config_set_inner(path, value, scope))
-    }
-
-    fn config_set_inner(
-        &mut self,
-        path: &str,
-        value: Value,
-        scope: ConfigScope,
-    ) -> Result<ConfigSetData, AmError> {
-        validate_set_path(path)?;
-        validate_set_value(path, &value)?;
-        {
-            let overlay = match scope {
-                ConfigScope::Session => &mut self.session_overlay,
-                ConfigScope::Profile => {
-                    if self.active_profile.is_none() {
-                        return Err(AmError::new(
-                            ErrorCode::InvalidArgument,
-                            "config_set scope=profile requires an active profile",
-                        ));
-                    }
-                    &mut self.profile_overlay
-                }
-                ConfigScope::Deployment => &mut self.deployment_overlay,
-            };
-            overlay.insert(path.to_owned(), value.clone());
-        }
-        if path == "log.level" {
-            self.sync_log_level();
-        }
-        if path == "bank.policy" {
-            // Validated above; deserialize cannot fail for allowlisted shapes.
-            self.bank_policy =
-                serde_json::from_value(value.clone()).expect("bank.policy after validate");
-        }
-        if scope == ConfigScope::Deployment
-            && let Some(path_buf) = self.deployment_path.clone()
-        {
-            ensure_overwritable(&path_buf)?;
-            save_overlay_file(&path_buf, &self.deployment_overlay)?;
-        }
-        log::info("config_set", &[("path", path), ("scope", scope.as_str())]);
-        Ok(ConfigSetData {
-            path: path.to_owned(),
-            scope: scope.as_str().to_owned(),
-            value: if path_is_secret(path) {
-                Value::String(crate::secret::mask_secret(&value_as_string(&value)))
-            } else {
-                value
-            },
-        })
     }
 }

@@ -21,7 +21,7 @@
 //! Keep this module focused on retention profile Runtime handler tests.
 
 use crate::config::*;
-use crate::error::ErrorCode;
+use crate::error::{ErrorCode, ToolResult};
 use crate::retention::{RETENTION_PROFILE_VERSION, RetentionProfile, Verbosity};
 use std::time::{SystemTime, UNIX_EPOCH};
 
