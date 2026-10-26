@@ -10,7 +10,7 @@
 //! - Bottom-up same-depth parallel summary refresh with bounded workers
 //! - Generation-guarded refresh so mid-wave re-dirtied nodes are never cleared
 //! - Per-bank timing for completed structural refresh waves
-//! - `MaintenanceHook` that attaches ingest leaves into the forest
+//! - The forest, leaf index and optional store handle the engine carries
 //! - A wave gauge claimed by the spawner and released once the structural
 //!   refresh completes, so a background wave counts from the moment it is
 //!   scheduled rather than from when it runs
@@ -23,18 +23,19 @@
 //! - Agent-facing tool handlers (`memtree_tools`)
 //! - The non-blocking counters and the contended dirty-ancestor read
 //!   (`memtree_maint_reads`)
-//! - Durable persistence of MemTree rows (host-layer concern; `clio-store` CRUD is
-//!   available for durable hosts and is wired downstream, keeping this engine in-process)
+//! - Durable row persistence of attached and refreshed nodes (`memtree_hook`),
+//!   which owns the upsert; this engine only carries the store handle
 //!
 //! ## Boundary
 //!
 //! Changes to dirty refresh / maintenance scheduling should normally require changes here.
-//! Changes to tool shapes or leaf admit gates should not require changes here.
+//! Changes to tool shapes, leaf admit gates or row persistence should not require changes here.
 //!
 //! Keep this module focused on MemTree maintenance internals.
 
-use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
-use crate::memtree::{AttachLeaf, MemForest, MemTreeNode};
+use crate::maintenance::LeafIndex;
+use crate::memtree::{MemForest, MemTreeNode};
+use clio_store::Store;
 use memtree_refresh_one::refresh_one;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -60,10 +61,11 @@ pub struct MaintStats {
 }
 
 /// Maintenance engine over a shared forest.
-#[derive(Debug)]
 pub struct MemTreeMaint {
     pub(crate) forest: SharedMemForest,
     pub(crate) leaves: Arc<LeafIndex>,
+    /// Durable sink for attached and refreshed rows (`None` stays in-process).
+    pub(crate) store: Option<Arc<dyn Store>>,
     /// Coalesced dirty set: bank → node_ids
     dirty_set: Mutex<HashMap<String, HashSet<String>>>,
     /// Optional node ids that fail refresh (tests).
@@ -102,9 +104,19 @@ impl MemTreeMaint {
     /// Build a maintainer bound to a forest and leaf index.
     #[must_use]
     pub fn new(forest: SharedMemForest, leaves: Arc<LeafIndex>) -> Arc<Self> {
+        Self::with_store_handle(forest, leaves, None)
+    }
+
+    /// The one constructor body; [`MemTreeMaint::with_store`] adds the sink.
+    pub(crate) fn with_store_handle(
+        forest: SharedMemForest,
+        leaves: Arc<LeafIndex>,
+        store: Option<Arc<dyn Store>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             forest,
             leaves,
+            store,
             dirty_set: Mutex::new(HashMap::new()),
             fail_nodes: Mutex::new(HashSet::new()),
             stats: MaintStats::default(),
@@ -342,6 +354,7 @@ impl MemTreeMaint {
     ) -> Vec<String> {
         let mut cleared = Vec::new();
         let mut keep_queued = Vec::new();
+        let mut persist = Vec::new();
         let fail = self.fail_nodes.lock().expect("fail set").clone();
 
         for (_depth, ids) in by_depth {
@@ -376,6 +389,7 @@ impl MemTreeMaint {
             for (id, outcome) in results.into_inner().expect("results") {
                 match outcome {
                     RefreshOutcome::Refreshed => {
+                        persist.push(id.clone());
                         cleared.push(id);
                         self.stats.refreshed.fetch_add(1, Ordering::Relaxed);
                     }
@@ -383,6 +397,7 @@ impl MemTreeMaint {
                     // next wave retries them instead of dropping the mark.
                     other => {
                         if let RefreshOutcome::Failed(msg) = other {
+                            persist.push(id.clone());
                             self.stats.refresh_failures.fetch_add(1, Ordering::Relaxed);
                             let mut forest = self.forest.lock().expect("forest");
                             if let Some(n) = forest.tree_mut(bank_id).node_mut(&id) {
@@ -398,33 +413,15 @@ impl MemTreeMaint {
         }
 
         self.enqueue_dirty(bank_id, &keep_queued);
+        // A refreshed node now carries the new gist with `dirty` cleared, and a
+        // failed one carries its error; both are what a reader must see.
+        self.persist_nodes(bank_id, &persist);
         cleared
     }
 }
 
-impl MaintenanceHook for MemTreeMaint {
-    fn on_leaf_attached(&self, signal: MaintenanceSignal) {
-        let Some(item) = self.leaves.get(&signal.bank_id, &signal.item_id) else {
-            return;
-        };
-        let attach = AttachLeaf {
-            item_id: signal.item_id.clone(),
-            bank_id: signal.bank_id.clone(),
-            interval_start: item.created_at.clone(),
-            interval_end: item.created_at,
-            gist: item.gist,
-            task_id: None,
-        };
-        let dirty = {
-            let mut forest = self.forest.lock().expect("forest");
-            match forest.tree_mut(&signal.bank_id).attach_leaf(attach) {
-                Ok((_, dirty)) => dirty,
-                Err(_) => return,
-            }
-        };
-        self.enqueue_dirty(&signal.bank_id, &dirty);
-    }
-}
+#[path = "memtree_hook.rs"]
+mod memtree_hook;
 
 #[path = "memtree_maint_reads.rs"]
 mod memtree_maint_reads;
@@ -439,3 +436,7 @@ mod memtree_maint_erase_tests;
 #[cfg(test)]
 #[path = "memtree_maint_wave_tests.rs"]
 mod memtree_maint_wave_tests;
+
+#[cfg(test)]
+#[path = "memtree_persist_tests.rs"]
+mod memtree_persist_tests;

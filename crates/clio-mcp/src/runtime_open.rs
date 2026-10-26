@@ -220,7 +220,13 @@ impl McpState {
         let leaves = Arc::new(LeafIndex::new());
         let forest: Arc<std::sync::Mutex<MemForest>> =
             Arc::new(std::sync::Mutex::new(MemForest::new()));
-        let maint = MemTreeMaint::new(Arc::clone(&forest), Arc::clone(&leaves));
+        // The tree is only useful to a reader if it reaches the store, so the
+        // maintainer writes what it attaches and refreshes through this handle.
+        let maint = MemTreeMaint::with_store(
+            Arc::clone(&forest),
+            Arc::clone(&leaves),
+            Arc::clone(&store_any),
+        );
         let hub = Arc::new(HubDistillEngine::new(
             Arc::clone(&store_any),
             env.clone(),

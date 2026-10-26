@@ -8,7 +8,8 @@
 //! ## Owns
 //! - In-process leaf index (get-by-id / list) independent of ancestor refresh
 //! - Leaf-publish timing retained for the status surface
-//! - `LeafAttached` maintenance signal buffer for later dirty-path consumers
+//! - `LeafAttached` maintenance signal and the bounded wait a write may take on
+//!   the detached hook that consumes it
 //!
 //! ## Does not own
 //! - MemTree ancestor recompute or hybrid retrieve
@@ -22,7 +23,9 @@
 
 use clio_types::MemoryItem;
 use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Signal emitted after a leaf is admitted and marked queryable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,10 +52,11 @@ impl MaintenanceSignal {
 
 /// Consumer for dirty-path refresh, which a later stage may subscribe.
 ///
-/// Contract: the write path MUST NOT wait on this hook. `parallel_ingest` delivers
-/// signals on a detached dispatcher thread (see [`dispatch_async`]), so an
-/// implementor may do heavy work without gating the write response. Implementors
-/// MUST be `Send + Sync` so they can be shared with that dispatcher.
+/// Contract: a hook runs on the dispatcher thread, and a write may wait for it
+/// only through [`DispatchJob::drain`], bounded by a budget the caller chooses.
+/// A hook therefore owns the leaf's own durability but never runs hierarchical
+/// consolidation: per-signal work must stay small enough for that budget.
+/// Implementors MUST be `Send + Sync` so they can be shared with the dispatcher.
 pub trait MaintenanceHook: std::fmt::Debug {
     /// Notify that a leaf is durable and queryable; path may be dirty.
     fn on_leaf_attached(&self, signal: MaintenanceSignal);
@@ -61,20 +65,55 @@ pub trait MaintenanceHook: std::fmt::Debug {
 /// Thread-safe handle to a maintenance hook for non-blocking dispatch.
 pub type SharedMaintenanceHook = Arc<dyn MaintenanceHook + Send + Sync>;
 
-/// Deliver leaf-attached signals on a detached thread so ingest never blocks.
+/// Delivery budget a write uses when it waits for its own signals.
 ///
-/// Returns immediately. If no signals were produced, no thread is spawned.
-/// Delivery order matches `signals`. A slow or panicking hook affects only its
-/// own detached thread, never the write path.
-pub fn dispatch_async(hook: SharedMaintenanceHook, signals: Vec<MaintenanceSignal>) {
-    if signals.is_empty() {
-        return;
+/// Generous enough for a leaf attach plus a handful of row upserts on a loaded
+/// host, short enough that a stuck store delays one write instead of hanging it.
+pub const MAINTENANCE_DRAIN_BUDGET: Duration = Duration::from_secs(5);
+
+/// Handle that reports when the dispatched signals have all been consumed.
+///
+/// Detached execution alone cannot promise durability: a one-shot process can
+/// exit before the hook has written anything, so the caller needs a way to know
+/// the work landed. The handle offers a bounded wait, and dropping it keeps the
+/// old fire-and-forget behaviour.
+#[derive(Debug)]
+pub struct DispatchJob {
+    done: Receiver<()>,
+}
+
+impl DispatchJob {
+    /// Wait up to `budget` for the hook to consume every dispatched signal.
+    ///
+    /// `true` when the hook finished inside the budget. A panicking hook drops
+    /// its sender, which returns `false` immediately rather than blocking.
+    #[must_use]
+    pub fn drain(self, budget: Duration) -> bool {
+        self.done.recv_timeout(budget).is_ok()
     }
+}
+
+/// Deliver leaf-attached signals on a detached thread so consolidation never blocks.
+///
+/// Returns immediately, with a handle a caller may [`DispatchJob::drain`] when
+/// it needs the signals' own effects to have landed before it answers. If no
+/// signals were produced, no thread is spawned. Delivery order matches
+/// `signals`. A slow or panicking hook affects only its own detached thread.
+pub fn dispatch_async(
+    hook: SharedMaintenanceHook,
+    signals: Vec<MaintenanceSignal>,
+) -> Option<DispatchJob> {
+    if signals.is_empty() {
+        return None;
+    }
+    let (done_tx, done) = channel();
     std::thread::spawn(move || {
         for signal in signals {
             hook.on_leaf_attached(signal);
         }
+        let _ = done_tx.send(());
     });
+    Some(DispatchJob { done })
 }
 
 /// No-op hook when no maintenance subscriber is present.
