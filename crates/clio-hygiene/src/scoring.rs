@@ -4,13 +4,14 @@
 //! # Responsibility
 //!
 //! This module is responsible for deterministic `hygiene_noise_score`
-//! composition (appendix): weighted signals, the secret-score floor,
+//! composition (appendix): weighted signals, graded credential scoring,
 //! `noise_reasons[]`, and the suggested-action bands.
 //!
 //! ## Owns
-//! - [`score_noise`]: `clamp_01` weighted sum + secret override (≥ 0.90)
-//! - Suggested action bands (`discard` ≥ 0.90 / secret, `archive` 0.70–0.89,
-//!   `flag` 0.40–0.69, none below)
+//! - [`score_noise`]: `clamp_01` weighted sum + graded credential floor
+//!   (kind base plus run length) and the weaker token-run proxy band
+//! - Suggested action bands (`discard` ≥ 0.90 / credential, `archive`
+//!   0.70–0.89, `flag` 0.40–0.69, none below)
 //!
 //! ## Does not own
 //! - Signal detection heuristics (see `detect`)
@@ -41,8 +42,14 @@ pub struct Scored {
 /// Inputs for one noise-score computation.
 #[derive(Debug, Clone)]
 pub struct ScoreInput {
-    /// Detected secret/pattern signals.
-    pub secret_hit: bool,
+    /// Real credential evidence ids (`named_credential_key`, `pem_private_key`,
+    /// `bearer_token`, `known_secret_format`); empty means no credential.
+    pub secret_kinds: Vec<&'static str>,
+    /// Measured credential value length in bytes when the matched kind carries
+    /// one, `0` when the kind has no measurable run.
+    pub secret_run_len: usize,
+    /// Longest token-shaped run length in bytes: a weak proxy, never a hit.
+    pub token_run_len: Option<usize>,
     /// Operational pattern class ids (empty = none).
     pub pattern_kinds: Vec<&'static str>,
     /// Near-duplicate of a higher-utility retained item.
@@ -56,27 +63,49 @@ pub struct ScoreInput {
 /// Compose the deterministic noise score for one candidate.
 ///
 /// `hygiene_noise_score = clamp_01(w_secret·secret + w_pattern·pattern +
-/// w_dup·dup + w_utility·(1−utility) + w_staleness·staleness)`; a secret hit
-/// forces `max(score, 0.90)` with the `secret_credential` reason.
+/// w_dup·dup + w_utility·(1−utility) + w_staleness·staleness)`, where `secret`
+/// is the graded credential strength (strongest kind base plus run-length
+/// bonus). That strength also floors the score, so a real credential never
+/// lands below its kind base. With no credential evidence the secret weight
+/// carries nothing: a token-shaped run only floors the remaining weighted sum
+/// at its proxy strength, which keeps that weaker evidence in the `flag` band.
 /// Weights are renormalized so custom deployments stay on the same scale;
 /// identical inputs and config always yield identical output.
 #[must_use]
 pub fn score_noise(input: &ScoreInput, weights: &HygieneWeights) -> Scored {
     let w = normalized(weights);
-    let mut raw = w.secret * f64::from(input.secret_hit)
-        + w.pattern
-            * (f64::from(u32::try_from(input.pattern_kinds.len().min(2)).unwrap_or(2)) / 2.0)
+    let credential = !input.secret_kinds.is_empty();
+    let mut other = w.pattern
+        * (f64::from(u32::try_from(input.pattern_kinds.len().min(2)).unwrap_or(2)) / 2.0)
         + w.dup * f64::from(input.near_duplicate)
         + w.utility * (1.0 - input.utility_proxy.clamp(0.0, 1.0))
         + w.staleness * input.staleness.clamp(0.0, 1.0);
-    if !(raw.is_finite()) {
-        raw = 0.0;
+    if !other.is_finite() {
+        other = 0.0;
     }
-    let mut score = raw.clamp(0.0, 1.0);
+    let score = if credential {
+        let base = input
+            .secret_kinds
+            .iter()
+            .map(|kind| kind_base(kind))
+            .fold(0.0, f64::max);
+        let strength = (base + length_bonus(input.secret_run_len)).min(1.0);
+        (other + w.secret * strength).clamp(0.0, 1.0).max(strength)
+    } else {
+        other
+            .clamp(0.0, 1.0)
+            .max(proxy_strength(input.token_run_len))
+            .min(1.0)
+    };
     let mut reasons: Vec<&'static str> = Vec::new();
-    if input.secret_hit {
+    if credential {
         reasons.push("secret_credential");
-        score = score.max(0.90);
+        let mut kinds = input.secret_kinds.clone();
+        kinds.sort_unstable();
+        kinds.dedup();
+        reasons.extend(kinds);
+    } else if input.token_run_len.is_some() {
+        reasons.push("token_shaped_run");
     }
     reasons.extend_from_slice(&input.pattern_kinds);
     if input.near_duplicate {
@@ -91,8 +120,37 @@ pub fn score_noise(input: &ScoreInput, weights: &HygieneWeights) -> Scored {
     Scored {
         score,
         reasons,
-        suggested_action: suggested_action(score, input.secret_hit),
+        suggested_action: suggested_action(score, credential),
     }
+}
+
+/// Credential kind bases: the stronger the evidence, the higher the base.
+const KIND_BASES: &[(&str, f64)] = &[
+    ("pem_private_key", 0.98),
+    ("known_secret_format", 0.95),
+    ("named_credential_key", 0.93),
+    ("bearer_token", 0.90),
+];
+
+/// Base score for one credential kind; an unknown kind takes the weakest base.
+fn kind_base(kind: &str) -> f64 {
+    KIND_BASES
+        .iter()
+        .find(|(id, _)| kind == *id)
+        .map_or(0.90, |(_, base)| *base)
+}
+
+/// Length bonus: `0.0..=0.05`, full at a 64-byte matched run, `0.0` when the
+/// detector measured no run.
+fn length_bonus(run_len: usize) -> f64 {
+    f64::from(u32::try_from(run_len.min(64)).unwrap_or(64)) / 64.0 * 0.05
+}
+
+/// Floor for a token-shaped run with no credential evidence: `0.42..=0.57`.
+fn proxy_strength(token_run_len: Option<usize>) -> f64 {
+    token_run_len.map_or(0.0, |len| {
+        0.42 + f64::from(u32::try_from(len.min(120)).unwrap_or(120)) / 120.0 * 0.15
+    })
 }
 
 /// Appendix action band.

@@ -11,6 +11,7 @@
 //!
 //! ## Owns
 //! - Tests for scan ceilings above 5,000 items and incomplete signal on overflow
+//! - Scan reach past the inspector's 200-row page cap
 //! - Scalable near-duplicate pairing equivalence tests against brute force
 //! - Staleness tests verifying updated items use the most recent touch timestamp
 //!
@@ -262,7 +263,9 @@ fn t02_near_duplicate_lookup_at_scale_matches_brute_force() {
         let signals = detect_noise(gist);
         let expected_score = score_noise(
             &ScoreInput {
-                secret_hit: signals.secret_hit(),
+                secret_kinds: signals.secret_kinds.clone(),
+                secret_run_len: signals.secret_run_len,
+                token_run_len: signals.token_run_len,
                 pattern_kinds: signals.pattern_kinds.clone(),
                 near_duplicate: expected_dup,
                 utility_proxy: *utility,
@@ -362,14 +365,36 @@ fn t03_staleness_with_last_relevance() {
     // The updated item has a lower noise score than the stale item.
     assert!(
         cand_touched.noise_score < cand_stale.noise_score,
-        "more recent touch lowers staleness and noise score: {} < {}",
-        cand_touched.noise_score,
-        cand_stale.noise_score
+        "a more recent touch lowers staleness and the noise score"
     );
 
     // Fallback item uses created_at when updated_at is older, so it is not stale.
     assert!(
         !cand_fallback.noise_reasons.iter().any(|r| r == "stale"),
         "fallback item uses recent created_at"
+    );
+}
+
+#[test]
+fn audit_scans_past_the_200_row_page_cap() {
+    let s = store();
+    let bank = "bank-pages";
+    let s_ref = &*s as &dyn Store;
+    for i in 0..201 {
+        let id = format!("p{i:03}");
+        let gist = format!("filler scratch note {i:03}");
+        let date = "2026-09-20T00:00:00Z";
+        let itm = make_item(&id, bank, &gist, 0.5, date, date);
+        s_ref.create_memory_item(&itm, "actor").unwrap();
+    }
+    let report =
+        hygiene_audit(&audit_args(s_ref, bank, "2026-09-20T00:00:00Z", 0.0, 10, 0)).unwrap();
+    assert_eq!(
+        report.scanned, 201,
+        "scan walks past the inspector's 200-row page"
+    );
+    assert!(
+        !report.incomplete,
+        "201 items sit inside the default budget"
     );
 }
