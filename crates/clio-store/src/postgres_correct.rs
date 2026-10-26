@@ -24,7 +24,7 @@
 
 use crate::audit_model::{CorrectionOutcome, CorrectionSpec};
 use crate::item_persist::{require_actor, seal_dual};
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, close_stamp};
 use crate::postgres::PostgresStore;
 use crate::postgres_memory::lock_subject_write_tx;
 use clio_types::{AmError, ErrorCode, MemoryItem};
@@ -73,7 +73,7 @@ impl PostgresStore {
             lock_subject_write_tx(&mut tx, &spec.new_item.subject_id)?;
             let prior = tx
                 .query_opt(
-                    "SELECT discarded_at, tx_until, subject_id FROM items \
+                    "SELECT discarded_at, tx_until, subject_id, tx_from FROM items \
                      WHERE id = $1 AND bank_id = $2",
                     &[&spec.prior_item_id, &spec.bank_id],
                 )
@@ -87,6 +87,7 @@ impl PostgresStore {
             let discarded: Option<String> = row.get(0);
             let tx_until: Option<String> = row.get(1);
             let prior_subject: Option<String> = row.get(2);
+            let prior_from: String = row.get(3);
             if discarded.is_some() {
                 return Err(AmError::new(
                     ErrorCode::InvalidArgument,
@@ -107,13 +108,15 @@ impl PostgresStore {
                     &spec.prior_item_id,
                 ));
             }
+            let close = close_stamp(&prior_from, &spec.timestamp);
             let n = tx
                 .execute(
                     "UPDATE items
-                     SET valid_until = $1, tx_until = $1, superseded_by_id = $2, updated_at = $1
-                     WHERE id = $3 AND bank_id = $4 AND tx_until IS NULL",
+                     SET valid_until = $1, tx_until = $2, superseded_by_id = $3, updated_at = $1
+                     WHERE id = $4 AND bank_id = $5 AND tx_until IS NULL",
                     &[
                         &spec.timestamp,
+                        &close,
                         &spec.new_item.id,
                         &spec.prior_item_id,
                         &spec.bank_id,

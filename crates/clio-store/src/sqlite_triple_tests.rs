@@ -11,6 +11,8 @@
 //! ## Does not own
 //! - Concurrency and guard edge cases (see `triple_edge_tests`)
 //! - Postgres parity (see `pg_triple_tests`)
+//! - Supersede cases closed inside the row's own second (see
+//!   `sqlite_triple_supersede_tests`)
 //!
 //! ## Boundary
 //!

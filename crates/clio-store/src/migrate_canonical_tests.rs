@@ -21,7 +21,9 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{canonical_optional_stamp, canonical_ts, canonical_write_stamp, millis_to_rfc3339};
+use super::{
+    canonical_optional_stamp, canonical_ts, canonical_write_stamp, close_stamp, millis_to_rfc3339,
+};
 
 #[test]
 fn millis_are_converted_to_utc_seconds_with_a_z_suffix() {
@@ -183,4 +185,76 @@ fn an_unplaceable_optional_stamp_is_refused() {
             .code,
         clio_types::ErrorCode::InvalidArgument
     );
+}
+
+#[test]
+fn a_close_on_the_row_start_moves_one_second_later() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T05:06:07Z"),
+        "2026-03-04T05:06:08Z"
+    );
+    assert_eq!(
+        close_stamp("2026-12-31T23:59:59Z", "2026-12-31T23:59:59Z"),
+        "2027-01-01T00:00:00Z",
+        "the widening crosses the year boundary on the same clock"
+    );
+}
+
+#[test]
+fn a_close_before_the_row_start_moves_one_second_after_it() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T05:00:00Z"),
+        "2026-03-04T05:06:08Z",
+        "an earlier close would describe a negative-length interval"
+    );
+}
+
+#[test]
+fn a_close_naming_the_row_start_on_another_offset_moves_one_second_later() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T07:06:07+02:00"),
+        "2026-03-04T05:06:08Z",
+        "the offset names the same instant, so the interval is still empty"
+    );
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T03:06:07-02:00"),
+        "2026-03-04T05:06:08Z"
+    );
+}
+
+#[test]
+fn a_close_naming_the_row_start_with_a_fraction_moves_one_second_later() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T05:06:07.500Z"),
+        "2026-03-04T05:06:08Z",
+        "a fraction inside the row's second still names its start at column precision"
+    );
+}
+
+#[test]
+fn a_close_at_an_impossible_date_keeps_the_requested_stamp() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-02-30T00:00:00Z"),
+        "2026-02-30T00:00:00Z",
+        "a date the calendar does not have is not widened into a different instant"
+    );
+}
+
+#[test]
+fn a_close_after_the_row_start_is_unchanged() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-04-05T06:07:08Z"),
+        "2026-04-05T06:07:08Z"
+    );
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T08:00:00.250+02:00"),
+        "2026-03-04T08:00:00.250+02:00",
+        "a later close is stored exactly as given, spelling and all"
+    );
+}
+
+#[test]
+fn a_close_over_an_unplaceable_start_keeps_the_requested_stamp() {
+    assert_eq!(close_stamp("2025-01-01", "2025-01-01"), "2025-01-01");
+    assert_eq!(close_stamp("not a stamp", "not a stamp"), "not a stamp");
 }

@@ -169,6 +169,81 @@ fn t10_postgres_as_of_parity_sample() {
 }
 
 #[test]
+fn t11_postgres_supersede_same_second_keeps_history() {
+    let _guard = lock_pg_test();
+    let Some(store) = open_pg() else {
+        return;
+    };
+    let bank = unique("pg-trip-same");
+    let t = "2024-05-01T00:00:00Z";
+    let i1 = unique("i1");
+    let i2 = unique("i2");
+    let e1 = unique("e1");
+    let e2 = unique("e2");
+    store
+        .commit_triple_add(
+            &carrier(&i1, &bank, "Chicago", "2024-01-01", t),
+            &edge(&e1, &bank, &i1, "Chicago", "2024-01-01", t),
+            true,
+            "agent",
+        )
+        .unwrap();
+    store
+        .commit_triple_add(
+            &carrier(&i2, &bank, "Boston", "2024-06-01", t),
+            &edge(&e2, &bank, &i2, "Boston", "2024-06-01", t),
+            true,
+            "agent",
+        )
+        .unwrap();
+    let prior = store.get_triple(&bank, &e1).unwrap().unwrap();
+    let until = prior.tx_until.clone().expect("prior row is closed");
+    assert_eq!(until, "2024-05-01T00:00:01Z", "close lands one second on");
+    assert!(until > prior.tx_from, "{until} vs {}", prior.tx_from);
+    let valid_until = prior
+        .valid_until
+        .clone()
+        .expect("prior row is closed on the valid axis too");
+    assert!(
+        valid_until > prior.valid_from,
+        "valid interval [{}, {valid_until}) is empty",
+        prior.valid_from
+    );
+    let believed = |as_of: &str| {
+        store
+            .query_triples(&TripleQuery {
+                bank_id: bank.clone(),
+                subject: None,
+                predicate: None,
+                object: Some("Chicago".into()),
+                as_of: Some(as_of.into()),
+                time_axis: TimeAxis::Transaction,
+            })
+            .unwrap()
+    };
+    assert_eq!(believed(t).len(), 1, "visible at {t}");
+    assert!(believed(&until).is_empty(), "prior belief gone at {until}");
+    let rows_at_close = store
+        .query_triples(&TripleQuery {
+            bank_id: bank.clone(),
+            subject: Some("Alice".into()),
+            predicate: Some("lives_in".into()),
+            object: None,
+            as_of: Some(t.into()),
+            time_axis: TimeAxis::Transaction,
+        })
+        .unwrap();
+    let mut ids: Vec<&str> = rows_at_close.iter().map(|row| row.id.as_str()).collect();
+    ids.sort_unstable();
+    let mut want = vec![e1.as_str(), e2.as_str()];
+    want.sort_unstable();
+    assert_eq!(
+        ids, want,
+        "the row closed in its own second stays readable for that second alongside its successor"
+    );
+}
+
+#[test]
 fn postgres_triple_context_parity() {
     let _guard = lock_pg_test();
     let Some(store) = open_pg() else {

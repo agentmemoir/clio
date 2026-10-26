@@ -189,6 +189,7 @@ mod sqlite_sync;
 mod sqlite_sync_rows;
 mod sqlite_triple;
 mod sqlite_triple_asserted;
+mod sqlite_triple_invalidate;
 mod sqlite_triple_read;
 mod sqlite_window;
 mod store;

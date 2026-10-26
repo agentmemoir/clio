@@ -27,7 +27,9 @@
 use crate::triple::{TripleAddArgs, TripleVecSink, triple_add, triple_end};
 use clio_admission::{AdmissionPolicy, RankingEnv, SignalSource, VecSink};
 use clio_store::{DekProvider, LocalDevKms, SqliteStore, Store};
-use clio_types::{Actor, AmError, Bank, EpistemicKind, ErrorCode, MemoryItem, OpContext};
+use clio_types::{
+    Actor, AmError, Bank, EpistemicKind, ErrorCode, MemoryItem, OpContext, TimeAxis, TripleQuery,
+};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -262,4 +264,65 @@ fn triple_end_stores_a_canonical_valid_until() {
         .expect("stored edge");
     assert_eq!(edge.valid_until.as_deref(), Some("2026-04-05T04:07:08Z"));
     assert!(!edge.is_open());
+}
+
+#[test]
+fn a_close_in_the_second_the_edge_started_keeps_it_in_transaction_history() {
+    let s = store();
+    let bank = unique("b-stamp-same-second");
+    let ctx = OpContext::new(Bank::new(bank.clone()), Actor::Agent);
+    let edge_id = add(&s, &ctx, None, None, "2026-03-04T05:06:07Z").expect("open triple");
+    let trip = TripleVecSink::default();
+    triple_end(
+        &s,
+        &ctx,
+        "Alice",
+        "lives_in",
+        None,
+        "2026-03-04T05:06:07Z",
+        "2026-03-04T05:06:07Z",
+        None,
+        &trip,
+    )
+    .expect("a close in the starting second is placeable");
+    let edge = s
+        .get_triple(&bank, &edge_id)
+        .expect("read edge")
+        .expect("stored edge");
+    assert_eq!(edge.tx_from, "2026-03-04T05:06:07Z");
+    assert_eq!(
+        edge.tx_until.as_deref(),
+        Some("2026-03-04T05:06:08Z"),
+        "a close on the edge's own start must widen, or the interval is empty"
+    );
+    assert!(
+        edge.tx_until.as_deref().unwrap() > edge.tx_from.as_str(),
+        "transaction intervals are compared as text"
+    );
+    let at_start = s
+        .query_triples(&TripleQuery {
+            bank_id: bank.clone(),
+            subject: Some("Alice".into()),
+            predicate: Some("lives_in".into()),
+            object: None,
+            as_of: Some("2026-03-04T05:06:07Z".into()),
+            time_axis: TimeAxis::Transaction,
+        })
+        .expect("query at the starting second");
+    assert_eq!(
+        at_start.len(),
+        1,
+        "the closed edge left transaction history: {at_start:?}"
+    );
+    let at_close = s
+        .query_triples(&TripleQuery {
+            bank_id: bank,
+            subject: Some("Alice".into()),
+            predicate: Some("lives_in".into()),
+            object: None,
+            as_of: Some("2026-03-04T05:06:08Z".into()),
+            time_axis: TimeAxis::Transaction,
+        })
+        .expect("query at the closing second");
+    assert!(at_close.is_empty(), "{at_close:?}");
 }

@@ -18,7 +18,7 @@
 //! Changes to Postgres triple read/end SQL should normally require changes here.
 
 use crate::item_persist::open_context;
-use crate::migrate::{IntoAmError, now_iso};
+use crate::migrate::{IntoAmError, canonical_stamp, close_stamp, now_iso};
 use crate::postgres::PostgresStore;
 use crate::triple_map::{filter_triples, map_triple_row, query_where_clause};
 use clio_types::{AmError, ErrorCode, TripleEndOutcome, TripleQuery, TripleRecord};
@@ -199,17 +199,18 @@ impl PostgresStore {
             let mut tx = client.transaction().am("triple_end begin")?;
             let rows = tx
                 .query(
-                    "SELECT id, object_ciphertext FROM triples
+                    "SELECT id, object_ciphertext, tx_from FROM triples
                      WHERE bank_id = $1 AND subject = $2 AND predicate = $3
                        AND tx_until IS NULL
                      FOR UPDATE",
                     &[&bank_id, &subject, &predicate],
                 )
                 .am("triple_end query")?;
-            let mut closed_ids = Vec::new();
+            let mut closed = Vec::new();
             for r in rows {
                 let id: String = r.get(0);
                 let cipher: Option<String> = r.get(1);
+                let tx_from: String = r.get(2);
                 // The asserted value is sealed, so an `object` filter
                 // is applied here after opening each candidate row's value
                 // rather than in SQL.
@@ -221,17 +222,18 @@ impl PostgresStore {
                 {
                     continue;
                 }
-                closed_ids.push(id);
+                closed.push((id, tx_from));
             }
-            if closed_ids.is_empty() {
+            if closed.is_empty() {
                 tx.commit().am("triple_end noop commit")?;
                 return Ok(TripleEndOutcome {
-                    closed_ids,
+                    closed_ids: Vec::new(),
                     already_ended: true,
                     replacement_id: None,
                 });
             }
-            for id in &closed_ids {
+            for (id, tx_from) in &closed {
+                let tx_until = close_stamp(tx_from, tx_until);
                 tx.execute(
                     "UPDATE triples
                      SET valid_until = COALESCE(valid_until, $1), tx_until = $2, updated_at = $3
@@ -242,7 +244,7 @@ impl PostgresStore {
             }
             tx.commit().am("triple_end commit")?;
             Ok(TripleEndOutcome {
-                closed_ids,
+                closed_ids: closed.into_iter().map(|(id, _)| id).collect(),
                 already_ended: false,
                 replacement_id: None,
             })
@@ -306,7 +308,7 @@ pub(crate) fn invalidate_item_tx(
     let ts = now_iso();
     let row = tx
         .query_opt(
-            "SELECT valid_until, tx_until, category, epistemic_kind
+            "SELECT valid_until, tx_until, category, epistemic_kind, tx_from
              FROM items WHERE id = $1 AND bank_id = $2",
             &[&item_id, &bank_id],
         )
@@ -321,6 +323,7 @@ pub(crate) fn invalidate_item_tx(
     let tu: Option<String> = r.get(1);
     let category: Option<String> = r.get(2);
     let epistemic_kind: String = r.get(3);
+    let row_tx_from: String = r.get(4);
     if vu.is_some() && tu.is_some() {
         return Ok(TripleEndOutcome {
             closed_ids: vec![item_id.to_owned()],
@@ -328,6 +331,8 @@ pub(crate) fn invalidate_item_tx(
             replacement_id: replacement_id.map(str::to_owned),
         });
     }
+    let tx_until = canonical_stamp(tx_until).unwrap_or_else(|| tx_until.to_owned());
+    let tx_close = close_stamp(&row_tx_from, &tx_until);
     let n = tx
         .execute(
             "UPDATE items SET valid_until = $1, tx_until = $2, superseded_by_id = $3,
@@ -335,7 +340,7 @@ pub(crate) fn invalidate_item_tx(
              WHERE id = $5 AND bank_id = $6",
             &[
                 &valid_until,
-                &tx_until,
+                &tx_close,
                 &replacement_id,
                 &ts,
                 &item_id,
@@ -374,3 +379,15 @@ pub(crate) fn invalidate_item_tx(
         replacement_id: replacement_id.map(str::to_owned),
     })
 }
+
+#[cfg(test)]
+#[path = "postgres_triple_read_tests.rs"]
+mod postgres_triple_read_tests;
+
+#[cfg(test)]
+#[path = "postgres_triple_read_query_tests.rs"]
+mod postgres_triple_read_query_tests;
+
+#[cfg(test)]
+#[path = "postgres_triple_invalidate_tests.rs"]
+mod postgres_triple_invalidate_tests;

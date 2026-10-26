@@ -181,11 +181,16 @@ pub fn canonical_ts(raw: &str) -> String {
 /// place it", or the two disagree about which rows are on the shared clock.
 #[must_use]
 pub fn canonical_stamp(raw: &str) -> Option<String> {
+    stamp_instant(raw).map(millis_to_rfc3339)
+}
+
+/// The instant a stamp this build can place names, in UTC epoch millis.
+fn stamp_instant(raw: &str) -> Option<i64> {
     if is_epoch_stamp(raw) {
-        return raw.parse::<i64>().ok().map(millis_to_rfc3339);
+        return raw.parse::<i64>().ok();
     }
     let (millis, offset_secs) = stamp_offset(raw)?;
-    Some(millis_to_rfc3339(millis - offset_secs * 1_000))
+    Some(millis - offset_secs * 1_000)
 }
 
 /// The canonical form of a caller-supplied stamp, or the refusal for one this
@@ -221,6 +226,30 @@ pub fn canonical_optional_stamp(raw: Option<&str>) -> Result<Option<String>, AmE
         Some(value) => canonical_write_stamp(value).map(Some),
         None => Ok(None),
     }
+}
+
+/// The `tx_until` to store when closing a row whose transaction interval starts
+/// at `tx_from`.
+///
+/// Reads compare the column as text with a half-open predicate, so an interval
+/// whose ends name the same instant contains no instant: the closed row leaves
+/// transaction-time history, and `TripleRecord::validate` refuses a negative
+/// length. Both sides are therefore resolved to instants rather than compared as
+/// bytes, and compared at the whole second the columns are written and read at,
+/// so the row's own start spelled on another offset or with a fraction is still
+/// recognised as its start. A close naming an instant at or before that start is
+/// placed one second after it, in the canonical form; a close naming a later
+/// second is returned unchanged, byte for byte, and so is one either side cannot
+/// be placed on the clock.
+#[must_use]
+pub(crate) fn close_stamp(tx_from: &str, tx_until: &str) -> String {
+    let (Some(from), Some(until)) = (stamp_instant(tx_from), stamp_instant(tx_until)) else {
+        return tx_until.to_owned();
+    };
+    if until.div_euclid(1_000) > from.div_euclid(1_000) {
+        return tx_until.to_owned();
+    }
+    millis_to_rfc3339(from.saturating_add(1_000))
 }
 
 /// `YYYY-MM-DDThh:mm:ss[.fraction](Z|±hh:mm)` → (instant, offset in seconds east
