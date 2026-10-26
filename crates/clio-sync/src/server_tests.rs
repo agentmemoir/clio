@@ -235,8 +235,7 @@ fn t24_04_refuses_anonymous_bind_outside_dev_mode() {
 fn t24_04_token_enforced_and_routes_scoped() {
     let (server, store) = serve(&["b1"], Some("s3cret"), false, None, None);
     let addr = server.addr().to_owned();
-    // The route admits content only sealed, so the push under test carries a
-    // sealed row and the token guard is what the assertions reach.
+    // The route admits content only sealed, so the token guard is reached on a sealed row.
     let m = seal_own_content(mutation("m-1", "b1", "2026-01-01T00:00:00Z", "g"));
     let body = push_body("b1", &[m]);
     // Missing and wrong tokens: 401 and nothing applied.
