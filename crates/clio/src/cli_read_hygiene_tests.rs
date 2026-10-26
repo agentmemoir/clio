@@ -134,6 +134,108 @@ fn audit_marks_the_page_truncated_when_more_candidates_exist() {
     assert_eq!(full["truncated"], json!(false), "{full}");
 }
 
+/// A long hyphenated task id: mixed letters and digits, so the token-shape
+/// proxy fires, but it is an identifier and not credential evidence.
+const LONG_ID: &str = "clb016-long-id-probe-task-with-long-identifier-1792665330634632000";
+
+/// Prose that names a bearer header without carrying a token after it.
+const BEARER_PROSE: &str =
+    "the client sent bearer auth without a token and the retry returned 401 again";
+
+/// The audit candidate for `item_id` from the CLI's JSON page.
+fn candidate_of<'a>(payload: &'a serde_json::Value, item_id: &str) -> &'a serde_json::Value {
+    payload["candidates"]
+        .as_array()
+        .and_then(|page| page.iter().find(|c| c["item_id"] == json!(item_id)))
+        .unwrap_or_else(|| panic!("expected the seeded item to be a candidate: {item_id}"))
+}
+
+#[test]
+fn audit_reads_a_long_id_and_bearer_prose_as_a_token_proxy_not_a_credential() {
+    let s = state();
+    seed_item(
+        &s,
+        "demo",
+        "itm-proxy-1",
+        &format!("{BEARER_PROSE} {LONG_ID}"),
+    );
+    let (code, out, _) = run_state("hygiene audit", &["--bank", "demo"], &s, false);
+    assert_eq!(code, ExitCode::SUCCESS, "hygiene audit must succeed");
+    let payload = json_of(&out);
+    let candidate = candidate_of(&payload, "itm-proxy-1");
+    let reasons: Vec<&str> = candidate["noise_reasons"]
+        .as_array()
+        .map(|reasons| reasons.iter().filter_map(|r| r.as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        !reasons.contains(&"secret_credential"),
+        "bearer prose must not be a credential"
+    );
+    assert!(
+        reasons.contains(&"token_shaped_run"),
+        "the long id must be reported as a token proxy"
+    );
+    let action_is_flag = candidate["suggested_action"] == json!("flag");
+    assert!(
+        action_is_flag,
+        "a token proxy must be flagged, not discarded"
+    );
+    let score = candidate["noise_score"].as_f64().expect("noise score");
+    assert!(
+        score < 0.90,
+        "a token proxy must stay below the discard band"
+    );
+    let preview = candidate["preview"].as_str().expect("preview");
+    assert!(
+        preview != "[REDACTED]",
+        "proxy preview must not be fully redacted"
+    );
+    assert!(
+        !preview.contains(LONG_ID),
+        "proxy preview must not contain the full id"
+    );
+    assert!(preview.contains("****"), "proxy preview must mask the run");
+    assert!(
+        !out.contains(LONG_ID),
+        "the full id must not appear in CLI output"
+    );
+}
+
+#[test]
+fn audit_keeps_a_labeled_credential_in_the_discard_band() {
+    let s = state();
+    seed_item(
+        &s,
+        "demo",
+        "itm-live-1",
+        "rotated key api_key: sk-live-abcdefgh1234",
+    );
+    let (code, out, _) = run_state("hygiene audit", &["--bank", "demo"], &s, false);
+    assert_eq!(code, ExitCode::SUCCESS, "hygiene audit must succeed");
+    let payload = json_of(&out);
+    let candidate = candidate_of(&payload, "itm-live-1");
+    let reasons: Vec<&str> = candidate["noise_reasons"]
+        .as_array()
+        .map(|reasons| reasons.iter().filter_map(|r| r.as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        reasons.contains(&"secret_credential"),
+        "a labeled credential must be reported as a credential"
+    );
+    let action_is_discard = candidate["suggested_action"] == json!("discard");
+    assert!(action_is_discard, "a real credential must be discarded");
+    let score = candidate["noise_score"].as_f64().expect("noise score");
+    assert!(
+        score >= 0.90,
+        "a real credential must reach the discard band"
+    );
+    let preview_is_redacted = candidate["preview"] == json!("[REDACTED]");
+    assert!(
+        preview_is_redacted,
+        "a real credential preview must be fully redacted"
+    );
+}
+
 #[test]
 fn audit_rejects_invalid_numeric_flags_with_exit_two() {
     let s = state();
