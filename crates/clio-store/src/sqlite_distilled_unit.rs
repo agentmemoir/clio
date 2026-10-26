@@ -437,3 +437,7 @@ pub(crate) fn cascade_source_removed_tx(
 #[cfg(test)]
 #[path = "sqlite_distilled_unit_tests.rs"]
 mod sqlite_distilled_unit_tests;
+
+#[cfg(test)]
+#[path = "sqlite_distilled_unit_update_tests.rs"]
+mod sqlite_distilled_unit_update_tests;

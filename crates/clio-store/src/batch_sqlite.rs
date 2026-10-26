@@ -303,3 +303,7 @@ fn apply_one(
         } => record_audit_event_tx(tx, bank_id, operation, item_id.as_deref(), actor, detail),
     }
 }
+
+#[cfg(test)]
+#[path = "batch_sqlite_tests.rs"]
+mod batch_sqlite_tests;

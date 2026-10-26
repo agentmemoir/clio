@@ -357,33 +357,3 @@ fn batch_write_bank_ids_cover_every_variant() {
         "bank-w"
     );
 }
-
-#[test]
-fn sqlite_batch_close_item_in_its_starting_second_widens_the_interval() {
-    let store = store();
-    let bank = unique("b-batch-close");
-    store
-        .apply_batch(&[BatchWrite::CreateItem {
-            item: item("item-a", &bank),
-            actor: "agent".into(),
-        }])
-        .expect("create");
-    store
-        .apply_batch(&[BatchWrite::CloseItem {
-            bank_id: bank.clone(),
-            item_id: "item-a".into(),
-            valid_until: "2026-02-01T00:00:00Z".into(),
-            tx_until: "2026-01-01T02:00:00+02:00".into(),
-            replacement_id: None,
-            actor: "agent".into(),
-        }])
-        .expect("close");
-    let row = store.get_memory_item(&bank, "item-a").unwrap().unwrap();
-    assert_eq!(row.tx_from, "2026-01-01T00:00:00Z");
-    assert_eq!(
-        row.tx_until.as_deref(),
-        Some("2026-01-01T00:00:01Z"),
-        "the batch close stores a canonical stamp one second on"
-    );
-    assert_eq!(row.valid_until.as_deref(), Some("2026-02-01T00:00:00Z"));
-}
