@@ -6,8 +6,8 @@
 //! This module tests deterministic noise-score composition (`scoring.rs`).
 //!
 //! ## Owns
-//! - Test coverage for appendix weight composition, the secret score floor,
-//!   and suggested-action bands
+//! - Test coverage for appendix weight composition, graded credential scoring,
+//!   the token-run proxy band, and suggested-action bands
 //!
 //! ## Does not own
 //! - Signal detection (`detect_tests.rs`)
@@ -24,12 +24,22 @@ use clio_config::ranking::HygieneWeights;
 
 fn input() -> ScoreInput {
     ScoreInput {
-        secret_hit: false,
+        secret_kinds: vec![],
+        secret_run_len: 0,
+        token_run_len: None,
         pattern_kinds: vec![],
         near_duplicate: false,
         utility_proxy: 1.0,
         staleness: 0.0,
     }
+}
+
+/// Score of one credential kind at a fixed 16-byte matched run.
+fn secret_score(kind: &'static str) -> f64 {
+    let mut i = input();
+    i.secret_kinds = vec![kind];
+    i.secret_run_len = 16;
+    score_noise(&i, &HygieneWeights::default()).score
 }
 
 #[test]
@@ -55,13 +65,67 @@ fn identical_inputs_yield_identical_scores() {
 }
 
 #[test]
-fn secret_hit_floors_score_at_ninety() {
+fn named_credential_key_is_a_discard_credential() {
     let mut i = input();
-    i.secret_hit = true;
+    i.secret_kinds = vec!["named_credential_key"];
+    i.secret_run_len = 16;
     let scored = score_noise(&i, &HygieneWeights::default());
-    assert!(scored.score >= 0.90);
+    assert!(scored.score >= 0.90, "credential floor: {}", scored.score);
     assert_eq!(scored.reasons[0], "secret_credential");
+    assert!(scored.reasons.contains(&"named_credential_key"));
     assert_eq!(scored.suggested_action, Some("discard"));
+}
+
+#[test]
+fn secret_scores_vary_by_kind() {
+    let pem = secret_score("pem_private_key");
+    let known = secret_score("known_secret_format");
+    let named = secret_score("named_credential_key");
+    let bearer = secret_score("bearer_token");
+    assert!(pem > known, "pem {pem} > known format {known}");
+    assert!(known > named, "known format {known} > named key {named}");
+    assert!(named > bearer, "named key {named} > bearer token {bearer}");
+}
+
+#[test]
+fn secret_score_grows_with_run_length() {
+    let mut short = input();
+    short.secret_kinds = vec!["named_credential_key"];
+    short.secret_run_len = 16;
+    let mut long = short.clone();
+    long.secret_run_len = 64;
+    let short_score = score_noise(&short, &HygieneWeights::default()).score;
+    let long_score = score_noise(&long, &HygieneWeights::default()).score;
+    assert!(
+        long_score > short_score,
+        "64-byte run {long_score} > 16-byte run {short_score}"
+    );
+}
+
+#[test]
+fn token_shaped_run_is_not_a_credential_band() {
+    let mut short = input();
+    short.token_run_len = Some(24);
+    let mut long = input();
+    long.token_run_len = Some(120);
+    let short_hit = score_noise(&short, &HygieneWeights::default());
+    let long_hit = score_noise(&long, &HygieneWeights::default());
+    for scored in [&short_hit, &long_hit] {
+        assert!(
+            (0.40..0.70).contains(&scored.score),
+            "proxy band: {}",
+            scored.score
+        );
+        assert!(!scored.reasons.contains(&"secret_credential"));
+        assert!(scored.reasons.contains(&"token_shaped_run"));
+        assert_eq!(scored.suggested_action, Some("flag"));
+    }
+    assert!(
+        long_hit.score > short_hit.score,
+        "120-char run {} > 24-char run {}",
+        long_hit.score,
+        short_hit.score
+    );
 }
 
 #[test]
@@ -86,13 +150,14 @@ fn weights_are_renormalized() {
         utility: 1.0,
         staleness: 0.0,
     };
-    // renormalized to .5/.5: secret hit alone = .5, below floor → keep bands
+    // renormalized to .5/.5: the weight-scaled strength lands at .465, so the
+    // credential floor (named key base .93, no run length) still governs
     let mut i = input();
-    i.secret_hit = true;
+    i.secret_kinds = vec!["named_credential_key"];
     let scored = score_noise(&i, &weights);
     assert!(
-        (scored.score - 0.90).abs() < 1e-9,
-        "secret floor still applies"
+        (scored.score - 0.93).abs() < 1e-9,
+        "credential floor still applies"
     );
 }
 

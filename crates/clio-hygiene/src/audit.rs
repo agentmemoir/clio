@@ -228,7 +228,9 @@ pub fn hygiene_audit(args: &AuditArgs<'_>) -> Result<AuditReport, AmError> {
         let staleness = staleness_of(touch, args.now, args.stale_half_life_days);
         let scored = score_noise(
             &ScoreInput {
-                secret_hit: signals.secret_hit(),
+                secret_kinds: signals.secret_kinds.clone(),
+                secret_run_len: signals.secret_run_len,
+                token_run_len: signals.token_run_len,
                 pattern_kinds: signals.pattern_kinds.clone(),
                 near_duplicate: near_dup_flags[i],
                 utility_proxy: *utility,

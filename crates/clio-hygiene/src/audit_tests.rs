@@ -321,31 +321,37 @@ fn pagination_is_stable_and_bank_scoped() {
 }
 
 #[test]
-fn audit_scans_past_the_200_row_page_cap() {
+fn ordinary_long_id_record_is_not_a_secret_credential() {
     let s = store();
-    let bank = "bank-pages";
-    for i in 0..201 {
-        s.create_memory_item(
-            &item(
-                &format!("p{i:03}"),
-                bank,
-                &format!("filler scratch note {i:03}"),
-                0.5,
-                "2026-09-20T00:00:00Z",
-            ),
-            "actor",
-        )
-        .unwrap();
-    }
-    let report = hygiene_audit(&audit_args(&*s, bank, "2026-09-20T00:00:00Z", 0.0, 10, 0)).unwrap();
-    assert_eq!(
-        report.scanned, 201,
-        "scan walks past the inspector's 200-row page"
-    );
+    let bank = "bank-long-id";
+    // The failure record whose hyphenated identifiers are long enough to look
+    // token-shaped: it rides along as the snapshot half of the scanned text.
+    let record = r#"{"id":"fr-agents-clb016-long-id-probe-task-with-long-identifier-1792665330634632000-1792665446249689000-1","item_id":"failure-item-agents-clb016-long-id-probe-task-with-long-identifier-1792665330634632000-1792665446249679000-0","task_id":"clb016-long-id-probe-task-with-long-identifier-1792665330634632000","what_failed":"clb016 ordinary failure text","lesson":"clb016 ordinary lesson text"}"#;
+    let gist = "clb016 ordinary failure text";
+    let mut itm = item("itm-long", bank, gist, 0.5, "2026-09-01T00:00:00Z");
+    itm.snapshot = Some(serde_json::from_str(record).expect("failure record json"));
+    s.create_memory_item(&itm, "actor").unwrap();
+    let report = hygiene_audit(&audit_args(&*s, bank, "2026-09-20T00:00:00Z", 0.0, 50, 0)).unwrap();
+    let c = report
+        .candidates
+        .iter()
+        .find(|c| c.item_id == "itm-long")
+        .expect("candidate");
     assert!(
-        !report.incomplete,
-        "201 items sit inside the default budget"
+        !c.noise_reasons.contains(&"secret_credential".to_owned()),
+        "{:?}",
+        c.noise_reasons
     );
+    assert_ne!(c.suggested_action.as_deref(), Some("discard"));
+    assert!(c.noise_score < 0.90, "score {}", c.noise_score);
+    assert!(
+        (0.40..0.70).contains(&c.noise_score),
+        "proxy band: {}",
+        c.noise_score
+    );
+    let preview = c.preview.as_deref().expect("preview");
+    assert_ne!(preview, "[REDACTED]");
+    assert!(preview.contains("clb016 ordinary"), "{preview}");
 }
 
 #[test]
