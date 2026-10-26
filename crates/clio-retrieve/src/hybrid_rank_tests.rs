@@ -397,4 +397,5 @@ fn an_empty_shortlist_is_not_sent_to_the_reranker() {
     );
 }
 
+#[path = "hybrid_rank_tests/rerank_batch_tests.rs"]
 mod rerank_batch_tests;
