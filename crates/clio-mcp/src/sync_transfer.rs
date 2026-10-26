@@ -32,7 +32,7 @@
 //! Keep this module focused on the transfer tools and their denial guard.
 
 use crate::runtime::{McpState, now_utc};
-use crate::sync_tools::{banks_of, client_cfg, custody_cipher};
+use crate::sync_tools::{banks_of, client_cfg, required_custody_cipher};
 use crate::write_tools::opt_str;
 use clio_compliance::JournalDenialProbe;
 use clio_sync::client::{SyncModes, bidirectional_with_denial, pull_with_denial, push};
@@ -73,7 +73,7 @@ pub(crate) fn transfer_with(
         ));
     }
     let mut cfg = client_cfg(state, opt_str(args, "remote"), opt_str(args, "token"));
-    cfg.cipher = custody_cipher(get)?;
+    cfg.cipher = required_custody_cipher(get)?;
     let banks = banks_of(state, args)?;
     let mode = SyncModes::parse(opt_str(args, "mode").unwrap_or(default_mode))?;
     let rows = match mode {

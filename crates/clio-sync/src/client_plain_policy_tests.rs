@@ -4,13 +4,14 @@
 //! # Responsibility
 //!
 //! This module tests the receive policy for plaintext content: a node
-//! configured with a sync key is sealed and refuses a plaintext row before any
-//! effect, while a node with no key keeps applying the same row.
+//! configured with a sync key is sealed, and a node with no key cannot verify a
+//! plaintext row, so both refuse one before it has any effect.
 //!
 //! ## Owns
-//! - The sealed-mode refusal of a plaintext discard, invalidate, and denial
-//!   carrier, and the no-effect assertions that go with each
-//! - The keyless positive control that scopes the rule to sealed mode
+//! - The refusal of a plaintext discard, invalidate, and denial carrier at a
+//!   sealed and at a keyless node, and the no-effect assertions that go with
+//!   each
+//! - The remedy the keyless refusal names, so an operator can act on it
 //!
 //! ## Does not own
 //! - The envelope binding of a sealed row (`client_envelope_tests`)
@@ -22,11 +23,16 @@
 //! change it.
 //!
 //! Keep this module focused on the plaintext receive policy.
+//!
+//! A plaintext row is planted in the relay's journal with the server's own
+//! journal write rather than pushed: the push route refuses plaintext content,
+//! so a relay that fabricates or downgrades a row is what a test can model.
 
-use crate::client::client_envelope_tests::{BANK, Receiver, VICTIM, hand_push, held_key, receiver};
+use crate::apply::ApplyEngine;
+use crate::client::client_envelope_tests::{BANK, Receiver, VICTIM, hand_push, held_key};
 use crate::client::client_tests::{TOKEN, cfg, create_item, serve, sqlite};
-use crate::client::{pull, pull_with_denial, sync_status};
-use crate::client_refusal::PLAINTEXT_REFUSED_REASON;
+use crate::client::{pull, pull_with_denial};
+use crate::client_refusal::{PLAINTEXT_REFUSED_KEYLESS_REASON, PLAINTEXT_REFUSED_REASON};
 use crate::crypto::SyncCipherKey;
 use crate::denial::{DenialCarrier, denial_mutation};
 use crate::denial_fixtures::FakeDenial;
@@ -50,19 +56,43 @@ const PLAIN_STAMP: &str = "2026-01-02T00:00:00Z";
 /// relay's own denial marker cannot hide the row being refused.
 const COVERED_BANK: &str = "bank-covered";
 
-/// The same receiving node with no key at all: plaintext mode, `cfg.cipher`
-/// empty, which is the documented keyless deployment.
-fn keyless_receiver(banks: &[&str]) -> Receiver {
-    let (server, _srv, _kms) = serve(banks);
+/// A receiving node and the relay journal it pulls from. The journal handle is
+/// what lets a test plant a row the push route would never accept.
+fn node(banks: &[&str], cipher: Vec<SyncCipherKey>) -> (Receiver, Arc<SqliteStore>) {
+    let (server, relay, _kms) = serve(banks);
     let addr = server.addr().to_owned();
     let store = sqlite();
-    let cfg = cfg("dev-a", &store, &addr, Vec::new());
-    Receiver {
-        server,
-        addr,
-        store,
-        cfg,
-    }
+    let cfg = cfg("dev-a", &store, &addr, cipher);
+    (
+        Receiver {
+            server,
+            addr,
+            store,
+            cfg,
+        },
+        relay,
+    )
+}
+
+/// Plant `m` in the relay's journal as the plaintext row a hostile relay would
+/// serve: the same row builder and append the server's own apply path uses,
+/// with no KMS, so the row stores no sealed content and a puller receives it as
+/// plaintext.
+fn plant_plain(relay: &Arc<SqliteStore>, m: &SyncMutation) {
+    let engine = ApplyEngine {
+        store: relay.as_ref(),
+        sync: relay.as_ref(),
+        device_id: "srv-1".into(),
+        kms: None,
+    };
+    let row = crate::journal_row::journal_row(&engine, m).expect("journal row");
+    assert!(
+        relay
+            .journal_append(&row)
+            .expect("plant the relay row")
+            .inserted,
+        "the relay journal took exactly the planted row"
+    );
 }
 
 /// A relay that carries the deny role, so it accepts a denial operation on push
@@ -113,9 +143,10 @@ fn plain(bank: &str, id: &str, op: &str) -> SyncMutation {
     }
 }
 
-/// The receiver refused the row as a sealed-mode refusal and recorded nothing:
-/// the persisted pull cursor is frozen and the journal never grew.
-fn refused_plain(r: &Receiver, bank: &str) {
+/// The receiver refused the row on the denial path and recorded nothing: the
+/// row is quarantined with `reason`, the persisted pull cursor is frozen, and
+/// the journal never grew.
+fn refused_plain(r: &Receiver, bank: &str, reason: &str) {
     let open = r
         .store
         .dead_letter_list(bank, DeadLetterStatus::Open, 10)
@@ -123,11 +154,11 @@ fn refused_plain(r: &Receiver, bank: &str) {
     assert_eq!(open.len(), 1, "exactly one row is quarantined in {bank}");
     assert_eq!(
         open[0].reason_code, REASON_MALFORMED,
-        "a plaintext row at a sealed node is refused as malformed"
+        "a plaintext row is refused as malformed"
     );
     assert_eq!(
-        open[0].detail, PLAINTEXT_REFUSED_REASON,
-        "the refusal names sealed mode as the cause"
+        open[0].detail, reason,
+        "the refusal names why this node cannot trust the row"
     );
     assert_eq!(
         r.cfg.sync.cursor_get(bank, "pull").expect("cursor"),
@@ -148,37 +179,14 @@ fn refused_plain(r: &Receiver, bank: &str) {
     );
 }
 
-/// The receiver applied the row: nothing was quarantined, exactly one journal
-/// row landed, and the cursor advanced past it.
-fn applied(r: &Receiver, bank: &str) {
-    assert_eq!(
-        r.store
-            .dead_letter_count(bank, DeadLetterStatus::Open)
-            .expect("count"),
-        0,
-        "nothing is quarantined without a key"
-    );
-    assert_eq!(
-        r.store.journal_max_seq(bank).expect("max seq"),
-        1,
-        "the applied row was journaled once"
-    );
-    let report = sync_status(&r.cfg, &[bank.to_owned()]).expect("status");
-    assert!(
-        report.banks[0].pull_cursor.is_some(),
-        "the cursor advanced past the applied row"
-    );
-}
-
 /// A sealed node pulled a plaintext row for the live victim and kept the victim
 /// live: the refusal is the sealed-mode one and it left no durable trace.
 fn sealed_node_refuses_plain(op: &str) {
-    let key = held_key("plain-policy-key");
-    let r = receiver(&[BANK], &key);
+    let (r, relay) = node(&[BANK], vec![held_key("plain-policy-key")]);
     create_item(&r.store, BANK, VICTIM, "victim gist");
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, op));
+    plant_plain(&relay, &plain(BANK, VICTIM, op));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
-    refused_plain(&r, BANK);
+    refused_plain(&r, BANK, PLAINTEXT_REFUSED_REASON);
     let identity = r
         .store
         .get_item_identity(BANK, VICTIM)
@@ -225,7 +233,7 @@ fn sealed_node_refuses_a_plaintext_denial_carrier() {
         store,
         cfg,
     };
-    refused_plain(&r, BANK);
+    refused_plain(&r, BANK, PLAINTEXT_REFUSED_REASON);
     assert_eq!(
         denial.records_for(subject),
         0,
@@ -249,41 +257,65 @@ fn sealed_node_refuses_a_plaintext_denial_carrier() {
     r.server.stop();
 }
 
-/// The positive control: the same row at a node with no key applies, so the
-/// rule above is scoped to sealed mode and not to plaintext content itself.
+/// A keyless node pulled a plaintext discard for the live victim and kept the
+/// victim live: with no key it cannot verify the row, so it refuses it too.
 #[test]
-fn keyless_node_still_applies_a_plaintext_discard() {
-    let r = keyless_receiver(&[BANK]);
+fn keyless_node_refuses_a_plaintext_discard() {
+    let (r, relay) = node(&[BANK], Vec::new());
     create_item(&r.store, BANK, VICTIM, "victim gist");
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, OP_DISCARD));
+    plant_plain(&relay, &plain(BANK, VICTIM, OP_DISCARD));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
-    assert!(
-        r.store
-            .get_item_identity(BANK, VICTIM)
-            .expect("identity read")
-            .is_none(),
-        "the plaintext discard applied"
-    );
-    applied(&r, BANK);
+    refused_plain(&r, BANK, PLAINTEXT_REFUSED_KEYLESS_REASON);
+    let identity = r
+        .store
+        .get_item_identity(BANK, VICTIM)
+        .expect("identity read")
+        .expect("the refused discard left the victim live");
+    assert_eq!(identity.item_id, VICTIM);
     r.server.stop();
 }
 
+/// A keyless node pulled a plaintext invalidate and left the valid axis open:
+/// the row was refused, never applied.
 #[test]
-fn keyless_node_still_applies_a_plaintext_invalidate() {
-    let r = keyless_receiver(&[BANK]);
+fn keyless_node_refuses_a_plaintext_invalidate() {
+    let (r, relay) = node(&[BANK], Vec::new());
     create_item(&r.store, BANK, VICTIM, "victim gist");
-    hand_push(&r.addr, BANK, plain(BANK, VICTIM, OP_INVALIDATE));
+    plant_plain(&relay, &plain(BANK, VICTIM, OP_INVALIDATE));
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
+    refused_plain(&r, BANK, PLAINTEXT_REFUSED_KEYLESS_REASON);
     let got = r
         .store
         .get_memory_item(BANK, VICTIM)
         .expect("get")
-        .expect("the invalidated row is still stored");
+        .expect("the unapplied row is still stored");
     assert_eq!(
-        got.valid_until.as_deref(),
-        Some(PLAIN_STAMP),
-        "the plaintext invalidate closed the valid axis"
+        got.valid_until, None,
+        "the refused invalidate left the valid axis open"
     );
-    applied(&r, BANK);
+    r.server.stop();
+}
+
+/// The keyless refusal is actionable: it names the key this node is missing and
+/// the deliberate discard, so the operator can unblock the frozen cursor.
+#[test]
+fn keyless_refusal_reason_names_the_remedy() {
+    let (r, relay) = node(&[BANK], Vec::new());
+    plant_plain(&relay, &plain(BANK, VICTIM, OP_DISCARD));
+    pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
+    let open = r
+        .store
+        .dead_letter_list(BANK, DeadLetterStatus::Open, 10)
+        .expect("dead letters");
+    assert_eq!(open.len(), 1, "the keyless node quarantined the row");
+    let detail = open[0].detail.clone();
+    assert!(
+        detail.contains("clio sync keygen"),
+        "the refusal names the keygen remedy: {detail}"
+    );
+    assert!(
+        detail.contains("sync_ack_skip"),
+        "the refusal names the discard path: {detail}"
+    );
     r.server.stop();
 }

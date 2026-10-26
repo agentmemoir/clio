@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on the shared-cursor conversion tests.
 
-use crate::client::client_tests::{cfg, item, serve, sqlite};
+use crate::client::client_tests::{cfg, item, paired_cfg, serve, sqlite};
 use crate::client::push;
 use crate::protocol::{decode_watermark, encode_watermark};
 use crate::server::SyncServer;
@@ -228,7 +228,7 @@ fn real_push_path_converts_the_shared_cursor_and_drains_exactly_once() {
     let _server_stop = StopServer(&server);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
     let stamp = "2026-01-01T00:00:00Z";
     let n = 3;
     for i in 0..n {

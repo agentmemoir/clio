@@ -23,6 +23,7 @@
 //! Keep this module focused on the scoped bank checks in `server`.
 
 use crate::credential_fixtures::{Scratch, record, secret};
+use crate::envelope_fixtures::seal_own_content;
 use crate::protocol::SyncContent;
 use crate::server::server_tests::{http, item_value, mutation, push_body, sqlite};
 use crate::server::{SyncServer, SyncServerOptions, sync_serve};
@@ -71,7 +72,7 @@ fn two_clients_on_one_server_are_isolated() {
     let addr = server.addr().to_owned();
 
     // Each client reaches its own bank.
-    let m = mutation("m-a", "b-a", "2026-01-01T00:00:00Z", "g");
+    let m = seal_own_content(mutation("m-a", "b-a", "2026-01-01T00:00:00Z", "g"));
     let (status, ack) = http(
         &addr,
         "POST",
@@ -85,6 +86,7 @@ fn two_clients_on_one_server_are_isolated() {
     let mut m = mutation("m-b", "b-b", "2026-01-01T00:00:00Z", "g");
     m.entity_id = "i-2".into();
     m.content = SyncContent::Plain(item_value("b-b", "i-2", "2026-01-01T00:00:00Z", "g"));
+    let m = seal_own_content(m);
     let (status, value) = http(
         &addr,
         "POST",

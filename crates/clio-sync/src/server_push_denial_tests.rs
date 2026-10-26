@@ -28,8 +28,10 @@
 //! Keep this module focused on the routes' denial refusals.
 
 use crate::apply::apply_tests::{env, item_value};
-use crate::client::{SyncClientConfig, pull_with_denial};
+use crate::client::client_tests::{TOKEN, paired_cfg, paired_key};
+use crate::client::pull_with_denial;
 use crate::credential_fixtures::{Scratch, record, secret};
+use crate::crypto::SyncCipherKey;
 use crate::denial::{DenialCarrier, denial_mutation, denied_bank_marker};
 use crate::denial_fixtures::FakeDenial;
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncMutation};
@@ -111,6 +113,30 @@ fn pull(addr: &str, token: &str, bank: &str) -> (u16, Value) {
     )
 }
 
+/// One item mutation sealed under `key` in its own execution envelope, which is
+/// the only shape the pulling node accepts.
+fn sealed_item(
+    mid: &str,
+    id: &str,
+    subject: &str,
+    stamp: &str,
+    gist: &str,
+    key: &SyncCipherKey,
+) -> SyncMutation {
+    let content = item_value("b-a", id, subject, stamp, gist);
+    let mutation = env(
+        mid,
+        "b-a",
+        ENTITY_KIND_ITEM,
+        id,
+        OP_UPSERT,
+        stamp,
+        "dev-a",
+        content.clone(),
+    );
+    crate::envelope_fixtures::seal_content_for(mutation, key, &content)
+}
+
 /// A credential for `b-a` alone cannot record the serve marker of `b-b`: the
 /// carrier is refused whole before any marker exists, so one bank's token can
 /// never durably refuse another bank's reads.
@@ -180,25 +206,71 @@ fn an_authorized_carrier_records_every_covered_banks_marker() {
 /// A push the authority refuses mid-batch answers with the refusal's own code
 /// and message, so a client can tell a damaged authority (`config_corrupt`)
 /// from a transient storage failure; nothing is applied behind the refusal.
+/// The row rides as a denial carrier, the one plaintext shape the route
+/// accepts, so the authority is consulted and the refusal under test is its
+/// own rather than the route's.
 #[test]
 fn a_push_refused_by_an_unreadable_authority_answers_its_own_code() {
     let (server, store, denial, _scratch, _token_narrow, token_wide) = serve_scoped();
     let addr = server.addr().to_owned();
     denial.damage();
-    let item = mutation("m-refused", "b-a", "2026-01-01T00:00:00Z", "g");
-    let (status, value) = push(&addr, &token_wide, "b-a", std::slice::from_ref(&item));
+    let op = denial_op("b-a", "s-held", "req-refused", &["b-a"]);
+    let (status, value) = push(&addr, &token_wide, "b-a", std::slice::from_ref(&op));
     assert_eq!(status, 500, "{value}");
     assert_eq!(
         value["code"], "config_corrupt",
         "the authority refusal keeps its code: {value}"
     );
-    assert_eq!(
-        value["message"], "the local erasure-denial authority is unreadable; refusing the mutation",
-        "{value}"
+    let message = value["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("denial authority is unavailable"),
+        "the authority's own refusal travels, not a generic one: {value}"
     );
     assert!(
-        store.journal_get("b-a", "m-refused").unwrap().is_none(),
+        store
+            .journal_get("b-a", &op.sync_mutation_id)
+            .unwrap()
+            .is_none(),
         "a refusal writes nothing durably"
+    );
+    server.stop();
+}
+
+/// A peer holding a bank token cannot push a plaintext content row into the
+/// serving node's memory: content crosses the push route only as client-sealed
+/// bytes, so the row is quarantined under the authorized envelope bank and the
+/// acknowledgement rejects it.
+#[test]
+fn a_pushed_plaintext_content_row_is_refused_and_never_applied() {
+    let (server, store) = serve(&["b-a"], Some(TOKEN), false, None, None);
+    let addr = server.addr().to_owned();
+    let fabricated = mutation("m-plain", "b-a", "2026-01-01T00:00:00Z", "fabricated");
+    let (status, ack) = push(&addr, TOKEN, "b-a", std::slice::from_ref(&fabricated));
+    assert_eq!(status, 200, "{ack}");
+    assert_eq!(
+        ack["accepted"],
+        json!([]),
+        "a plaintext row is not accepted: {ack}"
+    );
+    assert_eq!(
+        ack["rejected"],
+        json!(["m-plain"]),
+        "the refusal is reported, never silent: {ack}"
+    );
+    assert!(
+        store.get_memory_item("b-a", "i-1").unwrap().is_none(),
+        "unauthenticated content never reaches this node's memory"
+    );
+    assert!(
+        store.journal_get("b-a", "m-plain").unwrap().is_none(),
+        "a refused row is never journaled"
+    );
+    assert_eq!(
+        store
+            .dead_letter_count("b-a", DeadLetterStatus::Open)
+            .unwrap(),
+        1,
+        "the refusal is quarantined for the operator"
     );
     server.stop();
 }
@@ -208,29 +280,26 @@ fn a_push_refused_by_an_unreadable_authority_answers_its_own_code() {
 /// advance past the refusal.
 #[test]
 fn a_pulled_denied_subject_is_refused_while_a_clear_row_in_the_batch_applies() {
-    let (server, _store) = serve(&["b-a"], Some("tok-plain"), false, None, None);
+    let (server, _store) = serve(&["b-a"], Some(TOKEN), false, None, None);
     let addr = server.addr().to_owned();
-    let clear = env(
+    let key = paired_key();
+    let clear = sealed_item(
         "m-clear",
-        "b-a",
-        ENTITY_KIND_ITEM,
         "i-clear",
-        OP_UPSERT,
+        "s-clear",
         "2026-01-01T00:00:00Z",
-        "dev-a",
-        item_value("b-a", "i-clear", "s-clear", "2026-01-01T00:00:00Z", "clear"),
+        "clear",
+        &key,
     );
-    let held = env(
+    let held = sealed_item(
         "m-held",
-        "b-a",
-        ENTITY_KIND_ITEM,
         "i-held",
-        OP_UPSERT,
+        "s-held",
         "2026-01-01T00:00:01Z",
-        "dev-a",
-        item_value("b-a", "i-held", "s-held", "2026-01-01T00:00:01Z", "held"),
+        "held",
+        &key,
     );
-    let (status, ack) = push(&addr, "tok-plain", "b-a", &[clear, held]);
+    let (status, ack) = push(&addr, TOKEN, "b-a", &[clear, held]);
     assert_eq!(status, 200, "{ack}");
     assert_eq!(
         ack["accepted"].as_array().expect("accepted").len(),
@@ -239,14 +308,7 @@ fn a_pulled_denied_subject_is_refused_while_a_clear_row_in_the_batch_applies() {
     );
 
     let (client_store, _kms) = sqlite();
-    let cfg = SyncClientConfig {
-        device_id: "dev-a".into(),
-        store: Arc::clone(&client_store) as Arc<dyn Store>,
-        sync: client_store as Arc<dyn SyncStore>,
-        remote: Some(addr),
-        token: Some("tok-plain".into()),
-        cipher: Vec::new(),
-    };
+    let cfg = paired_cfg("dev-a", &client_store, &addr);
     let denial = FakeDenial::new("fp-1");
     denial.deny("s-held", &["b-a"]);
     let rows =

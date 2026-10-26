@@ -13,6 +13,7 @@
 //! - Behavior coverage for the transfer tools' guarded pull and bidirectional
 //!   runs against a served peer
 //! - The scratch journal fixture these transfer tests share
+//! - The refusal a node with no sync key gets on every transfer mode
 //!
 //! ## Does not own
 //! - The apply guard itself (`clio-sync` `apply_denial_tests`)
@@ -29,7 +30,7 @@
 
 use super::transfer_with;
 use crate::runtime::McpState;
-use crate::sync_tools::sync_tools_test_support_tests::state;
+use crate::sync_tools::sync_tools_test_support_tests::{TempDir, state};
 use clio_compliance::JournalDenialProbe;
 use clio_store::{DeadLetterStatus, ErasureDenial};
 use clio_sync::prelude::{ApplyEngine, ApplyOutcome, apply_mutation};
@@ -65,11 +66,29 @@ impl Drop for ScratchJournal {
     }
 }
 
-/// The deployment environment naming `journal` as this host's erasure journal.
-fn journal_env(journal: &ScratchJournal) -> impl Fn(&str) -> Option<String> + '_ {
-    move |key: &str| {
-        (key == clio_config::ERASURE_JOURNAL_FILE_ENV).then(|| journal.path().display().to_string())
+/// The deployment environment naming `journal` as this host's erasure journal
+/// and `keys` as the sync key this client transfers under.
+fn journal_env<'a>(
+    journal: &'a ScratchJournal,
+    keys: &'a TempDir,
+) -> impl Fn(&str) -> Option<String> + 'a {
+    let journal_path = journal.path().display().to_string();
+    let key_path = keys.key().display().to_string();
+    move |name: &str| match name {
+        clio_config::ERASURE_JOURNAL_FILE_ENV => Some(journal_path.clone()),
+        clio_config::SYNC_KEY_FILE_ENV => Some(key_path.clone()),
+        _ => None,
     }
+}
+
+/// One sync key recorded through the production generator, in its own temp
+/// directory, so the transfer has a key to seal with.
+fn sync_key(label: &str) -> TempDir {
+    let dir = TempDir::new(label);
+    let path = dir.key().display().to_string();
+    let get = |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| path.clone());
+    clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("generate");
+    dir
 }
 
 fn item(bank: &str, id: &str, subject: &str, stamp: &str) -> MemoryItem {
@@ -114,16 +133,16 @@ fn mutation(mid: &str, bank: &str, id: &str, subject: &str, stamp: &str) -> Sync
     }
 }
 
-/// Seed one bank's row into the peer's journal the way the serve push route
-/// stores an accepted mutation: through the apply engine, sealed under the
-/// peer's own keys, so a later pull serves plain content.
-fn seed(peer: &McpState, m: &SyncMutation) {
+/// Seed one row into a seeding client's own store, the way a local write leaves
+/// it: the apply engine with no KMS writes plain content that the push feed
+/// then packages sealed under that client's sync key.
+fn seed(client: &McpState, m: &SyncMutation) {
     let envelope = serde_json::to_string(m).expect("serialize the seed mutation");
     let engine = ApplyEngine {
-        store: peer.store.as_ref(),
-        sync: peer.sync.as_ref(),
+        store: client.store.as_ref(),
+        sync: client.sync.as_ref(),
         device_id: "dev-seed".into(),
-        kms: Some(peer.kms.as_ref()),
+        kms: None,
     };
     let outcome = apply_mutation(&engine, m, &envelope).expect("the seed mutation applies");
     assert_eq!(
@@ -134,33 +153,22 @@ fn seed(peer: &McpState, m: &SyncMutation) {
 }
 
 /// A serving peer holding one row for `b-held` and one for `b-open`, plus the
-/// scratch journal a pulling client resolves. Nothing is recorded in the
-/// journal here: a caller records the denial it wants to exercise.
-fn seeded_peer() -> (Arc<McpState>, String, ScratchJournal) {
-    let peer = state();
-    seed(
-        &peer,
-        &mutation(
-            "m-held",
-            "b-held",
-            "i-held",
-            "s-held",
-            "2026-01-01T00:00:00Z",
-        ),
-    );
-    seed(
-        &peer,
-        &mutation(
-            "m-open",
-            "b-open",
-            "i-open",
-            "s-clear",
-            "2026-01-01T00:00:01Z",
-        ),
-    );
+/// scratch journal a pulling client resolves and the sync key both ends share.
+///
+/// The rows reach the peer the way a real peer's do: a keyed client pushes
+/// them, so the peer journals sealed content and serves it back sealed. Seeding
+/// the peer's own store would seal under the peer's DEK and serve the rows back
+/// plain, which a keyed client quarantines. Nothing is recorded in the journal
+/// here: a caller records the denial it wants to exercise.
+fn seeded_peer() -> (Arc<McpState>, String, ScratchJournal, TempDir) {
+    let keys = sync_key("mcp-transfer-peer");
     let journal = ScratchJournal::new("pull-denial");
+    let peer = state();
     let addr = {
-        let get = journal_env(&journal);
+        let get = |name: &str| {
+            (name == clio_config::ERASURE_JOURNAL_FILE_ENV)
+                .then(|| journal.path().display().to_string())
+        };
         let payload = crate::sync_tools::sync_serve_with(
             &peer,
             &json!({ "dev": true, "ttl_secs": 30, "banks": ["b-held", "b-open"] }),
@@ -172,13 +180,53 @@ fn seeded_peer() -> (Arc<McpState>, String, ScratchJournal) {
             .expect("the bound address")
             .to_owned()
     };
-    (peer, addr, journal)
+    let seeder = state();
+    for (mid, bank, id, subject, stamp) in [
+        (
+            "m-held",
+            "b-held",
+            "i-held",
+            "s-held",
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "m-open",
+            "b-open",
+            "i-open",
+            "s-clear",
+            "2026-01-01T00:00:01Z",
+        ),
+    ] {
+        seed(&seeder, &mutation(mid, bank, id, subject, stamp));
+    }
+    let key_path = keys.key().display().to_string();
+    let push_env = |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| key_path.clone());
+    transfer_with(
+        &seeder,
+        &json!({ "remote": addr, "banks": ["b-held", "b-open"] }),
+        "push",
+        &push_env,
+    )
+    .expect("the seeded rows reach the peer");
+    (peer, addr, journal, keys)
+}
+
+/// The wire id the peer serves for the one row seeded into `bank`. Push
+/// packaging derives the id from the sealing key, so a test reads it from the
+/// peer's own journal instead of spelling the local seed id.
+fn wire_id(peer: &McpState, bank: &str) -> String {
+    let rows = peer
+        .sync
+        .journal_list_since(bank, 0, 10)
+        .expect("the peer's journal is readable");
+    assert_eq!(rows.len(), 1, "the premise: one row is seeded into {bank}");
+    rows[0].sync_mutation_id.clone()
 }
 
 /// The client-side facts after one guarded transfer: the denied row never
 /// became readable and is dead-lettered, while the unrelated bank's row
 /// applied and its cursor advanced.
-fn assert_denied_subject_refused(client: &McpState) {
+fn assert_denied_subject_refused(client: &McpState, held: &str) {
     assert!(
         client
             .store
@@ -188,7 +236,7 @@ fn assert_denied_subject_refused(client: &McpState) {
         "the denied row never became readable"
     );
     assert_eq!(
-        client.sync.dead_letter_status("m-held").unwrap(),
+        client.sync.dead_letter_status(held).unwrap(),
         Some(DeadLetterStatus::Open),
         "the denied row is dead-lettered"
     );
@@ -212,8 +260,9 @@ fn assert_denied_subject_refused(client: &McpState) {
 /// bypassed by a pulled replay.
 #[test]
 fn a_pulled_denied_subject_is_dead_lettered_while_an_unrelated_bank_applies() {
-    let (_peer, addr, journal) = seeded_peer();
-    let get = journal_env(&journal);
+    let (peer, addr, journal, keys) = seeded_peer();
+    let held = wire_id(&peer, "b-held");
+    let get = journal_env(&journal, &keys);
     JournalDenialProbe::new(journal.path().to_path_buf())
         .record_denial("s-held", &["b-held".to_owned()])
         .expect("record the subject denial");
@@ -232,13 +281,9 @@ fn a_pulled_denied_subject_is_dead_lettered_while_an_unrelated_bank_applies() {
         "one pull carries two banks"
     );
 
-    assert_denied_subject_refused(&client);
+    assert_denied_subject_refused(&client, &held);
     assert!(
-        client
-            .sync
-            .journal_get("b-held", "m-held")
-            .unwrap()
-            .is_none(),
+        client.sync.journal_get("b-held", &held).unwrap().is_none(),
         "a refused row is never journaled"
     );
 }
@@ -248,8 +293,9 @@ fn a_pulled_denied_subject_is_dead_lettered_while_an_unrelated_bank_applies() {
 /// push half.
 #[test]
 fn a_bidirectional_transfer_dead_letters_a_pulled_denied_subject_too() {
-    let (_peer, addr, journal) = seeded_peer();
-    let get = journal_env(&journal);
+    let (peer, addr, journal, keys) = seeded_peer();
+    let held = wire_id(&peer, "b-held");
+    let get = journal_env(&journal, &keys);
     JournalDenialProbe::new(journal.path().to_path_buf())
         .record_denial("s-held", &["b-held".to_owned()])
         .expect("record the subject denial");
@@ -263,7 +309,7 @@ fn a_bidirectional_transfer_dead_letters_a_pulled_denied_subject_too() {
     )
     .expect("the bidirectional transfer runs");
 
-    assert_denied_subject_refused(&client);
+    assert_denied_subject_refused(&client, &held);
 }
 
 /// A journal path that cannot be resolved refuses both pull-apply modes before
@@ -272,7 +318,9 @@ fn a_bidirectional_transfer_dead_letters_a_pulled_denied_subject_too() {
 #[test]
 fn an_unresolvable_journal_path_refuses_the_pull_transfers() {
     let client = state();
-    let env = |_key: &str| -> Option<String> { None };
+    let keys = sync_key("mcp-transfer-no-journal");
+    let path = keys.key().display().to_string();
+    let env = move |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| path.clone());
     for mode in ["pull", "bidirectional"] {
         let result = transfer_with(
             &client,
@@ -293,12 +341,37 @@ fn an_unresolvable_journal_path_refuses_the_pull_transfers() {
     }
 }
 
+/// A node that has recorded no sync key refuses every transfer mode: packaging
+/// memory without client-side encryption is never allowed, so the refusal names
+/// the command that records a key.
+#[test]
+fn a_keyless_node_refuses_push_pull_and_bidirectional() {
+    let client = state();
+    let no_key = |_name: &str| -> Option<String> { None };
+    for mode in ["push", "pull", "bidirectional"] {
+        let result = transfer_with(
+            &client,
+            &json!({ "remote": "127.0.0.1:1", "mode": mode }),
+            "push",
+            &no_key,
+        );
+        let error = result
+            .err()
+            .unwrap_or_else(|| panic!("{mode} must not run without a sync key"));
+        assert_eq!(error.code, ErrorCode::ConfigCorrupt, "{mode}: {error:?}");
+        assert!(
+            error.message.contains("clio sync keygen"),
+            "{mode}: the refusal names the command that fixes it: {error}"
+        );
+    }
+}
+
 /// A resolved journal path with no file yet is a fresh deployment: the bridge
 /// pulls and applies rather than refusing on the absence of the file.
 #[test]
 fn a_resolved_journal_path_with_no_file_keeps_the_pull_clear() {
-    let (_peer, addr, journal) = seeded_peer();
-    let get = journal_env(&journal);
+    let (_peer, addr, journal, keys) = seeded_peer();
+    let get = journal_env(&journal, &keys);
     assert!(
         !journal.path().exists(),
         "the premise: no journal file exists yet"

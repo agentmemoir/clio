@@ -25,6 +25,7 @@
 //!
 //! Keep this module focused on the concurrent-apply case.
 
+use crate::envelope_fixtures::seal_own_content;
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation};
 use crate::server::server_tests::{http, item_value, mutation, push_body, serve};
 use clio_store::{Store as _, SyncStore as _};
@@ -35,10 +36,10 @@ const STAMP: &str = "2026-01-01T00:00:00Z";
 
 /// One item mutation for `entity_id`, so distinct mutations can be built for
 /// distinct entities. The content is serialized from the same `MemoryItem` the
-/// existing server tests use, so the mutation is valid for the apply path
-/// rather than being quarantined for a missing field.
+/// existing server tests use and sealed under the shared sync key, so the route
+/// admits it as the client-sealed row a feeding node sends.
 fn item_mutation(mid: &str, bank: &str, entity_id: &str) -> SyncMutation {
-    SyncMutation {
+    seal_own_content(SyncMutation {
         sync_mutation_id: mid.into(),
         bank: bank.into(),
         entity_kind: ENTITY_KIND_ITEM.into(),
@@ -49,7 +50,7 @@ fn item_mutation(mid: &str, bank: &str, entity_id: &str) -> SyncMutation {
         content: SyncContent::Plain(item_value(bank, entity_id, STAMP, mid)),
         content_hash: format!("h-{mid}"),
         admission_receipt: None,
-    }
+    })
 }
 
 /// Push `m` on its own thread against the running server, and return the ack.
@@ -74,16 +75,17 @@ fn push_in_thread(addr: &str, m: SyncMutation) -> thread::JoinHandle<serde_json:
 /// Two pushes of the *same* mutation id race for the same entity row. The
 /// journal's per-bank unique key keeps the durable state to one row, so the
 /// defect this pins is the window before it: without per-bank serialization
-/// both workers can see an absent item and both try to create it, and the
-/// loser of that create fails with a store error the server reports as a
-/// transient 500, which makes the client retry a mutation that already
-/// succeeded. Every push is answered, and the id is settled exactly once.
+/// both workers can pass every dedupe check before either journals, and the
+/// loser's append is what decides the outcome — a transient failure there makes
+/// the client retry a mutation that already succeeded. Every push is answered,
+/// the id is settled exactly once, and a blind relay keeps the seal it was sent.
 #[test]
 fn concurrent_pushes_of_one_mutation_id_are_answered_without_a_transient_failure() {
     let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();
+    let raced = seal_own_content(mutation("m-race", "b1", STAMP, "raced gist"));
     let workers: Vec<_> = (0..4)
-        .map(|_| push_in_thread(&addr, mutation("m-race", "b1", STAMP, "raced gist")))
+        .map(|_| push_in_thread(&addr, raced.clone()))
         .collect();
     for w in workers {
         w.join().expect("push thread");
@@ -93,11 +95,18 @@ fn concurrent_pushes_of_one_mutation_id_are_answered_without_a_transient_failure
         1,
         "one mutation id settles into exactly one journal row"
     );
-    let item = store
-        .get_memory_item("b1", "i-1")
-        .expect("get item")
-        .expect("the raced mutation was applied");
-    assert_eq!(item.gist.as_deref(), Some("raced gist"));
+    let rows = store.journal_list_since("b1", 0, 10).expect("journal");
+    assert!(
+        rows[0].client_encrypted,
+        "the settled row is the pusher's seal: {rows:?}"
+    );
+    assert!(
+        store
+            .get_memory_item("b1", "i-1")
+            .expect("get item")
+            .is_none(),
+        "a blind node holds no plaintext item for a sealed row"
+    );
     server.stop();
 }
 
@@ -121,60 +130,74 @@ fn concurrent_pushes_of_distinct_entities_all_apply() {
         4,
         "four distinct mutations must produce four journal rows: none dropped"
     );
+    let rows = store.journal_list_since("b1", 0, 10).expect("journal");
+    assert!(
+        rows.iter().all(|r| r.client_encrypted),
+        "every row is the pusher's seal: {rows:?}"
+    );
     for i in 0..4 {
+        let id = format!("i-conc-{i}");
         assert!(
-            store
-                .get_memory_item("b1", &format!("i-conc-{i}"))
-                .expect("get item")
-                .is_some(),
-            "entity i-conc-{i} must be applied exactly once"
+            rows.iter().any(|r| r.entity_id == id),
+            "entity {id} must reach the relay exactly once: {rows:?}"
         );
     }
     server.stop();
 }
 
-/// Distinct mutation ids writing the *same* entity are a real conflict, not a
-/// duplicate. The server resolves them by last-writer-wins, so exactly one is
-/// journaled as applied and the rest are recorded as conflict losers. Before
-/// per-bank serialization the two creates raced and one push failed with a
-/// transient 500; this asserts the resolution is reached instead of an error.
+/// Three concurrent pushes write the *same* entity under different mutation
+/// ids. This node is blind: it stores no item row for a sealed row and has no
+/// content to compare, so every sealed row is applied and journaled on its own
+/// and no push is refused or left needing a retry. What this proves: all three
+/// pushes are acknowledged as applied with nothing quarantined, one journal row
+/// each, and nothing materialized from content the node cannot read.
 #[test]
 fn concurrent_pushes_to_one_entity_resolve_without_a_transient_failure() {
     let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();
-    let acks: Vec<_> = ["m-x", "m-y", "m-z"]
+    let ids = ["m-x", "m-y", "m-z"];
+    // Every push is in flight before the first one is joined, so the three
+    // really do race for the same entity and the same bank lock.
+    let workers: Vec<_> = ids
         .into_iter()
         .map(|mid| push_in_thread(&addr, item_mutation(mid, "b1", "i-shared")))
-        .map(|w| w.join().expect("push thread"))
         .collect();
+    let mut acks = Vec::new();
+    for w in workers {
+        acks.push(w.join().expect("push thread"));
+    }
     assert_eq!(
         store.journal_max_seq("b1").expect("journal"),
-        1,
-        "one entity can take exactly one applied winner; the losers are conflicts"
+        3,
+        "each racing push journals its own row: none dropped, none failed"
     );
-    // Every push is answered and reports the id as settled: the client learns
-    // the outcome either way, and none of them is told to retry a 500.
-    for (mid, ack) in ["m-x", "m-y", "m-z"].iter().zip(&acks) {
-        let accepted = ack["accepted"].as_array().expect("accepted array");
-        let rejected = ack["rejected"].as_array().expect("rejected array");
+    let rows = store.journal_list_since("b1", 0, 10).expect("journal");
+    assert_eq!(rows.len(), 3, "three sealed rows reached the journal");
+    for row in &rows {
+        assert_eq!(row.entity_id, "i-shared", "every row targets the entity");
         assert!(
-            accepted.contains(&serde_json::Value::String((*mid).into())),
-            "{mid} must be settled, not retried: {ack}"
-        );
-        assert!(
-            rejected.is_empty(),
-            "a last-writer-wins loser is settled, not quarantined: {ack}"
+            row.client_encrypted,
+            "the settled row is the pusher's seal: {row:?}"
         );
     }
-    // The winner is one of the three, and the stored row is that mutation's.
-    let stored = store
-        .get_memory_item("b1", "i-shared")
-        .expect("get item")
-        .expect("the entity exists");
-    let gist = stored.gist.expect("a winner's gist is stored");
+    for (mid, ack) in ids.iter().zip(&acks) {
+        assert_eq!(
+            ack["accepted"],
+            serde_json::json!([mid]),
+            "{mid} is answered as applied, never as a failure to retry: {ack}"
+        );
+        assert_eq!(
+            ack["rejected"],
+            serde_json::json!([]),
+            "nothing is quarantined and nothing needs a retry: {ack}"
+        );
+    }
     assert!(
-        ["m-x", "m-y", "m-z"].contains(&gist.as_str()),
-        "the stored row must be one of the racing mutations, got {gist}"
+        store
+            .get_memory_item("b1", "i-shared")
+            .expect("get item")
+            .is_none(),
+        "a blind node holds no plaintext item for a sealed row"
     );
     server.stop();
 }
@@ -187,7 +210,7 @@ fn concurrent_pushes_to_one_entity_resolve_without_a_transient_failure() {
 fn pushes_to_different_banks_are_not_serialized_behind_each_other() {
     let (server, store) = serve(&["b1", "b2"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();
-    let m1 = mutation("m-b1", "b1", STAMP, "bank one");
+    let m1 = seal_own_content(mutation("m-b1", "b1", STAMP, "bank one"));
     let m2 = item_mutation("m-b2", "b2", "i-b2");
     let started = std::time::Instant::now();
     let addr_b1 = addr.clone();
@@ -212,7 +235,7 @@ fn pushes_to_different_banks_are_not_serialized_behind_each_other() {
         elapsed < Duration::from_secs(5),
         "pushes to independent banks must not wait on each other: {elapsed:?}"
     );
-    assert!(store.get_memory_item("b1", "i-1").expect("get").is_some());
-    assert!(store.get_memory_item("b2", "i-b2").expect("get").is_some());
+    assert_eq!(store.journal_max_seq("b1").expect("journal"), 1);
+    assert_eq!(store.journal_max_seq("b2").expect("journal"), 1);
     server.stop();
 }

@@ -318,6 +318,29 @@ pub(crate) fn custody_cipher(
         .collect())
 }
 
+/// The transfer path's keys, refusing a node that has recorded none.
+///
+/// A transfer packages this node's memory for the wire, so with no key it fails
+/// closed rather than send plaintext. [`custody_cipher`] stays keyless on
+/// purpose: the status and key-status surfaces must keep answering on a node
+/// that holds no key.
+///
+/// # Errors
+/// [`ErrorCode::ConfigCorrupt`] naming the remedy when no key resolves, else
+/// whatever [`custody_cipher`] reports.
+pub(crate) fn required_custody_cipher(
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<SyncCipherKey>, AmError> {
+    let cipher = custody_cipher(get)?;
+    if cipher.is_empty() {
+        return Err(AmError::new(
+            ErrorCode::ConfigCorrupt,
+            "sync on this node has no sync key; memory is never synced without client-side encryption, so the transfer is refused — run `clio sync keygen` to record one",
+        ));
+    }
+    Ok(cipher)
+}
+
 /// The client's encryption keys for the status and ack-skip paths, newest
 /// first. One JSON string keeps the old single-key calls working; a JSON array
 /// of strings carries a rotation. An absent or null argument means no keys.
