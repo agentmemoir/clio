@@ -37,7 +37,7 @@ use crate::sqlite_history_write::{commit_failure_record_tx, commit_task_upsert_t
 use crate::sqlite_memory::{active_item_id_by_subject_tx, create_memory_item_tx};
 use crate::sqlite_persona::{put_preference_state_tx_audited, put_stable_entry_tx_audited};
 use crate::sqlite_triple::commit_triple_add_tx;
-use crate::sqlite_triple_read::invalidate_item_tx;
+use crate::sqlite_triple_invalidate::invalidate_item_tx;
 use clio_types::{AmError, ErrorCode, proposition_key};
 
 impl SqliteStore {

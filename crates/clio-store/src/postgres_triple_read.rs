@@ -18,7 +18,7 @@
 //! Changes to Postgres triple read/end SQL should normally require changes here.
 
 use crate::item_persist::open_context;
-use crate::migrate::{IntoAmError, close_stamp, now_iso};
+use crate::migrate::{IntoAmError, canonical_stamp, close_stamp, now_iso};
 use crate::postgres::PostgresStore;
 use crate::triple_map::{filter_triples, map_triple_row, query_where_clause};
 use clio_types::{AmError, ErrorCode, TripleEndOutcome, TripleQuery, TripleRecord};
@@ -308,7 +308,7 @@ pub(crate) fn invalidate_item_tx(
     let ts = now_iso();
     let row = tx
         .query_opt(
-            "SELECT valid_until, tx_until, category, epistemic_kind
+            "SELECT valid_until, tx_until, category, epistemic_kind, tx_from
              FROM items WHERE id = $1 AND bank_id = $2",
             &[&item_id, &bank_id],
         )
@@ -323,6 +323,7 @@ pub(crate) fn invalidate_item_tx(
     let tu: Option<String> = r.get(1);
     let category: Option<String> = r.get(2);
     let epistemic_kind: String = r.get(3);
+    let row_tx_from: String = r.get(4);
     if vu.is_some() && tu.is_some() {
         return Ok(TripleEndOutcome {
             closed_ids: vec![item_id.to_owned()],
@@ -330,6 +331,8 @@ pub(crate) fn invalidate_item_tx(
             replacement_id: replacement_id.map(str::to_owned),
         });
     }
+    let tx_until = canonical_stamp(tx_until).unwrap_or_else(|| tx_until.to_owned());
+    let tx_close = close_stamp(&row_tx_from, &tx_until);
     let n = tx
         .execute(
             "UPDATE items SET valid_until = $1, tx_until = $2, superseded_by_id = $3,
@@ -337,7 +340,7 @@ pub(crate) fn invalidate_item_tx(
              WHERE id = $5 AND bank_id = $6",
             &[
                 &valid_until,
-                &tx_until,
+                &tx_close,
                 &replacement_id,
                 &ts,
                 &item_id,
@@ -384,3 +387,7 @@ mod postgres_triple_read_tests;
 #[cfg(test)]
 #[path = "postgres_triple_read_query_tests.rs"]
 mod postgres_triple_read_query_tests;
+
+#[cfg(test)]
+#[path = "postgres_triple_invalidate_tests.rs"]
+mod postgres_triple_invalidate_tests;
