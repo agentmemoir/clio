@@ -346,12 +346,16 @@ fn factory_selects_teiranker_by_provider() {
         {"index": 1, "score": 0.9},
         {"index": 0, "score": 0.4}
     ])));
+    let documents = docs();
+    let max_batch = documents.len();
     let tei = json!({
-        "rerank": {"url": url, "model": "m", "provider": "tei", "max_batch": 2}
+        "rerank": {"url": url, "model": "m", "provider": "tei", "max_batch": max_batch}
     });
     let r = build_reranker_from(&tei, None).expect("tei").expect("some");
-    assert_eq!(r.max_batch_size(), 2);
-    let order = r.rerank("query", &docs(), 3).expect("rerank");
+    assert_eq!(r.max_batch_size(), max_batch);
+    let order = r
+        .rerank("query", &documents, documents.len())
+        .expect("rerank");
     assert_eq!(indices(&order), vec![1, 0, 2]); // omitted doc appends in original order
     // TEI wire shape: POST {url}/rerank with {query, texts}; no top_k/documents.
     let request = rx.recv().expect("captured request");
