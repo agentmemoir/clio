@@ -19,7 +19,7 @@
 use crate::item_persist::{
     kind_columns, map_item_insert, require_actor, seal_dual, source_type_sql,
 };
-use crate::migrate::{IntoAmError, now_iso};
+use crate::migrate::{IntoAmError, close_stamp, now_iso};
 use crate::sqlite::SqliteStore;
 use crate::triple_cipher::TripleSeal;
 use crate::triple_map::wrong_update_rule_attr;
@@ -74,42 +74,49 @@ pub(crate) fn commit_triple_add_tx(
             ));
         }
     }
-    let mut prior_edge_ids = Vec::new();
+    let mut prior_edges = Vec::new();
     {
         // tx-open, not valid-open: an edge with a known valid_until but no
         // tx_until is still the system's current belief and must supersede.
         let mut stmt = tx
             .prepare(
-                "SELECT id FROM triples
+                "SELECT id, tx_from FROM triples
                  WHERE bank_id = ?1 AND subject = ?2 AND predicate = ?3
                    AND tx_until IS NULL",
             )
             .am("open triples prepare")?;
-        let ids = stmt
+        let rows = stmt
             .query_map(params![edge.bank_id, edge.subject, edge.predicate], |r| {
-                r.get::<_, String>(0)
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })
             .am("open triples query")?;
-        for id in ids {
-            prior_edge_ids.push(id.am("open triple id")?);
+        for row in rows {
+            prior_edges.push(row.am("open triple row")?);
         }
     }
     if supersede {
-        for pid in &prior_edge_ids {
+        for (pid, prior_tx_from) in &prior_edges {
             tx.execute(
                 "UPDATE triples
                  SET valid_until = COALESCE(valid_until, ?1), tx_until = ?2, updated_at = ?3
                  WHERE id = ?4 AND bank_id = ?5",
-                params![edge.valid_from, edge.tx_from, ts, pid, edge.bank_id],
+                params![
+                    edge.valid_from,
+                    close_stamp(prior_tx_from, &edge.tx_from),
+                    ts,
+                    pid,
+                    edge.bank_id
+                ],
             )
             .am("close prior triple")?;
         }
-    } else if !prior_edge_ids.is_empty() {
+    } else if !prior_edges.is_empty() {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
             "open subject+predicate edge exists; set supersede=true or triple_end first",
         ));
     }
+    let prior_edge_ids: Vec<String> = prior_edges.into_iter().map(|(id, _)| id).collect();
     let sk_rows = tx
         .execute(
             "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)

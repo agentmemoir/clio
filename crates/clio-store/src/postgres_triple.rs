@@ -17,7 +17,7 @@
 //! Changes to Postgres supersession write SQL should normally require changes here.
 
 use crate::item_persist::{kind_columns, require_actor, seal_dual, source_type_sql};
-use crate::migrate::{IntoAmError, now_iso};
+use crate::migrate::{IntoAmError, close_stamp, now_iso};
 use crate::postgres::PostgresStore;
 use crate::postgres_memory::lock_subject_write_tx;
 use crate::triple_cipher::TripleSeal;
@@ -77,30 +77,38 @@ pub(crate) fn commit_triple_add_tx(
     // tx_until is still the system's current belief and must supersede.
     let open_rows = tx
         .query(
-            "SELECT id FROM triples
+            "SELECT id, tx_from FROM triples
              WHERE bank_id = $1 AND subject = $2 AND predicate = $3
                AND tx_until IS NULL
              FOR UPDATE",
             &[&edge.bank_id, &edge.subject, &edge.predicate],
         )
         .am("open triples query")?;
-    let prior_edge_ids: Vec<String> = open_rows.iter().map(|r| r.get(0)).collect();
+    let prior_edges: Vec<(String, String)> =
+        open_rows.iter().map(|r| (r.get(0), r.get(1))).collect();
     if supersede {
-        for pid in &prior_edge_ids {
+        for (pid, prior_tx_from) in &prior_edges {
             tx.execute(
                 "UPDATE triples
                  SET valid_until = COALESCE(valid_until, $1), tx_until = $2, updated_at = $3
                  WHERE id = $4 AND bank_id = $5",
-                &[&edge.valid_from, &edge.tx_from, &ts, pid, &edge.bank_id],
+                &[
+                    &edge.valid_from,
+                    &close_stamp(prior_tx_from, &edge.tx_from),
+                    &ts,
+                    pid,
+                    &edge.bank_id,
+                ],
             )
             .am("close prior triple")?;
         }
-    } else if !prior_edge_ids.is_empty() {
+    } else if !prior_edges.is_empty() {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
             "open subject+predicate edge exists; set supersede=true or triple_end first",
         ));
     }
+    let prior_edge_ids: Vec<String> = prior_edges.into_iter().map(|(id, _)| id).collect();
     let sk_rows = tx
         .execute(
             "INSERT INTO subject_keys (subject_id, dek_ref, status, created_at, updated_at)

@@ -410,3 +410,39 @@ fn t12_triple_without_context_omits_wire_key() {
     let wire = serde_json::to_string(&got).unwrap();
     assert!(!wire.contains("context"), "{wire}");
 }
+
+#[test]
+fn t13_supersede_same_second_keeps_prior_in_history() {
+    let s = store();
+    let bank = unique("b");
+    let t = "2024-05-01T00:00:00Z";
+    let add = |item: &str, id: &str, object: &str| {
+        s.commit_triple_add(
+            &carrier(item, &bank, "2024-01-01", t, object),
+            &edge(id, &bank, item, object, "2024-01-01", t),
+            true,
+            "agent",
+        )
+        .unwrap()
+    };
+    assert!(add("i1", "e1", "Chicago").prior_edge_ids.is_empty());
+    let closed = add("i2", "e2", "Boston").prior_edge_ids;
+    assert_eq!(closed, vec!["e1".to_owned()]);
+    let prior = s.get_triple(&bank, "e1").unwrap().unwrap();
+    let until = prior.tx_until.clone().expect("prior row is closed");
+    assert_eq!(until, "2024-05-01T00:00:01Z", "close lands one second on");
+    assert!(until > prior.tx_from, "{until} vs {}", prior.tx_from);
+    let believed = |as_of: &str| {
+        s.query_triples(&TripleQuery {
+            bank_id: bank.clone(),
+            subject: None,
+            predicate: None,
+            object: Some("Chicago".into()),
+            as_of: Some(as_of.into()),
+            time_axis: TimeAxis::Transaction,
+        })
+        .unwrap()
+    };
+    assert_eq!(believed(t).len(), 1, "visible at {t}");
+    assert!(believed(&until).is_empty(), "prior belief gone at {until}");
+}
