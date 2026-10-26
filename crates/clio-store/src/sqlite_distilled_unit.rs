@@ -33,7 +33,7 @@ use crate::distilled_unit::{
     revision_from_i64,
 };
 use crate::item_persist::{open_dual, require_actor, seal_dual, seal_dual_content};
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, close_stamp};
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode, MemoryItem};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -309,12 +309,21 @@ impl SqliteStore {
         let prior_id = revision_prior_id(record)?;
         self.with_conn(|conn| {
             let tx = conn.transaction().am("distilled revision begin")?;
+            let prior_from: Option<String> = tx
+                .query_row(
+                    "SELECT tx_from FROM items WHERE id = ?1 AND bank_id = ?2",
+                    params![prior_id, record.bank_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .am("distilled revision prior start")?;
+            let close = close_stamp(prior_from.as_deref().unwrap_or_default(), &ts);
             let n = tx
                 .execute(
                     "UPDATE items
-                     SET valid_until = ?1, tx_until = ?1, superseded_by_id = ?2, updated_at = ?1
-                     WHERE id = ?3 AND bank_id = ?4 AND tx_until IS NULL",
-                    params![ts, new_item.id, prior_id, record.bank_id],
+                     SET valid_until = ?1, tx_until = ?2, superseded_by_id = ?3, updated_at = ?1
+                     WHERE id = ?4 AND bank_id = ?5 AND tx_until IS NULL",
+                    params![ts, close, new_item.id, prior_id, record.bank_id],
                 )
                 .am("distilled revision prior close")?;
             if n == 0 {
@@ -424,3 +433,7 @@ pub(crate) fn cascade_source_removed_tx(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "sqlite_distilled_unit_tests.rs"]
+mod sqlite_distilled_unit_tests;

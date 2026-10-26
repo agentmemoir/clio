@@ -32,7 +32,7 @@ use crate::distilled_unit::{
     revision_from_i64,
 };
 use crate::item_persist::{open_dual, require_actor, seal_dual, seal_dual_content};
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, close_stamp};
 use crate::postgres::PostgresStore;
 use crate::postgres_memory::lock_subject_write_tx;
 use clio_types::{AmError, ErrorCode, MemoryItem};
@@ -356,12 +356,20 @@ impl PostgresStore {
         self.with_client(|client| {
             let mut tx = client.transaction().am("distilled revision begin pg")?;
             lock_subject_write_tx(&mut tx, &new_item.subject_id)?;
+            let prior_from: Option<String> = tx
+                .query_opt(
+                    "SELECT tx_from FROM items WHERE id = $1 AND bank_id = $2",
+                    &[&prior_id, &record.bank_id],
+                )
+                .am("distilled revision prior start pg")?
+                .map(|row| row.get(0));
+            let close = close_stamp(prior_from.as_deref().unwrap_or_default(), &ts);
             let n = tx
                 .execute(
                     "UPDATE items
-                     SET valid_until = $1, tx_until = $1, superseded_by_id = $2, updated_at = $1
-                     WHERE id = $3 AND bank_id = $4 AND tx_until IS NULL",
-                    &[&ts, &new_item.id, &prior_id, &record.bank_id],
+                     SET valid_until = $1, tx_until = $2, superseded_by_id = $3, updated_at = $1
+                     WHERE id = $4 AND bank_id = $5 AND tx_until IS NULL",
+                    &[&ts, &close, &new_item.id, &prior_id, &record.bank_id],
                 )
                 .am("distilled revision prior close pg")?;
             if n == 0 {
@@ -417,3 +425,7 @@ pub(crate) mod postgres_distilled_unit_tests;
 #[cfg(test)]
 #[path = "postgres_distilled_unit_cas_tests.rs"]
 mod postgres_distilled_unit_cas_tests;
+
+#[cfg(test)]
+#[path = "postgres_distilled_unit_close_stamp_tests.rs"]
+mod postgres_distilled_unit_close_stamp_tests;

@@ -26,7 +26,7 @@ use crate::audit_model::{CorrectionOutcome, CorrectionSpec};
 use crate::item_persist::{
     kind_columns, map_item_insert, require_actor, seal_dual, source_type_sql,
 };
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, close_stamp};
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode, MemoryItem};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -69,16 +69,16 @@ impl SqliteStore {
         );
         self.with_conn(|conn| {
             let tx = conn.transaction().am("correct begin")?;
-            let prior: Option<(Option<String>, Option<String>, Option<String>)> = tx
+            let prior: Option<(Option<String>, Option<String>, Option<String>, String)> = tx
                 .query_row(
-                    "SELECT discarded_at, tx_until, subject_id FROM items \
+                    "SELECT discarded_at, tx_until, subject_id, tx_from FROM items \
                      WHERE id = ?1 AND bank_id = ?2",
                     params![spec.prior_item_id, spec.bank_id],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()
                 .am("correct prior lookup")?;
-            let Some((discarded, tx_until, prior_subject)) = prior else {
+            let Some((discarded, tx_until, prior_subject, prior_from)) = prior else {
                 return Err(AmError::new(
                     ErrorCode::ItemNotFound,
                     format!("item `{}` not found in bank", spec.prior_item_id),
@@ -104,13 +104,15 @@ impl SqliteStore {
                     &spec.prior_item_id,
                 ));
             }
+            let close = close_stamp(&prior_from, &spec.timestamp);
             let n = tx
                 .execute(
                     "UPDATE items
-                     SET valid_until = ?1, tx_until = ?1, superseded_by_id = ?2, updated_at = ?1
-                     WHERE id = ?3 AND bank_id = ?4 AND tx_until IS NULL",
+                     SET valid_until = ?1, tx_until = ?2, superseded_by_id = ?3, updated_at = ?1
+                     WHERE id = ?4 AND bank_id = ?5 AND tx_until IS NULL",
                     params![
                         spec.timestamp,
+                        close,
                         spec.new_item.id,
                         spec.prior_item_id,
                         spec.bank_id
@@ -259,3 +261,7 @@ fn insert_correct_audit(
     .am("correct audit insert")?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "sqlite_correct_tests.rs"]
+mod sqlite_correct_tests;

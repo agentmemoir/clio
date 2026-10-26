@@ -76,3 +76,92 @@ fn pg_correct_erased_subject_refuses_and_rolls_back_prior() {
         ))
         .unwrap();
 }
+
+const START: &str = "2026-06-01T00:00:00Z";
+const WIDENED: &str = "2026-06-01T00:00:01Z";
+const LATER: &str = "2026-07-01T00:00:00Z";
+
+fn setup() -> Option<(crate::PgTestGuard, PostgresStore)> {
+    let guard = lock_pg_test();
+    let url = postgres_url_from_env();
+    match PostgresStore::open(url.as_str(), local_kms()) {
+        Ok(store) => Some((guard, store)),
+        Err(err) => {
+            crate::pg_skip::unreachable_pg_or_skip("postgres correction close stamps", &err);
+            None
+        }
+    }
+}
+
+/// Run one correction of `prior_id` at `stamp` and leave its prior row closed.
+fn correct(s: &PostgresStore, bank: &str, prior_id: &str, new_id: &str, stamp: &str) {
+    let prior = s.get_memory_item(bank, prior_id).unwrap().unwrap();
+    let mut new_item = prior.clone();
+    new_item.id = new_id.to_owned();
+    s.correct_item(&CorrectionSpec {
+        bank_id: bank.to_owned(),
+        prior_item_id: prior_id.to_owned(),
+        new_item,
+        reason: "same-second correction".to_owned(),
+        actor: "tester".to_owned(),
+        timestamp: stamp.to_owned(),
+    })
+    .unwrap();
+}
+
+#[test]
+fn pg_correct_in_the_priors_starting_second_stores_one_second_later() {
+    let Some((_guard, s)) = setup() else {
+        return;
+    };
+    let bank = unique("b-pg-correct-same-second");
+    let subject = unique("correct-same-subject");
+    let prior_id = unique("item-prior");
+    let new_id = unique("item-corrected");
+    let prior = memory_item(&bank, &prior_id, &subject);
+    assert_eq!(prior.tx_from, START, "fixture starts the row at {START}");
+    s.create_memory_item(&prior, "tester").expect("create");
+
+    correct(&s, &bank, &prior_id, &new_id, START);
+
+    let row = s.get_memory_item(&bank, &prior_id).unwrap().unwrap();
+    assert_eq!(
+        row.tx_until.as_deref(),
+        Some(WIDENED),
+        "the close lands one second past the row's own start"
+    );
+    assert!(
+        row.tx_from.as_str() < row.tx_until.as_deref().unwrap(),
+        "a transaction read at {} sits inside [{:?})",
+        row.tx_from,
+        row.tx_until
+    );
+    assert_eq!(
+        row.valid_until.as_deref(),
+        Some(START),
+        "the valid axis keeps the requested stamp"
+    );
+}
+
+#[test]
+fn pg_correct_after_the_priors_start_keeps_the_requested_stamp() {
+    let Some((_guard, s)) = setup() else {
+        return;
+    };
+    let bank = unique("b-pg-correct-later");
+    let subject = unique("correct-later-subject");
+    let prior_id = unique("item-prior");
+    let new_id = unique("item-corrected");
+    let prior = memory_item(&bank, &prior_id, &subject);
+    s.create_memory_item(&prior, "tester").expect("create");
+
+    correct(&s, &bank, &prior_id, &new_id, LATER);
+
+    let row = s.get_memory_item(&bank, &prior_id).unwrap().unwrap();
+    assert_eq!(
+        row.tx_until.as_deref(),
+        Some(LATER),
+        "a later close is stored byte for byte"
+    );
+    assert_eq!(row.valid_until.as_deref(), Some(LATER));
+}
