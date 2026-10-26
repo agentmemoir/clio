@@ -190,8 +190,8 @@ fn t11_postgres_supersede_same_second_keeps_history() {
         .unwrap();
     store
         .commit_triple_add(
-            &carrier(&i2, &bank, "Boston", "2024-01-01", t),
-            &edge(&e2, &bank, &i2, "Boston", "2024-01-01", t),
+            &carrier(&i2, &bank, "Boston", "2024-06-01", t),
+            &edge(&e2, &bank, &i2, "Boston", "2024-06-01", t),
             true,
             "agent",
         )
@@ -200,6 +200,15 @@ fn t11_postgres_supersede_same_second_keeps_history() {
     let until = prior.tx_until.clone().expect("prior row is closed");
     assert_eq!(until, "2024-05-01T00:00:01Z", "close lands one second on");
     assert!(until > prior.tx_from, "{until} vs {}", prior.tx_from);
+    let valid_until = prior
+        .valid_until
+        .clone()
+        .expect("prior row is closed on the valid axis too");
+    assert!(
+        valid_until > prior.valid_from,
+        "valid interval [{}, {valid_until}) is empty",
+        prior.valid_from
+    );
     let believed = |as_of: &str| {
         store
             .query_triples(&TripleQuery {
@@ -214,6 +223,24 @@ fn t11_postgres_supersede_same_second_keeps_history() {
     };
     assert_eq!(believed(t).len(), 1, "visible at {t}");
     assert!(believed(&until).is_empty(), "prior belief gone at {until}");
+    let rows_at_close = store
+        .query_triples(&TripleQuery {
+            bank_id: bank.clone(),
+            subject: Some("Alice".into()),
+            predicate: Some("lives_in".into()),
+            object: None,
+            as_of: Some(t.into()),
+            time_axis: TimeAxis::Transaction,
+        })
+        .unwrap();
+    let mut ids: Vec<&str> = rows_at_close.iter().map(|row| row.id.as_str()).collect();
+    ids.sort_unstable();
+    let mut want = vec![e1.as_str(), e2.as_str()];
+    want.sort_unstable();
+    assert_eq!(
+        ids, want,
+        "the row closed in its own second stays readable for that second alongside its successor"
+    );
 }
 
 #[test]

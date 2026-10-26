@@ -232,19 +232,24 @@ pub fn canonical_optional_stamp(raw: Option<&str>) -> Result<Option<String>, AmE
 /// at `tx_from`.
 ///
 /// Reads compare the column as text with a half-open predicate, so an interval
-/// whose ends are the same second contains no instant and the closed row leaves
-/// transaction-time history. A close that would land on the row's own start is
-/// therefore placed one second later, in the same canonical form. A later value
-/// is returned unchanged, and so is one that cannot be placed on the clock.
+/// whose ends name the same instant contains no instant: the closed row leaves
+/// transaction-time history, and `TripleRecord::validate` refuses a negative
+/// length. Both sides are therefore resolved to instants rather than compared as
+/// bytes, and compared at the whole second the columns are written and read at,
+/// so the row's own start spelled on another offset or with a fraction is still
+/// recognised as its start. A close naming an instant at or before that start is
+/// placed one second after it, in the canonical form; a close naming a later
+/// second is returned unchanged, byte for byte, and so is one either side cannot
+/// be placed on the clock.
 #[must_use]
 pub(crate) fn close_stamp(tx_from: &str, tx_until: &str) -> String {
-    if tx_until != tx_from {
+    let (Some(from), Some(until)) = (stamp_instant(tx_from), stamp_instant(tx_until)) else {
+        return tx_until.to_owned();
+    };
+    if until.div_euclid(1_000) > from.div_euclid(1_000) {
         return tx_until.to_owned();
     }
-    stamp_instant(tx_from).map_or_else(
-        || tx_until.to_owned(),
-        |millis| millis_to_rfc3339(millis + 1_000),
-    )
+    millis_to_rfc3339(from.saturating_add(1_000))
 }
 
 /// `YYYY-MM-DDThh:mm:ss[.fraction](Z|±hh:mm)` → (instant, offset in seconds east

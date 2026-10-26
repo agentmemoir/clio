@@ -276,3 +276,7 @@ pub(crate) mod sqlite_triple_open_uniq_tests;
 #[cfg(test)]
 #[path = "sqlite_triple_tests.rs"]
 mod sqlite_triple_tests;
+
+#[cfg(test)]
+#[path = "sqlite_triple_supersede_tests.rs"]
+mod sqlite_triple_supersede_tests;

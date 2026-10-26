@@ -201,10 +201,55 @@ fn a_close_on_the_row_start_moves_one_second_later() {
 }
 
 #[test]
+fn a_close_before_the_row_start_moves_one_second_after_it() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T05:00:00Z"),
+        "2026-03-04T05:06:08Z",
+        "an earlier close would describe a negative-length interval"
+    );
+}
+
+#[test]
+fn a_close_naming_the_row_start_on_another_offset_moves_one_second_later() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T07:06:07+02:00"),
+        "2026-03-04T05:06:08Z",
+        "the offset names the same instant, so the interval is still empty"
+    );
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T03:06:07-02:00"),
+        "2026-03-04T05:06:08Z"
+    );
+}
+
+#[test]
+fn a_close_naming_the_row_start_with_a_fraction_moves_one_second_later() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T05:06:07.500Z"),
+        "2026-03-04T05:06:08Z",
+        "a fraction inside the row's second still names its start at column precision"
+    );
+}
+
+#[test]
+fn a_close_at_an_impossible_date_keeps_the_requested_stamp() {
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-02-30T00:00:00Z"),
+        "2026-02-30T00:00:00Z",
+        "a date the calendar does not have is not widened into a different instant"
+    );
+}
+
+#[test]
 fn a_close_after_the_row_start_is_unchanged() {
     assert_eq!(
         close_stamp("2026-03-04T05:06:07Z", "2026-04-05T06:07:08Z"),
         "2026-04-05T06:07:08Z"
+    );
+    assert_eq!(
+        close_stamp("2026-03-04T05:06:07Z", "2026-03-04T08:00:00.250+02:00"),
+        "2026-03-04T08:00:00.250+02:00",
+        "a later close is stored exactly as given, spelling and all"
     );
 }
 
