@@ -115,8 +115,11 @@ fn sync_status_reports_the_node_s_own_keys_when_none_are_supplied() {
 
 /// Transfer and status answer from one source: for the same arguments and the
 /// same custody view, the push response's `encryption` field and the status
-/// report's `encryption` agree in both directions. The getter is injected, so
-/// no test reads the machine's own key store.
+/// report's `encryption` agree. A node holding no key has no push response to
+/// compare — the transfer is refused, because a keyless transfer would package
+/// memory as plaintext — while status keeps answering so an operator can see
+/// the missing key. The getter is injected, so no test reads the machine's own
+/// key store.
 #[test]
 fn sync_transfer_and_sync_status_agree_on_encryption_for_the_same_arguments() {
     let st = state();
@@ -124,16 +127,22 @@ fn sync_transfer_and_sync_status_agree_on_encryption_for_the_same_arguments() {
     assert_eq!(serve["ok"], Value::Bool(true), "{serve}");
     let addr = serve["addr"].as_str().expect("addr").to_owned();
 
-    // No keys in custody: both surfaces report encryption off. The getter
-    // answers `None`, so no explicit file is named and no recorded store
-    // resolves either; an explicit path that held no key would be an error.
+    // No keys in custody: the transfer refuses and names the remedy, where
+    // status reports encryption off. The getter answers `None`, so no explicit
+    // file is named and no recorded store resolves either; an explicit path
+    // that held no key would be an error.
     let none = |_key: &str| None;
-    let pushed =
+    let refused =
         super::sync_transfer::transfer_with(&st, &json!({ "remote": addr }), "push", &none)
-            .expect("push");
+            .expect_err("a keyless node must not transfer");
+    assert_eq!(
+        refused.code,
+        clio_types::ErrorCode::ConfigCorrupt,
+        "{refused:?}"
+    );
+    assert!(refused.message.contains("clio sync keygen"), "{refused}");
     let status = crate::sync_tools::sync_status_with(&st, &json!({}), &none).expect("status");
-    assert_eq!(pushed["encryption"], Value::Bool(false));
-    assert_eq!(pushed["encryption"], status["encryption"]);
+    assert_eq!(status["encryption"], Value::Bool(false));
 
     // The node holds keys and the caller supplies none: both surfaces report
     // encryption on, from the same custody set. Generating twice leaves a

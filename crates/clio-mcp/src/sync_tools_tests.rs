@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on MCP sync tool tests.
 
-use super::sync_tools_test_support_tests::state;
+use super::sync_tools_test_support_tests::{TempDir, state};
 use crate::write_tools::dispatch;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -75,6 +75,14 @@ impl Drop for ScratchStore {
     }
 }
 
+/// The three transfer modes run end to end against this node's own dev serve:
+/// the push echoes a masked token, the pull and the bidirectional run come
+/// back with a mode, a remote, and a cursor per bank.
+///
+/// It drives `transfer_with` rather than the env-reading `transfer` wrapper so
+/// the sync key and the denial journal come from the injected getter: a
+/// parallel suite must not mutate the process environment, and a keyless
+/// transfer is refused.
 #[test]
 fn sync_transfer_roundtrip_against_local_dev_serve() {
     let st = state();
@@ -82,16 +90,34 @@ fn sync_transfer_roundtrip_against_local_dev_serve() {
     assert_eq!(serve["ok"], Value::Bool(true), "{serve}");
     let addr = serve["addr"].as_str().expect("addr").to_owned();
 
+    let dir = TempDir::new("mcp-transfer-roundtrip");
+    let key_path = dir.key().display().to_string();
+    let journal_path = dir
+        .key()
+        .with_file_name("erasure-journal.json")
+        .display()
+        .to_string();
+    let key_only = |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| key_path.clone());
+    clio_config::sync_key::generate(&key_only, Some(clio_config::KeySource::File))
+        .expect("generate");
+    let get = move |name: &str| match name {
+        clio_config::SYNC_KEY_FILE_ENV => Some(key_path.clone()),
+        clio_config::ERASURE_JOURNAL_FILE_ENV => Some(journal_path.clone()),
+        _ => None,
+    };
+
     // Push: empty feed still acks a cursor; the echoed token is masked and
     // the clear secret never appears anywhere in the response tree.
-    let pushed = dispatch(
+    let pushed = super::sync_transfer::transfer_with(
         &st,
-        "sync_push",
         &json!({ "remote": addr, "token": "averylongtoken123" }),
-    );
-    assert_eq!(pushed["ok"], Value::Bool(true), "{pushed}");
+        "push",
+        &get,
+    )
+    .expect("the push runs");
     assert_eq!(pushed["mode"], "push");
     assert_eq!(pushed["remote"], addr);
+    assert_eq!(pushed["encryption"], Value::Bool(true));
     let token = pushed["token"].as_str().expect("masked token");
     assert!(token.starts_with("***"), "{token}");
     assert!(!pushed.to_string().contains("averylongtoken123"));
@@ -100,22 +126,24 @@ fn sync_transfer_roundtrip_against_local_dev_serve() {
     assert!(rows[0]["push_cursor"].as_str().is_some());
 
     // Pull: short token takes the full-mask branch.
-    let pulled = dispatch(
+    let pulled = super::sync_transfer::transfer_with(
         &st,
-        "sync_pull",
         &json!({ "remote": addr, "mode": "pull", "token": "short" }),
-    );
-    assert_eq!(pulled["ok"], Value::Bool(true), "{pulled}");
+        "pull",
+        &get,
+    )
+    .expect("the pull runs");
     assert_eq!(pulled["token"], "***");
     assert!(pulled["banks"][0]["pull_cursor"].as_str().is_some());
 
     // Bidirectional: pull then push in one action.
-    let bidi = dispatch(
+    let bidi = super::sync_transfer::transfer_with(
         &st,
-        "sync_pull",
         &json!({ "remote": addr, "mode": "bidirectional" }),
-    );
-    assert_eq!(bidi["ok"], Value::Bool(true), "{bidi}");
+        "pull",
+        &get,
+    )
+    .expect("the bidirectional transfer runs");
     assert_eq!(bidi["mode"], "bidirectional");
     // Bidirectional returns one row per bank per phase: pull rows then push rows.
     assert_eq!(bidi["banks"].as_array().expect("rows").len(), 2);
@@ -172,11 +200,17 @@ fn sync_status_returns_masked_report_shape() {
 #[test]
 fn sync_push_without_remote_fails_as_invalid_argument() {
     let st = state();
-    let result = dispatch(&st, "sync_push", &json!({}));
-    assert_eq!(result["ok"], Value::Bool(false), "{result}");
-    assert_eq!(result["code"], "invalid_argument");
-    let pull = dispatch(&st, "sync_pull", &json!({}));
-    assert_eq!(pull["ok"], Value::Bool(false), "{pull}");
+    // A keyed node, because the transfer refuses before reading the endpoint
+    // otherwise: the endpoint argument is what this test is about.
+    let dir = TempDir::new("mcp-push-no-remote");
+    let path = dir.key().display().to_string();
+    let get = |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| path.clone());
+    clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("generate");
+    let err = super::sync_transfer::transfer_with(&st, &json!({}), "push", &get)
+        .expect_err("a push with no remote is refused");
+    assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument, "{err:?}");
+    super::sync_transfer::transfer_with(&st, &json!({}), "pull", &get)
+        .expect_err("a pull with no remote is refused");
 }
 
 #[test]
@@ -345,6 +379,21 @@ fn sync_transfer_rejects_a_supplied_sync_key_array() {
         let message = result["message"].as_str().expect("message");
         assert!(message.contains("sync key store"), "{name}: {message}");
     }
+}
+
+#[test]
+fn sync_transfer_key_gate_refuses_a_keyless_node() {
+    let err = crate::sync_tools::required_custody_cipher(&|_name: &str| None)
+        .expect_err("a node with no sync key must not transfer");
+    assert_eq!(err.code, clio_types::ErrorCode::ConfigCorrupt, "{err:?}");
+    assert!(err.message.contains("clio sync keygen"), "{err}");
+
+    let dir = TempDir::new("mcp-required-cipher");
+    let path = dir.key().display().to_string();
+    let get = |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| path.clone());
+    clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("generate");
+    let cipher = crate::sync_tools::required_custody_cipher(&get).expect("a held key answers");
+    assert_eq!(cipher.len(), 1, "the key the gate resolved");
 }
 
 #[test]
