@@ -33,8 +33,13 @@ pub const MAX_PREVIEW_CHARS: usize = 240;
 /// Reasons are stable ids shared with `noise_reasons[]` on audit candidates.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NoiseSignals {
-    /// Secret-class kinds found (e.g. `secret_credential`).
+    /// Real credential evidence found: `named_credential_key`, `pem_private_key`,
+    /// `bearer_token`, `known_secret_format`.
     pub secret_kinds: Vec<&'static str>,
+    /// Longest matched credential value length in bytes, `0` when none.
+    pub secret_run_len: usize,
+    /// Longest token-shaped run length in bytes; a weak proxy, never a hit.
+    pub token_run_len: Option<usize>,
     /// Operational pattern kinds found (ids).
     pub pattern_kinds: Vec<&'static str>,
 }
@@ -55,30 +60,40 @@ impl NoiseSignals {
 
 /// Detect secret-class and operational-noise signals in item text.
 ///
-/// Secret detection reuses the shared config masker as the detector: when
-/// inline scrubbing changes the text, secret material was present. Best-effort
-/// by design — pattern packs cannot guarantee coverage of novel secret formats
-/// (documented limitation).
+/// A secret-class hit needs real credential evidence: a labeled key the shared
+/// config masker scrubs, a PEM key block, a bearer token, or a known credential
+/// format. Best-effort by design — pattern packs cannot guarantee coverage of
+/// novel secret formats (documented limitation).
 #[must_use]
 pub fn detect_noise(text: &str) -> NoiseSignals {
     let mut signals = NoiseSignals::default();
     let lower = text.to_ascii_lowercase();
 
-    // Secret-class: labeled credentials, PEM key blocks, bearer tokens, and
-    // long token-shaped runs (high-entropy proxy).
-    if scrub_inline_secrets(text) != text
-        || lower.contains("-----begin")
-            && (lower.contains("private key") || lower.contains("certificate"))
-        || lower.contains("bearer ")
-            && lower[rfind_bearer(&lower)..]
-                .chars()
-                .filter(char::is_ascii_alphanumeric)
-                .count()
-                >= 24
-        || has_token_shaped_run(&lower)
-    {
-        signals.secret_kinds.push("secret_credential");
+    // Secret-class: only real credential evidence counts. A long hyphenated
+    // identifier mixes letters with digits too, so run shape alone is not one.
+    if scrub_inline_secrets(text) != text {
+        signals.secret_kinds.push("named_credential_key");
     }
+    if lower.contains("-----begin")
+        && (lower.contains("private key") || lower.contains("certificate"))
+    {
+        signals.secret_kinds.push("pem_private_key");
+    }
+    if lower.contains("bearer ") {
+        let run = lower[rfind_bearer(&lower)..]
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .count();
+        if run >= 24 {
+            signals.secret_kinds.push("bearer_token");
+            signals.secret_run_len = signals.secret_run_len.max(run);
+        }
+    }
+    if let Some(len) = known_secret_format_len(text) {
+        signals.secret_kinds.push("known_secret_format");
+        signals.secret_run_len = signals.secret_run_len.max(len);
+    }
+    signals.token_run_len = token_shaped_run_len(&lower);
 
     // Terminal spam: ANSI escapes or prompt/exit chatter.
     if text.contains('\u{1b}')
@@ -134,19 +149,69 @@ fn rfind_bearer(lower: &str) -> usize {
     lower.rfind("bearer ").map_or(0, |i| i + "bearer ".len())
 }
 
-/// True when the text contains a token-shaped run: 24+ token chars mixing
-/// digits with letters (entropy proxy; best-effort).
-fn has_token_shaped_run(lower: &str) -> bool {
-    for word in lower.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
-        if word.len() >= 24 {
-            let has_digit = word.chars().any(|c: char| c.is_ascii_digit());
-            let has_alpha = word.chars().any(char::is_alphabetic);
-            if has_digit && has_alpha {
-                return true;
-            }
-        }
-    }
-    false
+/// Longest token-shaped run: 24+ token chars mixing digits with letters.
+///
+/// This is a weak entropy proxy, not credential evidence, so callers must not
+/// treat a hit as a secret.
+fn token_shaped_run_len(lower: &str) -> Option<usize> {
+    lower
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .filter(|word| word.len() >= 24)
+        .filter(|word| {
+            word.chars().any(|c: char| c.is_ascii_digit()) && word.chars().any(char::is_alphabetic)
+        })
+        .map(str::len)
+        .max()
+}
+
+/// Known credential format prefixes paired with the body length each needs.
+const KNOWN_SECRET_PREFIXES: &[(&str, usize)] = &[
+    ("github_pat_", 20),
+    ("sk_live_", 16),
+    ("sk_test_", 16),
+    ("rk_live_", 16),
+    ("glpat-", 20),
+    ("xoxb-", 10),
+    ("xoxp-", 10),
+    ("xoxa-", 10),
+    ("xoxr-", 10),
+    ("xoxs-", 10),
+    ("AKIA", 16),
+    ("ASIA", 16),
+    ("AIza", 20),
+    ("ghp_", 20),
+    ("gho_", 20),
+    ("ghu_", 20),
+    ("ghs_", 20),
+    ("ghr_", 20),
+    ("npm_", 20),
+    ("sk-", 16),
+];
+
+/// Longest body length of a known credential format found in `text`.
+///
+/// A prefix only counts at a token boundary: the character before it is absent
+/// or is neither ASCII alphanumeric nor `_`, so `risk-free` cannot match `sk-`.
+fn known_secret_format_len(text: &str) -> Option<usize> {
+    KNOWN_SECRET_PREFIXES
+        .iter()
+        .flat_map(|(prefix, min)| {
+            text.match_indices(prefix).filter_map(move |(start, _)| {
+                let boundary = text[..start]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+                if !boundary {
+                    return None;
+                }
+                let body = text[start + prefix.len()..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                    .count();
+                (body >= *min).then_some(body)
+            })
+        })
+        .max()
 }
 
 fn count_lines_starting_with(text: &str, marker: char) -> usize {

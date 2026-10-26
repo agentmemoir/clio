@@ -30,8 +30,33 @@ fn secret_classes_are_detected() {
     assert!(detect_noise(pem).secret_hit());
     let bearer = "call with bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdefgh";
     assert!(detect_noise(bearer).secret_hit());
-    let token = "deploy key Zx3_9kQ2-wLp7RtYvBnM4cDf8GhJ5KmNpQrStUvWx12";
-    assert!(detect_noise(token).secret_hit());
+    let known = "deploy key ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    assert!(detect_noise(known).secret_hit());
+}
+
+#[test]
+fn token_shaped_run_is_not_a_credential() {
+    let bare = "Zx3_9kQ2-wLp7RtYvBnM4cDf8GhJ5KmNpQrStUvWx12";
+    let signals = detect_noise(bare);
+    assert!(!signals.secret_hit(), "{:?}", signals.secret_kinds);
+    assert_eq!(signals.token_run_len, Some(bare.len()));
+    assert_eq!(signals.secret_run_len, 0, "no credential value measured");
+}
+
+#[test]
+fn long_hyphenated_id_is_not_a_credential() {
+    let id = "failure-item-agents-clb016-long-id-probe-task-with-long-identifier-1792665330634632000-1792665446249679000-0";
+    let bare = detect_noise(id);
+    assert!(!bare.secret_hit(), "{:?}", bare.secret_kinds);
+    assert!(bare.token_run_len.is_some());
+    let prose = detect_noise(&format!("clb016 ordinary failure text {id}"));
+    assert!(!prose.secret_hit(), "{:?}", prose.secret_kinds);
+}
+
+#[test]
+fn known_secret_format_requires_a_token_boundary() {
+    assert!(!detect_noise("task-list-risk-free").secret_hit());
+    assert!(detect_noise("ghp_abcdefghijklmnopqrstuvwxyz0123456789").secret_hit());
 }
 
 #[test]
