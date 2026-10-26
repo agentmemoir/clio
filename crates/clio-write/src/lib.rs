@@ -42,6 +42,7 @@ pub mod maintenance;
 pub mod memtree;
 pub mod memtree_attach;
 pub mod memtree_maint;
+pub mod memtree_record;
 pub mod memtree_tools;
 pub mod parallel;
 pub mod persona;
@@ -83,13 +84,14 @@ pub use ingest::{
     parallel_ingest,
 };
 pub use maintenance::{
-    BufferMaintenance, LeafIndex, MaintenanceHook, MaintenanceSignal, NoopMaintenance,
-    SharedMaintenanceHook, dispatch_async,
+    BufferMaintenance, DispatchJob, LeafIndex, MAINTENANCE_DRAIN_BUDGET, MaintenanceHook,
+    MaintenanceSignal, NoopMaintenance, SharedMaintenanceHook, dispatch_async,
 };
 pub use memtree::{
     AttachLeaf, BankMemTree, DEFAULT_FANOUT, MemForest, MemTreeNode, MemTreeQueryFilter,
 };
 pub use memtree_maint::{MaintStats, MemTreeMaint, SharedMemForest};
+pub use memtree_record::{node_from_record, query_from_filter, record_from_node};
 pub use memtree_tools::{
     ConsolidateAccept, MaintenanceStatusData, consolidate_tool, maintenance_status, memtree_get,
     memtree_query,

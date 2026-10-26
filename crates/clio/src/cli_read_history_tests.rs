@@ -153,6 +153,13 @@ fn memtree_query_get_and_truncation() {
     let list = nodes["nodes"].as_array().expect("nodes");
     assert!(!list.is_empty(), "leaf attach must create a node");
     let node_id = list[0]["id"].as_str().expect("node id").to_owned();
+    // The answer is a durable row, not this process's forest.
+    let stored = s
+        .store
+        .get_memtree_node("bank-a", &node_id)
+        .expect("stored node")
+        .expect("the queried node is a stored row");
+    assert_eq!(stored.id, node_id);
 
     let (_, out, _) = run_state("memtree get", &[&node_id, "--bank", "bank-a"], &s, false);
     assert_eq!(json_of(&out)["ok"], json!(true));
@@ -189,6 +196,13 @@ fn memtree_query_get_and_truncation() {
     let (_, out, _) = run_state("memtree query", &["--bank", "bank-a"], &s, true);
     assert!(out.contains("nodes: "), "{out}");
     assert!(out.contains(&node_id), "{out}");
+
+    // A bank with no node is not found, not an empty success: a caller cannot
+    // tell an empty bank from a read that failed otherwise.
+    let (code, out, err) = run_state("memtree query", &["--bank", "bank-empty"], &s, false);
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(err.contains("\"code\":\"not_found\""), "{err}");
+    assert!(err.contains("bank-empty"), "{err}");
 
     assert_eq!(render_node_list("nodes", &json!({})), "nodes: 0");
     assert_eq!(

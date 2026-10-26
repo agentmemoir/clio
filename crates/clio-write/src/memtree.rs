@@ -109,6 +109,11 @@ pub struct BankMemTree {
     pub(crate) nodes: HashMap<String, MemTreeNode>,
     /// item_id → leaf node id
     pub(crate) placement: HashMap<String, String>,
+    /// Node ids whose parent this most recent attach changed by splitting: the
+    /// children a split moved and the two halves a new root took. Awaiting a
+    /// durable write of their new `parent_id`; emptied at the start of every
+    /// attach, so it holds at most one attach's moves.
+    pub(crate) reparented: Vec<String>,
     pub(crate) seq: AtomicU64,
 }
 
@@ -122,6 +127,7 @@ impl BankMemTree {
             root_id: None,
             nodes: HashMap::new(),
             placement: HashMap::new(),
+            reparented: Vec::new(),
             seq: AtomicU64::new(1),
         }
     }

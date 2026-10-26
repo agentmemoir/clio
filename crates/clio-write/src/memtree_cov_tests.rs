@@ -25,6 +25,7 @@ use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
 use crate::memtree::{AttachLeaf, BankMemTree, MemForest, MemTreeQueryFilter};
 use crate::memtree_maint::MemTreeMaint;
 use crate::memtree_tools::{consolidate_tool, maintenance_status, memtree_get, memtree_query};
+use clio_store::{LocalDevKms, SqliteStore, Store};
 use clio_types::{EpisodicType, EpistemicKind, ErrorCode, ItemKind, MemoryItem};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -122,11 +123,14 @@ fn coverage_maint_tools_and_force() {
         clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         clio_types::ToolResult::Ok { .. } => panic!("expected missing bank"),
     }
-    match memtree_get(&forest, "", "x") {
+    let store: Arc<dyn Store> = Arc::new(
+        SqliteStore::open_in_memory(Arc::new(LocalDevKms::new())).expect("in-memory store"),
+    );
+    match memtree_get(store.as_ref(), &forest, "", "x") {
         clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         clio_types::ToolResult::Ok { .. } => panic!("expected missing bank"),
     }
-    match memtree_query(&forest, "", &MemTreeQueryFilter::default()) {
+    match memtree_query(store.as_ref(), &forest, "", &MemTreeQueryFilter::default()) {
         clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::MissingBank),
         clio_types::ToolResult::Ok { .. } => panic!("expected missing bank"),
     }

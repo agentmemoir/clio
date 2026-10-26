@@ -8,24 +8,30 @@
 //! ## Owns
 //! - `maintenance_status` response assembly and dirty/refreshing reporting
 //! - `consolidate` accept flow (non-blocking background wave or wait mode)
-//! - `memtree_get` / `memtree_query` bank-scoped reads
+//! - `memtree_get` / `memtree_query` bank-scoped reads, answered from the store
+//!   with the in-process forest as the cache for nodes not yet flushed
 //!
 //! ## Does not own
 //! - Dirty-set coalescing or the refresh engine (`memtree_maint`)
 //! - Tree topology / attach / split algorithms
+//! - The durable write of a node (`memtree_hook`) or its row shape (`memtree_record`)
 //!
 //! ## Boundary
 //!
 //! Changes to tool request/response shapes should normally require changes here.
-//! Changes to refresh scheduling should not require changes here.
+//! Changes to refresh scheduling or to the SQL behind a row should not require
+//! changes here.
 //!
 //! Keep this module focused on MemTree inspect/trigger tool handlers.
 
 use crate::hub_distill::HubDistillEngine;
-use crate::memtree::MemTreeQueryFilter;
+use crate::memtree::{MemTreeNode, MemTreeQueryFilter};
 use crate::memtree_maint::{MemTreeMaint, SharedMemForest};
+use crate::memtree_record::{node_from_record, query_from_filter};
+use clio_store::Store;
 use clio_types::{AmError, ErrorCode, OpContext, ToolResult};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -49,6 +55,15 @@ pub struct MaintenanceStatusData {
     /// Optional last error from a failed refresh.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// How many MemTree row writes (or dispatch waits) failed in this process.
+    ///
+    /// A non-zero count means part of the tree a read answers from never
+    /// reached the store. The write that caused it still succeeded; this is how
+    /// the degradation stays visible after the fact.
+    pub persist_failures: u64,
+    /// The most recent persist failure, when `persist_failures` is non-zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_persist_error: Option<String>,
     /// Optional item id when scoped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
@@ -128,6 +143,7 @@ pub fn maintenance_status(
         }
         (None, _) => (vec![], vec![], None),
     };
+    let (persist_failures, last_persist_error) = maint.persist_failures();
     ToolResult::success(MaintenanceStatusData {
         leaf_queryable,
         structural_maintenance_ms,
@@ -135,6 +151,8 @@ pub fn maintenance_status(
         dirty_ancestors,
         refreshing,
         last_error,
+        persist_failures,
+        last_persist_error,
         item_id: item_id.map(str::to_owned),
     })
 }
@@ -232,38 +250,121 @@ fn hubs_text(
     }
 }
 
-/// `memtree_get(node_id)` bank-scoped.
+/// `memtree_get(node_id)` bank-scoped: the stored row, else an unflushed node.
+///
+/// The store is the source of truth. A process that has held this bank in its
+/// forest for a long time would otherwise answer from memory and never see a
+/// row an earlier process wrote, so the forest is consulted only when the store
+/// holds no row for the id.
 pub fn memtree_get(
+    store: &dyn Store,
     forest: &SharedMemForest,
     bank_id: &str,
     node_id: &str,
-) -> ToolResult<crate::memtree::MemTreeNode> {
+) -> ToolResult<MemTreeNode> {
     if bank_id.is_empty() {
         return ToolResult::failure(AmError::new(ErrorCode::MissingBank, "bank is required"));
     }
-    let guard = forest.lock().expect("forest");
-    match guard.tree(bank_id).and_then(|t| t.get(node_id)).cloned() {
-        Some(n) => ToolResult::success(n),
+    let stored = match store.get_memtree_node(bank_id, node_id) {
+        Ok(stored) => stored,
+        Err(error) => return ToolResult::failure(error),
+    };
+    if let Some(record) = stored {
+        return ToolResult::success(node_from_record(record));
+    }
+    let unflushed = forest
+        .lock()
+        .expect("forest")
+        .tree(bank_id)
+        .and_then(|t| t.get(node_id))
+        .cloned();
+    match unflushed {
+        Some(node) => ToolResult::success(node),
         None => ToolResult::failure(AmError::new(
-            ErrorCode::UnknownPath,
-            format!("memtree node `{node_id}` not found in bank"),
+            ErrorCode::NotFound,
+            format!("memtree node `{node_id}` not found in bank `{bank_id}`"),
         )),
     }
 }
 
-/// `memtree_query` bank-scoped.
+/// `memtree_query` bank-scoped: the stored rows merged with the unflushed forest.
+///
+/// A bank's answer is the union of what the store holds and what this process
+/// has in its forest. One stored row of any kind must not suppress a node the
+/// process has not flushed yet: that is a partial-memory answer shaped as a
+/// complete one. Where both hold one id, the forest copy wins, because the
+/// forest holds what this process just attached and is the fresher of the two.
+/// Sorting and truncation are `BankMemTree::query`'s own, so the answer is
+/// ordered the same way whichever side a node came from.
+///
+/// An empty result is not found rather than an empty success: a caller cannot
+/// tell an empty bank from a broken read otherwise, and the message names every
+/// filter that was applied, so a narrow filter is not read as an empty bank.
 pub fn memtree_query(
+    store: &dyn Store,
     forest: &SharedMemForest,
     bank_id: &str,
     filter: &MemTreeQueryFilter,
-) -> ToolResult<Vec<crate::memtree::MemTreeNode>> {
+) -> ToolResult<Vec<MemTreeNode>> {
     if bank_id.is_empty() {
         return ToolResult::failure(AmError::new(ErrorCode::MissingBank, "bank is required"));
     }
-    let guard = forest.lock().expect("forest");
-    let nodes = match guard.tree(bank_id) {
-        Some(t) => t.query(filter),
-        None => vec![],
+    let rows = match store.query_memtree_nodes(&query_from_filter(bank_id, filter)) {
+        Ok(rows) => rows,
+        Err(error) => return ToolResult::failure(error),
     };
+    let mut by_id: HashMap<String, MemTreeNode> = rows
+        .into_iter()
+        .map(|record| {
+            let node = node_from_record(record);
+            (node.id.clone(), node)
+        })
+        .collect();
+    {
+        // The forest applies the depth, task and time-range predicates itself,
+        // so only a node the filter selects reaches this map.
+        let guard = forest.lock().expect("forest");
+        if let Some(tree) = guard.tree(bank_id) {
+            for node in tree.query(filter) {
+                by_id.insert(node.id.clone(), node);
+            }
+        }
+    }
+    let mut nodes: Vec<MemTreeNode> = by_id.into_values().collect();
+    nodes.sort_by(|a, b| {
+        a.interval_start
+            .cmp(&b.interval_start)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    nodes.truncate(filter.limit.unwrap_or(100).min(1000));
+    if nodes.is_empty() {
+        let mut applied: Vec<String> = Vec::new();
+        if let Some(depth) = filter.depth {
+            applied.push(format!("depth {depth}"));
+        }
+        if let Some(task) = filter.task_id.as_deref() {
+            applied.push(format!("task `{task}`"));
+        }
+        if filter.time_start.is_some() || filter.time_end.is_some() {
+            applied.push(format!(
+                "time range {}..{}",
+                filter.time_start.as_deref().unwrap_or("-"),
+                filter.time_end.as_deref().unwrap_or("+")
+            ));
+        }
+        let narrowed = if applied.is_empty() {
+            String::new()
+        } else {
+            format!(" matching {}", applied.join(", "))
+        };
+        return ToolResult::failure(AmError::new(
+            ErrorCode::NotFound,
+            format!("no memtree node in bank `{bank_id}`{narrowed}"),
+        ));
+    }
     ToolResult::success(nodes)
 }
+
+#[cfg(test)]
+#[path = "memtree_tools_tests.rs"]
+mod memtree_tools_tests;

@@ -21,9 +21,9 @@
 //! Keep this module focused on MemTree acceptance coverage.
 
 use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
-use crate::memtree::{AttachLeaf, BankMemTree, DEFAULT_FANOUT, MemForest, MemTreeQueryFilter};
+use crate::memtree::{AttachLeaf, BankMemTree, DEFAULT_FANOUT, MemForest};
 use crate::memtree_maint::MemTreeMaint;
-use crate::memtree_tools::{consolidate_tool, maintenance_status, memtree_get, memtree_query};
+use crate::memtree_tools::{consolidate_tool, maintenance_status};
 use clio_types::{ErrorCode, MemoryItem};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -86,11 +86,7 @@ fn t01_attach_leaf_linked_and_readable() {
         clio_types::ToolResult::Err { message, .. } => panic!("{message}"),
     };
     assert!(st.leaf_queryable);
-    // Successful get through the tool (not only the error arm).
-    match memtree_get(&forest, "b1", &leaf_id) {
-        clio_types::ToolResult::Ok { data, .. } => assert_eq!(data.id, leaf_id),
-        clio_types::ToolResult::Err { message, .. } => panic!("{message}"),
-    }
+    // Reading a node back through its handler is `memtree_tools_tests`' claim.
 }
 
 #[test]
@@ -265,42 +261,6 @@ fn t07_refresh_failure_leaves_dirty() {
 }
 
 #[test]
-fn t08_memtree_query_time_range() {
-    let forest = Arc::new(Mutex::new(MemForest::new()));
-    {
-        let mut g = forest.lock().unwrap();
-        let t = g.tree_mut("b1");
-        t.attach_leaf(leaf("a", "b1", "10", "a")).unwrap();
-        t.attach_leaf(leaf("b", "b1", "50", "b")).unwrap();
-        t.attach_leaf(leaf("c", "b1", "90", "c")).unwrap();
-    }
-    let nodes = match memtree_query(
-        &forest,
-        "b1",
-        &MemTreeQueryFilter {
-            time_start: Some("40".into()),
-            time_end: Some("60".into()),
-            depth: Some(0),
-            ..Default::default()
-        },
-    ) {
-        clio_types::ToolResult::Ok { data, .. } => data,
-        clio_types::ToolResult::Err { message, .. } => panic!("{message}"),
-    };
-    assert_eq!(nodes.len(), 1);
-    assert_eq!(nodes[0].item_id.as_deref(), Some("b"));
-}
-
-#[test]
-fn t09_memtree_get_missing() {
-    let forest = Arc::new(Mutex::new(MemForest::new()));
-    match memtree_get(&forest, "b1", "missing") {
-        clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::UnknownPath),
-        clio_types::ToolResult::Ok { .. } => panic!("expected not found"),
-    }
-}
-
-#[test]
 fn t10_summary_does_not_mutate_leaf_snapshot() {
     let forest = Arc::new(Mutex::new(MemForest::new()));
     let leaves = Arc::new(LeafIndex::new());
@@ -349,18 +309,7 @@ fn t11_cross_bank_denied() {
             .attach_leaf(leaf("a", "bank-a", "1", "a"))
             .unwrap();
     }
-    let node_id = forest
-        .lock()
-        .unwrap()
-        .tree("bank-a")
-        .unwrap()
-        .leaf_node_id_for_item("a")
-        .unwrap()
-        .to_owned();
-    match memtree_get(&forest, "bank-b", &node_id) {
-        clio_types::ToolResult::Err { code, .. } => assert_eq!(code, ErrorCode::UnknownPath),
-        clio_types::ToolResult::Ok { .. } => panic!("cross-bank must fail closed"),
-    }
+    // A read of that node under another bank is `memtree_tools_tests`' claim.
     let err = forest
         .lock()
         .unwrap()

@@ -28,7 +28,9 @@
 
 use crate::runtime::{McpState, SHARED_BANK};
 use clio_types::{Actor, AmError, Bank, ErrorCode, OpContext, PrincipalLabel, civil_from_days};
-use clio_write::{MaintenanceSignal, SharedMaintenanceHook, dispatch_async};
+use clio_write::{
+    MAINTENANCE_DRAIN_BUDGET, MaintenanceSignal, SharedMaintenanceHook, dispatch_async,
+};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -211,10 +213,32 @@ impl McpState {
         crate::runtime_context::canonical_write_stamp(&raw)
     }
 
-    /// Dispatch maintenance signals off the write path (never gates the response).
+    /// Dispatch maintenance signals, then wait for the hook to consume them.
+    ///
+    /// Structural refresh stays off this path; what is waited for is the hook's
+    /// own work — attaching the leaf and upserting the rows the attach changed.
+    /// Without that wait a one-shot write can exit before its leaf rows land, so
+    /// a later read finds nothing. The wait is bounded by
+    /// [`MAINTENANCE_DRAIN_BUDGET`], so a stuck store costs one write that
+    /// budget instead of hanging it.
+    ///
+    /// A wait that expires, or a hook that panicked, returns `false`, and that
+    /// verdict says the rows this write produced may never have landed. The
+    /// write itself already succeeded and is not rolled back; the verdict is
+    /// recorded on the engine instead, so the degradation reaches the process
+    /// log now and `maintenance status` later.
     pub fn dispatch_maintenance(&self, signals: Vec<MaintenanceSignal>) {
-        if !signals.is_empty() {
-            dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
+        let job = dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
+        if let Some(job) = job
+            && !job.drain(MAINTENANCE_DRAIN_BUDGET)
+        {
+            self.maint.record_persist_failure(&AmError::new(
+                ErrorCode::Internal,
+                format!(
+                    "maintenance hook did not finish within {}ms, so its memtree rows may be unwritten",
+                    MAINTENANCE_DRAIN_BUDGET.as_millis()
+                ),
+            ));
         }
     }
 }

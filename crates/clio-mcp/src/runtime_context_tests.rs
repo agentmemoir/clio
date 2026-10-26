@@ -168,6 +168,57 @@ fn clean_batch_ids_do_not_repeat() {
     assert_ne!(s.next_clean_batch_id(), s.next_clean_batch_id());
 }
 
+#[test]
+fn a_drain_that_never_finishes_is_recorded_instead_of_dropped() {
+    let s = state();
+    // Poison the forest lock: the hook's attach panics on it, so the job's
+    // sender drops and `drain` reports the stalled hook instead of blocking
+    // for its budget. That is the one verdict a write must not discard.
+    let forest = Arc::clone(&s.forest);
+    let poisoned = std::thread::spawn(move || {
+        let _guard = forest.lock().expect("forest");
+        panic!("poison the forest lock");
+    })
+    .join();
+    assert!(poisoned.is_err(), "the lock holder panicked");
+    let item = unbanked_item("item-1");
+    let bank = item.bank_id.clone();
+    s.leaves.publish(item);
+
+    s.dispatch_maintenance(vec![MaintenanceSignal::leaf_attached("item-1", bank)]);
+
+    let (count, last) = s.maint.persist_failures();
+    assert_eq!(count, 1, "the dropped drain verdict is recorded once");
+    let last = last.expect("the verdict message is kept");
+    assert!(last.contains("did not finish"), "{last}");
+}
+
+/// One episodic item for a disposable bank, so the hook has a leaf to attach.
+fn unbanked_item(id: &str) -> clio_types::MemoryItem {
+    clio_types::MemoryItem {
+        id: id.into(),
+        bank_id: "bank-drain".into(),
+        subject_id: "subject-drain".into(),
+        kind: clio_types::ItemKind::Episodic,
+        category: None,
+        episodic_type: Some(clio_types::EpisodicType::Gist),
+        epistemic_kind: clio_types::EpistemicKind::Fact,
+        source_type: None,
+        confidence: None,
+        admission_score: Some(0.7),
+        source_ref: None,
+        snapshot: None,
+        gist: Some("gist drain".into()),
+        valid_from: "2026-06-01T00:00:00Z".into(),
+        valid_until: None,
+        tx_from: "2026-06-01T00:00:00Z".into(),
+        tx_until: None,
+        created_at: "2026-06-01T00:00:00Z".into(),
+        updated_at: "2026-06-01T00:00:00Z".into(),
+        context: None,
+    }
+}
+
 /// Store one item through the shared write tool and report its stored stamps.
 ///
 /// The item travels the ordinary path — `dispatch` → `store` → the store's
