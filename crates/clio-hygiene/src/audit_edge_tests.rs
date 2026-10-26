@@ -151,7 +151,7 @@ fn empty_text_and_malformed_timestamps_fail_soft() {
         .iter()
         .find(|c| c.item_id == "soft-empty")
         .expect("empty candidate");
-    assert_eq!(empty.preview, None, "empty text yields no preview");
+    assert!(empty.preview.is_none(), "empty text yields no preview");
     assert!(!empty.noise_reasons.iter().any(|r| r == "stale"));
     let bad = report
         .candidates

@@ -259,7 +259,10 @@ fn t21_07_confirmed_clean_writes_masked_durable_log_rows() {
     assert_eq!(row.action, "archive");
     assert!(row.confirmed && !row.dry_run);
     assert_eq!(row.item_id, "itm-1");
-    assert_eq!(row.noise_score, Some(0.75));
+    assert!(
+        row.noise_score == Some(0.75),
+        "the log row records the noise score"
+    );
     // Rows never carry secret material or content — ids/scores/labels only.
     let detail = row.detail.to_string();
     assert!(!detail.contains("api_key") && !detail.contains("gist"));

@@ -69,7 +69,10 @@ fn named_credential_key_is_a_discard_credential() {
     let mut i = input();
     i.secret_kinds = vec!["named_credential_key"];
     let scored = score_noise(&i, &HygieneWeights::default());
-    assert!(scored.score >= 0.90, "credential floor: {}", scored.score);
+    assert!(
+        scored.score >= 0.90,
+        "a named credential key reaches the credential floor"
+    );
     assert_eq!(scored.reasons[0], "secret_credential");
     assert!(scored.reasons.contains(&"named_credential_key"));
     assert_eq!(scored.suggested_action, Some("discard"));
@@ -100,7 +103,7 @@ fn secret_score_grows_with_run_length() {
     let long_score = score_noise(&long, &HygieneWeights::default()).score;
     assert!(
         long_score > short_score,
-        "64-byte run {long_score} > 16-byte run {short_score}"
+        "a 64-byte credential run outranks a 16-byte run"
     );
 }
 
@@ -115,8 +118,7 @@ fn token_shaped_run_is_not_a_credential_band() {
     for scored in [&short_hit, &long_hit] {
         assert!(
             (0.40..0.70).contains(&scored.score),
-            "proxy band: {}",
-            scored.score
+            "proxy score sits in the flag band"
         );
         assert!(!scored.reasons.contains(&"secret_credential"));
         assert!(scored.reasons.contains(&"token_shaped_run"));
@@ -124,9 +126,7 @@ fn token_shaped_run_is_not_a_credential_band() {
     }
     assert!(
         long_hit.score > short_hit.score,
-        "120-char run {} > 24-char run {}",
-        long_hit.score,
-        short_hit.score
+        "a 120-char token run outranks a 24-char run"
     );
 }
 
@@ -139,7 +139,10 @@ fn token_shaped_run_with_other_signals_stays_flag() {
     i.utility_proxy = 0.0;
     i.staleness = 1.0;
     let scored = score_noise(&i, &HygieneWeights::default());
-    assert!(scored.score < 0.70, "proxy-only band: {}", scored.score);
+    assert!(
+        scored.score < 0.70,
+        "a proxy-only score stays under the discard band"
+    );
     assert_eq!(scored.suggested_action, Some("flag"));
     assert!(!scored.reasons.contains(&"secret_credential"));
 }

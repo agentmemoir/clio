@@ -365,9 +365,7 @@ fn t03_staleness_with_last_relevance() {
     // The updated item has a lower noise score than the stale item.
     assert!(
         cand_touched.noise_score < cand_stale.noise_score,
-        "more recent touch lowers staleness and noise score: {} < {}",
-        cand_touched.noise_score,
-        cand_stale.noise_score
+        "a more recent touch lowers staleness and the noise score"
     );
 
     // Fallback item uses created_at when updated_at is older, so it is not stale.

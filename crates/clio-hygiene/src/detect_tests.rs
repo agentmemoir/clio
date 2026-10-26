@@ -30,8 +30,14 @@ fn secret_classes_are_detected() {
     assert!(detect_noise(pem).secret_hit());
     let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdefgh";
     let bearer = detect_noise(&format!("call with bearer {token}"));
-    assert_eq!(bearer.secret_kinds, vec!["bearer_token"]);
-    assert_eq!(bearer.secret_run_len, token.len());
+    assert!(
+        bearer.secret_kinds == vec!["bearer_token"],
+        "a bearer credential is the only class detected"
+    );
+    assert!(
+        bearer.secret_run_len == token.len(),
+        "the measured credential run is the token"
+    );
     let known = "deploy key ghp_abcdefghijklmnopqrstuvwxyz0123456789";
     assert!(detect_noise(known).secret_hit());
 }
@@ -42,11 +48,10 @@ fn bearer_prose_is_not_a_credential() {
     let signals = detect_noise(prose);
     assert!(
         signals.secret_kinds.is_empty(),
-        "prose about bearer auth is not secret-class: {:?}",
-        signals.secret_kinds
+        "prose about bearer auth is not secret-class"
     );
     assert!(!signals.secret_hit());
-    assert_eq!(signals.secret_run_len, 0);
+    assert!(signals.secret_run_len == 0, "no credential run measured");
 }
 
 #[test]
@@ -58,8 +63,11 @@ fn token_shaped_run_is_not_a_credential() {
         "bare token run is not secret-class"
     );
     assert!(!signals.secret_hit());
-    assert_eq!(signals.token_run_len, Some(bare.len()));
-    assert_eq!(signals.secret_run_len, 0, "no credential value measured");
+    assert!(
+        signals.token_run_len == Some(bare.len()),
+        "the whole text is one token-shaped run"
+    );
+    assert!(signals.secret_run_len == 0, "no credential value measured");
 }
 
 #[test]
@@ -117,9 +125,9 @@ fn secret_preview_is_fully_redacted() {
     let secret = "api_key: sk-live-abcdefgh1234 and more context after";
     let signals = detect_noise(secret);
     assert!(signals.secret_hit());
-    assert_eq!(
-        masked_preview(secret, &signals).as_deref(),
-        Some("[REDACTED]")
+    assert!(
+        masked_preview(secret, &signals).as_deref() == Some("[REDACTED]"),
+        "a secret-class preview is fully redacted"
     );
     // Fail closed: the scrubber itself marks labeled secrets secret-class, so
     // a "non-secret" preview never carries a raw labeled key either.
@@ -132,9 +140,8 @@ fn non_secret_preview_is_truncated_and_scrubbed() {
     let long = "x".repeat(MAX_PREVIEW_CHARS + 50);
     let preview = masked_preview(&long, &NoiseSignals::default()).expect("preview");
     assert_eq!(preview.chars().count(), MAX_PREVIEW_CHARS);
-    assert_eq!(
-        masked_preview("   ", &NoiseSignals::default()),
-        None,
+    assert!(
+        masked_preview("   ", &NoiseSignals::default()).is_none(),
         "empty text yields no preview"
     );
 }
@@ -145,25 +152,31 @@ fn proxy_preview_masks_the_run() {
     let text = format!("scratch note about cache warmup {run} and the rest of the note");
     let signals = detect_noise(&text);
     assert!(signals.secret_kinds.is_empty(), "no credential evidence");
-    assert_eq!(signals.token_run_len, Some(run.len()));
+    assert!(
+        signals.token_run_len == Some(run.len()),
+        "the run is measured as a token run"
+    );
     let preview = masked_preview(&text, &signals).expect("preview");
-    assert!(!preview.contains(run), "the run is masked: {preview}");
+    assert!(!preview.contains(run), "the run is masked in the preview");
     assert!(
         preview.contains("scratch note about cache warmup"),
-        "{preview}"
+        "the prose around the run survives masking"
     );
-    assert!(preview.contains("****"), "{preview}");
+    assert!(preview.contains("****"), "the masked run is starred out");
     assert!(
         preview.contains(&run[..4]),
-        "first 4 chars survive: {preview}"
+        "first 4 chars of the run survive"
     );
     assert!(
         preview.contains(&run[run.len() - 4..]),
-        "last 4 chars survive: {preview}"
+        "last 4 chars of the run survive"
     );
     // Masking a proxy never drops the labelled-key scrub: a key that is not
     // secret-class is still scrubbed before the preview is returned.
     let labelled =
         masked_preview("api_key: sk-live-abcdefgh1234", &NoiseSignals::default()).expect("preview");
-    assert!(!labelled.contains("sk-live-abcdefgh1234"), "{labelled}");
+    assert!(
+        !labelled.contains("sk-live-abcdefgh1234"),
+        "a labelled key is scrubbed even when not secret-class"
+    );
 }
