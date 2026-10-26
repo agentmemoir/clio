@@ -99,7 +99,10 @@ fn resolve_defaults_follow_xdg_then_home() {
 #[test]
 fn default_config_dir_is_the_app_dir_under_an_absolute_base() {
     let xdg = lookup(&[("XDG_CONFIG_HOME", "/tmp/xdg"), ("HOME", "/tmp/home")]);
-    assert_eq!(default_config_dir(&xdg), Some(PathBuf::from("/tmp/xdg/clio")));
+    assert_eq!(
+        default_config_dir(&xdg),
+        Some(PathBuf::from("/tmp/xdg/clio"))
+    );
     let home = lookup(&[("HOME", "/tmp/home")]);
     assert_eq!(
         default_config_dir(&home),

@@ -84,7 +84,10 @@ fn apply_profile_writes_the_bundle_and_clears_the_profile_overlay() {
     );
     assert_eq!(effective["sync"]["omit"], json!(profile.omit_sync));
     assert_eq!(effective["mcp"]["revision"], json!(profile.mcp_revision));
-    assert_eq!(effective["mcp"]["transports"], json!(profile.mcp_transports));
+    assert_eq!(
+        effective["mcp"]["transports"],
+        json!(profile.mcp_transports)
+    );
     assert_eq!(effective["fr10_satisfied"], json!(false));
 }
 

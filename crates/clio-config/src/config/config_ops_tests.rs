@@ -165,7 +165,8 @@ fn config_set_profile_scope_requires_an_active_profile() {
     let ToolResult::Ok { .. } = rt.config_profile_apply("coding_local") else {
         panic!("apply");
     };
-    let ToolResult::Ok { data, .. } = rt.config_set("backend", json!("postgres"), ConfigScope::Profile)
+    let ToolResult::Ok { data, .. } =
+        rt.config_set("backend", json!("postgres"), ConfigScope::Profile)
     else {
         panic!("profile set");
     };
@@ -217,9 +218,7 @@ fn config_set_updates_the_bank_policy() {
     };
     assert_eq!(
         rt.bank_policy,
-        BankDefaultPolicy::Fixed {
-            bank: "fb".into()
-        }
+        BankDefaultPolicy::Fixed { bank: "fb".into() }
     );
     assert_eq!(rt.effective_raw()["bank"]["policy"]["kind"], json!("fixed"));
 }

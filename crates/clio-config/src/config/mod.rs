@@ -362,6 +362,4 @@ impl Runtime {
         };
         Ok(OpContext::new(bank, actor))
     }
-
 }
-
