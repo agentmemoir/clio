@@ -75,9 +75,10 @@ pub(crate) fn build_payload(args: &ExportArgs<'_>, bank: &str) -> Result<ExportP
 /// The whole-bank bundle: every collected entity plus its completeness manifest.
 fn build_bank_payload(args: &ExportArgs<'_>, bank: &str) -> Result<ExportPayload, AmError> {
     let mut entities = ExportEntities::default();
-    collect_items(args, bank, None, &mut entities)?;
-    let truncation = collect_bank_entities(args, bank, &mut entities)?;
-    let manifest = build_manifest(args, bank, &entities, truncation);
+    let emitted = collect_items(args, bank, None, &mut entities)?;
+    let (truncation, assoc_edges_dropped) =
+        collect_bank_entities(args, bank, &emitted, &mut entities)?;
+    let manifest = build_manifest(args, bank, &entities, truncation, assoc_edges_dropped);
     let envelope = BundleEnvelope {
         format: BUNDLE_FORMAT.to_owned(),
         format_version: BUNDLE_FORMAT_VERSION,
@@ -93,15 +94,16 @@ fn build_bank_payload(args: &ExportArgs<'_>, bank: &str) -> Result<ExportPayload
     })
 }
 
-/// Page through the inspector and collect items in the requested content mode.
-/// With `subject` set, only the subject's own items are collected, so the
-/// selection stays subject-scoped under the same narrowing filters.
+/// Page through the inspector and collect items in the requested content mode,
+/// returning the ids of the items actually emitted. With `subject` set, only
+/// the subject's own items are collected, so the selection stays subject-scoped
+/// under the same narrowing filters.
 pub(crate) fn collect_items(
     args: &ExportArgs<'_>,
     bank: &str,
     subject: Option<&BTreeSet<String>>,
     entities: &mut ExportEntities,
-) -> Result<(), AmError> {
+) -> Result<BTreeSet<String>, AmError> {
     let mut filter = ItemInspectFilter::new(bank);
     filter.category = args
         .filter
@@ -115,6 +117,7 @@ pub(crate) fn collect_items(
     filter.include_discarded = args.filter.include_discarded;
     filter.limit = PAGE;
     let total = args.store.count_items(&filter)?;
+    let mut emitted = BTreeSet::new();
     let mut offset = 0;
     while offset < total {
         filter.offset = offset;
@@ -130,7 +133,10 @@ pub(crate) fn collect_items(
             match args.content_mode {
                 ExportContentMode::DsarPlaintext => {
                     match args.store.get_memory_item(bank, &row.item_id) {
-                        Ok(Some(item)) => entities.items.push(mask_item(item)),
+                        Ok(Some(item)) => {
+                            emitted.insert(row.item_id.clone());
+                            entities.items.push(mask_item(item));
+                        }
                         Ok(None) => return Err(vanished(&row.item_id)),
                         Err(err) if is_shredded(&err) => {}
                         Err(err) => return Err(err),
@@ -138,6 +144,7 @@ pub(crate) fn collect_items(
                 }
                 ExportContentMode::CiphertextBackup => {
                     if let Some(opaque) = opaque_item(args, bank, &row)? {
+                        emitted.insert(opaque.id.clone());
                         entities.opaque_items.push(opaque);
                     }
                 }
@@ -145,7 +152,7 @@ pub(crate) fn collect_items(
         }
         offset += PAGE;
     }
-    Ok(())
+    Ok(emitted)
 }
 
 /// Compliance-shredded rows (subject DEK destroyed) are skipped: their content
@@ -208,20 +215,35 @@ fn opaque_item(
     }))
 }
 
-/// Always-exported bank-wide entities (unfiltered, which is why any narrowing
-/// makes the manifest incomplete). Domain-record prose and `context` fields are
-/// masked defensively by [`crate::export_mask`] in `dsar_plaintext` mode, and
-/// emitted content-free in `ciphertext_backup` mode.
+/// Collect the bank-wide entities. The knowledge graph follows the exported
+/// items: a triple is kept only when its carrier item was emitted, and an assoc
+/// edge only when both endpoints were, so the graph can never name a record the
+/// bundle omits. The collections with no category or time column (persona,
+/// tasks, failures, beliefs, tombstones) stay bank-wide, which is why any
+/// narrowing makes the manifest incomplete. Domain-record prose and `context`
+/// fields are masked defensively by [`crate::export_mask`] in `dsar_plaintext`
+/// mode, and emitted content-free in `ciphertext_backup` mode.
+///
+/// Returns the history truncation and the number of assoc edges the item-id
+/// filter dropped.
 fn collect_bank_entities(
     args: &ExportArgs<'_>,
     bank: &str,
+    item_ids: &BTreeSet<String>,
     entities: &mut ExportEntities,
-) -> Result<Truncation, AmError> {
+) -> Result<(Truncation, usize), AmError> {
     let mode = args.content_mode;
-    entities.triples = args.store.list_triples(bank)?;
-    mask_triples(&mut entities.triples, mode);
-    entities.assoc_edges = args.store.list_assoc_edges(bank, None)?;
-    mask_assoc_edges(&mut entities.assoc_edges, mode);
+    let mut triples = args.store.list_triples(bank)?;
+    triples.retain(|triple| item_ids.contains(&triple.item_id));
+    mask_triples(&mut triples, mode);
+    entities.triples = triples;
+    let mut assoc_edges = args.store.list_assoc_edges(bank, None)?;
+    let edge_rows = assoc_edges.len();
+    assoc_edges
+        .retain(|edge| item_ids.contains(&edge.source_id) && item_ids.contains(&edge.target_id));
+    let assoc_edges_dropped = edge_rows - assoc_edges.len();
+    mask_assoc_edges(&mut assoc_edges, mode);
+    entities.assoc_edges = assoc_edges;
     collect_persona(args, bank, entities)?;
     let mut task_rows = args.history.list_tasks(bank, HISTORY_LIMIT)?;
     let tasks = hit_history_limit(task_rows.len());
@@ -235,7 +257,7 @@ fn collect_bank_entities(
     mask_beliefs(&mut beliefs, mode);
     entities.beliefs = beliefs;
     entities.tombstones = args.compliance.list_tombstones(bank)?;
-    Ok(Truncation { tasks, failures })
+    Ok((Truncation { tasks, failures }, assoc_edges_dropped))
 }
 
 /// Persona stable history (all versions, deduped) plus preference states.
@@ -277,8 +299,9 @@ fn build_manifest(
     bank: &str,
     entities: &ExportEntities,
     truncation: Truncation,
+    assoc_edges_dropped: usize,
 ) -> CompletenessManifest {
-    let (complete, omissions) = completeness(&args.filter, truncation);
+    let (complete, omissions) = completeness(&args.filter, truncation, assoc_edges_dropped);
     CompletenessManifest {
         format_version: BUNDLE_FORMAT_VERSION,
         content_mode: args.content_mode,

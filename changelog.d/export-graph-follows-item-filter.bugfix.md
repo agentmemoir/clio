@@ -1,0 +1,1 @@
+`clio export` with `--category`, `--time-start`, or `--time-end` now narrows triples and association edges to the items the bundle actually contains, so a bundle no longer carries graph rows that point at records it omits, and its completeness manifest says so instead of reporting association edges as exported unfiltered.

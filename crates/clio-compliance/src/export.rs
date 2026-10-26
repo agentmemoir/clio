@@ -261,8 +261,14 @@ fn authorize(actor: Actor) -> Result<(), AmError> {
 }
 
 /// Honest completeness: `true` only when nothing was narrowed or truncated.
-/// Any narrowing makes other bank-wide entities unfiltered relative to items.
-pub(crate) fn completeness(filter: &ExportFilter, truncation: Truncation) -> (bool, Vec<String>) {
+/// The knowledge graph follows the exported items, so any item narrowing
+/// narrows triples and association edges with it; the collections that carry
+/// no category or time column are exported bank-wide and say so.
+pub(crate) fn completeness(
+    filter: &ExportFilter,
+    truncation: Truncation,
+    assoc_edges_dropped: usize,
+) -> (bool, Vec<String>) {
     let mut omissions = Vec::new();
     if filter.category.as_deref().is_some_and(|c| !c.is_empty()) {
         omissions.push("category filter narrowed items".to_owned());
@@ -277,7 +283,16 @@ pub(crate) fn completeness(filter: &ExportFilter, truncation: Truncation) -> (bo
         omissions.push("archived items excluded".to_owned());
     }
     if !omissions.is_empty() {
-        omissions.push("assoc edges exported unfiltered".to_owned());
+        omissions.push("triples and association edges narrowed to the exported items".to_owned());
+        if assoc_edges_dropped > 0 {
+            omissions.push(format!(
+                "{assoc_edges_dropped} association edges dropped: an endpoint was not exported"
+            ));
+        }
+        omissions.push(
+            "no category or time column: persona, task, failure, belief, and tombstone rows are exported bank-wide"
+                .to_owned(),
+        );
     }
     if truncation.tasks {
         omissions.push(format!("task history truncated at {HISTORY_LIMIT} rows"));
