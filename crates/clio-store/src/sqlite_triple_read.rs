@@ -18,7 +18,7 @@
 //! Changes to SQLite triple read/end SQL should normally require changes here.
 
 use crate::item_persist::open_context;
-use crate::migrate::{IntoAmError, now_iso};
+use crate::migrate::{IntoAmError, close_stamp, now_iso};
 use crate::sqlite::SqliteStore;
 use crate::triple_map::{filter_triples, map_triple_row, query_where_clause};
 use clio_types::{AmError, ErrorCode, TripleEndOutcome, TripleQuery, TripleRecord};
@@ -265,19 +265,23 @@ impl SqliteStore {
             let tx = conn.transaction().am("triple_end begin")?;
             let mut stmt = tx
                 .prepare(
-                    "SELECT id, object_ciphertext FROM triples
+                    "SELECT id, object_ciphertext, tx_from FROM triples
                      WHERE bank_id = ?1 AND subject = ?2 AND predicate = ?3
                        AND tx_until IS NULL",
                 )
                 .am("triple_end select")?;
             let rows = stmt
                 .query_map(params![bank_id, subject, predicate], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
                 })
                 .am("triple_end query")?;
-            let mut closed_ids = Vec::new();
+            let mut closed = Vec::new();
             for row in rows {
-                let (id, cipher) = row.am("triple_end row")?;
+                let (id, cipher, tx_from) = row.am("triple_end row")?;
                 // The asserted value is sealed, so an `object` filter
                 // is applied here after opening each candidate row's value
                 // rather than in SQL.
@@ -289,29 +293,29 @@ impl SqliteStore {
                 {
                     continue;
                 }
-                closed_ids.push(id);
+                closed.push((id, tx_from));
             }
             drop(stmt);
-            if closed_ids.is_empty() {
+            if closed.is_empty() {
                 tx.commit().am("triple_end noop commit")?;
                 return Ok(TripleEndOutcome {
-                    closed_ids,
+                    closed_ids: Vec::new(),
                     already_ended: true,
                     replacement_id: None,
                 });
             }
-            for id in &closed_ids {
+            for (id, tx_from) in &closed {
                 tx.execute(
                     "UPDATE triples
                      SET valid_until = COALESCE(valid_until, ?1), tx_until = ?2, updated_at = ?3
                      WHERE id = ?4 AND bank_id = ?5",
-                    params![valid_until, tx_until, ts, id, bank_id],
+                    params![valid_until, close_stamp(tx_from, tx_until), ts, id, bank_id],
                 )
                 .am("triple_end close")?;
             }
             tx.commit().am("triple_end commit")?;
             Ok(TripleEndOutcome {
-                closed_ids,
+                closed_ids: closed.into_iter().map(|(id, _)| id).collect(),
                 already_ended: false,
                 replacement_id: None,
             })

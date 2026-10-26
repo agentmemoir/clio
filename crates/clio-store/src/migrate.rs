@@ -181,11 +181,16 @@ pub fn canonical_ts(raw: &str) -> String {
 /// place it", or the two disagree about which rows are on the shared clock.
 #[must_use]
 pub fn canonical_stamp(raw: &str) -> Option<String> {
+    stamp_instant(raw).map(millis_to_rfc3339)
+}
+
+/// The instant a stamp this build can place names, in UTC epoch millis.
+fn stamp_instant(raw: &str) -> Option<i64> {
     if is_epoch_stamp(raw) {
-        return raw.parse::<i64>().ok().map(millis_to_rfc3339);
+        return raw.parse::<i64>().ok();
     }
     let (millis, offset_secs) = stamp_offset(raw)?;
-    Some(millis_to_rfc3339(millis - offset_secs * 1_000))
+    Some(millis - offset_secs * 1_000)
 }
 
 /// The canonical form of a caller-supplied stamp, or the refusal for one this
@@ -221,6 +226,25 @@ pub fn canonical_optional_stamp(raw: Option<&str>) -> Result<Option<String>, AmE
         Some(value) => canonical_write_stamp(value).map(Some),
         None => Ok(None),
     }
+}
+
+/// The `tx_until` to store when closing a row whose transaction interval starts
+/// at `tx_from`.
+///
+/// Reads compare the column as text with a half-open predicate, so an interval
+/// whose ends are the same second contains no instant and the closed row leaves
+/// transaction-time history. A close that would land on the row's own start is
+/// therefore placed one second later, in the same canonical form. A later value
+/// is returned unchanged, and so is one that cannot be placed on the clock.
+#[must_use]
+pub(crate) fn close_stamp(tx_from: &str, tx_until: &str) -> String {
+    if tx_until != tx_from {
+        return tx_until.to_owned();
+    }
+    stamp_instant(tx_from).map_or_else(
+        || tx_until.to_owned(),
+        |millis| millis_to_rfc3339(millis + 1_000),
+    )
 }
 
 /// `YYYY-MM-DDThh:mm:ss[.fraction](Z|±hh:mm)` → (instant, offset in seconds east
