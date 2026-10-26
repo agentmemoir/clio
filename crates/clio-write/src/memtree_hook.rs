@@ -135,9 +135,20 @@ impl MaintenanceHook for MemTreeMaint {
         };
         let (leaf_id, dirty) = {
             let mut forest = self.forest.lock().expect("forest");
-            match forest.tree_mut(&signal.bank_id).attach_leaf(attach) {
-                Ok(attached) => attached,
-                Err(_) => return,
+            let tree = forest.tree_mut(&signal.bank_id);
+            if let Ok(attached) = tree.attach_leaf(attach) {
+                attached
+            } else {
+                // A write path that places the leaf itself and dispatches the
+                // signal afterwards gets here with the leaf already placed. That
+                // is not a reason to persist nothing: the node the first attach
+                // created is exactly the one this signal reports, so the rows are
+                // taken from the tree as it stands.
+                let Some(leaf_id) = tree.leaf_node_id_for_item(&signal.item_id) else {
+                    return;
+                };
+                let dirty = tree.ancestors_of(leaf_id);
+                (leaf_id.to_owned(), dirty)
             }
         };
         self.enqueue_dirty(&signal.bank_id, &dirty);
@@ -163,3 +174,7 @@ fn upsert_all(store: &dyn Store, records: Vec<MemTreeNodeRecord>) {
         let _ = store.upsert_memtree_node(&record);
     }
 }
+
+#[cfg(test)]
+#[path = "memtree_hook_tests.rs"]
+mod memtree_hook_tests;

@@ -1,9 +1,27 @@
 // Copyright 2026 Agent Memoir (https://agentmemoir.com/)
 // SPDX-License-Identifier: Apache-2.0
 //
-//! MemTree durable-write coverage: attach, refresh, store-less, and re-persist.
+//! # Responsibility
 //!
-//! Test-only. Never compiled into production builds.
+//! This module is responsible for the MemTree durable-write tests: which rows a
+//! leaf attach, a refresh wave, and a re-persist leave in the store.
+//!
+//! ## Owns
+//! - The leaf and root rows an attach signal creates, and the gist row a refresh
+//!   wave rewrites while clearing the dirty flag
+//! - The paths that write nothing: an engine with no store, a re-persisted node
+//!   keeping its original creation time
+//!
+//! ## Does not own
+//! - The maintenance hook and record conversion under test
+//! - The store's own SQLite behaviour
+//!
+//! ## Boundary
+//!
+//! Changes to what a durable MemTree write stores should normally require changes here.
+//! Changes to the hook, the record shape, or the store itself should not require changes here.
+//!
+//! Keep this module focused on the rows a write is expected to leave behind.
 
 use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
 use crate::memtree::{MemForest, MemTreeNode};
