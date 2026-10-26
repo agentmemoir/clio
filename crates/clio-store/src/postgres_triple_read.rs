@@ -376,3 +376,11 @@ pub(crate) fn invalidate_item_tx(
         replacement_id: replacement_id.map(str::to_owned),
     })
 }
+
+#[cfg(test)]
+#[path = "postgres_triple_read_tests.rs"]
+mod postgres_triple_read_tests;
+
+#[cfg(test)]
+#[path = "postgres_triple_read_query_tests.rs"]
+mod postgres_triple_read_query_tests;
