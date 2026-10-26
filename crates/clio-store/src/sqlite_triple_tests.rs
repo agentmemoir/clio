@@ -425,7 +425,8 @@ fn t13_supersede_same_second_keeps_prior_in_history() {
         )
         .unwrap()
     };
-    assert!(add("i1", "e1", "Chicago").prior_edge_ids.is_empty());
+    let opened = add("i1", "e1", "Chicago").prior_edge_ids;
+    assert!(opened.is_empty(), "{opened:?}");
     let closed = add("i2", "e2", "Boston").prior_edge_ids;
     assert_eq!(closed, vec!["e1".to_owned()]);
     let prior = s.get_triple(&bank, "e1").unwrap().unwrap();
