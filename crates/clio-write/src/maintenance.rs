@@ -99,6 +99,11 @@ impl DispatchJob {
 /// it needs the signals' own effects to have landed before it answers. If no
 /// signals were produced, no thread is spawned. Delivery order matches
 /// `signals`. A slow or panicking hook affects only its own detached thread.
+///
+/// `#[must_use]`: dropping the handle is the fire-and-forget path, honest only
+/// for a process that outlives the hook. A caller that answers a write must
+/// drain the handle and record the verdict it gets.
+#[must_use]
 pub fn dispatch_async(
     hook: SharedMaintenanceHook,
     signals: Vec<MaintenanceSignal>,

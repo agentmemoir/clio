@@ -68,6 +68,8 @@ pub struct MemTreeMaint {
     pub(crate) store: Option<Arc<dyn Store>>,
     /// Coalesced dirty set: bank → node_ids
     dirty_set: Mutex<HashMap<String, HashSet<String>>>,
+    /// Persist failures the write path recorded (`memtree_hook`).
+    pub(crate) persist_errors: memtree_hook::PersistErrors,
     /// Optional node ids that fail refresh (tests).
     fail_nodes: Mutex<HashSet<String>>,
     stats: MaintStats,
@@ -118,6 +120,7 @@ impl MemTreeMaint {
             leaves,
             store,
             dirty_set: Mutex::new(HashMap::new()),
+            persist_errors: memtree_hook::PersistErrors::default(),
             fail_nodes: Mutex::new(HashSet::new()),
             stats: MaintStats::default(),
             last_structural_maintenance_ms: Mutex::new(HashMap::new()),
@@ -415,7 +418,9 @@ impl MemTreeMaint {
         self.enqueue_dirty(bank_id, &keep_queued);
         // A refreshed node now carries the new gist with `dirty` cleared, and a
         // failed one carries its error; both are what a reader must see.
-        self.persist_nodes(bank_id, &persist);
+        if let Err(error) = self.persist_nodes(bank_id, &persist) {
+            self.record_persist_failure(&error);
+        }
         cleared
     }
 }

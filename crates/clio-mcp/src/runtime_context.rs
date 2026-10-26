@@ -221,10 +221,24 @@ impl McpState {
     /// a later read finds nothing. The wait is bounded by
     /// [`MAINTENANCE_DRAIN_BUDGET`], so a stuck store costs one write that
     /// budget instead of hanging it.
+    ///
+    /// A wait that expires, or a hook that panicked, returns `false`, and that
+    /// verdict says the rows this write produced may never have landed. The
+    /// write itself already succeeded and is not rolled back; the verdict is
+    /// recorded on the engine instead, so the degradation reaches the process
+    /// log now and `maintenance status` later.
     pub fn dispatch_maintenance(&self, signals: Vec<MaintenanceSignal>) {
         let job = dispatch_async(Arc::clone(&self.maint) as SharedMaintenanceHook, signals);
-        if let Some(job) = job {
-            let _ = job.drain(MAINTENANCE_DRAIN_BUDGET);
+        if let Some(job) = job
+            && !job.drain(MAINTENANCE_DRAIN_BUDGET)
+        {
+            self.maint.record_persist_failure(&AmError::new(
+                ErrorCode::Internal,
+                format!(
+                    "maintenance hook did not finish within {}s, so its memtree rows may be unwritten",
+                    MAINTENANCE_DRAIN_BUDGET.as_secs()
+                ),
+            ));
         }
     }
 }

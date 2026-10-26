@@ -234,7 +234,7 @@ fn a_refresh_wave_stores_the_cleared_dirty_flag() {
 fn persist_nodes_writes_nothing_for_an_empty_list() {
     let store = store();
     let (engine, _leaves, _forest) = engine(&store);
-    engine.persist_nodes(BANK, &[]);
+    engine.persist_nodes(BANK, &[]).expect("no rows to write");
     assert_eq!(rows(store.as_ref()).len(), 0, "no ids, no rows");
 }
 
@@ -242,6 +242,31 @@ fn persist_nodes_writes_nothing_for_an_empty_list() {
 fn persist_nodes_writes_nothing_for_a_bank_the_forest_lacks() {
     let store = store();
     let (engine, _leaves, _forest) = engine(&store);
-    engine.persist_nodes("bank-without-a-tree", &["node-1".to_owned()]);
+    engine
+        .persist_nodes("bank-without-a-tree", &["node-1".to_owned()])
+        .expect("no tree, so no write to fail");
     assert_eq!(rows(store.as_ref()).len(), 0, "no tree, no rows");
+}
+
+#[test]
+fn a_row_write_the_store_refuses_is_recorded_on_the_engine() {
+    let store = store();
+    let (engine, leaves, _forest) = engine(&store);
+    // The store refuses a memtree row with no bank, so this attach's rows never
+    // land. That is a real persist failure against the in-memory store, so the
+    // engine must keep it instead of dropping it.
+    let mut unbanked = item("item-1");
+    unbanked.bank_id = String::new();
+    leaves.publish(unbanked);
+    engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", ""));
+
+    let (count, last) = engine.persist_failures();
+    assert_eq!(count, 1, "the failed upsert is counted once");
+    let last = last.expect("the failure message is kept");
+    assert!(last.contains("bank"), "{last}");
+    assert_eq!(
+        rows(store.as_ref()).len(),
+        0,
+        "nothing landed, which is what the record says"
+    );
 }

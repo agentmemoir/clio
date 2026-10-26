@@ -7,8 +7,10 @@
 //! `memtree_query` / `memtree_get` call returns, and how it reports nothing.
 //!
 //! ## Owns
-//! - Store-first reads, the unflushed-forest fallback, and cross-bank refusal
-//! - The not-found shape of an empty query and of an unknown node
+//! - Store-first reads, the merged forest answer, and cross-bank refusal
+//! - The not-found shape of an empty query and of an unknown node, including
+//!   the filters the message names
+//! - The persist-failure count a `maintenance_status` response reports
 //!
 //! ## Does not own
 //! - The handlers under test
@@ -24,7 +26,7 @@
 use crate::maintenance::{LeafIndex, MaintenanceHook, MaintenanceSignal};
 use crate::memtree::{AttachLeaf, MemForest, MemTreeNode, MemTreeQueryFilter};
 use crate::memtree_maint::MemTreeMaint;
-use crate::memtree_tools::{memtree_get, memtree_query};
+use crate::memtree_tools::{maintenance_status, memtree_get, memtree_query};
 use clio_store::{LocalDevKms, SqliteStore, Store};
 use clio_types::{EpisodicType, EpistemicKind, ErrorCode, ItemKind, MemoryItem, ToolResult};
 use std::sync::{Arc, Mutex};
@@ -111,28 +113,58 @@ fn query_answers_from_the_store_a_later_process_wrote() {
 }
 
 #[test]
-fn query_prefers_stored_rows_over_the_forest_this_process_holds() {
+fn query_merges_stored_rows_with_a_node_only_this_process_holds() {
     let store = store();
     let forest = attached_durably(&store);
-    // A node this process never flushed: a forest row the store cannot hold.
+    // One id both sides hold: the forest copy is the fresher one.
+    let shared_id = forest
+        .lock()
+        .unwrap()
+        .tree(BANK)
+        .and_then(|t| t.leaf_node_id_for_item("item-1"))
+        .expect("placed leaf")
+        .to_owned();
     forest
         .lock()
         .unwrap()
         .tree_mut(BANK)
+        .node_mut(&shared_id)
+        .expect("leaf node")
+        .summary_gist = Some("fresher from the forest".into());
+    // A node the store cannot hold, because this process never flushed it.
+    let unflushed_id = forest
+        .lock()
+        .unwrap()
+        .tree_mut(BANK)
         .attach_leaf(leaf("unflushed", BANK))
-        .unwrap();
+        .expect("second attach")
+        .0;
     let nodes = data(memtree_query(
         store.as_ref(),
         &forest,
         BANK,
         &MemTreeQueryFilter::default(),
     ));
-    assert_eq!(nodes.len(), 2, "the stored rows only: {nodes:?}");
+    let mut ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    ids.sort_unstable();
+    let mut expected = [shared_id.as_str(), unflushed_id.as_str()];
+    expected.sort_unstable();
     assert!(
-        nodes
-            .iter()
-            .all(|n| n.item_id.as_deref() != Some("unflushed")),
-        "an unflushed forest node must not displace the stored rows: {nodes:?}"
+        expected.iter().all(|id| ids.contains(id)),
+        "the stored rows and the unflushed node are all present: {ids:?}"
+    );
+    assert!(
+        ids.len() > expected.len(),
+        "the stored root is not suppressed by the merge: {ids:?}"
+    );
+    let shared = nodes
+        .iter()
+        .find(|n| n.id == shared_id)
+        .expect("the id both sides hold");
+    assert_eq!(
+        shared.summary_gist.as_deref(),
+        Some("fresher from the forest"),
+        "the forest's copy of a shared id is the one returned"
     );
 }
 
@@ -168,9 +200,58 @@ fn query_of_an_empty_bank_is_not_found() {
         ToolResult::Err { code, message, .. } => {
             assert_eq!(code, ErrorCode::NotFound);
             assert!(message.contains("bank-empty"), "{message}");
-            assert!(!message.contains("time range"), "{message}");
+            // No filter was applied, so the message claims none.
+            assert!(!message.contains("matching"), "{message}");
         }
         ToolResult::Ok { .. } => panic!("an empty bank is not an empty success"),
+    }
+}
+
+#[test]
+fn query_of_a_bank_with_nothing_at_a_depth_names_every_filter() {
+    let store = store();
+    let _writer = attached_durably(&store);
+    let forest: Arc<Mutex<MemForest>> = Arc::new(Mutex::new(MemForest::new()));
+    let filter = MemTreeQueryFilter {
+        depth: Some(7),
+        task_id: Some("task-x".into()),
+        time_start: Some("2030-01-01".into()),
+        time_end: Some("2031-01-01".into()),
+        ..Default::default()
+    };
+    match memtree_query(store.as_ref(), &forest, BANK, &filter) {
+        ToolResult::Err { code, message, .. } => {
+            assert_eq!(code, ErrorCode::NotFound);
+            for named in ["depth 7", "task `task-x`", "2030-01-01", "2031-01-01"] {
+                assert!(message.contains(named), "{named} in {message}");
+            }
+        }
+        ToolResult::Ok { data, .. } => panic!("expected not found, got {} nodes", data.len()),
+    }
+}
+
+#[test]
+fn maintenance_status_reports_a_persist_failure() {
+    let store = store();
+    let leaves = Arc::new(LeafIndex::new());
+    let forest: Arc<Mutex<MemForest>> = Arc::new(Mutex::new(MemForest::new()));
+    let engine =
+        MemTreeMaint::with_store(Arc::clone(&forest), Arc::clone(&leaves), Arc::clone(&store));
+    // The store refuses a row with no bank, so this attach's rows never land:
+    // a real persist failure the status surface has to report.
+    let mut unbanked = item("item-1");
+    unbanked.bank_id = String::new();
+    leaves.publish(unbanked);
+    engine.on_leaf_attached(MaintenanceSignal::leaf_attached("item-1", ""));
+    match maintenance_status(&engine, BANK, None) {
+        ToolResult::Ok { data, .. } => {
+            assert_eq!(data.persist_failures, 1, "the failed upsert is counted");
+            let last = data
+                .last_persist_error
+                .expect("the failure message survives");
+            assert!(last.contains("bank"), "{last}");
+        }
+        ToolResult::Err { message, .. } => panic!("{message}"),
     }
 }
 

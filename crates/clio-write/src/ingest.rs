@@ -356,8 +356,10 @@ pub fn parallel_ingest(
             .record_time_to_queryable(args.ctx.bank.as_str(), time_to_queryable_ms);
     }
     // Non-blocking handoff: the hook runs on a detached thread so a slow
-    // maintenance consumer can never gate the write response or leaf get.
-    dispatch_async(args.maintenance.clone(), maintenance_signals.clone());
+    // maintenance consumer can never gate the write response or leaf get. The
+    // handle is dropped on purpose here; a caller that must answer over durable
+    // rows drains it instead.
+    let _ = dispatch_async(args.maintenance.clone(), maintenance_signals.clone());
 
     Ok(IngestOutcome {
         leaf_queryable: !admitted.is_empty(),

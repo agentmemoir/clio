@@ -11,6 +11,8 @@
 //!   then upsert the rows the attach created or changed
 //! - The store handle carried by the engine, and the constructor that wires it
 //! - The write-time stamp a persisted row carries
+//! - The persist-failure record (count and last message) a row write that did
+//!   not land leaves on the engine
 //!
 //! ## Does not own
 //! - Attach / split topology or dirty-path refresh (siblings in `memtree_maint`)
@@ -31,8 +33,20 @@ use crate::memtree::AttachLeaf;
 use crate::memtree_maint::{MemTreeMaint, SharedMemForest};
 use crate::memtree_record::record_from_node;
 use clio_store::{MemTreeNodeRecord, Store};
-use std::sync::Arc;
+use clio_types::AmError;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Persistence failures the write path hit, kept so a later status read reports
+/// them.
+#[derive(Debug, Default)]
+pub(crate) struct PersistErrors {
+    /// How many row writes (or dispatch waits) did not land.
+    count: AtomicU64,
+    /// The message of the most recent failure.
+    last_error: Mutex<Option<String>>,
+}
 
 impl std::fmt::Debug for MemTreeMaint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -58,19 +72,21 @@ impl MemTreeMaint {
     ///
     /// Reads under the forest lock and writes outside it: the stored row is the
     /// node's state at the moment it was read, and no store call runs while the
-    /// structural lock is held. A store-less engine does nothing.
-    pub(crate) fn persist_nodes(&self, bank_id: &str, node_ids: &[String]) {
+    /// structural lock is held. A store-less engine does nothing apart from the
+    /// empty-list short circuit. Returns the first store error, which the caller
+    /// records on the engine rather than discarding.
+    pub(crate) fn persist_nodes(&self, bank_id: &str, node_ids: &[String]) -> Result<(), AmError> {
         let Some(store) = self.store.as_deref() else {
-            return;
+            return Ok(());
         };
         if node_ids.is_empty() {
-            return;
+            return Ok(());
         }
         let now = now_stamp();
         let records: Vec<MemTreeNodeRecord> = {
             let forest = self.forest.lock().expect("forest");
             let Some(tree) = forest.tree(bank_id) else {
-                return;
+                return Ok(());
             };
             node_ids
                 .iter()
@@ -78,7 +94,7 @@ impl MemTreeMaint {
                 .map(|node| record_from_node(node, &now))
                 .collect()
         };
-        upsert_all(store, records);
+        upsert_all(store, records)
     }
 
     /// Upsert the leaf an attach placed plus every node the attach changed.
@@ -89,15 +105,20 @@ impl MemTreeMaint {
     /// ancestor chain and each of those nodes' children are persisted. Anything
     /// outside that set kept its row's columns, and a stale row for a node no
     /// longer reachable is unreachable for a reader too.
-    fn persist_attach(&self, bank_id: &str, leaf_id: &str, dirty: &[String]) {
+    fn persist_attach(
+        &self,
+        bank_id: &str,
+        leaf_id: &str,
+        dirty: &[String],
+    ) -> Result<(), AmError> {
         let Some(store) = self.store.as_deref() else {
-            return;
+            return Ok(());
         };
         let now = now_stamp();
         let records: Vec<MemTreeNodeRecord> = {
             let forest = self.forest.lock().expect("forest");
             let Some(tree) = forest.tree(bank_id) else {
-                return;
+                return Ok(());
             };
             let mut ids = Vec::with_capacity(dirty.len().saturating_mul(2).saturating_add(2));
             ids.push(leaf_id.to_owned());
@@ -116,7 +137,43 @@ impl MemTreeMaint {
                 .map(|node| record_from_node(node, &now))
                 .collect()
         };
-        upsert_all(store, records);
+        upsert_all(store, records)
+    }
+
+    /// Record a row write, or a dispatch wait, that did not land.
+    ///
+    /// The item write has already been answered when this runs, so the
+    /// degradation is disclosed instead of rolling the write back: the process
+    /// log names it now, and the engine keeps a count and the message for a
+    /// later `maintenance status`. Without this the process exited 0 over rows
+    /// that were never written and nothing anywhere said so.
+    pub fn record_persist_failure(&self, error: &AmError) {
+        clio_config::log::warn(
+            "memtree_persist_failed",
+            &[
+                ("code", error.code.as_str()),
+                ("error", error.message.as_str()),
+            ],
+        );
+        self.persist_errors.count.fetch_add(1, Ordering::Relaxed);
+        *self
+            .persist_errors
+            .last_error
+            .lock()
+            .expect("persist error") = Some(error.message.clone());
+    }
+
+    /// How many persist failures this engine recorded, and the last message.
+    #[must_use]
+    pub fn persist_failures(&self) -> (u64, Option<String>) {
+        (
+            self.persist_errors.count.load(Ordering::Relaxed),
+            self.persist_errors
+                .last_error
+                .lock()
+                .expect("persist error")
+                .clone(),
+        )
     }
 }
 
@@ -152,7 +209,9 @@ impl MaintenanceHook for MemTreeMaint {
             }
         };
         self.enqueue_dirty(&signal.bank_id, &dirty);
-        self.persist_attach(&signal.bank_id, &leaf_id, &dirty);
+        if let Err(error) = self.persist_attach(&signal.bank_id, &leaf_id, &dirty) {
+            self.record_persist_failure(&error);
+        }
     }
 }
 
@@ -164,15 +223,18 @@ fn now_stamp() -> String {
     clio_store::millis_to_rfc3339(millis)
 }
 
-/// Write the rows one by one.
+/// Write the rows one by one, stopping at the first failure.
 ///
-/// A failed upsert is not reported upwards: the hook runs after the write has
-/// been answered and has no caller to fail, and the node keeps its dirty mark,
-/// so the next wave re-reads it from the forest and tries again.
-fn upsert_all(store: &dyn Store, records: Vec<MemTreeNodeRecord>) {
+/// The error is returned, not dropped: the hook runs after the write has been
+/// answered and has no caller to fail, so the only honest thing left is to hand
+/// the error to [`MemTreeMaint::record_persist_failure`] at the call site. The
+/// node keeps its dirty mark, but that alone retries only what a refresh wave
+/// processes, which is not the leaf this upsert belongs to.
+fn upsert_all(store: &dyn Store, records: Vec<MemTreeNodeRecord>) -> Result<(), AmError> {
     for record in records {
-        let _ = store.upsert_memtree_node(&record);
+        store.upsert_memtree_node(&record)?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
