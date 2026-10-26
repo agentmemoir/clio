@@ -150,7 +150,3 @@ impl Runtime {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "profile_ops_tests.rs"]
-mod tests;

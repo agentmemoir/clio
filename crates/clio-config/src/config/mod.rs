@@ -194,6 +194,16 @@ impl Runtime {
         self.sync_log_level();
     }
 
+    /// Override the durable deployment config path (tests / embedding).
+    pub fn set_deployment_path(&mut self, path: impl Into<PathBuf>) {
+        self.deployment_path = Some(path.into());
+    }
+
+    /// Drop the durable deployment path so deployment-scoped sets stay in-memory only.
+    pub fn clear_deployment_path(&mut self) {
+        self.deployment_path = None;
+    }
+
     /// Reload deployment overlay from [`Self::set_deployment_path`] / env.
     ///
     /// # Errors
