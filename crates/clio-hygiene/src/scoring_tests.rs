@@ -34,11 +34,11 @@ fn input() -> ScoreInput {
     }
 }
 
-/// Score of one credential kind at a fixed 16-byte matched run.
+/// Score of one credential kind at the kind base alone (no measured run).
 fn secret_score(kind: &'static str) -> f64 {
     let mut i = input();
     i.secret_kinds = vec![kind];
-    i.secret_run_len = 16;
+    i.secret_run_len = 0;
     score_noise(&i, &HygieneWeights::default()).score
 }
 
@@ -68,7 +68,6 @@ fn identical_inputs_yield_identical_scores() {
 fn named_credential_key_is_a_discard_credential() {
     let mut i = input();
     i.secret_kinds = vec!["named_credential_key"];
-    i.secret_run_len = 16;
     let scored = score_noise(&i, &HygieneWeights::default());
     assert!(scored.score >= 0.90, "credential floor: {}", scored.score);
     assert_eq!(scored.reasons[0], "secret_credential");
@@ -93,7 +92,7 @@ fn secret_scores_vary_by_kind() {
 #[test]
 fn secret_score_grows_with_run_length() {
     let mut short = input();
-    short.secret_kinds = vec!["named_credential_key"];
+    short.secret_kinds = vec!["known_secret_format"];
     short.secret_run_len = 16;
     let mut long = short.clone();
     long.secret_run_len = 64;
@@ -129,6 +128,20 @@ fn token_shaped_run_is_not_a_credential_band() {
         long_hit.score,
         short_hit.score
     );
+}
+
+#[test]
+fn token_shaped_run_with_other_signals_stays_flag() {
+    let mut i = input();
+    i.token_run_len = Some(120);
+    i.pattern_kinds = vec!["terminal_spam", "stack_trace"];
+    i.near_duplicate = true;
+    i.utility_proxy = 0.0;
+    i.staleness = 1.0;
+    let scored = score_noise(&i, &HygieneWeights::default());
+    assert!(scored.score < 0.70, "proxy-only band: {}", scored.score);
+    assert_eq!(scored.suggested_action, Some("flag"));
+    assert!(!scored.reasons.contains(&"secret_credential"));
 }
 
 #[test]

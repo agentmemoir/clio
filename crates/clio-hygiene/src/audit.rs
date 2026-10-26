@@ -246,7 +246,7 @@ pub fn hygiene_audit(args: &AuditArgs<'_>) -> Result<AuditReport, AmError> {
             noise_score: scored.score,
             noise_reasons: scored.reasons.iter().map(|r| (*r).to_owned()).collect(),
             suggested_action: scored.suggested_action.map(str::to_owned),
-            preview: masked_preview(text, signals.secret_hit()),
+            preview: masked_preview(text, &signals),
         });
     }
 
