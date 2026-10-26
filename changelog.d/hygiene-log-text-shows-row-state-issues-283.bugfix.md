@@ -1,0 +1,1 @@
+`clio hygiene log --output text` now prints each row's state between the action and the item id, so a previewed row reads `would_apply` while an applied one reads `applied`; a row that recorded no state reads `unknown`.

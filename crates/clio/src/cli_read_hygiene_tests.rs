@@ -290,6 +290,8 @@ fn hygiene_log_renders_rows_after_a_confirmed_clean() {
     let (_, text, _) = run_state("hygiene log", &["--bank", "demo"], &s, true);
     assert!(text.starts_with("hygiene log: 1 entry\n"), "{text}");
     assert!(text.contains("flag"), "{text}");
+    // The confirmed clean wrote a real row, and its text view says so.
+    assert!(text.contains("  applied  itm-log-1"), "{text}");
     assert!(text.contains("itm-log-1"), "{text}");
 }
 
@@ -325,7 +327,29 @@ fn render_audit_and_log_default_their_missing_fields() {
             "timestamp": "2024-01-01T00:00:00Z", "bank": "demo",
             "action": "flag", "item_id": "itm-1"
         }]})),
-        "hygiene log: 1 entry\n2024-01-01T00:00:00Z  demo  flag  itm-1"
+        "hygiene log: 1 entry\n2024-01-01T00:00:00Z  demo  flag  unknown  itm-1"
+    );
+}
+
+/// A previewed row and an applied one must not read alike, so the row's state
+/// sits between the action and the item id.
+#[test]
+fn render_log_distinguishes_a_preview_from_an_applied_row() {
+    let rendered = render_log(&json!({"rows": [
+        {"timestamp": TS, "bank": "demo", "action": "flag", "item_id": "itm-1",
+         "detail": {"result": "would_apply"}},
+        {"timestamp": TS, "bank": "demo", "action": "flag", "item_id": "itm-1",
+         "detail": {"result": "applied"}},
+        // A row that recorded no state reads `unknown`, never a blank column.
+        {"timestamp": TS, "bank": "demo", "action": "flag", "item_id": "itm-1"}
+    ]}));
+    assert_eq!(
+        rendered,
+        "hygiene log: 3 entries\n\
+         2024-01-01T00:00:00Z  demo  flag  would_apply  itm-1\n\
+         2024-01-01T00:00:00Z  demo  flag  applied  itm-1\n\
+         2024-01-01T00:00:00Z  demo  flag  unknown  itm-1",
+        "{rendered}"
     );
 }
 
