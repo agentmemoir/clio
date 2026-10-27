@@ -147,7 +147,10 @@ fn t22_02c_category_narrowing_narrows_the_graph() {
             .manifest
             .omissions
             .iter()
-            .any(|o| o.contains("no category or time column") && o.contains("persona")),
+            .any(|o| {
+                o.contains("the export filters reach only the items collection")
+                    && o.contains("persona")
+            }),
         "{:?}",
         outcome.manifest.omissions
     );

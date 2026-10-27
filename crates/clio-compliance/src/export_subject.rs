@@ -218,7 +218,7 @@ fn opaque_item(
 /// Collect the bank-wide entities. The knowledge graph follows the exported
 /// items: a triple is kept only when its carrier item was emitted, and an assoc
 /// edge only when both endpoints were, so the graph can never name a record the
-/// bundle omits. The collections with no category or time column (persona,
+/// bundle omits. The collections the filters cannot reach (persona,
 /// tasks, failures, beliefs, tombstones) stay bank-wide, which is why any
 /// narrowing makes the manifest incomplete. Domain-record prose and `context`
 /// fields are masked defensively by [`crate::export_mask`] in `dsar_plaintext`

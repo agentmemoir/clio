@@ -203,10 +203,10 @@ fn export_matches_the_registered_usage_and_parser() {
 /// whole bundle.
 #[test]
 fn the_export_narrowing_flags_explain_the_graph_and_the_whole_collections() {
-    for (flag, column, consumer) in [
-        ("category", "category", "SemanticCategory::WIRE"),
-        ("time-start", "time", "`time_start`"),
-        ("time-end", "time", "`time_end`"),
+    for (flag, consumer) in [
+        ("category", "SemanticCategory::WIRE"),
+        ("time-start", "`time_start`"),
+        ("time-end", "`time_end`"),
     ] {
         let description = documented_flag("export", flag).description;
         assert!(
@@ -222,11 +222,11 @@ fn the_export_narrowing_flags_explain_the_graph_and_the_whole_collections() {
                 && description.contains("one whose endpoint is filtered out is dropped"),
             "`--{flag}` states the graph rule: {description}"
         );
-        let whole = format!(
-            "persona_stable, persona_preferences, tasks, failures, beliefs, and tombstones carry no {column} column, stay whole, and the bundle manifest records it"
-        );
+        let whole = "the filters do not reach persona_stable, persona_preferences, tasks, \
+                     failures, beliefs, and tombstones, which stay whole, and the bundle \
+                     manifest records it";
         assert!(
-            description.contains(&whole),
+            description.contains(whole),
             "`--{flag}` names the collections it leaves whole: {description}"
         );
         assert!(

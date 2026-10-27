@@ -262,8 +262,8 @@ fn authorize(actor: Actor) -> Result<(), AmError> {
 
 /// Honest completeness: `true` only when nothing was narrowed or truncated.
 /// The knowledge graph follows the exported items, so any item narrowing
-/// narrows triples and association edges with it; the collections that carry
-/// no category or time column are exported bank-wide and say so.
+/// narrows triples and association edges with it; the collections the filters
+/// cannot reach are exported bank-wide and say so.
 pub(crate) fn completeness(
     filter: &ExportFilter,
     truncation: Truncation,
@@ -290,7 +290,7 @@ pub(crate) fn completeness(
             ));
         }
         omissions.push(
-            "no category or time column: persona, task, failure, belief, and tombstone rows are exported bank-wide"
+            "the export filters reach only the items collection: persona, task, failure, belief, and tombstone rows are exported bank-wide"
                 .to_owned(),
         );
     }
