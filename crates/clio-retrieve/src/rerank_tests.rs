@@ -352,7 +352,7 @@ fn factory_selects_teiranker_by_provider() {
         "rerank": {"url": url, "model": "m", "provider": "tei", "max_batch": max_batch}
     });
     let r = build_reranker_from(&tei, None).expect("tei").expect("some");
-    assert_eq!(r.max_batch_size(), max_batch);
+    assert_eq!(r.max_batch_size(), usize::MAX);
     let order = r
         .rerank("query", &documents, documents.len())
         .expect("rerank");

@@ -92,9 +92,9 @@ pub trait Reranker: Send + Sync {
     /// Maximum number of documents the orchestrator should send in one call.
     ///
     /// Custom rerankers and providers without a client-side request ceiling
-    /// keep the pre-batching behavior by returning the unbounded default. The
-    /// TEI adapter exposes its configured service cap here; its own direct
-    /// calls still perform the same split for callers outside the orchestrator.
+    /// keep the pre-batching behavior by returning the unbounded default.
+    /// Providers that batch internally should keep that default so one call
+    /// can enforce its deadline and report shortlist-wide positions.
     fn max_batch_size(&self) -> usize {
         usize::MAX
     }
@@ -223,10 +223,6 @@ impl Reranker for HttpReranker {
                 .total_cmp(&a.score.unwrap_or(f64::NEG_INFINITY))
         });
         Ok(merged)
-    }
-
-    fn max_batch_size(&self) -> usize {
-        self.max_batch
     }
 }
 

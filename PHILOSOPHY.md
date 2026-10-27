@@ -103,3 +103,4 @@ Autonomous agents run unattended across days and weeks. Clio must maintain itsel
 ## The test
 
 A design is true to Clio only if it passes every belief and breaks no hard line. If it fails one, it is not Clio, whatever the roadmap says.
+
