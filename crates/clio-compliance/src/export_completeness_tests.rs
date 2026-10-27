@@ -143,14 +143,10 @@ fn t22_02c_category_narrowing_narrows_the_graph() {
     assert_eq!(count(&outcome.manifest, "assoc_edges"), 0);
     assert!(!outcome.manifest.complete);
     assert!(
-        outcome
-            .manifest
-            .omissions
-            .iter()
-            .any(|o| {
-                o.contains("the export filters reach only the items collection")
-                    && o.contains("persona")
-            }),
+        outcome.manifest.omissions.iter().any(|o| {
+            o.contains("the export filters reach only the items collection")
+                && o.contains("persona")
+        }),
         "{:?}",
         outcome.manifest.omissions
     );
