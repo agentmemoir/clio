@@ -12,6 +12,8 @@
 //!   usage text the write lookup resolves
 //! - The exact `parser_spec` value and boolean flag sequences per command
 //! - Each record's summary, tool, section, positional, and required-flag values
+//! - The claims `export`'s three narrowing flags' help makes about the graph
+//!   and about the collections the narrowing leaves whole
 //! - The tranche's `validate` contract against the catalog inventory
 //! - The tranche's flag metadata: the enum lists the consumers accept and the
 //!   defaults the tools apply
@@ -194,6 +196,44 @@ fn export_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.tool, Some("export"));
     assert_eq!(spec.section, Section::Write);
     assert!(spec.positionals.is_empty(), "{:?}", spec.positionals);
+}
+
+/// The three `export` narrowing flags say what the narrowing does to the graph
+/// and to the collections it cannot reach, and name the flag that scopes the
+/// whole bundle.
+#[test]
+fn the_export_narrowing_flags_explain_the_graph_and_the_whole_collections() {
+    for (flag, consumer) in [
+        ("category", "SemanticCategory::WIRE"),
+        ("time-start", "`time_start`"),
+        ("time-end", "`time_end`"),
+    ] {
+        let description = documented_flag("export", flag).description;
+        assert!(
+            description.starts_with("Narrows the items collection"),
+            "`--{flag}` names the collection it narrows: {description}"
+        );
+        assert!(
+            description.contains(consumer),
+            "`--{flag}` names its consumer: {description}"
+        );
+        assert!(
+            description.contains("triples and association edges follow it")
+                && description.contains("one whose endpoint is filtered out is dropped"),
+            "`--{flag}` states the graph rule: {description}"
+        );
+        let whole = "the filters do not reach persona_stable, persona_preferences, tasks, \
+                     failures, beliefs, and tombstones, which stay whole, and the bundle \
+                     manifest records it";
+        assert!(
+            description.contains(whole),
+            "`--{flag}` names the collections it leaves whole: {description}"
+        );
+        assert!(
+            description.contains("`--subject` scopes the whole bundle"),
+            "`--{flag}` defers the bundle scope to `--subject`: {description}"
+        );
+    }
 }
 
 /// `import` renders today's usage text and builds today's parser sets.

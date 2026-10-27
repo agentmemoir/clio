@@ -31,6 +31,7 @@ fn export_truncation_marks_manifest_incomplete() {
             tasks: true,
             failures: false,
         },
+        0,
     );
     assert!(!complete);
     assert_eq!(
@@ -47,6 +48,7 @@ fn export_no_truncation_stays_complete() {
             tasks: false,
             failures: false,
         },
+        0,
     );
     assert!(complete);
     assert!(omissions.is_empty(), "{omissions:?}");
@@ -64,6 +66,7 @@ fn export_truncation_combines_with_filter_notes() {
             tasks: false,
             failures: true,
         },
+        0,
     );
     assert!(!complete);
     assert!(

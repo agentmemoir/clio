@@ -190,8 +190,9 @@ fn collect_subject_links(
 
 /// The manifest for a subject selection: the counts the delivered entities
 /// carry, the checksum over them, the scope actually selected, and every
-/// named omission. The bank manifest's "assoc edges exported unfiltered"
-/// note does not apply: a subject selection carries no assoc edges at all.
+/// named omission. The bank manifest's association-edge narrowing notes do
+/// not apply: a subject selection carries triples, tasks, failures, and
+/// beliefs, and no association edges at all.
 fn subject_manifest(
     args: &ExportArgs<'_>,
     bank: &str,
@@ -244,3 +245,7 @@ fn subject_manifest(
         omissions,
     }
 }
+
+#[cfg(test)]
+#[path = "export_subject_selection_tests.rs"]
+mod export_subject_selection_tests;

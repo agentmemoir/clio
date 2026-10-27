@@ -257,18 +257,18 @@ pub(crate) const EXPORT: CommandSpec = CommandSpec {
         Flag::choice(
             "category",
             "C",
-            "Filters the bundle to one semantic category; `cli_write_portability::export_call` validates it against `clio_types::SemanticCategory::WIRE` (`task_spec`, `schema`, `tool_config`, `output_constraint`, `persona`).",
+            "Narrows the items collection to one semantic category, which `cli_write_portability::export_call` validates against `clio_types::SemanticCategory::WIRE` (`task_spec`, `schema`, `tool_config`, `output_constraint`, `persona`); triples and association edges follow it, so one whose endpoint is filtered out is dropped; the filters do not reach persona_stable, persona_preferences, tasks, failures, beliefs, and tombstones, which stay whole, and the bundle manifest records it; `--subject` scopes the whole bundle.",
             clio_types::SemanticCategory::WIRE,
         ),
         Flag::text(
             "time-start",
             "TS",
-            "Bounds the bundle to items created at or after this timestamp; `cli_write_portability::export_call` passes it as `time_start`.",
+            "Narrows the items collection to items created at or after this timestamp, which `cli_write_portability::export_call` passes as `time_start`; triples and association edges follow it, so one whose endpoint is filtered out is dropped; the filters do not reach persona_stable, persona_preferences, tasks, failures, beliefs, and tombstones, which stay whole, and the bundle manifest records it; `--subject` scopes the whole bundle.",
         ),
         Flag::text(
             "time-end",
             "TS",
-            "Bounds the bundle to items created at or before this timestamp; `cli_write_portability::export_call` passes it as `time_end`.",
+            "Narrows the items collection to items created at or before this timestamp, which `cli_write_portability::export_call` passes as `time_end`; triples and association edges follow it, so one whose endpoint is filtered out is dropped; the filters do not reach persona_stable, persona_preferences, tasks, failures, beliefs, and tombstones, which stay whole, and the bundle manifest records it; `--subject` scopes the whole bundle.",
         ),
         Flag {
             default: Some("true"),
