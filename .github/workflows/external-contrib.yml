@@ -18,7 +18,21 @@ jobs:
     timeout-minutes: 5
     steps:
       # No checkout, no PR-content evaluation, only GitHub API mutation.
+      - name: Resolve whether the actor may keep the PR ready
+        id: actor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.event.sender.login }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo none)
+          case "$permission" in
+            admin|maintain|write) echo "maintainer=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "maintainer=false" >> "$GITHUB_OUTPUT" ;;
+          esac
       - name: Convert external PR to draft
+        if: steps.actor.outputs.maintainer != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

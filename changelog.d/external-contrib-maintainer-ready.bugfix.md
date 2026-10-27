@@ -1,0 +1,1 @@
+The External Contrib workflow now resolves the event sender's repository permission before converting a fork pull request to a draft, so a maintainer marking a fork pull request ready for review no longer has it reverted to draft seconds later, while a contributor's own fork pull request is still drafted and a failed permission lookup still falls back to converting it to draft.
