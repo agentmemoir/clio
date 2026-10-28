@@ -73,3 +73,7 @@ impl SqliteStore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_envelope_tests.rs"]
+mod sqlite_envelope_tests;

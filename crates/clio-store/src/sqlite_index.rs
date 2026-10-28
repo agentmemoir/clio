@@ -400,9 +400,8 @@ impl IndexStore for SqliteStore {
         // FTS5 and outbox tables do not enforce FK cascade; sweep rows whose
         // item is gone. `NOT IN` over an empty items set removes every derived
         // row, which is correct (no items → all derived rows are orphans). A
-        // bank scope filters every table by its `bank_id` column so a scoped
-        // reindex never deletes derived rows of other banks. The vector-table
-        // leg is the seam's (`vector_backend`).
+        // bank scope filters every table by its `bank_id` column; the
+        // vector-table leg is the seam's (`vector_backend`).
         let bank_filter = if bank_id.is_some() {
             " AND bank_id = ?1"
         } else {
@@ -446,3 +445,6 @@ impl SqliteStore {
         Ok(n > 0)
     }
 }
+#[cfg(test)]
+#[path = "sqlite_index_tests.rs"]
+mod sqlite_index_tests;

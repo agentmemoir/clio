@@ -378,3 +378,7 @@ impl crate::triple_assertion::TripleAssertion for SqliteStore {
         self.triple_asserted_ever_impl(bank_id, subject, predicate, object)
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_store_tests.rs"]
+mod sqlite_store_tests;
