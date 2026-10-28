@@ -112,7 +112,10 @@ fn triple_and_memtree_reads_answer_on_an_empty_store() {
         time_axis: TimeAxis::Valid,
     };
     assert!(
-        store.query_triples(&query).expect("query triples").is_empty(),
+        store
+            .query_triples(&query)
+            .expect("query triples")
+            .is_empty(),
         "an empty bank must query to no triples"
     );
     store
@@ -152,20 +155,14 @@ fn the_item_lifecycle_round_trips_through_the_wiring() {
     updated.gist = Some("second gist".into());
     updated.snapshot = Some(json!({"gist": "second gist"}));
     updated.updated_at = T1.into();
-    store
-        .update_memory_item(&updated, "agent")
-        .expect("update");
+    store.update_memory_item(&updated, "agent").expect("update");
     assert_eq!(
-        store
-            .get_gist(&bank, &id)
-            .expect("gist read"),
+        store.get_gist(&bank, &id).expect("gist read"),
         Some("second gist".into()),
         "the update must replace the gist"
     );
     assert_eq!(
-        store
-            .get_snapshot(&bank, &id)
-            .expect("snapshot read"),
+        store.get_snapshot(&bank, &id).expect("snapshot read"),
         Some(json!({"gist": "second gist"})),
         "the snapshot must survive the update"
     );
@@ -210,9 +207,7 @@ fn association_edges_round_trip_and_reinforce_in_place() {
         .expect("reinforce");
     assert!(reinforced.weight > 0.5, "{reinforced:?}");
 
-    let listed = store
-        .list_assoc_edges(&bank, Some(&a))
-        .expect("list edges");
+    let listed = store.list_assoc_edges(&bank, Some(&a)).expect("list edges");
     assert_eq!(listed.len(), 2, "{listed:?}");
     assert!(
         listed
@@ -256,10 +251,22 @@ fn audit_rows_record_operations_and_corrections_build_a_trail() {
         .expect("create");
 
     store
-        .record_audit_event(&bank, "workspace.attest", Some(&id), "reviewer", &json!({"ok": true}))
+        .record_audit_event(
+            &bank,
+            "workspace.attest",
+            Some(&id),
+            "reviewer",
+            &json!({"ok": true}),
+        )
         .expect("audit event");
     store
-        .record_assoc_audit(&bank, "edge.prune", Some(&id), "agent", &json!({"weight": 0.5}))
+        .record_assoc_audit(
+            &bank,
+            "edge.prune",
+            Some(&id),
+            "agent",
+            &json!({"weight": 0.5}),
+        )
         .expect("assoc audit");
 
     let mut corrected = item(&unique("live"), &bank, "second");
@@ -317,7 +324,10 @@ fn vector_hooks_store_scan_and_remove_rows() {
         "a repeated vector delete must report false"
     );
     assert!(
-        store.knn(&bank, &unit_vector(0), 1).expect("knn").is_empty(),
+        store
+            .knn(&bank, &unit_vector(0), 1)
+            .expect("knn")
+            .is_empty(),
         "no vector may remain"
     );
 }
@@ -342,9 +352,7 @@ fn inspection_reports_rows_and_windows_in_deterministic_pages() {
         .expect("window read");
     assert_eq!(ids, vec![id.clone()], "{ids:?}");
     assert!(
-        store
-            .inspect_content_ciphertext(&bank, &id)
-            .is_ok(),
+        store.inspect_content_ciphertext(&bank, &id).is_ok(),
         "the ciphertext inspect must answer for an existing item"
     );
     store
@@ -369,7 +377,9 @@ fn discard_and_invalidate_close_rows_without_erasing_them() {
         .discard_item(&bank, &discarded, "rotated away", T1, "agent")
         .expect("discard");
     assert!(
-        !store.item_is_archived(&bank, &discarded).expect("archived read"),
+        !store
+            .item_is_archived(&bank, &discarded)
+            .expect("archived read"),
         "a discard is not an archive"
     );
 
@@ -384,7 +394,10 @@ fn discard_and_invalidate_close_rows_without_erasing_them() {
             filter
         })
         .expect("invalidated count");
-    assert_eq!(closed, 1, "the invalidated item must be the only closed one");
+    assert_eq!(
+        closed, 1,
+        "the invalidated item must be the only closed one"
+    );
 
     assert!(
         store

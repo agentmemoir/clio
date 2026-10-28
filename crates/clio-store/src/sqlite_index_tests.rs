@@ -90,7 +90,8 @@ fn the_outbox_lifecycle_enqueues_once_and_finishes_clean() {
     let store = SqliteStore::open_in_memory(kms).expect("sqlite");
     let bank = unique("bank-outbox");
     let id = unique("item");
-    store.create_memory_item(&item(&id, &bank, ItemKind::Semantic, "leaf"), "agent")
+    store
+        .create_memory_item(&item(&id, &bank, ItemKind::Semantic, "leaf"), "agent")
         .expect("create");
 
     assert!(
@@ -101,7 +102,9 @@ fn the_outbox_lifecycle_enqueues_once_and_finishes_clean() {
         "create must enqueue the index job"
     );
     assert!(
-        !store.enqueue_index_job(&bank, &id).expect("duplicate enqueue"),
+        !store
+            .enqueue_index_job(&bank, &id)
+            .expect("duplicate enqueue"),
         "a duplicate enqueue before finish must be a no-op"
     );
 
@@ -140,7 +143,11 @@ fn a_failed_job_records_attempts_and_respects_the_max_attempts_cap() {
         .expect("job below the cap")
         .expect("one attempt must stay below a cap of 2");
     assert_eq!(job.attempts, 1, "{job:?}");
-    assert_eq!(job.last_error.as_deref(), Some("embedder offline"), "{job:?}");
+    assert_eq!(
+        job.last_error.as_deref(),
+        Some("embedder offline"),
+        "{job:?}"
+    );
     assert!(
         store
             .pending_index_job(&bank, &id, None, 1)
@@ -159,7 +166,10 @@ fn the_lexical_leg_is_bank_scoped_and_fail_closed() {
     let semantic = unique("fact");
     let task = unique("task");
     store
-        .create_memory_item(&item(&semantic, &bank, ItemKind::Semantic, "a fact"), "agent")
+        .create_memory_item(
+            &item(&semantic, &bank, ItemKind::Semantic, "a fact"),
+            "agent",
+        )
         .expect("create fact");
     store
         .create_memory_item(&item(&task, &bank, ItemKind::Episodic, "a task"), "agent")
@@ -205,9 +215,7 @@ fn the_lexical_leg_is_bank_scoped_and_fail_closed() {
         "limit 0 must return no lexical hits"
     );
     assert!(
-        store
-            .lexical_search(&other, "stored", &[], 5)
-            .is_ok(),
+        store.lexical_search(&other, "stored", &[], 5).is_ok(),
         "an empty index must answer without key material"
     );
 
@@ -239,7 +247,10 @@ fn the_dense_leg_widens_filters_domains_and_fails_closed() {
     let semantic = unique("fact");
     let task = unique("task");
     store
-        .create_memory_item(&item(&semantic, &bank, ItemKind::Semantic, "a fact"), "agent")
+        .create_memory_item(
+            &item(&semantic, &bank, ItemKind::Semantic, "a fact"),
+            "agent",
+        )
         .expect("create fact");
     store
         .create_memory_item(&item(&task, &bank, ItemKind::Episodic, "a task"), "agent")
@@ -247,7 +258,9 @@ fn the_dense_leg_widens_filters_domains_and_fails_closed() {
     vector(&store, &semantic, &bank, 0);
     vector(&store, &task, &bank, 1);
 
-    let hits = store.dense_search(&bank, &unit_vector(0), &[], 2).expect("dense");
+    let hits = store
+        .dense_search(&bank, &unit_vector(0), &[], 2)
+        .expect("dense");
     let ids: Vec<&str> = hits.iter().map(|h| h.item_id.as_str()).collect();
     assert_eq!(ids, vec![semantic.as_str(), task.as_str()], "{hits:?}");
     assert!(
@@ -311,9 +324,7 @@ fn coverage_reads_and_indexable_windows_report_the_bank() {
         .create_memory_item(&item(&second, &bank, ItemKind::Episodic, "two"), "agent")
         .expect("create two");
 
-    let page = store
-        .indexable_items(&bank, 1, 1)
-        .expect("indexable page");
+    let page = store.indexable_items(&bank, 1, 1).expect("indexable page");
     assert_eq!(page, vec![second.clone()], "{page:?}");
     assert_eq!(
         store.count_indexable_items(&bank).expect("count"),

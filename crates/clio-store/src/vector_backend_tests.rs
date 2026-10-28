@@ -38,9 +38,7 @@ fn wired_connection() -> Connection {
 fn registration_helpers_cover_both_arms() {
     assert!(map_register_outcome(&Ok(())).is_ok());
     assert_eq!(
-        map_register_outcome(&Err("boom".into()))
-            .unwrap_err()
-            .code,
+        map_register_outcome(&Err("boom".into())).unwrap_err().code,
         ErrorCode::ConfigCorrupt
     );
     assert!(interpret_auto_extension_rc(0).is_ok());
@@ -83,11 +81,7 @@ fn space_ddl_applies_on_a_wired_connection() {
     let space = EmbeddingSpace::new("m", 1536).unwrap();
     apply_space_ddl(&conn, &space).expect("space DDL must apply once registered");
     let dims: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM item_embeddings",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM item_embeddings", [], |row| row.get(0))
         .expect("the vector table must exist after the space DDL");
     assert_eq!(dims, 0);
 }
@@ -95,10 +89,13 @@ fn space_ddl_applies_on_a_wired_connection() {
 #[test]
 fn space_ddl_refuses_an_out_of_range_width() {
     let conn = wired_connection();
-    let err = apply_space_ddl(&conn, &EmbeddingSpace {
-        model_id: "m".into(),
-        dims: 0,
-    })
+    let err = apply_space_ddl(
+        &conn,
+        &EmbeddingSpace {
+            model_id: "m".into(),
+            dims: 0,
+        },
+    )
     .unwrap_err();
     assert_eq!(err.code, ErrorCode::OutOfRange);
 }
@@ -183,10 +180,8 @@ fn upsert_vector_row_replaces_the_existing_row() {
     let conn = wired_connection();
     apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
         .expect("space DDL must apply once registered");
-    upsert_vector_row(&conn, &slot("i1", "b1", [1.0, 0.0, 0.0, 0.0]), TS)
-        .expect("first insert");
-    upsert_vector_row(&conn, &slot("i1", "b1", [0.0, 1.0, 0.0, 0.0]), TS)
-        .expect("replace insert");
+    upsert_vector_row(&conn, &slot("i1", "b1", [1.0, 0.0, 0.0, 0.0]), TS).expect("first insert");
+    upsert_vector_row(&conn, &slot("i1", "b1", [0.0, 1.0, 0.0, 0.0]), TS).expect("replace insert");
     assert_eq!(vector_table_rows(&conn), 1, "one row after two upserts");
 }
 
@@ -253,8 +248,5 @@ fn drop_vector_table_removes_the_table() {
             r.get::<_, i64>(0)
         })
         .expect_err("the table must be gone after the drop");
-    assert!(
-        matches!(err, rusqlite::Error::SqliteFailure(..)),
-        "{err}"
-    );
+    assert!(matches!(err, rusqlite::Error::SqliteFailure(..)), "{err}");
 }

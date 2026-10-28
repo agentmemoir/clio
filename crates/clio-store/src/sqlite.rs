@@ -36,8 +36,7 @@ use crate::embedding_space::{
 use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, now_iso};
 use crate::sqlite_path::ensure_parent;
 use crate::vector_backend::{
-    apply_space_ddl, apply_static_vectors, drop_vector_table, ensure_registered,
-    verify_vec_version,
+    apply_space_ddl, apply_static_vectors, drop_vector_table, ensure_registered, verify_vec_version,
 };
 use clio_types::AmError;
 use rusqlite::{Connection, OptionalExtension, params};

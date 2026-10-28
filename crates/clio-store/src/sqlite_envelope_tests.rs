@@ -68,7 +68,9 @@ fn delete_removes_the_item_row_and_every_derived_row_in_one_transaction() {
     let bank = unique("bank-envelope");
     let id = unique("item");
 
-    store.create_memory_item(&item(&id, &bank), "agent").expect("create");
+    store
+        .create_memory_item(&item(&id, &bank), "agent")
+        .expect("create");
     store
         .put_lexical_doc(&bank, &id, "delete me once")
         .expect("lexical doc");
@@ -84,7 +86,9 @@ fn delete_removes_the_item_row_and_every_derived_row_in_one_transaction() {
     assert!(store.delete_item(&bank, &id).expect("first delete"));
 
     assert_eq!(
-        store.get_memory_item(&bank, &id).expect("read after delete"),
+        store
+            .get_memory_item(&bank, &id)
+            .expect("read after delete"),
         None,
         "the item row must be gone"
     );
@@ -104,11 +108,16 @@ fn delete_removes_the_item_row_and_every_derived_row_in_one_transaction() {
         "the outbox row must be gone"
     );
     assert!(
-        !store.delete_vector(&bank, &id).expect("vector after delete"),
+        !store
+            .delete_vector(&bank, &id)
+            .expect("vector after delete"),
         "the vector row must already be gone with the item"
     );
     assert!(
-        store.knn(&bank, &unit_vector(0), 5).expect("knn").is_empty(),
+        store
+            .knn(&bank, &unit_vector(0), 5)
+            .expect("knn")
+            .is_empty(),
         "no vector may remain to be scanned"
     );
     assert!(
