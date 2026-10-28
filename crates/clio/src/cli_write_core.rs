@@ -381,6 +381,10 @@ fn render_job(payload: &Value) -> String {
 mod tests;
 
 #[cfg(test)]
+#[path = "cli_write_core_render_tests.rs"]
+mod render_tests;
+
+#[cfg(test)]
 #[path = "cli_write_core_category_tests.rs"]
 mod category_tests;
 

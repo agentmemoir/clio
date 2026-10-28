@@ -64,3 +64,136 @@ fn remember_rejects_source_text_without_snapshot_support() {
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
     assert!(err.contains("--source-text"), "{err}");
 }
+
+/// The consolidate dry-run validates the bank the caller named, exactly like
+/// the summarize dry-run: same exit code, same `not_found` code and message.
+#[test]
+fn consolidate_dry_run_rejects_an_unknown_bank() {
+    let (code, out, err) = run_write_open(
+        "consolidate",
+        &[
+            "--dry-run",
+            "--bank",
+            "nope",
+            "--db",
+            "sqlite::memory:",
+            "--output",
+            "json",
+        ],
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(out.is_empty(), "stdout: {out}");
+    let payload = json_of(&err);
+    assert_eq!(payload["code"], json!("not_found"), "{payload}");
+    assert_eq!(
+        payload["message"],
+        json!("--bank `nope` not found"),
+        "{payload}"
+    );
+}
+
+/// A name that is not a valid bank name at all is refused the same way: it
+/// names no bank the store holds, so the check cannot pass.
+#[test]
+fn consolidate_dry_run_rejects_an_invalid_bank_name() {
+    let (code, out, err) = run_write_open(
+        "consolidate",
+        &[
+            "--dry-run",
+            "--bank",
+            "bad bank!",
+            "--db",
+            "sqlite::memory:",
+            "--output",
+            "json",
+        ],
+        false,
+    );
+    assert_eq!(code, ExitCode::from(1), "{out}{err}");
+    assert!(out.is_empty(), "stdout: {out}");
+    let payload = json_of(&err);
+    assert_eq!(payload["code"], json!("not_found"), "{payload}");
+    assert_eq!(
+        payload["message"],
+        json!("--bank `bad bank!` not found"),
+        "{payload}"
+    );
+}
+
+/// The two dry runs report one missing bank identically: a script checking the
+/// exit code gets the same answer from either command.
+#[test]
+fn consolidate_and_summarize_dry_runs_refuse_a_bank_identically() {
+    let summarize = run_write_open(
+        "summarize",
+        &[
+            "--scope",
+            "bank",
+            "--dry-run",
+            "--bank",
+            "nope",
+            "--db",
+            "sqlite::memory:",
+            "--output",
+            "json",
+        ],
+        false,
+    );
+    let consolidate = run_write_open(
+        "consolidate",
+        &[
+            "--dry-run",
+            "--bank",
+            "nope",
+            "--db",
+            "sqlite::memory:",
+            "--output",
+            "json",
+        ],
+        false,
+    );
+    assert_eq!(summarize.0, consolidate.0, "{summarize:?}{consolidate:?}");
+    assert_eq!(summarize.1, consolidate.1, "{summarize:?}{consolidate:?}");
+    let payload = json_of(&consolidate.2);
+    assert_eq!(payload["code"], json!("not_found"), "{payload}");
+    assert_eq!(payload["ok"], json!(false), "{payload}");
+}
+
+/// A bank the store knows (the configured default) still previews: the check
+/// refuses only banks the dry run could not touch.
+#[test]
+fn consolidate_dry_run_still_previews_for_the_default_bank() {
+    let (code, out, err) = run_write_open(
+        "consolidate",
+        &["--dry-run", "--db", "sqlite::memory:", "--output", "json"],
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["dry_run"], json!(true), "{payload}");
+    assert_eq!(payload["bank"], json!(null), "{payload}");
+}
+
+/// The summarize dry run keeps its own behavior: a valid bank scope still
+/// previews.
+#[test]
+fn summarize_dry_run_still_previews_for_the_default_bank() {
+    let (code, out, err) = run_write_open(
+        "summarize",
+        &[
+            "--scope",
+            "bank",
+            "--dry-run",
+            "--db",
+            "sqlite::memory:",
+            "--output",
+            "json",
+        ],
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["dry_run"], json!(true), "{payload}");
+    assert_eq!(payload["scope"], json!("bank"), "{payload}");
+}

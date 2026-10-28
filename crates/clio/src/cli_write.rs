@@ -87,7 +87,7 @@ pub(crate) fn run_resolved(verb: &str, args: Vec<String>, io: &mut CliIo) -> Exi
         // The runtime default is configuration, never the caller's `--bank`.
         // The request carries `--bank` in its own arguments, and promoting it
         // here would exempt the bank from a caller that checks it (the
-        // summarize dry-run validates the named bank).
+        // summarize and consolidate dry-runs validate the named bank).
         default_bank: "default".to_owned(),
         default_actor: clio_types::Actor::Agent,
         // The shared surface is opt-in, mirroring `clio mcp stdio --shared-bank`;
@@ -167,8 +167,8 @@ fn run_parsed(
     };
     match call {
         WriteCall::Preview { payload, text } => {
-            if verb == "summarize"
-                && let Err(error) = validate_summarize_preview(state, parsed)
+            if (verb == "summarize" || verb == "consolidate")
+                && let Err(error) = validate_preview(state, verb, parsed)
             {
                 return fail(io, mode, &error);
             }
@@ -228,7 +228,13 @@ fn receipt_bank<'a>(verb: &str, args: &'a Value, state: &'a McpState) -> Option<
     )
 }
 
-fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(), CliError> {
+/// Validate a `--dry-run` preview against the store it would touch: resolve
+/// the caller's `--bank` (or the runtime default) and refuse an unknown or
+/// invalid bank exactly as the real tool call would, so every dry run of this
+/// dispatcher reports a missing bank the same way. `summarize` additionally
+/// checks its scope: a bank scope is fine, but an item scope must name an
+/// existing item.
+fn validate_preview(state: &McpState, verb: &str, parsed: &ParsedArgs) -> Result<(), CliError> {
     let mut args = serde_json::Map::new();
     if let Some(bank) = parsed.value("bank") {
         args.insert("bank".into(), serde_json::Value::from(bank));
@@ -239,6 +245,9 @@ fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(
     state
         .require_known_bank(ctx.bank.as_str())
         .map_err(|error| CliError::from_am_error(&error))?;
+    if verb != "summarize" {
+        return Ok(());
+    }
     let Some(scope) = parsed.value("scope") else {
         return Ok(());
     };
