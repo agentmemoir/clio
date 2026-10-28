@@ -366,7 +366,8 @@ fn measure_inventory(
 /// non-empty model and a credential, because `ingest_raw` fails closed without
 /// them. Any other provider value is rejected at ingest time, so it reports
 /// not-available rather than a readiness false positive.
-pub(crate) fn extract_available_from(effective: &Value) -> bool {
+#[must_use]
+pub fn extract_available_from(effective: &Value) -> bool {
     let text = |pointer: &str| {
         effective
             .pointer(pointer)

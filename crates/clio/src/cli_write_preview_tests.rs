@@ -20,8 +20,9 @@
 
 use crate::cli_args::ParsedArgs;
 use crate::cli_error::CliError;
-use crate::cli_read_test_support::{seed_item, state, tokens};
+use crate::cli_read_test_support::{extract_state, seed_item, state, tokens};
 use crate::cli_write_preview::{preview_counts, validate_preview};
+use clio_types::{AmError, ErrorCode};
 use serde_json::json;
 
 fn parsed(verb: &str, args: &[&str]) -> ParsedArgs {
@@ -33,7 +34,7 @@ fn parsed(verb: &str, args: &[&str]) -> ParsedArgs {
 /// active item holding a snapshot is a gist to regenerate.
 #[test]
 fn summarize_bank_counts_the_gists_the_scope_holds() {
-    let s = state();
+    let s = extract_state();
     seed_item(&s, "demo", "itm-a", "prefers aisle seats");
     seed_item(&s, "demo", "itm-b", "prefers terse answers");
     let parsed = parsed("summarize", &["--scope", "bank", "--bank", "demo"]);
@@ -46,13 +47,35 @@ fn summarize_bank_counts_the_gists_the_scope_holds() {
 /// The item-scope summarize counts the one item it would regenerate.
 #[test]
 fn summarize_item_counts_the_named_item() {
-    let s = state();
+    let s = extract_state();
     seed_item(&s, "demo", "itm-a", "prefers aisle seats");
     let parsed = parsed("summarize", &["--scope", "itm-a", "--bank", "demo"]);
     let bank = validate_preview(&s, "summarize", &parsed).expect("validated");
     let counts = preview_counts(&s, "summarize", &parsed, &bank).expect("counts");
     assert_eq!(counts["gists"], json!(1), "{counts}");
     assert_eq!(counts["skipped"], json!(0), "{counts}");
+}
+
+/// With no extractor configured the dry run fails exactly as the real call
+/// does: the same `not_implemented` code, message, and exit domain, before it
+/// counts anything, so it can never preview success where the real run fails.
+#[test]
+fn summarize_without_an_extractor_fails_like_the_real_call() {
+    let s = state();
+    seed_item(&s, "demo", "itm-a", "prefers aisle seats");
+    let parsed = parsed("summarize", &["--scope", "bank", "--bank", "demo"]);
+    let bank = validate_preview(&s, "summarize", &parsed).expect("bank is known");
+    let error = preview_counts(&s, "summarize", &parsed, &bank).expect_err("gate fails");
+    assert_eq!(
+        error,
+        CliError::from_am_error(&AmError::new(
+            ErrorCode::NotImplemented,
+            "extraction unavailable: no extractor configured (set extract.url to a local \
+             extraction sidecar, or extract.provider=openai with a credential); no gist was \
+             regenerated and no text was fabricated",
+        )),
+        "{error:?}"
+    );
 }
 
 /// The consolidate counts the wave's pending work: the dirty ancestors it
@@ -117,7 +140,7 @@ fn validate_refuses_an_unknown_item_scope() {
 /// after the preview reads, so a dry run never changes what it previews.
 #[test]
 fn counts_leave_the_store_unchanged() {
-    let s = state();
+    let s = extract_state();
     seed_item(&s, "demo", "itm-a", "prefers aisle seats");
     seed_item(&s, "demo", "itm-b", "prefers terse answers");
     let before = (

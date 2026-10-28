@@ -29,8 +29,9 @@
 
 use crate::cli_args::ParsedArgs;
 use crate::cli_error::CliError;
-use clio_mcp::runtime::McpState;
+use clio_mcp::runtime::{McpState, extract_available_from};
 use clio_store::{InspectValidity, ItemInspectFilter};
+use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 
 /// Validate a `--dry-run` preview against the store it would touch: resolve
@@ -108,7 +109,33 @@ pub(crate) fn preview_counts(
 /// bank-scope summarize runs; any page size yields the same total).
 const PREVIEW_PAGE: usize = 200;
 
+/// The extraction-availability gate the real summarize call enforces before
+/// any item work, run the same way against the runtime's effective config.
+///
+/// # Errors
+/// The same `not_implemented` error the real call fails with when no gist
+/// generator is configured.
+fn extractor_gate(state: &McpState) -> Result<(), CliError> {
+    let effective = {
+        let rt = state.config.lock().expect("config runtime mutex poisoned");
+        rt.effective_raw()
+    };
+    if extract_available_from(&effective) {
+        return Ok(());
+    }
+    Err(CliError::from_am_error(&AmError::new(
+        ErrorCode::NotImplemented,
+        "extraction unavailable: no extractor configured (set extract.url to a local \
+         extraction sidecar, or extract.provider=openai with a credential); no gist was \
+         regenerated and no text was fabricated",
+    )))
+}
+
 fn summarize_counts(state: &McpState, parsed: &ParsedArgs, bank: &str) -> Result<Value, CliError> {
+    // The real call fails closed before touching any item when no gist
+    // generator is configured; the dry run refuses the same way, so it never
+    // previews success where the real run fails.
+    extractor_gate(state)?;
     let mut gists = 0_u64;
     let mut skipped = 0_u64;
     match parsed.value("scope") {

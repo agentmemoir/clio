@@ -160,8 +160,11 @@ fn consolidate_and_summarize_dry_runs_refuse_a_bank_identically() {
     assert_eq!(payload["ok"], json!(false), "{payload}");
 }
 
-/// A bank the store knows (the configured default) still previews: the check
-/// refuses only banks the dry run could not touch.
+/// The consolidate dry run keeps its own behavior: a valid bank scope still
+/// previews. The summarize twin of this test is the engine-level
+/// `summarize_bank_dry_run_previews_without_calling_the_dispatcher`; this
+/// opening-path variant cannot inject an extract config for summarize, so
+/// only the consolidate case (which needs no extractor) lives here.
 #[test]
 fn consolidate_dry_run_still_previews_for_the_default_bank() {
     let (code, out, err) = run_write_open(
@@ -173,27 +176,4 @@ fn consolidate_dry_run_still_previews_for_the_default_bank() {
     let payload = json_of(&out);
     assert_eq!(payload["dry_run"], json!(true), "{payload}");
     assert_eq!(payload["bank"], json!(null), "{payload}");
-}
-
-/// The summarize dry run keeps its own behavior: a valid bank scope still
-/// previews.
-#[test]
-fn summarize_dry_run_still_previews_for_the_default_bank() {
-    let (code, out, err) = run_write_open(
-        "summarize",
-        &[
-            "--scope",
-            "bank",
-            "--dry-run",
-            "--db",
-            "sqlite::memory:",
-            "--output",
-            "json",
-        ],
-        false,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
-    let payload = json_of(&out);
-    assert_eq!(payload["dry_run"], json!(true), "{payload}");
-    assert_eq!(payload["scope"], json!("bank"), "{payload}");
 }

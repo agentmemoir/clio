@@ -420,7 +420,7 @@ impl McpState {
 }
 
 pub use crate::runtime_context::now_utc;
-pub(crate) use crate::runtime_open::extract_available_from;
+pub use crate::runtime_open::extract_available_from;
 pub use crate::runtime_open::load_retention_store;
 
 #[cfg(test)]

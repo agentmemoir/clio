@@ -18,7 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::cli_read_test_support::{TS, call, json_of, seed_item, state};
+use crate::cli_read_test_support::{TS, call, extract_state, json_of, seed_item, state};
 use crate::cli_write_test_support::run_write_state;
 use serde_json::json;
 use std::process::ExitCode;
@@ -214,7 +214,7 @@ fn summarize_requires_scope() {
 
 #[test]
 fn summarize_bank_dry_run_previews_without_calling_the_dispatcher() {
-    let s = state();
+    let s = extract_state();
     let (code, out, err) =
         run_write_state("summarize", &["--scope", "bank", "--dry-run"], &s, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
