@@ -64,7 +64,7 @@ impl ReadGroup for CoreGroup {
 
     fn decorate(&self, verb: &str, parsed: &ParsedArgs, arguments: &Value, payload: &mut Value) {
         if verb == "inspect" {
-            add_truncated(payload);
+            add_truncated(payload, "items");
             // The CLI clamped a typed `--limit` above the cap; name the value
             // the caller asked for so the served page never silently differs.
             add_requested_limit(payload, parsed);

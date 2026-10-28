@@ -366,6 +366,7 @@ const PAGE_LIMIT_COMMANDS: &[(&str, &str)] = &[
     ("task history", "20"),
     ("failure list", "20"),
     ("memtree query", "100"),
+    ("triple query", "50"),
 ];
 
 /// Every page-capable read command's `--limit` help names its default and the

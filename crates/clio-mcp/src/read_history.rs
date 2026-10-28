@@ -257,7 +257,7 @@ fn axis_str(axis: TimeAxis) -> &'static str {
     axis.as_str()
 }
 
-/// `triple_query(subject?, predicate?, object?, as_of?, time_axis?)`.
+/// `triple_query(subject?, predicate?, object?, as_of?, time_axis?, limit?, offset?)`.
 #[inline(never)]
 fn triple_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
@@ -270,7 +270,20 @@ fn triple_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
         time_axis: time_axis(args)?,
     };
     let rows = state.store.query_triples(&query)?;
-    Ok(json!({ "triples": rows }))
+    // Paging at the binding layer, as `inspect` does for its filter: slice the
+    // matched rows, and echo the served page plus the full match count so the
+    // CLI can mark a short page. Direct callers without `limit` get the same
+    // 50-page default the CLI sends; the cap matches the inspect binding.
+    let limit = opt_usize(args, "limit").unwrap_or(50).min(200);
+    let offset = opt_usize(args, "offset").unwrap_or(0);
+    let total = rows.len();
+    let triples: Vec<_> = rows.into_iter().skip(offset).take(limit).collect();
+    Ok(json!({
+        "triples": triples,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }))
 }
 
 /// `belief_history(belief_id_or_proposition)`: full confidence trajectory.

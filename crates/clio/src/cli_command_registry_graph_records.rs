@@ -123,7 +123,7 @@ const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a
 
 /// `triple query`'s usage line: its three positionals are nested optionals, a
 /// shape the assembled form cannot print.
-const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]";
+const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--explain] [--bank BANK] [--output json|text]";
 
 /// `clio triple query`: match subject/predicate/object patterns, over the
 /// `triple_query` tool.
@@ -145,6 +145,22 @@ pub(crate) const TRIPLE_QUERY: CommandSpec = CommandSpec {
                 "valid|transaction",
                 "`cli_read_belief` validates `valid` or `transaction`, and the tool defaults it to `valid`.",
                 &["valid", "transaction"],
+            )
+        },
+        Flag {
+            default: Some("50"),
+            ..Flag::uint(
+                "limit",
+                "N",
+                "Caps the result page; defaults to 50 when omitted; a limit above 200 is lowered to 200.",
+            )
+        },
+        Flag {
+            default: Some("0"),
+            ..Flag::uint(
+                "offset",
+                "N",
+                "Skips this many leading results; the tool defaults it to 0 when omitted.",
             )
         },
         EXPLAIN,

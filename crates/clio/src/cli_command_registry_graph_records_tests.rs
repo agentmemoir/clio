@@ -51,12 +51,12 @@ fn triple_query_matches_the_registered_usage_and_parser() {
     let spec = record("triple query");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--explain] [--bank BANK] [--output json|text]",
         "triple query full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]",
+        "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--explain] [--bank BANK] [--output json|text]",
         "triple query usage line"
     );
     assert_eq!(
@@ -71,7 +71,9 @@ fn triple_query_matches_the_registered_usage_and_parser() {
             "predicate",
             "object",
             "as-of",
-            "time-axis"
+            "time-axis",
+            "limit",
+            "offset"
         ]
     );
     assert_eq!(

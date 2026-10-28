@@ -252,8 +252,9 @@ fn find_group(verb: &str) -> Option<&'static dyn ReadGroup> {
 }
 
 /// Add the in-band `truncated` marker to a success payload that reports
-/// `total`/`offset`/`items` (used by `inspect`).
-pub(crate) fn add_truncated(payload: &mut Value) {
+/// `total`/`offset` and a result array under `key` (used by `inspect` with
+/// `items` and `triple query` with `triples`).
+pub(crate) fn add_truncated(payload: &mut Value, key: &str) {
     let count = |key: &str| {
         payload
             .get(key)
@@ -263,7 +264,7 @@ pub(crate) fn add_truncated(payload: &mut Value) {
     let offset = count("offset").unwrap_or(0);
     let total = count("total").unwrap_or(0);
     let returned = payload
-        .get("items")
+        .get(key)
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     payload["truncated"] = Value::Bool(offset.saturating_add(returned) < total);

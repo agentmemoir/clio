@@ -318,6 +318,8 @@ pub(crate) fn read_defs() -> Vec<ToolDef> {
                     "time_axis",
                     en("Bi-temporal axis (default valid).", &TIME_AXES),
                 ),
+                ("limit", num("Optional page size (default 50, max 200).")),
+                ("offset", num("Optional page offset.")),
             ],
         ),
         read(
