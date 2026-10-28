@@ -337,7 +337,17 @@ fn render_inspect(payload: &Value) -> String {
     let total = total
         .and_then(|n| usize::try_from(n).ok())
         .unwrap_or(returned);
-    let mut lines = vec![format!("items: {returned} of {total}")];
+    let mut header = format!("items: {returned} of {total}");
+    // The page the caller asked for was lowered to the cap; name both values
+    // so the header never silently disagrees with the request.
+    if let (Some(limit), Some(requested)) = (
+        payload.get("limit").and_then(Value::as_u64),
+        payload.get("requested_limit").and_then(Value::as_u64),
+    ) {
+        use std::fmt::Write as _;
+        let _ = write!(header, " (limit {limit}, lowered from {requested})");
+    }
+    let mut lines = vec![header];
     if let Some(items) = items {
         for item in items {
             let id = item.get("item_id").and_then(Value::as_str).unwrap_or("?");

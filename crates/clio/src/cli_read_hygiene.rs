@@ -12,6 +12,7 @@
 //! - Flag decoding for `hygiene audit` / `hygiene log` into MCP tool arguments
 //! - The audit page's bounded-output `truncated` and scan-budget `incomplete`
 //!   markers
+//! - The audit page's `--limit` clamp disclosure in both output forms
 //! - Their human text views (the audit text view never prints previews)
 //!
 //! ## Does not own
@@ -27,7 +28,10 @@
 
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
-use crate::cli_read::{base_args, no_positionals, parse_f64, parse_u64};
+use crate::cli_read::{
+    MAX_PAGE_LIMIT, add_requested_limit, base_args, no_positionals, page_limit, parse_f64,
+    parse_u64,
+};
 use crate::cli_read_group::ReadGroup;
 use crate::count_noun::count_noun;
 use serde_json::Value;
@@ -76,6 +80,9 @@ impl ReadGroup for HygieneReadGroup {
             .and_then(|n| usize::try_from(n).ok())
             .unwrap_or(0);
         payload["truncated"] = Value::Bool(offset.saturating_add(returned) < total);
+        // The CLI clamped a typed `--limit` above the cap; name the value the
+        // caller asked for so the served page never silently differs.
+        add_requested_limit(payload, parsed);
     }
 
     fn render(&self, verb: &str, payload: &Value, _palette: crate::cli_style::Palette) -> String {
@@ -98,7 +105,10 @@ fn audit_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
         );
     }
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // tool's own validator stays as the backstop for direct callers).
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     if let Some(offset) = parsed.value("offset") {
         args.insert("offset".into(), Value::from(parse_u64("offset", offset)?));
@@ -139,6 +149,15 @@ fn render_audit(payload: &Value) -> String {
     // a bank larger than the scan budget via `incomplete`; surface it in text.
     if payload.get("incomplete") == Some(&Value::Bool(true)) {
         summary.push_str(" (partial scan: bank exceeds the scan budget)");
+    }
+    // The CLI clamped the typed `--limit` down to the cap; name both values so
+    // the page never silently disagrees with the request.
+    if let Some(requested) = payload.get("requested_limit").and_then(Value::as_u64) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            summary,
+            " (limit {MAX_PAGE_LIMIT}, lowered from {requested})"
+        );
     }
     let mut lines = vec![summary];
     if let Some(candidates) = payload.get("candidates").and_then(Value::as_array) {
@@ -206,3 +225,9 @@ fn render_log(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_read_hygiene_tests.rs"]
 mod tests;
+
+// The page-limit clamp tests are a child module so both files keep real
+// headroom under the 450-line source-file limit.
+#[cfg(test)]
+#[path = "cli_read_hygiene_tests_limit_tests.rs"]
+mod limit_tests;
