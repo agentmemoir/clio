@@ -12,6 +12,7 @@
 //! ## Does not own
 //! - The index contract definition (`index_store`)
 //! - Embedding generation or worker scheduling (see the `clio-index` crate)
+//! - The vector-table orphan sweep (`vector_backend`)
 //!
 //! ## Boundary
 //!
@@ -28,6 +29,7 @@ use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{IndexCoverage, IndexJob, KnnHit, SearchHit};
 use crate::sqlite::SqliteStore;
 use crate::sqlite_knn::knn_in_bank;
+use crate::vector_backend;
 use clio_types::{AmError, ErrorCode, SearchDomain};
 use rusqlite::params;
 
@@ -395,19 +397,20 @@ impl IndexStore for SqliteStore {
     }
 
     fn cleanup_orphans(&self, bank_id: Option<&str>) -> Result<u64, AmError> {
-        // vec0/FTS5 tables do not enforce FK cascade; sweep rows whose item is
-        // gone. `NOT IN` over an empty items set removes every derived row,
-        // which is correct (no items → all derived rows are orphans). A bank
-        // scope filters every table by its `bank_id` column so a scoped
-        // reindex never deletes derived rows of other banks.
+        // FTS5 and outbox tables do not enforce FK cascade; sweep rows whose
+        // item is gone. `NOT IN` over an empty items set removes every derived
+        // row, which is correct (no items → all derived rows are orphans). A
+        // bank scope filters every table by its `bank_id` column so a scoped
+        // reindex never deletes derived rows of other banks. The vector-table
+        // leg is the seam's (`vector_backend`).
         let bank_filter = if bank_id.is_some() {
             " AND bank_id = ?1"
         } else {
             ""
         };
         self.with_conn(|conn| {
-            let mut removed = 0_u64;
-            for table in ["item_embeddings", "items_fts", "index_pending"] {
+            let mut removed = vector_backend::sweep_orphan_vector_rows(conn, bank_id)?;
+            for table in ["items_fts", "index_pending"] {
                 let sql = format!(
                     "DELETE FROM {table} WHERE item_id NOT IN (SELECT id FROM items){bank_filter}"
                 );

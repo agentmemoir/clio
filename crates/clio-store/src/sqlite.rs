@@ -17,8 +17,8 @@
 //! ## Does not own
 //! - Backend CRUD SQL (the `sqlite_*` modules)
 //! - Space identity or width policy (`embedding_space`)
-//! - The vector backend seam: extension registration and vector DDL
-//!   (`vector_backend`)
+//! - The vector backend seam: extension registration, vector DDL, and
+//!   vector-table writes (`vector_backend`)
 //!
 //! ## Boundary
 //!
@@ -36,7 +36,8 @@ use crate::embedding_space::{
 use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, now_iso};
 use crate::sqlite_path::ensure_parent;
 use crate::vector_backend::{
-    apply_space_ddl, apply_static_vectors, ensure_registered, verify_vec_version,
+    apply_space_ddl, apply_static_vectors, drop_vector_table, ensure_registered,
+    verify_vec_version,
 };
 use clio_types::AmError;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -291,8 +292,7 @@ fn switch_sqlite(conn: &mut Connection, space: &EmbeddingSpace) -> Result<u64, A
     let purged: i64 = conn
         .query_row("SELECT COUNT(*) FROM item_embeddings", [], |r| r.get(0))
         .am("space purge count")?;
-    conn.execute_batch("DROP TABLE IF EXISTS item_embeddings;")
-        .am("space drop")?;
+    drop_vector_table(conn)?;
     apply_space_ddl(conn, space)?;
     write_space(conn, space)?;
     Ok(u64::try_from(purged.max(0)).unwrap_or(0))

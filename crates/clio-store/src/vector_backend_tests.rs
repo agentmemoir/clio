@@ -9,6 +9,8 @@
 //! - Registration outcome mapping and auto-extension return-code interpretation
 //! - Width-parameterized SQLite vector DDL text and its failure contract
 //! - The fail-closed apply/verify wrappers on a live connection
+//! - The virtual-table write mechanics: replace, scoped delete, orphan sweep,
+//!   and drop
 //!
 //! ## Does not own
 //! - Production behaviour
@@ -148,4 +150,111 @@ fn knn_scan_returns_rows_nearest_first_up_to_the_fetch_limit() {
     let mut distances = widened.iter().map(|(_, d, _)| *d).collect::<Vec<_>>();
     distances.sort_by(|a, b| a.partial_cmp(b).expect("finite distances"));
     assert!(distances.windows(2).all(|w| w[0] < w[1]), "{distances:?}");
+}
+
+const TS: &str = "2026-01-01T00:00:00Z";
+
+fn slot(item: &str, bank: &str, v: [f32; 4]) -> VectorSlot {
+    VectorSlot {
+        item_id: item.into(),
+        bank_id: bank.into(),
+        model_id: "m".into(),
+        embedding: v.to_vec(),
+    }
+}
+
+fn insert_vector_row(conn: &Connection, item: &str, bank: &str, v: [f32; 4]) {
+    conn.execute(
+        "INSERT INTO item_embeddings
+         (item_id, embedding, bank_id, model_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'm', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        rusqlite::params![item, v.as_bytes(), bank],
+    )
+    .expect("insert a vector row");
+}
+
+fn vector_table_rows(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM item_embeddings", [], |r| r.get(0))
+        .expect("read back the vector table")
+}
+
+#[test]
+fn upsert_vector_row_replaces_the_existing_row() {
+    let conn = wired_connection();
+    apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
+        .expect("space DDL must apply once registered");
+    upsert_vector_row(&conn, &slot("i1", "b1", [1.0, 0.0, 0.0, 0.0]), TS)
+        .expect("first insert");
+    upsert_vector_row(&conn, &slot("i1", "b1", [0.0, 1.0, 0.0, 0.0]), TS)
+        .expect("replace insert");
+    assert_eq!(vector_table_rows(&conn), 1, "one row after two upserts");
+}
+
+#[test]
+fn delete_vector_rows_reports_counts_and_scopes_by_bank() {
+    let conn = wired_connection();
+    apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
+        .expect("space DDL must apply once registered");
+    insert_vector_row(&conn, "i1", "b1", [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        delete_vector_rows(&conn, "i1", None).expect("unscoped delete"),
+        1
+    );
+    assert_eq!(
+        delete_vector_rows(&conn, "i1", None).expect("repeat delete"),
+        0
+    );
+    insert_vector_row(&conn, "i1", "b1", [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        delete_vector_rows(&conn, "i1", Some("b2")).expect("wrong-bank delete"),
+        0
+    );
+    assert_eq!(
+        delete_vector_rows(&conn, "i1", Some("b1")).expect("scoped delete"),
+        1
+    );
+}
+
+#[test]
+fn sweep_orphan_vector_rows_scopes_by_bank_and_counts() {
+    let conn = wired_connection();
+    apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
+        .expect("space DDL must apply once registered");
+    insert_vector_row(&conn, "o1", "b1", [1.0, 0.0, 0.0, 0.0]);
+    insert_vector_row(&conn, "o2", "b2", [0.0, 1.0, 0.0, 0.0]);
+    assert_eq!(
+        sweep_orphan_vector_rows(&conn, Some("b1")).expect("scoped sweep"),
+        1
+    );
+    assert_eq!(
+        vector_table_rows(&conn),
+        1,
+        "a scoped sweep must spare other banks"
+    );
+    assert_eq!(
+        sweep_orphan_vector_rows(&conn, None).expect("unscoped sweep"),
+        1
+    );
+    assert_eq!(
+        sweep_orphan_vector_rows(&conn, None).expect("repeat sweep"),
+        0
+    );
+}
+
+#[test]
+fn drop_vector_table_removes_the_table() {
+    let conn = wired_connection();
+    apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
+        .expect("space DDL must apply once registered");
+    insert_vector_row(&conn, "i1", "b1", [1.0, 0.0, 0.0, 0.0]);
+    drop_vector_table(&conn).expect("drop must succeed");
+    let err = conn
+        .query_row("SELECT COUNT(*) FROM item_embeddings", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .expect_err("the table must be gone after the drop");
+    assert!(
+        matches!(err, rusqlite::Error::SqliteFailure(..)),
+        "{err}"
+    );
 }

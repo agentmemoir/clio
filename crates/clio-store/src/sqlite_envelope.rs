@@ -13,6 +13,7 @@
 //! ## Does not own
 //! - Which `Store` methods SQLite exposes (see `sqlite_store`)
 //! - Typed memory-item CRUD (`sqlite_memory`)
+//! - The vector-table delete SQL (`vector_backend`)
 //!
 //! ## Boundary
 //!
@@ -23,6 +24,7 @@
 
 use crate::migrate::IntoAmError;
 use crate::sqlite::SqliteStore;
+use crate::vector_backend;
 use clio_types::AmError;
 use rusqlite::params;
 
@@ -41,13 +43,9 @@ impl SqliteStore {
                 )
                 .am("items delete")?;
             if n > 0 {
-                // vec0 virtual tables do not enforce FK cascade; remove the
-                // derived vector row, the FTS5 row, and the outbox entry.
-                tx.execute(
-                    "DELETE FROM item_embeddings WHERE item_id = ?1",
-                    params![item_id],
-                )
-                .am("vector delete")?;
+                // Derived rows are not FK-cascaded: remove the vector row
+                // through the seam, the FTS5 row, and the outbox entry.
+                vector_backend::delete_vector_rows(&tx, item_id, None)?;
                 tx.execute(
                     "DELETE FROM index_pending WHERE item_id = ?1",
                     params![item_id],
