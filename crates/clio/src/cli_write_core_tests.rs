@@ -369,4 +369,3 @@ fn remember_maps_every_optional_flag() {
     assert_eq!(payload["pass"], json!(true), "{payload}");
     assert!(payload["id"].as_str().is_some(), "{payload}");
 }
-
