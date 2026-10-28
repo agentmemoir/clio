@@ -16,7 +16,8 @@
 //! - `knn_scan`: the virtual-table `MATCH` scan shape and its query binding
 //! - The virtual-table write mechanics: the no-upsert replace
 //!   (`upsert_vector_row`), explicit row removal (`delete_vector_rows`), the
-//!   orphan sweep (`sweep_orphan_vector_rows`), and the width-change drop
+//!   erase-path row removal (`erase_vector_rows`), the orphan sweep
+//!   (`sweep_orphan_vector_rows`), and the width-change drop
 //!   (`drop_vector_table`)
 //!
 //! ## Does not own
@@ -273,6 +274,26 @@ pub(crate) fn sweep_orphan_vector_rows(
         None => conn.execute(&sql, []).am("orphan cleanup")?,
     };
     Ok(n as u64)
+}
+
+/// Remove one item's vector rows inside one bank during erasure; `context`
+/// names the erase operation in the error. The virtual table does not
+/// enforce FK cascade, so erasure removes vector rows explicitly. Returns
+/// removed rows.
+///
+/// # Errors
+/// Driver failures from the delete, wrapped in `context`.
+pub(crate) fn erase_vector_rows(
+    conn: &Connection,
+    item_id: &str,
+    bank_id: &str,
+    context: &'static str,
+) -> Result<usize, AmError> {
+    conn.execute(
+        "DELETE FROM item_embeddings WHERE item_id = ?1 AND bank_id = ?2",
+        params![item_id, bank_id],
+    )
+    .am(context)
 }
 
 /// Drop the vector table if present, for a width change or a rebuild.

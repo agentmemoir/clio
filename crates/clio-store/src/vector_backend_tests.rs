@@ -9,8 +9,8 @@
 //! - Registration outcome mapping and auto-extension return-code interpretation
 //! - Width-parameterized SQLite vector DDL text and its failure contract
 //! - The fail-closed apply/verify wrappers on a live connection
-//! - The virtual-table write mechanics: replace, scoped delete, orphan sweep,
-//!   and drop
+//! - The virtual-table write mechanics: replace, scoped delete, erase-path
+//!   removal with its operation context, orphan sweep, and drop
 //!
 //! ## Does not own
 //! - Production behaviour
@@ -233,6 +233,32 @@ fn sweep_orphan_vector_rows_scopes_by_bank_and_counts() {
     assert_eq!(
         sweep_orphan_vector_rows(&conn, None).expect("repeat sweep"),
         0
+    );
+}
+
+#[test]
+fn erase_vector_rows_removes_the_bank_row_and_names_the_operation() {
+    let conn = wired_connection();
+    apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
+        .expect("space DDL must apply once registered");
+    insert_vector_row(&conn, "i1", "b1", [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        erase_vector_rows(&conn, "i1", "b1", "erase vector").expect("erase"),
+        1
+    );
+    assert_eq!(vector_table_rows(&conn), 0, "the row must be gone");
+    insert_vector_row(&conn, "i1", "b2", [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        erase_vector_rows(&conn, "i1", "b1", "erase vector").expect("wrong-bank erase"),
+        0,
+        "a wrong bank must remove nothing"
+    );
+    drop_vector_table(&conn).expect("drop");
+    let err = erase_vector_rows(&conn, "i1", "b1", "erase derived vector")
+        .expect_err("erasing a missing table must fail closed");
+    assert!(
+        err.message.contains("erase derived vector"),
+        "the error must name the erase operation: {err:?}"
     );
 }
 

@@ -8,7 +8,8 @@
 //!
 //! ## Owns
 //! - SQLite item/bank selection for erasure
-//! - The SQLite derived-row purge (vectors, FTS/outbox, assoc edges, MemTree)
+//! - The SQLite derived-row purge orchestration (FTS/outbox, assoc edges,
+//!   MemTree); the vector leg routes through the seam (`vector_backend`)
 //! - The SQLite persona-context purge for the erasure lifecycle
 //!   including its sync-derived copies (journal payload, dead-letter envelope)
 //! - The SQLite persona-erase eligibility check (live persona rows plus
@@ -19,6 +20,7 @@
 //! ## Does not own
 //! - The SPO triple-row purge and its sync-derived copies (`sqlite_erase_triples`)
 //! - The erasure transaction orchestration and tombstone writes (`sqlite_erase`)
+//! - The vector-table delete SQL (`vector_backend`)
 //! - Postgres parity (see `postgres_erase`)
 //!
 //! ## Boundary
@@ -32,6 +34,7 @@ use crate::compliance_store::{BankPurge, EraseRow, PurgedTriples};
 use crate::distilled_unit::HUB_DISTILL_EDGE_RELATIONSHIP;
 use crate::migrate::IntoAmError;
 use crate::sqlite_erase_triples::{purge_item_triples, purge_sync_copies};
+use crate::vector_backend;
 use clio_types::AmError;
 use rusqlite::{OptionalExtension, params};
 
@@ -276,12 +279,8 @@ pub(crate) fn purge_bank(
         ..BankPurge::default()
     };
     for row in items {
-        out.vectors += tx
-            .execute(
-                "DELETE FROM item_embeddings WHERE item_id = ?1 AND bank_id = ?2",
-                params![row.item_id, bank_id],
-            )
-            .am("erase vector")?;
+        out.vectors +=
+            vector_backend::erase_vector_rows(tx, &row.item_id, bank_id, "erase vector")?;
         tx.execute(
             "DELETE FROM index_pending WHERE item_id = ?1 AND bank_id = ?2",
             params![row.item_id, bank_id],
@@ -410,12 +409,8 @@ fn purge_derived_item(
     bank_id: &str,
     item_id: &str,
 ) -> Result<(usize, usize, usize, PurgedTriples), AmError> {
-    let vectors = tx
-        .execute(
-            "DELETE FROM item_embeddings WHERE item_id = ?1 AND bank_id = ?2",
-            params![item_id, bank_id],
-        )
-        .am("erase derived vector")?;
+    let vectors =
+        vector_backend::erase_vector_rows(tx, item_id, bank_id, "erase derived vector")?;
     tx.execute(
         "DELETE FROM index_pending WHERE item_id = ?1 AND bank_id = ?2",
         params![item_id, bank_id],
@@ -438,3 +433,7 @@ fn purge_derived_item(
     .am("erase derived content")?;
     Ok((vectors, edges, memtree, triples))
 }
+
+#[cfg(test)]
+#[path = "sqlite_erase_purge_tests.rs"]
+mod sqlite_erase_purge_tests;
