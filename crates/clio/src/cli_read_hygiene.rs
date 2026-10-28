@@ -9,10 +9,11 @@
 //! views.
 //!
 //! ## Owns
-//! - Flag decoding for `hygiene audit` / `hygiene log` into MCP tool arguments
+//! - Flag decoding for `hygiene audit` / `hygiene log` into MCP tool arguments,
+//!   under the shared `--limit` page rule
 //! - The audit page's bounded-output `truncated` and scan-budget `incomplete`
 //!   markers
-//! - The audit page's `--limit` clamp disclosure in both output forms
+//! - The audit and log pages' `--limit` clamp disclosure in both output forms
 //! - Their human text views (the audit text view never prints previews)
 //!
 //! ## Does not own
@@ -62,6 +63,9 @@ impl ReadGroup for HygieneReadGroup {
 
     fn decorate(&self, verb: &str, parsed: &ParsedArgs, _arguments: &Value, payload: &mut Value) {
         if verb != "hygiene audit" {
+            // The log page has no truncation marker of its own; only a lowered
+            // page request needs naming.
+            add_requested_limit(payload, parsed);
             return;
         }
         // Bounded-output contract: mark the page truncated when more ranked
@@ -122,7 +126,11 @@ fn log_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     no_positionals(parsed)?;
     let mut args = base_args(parsed);
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // store's own 1..=200 validator stays as the backstop for direct
+        // callers). Omitted keeps the tool's default of 50.
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     if let Some(offset) = parsed.value("offset") {
         args.insert("offset".into(), Value::from(parse_u64("offset", offset)?));
@@ -199,10 +207,20 @@ fn render_log(payload: &Value) -> String {
     let count = rows.map_or(0, Vec::len);
     // The count chooses its own noun through the one shared helper, so a
     // one-row log reads "1 entry" while an empty one keeps the plural.
-    let mut lines = vec![format!(
+    let mut summary = format!(
         "hygiene log: {}",
         count_noun(count as u64, "entry", "entries")
-    )];
+    );
+    // The CLI clamped the typed `--limit` down to the cap; the log page does
+    // not echo its page size, so name the cap and the request together.
+    if let Some(requested) = payload.get("requested_limit").and_then(Value::as_u64) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            summary,
+            " (limit {MAX_PAGE_LIMIT}, lowered from {requested})"
+        );
+    }
+    let mut lines = vec![summary];
     if let Some(rows) = rows {
         for row in rows {
             let timestamp = row.get("timestamp").and_then(Value::as_str).unwrap_or("?");

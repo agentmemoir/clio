@@ -9,7 +9,8 @@
 //! ## Owns
 //! - Flag decoding for the core read verbs into MCP tool arguments
 //! - The `recall` score-floor, entity-inclusion, and temporal-anchor flag mapping
-//! - The `recall` binding-floor warning rewrite and the echoed effective limit
+//! - The `recall` echoed effective limit, its `--limit` clamp disclosure, and
+//!   the score-floor warning rewrite
 //! - The `inspect` truncation decoration, the `--limit` clamp disclosure, and
 //!   their human text views
 //!
@@ -83,6 +84,9 @@ impl ReadGroup for CoreGroup {
                     .unwrap_or(clio_retrieve::DEFAULT_LIMIT as u64);
                 map.insert("limit".into(), Value::from(limit));
             }
+            // The CLI clamped a typed `--limit` above the cap; name the value
+            // the caller asked for so the served page never silently differs.
+            add_requested_limit(payload, parsed);
             name_floor_warnings(payload);
         }
     }
@@ -93,7 +97,11 @@ fn recall_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let mut args = base_args(parsed);
     args.insert("query".into(), Value::from(query));
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // engine's own zero-limit refusal stays as the backstop for direct
+        // callers). Omitted keeps the engine's default of 10.
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     if let Some(domains) = parsed.value("domains") {
         args.insert("domains".into(), Value::from(split_domains(domains)));

@@ -38,13 +38,15 @@ const IMPLICIT_GLOBALS_OUTSIDE_BANK: &[&str] = &["db", "backend", "actor", "no-i
 /// The closed `--action` set `cli_write_hygiene` validates against.
 const HYGIENE_ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "keep"];
 
-/// The `--limit N` page cap the hygiene read commands document.
+/// The `--limit N` page cap the hygiene read commands document: the tool
+/// defaults it to 50 when omitted, and the CLI lowers an above-cap request to
+/// 200 instead of the store refusing it.
 const HYGIENE_LIMIT: Flag = Flag {
     default: Some("50"),
     ..Flag::uint(
         "limit",
         "N",
-        "Caps the page; `cli_read_hygiene` parses it, and the tool defaults it to 50 when omitted.",
+        "Caps the page; defaults to 50 when omitted; a limit above 200 is lowered to 200.",
     )
 };
 

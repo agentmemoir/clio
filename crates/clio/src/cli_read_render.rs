@@ -94,9 +94,16 @@ fn render_recall(payload: &Value, palette: Palette) -> String {
         lines.push(String::new());
     }
     // The limit that actually ran, because an absent one is a default the
-    // caller did not type. Omitted when the payload carries no limit.
+    // caller did not type. Omitted when the payload carries no limit. A
+    // clamped request is named on the same line, so the served page never
+    // silently disagrees with the request.
     if let Some(limit) = payload.get("limit").and_then(Value::as_u64) {
-        lines.push(palette.meta(&format!("limit: {limit}")));
+        let mut line = format!("limit: {limit}");
+        if let Some(requested) = payload.get("requested_limit").and_then(Value::as_u64) {
+            use std::fmt::Write as _;
+            let _ = write!(line, " (lowered from {requested})");
+        }
+        lines.push(palette.meta(&line));
         lines.push(String::new());
     }
     lines.push(RELATIVE_SCORE_NOTE.to_owned());
@@ -150,6 +157,14 @@ fn render_recall(payload: &Value, palette: Palette) -> String {
 /// wording instead of a copied string.
 fn empty_recall_text(payload: &Value) -> String {
     let mut lines = vec!["no results".to_owned()];
+    // A clamped request is named even on an empty page, so a caller who asked
+    // for more than the cap can see the page they were served.
+    if let (Some(limit), Some(requested)) = (
+        payload.get("limit").and_then(Value::as_u64),
+        payload.get("requested_limit").and_then(Value::as_u64),
+    ) {
+        lines.push(format!("limit: {limit} (lowered from {requested})"));
+    }
     if let Some(warnings) = payload.get("warnings").and_then(Value::as_array) {
         lines.extend(
             warnings

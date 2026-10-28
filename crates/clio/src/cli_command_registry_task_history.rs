@@ -34,6 +34,14 @@
 use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 
+/// The `--limit N` page flag the history read commands document, with its
+/// default and the shared 200 cap the CLI enforces.
+const fn limit_flag(default: &'static str, description: &'static str) -> Flag {
+    let mut flag = Flag::uint("limit", "N", description);
+    flag.default = Some(default);
+    flag
+}
+
 /// The required `TASK_ID` positional of `task get`, `task history`,
 /// `task upsert`, and `failure record`.
 const TASK_ID: Positional = Positional {
@@ -158,10 +166,9 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[TASK_ID],
     documented: &[
-        Flag::uint(
-            "limit",
-            "N",
-            "Caps the recorded transitions; `cli_read_history::task_history_call` parses it with `parse_u64` for `task_history`.",
+        limit_flag(
+            "20",
+            "Caps the recorded transitions; defaults to 20 when omitted; a limit above 200 is lowered to 200.",
         ),
         EXPLAIN,
         GLOBAL_BANK,
@@ -235,10 +242,9 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[TASK_ID_OR_QUERY],
     documented: &[
-        Flag::uint(
-            "limit",
-            "N",
-            "Caps the failures returned; `cli_read_history::failure_list_call` parses it with `parse_u64` for `failures_for_task`.",
+        limit_flag(
+            "20",
+            "Caps the failures returned; defaults to 20 when omitted; a limit above 200 is lowered to 200.",
         ),
         EXPLAIN,
         GLOBAL_BANK,
@@ -333,10 +339,9 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
             "N",
             "Bounds the tree walk depth; `cli_read_history::memtree_query_call` parses it with `parse_u64`.",
         ),
-        Flag::uint(
-            "limit",
-            "N",
-            "Caps the nodes returned; `cli_read_history::memtree_query_call` parses it with `parse_u64` for `memtree_query`.",
+        limit_flag(
+            "100",
+            "Caps the nodes returned; defaults to 100 when omitted; a limit above 200 is lowered to 200.",
         ),
         EXPLAIN,
         GLOBAL_BANK,

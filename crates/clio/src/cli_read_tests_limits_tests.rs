@@ -3,13 +3,14 @@
 //
 //! # Responsibility
 //!
-//! This module tests the CLI page-limit contract end to end for `inspect`: a
-//! limit above the cap is served at the cap with the requested value
-//! disclosed, a limit at the cap carries no disclosure, and a non-positive
-//! limit is refused at the CLI layer before the store.
+//! This module tests the CLI page-limit contract end to end for `inspect` and
+//! `recall`: a limit above the cap is served at the cap with the requested
+//! value disclosed, a limit at the cap carries no disclosure, and a
+//! non-positive limit is refused at the CLI layer before the store.
 //!
 //! ## Owns
-//! - The `inspect` clamp-and-disclose behavior over `run_with_state`
+//! - The `inspect` and `recall` clamp-and-disclose behavior over
+//!   `run_with_state`
 //! - `add_requested_limit`'s disclosure condition
 //!
 //! ## Does not own
@@ -20,7 +21,8 @@
 //!
 //! Test-only. Never compiled into production builds.
 //!
-//! Keep this module focused on the CLI page-limit contract for `inspect`.
+//! Keep this module focused on the CLI page-limit contract for `inspect` and
+//! `recall`.
 
 use super::*;
 
@@ -108,4 +110,59 @@ fn add_requested_limit_discloses_only_a_lowered_request() {
     let mut omitted = json!({"limit": 50});
     add_requested_limit(&mut omitted, &parsed_limit(None));
     assert_eq!(omitted.get("requested_limit"), None, "{omitted}");
+}
+
+/// `recall --limit 500` is served at the 200 cap, and both output forms name
+/// the request the CLI lowered.
+#[test]
+fn recall_serves_the_cap_for_a_limit_above_it_and_discloses_the_request() {
+    let state = state_with_items();
+    let args = ["terse", "--bank", "bank-a", "--limit", "500"];
+    let (code, out, _) = run_state("recall", &args, &state, false);
+    assert_eq!(code, ExitCode::from(0), "{out}");
+    let page = json_of(&out);
+    assert_eq!(page["limit"], json!(200), "{page}");
+    assert_eq!(page["requested_limit"], json!(500), "{page}");
+
+    let (_, text, _) = run_state("recall", &args, &state, true);
+    assert!(text.contains("limit: 200 (lowered from 500)"), "{text}");
+}
+
+/// An empty recall page still names a lowered request, so a caller who asked
+/// for more than the cap sees the page they were served.
+#[test]
+fn recall_empty_page_still_names_a_lowered_request() {
+    let state = state_with_items();
+    let args = [
+        "terse",
+        "--bank",
+        "bank-a",
+        "--min-final",
+        "1000",
+        "--limit",
+        "500",
+    ];
+    let (code, out, _) = run_state("recall", &args, &state, false);
+    assert_eq!(code, ExitCode::from(0), "{out}");
+    assert_eq!(json_of(&out)["requested_limit"], json!(500), "{out}");
+
+    let (_, text, _) = run_state("recall", &args, &state, true);
+    assert!(text.contains("no results"), "{text}");
+    assert!(text.contains("limit: 200 (lowered from 500)"), "{text}");
+}
+
+/// `recall --limit 0` is refused at the CLI layer as a usage error, before the
+/// engine is asked for a page of nothing.
+#[test]
+fn recall_refuses_a_zero_limit_at_the_cli_layer() {
+    let state = state_with_items();
+    let (code, out, err) = run_state(
+        "recall",
+        &["terse", "--bank", "bank-a", "--limit", "0"],
+        &state,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("positive page size"), "{err}");
 }

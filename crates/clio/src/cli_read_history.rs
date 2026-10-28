@@ -9,7 +9,10 @@
 //!
 //! ## Owns
 //! - Flag decoding for the task/failure/MemTree/temporal verbs into MCP tool
-//!   arguments, and their in-band `truncated` markers and human text views
+//!   arguments, their shared `--limit` page rule, and their in-band `truncated`
+//!   markers and human text views
+//! - The task/failure/MemTree pages' `--limit` clamp disclosure in both output
+//!   forms
 //! - Secret masking and inline prose scrubbing over history view payloads
 //!
 //! ## Does not own
@@ -26,7 +29,8 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{
-    mark_truncated, no_positionals, one_positional, parse_u64, read_args, validate_time_axis,
+    MAX_PAGE_LIMIT, add_requested_limit, mark_truncated, no_positionals, one_positional,
+    page_limit, parse_u64, read_args, validate_time_axis,
 };
 use crate::cli_read_group::ReadGroup;
 use clio_config::secret::{mask_string_secrets, scrub_inline_secrets};
@@ -78,7 +82,7 @@ impl ReadGroup for HistoryGroup {
         }
     }
 
-    fn decorate(&self, verb: &str, parsed: &ParsedArgs, _arguments: &Value, payload: &mut Value) {
+    fn decorate(&self, verb: &str, parsed: &ParsedArgs, arguments: &Value, payload: &mut Value) {
         // Defence in depth: history views echo task definitions, failure
         // lessons, and gists, so mask secret-keyed string fields and scrub
         // inline `key: secret` prose before anything leaves the command.
@@ -89,6 +93,9 @@ impl ReadGroup for HistoryGroup {
         // that a view returns the same structured result as its tool.
         mask_string_secrets("", payload);
         scrub_prose_secrets(payload);
+        // The CLI clamped a typed `--limit` above the cap; name the value the
+        // caller asked for so the served page never silently differs.
+        add_requested_limit(payload, parsed);
         match verb {
             "task history" => mark_truncated(payload, "records"),
             "failure list" => mark_truncated(payload, "failures"),
@@ -97,10 +104,13 @@ impl ReadGroup for HistoryGroup {
                     .get("nodes")
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len);
-                let truncated = parsed
-                    .value("limit")
-                    .and_then(|raw| raw.parse::<usize>().ok())
-                    .is_some_and(|limit| returned >= limit);
+                // The served limit from the built arguments, not the raw typed
+                // value: a clamped request must still mark a full page.
+                let limit = arguments
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .and_then(|limit| usize::try_from(limit).ok());
+                let truncated = limit.is_some_and(|limit| returned >= limit);
                 payload["truncated"] = Value::Bool(truncated);
             }
             _ => {}
@@ -141,7 +151,11 @@ fn task_history_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliEr
     let mut args = read_args(parsed);
     args.insert("task_id".into(), Value::from(task_id));
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // policy's own bounds stay as the backstop for direct callers).
+        // Omitted keeps the policy's configured default (20 by default).
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     Ok(("task_history", Value::Object(args)))
 }
@@ -151,7 +165,11 @@ fn failure_list_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliEr
     let mut args = read_args(parsed);
     args.insert("task_id_or_query".into(), Value::from(query));
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // policy's own bounds stay as the backstop for direct callers).
+        // Omitted keeps the policy's configured default (20 by default).
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     Ok(("failures_for_task", Value::Object(args)))
 }
@@ -177,7 +195,11 @@ fn memtree_query_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliE
         args.insert("depth".into(), Value::from(parse_u64("depth", depth)?));
     }
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // walk's own 1000-node bound stays as the backstop for direct
+        // callers). Omitted keeps the walk's default of 100.
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     Ok(("memtree_query", Value::Object(args)))
 }
@@ -231,7 +253,14 @@ fn render_task_history(payload: &Value) -> String {
     let records = payload.get("records").and_then(Value::as_array);
     let returned = records.map_or(0, Vec::len);
     let limit = payload.get("limit").and_then(Value::as_u64).unwrap_or(0);
-    let mut lines = vec![format!("records: {returned} of {limit}")];
+    let mut header = format!("records: {returned} of {limit}");
+    // The CLI clamped the typed `--limit` down to the cap; name the request so
+    // the page never silently disagrees with it.
+    if let Some(requested) = payload.get("requested_limit").and_then(Value::as_u64) {
+        use std::fmt::Write as _;
+        let _ = write!(header, " (lowered from {requested})");
+    }
+    let mut lines = vec![header];
     if let Some(records) = records {
         for record in records {
             lines.push(format!(
@@ -253,10 +282,14 @@ fn render_failure_list(payload: &Value) -> String {
         .get("mode")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let mut lines = vec![
-        format!("mode: {mode}"),
-        format!("failures: {returned} of {limit}"),
-    ];
+    let mut page = format!("failures: {returned} of {limit}");
+    // The CLI clamped the typed `--limit` down to the cap; name the request so
+    // the page never silently disagrees with it.
+    if let Some(requested) = payload.get("requested_limit").and_then(Value::as_u64) {
+        use std::fmt::Write as _;
+        let _ = write!(page, " (lowered from {requested})");
+    }
+    let mut lines = vec![format!("mode: {mode}"), page];
     if let Some(failures) = failures {
         for failure in failures {
             lines.push(format!(
@@ -278,7 +311,17 @@ fn render_failure_list(payload: &Value) -> String {
 fn render_node_list(key: &str, payload: &Value) -> String {
     let nodes = payload.get(key).and_then(Value::as_array);
     let returned = nodes.map_or(0, Vec::len);
-    let mut lines = vec![format!("{key}: {returned}")];
+    let mut header = format!("{key}: {returned}");
+    // The CLI clamped the typed `--limit` down to the cap; the walk's own page
+    // size is not echoed here, so name the cap and the request together.
+    if let Some(requested) = payload.get("requested_limit").and_then(Value::as_u64) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            header,
+            " (limit {MAX_PAGE_LIMIT}, lowered from {requested})"
+        );
+    }
+    let mut lines = vec![header];
     if let Some(nodes) = nodes {
         for node in nodes {
             lines.push(
@@ -317,3 +360,9 @@ fn render_temporal(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_read_history_tests.rs"]
 mod tests;
+
+// The page-limit clamp tests are a child module so both files keep real
+// headroom under the 450-line source-file limit.
+#[cfg(test)]
+#[path = "cli_read_history_tests_limit_tests.rs"]
+mod limit_tests;

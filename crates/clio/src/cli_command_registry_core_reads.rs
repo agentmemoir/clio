@@ -83,7 +83,7 @@ pub(crate) const RECALL: CommandSpec = CommandSpec {
             ..Flag::uint(
                 "limit",
                 "N",
-                "Caps the result page; `cli_read_core::recall_call` parses it with `parse_u64` for `retrieve` and `cli_read_core` echoes `clio_retrieve::DEFAULT_LIMIT` when omitted.",
+                "Caps the result page; defaults to 10 when omitted; a limit above 200 is lowered to 200.",
             )
         },
         Flag::text(
@@ -248,7 +248,7 @@ pub(crate) const INSPECT: CommandSpec = CommandSpec {
             ..Flag::uint(
                 "limit",
                 "N",
-                "Caps the result page; `cli_read_core::inspect_call` parses it with `parse_u64` for `inspect`, which defaults it to 50 when omitted.",
+                "Caps the result page; defaults to 50 when omitted; a limit above 200 is lowered to 200.",
             )
         },
         Flag {
