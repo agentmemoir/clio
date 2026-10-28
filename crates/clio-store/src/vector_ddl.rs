@@ -3,25 +3,26 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for generating the width-parameterized vector
-//! table and index DDL for both storage backends.
+//! This module is responsible for generating the width-parameterized Postgres
+//! vector table and index DDL.
 //!
 //! ## Owns
-//! - `postgres_vector_ddl` / `sqlite_vector_ddl` for a resolved width
+//! - `postgres_vector_ddl` for a resolved width
 //! - The width-driven index flavour (`vector` HNSW / `halfvec` expression / none)
 //! - The pgvector minimum-version check required by the `halfvec` path
 //!
 //! ## Does not own
+//! - The SQLite vector backend or its DDL (`vector_backend`)
 //! - Space identity or width policy (`embedding_space`)
 //! - Applying DDL during bootstrap or a space switch (backend modules)
 //! - The static (width-independent) SQL assets under `sql/`
 //!
 //! ## Boundary
 //!
-//! Changes to generated vector DDL should normally require changes here.
-//! Changes to non-vector DDL should not require changes here.
+//! Changes to generated Postgres vector DDL should normally require changes
+//! here. Changes to the SQLite vector backend or to non-vector DDL should not.
 //!
-//! Keep this module focused on width-parameterized vector DDL text.
+//! Keep this module focused on width-parameterized Postgres vector DDL text.
 
 use crate::embedding_space::{EmbeddingSpace, IndexMode};
 use clio_types::{AmError, ErrorCode};
@@ -32,7 +33,7 @@ pub const HALFVEC_MIN_VERSION: &str = "0.7.0";
 /// Same floor as a parsed `(major, minor, patch)` triple.
 const HALFVEC_MIN_TRIPLE: [u32; 3] = [0, 7, 0];
 
-/// Right-pad a column name so its type starts at column 96 (sql-guidelines).
+/// Right-pad a column name so its type starts at column 96.
 fn col(name: &str, rest: &str) -> String {
     if name.len() + 3 >= 93 {
         format!("  {name} {rest}")
@@ -87,38 +88,6 @@ pub fn postgres_vector_ddl(space: &EmbeddingSpace) -> Result<String, AmError> {
         }
         IndexMode::ExactScan => {}
     }
-    Ok(ddl)
-}
-
-/// SQLite `vec0` DDL for `space` (exact KNN regardless of width).
-///
-/// # Errors
-/// Zero/oversized width.
-pub fn sqlite_vector_ddl(space: &EmbeddingSpace) -> Result<String, AmError> {
-    let dims = space.dims;
-    if dims == 0 || dims > crate::embedding_space::MAX_VECTOR_DIMS {
-        return Err(AmError::new(
-            ErrorCode::OutOfRange,
-            format!("embedding width {dims} is outside 1..=16000"),
-        ));
-    }
-    let mut ddl =
-        String::from("CREATE VIRTUAL TABLE IF NOT EXISTS item_embeddings USING vec0\n(\n");
-    ddl.push_str(&col("item_id", "text PRIMARY KEY"));
-    ddl.push_str(",\n");
-    ddl.push_str(&col(
-        "embedding",
-        &format!("float[{dims}] distance_metric = cosine"),
-    ));
-    ddl.push_str(",\n");
-    ddl.push_str(&col("+bank_id", "text"));
-    ddl.push_str(",\n");
-    ddl.push_str(&col("+model_id", "text"));
-    ddl.push_str(",\n");
-    ddl.push_str(&col("+created_at", "text"));
-    ddl.push_str(",\n");
-    ddl.push_str(&col("+updated_at", "text"));
-    ddl.push_str("\n);\n");
     Ok(ddl)
 }
 
@@ -180,35 +149,6 @@ mod tests {
             postgres_vector_ddl(&EmbeddingSpace {
                 model_id: "m".into(),
                 dims: 16_001
-            })
-            .unwrap_err()
-            .code,
-            ErrorCode::OutOfRange
-        );
-    }
-
-    #[test]
-    fn sqlite_ddl_carries_width_and_aux_columns() {
-        let ddl = sqlite_vector_ddl(&EmbeddingSpace::new("m", 1536).unwrap()).unwrap();
-        assert!(ddl.contains("USING vec0"), "{ddl}");
-        assert!(
-            ddl.contains("float[1536] distance_metric = cosine"),
-            "{ddl}"
-        );
-        assert!(ddl.contains("+model_id"), "{ddl}");
-        assert_eq!(
-            sqlite_vector_ddl(&EmbeddingSpace {
-                model_id: "m".into(),
-                dims: 0
-            })
-            .unwrap_err()
-            .code,
-            ErrorCode::OutOfRange
-        );
-        assert_eq!(
-            sqlite_vector_ddl(&EmbeddingSpace {
-                model_id: "m".into(),
-                dims: 99_999
             })
             .unwrap_err()
             .code,

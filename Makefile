@@ -230,6 +230,7 @@ llc:
 		'*.go' '*.java' '*.kt' '*.scala' \
 		'*.c' '*.h' '*.cc' '*.hh' '*.cpp' '*.hpp' '*.cxx' '*.hxx' \
 		'*.rb' '*.php' '*.swift' '*.m' '*.mm' \
+		| xargs -0 -r sh -c 'for f do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ \
 		| xargs -0 -r awk 'FNR == 451 { printf "ERROR: %s exceeds 450 lines\n", FILENAME; failed = 1; nextfile } END { exit failed }'
 
 lint: llc

@@ -11,6 +11,7 @@
 //! ## Does not own
 //! - Connection open/migrate (see `sqlite`), the continuous-attribute
 //!   `ContinuousStore` impl (see `sqlite_attribute`), or SQL bodies elsewhere
+//!   (vector-table writes live in `vector_backend`)
 //!
 //! ## Boundary
 //!
@@ -23,10 +24,10 @@ use crate::model::{AssocEdgeRecord, KnnHit, VectorSlot};
 use crate::sqlite::SqliteStore;
 use crate::sqlite_knn::knn_in_bank;
 use crate::store::Store;
+use crate::vector_backend;
 use clio_types::{AmError, MemoryItem};
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
-use zerocopy::IntoBytes;
 
 impl Store for SqliteStore {
     fn delete_item(&self, bank_id: &str, item_id: &str) -> Result<bool, AmError> {
@@ -139,37 +140,12 @@ impl Store for SqliteStore {
         self.validate_dims(&slot.embedding)?;
         self.validate_model(&slot.model_id)?;
         let ts = now_iso();
-        self.with_conn(|conn| {
-            // vec0 upsert: delete then insert (virtual table).
-            conn.execute(
-                "DELETE FROM item_embeddings WHERE item_id = ?1",
-                params![slot.item_id],
-            )
-            .am("vector delete-before-upsert")?;
-            conn.execute(
-                "INSERT INTO item_embeddings (item_id, embedding, bank_id, model_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-                params![
-                    slot.item_id,
-                    slot.embedding.as_bytes(),
-                    slot.bank_id,
-                    slot.model_id,
-                    ts,
-                ],
-            )
-            .am("vector insert")?;
-            Ok(())
-        })
+        self.with_conn(|conn| vector_backend::upsert_vector_row(conn, slot, &ts))
     }
 
     fn delete_vector(&self, bank_id: &str, item_id: &str) -> Result<bool, AmError> {
         self.with_conn(|conn| {
-            let n = conn
-                .execute(
-                    "DELETE FROM item_embeddings WHERE item_id = ?1 AND bank_id = ?2",
-                    params![item_id, bank_id],
-                )
-                .am("vector delete")?;
+            let n = vector_backend::delete_vector_rows(conn, item_id, Some(bank_id))?;
             Ok(n > 0)
         })
     }
@@ -402,3 +378,7 @@ impl crate::triple_assertion::TripleAssertion for SqliteStore {
         self.triple_asserted_ever_impl(bank_id, subject, predicate, object)
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_store_tests.rs"]
+mod sqlite_store_tests;

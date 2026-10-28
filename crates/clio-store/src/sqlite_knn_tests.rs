@@ -12,7 +12,7 @@
 //!
 //! ## Does not own
 //! - Postgres execution parity (see `store_parity_tests`)
-//! - The vec0 scan itself (see `sqlite_knn`)
+//! - The backend scan mechanics (see `vector_backend`)
 //!
 //! ## Boundary
 //!
