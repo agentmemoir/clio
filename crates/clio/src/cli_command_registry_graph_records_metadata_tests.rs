@@ -106,7 +106,9 @@ fn the_graph_records_flag_kinds_match_their_consumers() {
                 ("triple add", "supersede") => ValueKind::Enum(&["true", "false"]),
                 ("triple add" | "triple end", "update-rule") => ValueKind::Enum(&["discrete"]),
                 ("graph query", "edge-type") => ValueKind::Enum(&["coactivation", "explicit"]),
-                ("graph query", "max-hops") => ValueKind::Uint,
+                ("graph query", "max-hops") | ("triple query", "limit" | "offset") => {
+                    ValueKind::Uint
+                }
                 ("graph query" | "associations", "min-weight")
                 | ("graph link", "weight")
                 | ("triple add" | "belief observe", "confidence") => ValueKind::Float,

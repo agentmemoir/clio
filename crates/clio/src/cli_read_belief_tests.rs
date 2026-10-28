@@ -253,6 +253,8 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "object",
                 "as-of",
                 "time-axis",
+                "limit",
+                "offset",
             ],
             &["no-input", "yes", "explain"],
         ),
