@@ -120,3 +120,32 @@ fn verify_vec_version_answers_when_registered() {
     let conn = wired_connection();
     verify_vec_version(&conn).expect("the backend must answer vec_version once registered");
 }
+
+#[test]
+fn knn_scan_returns_rows_nearest_first_up_to_the_fetch_limit() {
+    let conn = wired_connection();
+    apply_space_ddl(&conn, &EmbeddingSpace::new("m", 4).unwrap())
+        .expect("space DDL must apply once registered");
+    let insert = |item: &str, bank: &str, v: [f32; 4]| {
+        conn.execute(
+            "INSERT INTO item_embeddings
+             (item_id, embedding, bank_id, model_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'm', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            rusqlite::params![item, v.as_bytes(), bank],
+        )
+        .expect("insert a vector row");
+    };
+    insert("near", "b1", [1.0, 0.0, 0.0, 0.0]);
+    insert("mid", "b1", [0.7, 0.7, 0.0, 0.0]);
+    insert("far", "b2", [0.0, 1.0, 0.0, 0.0]);
+    let query = [1.0_f32, 0.0, 0.0, 0.0];
+    let limited = knn_scan(&conn, &query, 2).expect("scan at fetch_k = 2");
+    let ids: Vec<&str> = limited.iter().map(|(id, _, _)| id.as_str()).collect();
+    assert_eq!(ids, vec!["near", "mid"], "{limited:?}");
+    let widened = knn_scan(&conn, &query, 3).expect("scan at fetch_k = 3");
+    let ids: Vec<&str> = widened.iter().map(|(id, _, _)| id.as_str()).collect();
+    assert_eq!(ids, vec!["near", "mid", "far"], "{widened:?}");
+    let mut distances = widened.iter().map(|(_, d, _)| *d).collect::<Vec<_>>();
+    distances.sort_by(|a, b| a.partial_cmp(b).expect("finite distances"));
+    assert!(distances.windows(2).all(|w| w[0] < w[1]), "{distances:?}");
+}

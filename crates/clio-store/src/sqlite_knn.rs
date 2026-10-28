@@ -3,39 +3,44 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the bank-scoped sqlite-vec KNN scan and its
-//! current-belief visibility filter.
+//! This module is responsible for the bank-scoped KNN scan policy and its
+//! current-belief visibility filter, on top of the backend scan the
+//! `vector_backend` seam provides.
 //!
 //! ## Owns
-//! - `knn_in_bank`: the widened vec0 scan plus the visibility post-filter
+//! - `knn_in_bank`: the fetch-widening policy plus the visibility post-filter
 //! - The batch visibility query against `items`
 //!
 //! ## Does not own
+//! - The backend scan mechanics (`vector_backend`)
 //! - Domain filtering or the surrounding limit widening (`sqlite_index`)
 //! - Postgres KNN SQL (`postgres_store`)
 //!
 //! ## Boundary
 //!
-//! Changes to SQLite KNN candidate selection should normally require changes
-//! here. Changes to index-level domain filtering should not require changes here.
+//! Changes to SQLite KNN candidate selection, widening, or visibility should
+//! normally require changes here. Changes to the backend scan mechanics should
+//! not require changes here.
 //!
-//! Keep this module focused on the SQLite KNN scan and visibility filter.
+//! Keep this module focused on the SQLite KNN scan policy and visibility
+//! filter.
 
 use crate::migrate::IntoAmError;
 use crate::model::KnnHit;
+use crate::vector_backend::knn_scan;
 use clio_types::AmError;
 use rusqlite::types::Value;
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::{Connection, params_from_iter};
 use std::collections::BTreeSet;
-use zerocopy::IntoBytes;
 
 /// Exact in-bank top-k over currently visible items.
 ///
-/// The vec0 extension cannot filter auxiliary columns inside `MATCH`, so the
-/// scan widens until `k` visible in-bank rows are collected or the scan is
-/// exhausted. Visibility is the index legs' current-belief rule: the item is
-/// the current transaction belief (`tx_until IS NULL`), not discarded, and not
-/// archived. A corrected prior keeps its vector row but never returns.
+/// The backend scan returns rows unfiltered (it cannot constrain auxiliary
+/// columns inside the scan), so the scan widens until `k` visible in-bank
+/// rows are collected or the scan is exhausted. Visibility is the index legs'
+/// current-belief rule: the item is the current transaction belief
+/// (`tx_until IS NULL`), not discarded, and not archived. A corrected prior
+/// keeps its vector row but never returns.
 pub(crate) fn knn_in_bank(
     conn: &Connection,
     bank_id: &str,
@@ -45,27 +50,10 @@ pub(crate) fn knn_in_bank(
     // Start at `k` (not a large fixed over-fetch) so multi-bank cases must widen.
     let mut fetch_k = k.max(1);
     loop {
-        let mut stmt = conn
-            .prepare(
-                "SELECT item_id, distance, bank_id
-                 FROM item_embeddings
-                 WHERE embedding MATCH ?1 AND k = ?2
-                 ORDER BY distance",
-            )
-            .am("knn prepare")?;
-        let rows = stmt
-            .query_map(params![query.as_bytes(), fetch_k as i64], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, f64>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })
-            .am("knn query_map")?;
+        let rows = knn_scan(conn, query, fetch_k)?;
         let mut scanned = 0usize;
         let mut in_bank = Vec::new();
-        for row in rows {
-            let (item_id, distance, row_bank) = row.am("knn row")?;
+        for (item_id, distance, row_bank) in rows {
             scanned += 1;
             if row_bank == bank_id {
                 in_bank.push(KnnHit { item_id, distance });

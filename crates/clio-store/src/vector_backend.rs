@@ -4,33 +4,36 @@
 //! # Responsibility
 //!
 //! This module is the declared seam for the SQLite vector backend: the one
-//! place that names the extension crate, registers its entry point, and
-//! generates its virtual-table DDL, so the backend stays replaceable behind
-//! one API.
+//! place that names the extension crate, registers its entry point, generates
+//! its virtual-table DDL, and runs its `MATCH` scan, so the backend stays
+//! replaceable behind one API.
 //!
 //! ## Owns
 //! - Process-wide registration of the extension entry point (fail closed)
 //! - `sqlite_vector_ddl`: width-parameterized virtual-table DDL for a space
 //! - The fail-closed wrappers every caller routes through: applying the static
 //!   vectors SQL, applying a space's DDL, and verifying the backend answers
+//! - `knn_scan`: the virtual-table `MATCH` scan shape and its query binding
 //!
 //! ## Does not own
 //! - Postgres and pgvector DDL (`vector_ddl`)
 //! - Space identity or width policy (`embedding_space`)
 //! - Bootstrap order or the space switch (`sqlite`)
+//! - The KNN widening policy and the visibility post-filter (`sqlite_knn`)
 //! - The width-independent static SQL asset, which stays under `migrate`
 //!
 //! ## Boundary
 //!
 //! Swapping the vector backend should normally require changes here and
 //! nowhere else. Nothing outside this module may name the extension crate,
-//! its entry point, or its virtual-table kind.
+//! its entry point, its virtual-table kind, or its `MATCH` scan.
 
 use crate::embedding_space::{EmbeddingSpace, MAX_VECTOR_DIMS};
-use crate::migrate::{SQL_VECTORS_SQLITE, sqlite_vec_missing};
+use crate::migrate::{IntoAmError, SQL_VECTORS_SQLITE, sqlite_vec_missing};
 use clio_types::{AmError, ErrorCode};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use std::sync::OnceLock;
+use zerocopy::IntoBytes;
 
 static REGISTER: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -140,6 +143,44 @@ pub(crate) fn verify_vec_version(conn: &Connection) -> Result<(), AmError> {
     conn.query_row("SELECT vec_version()", [], |row| row.get::<_, String>(0))
         .map_err(sqlite_vec_missing)
         .map(|_| ())
+}
+
+/// One exact-KNN scan over the vector table, nearest first, unfiltered.
+///
+/// The virtual table's `MATCH` cannot filter auxiliary columns inside the
+/// scan, so rows return with their `bank_id` attached and the caller applies
+/// its own bank and visibility rules, widening `fetch_k` until `k` rows
+/// survive. Each row is `(item_id, distance, bank_id)`.
+///
+/// # Errors
+/// Driver failures from the scan.
+pub(crate) fn knn_scan(
+    conn: &Connection,
+    query: &[f32],
+    fetch_k: usize,
+) -> Result<Vec<(String, f64, String)>, AmError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT item_id, distance, bank_id
+             FROM item_embeddings
+             WHERE embedding MATCH ?1 AND k = ?2
+             ORDER BY distance",
+        )
+        .am("knn prepare")?;
+    let rows = stmt
+        .query_map(params![query.as_bytes(), fetch_k as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .am("knn query_map")?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.am("knn row")?);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
