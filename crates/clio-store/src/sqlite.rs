@@ -3,9 +3,9 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for opening and bootstrapping the SQLite +
-//! sqlite-vec backend: extension registration, width-parameterized vector DDL,
-//! the recorded active embedding space, and the space switch.
+//! This module is responsible for opening and bootstrapping the SQLite
+//! backend through the declared `vector_backend` seam: the recorded active
+//! embedding space, and the space switch.
 //!
 //! ## Owns
 //! - `SqliteStore::open` / `open_in_memory` / `from_connection` bootstrap order
@@ -17,12 +17,14 @@
 //! ## Does not own
 //! - Backend CRUD SQL (the `sqlite_*` modules)
 //! - Space identity or width policy (`embedding_space`)
-//! - Vector DDL text (`vector_ddl`)
+//! - The vector backend seam: extension registration and vector DDL
+//!   (`vector_backend`)
 //!
 //! ## Boundary
 //!
-//! Changes to SQLite bootstrap, extension wiring, or the space switch should
-//! normally require changes here. Changes to width policy or DDL text should not.
+//! Changes to SQLite bootstrap or the space switch should normally require
+//! changes here. Changes to width policy, the vector backend, or DDL text
+//! should not.
 //!
 //! Keep this module focused on SQLite store startup and space reconciliation.
 
@@ -31,16 +33,17 @@ use crate::embedding_space::{
     EmbeddingSpace, SETTING_EMBEDDING_DIM, SETTING_EMBEDDING_MODEL, SpaceSwitchReport, log_switch,
     refused_switch,
 };
-use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, SQL_VECTORS_SQLITE, now_iso};
+use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, now_iso};
 use crate::sqlite_path::ensure_parent;
-use crate::vec_register::ensure_sqlite_vec_registered;
-use crate::vector_ddl::sqlite_vector_ddl;
+use crate::vector_backend::{
+    apply_space_ddl, apply_static_vectors, ensure_registered, verify_vec_version,
+};
 use clio_types::AmError;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-/// SQLite-backed store. Requires a loaded sqlite-vec extension.
+/// SQLite-backed store. Requires the vector backend (see `vector_backend`).
 pub struct SqliteStore {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) kms: Arc<dyn DekProvider>,
@@ -64,12 +67,13 @@ pub struct SqliteStore {
 }
 
 impl SqliteStore {
-    /// Open (or create) a SQLite database, migrate, and verify vec0 works.
+    /// Open (or create) a SQLite database, migrate, and verify the vector
+    /// backend answers.
     ///
     /// # Errors
     /// Migration or extension failures.
     pub fn open(path: &Path, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
-        ensure_sqlite_vec_registered()?;
+        ensure_registered()?;
         ensure_parent(path)?;
         // `:memory:` is a valid SQLite path that gives an in-memory database:
         // it has no file a restore could replace, so it takes no hold and
@@ -100,7 +104,7 @@ impl SqliteStore {
         // Exempt from the shared hold on purpose: an in-memory store has no
         // file to lock, so no restore can ever replace it under this
         // connection.
-        ensure_sqlite_vec_registered()?;
+        ensure_registered()?;
         let conn = Connection::open_in_memory().expect("in-memory sqlite always opens");
         Self::from_connection(conn, kms)
     }
@@ -128,12 +132,9 @@ impl SqliteStore {
         let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;
-        conn.execute_batch(SQL_VECTORS_SQLITE)
-            .map_err(crate::migrate::sqlite_vec_missing)?;
+        apply_static_vectors(&conn)?;
         crate::bank_registration::install_sqlite_triggers(&conn)?;
-        let _version: String = conn
-            .query_row("SELECT vec_version()", [], |r| r.get(0))
-            .map_err(crate::migrate::sqlite_vec_missing)?;
+        verify_vec_version(&conn)?;
         // The vector table is created for the recorded space, so an existing
         // database keeps its width and a fresh one gets the documented default
         // recorded (and can then adopt the configured space with nothing to purge).
@@ -144,8 +145,7 @@ impl SqliteStore {
             write_space(&conn, &space)?;
             (space, true)
         };
-        conn.execute_batch(&sqlite_vector_ddl(&space)?)
-            .map_err(crate::migrate::sqlite_vec_missing)?;
+        apply_space_ddl(&conn, &space)?;
         // Timestamps a previous build stored as epoch millis are rewritten into
         // the canonical form the item time columns are compared in. A database
         // with nothing to fix runs one filtered read. This is the last step of an
@@ -293,8 +293,7 @@ fn switch_sqlite(conn: &mut Connection, space: &EmbeddingSpace) -> Result<u64, A
         .am("space purge count")?;
     conn.execute_batch("DROP TABLE IF EXISTS item_embeddings;")
         .am("space drop")?;
-    conn.execute_batch(&sqlite_vector_ddl(space)?)
-        .map_err(crate::migrate::sqlite_vec_missing)?;
+    apply_space_ddl(conn, space)?;
     write_space(conn, space)?;
     Ok(u64::try_from(purged.max(0)).unwrap_or(0))
 }

@@ -4,7 +4,8 @@
 //! # Responsibility
 //!
 //! This module is the `clio-store` crate root for dual-backend persistence:
-//! Postgres+pgvector and SQLite+sqlite-vec. `subject_id` means the
+//! Postgres+pgvector and SQLite with the vector backend behind the declared
+//! `vector_backend` seam. `subject_id` means the
 //! GDPR/data-subject key for DEKs — not an SPO triple subject.
 //!
 //! ## Owns
@@ -204,7 +205,7 @@ mod triple_cipher;
 mod triple_invariant;
 mod triple_map;
 mod triple_reshape;
-mod vec_register;
+mod vector_backend;
 mod vector_ddl;
 mod window_query;
 
@@ -301,9 +302,8 @@ pub use sync_store::{
     SyncJournalRow, SyncStore,
 };
 pub use triple_assertion::TripleAssertion;
-pub use vector_ddl::{
-    HALFVEC_MIN_VERSION, pgvector_supports_halfvec, postgres_vector_ddl, sqlite_vector_ddl,
-};
+pub use vector_backend::sqlite_vector_ddl;
+pub use vector_ddl::{HALFVEC_MIN_VERSION, pgvector_supports_halfvec, postgres_vector_ddl};
 
 pub use clio_types::{
     AttributeSchema, ContinuousPoint, ContinuousState, SearchDomain, TimeAxis, TripleAddOutcome,

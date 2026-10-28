@@ -143,10 +143,11 @@ fn file_state(path: &Path, hold: bool) -> Result<SqliteFileState, AmError> {
         }
         Err(error) => return Err(map_db_err("reading the store file", error)),
     };
-    // The store's derived tables are sqlite-vec virtual tables, so the
+    // The store's derived tables are vector virtual tables, so the backend
     // extension has to be registered before a count reads them; this is the
-    // same registration every store open performs, not a second copy of it.
-    crate::vec_register::ensure_sqlite_vec_registered()?;
+    // same registration every store open performs through the `vector_backend`
+    // seam, not a second copy of it.
+    crate::vector_backend::ensure_registered()?;
     // This measurement is a real store open, so it holds the store shared for
     // its lifetime; during the swap this hold is granted nested inside the
     // restore's own exclusive hold. The unheld variant skips this for files

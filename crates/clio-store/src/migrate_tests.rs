@@ -86,15 +86,6 @@ fn sql_assets_and_error_mappers() {
         Result::<(), &str>::Err("nope").am("bad").unwrap_err().code,
         ErrorCode::Internal
     );
-    assert!(crate::vec_register::map_register_outcome(&Ok(())).is_ok());
-    assert_eq!(
-        crate::vec_register::map_register_outcome(&Err("boom".into()))
-            .unwrap_err()
-            .code,
-        ErrorCode::ConfigCorrupt
-    );
-    assert!(crate::vec_register::interpret_auto_extension_rc(0).is_ok());
-    assert!(crate::vec_register::interpret_auto_extension_rc(1).is_err());
     assert_eq!(
         crate::db_url::postgres_url_or_default(Ok("postgres://x".into())),
         "postgres://x"

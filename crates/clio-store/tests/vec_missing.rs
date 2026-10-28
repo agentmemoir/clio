@@ -10,7 +10,7 @@
 //! - Missing-extension forcing test (fresh process, extension never registered)
 //!
 //! ## Does not own
-//! - Extension registration (see `vec_register`)
+//! - Extension registration (see `vector_backend`)
 //! - Migration orchestration (see `migrate`)
 //!
 //! ## Boundary

@@ -130,11 +130,12 @@ pub fn snapshot_sqlite_into(source: &Path, staged: &Path) -> Result<SnapshotFact
     // restore's exclusive hold makes the acquire wait a bounded time and then
     // refuse, so no copy can race the swap.
     let _store_lock = crate::store_lock::SharedHold::acquire(source)?;
-    // The store's derived tables are sqlite-vec virtual tables, and a snapshot
-    // counts every table, so the extension has to be registered before the
-    // counts are read. It is the same registration every store open performs,
-    // and it is process-wide, so this is not a second copy of anything.
-    crate::vec_register::ensure_sqlite_vec_registered()?;
+    // The store's derived tables are vector virtual tables, and a snapshot
+    // counts every table, so the backend extension has to be registered before
+    // the counts are read. It is the same registration every store open
+    // performs through the `vector_backend` seam, and it is process-wide, so
+    // this is not a second copy of anything.
+    crate::vector_backend::ensure_registered()?;
     let conn = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .am("open the store read-only for a snapshot")?;
     // The snapshot's own connection counts as an open store handle: the guard
