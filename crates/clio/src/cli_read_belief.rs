@@ -23,7 +23,10 @@
 
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
-use crate::cli_read::{one_positional, read_args, validate_time_axis};
+use crate::cli_read::{
+    add_requested_limit, add_truncated, one_positional, page_limit, parse_u64, read_args,
+    validate_time_axis,
+};
 use crate::cli_read_group::ReadGroup;
 use serde_json::Value;
 
@@ -57,6 +60,17 @@ impl ReadGroup for BeliefGroup {
             _ => render_belief(payload),
         }
     }
+
+    fn decorate(&self, verb: &str, parsed: &ParsedArgs, _arguments: &Value, payload: &mut Value) {
+        if verb == "triple query" {
+            // The JSON envelope carries `total`/`offset`, so the marker reads
+            // the same way as `inspect`'s.
+            add_truncated(payload, "triples");
+            // The CLI clamped a typed `--limit` above the cap; name the value
+            // the caller asked for so the served page never silently differs.
+            add_requested_limit(payload, parsed);
+        }
+    }
 }
 
 /// Triple pattern terms, in the positional order `SUBJECT PREDICATE OBJECT`.
@@ -87,6 +101,16 @@ fn triple_query_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliEr
     if let Some(axis) = parsed.value("time-axis") {
         args.insert("time_axis".into(), Value::from(validate_time_axis(axis)?));
     }
+    // One shared page-size rule: default when omitted, `0` refused, above the
+    // cap clamped (the clamp is disclosed in `decorate`).
+    let requested = parsed
+        .value("limit")
+        .map(|raw| parse_u64("limit", raw))
+        .transpose()?;
+    args.insert("limit".into(), Value::from(page_limit("limit", requested)?));
+    if let Some(offset) = parsed.value("offset") {
+        args.insert("offset".into(), Value::from(parse_u64("offset", offset)?));
+    }
     Ok(("triple_query", Value::Object(args)))
 }
 
@@ -100,7 +124,21 @@ fn belief_history_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), Cli
 fn render_triples(payload: &Value) -> String {
     let triples = payload.get("triples").and_then(Value::as_array);
     let returned = triples.map_or(0, Vec::len);
-    let mut lines = vec![format!("triples: {returned}")];
+    let total = payload.get("total").and_then(Value::as_u64);
+    let total = total
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(returned);
+    let mut header = format!("triples: {returned} of {total}");
+    // The page the caller asked for was lowered to the cap; name both values
+    // so the header never silently disagrees with the request.
+    if let (Some(limit), Some(requested)) = (
+        payload.get("limit").and_then(Value::as_u64),
+        payload.get("requested_limit").and_then(Value::as_u64),
+    ) {
+        use std::fmt::Write as _;
+        let _ = write!(header, " (limit {limit}, lowered from {requested})");
+    }
+    let mut lines = vec![header];
     if let Some(triples) = triples {
         for triple in triples {
             lines.push(format!(

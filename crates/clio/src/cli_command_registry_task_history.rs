@@ -4,19 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for the static records of the commands headed by
-//! `task`, `failure`, `memtree`, and `history`: `task get`, `task history`,
-//! `task upsert`, `failure list`, `failure record`, `memtree query`,
-//! `memtree get`, and `history temporal`.
+//! `task`, `failure`, `memtree`, and `history`; each record below names its
+//! command, so the enumeration lives with the records themselves.
 //!
 //! A read head can hold a write subcommand: `task upsert` and `failure record`
-//! write, but they are classified under their read head like every other
-//! record here.
+//! write, but they are classified under their read head like every other record.
 //!
 //! ## Owns
 //! - The eight `CommandSpec` records and `TASK_HISTORY`, the tranche that
 //!   lists them in head-group order
-//! - The positionals and examples of those records
-//! - The description, value kind, and default of each documented flag
+//! - The positionals, examples, and the description, value kind, and default
+//!   of each documented flag
 //!
 //! ## Does not own
 //! - The record model or its rendering (see `cli_command_spec`)
@@ -158,11 +156,14 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[TASK_ID],
     documented: &[
-        Flag::uint(
-            "limit",
-            "N",
-            "Caps the recorded transitions; `cli_read_history::task_history_call` parses it with `parse_u64` for `task_history`.",
-        ),
+        Flag {
+            default: Some("20"),
+            ..Flag::uint(
+                "limit",
+                "N",
+                "Caps the recorded transitions; defaults to 20 when omitted; a limit above 200 is lowered to 200.",
+            )
+        },
         EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
@@ -235,11 +236,14 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     notes: &[],
     positionals: &[TASK_ID_OR_QUERY],
     documented: &[
-        Flag::uint(
-            "limit",
-            "N",
-            "Caps the failures returned; `cli_read_history::failure_list_call` parses it with `parse_u64` for `failures_for_task`.",
-        ),
+        Flag {
+            default: Some("20"),
+            ..Flag::uint(
+                "limit",
+                "N",
+                "Caps the failures returned; defaults to 20 when omitted; a limit above 200 is lowered to 200.",
+            )
+        },
         EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
@@ -333,11 +337,14 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
             "N",
             "Bounds the tree walk depth; `cli_read_history::memtree_query_call` parses it with `parse_u64`.",
         ),
-        Flag::uint(
-            "limit",
-            "N",
-            "Caps the nodes returned; `cli_read_history::memtree_query_call` parses it with `parse_u64` for `memtree_query`.",
-        ),
+        Flag {
+            default: Some("100"),
+            ..Flag::uint(
+                "limit",
+                "N",
+                "Caps the nodes returned; defaults to 100 when omitted; a limit above 200 is lowered to 200.",
+            )
+        },
         EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,

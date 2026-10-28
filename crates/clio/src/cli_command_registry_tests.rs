@@ -354,3 +354,44 @@ fn validate_accepts_a_flag_alias_between_accepted_spellings() {
     let spec = aliased_record(&[("path", "out")]);
     assert_eq!(validate(&[&spec], &["get"]), Ok(()));
 }
+
+/// The page-capable read commands whose `--limit` help must name the default
+/// and the shared ceiling, with the default each serves when the flag is
+/// omitted. Issue 285: every ceiling must be visible in `--help`.
+const PAGE_LIMIT_COMMANDS: &[(&str, &str)] = &[
+    ("recall", "10"),
+    ("inspect", "50"),
+    ("hygiene audit", "50"),
+    ("hygiene log", "50"),
+    ("task history", "20"),
+    ("failure list", "20"),
+    ("memtree query", "100"),
+    ("triple query", "50"),
+];
+
+/// Every page-capable read command's `--limit` help names its default and the
+/// 200 ceiling, and the record's `[default: N]` suffix agrees with the text.
+#[test]
+fn every_page_limit_help_names_the_default_and_the_ceiling() {
+    for &(verb, default) in PAGE_LIMIT_COMMANDS {
+        let spec = find(verb).unwrap_or_else(|| panic!("{verb} has a record"));
+        let flag = spec
+            .documented
+            .iter()
+            .find(|flag| flag.long == "limit")
+            .unwrap_or_else(|| panic!("{verb} documents --limit"));
+        assert_eq!(flag.default, Some(default), "{verb} default");
+        assert!(
+            flag.description
+                .contains(&format!("defaults to {default} when omitted")),
+            "{verb}: {}",
+            flag.description
+        );
+        assert!(
+            flag.description
+                .contains("a limit above 200 is lowered to 200"),
+            "{verb}: {}",
+            flag.description
+        );
+    }
+}

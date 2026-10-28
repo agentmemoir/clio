@@ -41,8 +41,9 @@ use std::sync::Arc;
 /// command group reaches them through this module, and the split into
 /// `cli_read_args` exists for size, not for a second import path.
 pub(crate) use crate::cli_read_args::{
-    base_args, flag, no_positionals, one_positional, parse_f64, parse_u64, parse_unit_f64,
-    read_args, require_flags, required_flags, validate_choice, validate_time_axis,
+    MAX_PAGE_LIMIT, base_args, flag, no_positionals, one_positional, page_limit, parse_f64,
+    parse_u64, parse_unit_f64, read_args, require_flags, required_flags, validate_choice,
+    validate_time_axis,
 };
 
 /// Injected streams, terminal state, and environment for one read command.
@@ -251,8 +252,9 @@ fn find_group(verb: &str) -> Option<&'static dyn ReadGroup> {
 }
 
 /// Add the in-band `truncated` marker to a success payload that reports
-/// `total`/`offset`/`items` (used by `inspect`).
-pub(crate) fn add_truncated(payload: &mut Value) {
+/// `total`/`offset` and a result array under `key` (used by `inspect` with
+/// `items` and `triple query` with `triples`).
+pub(crate) fn add_truncated(payload: &mut Value, key: &str) {
     let count = |key: &str| {
         payload
             .get(key)
@@ -262,10 +264,27 @@ pub(crate) fn add_truncated(payload: &mut Value) {
     let offset = count("offset").unwrap_or(0);
     let total = count("total").unwrap_or(0);
     let returned = payload
-        .get("items")
+        .get(key)
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     payload["truncated"] = Value::Bool(offset.saturating_add(returned) < total);
+}
+
+/// Disclose in-band that the command served a smaller page than the `--limit`
+/// the caller typed: the CLI clamps above the maximum, so the served page is
+/// the maximum whenever this fires, and the JSON key carries the value the
+/// caller asked for. A value at or below the maximum is served as typed and
+/// stays undisclosed, and an absent flag has nothing to disclose.
+pub(crate) fn add_requested_limit(payload: &mut Value, parsed: &ParsedArgs) {
+    let Some(requested) = parsed
+        .value("limit")
+        .and_then(|raw| raw.parse::<u64>().ok())
+    else {
+        return;
+    };
+    if requested > MAX_PAGE_LIMIT {
+        payload["requested_limit"] = Value::from(requested);
+    }
 }
 
 /// Mark a page truncated when it filled the resolved `limit`.

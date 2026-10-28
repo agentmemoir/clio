@@ -11,6 +11,8 @@
 //! - `base_args` / `read_args`, the common read-tool arguments
 //! - Positional-argument handling and its one-line usage errors
 //! - `parse_u64`, `parse_f64`, and `validate_choice` flag validation
+//! - `page_limit`, the shared `--limit` page-size contract, with its named
+//!   default and maximum constants
 //! - `require_flags`, the all-at-once check for a command's required flags
 //! - The indefinite article used in a positional's usage hint
 //!
@@ -228,6 +230,36 @@ pub(crate) fn parse_u64(flag: &str, raw: &str) -> Result<u64, CliError> {
     })
 }
 
+/// The page size a page-capable read command serves when `--limit` is omitted.
+pub(crate) const DEFAULT_PAGE_LIMIT: u64 = 50;
+/// The largest page size the CLI serves for `--limit`; a larger value is
+/// clamped to this maximum rather than refused.
+pub(crate) const MAX_PAGE_LIMIT: u64 = 200;
+
+/// The page size a command serves for the caller's `--limit` value.
+///
+/// One shared rule, so every page-capable command answers a given `--limit`
+/// the same way. Omitted reads as [`DEFAULT_PAGE_LIMIT`], and `0` is refused:
+/// a page of nothing is a mistake, not a request. Anything above
+/// [`MAX_PAGE_LIMIT`] is clamped to the maximum instead of refused — a caller
+/// asking for more than the cap still gets the largest page the command
+/// serves — and the lowering is disclosed in the command's output by
+/// `add_requested_limit`, so the served page never silently disagrees with
+/// the request.
+///
+/// # Errors
+/// A usage error when the parsed limit is `0`.
+pub(crate) fn page_limit(flag: &str, requested: Option<u64>) -> Result<u64, CliError> {
+    match requested {
+        None => Ok(DEFAULT_PAGE_LIMIT),
+        Some(0) => Err(CliError::usage_hint(
+            format!("--{flag} must be a positive page size, got `0`"),
+            format!("try `--{flag} 10`"),
+        )),
+        Some(value) => Ok(value.min(MAX_PAGE_LIMIT)),
+    }
+}
+
 /// Parse a floating-point flag value, reporting the flag the caller typed.
 pub(crate) fn parse_f64(flag: &str, raw: &str) -> Result<f64, CliError> {
     raw.parse::<f64>()
@@ -302,3 +334,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cli_read_args_spec_tests.rs"]
 mod spec_tests;
+
+#[cfg(test)]
+#[path = "cli_read_args_page_limit_tests.rs"]
+mod page_limit_tests;

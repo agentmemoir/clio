@@ -433,3 +433,10 @@ mod recall_output_tests;
 #[cfg(test)]
 #[path = "cli_read_tests_scores_tests.rs"]
 mod scores_tests;
+
+// The page-limit clamp tests are a child module so both files keep real
+// headroom under the 450-line source-file limit; they read this module's
+// runners and seed fixtures through `use super::*`.
+#[cfg(test)]
+#[path = "cli_read_tests_limits_tests.rs"]
+mod limits_tests;

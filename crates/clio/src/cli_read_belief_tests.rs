@@ -73,7 +73,7 @@ fn triple_query_positionals_flags_and_text() {
     assert!(out.contains("triples: 1"), "{out}");
     assert!(out.contains("rust used_by tool"), "{out}");
 
-    assert_eq!(render_triples(&json!({})), "triples: 0");
+    assert_eq!(render_triples(&json!({})), "triples: 0 of 0");
 }
 
 #[test]
@@ -89,6 +89,105 @@ fn triple_query_usage_errors() {
         assert!(out.is_empty(), "{args:?}: {out}");
         assert!(err.contains(needle), "{args:?}: {err}");
     }
+}
+
+#[test]
+fn triple_query_refuses_a_zero_limit_at_the_cli_layer() {
+    let s = belief_state();
+    let (code, out, err) = run_state(
+        "triple query",
+        &["--limit", "0", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2));
+    assert!(out.is_empty(), "{out}");
+    assert!(
+        err.contains("--limit must be a positive page size, got `0`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn triple_query_serves_the_cap_for_a_limit_above_it_and_discloses_the_request() {
+    let s = belief_state();
+    let (code, out, _) = run_state(
+        "triple query",
+        &["--limit", "500", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(0));
+    let value = json_of(&out);
+    assert_eq!(value["limit"], json!(200));
+    assert_eq!(value["requested_limit"], json!(500));
+    assert_eq!(value["total"], json!(2));
+    // Two rows on a 200-row page: the page is not short, so no truncation.
+    assert_eq!(value["truncated"], json!(false));
+
+    let (_, out, _) = run_state(
+        "triple query",
+        &["--limit", "500", "--bank", "bank-a"],
+        &s,
+        true,
+    );
+    assert!(
+        out.contains("triples: 2 of 2 (limit 200, lowered from 500)"),
+        "{out}"
+    );
+}
+
+#[test]
+fn triple_query_offset_pages_over_a_seeded_store() {
+    let s = belief_state();
+    let (code, out, _) = run_state(
+        "triple query",
+        &["--limit", "1", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(0));
+    let value = json_of(&out);
+    // One row of two matches: `total` still names the full match count, and
+    // the page is short, so it reads as truncated.
+    assert_eq!(value["triples"].as_array().map(Vec::len), Some(1));
+    assert_eq!(value["total"], json!(2));
+    assert_eq!(value["offset"], json!(0));
+    assert_eq!(value["truncated"], json!(true));
+
+    // One row skipped by the offset: the remaining row fills page two.
+    let (code, out, _) = run_state(
+        "triple query",
+        &["--limit", "1", "--offset", "1", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(0));
+    let value = json_of(&out);
+    assert_eq!(value["triples"].as_array().map(Vec::len), Some(1));
+    assert_eq!(value["total"], json!(2));
+    assert_eq!(value["truncated"], json!(false));
+
+    // An offset past the end serves an empty page that is not truncated.
+    let (code, out, _) = run_state(
+        "triple query",
+        &["--offset", "5", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(0));
+    let value = json_of(&out);
+    assert_eq!(value["triples"].as_array().map(Vec::len), Some(0));
+    assert_eq!(value["total"], json!(2));
+    assert_eq!(value["truncated"], json!(false));
+
+    let (_, out, _) = run_state(
+        "triple query",
+        &["--limit", "1", "--bank", "bank-a"],
+        &s,
+        true,
+    );
+    assert!(out.contains("triples: 1 of 2"), "{out}");
 }
 
 #[test]
@@ -154,6 +253,8 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "object",
                 "as-of",
                 "time-axis",
+                "limit",
+                "offset",
             ],
             &["no-input", "yes", "explain"],
         ),

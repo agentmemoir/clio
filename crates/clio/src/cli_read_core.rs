@@ -9,8 +9,10 @@
 //! ## Owns
 //! - Flag decoding for the core read verbs into MCP tool arguments
 //! - The `recall` score-floor, entity-inclusion, and temporal-anchor flag mapping
-//! - The `recall` binding-floor warning rewrite and the echoed effective limit
-//! - The `inspect` truncation decoration and their human text views
+//! - The `recall` echoed effective limit, its `--limit` clamp disclosure, and
+//!   the score-floor warning rewrite
+//! - The `inspect` truncation decoration, the `--limit` clamp disclosure, and
+//!   their human text views
 //!
 //! ## Does not own
 //! - The read engine, parsing, and in-process call bridge (see `cli_read`)
@@ -26,8 +28,8 @@
 use crate::cli_args::{FlagSpec, ParsedArgs};
 use crate::cli_error::CliError;
 use crate::cli_read::{
-    add_truncated, base_args, no_positionals, one_positional, parse_f64, parse_u64,
-    validate_choice, validate_time_axis,
+    add_requested_limit, add_truncated, base_args, no_positionals, one_positional, page_limit,
+    parse_f64, parse_u64, validate_choice, validate_time_axis,
 };
 use crate::cli_read_group::ReadGroup;
 use serde_json::{Map, Value};
@@ -62,7 +64,10 @@ impl ReadGroup for CoreGroup {
 
     fn decorate(&self, verb: &str, parsed: &ParsedArgs, arguments: &Value, payload: &mut Value) {
         if verb == "inspect" {
-            add_truncated(payload);
+            add_truncated(payload, "items");
+            // The CLI clamped a typed `--limit` above the cap; name the value
+            // the caller asked for so the served page never silently differs.
+            add_requested_limit(payload, parsed);
         }
         if verb == "recall" {
             // Echo the query and the limit that actually ran, so the text view
@@ -79,6 +84,9 @@ impl ReadGroup for CoreGroup {
                     .unwrap_or(clio_retrieve::DEFAULT_LIMIT as u64);
                 map.insert("limit".into(), Value::from(limit));
             }
+            // The CLI clamped a typed `--limit` above the cap; name the value
+            // the caller asked for so the served page never silently differs.
+            add_requested_limit(payload, parsed);
             name_floor_warnings(payload);
         }
     }
@@ -89,7 +97,11 @@ fn recall_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
     let mut args = base_args(parsed);
     args.insert("query".into(), Value::from(query));
     if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
+        // One shared page-size rule: `0` refused, above the cap clamped (the
+        // engine's own zero-limit refusal stays as the backstop for direct
+        // callers). Omitted keeps the engine's default of 10.
+        let served = page_limit("limit", Some(parse_u64("limit", limit)?))?;
+        args.insert("limit".into(), Value::from(served));
     }
     if let Some(domains) = parsed.value("domains") {
         args.insert("domains".into(), Value::from(split_domains(domains)));
@@ -226,9 +238,13 @@ fn inspect_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> 
     if !filter.is_empty() {
         args.insert("filter".into(), Value::Object(filter));
     }
-    if let Some(limit) = parsed.value("limit") {
-        args.insert("limit".into(), Value::from(parse_u64("limit", limit)?));
-    }
+    // One shared page-size rule: default when omitted, `0` refused, above the
+    // cap clamped (the clamp is disclosed in `decorate`).
+    let requested = parsed
+        .value("limit")
+        .map(|raw| parse_u64("limit", raw))
+        .transpose()?;
+    args.insert("limit".into(), Value::from(page_limit("limit", requested)?));
     if let Some(offset) = parsed.value("offset") {
         args.insert("offset".into(), Value::from(parse_u64("offset", offset)?));
     }
