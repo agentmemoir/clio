@@ -102,7 +102,11 @@ fn selection_orders_items_lists_every_bank_and_overwrites_the_tombstone() {
             let tx = conn.transaction().expect("tx");
             let rows = select_items(&tx, &bank1, &subject).expect("select items");
             let ids: Vec<&str> = rows.iter().map(|r| r.item_id.as_str()).collect();
-            assert_eq!(ids, vec![a.as_str(), b.as_str()], "items must be id-ordered");
+            assert_eq!(
+                ids,
+                vec![a.as_str(), b.as_str()],
+                "items must be id-ordered"
+            );
             let subject_banks = select_subject_banks(&tx, &subject).expect("select banks");
             assert_eq!(
                 subject_banks,
@@ -220,10 +224,16 @@ fn persona_context_detection_and_purge_cover_every_copy() {
             Ok(n)
         })
         .expect("persona purge");
-    assert_eq!(purged, 4, "stable, preference, journal, and dead letter: {purged}");
+    assert_eq!(
+        purged, 4,
+        "stable, preference, journal, and dead letter: {purged}"
+    );
 
     let doc = store.get_persona_document(&live).expect("persona doc");
-    assert!(doc.stable[0].context.is_none(), "the stable context must be gone");
+    assert!(
+        doc.stable[0].context.is_none(),
+        "the stable context must be gone"
+    );
     assert!(
         doc.preferences.iter().all(|p| p.context.is_none()),
         "the preference context must be gone"
@@ -245,7 +255,10 @@ fn persona_context_detection_and_purge_cover_every_copy() {
                     |r| r.get(0),
                 )
                 .expect("journal flag read");
-            assert_eq!(encrypted, 0, "the journal row must read as plaintext-cleared");
+            assert_eq!(
+                encrypted, 0,
+                "the journal row must read as plaintext-cleared"
+            );
             let (blanked, kept): (Option<String>, String) = conn
                 .query_row(
                     "SELECT MAX(CASE WHEN envelope_json = ?2 THEN sync_mutation_id END),
@@ -328,7 +341,10 @@ fn purge_bank_sweeps_the_subject_and_its_hub_distilled_referrers() {
         .expect("purge_bank");
 
     assert_eq!(out.vectors, 2, "the subject item and the hub: {out:?}");
-    assert_eq!(out.edges, 3, "the explicit edge plus both hub edges: {out:?}");
+    assert_eq!(
+        out.edges, 3,
+        "the explicit edge plus both hub edges: {out:?}"
+    );
     assert_eq!(
         out.memtree, 3,
         "the leaf with its parent plus the ghost leaf: {out:?}"

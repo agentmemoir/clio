@@ -409,8 +409,7 @@ fn purge_derived_item(
     bank_id: &str,
     item_id: &str,
 ) -> Result<(usize, usize, usize, PurgedTriples), AmError> {
-    let vectors =
-        vector_backend::erase_vector_rows(tx, item_id, bank_id, "erase derived vector")?;
+    let vectors = vector_backend::erase_vector_rows(tx, item_id, bank_id, "erase derived vector")?;
     tx.execute(
         "DELETE FROM index_pending WHERE item_id = ?1 AND bank_id = ?2",
         params![item_id, bank_id],

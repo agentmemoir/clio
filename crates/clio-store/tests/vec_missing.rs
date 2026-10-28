@@ -53,7 +53,11 @@ fn vector_ddl_without_extension_fails_loudly() {
         "the refusal must be the absent extension module, not an unrelated error: {err}"
     );
     let mapped = sqlite_vec_missing(err);
-    assert_eq!(mapped.code, clio_types::ErrorCode::ConfigCorrupt, "{mapped:?}");
+    assert_eq!(
+        mapped.code,
+        clio_types::ErrorCode::ConfigCorrupt,
+        "{mapped:?}"
+    );
     assert!(
         mapped
             .message
