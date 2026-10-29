@@ -106,6 +106,14 @@ fn batch_aborts_on_first_failure_reporting_applied_vs_pending() {
     assert_eq!(outcome.pending, vec!["itm-3".to_owned()]);
     let failed = outcome.failed.expect("first failure reported");
     assert_eq!(failed.item_id, "itm-missing");
+    // The counters keep the preview's meaning on a confirmed run: each equals
+    // the applied count for its action, so failed and pending targets are
+    // never counted.
+    assert_eq!(
+        outcome.would_archive, 1,
+        "would_archive equals the applied archive count, not the target list length"
+    );
+    assert_eq!(outcome.would_flag + outcome.would_discard, 0);
 }
 
 #[test]

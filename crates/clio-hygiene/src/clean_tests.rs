@@ -10,8 +10,9 @@
 //! probe lives in `clio-store`'s `pg_hygiene_tests`.
 //!
 //! ## Owns
-//! - Test coverage for dry-run counting, archive/discard/keep outcomes, log
-//!   row shape, and fail-closed argument validation
+//! - Test coverage for dry-run counting, confirmed counter consistency
+//!   (would_* equals the applied counts per action), archive/discard/keep
+//!   outcomes, log row shape, and fail-closed argument validation
 //!
 //! ## Does not own
 //! - Batch-abort and duplicate-target semantics (`clean_batch_tests.rs`)
@@ -291,6 +292,40 @@ fn keep_applies_each_targets_suggested_action() {
         suggested_action: None,
     }];
     assert!(clean(&args(&s, &ctx(bank), &empty, CleanAction::Keep, true)).is_err());
+}
+
+#[test]
+fn confirmed_counters_equal_the_applied_counts_per_action() {
+    let s = store();
+    let bank = "bank-counters";
+    let s_ref = &*s as &dyn Store;
+    for id in ["cnt-flag", "cnt-arch", "cnt-disc"] {
+        s_ref
+            .create_memory_item(&item(id, bank, "counter me"), "actor")
+            .unwrap();
+    }
+    let targets = vec![
+        suggested("cnt-flag", "flag"),
+        suggested("cnt-arch", "archive"),
+        suggested("cnt-disc", "discard"),
+    ];
+    let outcome = clean(&args(&s, &ctx(bank), &targets, CleanAction::Keep, true)).unwrap();
+    assert!(outcome.failed.is_none());
+    assert_eq!(outcome.applied.len(), 3, "{:?}", outcome.applied);
+    // One meaning per field: on a confirmed run each would_* equals the
+    // applied count for its action, matching the preview's count.
+    assert_eq!(outcome.would_flag, 1);
+    assert_eq!(outcome.would_archive, 1);
+    assert_eq!(outcome.would_discard, 1);
+}
+
+/// One target with an explicit audit suggestion.
+fn suggested(id: &str, action: &str) -> CleanTarget {
+    CleanTarget {
+        item_id: id.into(),
+        noise_score: Some(0.5),
+        suggested_action: Some(action.into()),
+    }
 }
 
 #[test]

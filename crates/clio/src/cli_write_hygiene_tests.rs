@@ -110,6 +110,11 @@ fn confirmed_clean_discards_and_reports_the_applied_ids() {
     let payload = json_of(&out);
     assert_eq!(payload["dry_run"], json!(false), "{payload}");
     assert_eq!(payload["applied"], json!(["itm-h2"]), "{payload}");
+    // The confirmed JSON keeps the counter meaning: would_discard equals the
+    // applied discard count, as the preview reported.
+    assert_eq!(payload["would_discard"], json!(1), "{payload}");
+    assert_eq!(payload["would_flag"], json!(0), "{payload}");
+    assert_eq!(payload["would_archive"], json!(0), "{payload}");
     assert_eq!(stats(&s)["items_active"], json!(0), "item discarded");
     assert_eq!(
         super::render_clean(&json!({"dry_run": false, "applied": ["a", "b"], "pending": []})),
@@ -160,6 +165,7 @@ fn the_delete_alias_is_a_non_compliance_discard() {
     );
     assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
     assert_eq!(json_of(&out)["applied"], json!(["itm-h3"]), "{out}");
+    assert_eq!(json_of(&out)["would_discard"], json!(1), "{out}");
     assert_eq!(stats(&s)["items_active"], json!(0), "alias discarded");
     let _ = std::fs::remove_file(&path);
 }

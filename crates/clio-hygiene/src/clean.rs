@@ -117,11 +117,14 @@ pub struct CleanArgs<'a> {
 pub struct CleanOutcome {
     /// True when nothing was written (dry-run).
     pub dry_run: bool,
-    /// Dry-run count: targets that would be flagged.
+    /// Targets this run resolves to `flag`: what a dry-run would apply, equal
+    /// to the applied flag count on a confirmed run.
     pub would_flag: usize,
-    /// Dry-run count: targets that would be archived.
+    /// Targets this run resolves to `archive`: what a dry-run would apply,
+    /// equal to the applied archive count on a confirmed run.
     pub would_archive: usize,
-    /// Dry-run count: targets that would be discarded.
+    /// Targets this run resolves to `discard`: what a dry-run would apply,
+    /// equal to the applied discard count on a confirmed run.
     pub would_discard: usize,
     /// Confirmed: item ids mutated so far.
     pub applied: Vec<String>,
@@ -147,7 +150,9 @@ pub struct FailedTarget {
 /// already discarded or archived. With `confirm`: every mutation writes its
 /// telemetry row inside the store transaction,
 /// appends a durable `hygiene_audit_logs` row, and a first per-item failure
-/// aborts the remaining targets (reported as `pending`). The action set never
+/// aborts the remaining targets (reported as `pending`). The `would_*`
+/// counters keep one meaning in both modes: on a confirmed run each equals
+/// the applied count for its action. The action set never
 /// reaches compliance erasure: no DEK destruction or tombstone write exists on
 /// this path.
 ///
@@ -225,6 +230,17 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
         };
         match result {
             Ok(()) => {
+                // The same counters carry the same meaning as in a preview:
+                // on a confirmed run each would_* equals the applied count
+                // for its action, so a reader of either response can tell
+                // what the run did. Failed and pending targets are not
+                // counted.
+                match action {
+                    CleanAction::Flag => outcome.would_flag += 1,
+                    CleanAction::Archive => outcome.would_archive += 1,
+                    CleanAction::Discard => outcome.would_discard += 1,
+                    CleanAction::Keep => {}
+                }
                 outcome.applied.push(target.item_id.clone());
                 append_log(args, index, target, action)?;
             }
