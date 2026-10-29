@@ -155,10 +155,20 @@ fn consolidate_and_summarize_dry_runs_refuse_a_bank_identically() {
             ],
             false,
         );
-        assert_eq!(summarize.0, consolidate.0, "bank {bank}: {summarize:?}{consolidate:?}");
-        assert_eq!(summarize.1, consolidate.1, "bank {bank}: {summarize:?}{consolidate:?}");
+        assert_eq!(
+            summarize.0, consolidate.0,
+            "bank {bank}: {summarize:?}{consolidate:?}"
+        );
+        assert_eq!(
+            summarize.1, consolidate.1,
+            "bank {bank}: {summarize:?}{consolidate:?}"
+        );
         let payload = json_of(&consolidate.2);
-        assert_eq!(payload["code"], json!("not_found"), "bank {bank}: {payload}");
+        assert_eq!(
+            payload["code"],
+            json!("not_found"),
+            "bank {bank}: {payload}"
+        );
         assert_eq!(payload["ok"], json!(false), "bank {bank}: {payload}");
     }
 }
