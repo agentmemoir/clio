@@ -90,6 +90,19 @@ pub(crate) fn state() -> Arc<McpState> {
         .expect("state")
 }
 
+/// Open in-memory state with a template extractor configured, so summarize
+/// paths pass the extraction-availability gate the real call enforces.
+pub(crate) fn extract_state() -> Arc<McpState> {
+    let state = state();
+    {
+        let mut runtime = state.config.lock().expect("config runtime mutex");
+        runtime
+            .load_file_json(r#"{"extract": {"url": "http://127.0.0.1:9/extract"}}"#)
+            .expect("extract config");
+    }
+    state
+}
+
 /// Dispatch an in-process tool call (the same seam the CLI uses).
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn call(state: &McpState, tool: &str, args: Value) -> Value {

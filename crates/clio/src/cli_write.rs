@@ -87,7 +87,7 @@ pub(crate) fn run_resolved(verb: &str, args: Vec<String>, io: &mut CliIo) -> Exi
         // The runtime default is configuration, never the caller's `--bank`.
         // The request carries `--bank` in its own arguments, and promoting it
         // here would exempt the bank from a caller that checks it (the
-        // summarize dry-run validates the named bank).
+        // summarize and consolidate dry-runs validate the named bank).
         default_bank: "default".to_owned(),
         default_actor: clio_types::Actor::Agent,
         // The shared surface is opt-in, mirroring `clio mcp stdio --shared-bank`;
@@ -166,11 +166,16 @@ fn run_parsed(
         Err(error) => return fail(io, mode, &error),
     };
     match call {
-        WriteCall::Preview { payload, text } => {
-            if verb == "summarize"
-                && let Err(error) = validate_summarize_preview(state, parsed)
-            {
-                return fail(io, mode, &error);
+        WriteCall::Preview { mut payload, text } => {
+            if verb == "summarize" || verb == "consolidate" {
+                let counts = crate::cli_write_preview::validate_preview(state, verb, parsed)
+                    .and_then(|bank| {
+                        crate::cli_write_preview::preview_counts(state, verb, parsed, &bank)
+                    });
+                match counts {
+                    Ok(counts) => payload["counts"] = counts,
+                    Err(error) => return fail(io, mode, &error),
+                }
             }
             emit(io, mode, &payload, &text);
             ExitCode::from(EXIT_OK)
@@ -226,35 +231,6 @@ fn receipt_bank<'a>(verb: &str, args: &'a Value, state: &'a McpState) -> Option<
             .and_then(Value::as_str)
             .unwrap_or(&state.default_bank),
     )
-}
-
-fn validate_summarize_preview(state: &McpState, parsed: &ParsedArgs) -> Result<(), CliError> {
-    let mut args = serde_json::Map::new();
-    if let Some(bank) = parsed.value("bank") {
-        args.insert("bank".into(), serde_json::Value::from(bank));
-    }
-    let ctx = state
-        .resolve_ctx(&serde_json::Value::Object(args))
-        .map_err(|error| CliError::from_am_error(&error))?;
-    state
-        .require_known_bank(ctx.bank.as_str())
-        .map_err(|error| CliError::from_am_error(&error))?;
-    let Some(scope) = parsed.value("scope") else {
-        return Ok(());
-    };
-    if scope == "bank"
-        || state
-            .store
-            .get_memory_item(ctx.bank.as_str(), scope)
-            .map_err(|error| CliError::from_am_error(&error))?
-            .is_some()
-    {
-        return Ok(());
-    }
-    Err(CliError::operational(
-        "item_not_found",
-        format!("item `{scope}` not found in bank"),
-    ))
 }
 
 /// Drain the index work a one-shot write just enqueued so the items are

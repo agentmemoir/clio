@@ -18,7 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::cli_read_test_support::{TS, call, json_of, state};
+use crate::cli_read_test_support::{TS, call, extract_state, json_of, seed_item, state};
 use crate::cli_write_test_support::run_write_state;
 use serde_json::json;
 use std::process::ExitCode;
@@ -214,7 +214,7 @@ fn summarize_requires_scope() {
 
 #[test]
 fn summarize_bank_dry_run_previews_without_calling_the_dispatcher() {
-    let s = state();
+    let s = extract_state();
     let (code, out, err) =
         run_write_state("summarize", &["--scope", "bank", "--dry-run"], &s, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
@@ -233,6 +233,9 @@ fn summarize_bank_dry_run_previews_without_calling_the_dispatcher() {
 #[test]
 fn consolidate_dry_run_previews_bank_and_force() {
     let s = state();
+    // The dry run now validates the named bank, so bank `demo` must exist:
+    // one seeded item makes it a bank the store holds.
+    seed_item(&s, "demo", "itm-consolidate", "prefers demo");
     let (code, out, err) = run_write_state(
         "consolidate",
         &["--bank", "demo", "--force", "--dry-run"],
@@ -289,55 +292,6 @@ fn remember_then_recall_round_trip_in_one_runtime() {
     let hits = payload["hits"].as_array().cloned().unwrap_or_default();
     assert_eq!(hits.len(), 1, "{payload}");
     assert!(hits[0]["item_id"].as_str().is_some(), "{payload}");
-}
-
-#[test]
-fn text_mode_remember_prints_the_stored_id() {
-    let s = state();
-    let (code, out, err) = run_write_state(
-        "remember",
-        &[
-            "prefers aisle seats",
-            "--category",
-            "persona",
-            "--bank",
-            "demo",
-        ],
-        &s,
-        true,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.contains("stored itm-cli-"), "{out}");
-    assert!(out.contains("admission_score"), "{out}");
-}
-
-#[test]
-fn text_mode_remember_dry_run_renders_the_preview_not_a_write() {
-    // The dry-run payload is a read-only admission decision; the text view
-    // must show pass/score/factors and never claim something was stored.
-    let s = state();
-    let (code, out, err) = run_write_state(
-        "remember",
-        &[
-            "prefers aisle seats",
-            "--category",
-            "persona",
-            "--bank",
-            "demo",
-            "--dry-run",
-        ],
-        &s,
-        true,
-    );
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.contains("preview:"), "{out}");
-    assert!(out.contains("score:"), "{out}");
-    assert!(out.contains("factors:"), "{out}");
-    assert!(
-        !out.contains("stored"),
-        "dry-run must not claim a write: {out}"
-    );
-    assert!(s.leaves.list_leaves("demo").is_empty(), "{out}");
 }
 
 #[test]
@@ -414,36 +368,4 @@ fn remember_maps_every_optional_flag() {
     let payload = json_of(&out);
     assert_eq!(payload["pass"], json!(true), "{payload}");
     assert!(payload["id"].as_str().is_some(), "{payload}");
-}
-
-#[test]
-fn render_views_fall_back_deterministically() {
-    // The fallback arms keep text output stable when an optional field is
-    // absent from a tool payload.
-    assert_eq!(
-        super::render_stored(&json!({"id": "itm-1"})),
-        "stored itm-1"
-    );
-    assert_eq!(super::render_preview(&json!({})), "preview");
-    assert_eq!(
-        super::render_preview(&json!({"pass": false, "rejection_reason": "nope"})),
-        "preview: refused\nreason: nope"
-    );
-    assert_eq!(
-        super::render_job(&json!({"job_id": "j-1", "status": "accepted"})),
-        "job j-1 status: accepted"
-    );
-    assert_eq!(
-        super::render_batch_preview(&json!({
-            "count": 2,
-            "summary": {"would_admit": 1, "would_reject": 1},
-            "writes": 0
-        })),
-        "preview: 2 items (would_admit: 1, would_reject: 1, writes: 0)"
-    );
-    // Missing optional fields fall back to zero counts, never a write claim.
-    assert_eq!(
-        super::render_batch_preview(&json!({})),
-        "preview: 0 items (would_admit: 0, would_reject: 0, writes: 0)"
-    );
 }

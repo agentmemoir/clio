@@ -18,7 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::cli_read_test_support::{json_of, state};
+use crate::cli_read_test_support::{json_of, seed_item, state};
 use crate::cli_write_group::{WriteCall, decision_refusal};
 use crate::cli_write_test_support::{run_write_open, run_write_resolved, run_write_state};
 use serde_json::json;
@@ -162,6 +162,68 @@ fn dry_run_preview_writes_nothing_and_exits_zero() {
     let payload = json_of(&out);
     assert_eq!(payload["dry_run"], json!(true));
     assert!(out.contains("dry_run"), "{out}");
+}
+
+/// The engine injects the preview module's read-only counts into the dry-run
+/// payload next to the `would` sentence.
+#[test]
+fn dry_run_payload_carries_the_pending_work_counts() {
+    let s = crate::cli_read_test_support::extract_state();
+    seed_item(&s, "demo", "itm-a", "prefers aisle seats");
+    let (code, out, err) = run_write_state(
+        "summarize",
+        &["--scope", "bank", "--bank", "demo", "--dry-run"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["counts"]["gists"], json!(1), "{payload}");
+    assert_eq!(payload["counts"]["skipped"], json!(0), "{payload}");
+    assert!(
+        payload["would"]
+            .as_str()
+            .is_some_and(|would| would.contains("snapshots are never altered")),
+        "the would sentence stays: {payload}"
+    );
+}
+
+/// The dry run answers the request the real call serves: with no extractor
+/// configured, real run and dry run fail identically (same `not_implemented`
+/// JSON, same exit 1), so a caller cannot tell them apart by outcome.
+#[test]
+fn summarize_dry_run_fails_like_the_real_call_without_an_extractor() {
+    let s = state();
+    seed_item(&s, "demo", "itm-a", "prefers aisle seats");
+    let real = run_write_state(
+        "summarize",
+        &["--scope", "bank", "--bank", "demo", "--output", "json"],
+        &s,
+        false,
+    );
+    let dry = run_write_state(
+        "summarize",
+        &[
+            "--scope",
+            "bank",
+            "--bank",
+            "demo",
+            "--output",
+            "json",
+            "--dry-run",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(real.0, dry.0, "exit codes must match: {real:?} vs {dry:?}");
+    assert!(real.1.is_empty(), "real stdout: {}", real.1);
+    assert!(dry.1.is_empty(), "dry stdout: {}", dry.1);
+    assert_eq!(
+        json_of(&real.2),
+        json_of(&dry.2),
+        "error payloads must match"
+    );
+    assert_eq!(json_of(&dry.2)["code"], json!("not_implemented"), "{dry:?}");
 }
 
 #[test]

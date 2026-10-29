@@ -115,6 +115,7 @@ mod cli_write_hygiene;
 mod cli_write_mutate;
 mod cli_write_persona;
 mod cli_write_portability;
+mod cli_write_preview;
 mod cli_write_shared;
 mod cli_write_source_type;
 mod cli_write_workspace;
