@@ -361,7 +361,7 @@ fn audit_text_marks_a_partial_scan() {
             "incomplete": true, "candidates": []
         })),
         "hygiene audit (bank big): scanned 5000 active items, 3 candidates \
-         (partial scan: bank exceeds the scan budget)"
+         (partial scan: bank exceeds the scan budget), printed 0 rows"
     );
     // A complete scan carries no marker.
     assert_eq!(
@@ -369,7 +369,8 @@ fn audit_text_marks_a_partial_scan() {
             "bank": "small", "scanned": 2, "total_candidates": 1,
             "incomplete": false, "candidates": []
         })),
-        "hygiene audit (bank small): scanned 2 active items, 1 candidate"
+        "hygiene audit (bank small): scanned 2 active items, 1 candidate, \
+         printed 0 rows"
     );
 }
 

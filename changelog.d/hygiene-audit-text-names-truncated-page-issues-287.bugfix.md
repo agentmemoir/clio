@@ -1,0 +1,1 @@
+`hygiene audit` in text output no longer hides a short page: when the ranked candidates are truncated, the summary line now names how many rows were printed and tells the reader to use `--offset` for the next page, matching the `truncated` marker the JSON output already carried. A full page keeps its header unchanged.
