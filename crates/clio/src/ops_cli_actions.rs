@@ -157,3 +157,7 @@ pub(crate) fn run_reindex<S: OpsRepos>(
         Err(e) => emit_error(&e, 3),
     }
 }
+
+#[cfg(test)]
+#[path = "ops_cli_actions_tests.rs"]
+mod ops_cli_actions_tests;
