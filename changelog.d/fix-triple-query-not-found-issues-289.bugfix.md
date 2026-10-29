@@ -1,0 +1,1 @@
+`clio triple query` now reports a missing subject as a not-found error instead of an empty result, while a subject that exists but matches no triples still returns an empty page.
