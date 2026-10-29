@@ -167,6 +167,20 @@ fn render_audit(payload: &Value) -> String {
             " (limit {MAX_PAGE_LIMIT}, lowered from {requested})"
         );
     }
+    // Bounded-output contract: a text page must not silently drop rows. The
+    // payload does not echo the request offset, so the note names the flag.
+    if payload.get("truncated") == Some(&Value::Bool(true)) {
+        use std::fmt::Write as _;
+        let printed = payload
+            .get("candidates")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        let _ = write!(
+            summary,
+            ", printed {} (truncated: use --offset for the next page)",
+            count_noun(printed as u64, "row", "rows"),
+        );
+    }
     let mut lines = vec![summary];
     if let Some(candidates) = payload.get("candidates").and_then(Value::as_array) {
         for candidate in candidates {
@@ -243,6 +257,12 @@ fn render_log(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_read_hygiene_tests.rs"]
 mod tests;
+
+// The truncated-page text tests are a child module so both files keep real
+// headroom under the 450-line source-file limit.
+#[cfg(test)]
+#[path = "cli_read_hygiene_tests_truncation_tests.rs"]
+mod truncation_tests;
 
 // The page-limit clamp tests are a child module so both files keep real
 // headroom under the 450-line source-file limit.
