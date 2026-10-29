@@ -336,3 +336,35 @@ fn compliance_cli_refusals_leave_the_request_unchanged() {
         "the refused close left the request unchanged"
     );
 }
+
+/// `request-events` refuses an unknown request id exactly as `request-status`
+/// does, so the two read verbs agree on the same missing id.
+#[test]
+fn request_events_refuses_an_unknown_request_id_like_status() {
+    let s = state();
+    let missing = "req-cli-events-missing";
+    let (code, _out, events_err) = run_json("request-events", &["--request-id", missing], &s);
+    assert_refusal(code, &events_err, "not_found");
+    let (_, _out, status_err) = run_json("request-status", &["--request-id", missing], &s);
+    assert_eq!(
+        json_of(&events_err)["message"],
+        json_of(&status_err)["message"],
+        "events and status name the same missing request: {events_err}{status_err}"
+    );
+}
+
+/// A real request with no recorded events still answers an empty success page.
+#[test]
+fn request_events_on_a_request_without_events_stays_an_empty_page() {
+    let s = state();
+    let request = "req-cli-events-empty";
+    let (code, out, err) = start(&s, request, "subject-cli-events");
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+
+    let (code, out, err) = run_json("request-events", &["--request-id", request], &s);
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let events = json_of(&out);
+    assert_eq!(events["rows"].as_array().map(Vec::len), Some(0), "{events}");
+    assert_eq!(events["has_more"], json!(false), "{events}");
+    assert_eq!(events["next_cursor"], Value::Null, "{events}");
+}

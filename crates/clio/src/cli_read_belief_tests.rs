@@ -195,12 +195,7 @@ fn triple_query_names_a_missing_subject_and_keeps_a_real_one_empty() {
     let s = belief_state();
 
     // A subject the bank does not hold: not found, exit-code-1 class.
-    let (code, out, err) = run_state(
-        "triple query",
-        &["ghost", "--bank", "bank-a"],
-        &s,
-        false,
-    );
+    let (code, out, err) = run_state("triple query", &["ghost", "--bank", "bank-a"], &s, false);
     assert_eq!(code, ExitCode::from(1), "{err}");
     assert!(out.is_empty(), "{out}");
     let error: Value = serde_json::from_str(err.trim()).expect("error envelope");
