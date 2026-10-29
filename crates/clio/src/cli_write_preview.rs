@@ -9,8 +9,8 @@
 //! scope) and computing the read-only pending-work counts the preview reports.
 //!
 //! ## Owns
-//! - `validate_preview`: the bank/scope check a dry run shares with the real
-//!   call's refusal behavior
+//! - `validate_preview`: the bank/scope check a dry run runs before its
+//!   preview
 //! - `preview_counts`: the read-only counts object a dry run reports next to
 //!   its `would` sentence
 //!
@@ -36,15 +36,19 @@ use serde_json::{Value, json};
 
 /// Validate a `--dry-run` preview against the store it would touch: resolve
 /// the caller's `--bank` (or the runtime default) and refuse an unknown or
-/// invalid bank exactly as the real tool call would, so every dry run of this
-/// dispatcher reports a missing bank the same way. `summarize` additionally
-/// checks its scope: a bank scope is fine, but an item scope must name an
-/// existing item. Returns the resolved bank, which the pending-work counts
-/// read against.
+/// invalid bank, so every dry run of this dispatcher reports a missing bank
+/// the same way. For `summarize` that refusal matches the real call: the
+/// read dispatch runs the same known-bank check. For `consolidate` the dry
+/// run is stricter than the real call: the real consolidate write call
+/// currently accepts an unknown bank (only an empty bank is refused), so the
+/// refusal exists only in the dry run, as the issue scopes it. `summarize`
+/// additionally checks its scope: a bank scope is fine, but an item scope
+/// must name an existing item. Returns the resolved bank, which the
+/// pending-work counts read against.
 ///
 /// # Errors
-/// A usage or store error when the dry run could not touch the store the way
-/// the real call would.
+/// A usage or store error when the dry run could not resolve or read the
+/// bank it previews.
 pub(crate) fn validate_preview(
     state: &McpState,
     verb: &str,
