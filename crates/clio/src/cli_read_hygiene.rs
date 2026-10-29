@@ -168,16 +168,25 @@ fn render_audit(payload: &Value) -> String {
         );
     }
     // Bounded-output contract: a text page must not silently drop rows. The
-    // payload does not echo the request offset, so the note names the flag.
+    // payload does not echo the request offset, so a truncated page names the
+    // flag; a short page that is not truncated still prints fewer rows than
+    // the total, so it names its row count; a full page stays plain.
+    let printed = payload
+        .get("candidates")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
     if payload.get("truncated") == Some(&Value::Bool(true)) {
         use std::fmt::Write as _;
-        let printed = payload
-            .get("candidates")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len);
         let _ = write!(
             summary,
             ", printed {} (truncated: use --offset for the next page)",
+            count_noun(printed as u64, "row", "rows"),
+        );
+    } else if printed as u64 != total {
+        use std::fmt::Write as _;
+        let _ = write!(
+            summary,
+            ", printed {}",
             count_noun(printed as u64, "row", "rows"),
         );
     }
