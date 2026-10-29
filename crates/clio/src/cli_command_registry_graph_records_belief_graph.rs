@@ -28,7 +28,7 @@
 //!
 //! Keep this module focused on the belief, graph, and associations records.
 
-use super::{AS_OF, CONTEXT, DRY_RUN, EXPLAIN, SUBJECT_ID, UNPRINTED_GLOBALS_OUTSIDE_BANK};
+use super::{AS_OF, CONTEXT, DRY_RUN, SUBJECT_ID, UNPRINTED_GLOBALS_OUTSIDE_BANK};
 use crate::cli_command_registry::{GLOBAL_BANK, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 use clio_types::SourceType;
@@ -86,7 +86,7 @@ pub(crate) const BELIEF_HISTORY: CommandSpec = CommandSpec {
     summary: "one belief's confidence history",
     notes: &[],
     positionals: &[BELIEF_ID],
-    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
@@ -97,12 +97,8 @@ pub(crate) const BELIEF_HISTORY: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio belief history \"the deploy is blocked\" --explain",
-            comment: Some("by proposition"),
-        },
-        Example {
             command: "clio belief history \"the deploy is blocked\" -o json",
-            comment: None,
+            comment: Some("by proposition"),
         },
     ],
     tool: Some("belief_history"),
@@ -189,7 +185,6 @@ pub(crate) const GRAPH_QUERY: CommandSpec = CommandSpec {
             &["coactivation", "explicit"],
         ),
         MIN_WEIGHT,
-        EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -274,7 +269,7 @@ pub(crate) const ASSOCIATIONS: CommandSpec = CommandSpec {
     summary: "co-activation links for one item",
     notes: &[],
     positionals: &[ITEM_ID],
-    documented: &[MIN_WEIGHT, EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[MIN_WEIGHT, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: UNPRINTED_GLOBALS_OUTSIDE_BANK,
     flag_aliases: &[],
     usage_override: None,
@@ -289,7 +284,7 @@ pub(crate) const ASSOCIATIONS: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio associations itm-sample-1 --explain -o json",
+            command: "clio associations itm-sample-1 -o json",
             comment: None,
         },
     ],

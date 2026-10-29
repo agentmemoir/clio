@@ -221,22 +221,22 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "edge-type",
                 "min-weight",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "associations",
             &["db", "backend", "bank", "actor", "output", "min-weight"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "persona get",
             &["db", "backend", "bank", "actor", "output", "budget-tokens"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "maintenance status",
             &["db", "backend", "bank", "actor", "output", "item-id"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = GraphGroup;

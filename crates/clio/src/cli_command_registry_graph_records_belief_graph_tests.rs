@@ -34,22 +34,19 @@ fn belief_history_matches_the_registered_usage_and_parser() {
     let spec = record("belief history");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio belief history BELIEF_ID_OR_PROPOSITION [--bank BANK] [--output json|text]",
         "belief history full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio belief history BELIEF_ID_OR_PROPOSITION [--explain] [--bank BANK] [--output json|text]",
+        "clio belief history BELIEF_ID_OR_PROPOSITION [--bank BANK] [--output json|text]",
         "belief history usage line"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "one belief's confidence history");
     assert_eq!(spec.tool, Some("belief_history"));
     assert_eq!(spec.section, Section::Read);
@@ -116,12 +113,12 @@ fn graph_query_matches_the_registered_usage_and_parser() {
     let spec = record("graph query");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--bank BANK] [--output json|text]",
         "graph query full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
+        "clio graph query SEED_ID [--max-hops N] [--edge-type coactivation|explicit] [--min-weight W] [--bank BANK] [--output json|text]",
         "graph query usage line"
     );
     assert_eq!(
@@ -137,10 +134,7 @@ fn graph_query_matches_the_registered_usage_and_parser() {
             "min-weight"
         ]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "neighbours of one item, by edge type");
     assert_eq!(spec.tool, Some("graph_query"));
     assert_eq!(spec.section, Section::Read);
@@ -203,22 +197,19 @@ fn associations_matches_the_registered_usage_and_parser() {
     let spec = record("associations");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio associations ITEM_ID [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio associations ITEM_ID [--min-weight W] [--bank BANK] [--output json|text]",
         "associations full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio associations ITEM_ID [--min-weight W] [--explain] [--bank BANK] [--output json|text]",
+        "clio associations ITEM_ID [--min-weight W] [--bank BANK] [--output json|text]",
         "associations usage line"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output", "min-weight"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "co-activation links for one item");
     assert_eq!(spec.tool, Some("associations"));
     assert_eq!(spec.section, Section::Read);
@@ -238,7 +229,7 @@ fn associations_matches_the_registered_usage_and_parser() {
 #[test]
 fn the_belief_graph_records_carry_their_examples() {
     for (name, count) in [
-        ("belief history", 3),
+        ("belief history", 2),
         ("belief observe", 3),
         ("graph query", 3),
         ("graph link", 3),

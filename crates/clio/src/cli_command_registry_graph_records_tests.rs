@@ -51,12 +51,12 @@ fn triple_query_matches_the_registered_usage_and_parser() {
     let spec = record("triple query");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--bank BANK] [--output json|text]",
         "triple query full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--explain] [--bank BANK] [--output json|text]",
+        "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--bank BANK] [--output json|text]",
         "triple query usage line"
     );
     assert_eq!(
@@ -76,10 +76,7 @@ fn triple_query_matches_the_registered_usage_and_parser() {
             "offset"
         ]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "match subject/predicate/object patterns");
     assert_eq!(spec.tool, Some("triple_query"));
     assert_eq!(spec.section, Section::Read);
