@@ -3,10 +3,10 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the confirmed `hygiene_clean` mutator
-//! Dry-run counting without `confirm`, confirmed
-//! `flag`/`archive`/`discard` (`delete` alias) with per-item durable
-//! hygiene-log rows, and the explicit never-erase boundary.
+//! This module is responsible for the confirmed `hygiene_clean` mutator:
+//! preview counting without `confirm` (zero writes, zero durable rows),
+//! confirmed `flag`/`archive`/`discard` (`delete` alias) with per-item
+//! durable hygiene-log rows, and the explicit never-erase boundary.
 //!
 //! ## Owns
 //! - [`clean`]: target resolution, confirmation gate, per-item executors,
@@ -142,9 +142,10 @@ pub struct FailedTarget {
 
 /// Run one `hygiene_clean` call.
 ///
-/// Without `confirm`: zero writes, `dry_run=1` log rows; returns
-/// would-flag / would-archive / would-discard counts only. With `confirm`:
-/// every mutation writes its telemetry row inside the store transaction,
+/// Without `confirm`: zero writes and zero durable rows; returns
+/// would-flag / would-archive / would-discard counts only, skipping targets
+/// already discarded or archived. With `confirm`: every mutation writes its
+/// telemetry row inside the store transaction,
 /// appends a durable `hygiene_audit_logs` row, and a first per-item failure
 /// aborts the remaining targets (reported as `pending`). The action set never
 /// reaches compliance erasure: no DEK destruction or tombstone write exists on
@@ -152,7 +153,8 @@ pub struct FailedTarget {
 ///
 /// # Errors
 /// Missing bank, empty targets, `keep` without a suggested action, empty ids,
-/// unconfirmed discard without a reason, or a dry-run log write failure.
+/// a state probe failure, unconfirmed discard without a reason, or a confirmed
+/// log write failure.
 pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
     if args.ctx.bank.as_str().is_empty() {
         return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
@@ -174,27 +176,7 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
     }
 
     if !args.confirm {
-        let mut outcome = CleanOutcome {
-            dry_run: true,
-            would_flag: 0,
-            would_archive: 0,
-            would_discard: 0,
-            applied: Vec::new(),
-            pending: Vec::new(),
-            failed: None,
-        };
-        for (index, target) in args.targets.iter().enumerate() {
-            validate_target_id(target.item_id.as_str())?;
-            let action = resolved_action(args.action, target)?;
-            match action {
-                CleanAction::Flag => outcome.would_flag += 1,
-                CleanAction::Archive => outcome.would_archive += 1,
-                CleanAction::Discard => outcome.would_discard += 1,
-                CleanAction::Keep => {}
-            }
-            append_log(args, index, target, action, true)?;
-        }
-        return Ok(outcome);
+        return preview_outcome(args);
     }
 
     let mut outcome = CleanOutcome {
@@ -244,7 +226,7 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
         match result {
             Ok(()) => {
                 outcome.applied.push(target.item_id.clone());
-                append_log(args, index, target, action, false)?;
+                append_log(args, index, target, action)?;
             }
             Err(err) => {
                 // Batch abort on first failure: remaining targets are reported
@@ -303,19 +285,18 @@ fn validate_target_id(item_id: &str) -> Result<(), AmError> {
     Ok(())
 }
 
-/// Append one durable hygiene-log row. Both dry-run and confirmed rows
-/// propagate write failures (fail closed: a cleanup that cannot be logged
-/// fails rather than proceeding silently). The row id carries the target
-/// index so duplicate target item ids never collide on the log primary key.
+/// Append one durable hygiene-log row for a confirmed mutation. Write
+/// failures propagate (fail closed: a cleanup that cannot be logged fails
+/// rather than proceeding silently). The row id carries the target index so
+/// duplicate target item ids never collide on the log primary key.
 fn append_log(
     args: &CleanArgs<'_>,
     index: usize,
     target: &CleanTarget,
     action: CleanAction,
-    dry_run: bool,
 ) -> Result<(), AmError> {
     let mut detail = serde_json::json!({
-        "result": if dry_run { "would_apply" } else { "applied" },
+        "result": "applied",
         "batch_id": args.batch_id
     });
     // A bound transport names the credential beside the claimed role. A local
@@ -329,11 +310,54 @@ fn append_log(
         action: action.as_str().to_owned(),
         actor: args.ctx.actor.as_str().to_owned(),
         confirmed: args.confirm,
-        dry_run,
+        dry_run: false,
         detail,
         created_at: args.timestamp.to_owned(),
     };
     args.hygiene.insert_hygiene_log(&entry)
+}
+
+/// The preview branch: count the actionable targets and write nothing.
+/// Items already discarded or archived have nothing left to apply, so they
+/// contribute no count and no candidate action.
+fn preview_outcome(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
+    let mut outcome = CleanOutcome {
+        dry_run: true,
+        would_flag: 0,
+        would_archive: 0,
+        would_discard: 0,
+        applied: Vec::new(),
+        pending: Vec::new(),
+        failed: None,
+    };
+    for target in args.targets {
+        validate_target_id(target.item_id.as_str())?;
+        let action = resolved_action(args.action, target)?;
+        if target_already_settled(args, &target.item_id)? {
+            continue;
+        }
+        match action {
+            CleanAction::Flag => outcome.would_flag += 1,
+            CleanAction::Archive => outcome.would_archive += 1,
+            CleanAction::Discard => outcome.would_discard += 1,
+            CleanAction::Keep => {}
+        }
+    }
+    Ok(outcome)
+}
+
+/// True when the item already sits in the end state a clean targets: it is
+/// discarded, or it carries the archive marker. A preview reports nothing to
+/// do for such a target.
+fn target_already_settled(args: &CleanArgs<'_>, item_id: &str) -> Result<bool, AmError> {
+    let bank = args.ctx.bank.as_str();
+    let active = args.store.get_item_identity(bank, item_id)?.is_some();
+    if active {
+        return args.store.item_is_archived(bank, item_id);
+    }
+    // A discarded row keeps its memory row; a missing one has none. Missing
+    // items stay reportable: the confirmed path surfaces them as failures.
+    Ok(args.store.get_memory_item(bank, item_id)?.is_some())
 }
 
 /// Build clean targets straight from audit candidates (MCP bridge).

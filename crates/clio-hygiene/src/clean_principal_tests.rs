@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - Test coverage for the credential key on a `hygiene_audit_logs` row
-//! - Test coverage for its absence on an unbound row, dry-run rows included
+//! - Test coverage for its absence on an unbound row, and for a preview
+//!   leaving no row to attribute
 //!
 //! ## Does not own
 //! - Clean counts, outcomes and validation (`clean_tests`)
@@ -61,7 +62,7 @@ fn a_local_clean_row_carries_no_credential_key() {
 }
 
 #[test]
-fn a_dry_run_row_is_labelled_the_same_way_as_a_confirmed_one() {
+fn a_preview_writes_no_row_to_label() {
     let bank = "bank-dry";
     let s = store();
     let s_ref = &*s as &dyn Store;
@@ -77,10 +78,10 @@ fn a_dry_run_row_is_labelled_the_same_way_as_a_confirmed_one() {
     ))
     .unwrap();
     let rows = s.list_hygiene_logs(Some(bank), 50, 0).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].dry_run, "an unconfirmed clean still writes a row");
-    assert_eq!(rows[0].detail["result"], "would_apply");
-    assert_eq!(rows[0].detail[PRINCIPAL_DETAIL_KEY], "ops-key");
+    assert!(
+        rows.is_empty(),
+        "a preview leaves no durable row to attribute: {rows:?}"
+    );
 }
 
 #[test]

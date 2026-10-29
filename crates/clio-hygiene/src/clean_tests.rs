@@ -49,17 +49,73 @@ fn t21_02_dry_run_counts_only_and_writes_nothing() {
     assert_eq!(outcome.would_archive, 1);
     assert_eq!(outcome.would_flag + outcome.would_discard, 0);
     assert!(outcome.applied.is_empty() && outcome.pending.is_empty() && outcome.failed.is_none());
-    // zero writes: item unchanged, no archive marker; the dry-run report row
-    // (dry_run=1, SHOULD ) is the only hygiene-log write.
+    // zero writes: item unchanged, no archive marker, and no durable log row
+    // anywhere — a preview leaves no trace to list.
     assert!(!s_ref.item_is_archived(bank, "itm-1").unwrap());
     let logs = s.list_hygiene_logs(Some(bank), 50, 0).unwrap();
-    assert_eq!(logs.len(), 1);
-    assert!(logs[0].dry_run && !logs[0].confirmed);
-    assert_eq!(logs[0].action, "archive");
+    assert!(logs.is_empty(), "a preview writes no log row: {logs:?}");
     let after = s_ref.get_memory_item(bank, "itm-1").unwrap();
     assert_eq!(
         after.as_ref().and_then(|i| i.gist.clone()),
         before.as_ref().and_then(|i| i.gist.clone())
+    );
+}
+
+#[test]
+fn a_preview_over_an_already_discarded_item_reports_nothing_to_do() {
+    let s = store();
+    let bank = "bank-preview-disc";
+    let s_ref = &*s as &dyn Store;
+    s_ref
+        .create_memory_item(&item("itm-1", bank, "already gone"), "actor")
+        .unwrap();
+    s_ref
+        .discard_item(
+            bank,
+            "itm-1",
+            "removed earlier",
+            "2026-09-19T00:00:00Z",
+            "actor",
+        )
+        .unwrap();
+    let outcome = clean(&args(
+        &s,
+        &ctx(bank),
+        &[target("itm-1")],
+        CleanAction::Archive,
+        false,
+    ))
+    .unwrap();
+    assert!(outcome.dry_run);
+    assert_eq!(
+        outcome.would_flag + outcome.would_archive + outcome.would_discard,
+        0,
+        "a settled item has no candidate action left"
+    );
+}
+
+#[test]
+fn a_preview_over_an_already_archived_item_reports_nothing_to_do() {
+    let s = store();
+    let bank = "bank-preview-arch";
+    let s_ref = &*s as &dyn Store;
+    s_ref
+        .create_memory_item(&item("itm-1", bank, "already shelved"), "actor")
+        .unwrap();
+    s.archive_item(bank, "itm-1", "2026-09-19T00:00:00Z", "actor")
+        .unwrap();
+    let outcome = clean(&args(
+        &s,
+        &ctx(bank),
+        &[target("itm-1")],
+        CleanAction::Discard,
+        false,
+    ))
+    .unwrap();
+    assert!(outcome.dry_run);
+    assert_eq!(
+        outcome.would_flag + outcome.would_archive + outcome.would_discard,
+        0
     );
 }
 

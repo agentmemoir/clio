@@ -1,0 +1,1 @@
+The `hygiene clean` preview no longer writes durable hygiene-log rows, so its zero-writes promise now matches what it actually does. The preview also no longer reports actions for items already discarded or archived; it reports what would happen only for targets that still need it.
