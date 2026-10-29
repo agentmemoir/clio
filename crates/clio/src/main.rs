@@ -136,6 +136,8 @@ mod http_bind;
 mod install_cli;
 mod mcp_cli;
 mod ops_cli;
+mod ops_cli_actions;
+mod ops_cli_render;
 /// The shared Postgres test address, declared once so two test modules share
 /// it through `use` rather than loading the file twice.
 #[cfg(test)]
