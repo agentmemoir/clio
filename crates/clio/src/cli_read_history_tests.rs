@@ -144,6 +144,37 @@ fn failure_list_exact_truncation_and_none() {
     );
 }
 
+/// `failure list` names its argument `TASK_ID` like the registry record, and
+/// the free-text fallback still matches task definitions only: text similar to
+/// a definition reaches that task's failures, and a known task id stays exact.
+#[test]
+fn failure_list_usage_names_the_task_id_and_the_fallback_matches_definitions() {
+    let s = history_state();
+    let (code, _, err) = run_state("failure list", &[], &s, false);
+    assert_eq!(code, ExitCode::from(2), "{err}");
+    assert!(err.contains("usage: clio failure list TASK_ID"), "{err}");
+    assert!(!err.contains("TASK_ID_OR_QUERY"), "{err}");
+    let record = crate::cli_command_registry::find("failure list").expect("a record");
+    assert_eq!(
+        crate::cli_command_registry_test_support::positionals(record),
+        [("TASK_ID", true)],
+        "the usage hint must name the label the registry record carries"
+    );
+
+    // The similarity fallback works over task definitions, so text equal to a
+    // definition reaches that task's failures without naming its id.
+    let (code, out, err) = run_state(
+        "failure list",
+        &["Run tests third", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(0), "{err}");
+    let value = json_of(&out);
+    assert_eq!(value["mode"], json!("similar"));
+    assert_eq!(value["failures"].as_array().map(Vec::len), Some(2));
+}
+
 #[test]
 fn memtree_query_get_and_truncation() {
     let s = history_state();

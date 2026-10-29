@@ -40,11 +40,11 @@ const TASK_ID: Positional = Positional {
     description: "The task record the command reads or writes: `task upsert` writes it and the others read or file against it.",
 };
 
-/// The required `TASK_ID_OR_QUERY` positional of `failure list`.
-const TASK_ID_OR_QUERY: Positional = Positional {
-    label: "TASK_ID_OR_QUERY",
+/// The required `TASK_ID` positional of `failure list`.
+const FAILURE_LIST_TASK_ID: Positional = Positional {
+    label: "TASK_ID",
     required: true,
-    description: "A task id or free text; `failures_for_task` tries the exact id first, then a similar search over task definitions.",
+    description: "The task whose failures are listed; when that id has no recorded failures, `failures_for_task` also lists failures of tasks with a similar definition.",
 };
 
 /// The required `NODE_ID` positional of `memtree get`.
@@ -234,7 +234,7 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     aliases: &[],
     summary: "failures recorded against one task",
     notes: &[],
-    positionals: &[TASK_ID_OR_QUERY],
+    positionals: &[FAILURE_LIST_TASK_ID],
     documented: &[
         Flag {
             default: Some("20"),
@@ -254,7 +254,7 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     usage_alternates: &[],
     examples: &[
         Example::new("clio failure list t-1 --limit 10 --db ./memory.db", None),
-        Example::new("clio failure list \"import verb\" --limit 5 -o json", None),
+        Example::new("clio failure list t-1 --limit 5 -o json", None),
     ],
     tool: Some("failures_for_task"),
     section: Section::Read,
