@@ -103,6 +103,30 @@ fn consolidate_force_counts_the_internal_nodes() {
     assert_eq!(counts["dirty_ancestors"], json!(1), "{counts}");
 }
 
+/// While a real write or wave holds the forest lock the way the real code
+/// does, the consolidate dry run reports `dirty_ancestors: null` — never a
+/// fabricated zero — for the plain run and for `--force`. After the lock is
+/// released, the count is a real number again.
+#[test]
+fn consolidate_reports_null_counts_while_the_forest_lock_is_held() {
+    let s = state();
+    seed_item(&s, "demo", "itm-a", "prefers aisle seats");
+    let plain = parsed("consolidate", &["--bank", "demo"]);
+    let forced = parsed("consolidate", &["--bank", "demo", "--force"]);
+    let bank = validate_preview(&s, "consolidate", &plain).expect("validated");
+    {
+        // The real call holds the forest lock with a blocking `lock()`; hold
+        // it the same way so `try_lock` in the counts reads contention.
+        let _forest = s.forest.lock().expect("forest");
+        for run in [&plain, &forced] {
+            let counts = preview_counts(&s, "consolidate", run, &bank).expect("counts");
+            assert_eq!(counts["dirty_ancestors"], json!(null), "{counts}");
+        }
+    }
+    let counts = preview_counts(&s, "consolidate", &plain, &bank).expect("counts");
+    assert_eq!(counts["dirty_ancestors"], json!(1), "{counts}");
+}
+
 /// An unknown bank is refused exactly as the real call would refuse it, so a
 /// dry run never previews a target the store does not hold.
 #[test]

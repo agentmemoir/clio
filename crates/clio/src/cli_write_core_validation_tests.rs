@@ -122,42 +122,45 @@ fn consolidate_dry_run_rejects_an_invalid_bank_name() {
 }
 
 /// The two dry runs report one missing bank identically: a script checking the
-/// exit code gets the same answer from either command.
+/// exit code gets the same answer from either command. Both the unknown name
+/// and the invalid name get that same identical refusal.
 #[test]
 fn consolidate_and_summarize_dry_runs_refuse_a_bank_identically() {
-    let summarize = run_write_open(
-        "summarize",
-        &[
-            "--scope",
-            "bank",
-            "--dry-run",
-            "--bank",
-            "nope",
-            "--db",
-            "sqlite::memory:",
-            "--output",
-            "json",
-        ],
-        false,
-    );
-    let consolidate = run_write_open(
-        "consolidate",
-        &[
-            "--dry-run",
-            "--bank",
-            "nope",
-            "--db",
-            "sqlite::memory:",
-            "--output",
-            "json",
-        ],
-        false,
-    );
-    assert_eq!(summarize.0, consolidate.0, "{summarize:?}{consolidate:?}");
-    assert_eq!(summarize.1, consolidate.1, "{summarize:?}{consolidate:?}");
-    let payload = json_of(&consolidate.2);
-    assert_eq!(payload["code"], json!("not_found"), "{payload}");
-    assert_eq!(payload["ok"], json!(false), "{payload}");
+    for bank in ["nope", "bad bank!"] {
+        let summarize = run_write_open(
+            "summarize",
+            &[
+                "--scope",
+                "bank",
+                "--dry-run",
+                "--bank",
+                bank,
+                "--db",
+                "sqlite::memory:",
+                "--output",
+                "json",
+            ],
+            false,
+        );
+        let consolidate = run_write_open(
+            "consolidate",
+            &[
+                "--dry-run",
+                "--bank",
+                bank,
+                "--db",
+                "sqlite::memory:",
+                "--output",
+                "json",
+            ],
+            false,
+        );
+        assert_eq!(summarize.0, consolidate.0, "bank {bank}: {summarize:?}{consolidate:?}");
+        assert_eq!(summarize.1, consolidate.1, "bank {bank}: {summarize:?}{consolidate:?}");
+        let payload = json_of(&consolidate.2);
+        assert_eq!(payload["code"], json!("not_found"), "bank {bank}: {payload}");
+        assert_eq!(payload["ok"], json!(false), "bank {bank}: {payload}");
+    }
 }
 
 /// The consolidate dry run keeps its own behavior: a valid bank scope still
