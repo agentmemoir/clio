@@ -51,6 +51,9 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
 unicode-normalization = "0.1"
 chacha20poly1305 = "0.10"
+# Stretches the sync key out of its secret: a single fast SHA-256 pass lets a
+# low-entropy secret be brute-forced offline from stolen ciphertext.
+argon2 = "0.6"
 pgvector = { version = "0.4", features = ["postgres"] }
 postgres = "0.19"
 rand = "0.9"
@@ -138,6 +141,11 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Argon2id is ~1.4 s per call unoptimized in dev builds; optimizing it removes
+# most of that cost with no behavior change.
+[profile.dev.package.argon2]
+opt-level = 3
 
 [profile.debugging]
 inherits = "dev"

@@ -156,6 +156,40 @@ fn an_identifier_less_ciphertext_serializes_without_the_field() {
     );
 }
 
+/// Two instances built from one secret derive the same identifier and open
+/// each other's seals, which is what lets two peers hold only the secret
+/// string and still read the same rows: the derivation may depend on nothing
+/// but the secret itself.
+#[test]
+fn two_instances_of_one_secret_share_the_identifier_and_each_others_seals() {
+    let secret = crate::credential_fixtures::secret("peer-shared-secret");
+    let a = crate::crypto::SyncCipherKey::from_secret(&secret);
+    let b = crate::crypto::SyncCipherKey::from_secret(&secret);
+    assert_eq!(a.key_id(), b.key_id(), "one secret, one identifier");
+    let cipher = a.seal(b"peer payload", TEST_AAD).expect("seal");
+    assert_eq!(
+        b.open(&cipher, TEST_AAD).expect("open"),
+        b"peer payload".to_vec(),
+        "a peer re-deriving the same secret opens the seal"
+    );
+}
+
+/// The key bytes are stretched, not the retired fast digest: if derivation
+/// ever regresses to the single unsalted SHA-256 pass, the inequality below
+/// fails and this test names the path it fell back to.
+#[test]
+fn the_derived_key_differs_from_the_legacy_sha256_digest() {
+    let secret = crate::credential_fixtures::secret("legacy-kdf-path");
+    let key = crate::crypto::SyncCipherKey::from_secret(&secret);
+    let legacy_hex = clio_store::sha256_hex(secret.as_bytes(), "am-sync-key");
+    let legacy_digest = super::hex_to_bytes(&legacy_hex);
+    assert_ne!(
+        key.key_bytes(),
+        legacy_digest.as_slice(),
+        "the key is stretched, not the legacy single SHA-256 digest"
+    );
+}
+
 /// The AEAD seals under the sealing role's derived subkey, never under the sync
 /// key itself, so the digest role and the handle role cannot be reached from
 /// the key that protects content.
