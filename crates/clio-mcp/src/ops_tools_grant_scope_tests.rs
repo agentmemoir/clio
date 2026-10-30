@@ -204,8 +204,8 @@ fn bound_caller_without_a_bank_never_reaches_the_whole_store() {
 /// omitted-argument narrowing must not refuse a request the grant authorizes.
 #[test]
 fn bound_verify_and_doctor_with_an_explicit_granted_bank_stay_scoped() {
-    let original = state(false);
-    seed_item(&original, "bank-a", "itm-a");
+    let original = two_bank_store();
+    plant_orphan_edge(&original, "bank-b");
     let restricted = bound(&original, &["bank-a"]);
 
     let verify = dispatch(
@@ -217,6 +217,12 @@ fn bound_verify_and_doctor_with_an_explicit_granted_bank_stay_scoped() {
     assert!(
         !verify.to_string().contains("bank-b"),
         "verify left its grant: {verify}"
+    );
+    // Only the seeded foreign bank carries this finding, so a report that names
+    // it read outside the bank the request named.
+    assert!(
+        !has_finding(&verify, "ORPHAN_ASSOC_EDGE"),
+        "verify reported the foreign bank's finding: {verify}"
     );
 
     let doctor = dispatch(
