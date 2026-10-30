@@ -112,11 +112,11 @@ pub fn pull(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStat
 
 /// Pull remote mutations and apply them under the deployment's erasure-denial
 /// authority: every pulled mutation passes the guarded apply entry before it
-/// can write, a denied subject is dead-lettered, and an authority that cannot
-/// be read refuses with the cursor unchanged.
+/// can write, a denied subject is dead-lettered, and an unreadable authority refuses.
 ///
 /// # Errors
-/// Transport, auth, or transient storage failures (cursor unchanged).
+/// Transport, auth, or transient storage failures, or a policy refusal of a
+/// response row naming a different bank than the requested one (cursor unchanged).
 pub fn pull_with_denial(
     cfg: &SyncClientConfig,
     banks: &[String],
