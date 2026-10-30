@@ -1,0 +1,1 @@
+The `clio failure list` usage and help text now name the argument `TASK_ID` and describe what the command really does: it lists failures recorded against one task and falls back to failures of tasks with a similar definition, so the usage text no longer advertises a free-text query mode.

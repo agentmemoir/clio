@@ -378,7 +378,7 @@ fn text_mode_views_are_deterministic() {
         true,
     );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.starts_with("edge trp-"), "{out}");
+    assert!(out.starts_with("bank: demo\nedge trp-"), "{out}");
     let (code, out, err) = run_write_state(
         "triple end",
         &[

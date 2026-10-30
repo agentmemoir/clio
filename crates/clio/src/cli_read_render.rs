@@ -4,17 +4,20 @@
 //! # Responsibility
 //!
 //! This module is responsible for rendering read-command success payloads as
-//! human-readable text for the `clio` read surface (recall/get/show/inspect/stats),
-//! including the per-stage score breakdown under each recall hit.
+//! human-readable text for the `clio` read surface (recall/get/show),
+//! including the per-stage score breakdown under each recall hit. The
+//! `stats` and `inspect` views live in their own modules next to this one.
 //!
 //! ## Owns
-//! - The per-verb text views over MCP success payloads
+//! - The per-verb text views over MCP success payloads for recall/get/show
 //! - The per-hit score breakdown and the derived entity-match reason line
 //! - The `recall` limit line and the binding-floor reason under an empty page
 //! - The empty-recall and missing-field fallbacks
 //!
 //! ## Does not own
 //! - Score computation; the renderer only formats values it is handed
+//! - The `stats` and `inspect` text views (see `cli_read_render_stats` /
+//!   `cli_read_render_inspect`)
 //! - JSON emission or output-mode selection (see `cli_output`)
 //! - Read-command argument decoding and dispatch (see `cli_read`)
 //!
@@ -72,8 +75,8 @@ pub(crate) fn render_text(verb: &str, payload: &Value, palette: Palette) -> Stri
     match verb {
         "recall" => render_recall(payload, palette),
         "get" | "show" => render_get(payload),
-        "inspect" => render_inspect(payload),
-        _ => render_stats(payload),
+        "inspect" => crate::cli_read_render_inspect::render_inspect(payload),
+        _ => crate::cli_read_render_stats::render_stats(payload),
     }
 }
 
@@ -343,54 +346,6 @@ fn render_get(payload: &Value) -> String {
         lines.push(format!("context: {context}"));
     }
     lines.join("\n")
-}
-
-fn render_inspect(payload: &Value) -> String {
-    let items = payload.get("items").and_then(Value::as_array);
-    let returned = items.map_or(0, Vec::len);
-    let total = payload.get("total").and_then(Value::as_u64);
-    let total = total
-        .and_then(|n| usize::try_from(n).ok())
-        .unwrap_or(returned);
-    let mut header = format!("items: {returned} of {total}");
-    // The page the caller asked for was lowered to the cap; name both values
-    // so the header never silently disagrees with the request.
-    if let (Some(limit), Some(requested)) = (
-        payload.get("limit").and_then(Value::as_u64),
-        payload.get("requested_limit").and_then(Value::as_u64),
-    ) {
-        use std::fmt::Write as _;
-        let _ = write!(header, " (limit {limit}, lowered from {requested})");
-    }
-    let mut lines = vec![header];
-    if let Some(items) = items {
-        for item in items {
-            let id = item.get("item_id").and_then(Value::as_str).unwrap_or("?");
-            lines.push(id.to_owned());
-        }
-    }
-    lines.join("\n")
-}
-
-fn render_stats(payload: &Value) -> String {
-    let text = |key: &str| {
-        payload
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("?")
-            .to_owned()
-    };
-    let number = |key: &str| match payload.get(key).and_then(Value::as_u64) {
-        Some(n) => n.to_string(),
-        None => "?".to_owned(),
-    };
-    format!(
-        "bank: {}\nitems_total: {}\nitems_active: {}\nitems_discarded: {}",
-        text("bank"),
-        number("items_total"),
-        number("items_active"),
-        number("items_discarded")
-    )
 }
 
 #[cfg(test)]

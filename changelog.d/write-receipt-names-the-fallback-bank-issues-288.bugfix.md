@@ -1,0 +1,1 @@
+A bank-scoped write that names no `--bank` now opens its receipt with the bank it actually used (`bank: default`) and says plainly that the fallback was applied, in text and in the JSON result (`bank`, `bank_source: defaulted`), so a later read scoped to another bank is no longer mistaken for lost data.

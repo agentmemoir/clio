@@ -30,7 +30,7 @@ use super::*;
 
 /// An environment lookup that reports nothing set, which is what "this machine
 /// has no deployment config" means (#90).
-fn no_env(key: &str) -> Option<String> {
+pub(super) fn no_env(key: &str) -> Option<String> {
     let _ = key;
     None
 }
@@ -60,7 +60,7 @@ fn run_ops_args(args: impl IntoIterator<Item = String>) -> ExitCode {
     super::ops_with(args, &no_env)
 }
 
-fn memory(sub: &str) -> Vec<String> {
+pub(super) fn memory(sub: &str) -> Vec<String> {
     vec![
         sub.to_owned(),
         "--backend".to_owned(),

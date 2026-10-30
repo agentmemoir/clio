@@ -97,6 +97,20 @@ fn compose_context_requires_budget_and_renders() {
     assert_eq!(code, ExitCode::from(0));
     let value = json_of(&out);
     assert_eq!(value["budget_tokens"], json!(2000));
+    // A plain call carries no trace: `explanation` appears only when asked.
+    assert!(value.get("explanation").is_none(), "{value}");
+
+    let (_, out, _) = run_state(
+        "compose-context",
+        &["--budget-tokens", "2000", "--bank", "bank-a", "--explain"],
+        &s,
+        false,
+    );
+    let explained = json_of(&out);
+    // The documented flag changes the output: `compose_context` assembles the
+    // trace, so `--explain` adds the top-level `explanation` object.
+    assert!(explained["explanation"].is_object(), "{explained}");
+    assert!(explained["explanation"]["total_tokens"].is_number());
 
     let (_, out, _) = run_state(
         "compose-context",
@@ -243,7 +257,7 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
         (
             "intent gate",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "compose-context",
@@ -272,7 +286,7 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
         (
             "audit trail",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = WorkspaceGroup;

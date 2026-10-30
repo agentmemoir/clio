@@ -97,7 +97,8 @@ const AUDIT_ITEM_ID: Positional = Positional {
     description: "The item id whose lifecycle is reconstructed.",
 };
 
-/// The `--explain` trace flag the read commands here document.
+/// The `--explain` trace flag `compose-context` documents; `compose_context`
+/// is the only tool in this tranche that reads the trace argument.
 const EXPLAIN: Flag = Flag::toggle("explain", "`read_args` requests the trace.");
 
 /// The shared-bank lines print the global `--actor ACTOR` placeholder and
@@ -252,7 +253,7 @@ pub(crate) const INTENT_GATE: CommandSpec = CommandSpec {
     summary: "decide whether a turn should reach memory",
     notes: &[],
     positionals: &[TURN_TEXT],
-    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -263,7 +264,7 @@ pub(crate) const INTENT_GATE: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio intent gate \"should this turn reach memory?\" --explain",
+            command: "clio intent gate \"should this turn reach memory?\" -o json",
             comment: None,
         },
     ],
@@ -331,7 +332,7 @@ pub(crate) const AUDIT_TRAIL: CommandSpec = CommandSpec {
     summary: "masked lifecycle reconstruction for one item",
     notes: &[],
     positionals: &[AUDIT_ITEM_ID],
-    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -342,7 +343,7 @@ pub(crate) const AUDIT_TRAIL: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio audit trail itm-sample-1 --explain",
+            command: "clio audit trail itm-sample-1 -o json",
             comment: None,
         },
     ],

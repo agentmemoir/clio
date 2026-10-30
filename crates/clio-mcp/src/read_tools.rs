@@ -354,12 +354,16 @@ fn inspect(state: &McpState, args: &Value) -> Result<Value, AmError> {
         }
         items.push(value);
     }
+    // The echo reports the filter the store applied: a `validity: "discarded"`
+    // selection includes discarded rows on its own, exactly like the flag.
+    let include_discarded =
+        filter.include_discarded || filter.validity == clio_store::InspectValidity::Discarded;
     let mut payload = json!({
         "items": items,
         "total": total,
         "limit": filter.limit,
         "offset": filter.offset,
-        "include_discarded": filter.include_discarded
+        "include_discarded": include_discarded
     });
     // Optional read-only supersession section for one item; absent unless
     // the caller names an `item_id`.
@@ -435,3 +439,7 @@ mod read_tools_inspect_time_tests;
 #[cfg(test)]
 #[path = "read_tools_lifecycle_tests.rs"]
 mod read_tools_lifecycle_tests;
+
+#[cfg(test)]
+#[path = "read_tools_inspect_echo_tests.rs"]
+mod read_tools_inspect_echo_tests;
