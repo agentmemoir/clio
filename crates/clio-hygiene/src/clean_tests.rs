@@ -4,17 +4,19 @@
 //! # Responsibility
 //!
 //! This module tests the confirmed `hygiene_clean` mutator (`clean.rs`):
-//! dry-run counts, archive retrieve exclusion, discard
+//! archive retrieve exclusion, discard
 //! without DEK destroy, the `delete` alias, the durable log
 //! and request validation. SQLite backend; the Postgres parity
 //! probe lives in `clio-store`'s `pg_hygiene_tests`.
 //!
 //! ## Owns
-//! - Test coverage for dry-run counting, confirmed counter consistency
-//!   (would_* equals the applied counts per action), archive/discard
-//!   outcomes, log row shape, and fail-closed argument validation
+//! - Test coverage for confirmed counter consistency (would_* equals the
+//!   applied counts per action), archive/discard outcomes, log row shape,
+//!   and fail-closed argument validation
 //!
 //! ## Does not own
+//! - The preview branch: dry-run counting, the settled-target skip, and
+//!   preview→confirmed parity (`clean_preview_tests.rs`)
 //! - The per-target `apply_suggested` resolution and skip behaviour
 //!   (`clean_apply_suggested_tests.rs`)
 //! - Batch-abort and duplicate-target semantics (`clean_batch_tests.rs`)
@@ -30,97 +32,6 @@
 use super::clean_test_support::{args, ctx, item, store, target};
 use crate::clean::{CleanAction, CleanOutcome, CleanTarget, clean};
 use clio_store::{ComplianceStore, HygieneStore, IndexStore, SqliteStore, Store};
-
-#[test]
-fn t21_02_dry_run_counts_only_and_writes_nothing() {
-    let s = store();
-    let bank = "bank-dry";
-    let s_ref = &*s as &dyn Store;
-    s_ref
-        .create_memory_item(&item("itm-1", bank, "scratch note one"), "actor")
-        .unwrap();
-    let before = s_ref.get_memory_item(bank, "itm-1").unwrap();
-    let outcome = clean(&args(
-        &s,
-        &ctx(bank),
-        &[target("itm-1")],
-        CleanAction::Archive,
-        false,
-    ))
-    .unwrap();
-    assert!(outcome.dry_run);
-    assert_eq!(outcome.would_archive, 1);
-    assert_eq!(outcome.would_flag + outcome.would_discard, 0);
-    assert!(outcome.applied.is_empty() && outcome.pending.is_empty() && outcome.failed.is_none());
-    // zero writes: item unchanged, no archive marker, and no durable log row
-    // anywhere — a preview leaves no trace to list.
-    assert!(!s_ref.item_is_archived(bank, "itm-1").unwrap());
-    let logs = s.list_hygiene_logs(Some(bank), 50, 0).unwrap();
-    assert!(logs.is_empty(), "a preview writes no log row: {logs:?}");
-    let after = s_ref.get_memory_item(bank, "itm-1").unwrap();
-    assert_eq!(
-        after.as_ref().and_then(|i| i.gist.clone()),
-        before.as_ref().and_then(|i| i.gist.clone())
-    );
-}
-
-#[test]
-fn a_preview_over_an_already_discarded_item_reports_nothing_to_do() {
-    let s = store();
-    let bank = "bank-preview-disc";
-    let s_ref = &*s as &dyn Store;
-    s_ref
-        .create_memory_item(&item("itm-1", bank, "already gone"), "actor")
-        .unwrap();
-    s_ref
-        .discard_item(
-            bank,
-            "itm-1",
-            "removed earlier",
-            "2026-09-19T00:00:00Z",
-            "actor",
-        )
-        .unwrap();
-    let outcome = clean(&args(
-        &s,
-        &ctx(bank),
-        &[target("itm-1")],
-        CleanAction::Archive,
-        false,
-    ))
-    .unwrap();
-    assert!(outcome.dry_run);
-    assert_eq!(
-        outcome.would_flag + outcome.would_archive + outcome.would_discard,
-        0,
-        "a settled item has no candidate action left"
-    );
-}
-
-#[test]
-fn a_preview_over_an_already_archived_item_reports_nothing_to_do() {
-    let s = store();
-    let bank = "bank-preview-arch";
-    let s_ref = &*s as &dyn Store;
-    s_ref
-        .create_memory_item(&item("itm-1", bank, "already shelved"), "actor")
-        .unwrap();
-    s.archive_item(bank, "itm-1", "2026-09-19T00:00:00Z", "actor")
-        .unwrap();
-    let outcome = clean(&args(
-        &s,
-        &ctx(bank),
-        &[target("itm-1")],
-        CleanAction::Discard,
-        false,
-    ))
-    .unwrap();
-    assert!(outcome.dry_run);
-    assert_eq!(
-        outcome.would_flag + outcome.would_archive + outcome.would_discard,
-        0
-    );
-}
 
 #[test]
 fn t21_03_confirmed_archive_hides_from_default_retrieve() {

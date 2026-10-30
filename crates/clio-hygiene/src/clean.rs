@@ -29,6 +29,9 @@
 //! Keep this module focused on the clean orchestration contract.
 
 use crate::audit::NoiseCandidate;
+use crate::clean_preview::{
+    preview_outcome, resolved_action, target_already_settled, validate_target_id,
+};
 use clio_store::{HygieneLogEntry, HygieneStore, Store};
 use clio_types::{AmError, ErrorCode, OpContext, record_principal};
 use serde::Serialize;
@@ -131,8 +134,9 @@ pub struct CleanOutcome {
     pub would_discard: usize,
     /// Confirmed: item ids mutated so far.
     pub applied: Vec<String>,
-    /// Confirmed: item ids skipped because their suggestion is `keep`.
-    /// The batch continued without them.
+    /// Item ids skipped: the target's own suggestion is `keep` (nothing to
+    /// apply), or the item is already settled (discarded, or carrying the
+    /// archive marker). The batch continued without them, in both modes.
     pub skipped: Vec<String>,
     /// Confirmed abort: targets not attempted after the first failure.
     pub pending: Vec<String>,
@@ -152,16 +156,18 @@ pub struct FailedTarget {
 /// Run one `hygiene_clean` call.
 ///
 /// Without `confirm`: zero writes and zero durable rows; returns
-/// would-flag / would-archive / would-discard counts only, skipping targets
-/// already discarded or archived. With `confirm`: every mutation writes its
-/// telemetry row inside the store transaction and appends a durable
-/// `hygiene_audit_logs` row, and a first per-item failure aborts the
-/// remaining targets (reported as `pending`). A confirmed `apply_suggested`
-/// run skips a target suggested as `keep` (nothing to apply; reported as
-/// `skipped`) instead of failing the batch. The `would_*` counters keep one
-/// meaning in both modes: on a confirmed run each equals the applied count
-/// for its action. The action set never reaches compliance erasure: no DEK
-/// destruction or tombstone write exists on this path.
+/// would-flag / would-archive / would-discard counts only. With `confirm`:
+/// every mutation writes its telemetry row inside the store transaction and
+/// appends a durable `hygiene_audit_logs` row, and a first per-item failure
+/// aborts the remaining targets (reported as `pending`). A target suggested
+/// as `keep` (nothing to apply) or already settled — discarded, or carrying
+/// the archive marker — is skipped instead of failing the batch, in both
+/// modes: its id lands in `skipped` and it counts for nothing, so a preview
+/// and the confirmed run over the same request agree. The `would_*`
+/// counters keep one meaning in both modes: on a confirmed run each equals
+/// the applied count for its action. The action set never reaches
+/// compliance erasure: no DEK destruction or tombstone write exists on this
+/// path.
 ///
 /// # Errors
 /// Missing bank, empty targets, an `apply_suggested` target with no
@@ -208,6 +214,15 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
             outcome.skipped.push(target.item_id.clone());
             continue;
         };
+        // A settled target (already discarded or archived) has nothing left
+        // to apply: skip it with the same disclosure as a `keep` suggestion,
+        // so the confirmed run agrees with the preview instead of failing
+        // (discarded) or succeeding against an already-settled state
+        // (archived).
+        if target_already_settled(args, &target.item_id)? {
+            outcome.skipped.push(target.item_id.clone());
+            continue;
+        }
         let result = match action {
             CleanAction::Flag => args
                 .hygiene
@@ -285,42 +300,6 @@ fn confirmed_discard_requested(args: &CleanArgs<'_>) -> bool {
                 .any(|t| t.suggested_action.as_deref() == Some("discard")))
 }
 
-/// Resolve the per-target action (`apply_suggested` needs an audit
-/// suggestion). `None` marks a target suggested as `keep`: nothing applies,
-/// so the caller skips it rather than aborting the batch. Other unmapped
-/// suggestions still fail closed.
-fn resolved_action(
-    action: CleanAction,
-    target: &CleanTarget,
-) -> Result<Option<CleanAction>, AmError> {
-    match action {
-        CleanAction::ApplySuggested => match target.suggested_action.as_deref() {
-            Some("flag") => Ok(Some(CleanAction::Flag)),
-            Some("archive") => Ok(Some(CleanAction::Archive)),
-            Some("discard") => Ok(Some(CleanAction::Discard)),
-            Some("keep") => Ok(None),
-            other => Err(AmError::new(
-                ErrorCode::InvalidArgument,
-                format!(
-                    "target `{}` has no applicable suggested_action (`{other:?}`); supply an explicit action",
-                    target.item_id
-                ),
-            )),
-        },
-        explicit => Ok(Some(explicit)),
-    }
-}
-
-fn validate_target_id(item_id: &str) -> Result<(), AmError> {
-    if item_id.trim().is_empty() {
-        return Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            "item_id is required for every clean target",
-        ));
-    }
-    Ok(())
-}
-
 /// Append one durable hygiene-log row for a confirmed mutation. Write
 /// failures propagate (fail closed: a cleanup that cannot be logged fails
 /// rather than proceeding silently). The row id carries the target index so
@@ -362,53 +341,6 @@ fn append_log(
     args.hygiene.insert_hygiene_log(&entry)
 }
 
-/// The preview branch: count the actionable targets and write nothing.
-/// Items already discarded or archived have nothing left to apply, so they
-/// contribute no count and no candidate action.
-fn preview_outcome(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
-    let mut outcome = CleanOutcome {
-        dry_run: true,
-        would_flag: 0,
-        would_archive: 0,
-        would_discard: 0,
-        applied: Vec::new(),
-        skipped: Vec::new(),
-        pending: Vec::new(),
-        failed: None,
-    };
-    for target in args.targets {
-        validate_target_id(target.item_id.as_str())?;
-        // A `keep` suggestion has nothing to count: the preview skips it.
-        let Some(action) = resolved_action(args.action, target)? else {
-            continue;
-        };
-        if target_already_settled(args, &target.item_id)? {
-            continue;
-        }
-        match action {
-            CleanAction::Flag => outcome.would_flag += 1,
-            CleanAction::Archive => outcome.would_archive += 1,
-            CleanAction::Discard => outcome.would_discard += 1,
-            CleanAction::ApplySuggested => {}
-        }
-    }
-    Ok(outcome)
-}
-
-/// True when the item already sits in the end state a clean targets: it is
-/// discarded, or it carries the archive marker. A preview reports nothing to
-/// do for such a target.
-fn target_already_settled(args: &CleanArgs<'_>, item_id: &str) -> Result<bool, AmError> {
-    let bank = args.ctx.bank.as_str();
-    let active = args.store.get_item_identity(bank, item_id)?.is_some();
-    if active {
-        return args.store.item_is_archived(bank, item_id);
-    }
-    // A discarded row keeps its memory row; a missing one has none. Missing
-    // items stay reportable: the confirmed path surfaces them as failures.
-    Ok(args.store.get_memory_item(bank, item_id)?.is_some())
-}
-
 /// Build clean targets straight from audit candidates (MCP bridge).
 #[must_use]
 pub fn targets_from_candidates(candidates: &[NoiseCandidate]) -> Vec<CleanTarget> {
@@ -429,6 +361,10 @@ mod clean_test_support;
 #[cfg(test)]
 #[path = "clean_tests.rs"]
 mod clean_tests;
+
+#[cfg(test)]
+#[path = "clean_preview_tests.rs"]
+mod clean_preview_tests;
 
 #[cfg(test)]
 #[path = "clean_principal_tests.rs"]

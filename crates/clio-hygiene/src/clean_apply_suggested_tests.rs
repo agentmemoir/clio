@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - Test coverage for per-target suggestion application, the reported
-//!   `skipped` list on a confirmed run, and the preview's silent skip
+//!   `skipped` list (confirmed and preview), and the preview's reported skip
 //!
 //! ## Does not own
 //! - The single-action outcomes (`clean_tests.rs`)
@@ -158,6 +158,9 @@ fn a_preview_skips_a_keep_suggestion_without_failing() {
     assert!(outcome.dry_run);
     assert_eq!(outcome.would_archive, 1);
     assert_eq!(outcome.would_flag + outcome.would_discard, 0);
+    // The preview discloses the skip in the same field a confirmed run
+    // uses, so the two modes agree for the same request.
+    assert_eq!(outcome.skipped, vec!["pv-keep".to_owned()]);
     // Zero writes, as for any preview.
     assert!(!s_ref.item_is_archived(bank, "pv-arch").unwrap());
     let logs = s.list_hygiene_logs(Some(bank), 50, 0).unwrap();

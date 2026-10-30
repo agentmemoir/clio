@@ -227,7 +227,8 @@ fn candidate(entry: &Value) -> Result<Value, CliError> {
     Ok(Value::Object(candidate))
 }
 
-/// Human text for the clean outcome: a dry-run counts line, or the applied
+/// Human text for the clean outcome: a dry-run counts line (with a skipped
+/// count when the preview skipped any target) or the applied
 /// summary plus any per-target failure, pending count, and skipped count on a
 /// confirmed run (a failure is never hidden; a skipped `keep` suggestion is
 /// never counted as applied).
@@ -239,10 +240,17 @@ fn render_clean(payload: &Value) -> String {
             count("would_archive"),
             count("would_discard"),
         );
-        return format!(
+        let mut summary = format!(
             "hygiene clean dry-run: would flag {flag}, archive {archive}, discard {discard} \
              (zero writes; pass --confirm to apply)"
         );
+        // The preview discloses its skips the way the confirmed run does, so
+        // the dry-run text says why its counts came back zero.
+        let skipped = count_of(payload, "skipped");
+        if skipped > 0 {
+            let _ = write!(summary, "; {skipped} skipped");
+        }
+        return summary;
     }
     let applied = count_of(payload, "applied");
     let pending = count_of(payload, "pending");
@@ -276,3 +284,7 @@ fn count_of(payload: &Value, key: &str) -> usize {
 #[cfg(test)]
 #[path = "cli_write_hygiene_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_hygiene_parse_tests.rs"]
+mod parse_tests;
