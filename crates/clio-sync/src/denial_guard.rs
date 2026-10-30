@@ -11,6 +11,9 @@
 //! ## Owns
 //! - `content_subject_id` / `subject_verdict`: which payload shapes are
 //!   subject-keyed and the three-way verdict for one payload's subject
+//! - `sealed_content` / `sealed_subject_id` / `sealed_verdict`: the payload a
+//!   serving peer's sync key opens, the subject inside it, and the same
+//!   three-way verdict for that subject
 //! - `guard_subject`: the verdict a payload's subject must pass before an
 //!   upsert or mint path may run
 //! - `record_carrier_proof` / `apply_carrier` / `redelivery_proof`: recording
@@ -33,12 +36,14 @@
 //! Keep this module focused on the denial guards over the sync paths.
 
 use crate::apply::{ApplyEngine, ApplyOutcome, ApplyResult, dead_letter};
+use crate::crypto::SyncCipherKey;
 use crate::denial::{
     DenialCarrier, DenialProof, DenialProofBinding, bank_verdict, denial_carrier,
     denial_subject_hash, denied_bank_marker,
 };
 use crate::protocol::{
-    ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_TASK, SyncMutation,
+    ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_TASK, SyncContent,
+    SyncMutation,
 };
 use clio_store::{DenialVerdict, ErasureDenial};
 use clio_types::{AmError, ErrorCode};
@@ -73,6 +78,48 @@ pub fn subject_verdict(
 ) -> DenialVerdict {
     match content_subject_id(entity_kind, content) {
         Some(subject_id) => denial.verdict(subject_id),
+        None => DenialVerdict::Clear,
+    }
+}
+
+/// The content one sealed payload carries, opened under the serving peer's sync
+/// key, or `None` when this peer cannot read it.
+///
+/// A sealed row keeps everything inside the ciphertext, so the plaintext readers
+/// below and the apply path see no content at all. `None` is the answer in every
+/// case this peer cannot speak to: content that is not sealed, a ciphertext the
+/// key does not open, and a payload that is not JSON. A row this peer cannot
+/// read therefore keeps the behavior it had before the peer held a key.
+#[must_use]
+pub fn sealed_content(key: &SyncCipherKey, m: &SyncMutation) -> Option<Value> {
+    let SyncContent::Cipher(cipher) = &m.content else {
+        return None;
+    };
+    let bytes = key.open(cipher, &m.execution_view().aad()).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// The subject id one sealed payload carries, once the serving peer's sync key
+/// opens it, or `None` when there is nothing to resolve here.
+///
+/// The companion case is the same as [`sealed_content`]'s: an unsealed row, one
+/// this key does not open, and a payload or kind that carries no subject id all
+/// answer `None`, so a row this peer cannot read is never quarantined on a guess.
+#[must_use]
+pub fn sealed_subject_id(key: &SyncCipherKey, m: &SyncMutation) -> Option<String> {
+    content_subject_id(&m.entity_kind, &sealed_content(key, m)?).map(str::to_owned)
+}
+
+/// The verdict for the subject a sealed mutation carries: `Clear` when the row
+/// is unsealed, cannot be opened, or carries no readable subject id.
+#[must_use]
+pub fn sealed_verdict(
+    denial: &dyn ErasureDenial,
+    key: &SyncCipherKey,
+    m: &SyncMutation,
+) -> DenialVerdict {
+    match sealed_subject_id(key, m) {
+        Some(subject_id) => denial.verdict(&subject_id),
         None => DenialVerdict::Clear,
     }
 }
@@ -239,3 +286,7 @@ pub(crate) fn pull_refusal(denial: Option<&dyn ErasureDenial>, bank: &str) -> Re
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "denial_guard_sealed_tests.rs"]
+mod denial_guard_sealed_tests;

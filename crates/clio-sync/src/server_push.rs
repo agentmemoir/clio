@@ -30,13 +30,15 @@
 //!
 //! Keep this module focused on the push route.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation_guarded, quarantine};
+use crate::apply::{
+    ApplyEngine, ApplyOutcome, apply_mutation_guarded, apply_mutation_guarded_relaying, quarantine,
+};
 use crate::credential::AuthOutcome;
 use crate::denial::DenialAck;
 use crate::protocol::{PushAck, SyncContent, SyncMutation, encode_cursor};
 use crate::server::{ServeOptions, bank_authorized};
 use crate::server_conn::{write_json, write_status_error};
-use clio_store::ErasureDenial;
+use clio_store::DenialVerdict;
 use clio_types::{AmError, ErrorCode};
 use serde_json::Value;
 use std::net::TcpStream;
@@ -48,6 +50,62 @@ const PLAINTEXT_CONTENT_REFUSAL: &str = "refused plaintext content: this node st
      plaintext row carries no authenticated envelope, so it cannot be told apart from one a \
      relay fabricated or downgraded from sealed content. Reseal the row on the sending node \
      with a sync key and push again";
+
+/// The refusal a sealed mutation for a subject a recorded denial covers gets.
+/// The subject was resolved here, under this peer's own sync key, so the row is
+/// quarantined as the erased subject rather than as an unreadable envelope.
+const SEALED_ERASED_SUBJECT_REFUSAL: &str = "refused sealed content for a subject a recorded erasure denial covers: the \
+     person's data was erased, so the row is quarantined instead of applied";
+
+/// What the sealed subject check allows for one mutation.
+enum SealedCheck {
+    /// The row may take the ordinary apply path.
+    Apply,
+    /// The row was quarantined as the erased subject.
+    Refused,
+}
+
+/// Refuse a sealed mutation whose resolved subject a recorded denial covers.
+///
+/// A sealed row keeps its subject inside the ciphertext, so the apply guard's
+/// own read sees no subject at all. The serving peer holds the sync key, so the
+/// subject is resolved here, before the apply path writes anything: a row for a
+/// denied subject is quarantined as the erased subject, and a row this peer
+/// cannot open keeps the behavior it had before this check.
+///
+/// # Errors
+/// The quarantine write, and the authority's own refusal when it cannot be read.
+fn check_sealed_subject(
+    engine: &ApplyEngine<'_>,
+    options: &ServeOptions,
+    bank: &str,
+    m: &SyncMutation,
+    envelope: &str,
+    rejected: &mut Vec<String>,
+) -> Result<SealedCheck, AmError> {
+    let (Some(denial), Some(key)) = (options.denial.as_deref(), options.sync_key.as_deref()) else {
+        return Ok(SealedCheck::Apply);
+    };
+    match crate::denial_guard::sealed_verdict(denial, key, m) {
+        DenialVerdict::Clear => Ok(SealedCheck::Apply),
+        DenialVerdict::Denied => {
+            refuse(
+                engine,
+                bank,
+                m,
+                envelope,
+                crate::protocol::REASON_ERASED_SUBJECT,
+                SEALED_ERASED_SUBJECT_REFUSAL,
+                rejected,
+            )?;
+            Ok(SealedCheck::Refused)
+        }
+        DenialVerdict::AuthorityUnavailable => Err(AmError::new(
+            ErrorCode::ConfigCorrupt,
+            "the local erasure-denial authority is unreadable; refusing the mutation",
+        )),
+    }
+}
 
 /// Quarantine one refused mutation under the envelope's authorized bank and
 /// record its id as rejected, so a refusal never writes into another bank and
@@ -68,16 +126,34 @@ fn refuse(
 
 /// Apply one authorized mutation and record its outcome: the proof a denial
 /// operation answers with, and whether the peer is told accepted or rejected.
+///
+/// A row sealed under this peer's key is opened here, so the subject guard and
+/// the apply effects see the payload the writer sealed, while the journal keeps
+/// relaying that same sealed row to every reader downstream.
 fn apply_and_record(
     engine: &ApplyEngine<'_>,
-    denial: Option<&dyn ErasureDenial>,
+    options: &ServeOptions,
     m: &SyncMutation,
     envelope: &str,
     accepted: &mut Vec<String>,
     rejected: &mut Vec<String>,
     denial_acks: &mut Vec<DenialAck>,
 ) -> Result<(), AmError> {
-    let result = apply_mutation_guarded(engine, denial, m, envelope)?;
+    let denial = options.denial.as_deref();
+    let result = match options
+        .sync_key
+        .as_deref()
+        .and_then(|key| crate::denial_guard::sealed_content(key, m))
+    {
+        Some(content) => {
+            let opened = SyncMutation {
+                content: SyncContent::Plain(content),
+                ..m.clone()
+            };
+            apply_mutation_guarded_relaying(engine, denial, &opened, envelope, m)?
+        }
+        None => apply_mutation_guarded(engine, denial, m, envelope)?,
+    };
     // The durable record is written before this acknowledgement: the proof is
     // the authority's own record of it, never a transport receipt, and a
     // redelivery returns the same proof.
@@ -216,9 +292,15 @@ pub(crate) fn handle_push(
             )?;
             continue;
         }
+        // A sealed row's subject can only be resolved with this peer's own key.
+        match check_sealed_subject(&engine, options, &bank, &m, &envelope, &mut rejected) {
+            Ok(SealedCheck::Apply) => {}
+            Ok(SealedCheck::Refused) => continue,
+            Err(err) => return write_status_error(stream, 500, &err),
+        }
         if let Err(err) = apply_and_record(
             &engine,
-            options.denial.as_deref(),
+            options,
             &m,
             &envelope,
             &mut accepted,

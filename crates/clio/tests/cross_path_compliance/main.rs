@@ -35,6 +35,7 @@ mod case_fixtures;
 mod cli_test_support;
 mod family_fixtures;
 mod family_test_support;
+mod peer_probe_test_support;
 mod peer_process_test_support;
 mod peer_test_support;
 mod refusals_test_support;

@@ -226,6 +226,7 @@ pub fn sync_serve_with(
             ttl_secs,
             deadline_secs: None,
             device_id: state.device_id.clone(),
+            sync_key: None,
         },
         denial,
     )?;

@@ -12,6 +12,8 @@
 //!   decoder), the anonymous-bind refusal, and the bound address payload
 //! - `denial_probe`: the journal-backed authority the server is served with,
 //!   or the refusal when this deployment cannot name its journal
+//! - `serve_sync_key`: the sync key the peer serves with, read from the
+//!   explicit key file or the recorded store
 //!
 //! ## Does not own
 //! - The verb, its flags, dispatch, or views (see `sync_cli`)
@@ -30,10 +32,10 @@ use clio_compliance::JournalDenialProbe;
 use clio_mcp::runtime::McpState;
 use clio_mcp::sync_tools::banks_of;
 use clio_store::ErasureDenial;
-use clio_sync::prelude::{SyncServer, SyncServerOptions, sync_serve_with_denial};
+use clio_sync::prelude::{SyncCipherKey, SyncServer, SyncServerOptions, sync_serve_with_denial};
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::cli_error::CliError;
@@ -79,6 +81,7 @@ pub(crate) fn start_serve(
         ttl_secs,
         deadline_secs: None,
         device_id: state.device_id.clone(),
+        sync_key: serve_sync_key(env)?,
     };
     let server = sync_serve_with_denial(options, denial_probe(env)?)
         .map_err(|error| CliError::from_am_error(&error))?;
@@ -104,4 +107,34 @@ fn denial_probe(env: &dyn Fn(&str) -> Option<String>) -> Result<Arc<dyn ErasureD
     let probe =
         JournalDenialProbe::resolved(None, env).map_err(|error| CliError::from_am_error(&error))?;
     Ok(Arc::new(probe) as Arc<dyn ErasureDenial>)
+}
+
+/// The sync key this peer serves with, when the deployment holds one.
+///
+/// The key is read through the custody route the transfer path uses — the
+/// explicit `CLIO_SYNC_KEY_FILE` first, then this node's recorded store, newest
+/// key first — so a serve process holds the same key the pushes it receives were
+/// sealed under. A node that recorded no key holds none, and then serves sealed
+/// rows exactly as it did before: it cannot open them, so it cannot resolve
+/// their subject either.
+///
+/// A configured key that cannot be read is a refusal, because a serve process
+/// that silently lost its key would apply every erased subject it was sent.
+fn serve_sync_key(
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<Arc<SyncCipherKey>>, CliError> {
+    let explicit = env(clio_config::SYNC_KEY_FILE_ENV)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let secrets = match explicit {
+        Some(path) => vec![
+            clio_config::sync_key::read_key_file_base64(Path::new(&path))
+                .map_err(|error| CliError::from_am_error(&error))?,
+        ],
+        None => clio_config::sync_key::load_all_base64(&|key: &str| env(key))
+            .map_err(|error| CliError::from_am_error(&error))?,
+    };
+    Ok(secrets
+        .first()
+        .map(|secret| Arc::new(SyncCipherKey::from_secret(secret))))
 }

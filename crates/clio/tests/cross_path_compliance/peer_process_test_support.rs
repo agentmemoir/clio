@@ -34,7 +34,6 @@ use crate::cli_test_support::{clio_command, run_captured};
 use clio::AmError;
 use clio::store::{Store, SyncStore};
 use clio_sync::client::{SyncClientConfig, pull, push};
-use rusqlite::Connection;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -43,6 +42,8 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+pub use crate::peer_probe_test_support::PeerProbe;
 
 /// The one bearer the spawned peer is configured with and every client here
 /// presents, so one synthetic constant configures both sides.
@@ -210,6 +211,12 @@ impl Peer {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(stderr));
+        // The peer serves with the same key this harness's clients seal under, so
+        // it can resolve a sealed row's subject and refuse an erased one.
+        command.env(
+            "CLIO_SYNC_KEY_FILE",
+            crate::sync_wire_support::peer::shared_key_file(&self.dir),
+        );
         let mut child = command.spawn().expect("spawn clio sync serve");
         let (addr, reader) = drain_stdout(&mut child, &self.stdout_log);
         self.reader = Some(reader);
@@ -323,57 +330,6 @@ pub fn live_then_offline(peer: &mut Peer, scratch: &Path, bank: &str) {
         peer.pull(&reader, "reader-1", &[bank]).is_err(),
         "the offline peer refuses the wire"
     );
-}
-
-/// A read-only probe of the store a peer writes: its quarantined mutation
-/// reasons and its per-subject item counts.
-pub struct PeerProbe {
-    db: PathBuf,
-}
-
-impl PeerProbe {
-    /// A probe over the SQLite file `db`.
-    #[must_use]
-    pub fn new(db: &Path) -> Self {
-        Self {
-            db: db.to_path_buf(),
-        }
-    }
-
-    /// Every quarantine reason the peer recorded, sorted by mutation id.
-    ///
-    /// # Panics
-    /// The peer's database cannot be queried.
-    #[must_use]
-    pub fn dead_letter_reasons(&self) -> Vec<String> {
-        let conn = Connection::open(&self.db).expect("open the peer database");
-        conn.execute_batch("PRAGMA query_only = ON")
-            .expect("make the peer query-only");
-        let mut stmt = conn
-            .prepare("select reason_code from sync_dead_letter order by sync_mutation_id")
-            .expect("prepare the quarantine read");
-        stmt.query_map([], |row| row.get::<_, String>(0))
-            .expect("query the quarantine rows")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("quarantine rows")
-    }
-
-    /// The number of item rows the peer holds for one subject in one bank.
-    ///
-    /// # Panics
-    /// The peer's database cannot be queried.
-    #[must_use]
-    pub fn subject_items(&self, bank: &str, subject: &str) -> i64 {
-        let conn = Connection::open(&self.db).expect("open the peer database");
-        conn.execute_batch("PRAGMA query_only = ON")
-            .expect("make the peer query-only");
-        conn.query_row(
-            "select count(*) from items where bank_id = ?1 and subject_id = ?2",
-            rusqlite::params![bank, subject],
-            |row| row.get(0),
-        )
-        .expect("probe the peer's items")
-    }
 }
 
 /// Write one owner-only credential store whose one record reaches `banks` and
