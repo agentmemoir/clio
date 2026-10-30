@@ -92,8 +92,15 @@ impl SyncCipherKey {
     /// Derive a sync key from a profile-provided secret (never transmitted).
     ///
     /// # Panics
-    /// Panics if Argon2id rejects its own default parameters or the 32-byte
-    /// output length, which cannot happen for this fixed call shape.
+    /// Panics if `Argon2::hash_password_into` returns an error. The crate
+    /// documents six errors: `PwdTooLong`, `SaltTooShort`, `SaltTooLong`,
+    /// `OutputTooShort`, `OutputTooLong`, and `OutOfMemory`. The salt errors
+    /// need a salt outside 8 bytes to 4 GiB - 1, and the output errors an
+    /// output outside 4 bytes to 4 GiB - 1; this call always passes a 16-byte
+    /// salt and a 32-byte output, so those four cannot happen. `PwdTooLong`
+    /// needs a password above 4 GiB - 1 bytes, and `OutOfMemory` a failed
+    /// ~19 MiB working-buffer allocation; neither fits a profile secret or
+    /// normal memory conditions.
     #[must_use]
     pub fn from_secret(secret: &str) -> Self {
         // The salt is derived deterministically instead of stored: both peers
@@ -103,9 +110,16 @@ impl SyncCipherKey {
         let salt_hex = clio_store::sha256_hex(secret.as_bytes(), Self::SALT_DOMAIN);
         let salt = hex_to_bytes(&salt_hex[..32]);
         let mut key = [0u8; 32];
-        // Argon2id's only documented failure modes are invalid parameters or
-        // an output length above the cap; this call uses the defaults and a
-        // 32-byte output, so it cannot fail.
+        // `Argon2::hash_password_into` documents these errors: `PwdTooLong`
+        // (password above 4 GiB - 1 bytes), `SaltTooShort` and `SaltTooLong`
+        // (salt outside 8 bytes to 4 GiB - 1), `OutputTooShort` and
+        // `OutputTooLong` (output outside 4 bytes to 4 GiB - 1), and
+        // `OutOfMemory` when the working-buffer allocation fails. The salt
+        // here is always 16 bytes and the output always 32, both inside their
+        // bounds, so the salt and output errors cannot happen. The password
+        // is a profile secret, not a multi-gibibyte string, and the ~19 MiB
+        // working buffer only fails to allocate under system-wide memory
+        // exhaustion, where the process dies on its next allocation anyway.
         Argon2::default()
             .hash_password_into(secret.as_bytes(), &salt, &mut key)
             .expect("argon2 key derivation with default parameters");

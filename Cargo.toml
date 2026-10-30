@@ -142,6 +142,11 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# Argon2id is ~1.4 s per call unoptimized in dev builds; optimizing it removes
+# most of that cost with no behavior change.
+[profile.dev.package.argon2]
+opt-level = 3
+
 [profile.debugging]
 inherits = "dev"
 debug = true
