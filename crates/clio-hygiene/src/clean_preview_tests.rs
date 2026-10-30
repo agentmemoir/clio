@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on `hygiene_clean` preview tests.
 
-use super::clean_test_support::{args, ctx, item, store, target};
+use crate::clean::clean_test_support::{args, ctx, item, store, target};
 use crate::clean::{CleanAction, clean};
 use clio_store::{HygieneStore, Store};
 

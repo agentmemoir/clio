@@ -125,3 +125,7 @@ pub(crate) fn validate_target_id(item_id: &str) -> Result<(), AmError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "clean_preview_tests.rs"]
+mod clean_preview_tests;

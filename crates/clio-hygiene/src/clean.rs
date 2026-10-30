@@ -356,15 +356,11 @@ pub fn targets_from_candidates(candidates: &[NoiseCandidate]) -> Vec<CleanTarget
 
 #[cfg(test)]
 #[path = "clean_test_support.rs"]
-mod clean_test_support;
+pub(crate) mod clean_test_support;
 
 #[cfg(test)]
 #[path = "clean_tests.rs"]
 mod clean_tests;
-
-#[cfg(test)]
-#[path = "clean_preview_tests.rs"]
-mod clean_preview_tests;
 
 #[cfg(test)]
 #[path = "clean_principal_tests.rs"]
