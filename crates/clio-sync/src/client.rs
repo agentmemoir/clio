@@ -258,6 +258,15 @@ fn pull_bank(
         )?;
         let mut frozen = false;
         for m in &response.mutations {
+            // Refuse a wrong-bank row first, before serialization and
+            // decryption: no journal write, no dead letter, no cursor advance.
+            if m.bank != bank {
+                let refused = format!(
+                    "sync pull served mutation {} for bank {} while pulling bank {}",
+                    m.sync_mutation_id, m.bank, bank
+                );
+                return Err(AmError::new(ErrorCode::Forbidden, refused));
+            }
             let envelope = serde_json::to_string(m).expect("serialize mutation");
             let Some(m) = decrypt_for_apply(cfg, m, &envelope)? else {
                 // Unusable row quarantined: freeze at the last durable
@@ -406,6 +415,9 @@ fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
     }
 }
 
+#[cfg(test)]
+#[path = "client_bank_guard_tests.rs"]
+mod client_bank_guard_tests;
 #[cfg(test)]
 #[path = "client_envelope_tests.rs"]
 mod client_envelope_tests;
