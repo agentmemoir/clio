@@ -1,0 +1,1 @@
+Sync pull now refuses a relay answer that carries a different bank's row than the bank being pulled, so a hostile relay can no longer discard one bank's item while another bank's pull runs. [Issue #307]

@@ -112,11 +112,11 @@ pub fn pull(cfg: &SyncClientConfig, banks: &[String]) -> Result<Vec<BankSyncStat
 
 /// Pull remote mutations and apply them under the deployment's erasure-denial
 /// authority: every pulled mutation passes the guarded apply entry before it
-/// can write, a denied subject is dead-lettered, and an authority that cannot
-/// be read refuses with the cursor unchanged.
+/// can write, a denied subject is dead-lettered, and an unreadable authority refuses.
 ///
 /// # Errors
-/// Transport, auth, or transient storage failures (cursor unchanged).
+/// Transport, auth, or transient storage failures, or a policy refusal of a
+/// response row naming a different bank than the requested one (cursor unchanged).
 pub fn pull_with_denial(
     cfg: &SyncClientConfig,
     banks: &[String],
@@ -258,6 +258,15 @@ fn pull_bank(
         )?;
         let mut frozen = false;
         for m in &response.mutations {
+            // Refuse a wrong-bank row first, before serialization and
+            // decryption: no journal write, no dead letter, no cursor advance.
+            if m.bank != bank {
+                let refused = format!(
+                    "sync pull served mutation {} for bank {} while pulling bank {}",
+                    m.sync_mutation_id, m.bank, bank
+                );
+                return Err(AmError::new(ErrorCode::Forbidden, refused));
+            }
             let envelope = serde_json::to_string(m).expect("serialize mutation");
             let Some(m) = decrypt_for_apply(cfg, m, &envelope)? else {
                 // Unusable row quarantined: freeze at the last durable
@@ -406,6 +415,9 @@ fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
     }
 }
 
+#[cfg(test)]
+#[path = "client_bank_guard_tests.rs"]
+mod client_bank_guard_tests;
 #[cfg(test)]
 #[path = "client_envelope_tests.rs"]
 mod client_envelope_tests;
