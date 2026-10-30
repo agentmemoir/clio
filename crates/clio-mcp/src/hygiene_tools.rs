@@ -49,13 +49,12 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
 /// candidate ids later passed to `hygiene_clean`.
 #[inline(never)]
 fn hygiene_audit_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let bank = opt_str(args, "bank")
-        .unwrap_or(state.default_bank.as_str())
-        .to_owned();
+    let ctx = state.resolve_ctx(args)?;
+    let bank = ctx.bank.as_str();
     let min_score = opt_num(args, "min_score").unwrap_or(clio_hygiene::DEFAULT_MIN_SCORE);
     let report = clio_hygiene::hygiene_audit(&clio_hygiene::AuditArgs {
         store: &*state.store,
-        bank: &bank,
+        bank,
         now: &state.resolve_timestamp(args)?,
         min_score,
         limit: usize_arg(args, "limit").unwrap_or(50),
@@ -102,9 +101,9 @@ fn hygiene_clean_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
 /// `created_at` / `bank_id`, matching the log-entry terminology.
 #[inline(never)]
 fn hygiene_log_list_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let bank = opt_str(args, "bank").unwrap_or(state.default_bank.as_str());
+    let ctx = state.resolve_ctx(args)?;
     let rows = state.hygiene.list_hygiene_logs(
-        Some(bank),
+        Some(ctx.bank.as_str()),
         usize_arg(args, "limit").unwrap_or(50),
         usize_arg(args, "offset").unwrap_or(0),
     )?;
@@ -180,6 +179,9 @@ fn usize_arg(args: &Value, key: &str) -> Option<usize> {
         .and_then(|n| usize::try_from(n).ok())
 }
 
+#[cfg(test)]
+#[path = "hygiene_tools_bank_scope_tests.rs"]
+mod hygiene_tools_bank_scope_tests;
 #[cfg(test)]
 #[path = "hygiene_tools_principal_tests.rs"]
 mod hygiene_tools_principal_tests;
