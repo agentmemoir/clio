@@ -16,6 +16,9 @@
 //! - The keep count's refusals and the one call site that runs the prune after a
 //!   successful create, so a create never carries a second copy of the prune
 //!   rule
+//! - The one call site that records the archive's copy-custody row after a
+//!   successful create, so the create and the restore route's gate cannot
+//!   drift apart
 //! - The refusal for a key store the build cannot read, which happens before
 //!   any archive is written
 //!
@@ -103,11 +106,17 @@ pub(crate) fn run(
     if parsed.has("dry-run") {
         return backup_create_dry_run::dry_run(io, mode, &target, &backup.path, keep);
     }
+    // The create resolves the erasure journal once: the authority the manifest
+    // records comes from it, and the copy-custody record a restore reads is
+    // written beside it. A journal path that cannot be resolved cannot back a
+    // restorable snapshot, so the run fails instead of publishing one.
+    let journal_path = match clio_config::resolve_journal_path(&get) {
+        Ok(path) => path,
+        Err(error) => return fail(io, mode, &CliError::from_am_error(&error)),
+    };
     // Record the deployment's current erasure authority; a missing or damaged
     // journal records none, and the create warns rather than failing silently.
-    let authority = clio_config::resolve_journal_path(&get)
-        .ok()
-        .and_then(|path| current_authority(&path));
+    let authority = current_authority(&journal_path);
     let authority_recorded = authority.is_some();
     match take_snapshot(
         &target,
@@ -116,15 +125,27 @@ pub(crate) fn run(
         parsed.value("note"),
         authority,
     ) {
-        Ok(created) => emit_created(
-            io,
-            mode,
-            &created,
-            &parsed,
-            keep,
-            &backup.path,
-            authority_recorded,
-        ),
+        Ok(created) => {
+            // A snapshot without its copy-custody record cannot be restored:
+            // the restore route refuses it as a missing custody record. A
+            // recording failure is therefore the run's failure, not a warning.
+            if let Err(error) = crate::backup_create_custody::record_delivered_custody(
+                &journal_path,
+                &created.archive.id,
+                &created.archive.path,
+            ) {
+                return fail(io, mode, &CliError::from_am_error(&error));
+            }
+            emit_created(
+                io,
+                mode,
+                &created,
+                &parsed,
+                keep,
+                &backup.path,
+                authority_recorded,
+            )
+        }
         Err(error) => fail(io, mode, &CliError::from_am_error(&error)),
     }
 }

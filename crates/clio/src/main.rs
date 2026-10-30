@@ -34,6 +34,7 @@ mod agent_harness_write_install;
 mod auth_cli;
 mod backup_cli;
 mod backup_create_cli;
+mod backup_create_custody;
 mod backup_create_postgres;
 mod backup_create_report;
 mod backup_list_cli;

@@ -50,6 +50,10 @@ pub(crate) fn seed(scoped: &ScopedSchema, kms_path: &Path, items: usize) {
 
 /// Snapshot `scoped`'s store through the real `clio backup create`, carrying
 /// the key store at `kms_path`, and return the snapshot id.
+///
+/// The real create records the archive's copy-custody row beside the journal
+/// itself, so no row is seeded here — the restore paths built on this fixture
+/// exercise the create's own record.
 pub(crate) fn snapshot(scratch: &Scratch, scoped: &ScopedSchema, kms_path_string: &str) -> String {
     ensure_journal(scratch);
     let (code, payload, err) = run_json_in_with(
@@ -61,15 +65,10 @@ pub(crate) fn snapshot(scratch: &Scratch, scoped: &ScopedSchema, kms_path_string
         ],
     );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    let id = payload["snapshot_id"]
+    payload["snapshot_id"]
         .as_str()
         .expect("the create produced a snapshot id")
-        .to_owned();
-    let archive = scratch
-        .join("backups")
-        .join(clio_backup::archive_file_name(&id));
-    crate::backup_cli_fixtures::seed_copy_custody(scratch, &id, &archive);
-    id
+        .to_owned()
 }
 
 /// An orphan insert into the schema's vector table must be refused, and a

@@ -353,19 +353,17 @@ pub(crate) fn archive_with_wrong_digest(scratch: &Scratch, store: &Path) -> (Str
 ///
 /// A fixture: the create is the real command, and a create that did not produce
 /// an id fails the fixture loudly instead of letting a test assert nothing.
+/// The real create also records the archive's copy-custody row beside the
+/// journal itself, so no row is seeded here — the restore paths these fixtures
+/// drive exercise the create's own record.
 pub(crate) fn snapshot(scratch: &Scratch, items: usize) -> String {
     populated_store(&scratch.join("clio.db"), items, 1);
     ensure_journal(scratch);
     let (_, payload, _) = run_json_in(scratch, &["create"]);
-    let id = payload["snapshot_id"]
+    payload["snapshot_id"]
         .as_str()
         .expect("the create fixture produced a snapshot id")
-        .to_owned();
-    let archive = scratch
-        .join("backups")
-        .join(clio_backup::archive_file_name(&id));
-    seed_copy_custody(scratch, &id, &archive);
-    id
+        .to_owned()
 }
 
 /// An archive whose manifest records the chosen backend, schema version, and
