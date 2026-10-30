@@ -45,11 +45,14 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::bundle::sha256_hex_bytes;
 use crate::erasure_journal::{
     ArchiveClaim, AuthorityRefusal, JournalState, MemberFacts, check_archive_authority,
     load_journal,
 };
-use clio_store::{ExclusiveHold, LocalEventIntent, LocalEventStore};
+use crate::subject_request_events::{RestoreInputs, RestoreRefusal, check_restore};
+use crate::subject_request_manifest::DIGEST_ALGORITHM_PREFIX;
+use clio_store::{DestinationCustodyRow, ExclusiveHold, LocalEventIntent, LocalEventStore};
 use clio_types::{AmError, ErrorCode};
 
 /// The event kind label every guarded restore writes.
@@ -135,11 +138,37 @@ impl JournalHold {
 pub enum RestoreGuardRefusal {
     /// The authority check refused the restore.
     Authority(AuthorityRefusal),
+    /// The copy-custody check refused the restore.
+    Custody(RestoreRefusal),
     /// The durable event write failed: the restore intent could not be
     /// written, or the pending-action reconcile under the lock failed.
     Event(AmError),
     /// The journal lock could not be taken, so nothing was placed.
     Lock(AmError),
+}
+
+/// The stable code and operator text for a copy-custody refusal.
+///
+/// One mapping for the plan-time refusal and the placement-time guard refusal,
+/// so the two spellings cannot drift.
+#[must_use]
+pub fn custody_refusal_parts(refusal: RestoreRefusal) -> (ErrorCode, String) {
+    match refusal {
+        RestoreRefusal::CopyManifestMissing => (
+            ErrorCode::NotFound,
+            "no copy-custody record backs this restore; a restore places only a copy whose \
+             custody was recorded"
+                .to_owned(),
+        ),
+        RestoreRefusal::CopyDigestMismatch => (
+            ErrorCode::Forbidden,
+            "the copy's digest does not match the digest its custody record holds".to_owned(),
+        ),
+        RestoreRefusal::ReceiverMismatch => (
+            ErrorCode::Forbidden,
+            "the acting restorer is not the receiver the copy's custody record names".to_owned(),
+        ),
+    }
 }
 
 impl RestoreGuardRefusal {
@@ -148,6 +177,7 @@ impl RestoreGuardRefusal {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::Authority(refusal) => refusal.code(),
+            Self::Custody(refusal) => custody_refusal_parts(*refusal).0,
             Self::Event(_) | Self::Lock(_) => ErrorCode::Internal,
         }
     }
@@ -158,6 +188,13 @@ impl fmt::Display for RestoreGuardRefusal {
         match self {
             Self::Authority(refusal) => {
                 write!(f, "the restore authority check refused: {refusal}")
+            }
+            Self::Custody(refusal) => {
+                write!(
+                    f,
+                    "the copy-custody check refused: {}",
+                    custody_refusal_parts(*refusal).1
+                )
             }
             Self::Event(cause) => write!(f, "the durable restore event write failed: {cause}"),
             Self::Lock(cause) => write!(f, "the journal lock could not be taken: {cause}"),
@@ -223,6 +260,49 @@ impl RestoreGuard {
     }
 }
 
+/// The copy-custody facts one restore is checked against.
+///
+/// The row is the destination-custody row backing the copy, owned so a caller
+/// that resolves it can hand it to the placement re-check; the digest is
+/// recomputed over the copy's bytes with the delivery write's expression; the
+/// restorer is the acting identity the guarded restore records.
+pub struct CopyCustodyFacts<'a> {
+    /// The custody row backing the copy, when one exists.
+    pub row: Option<DestinationCustodyRow>,
+    /// The digest recomputed over the copy's bytes.
+    pub copy_digest: &'a str,
+    /// The acting restorer's identity.
+    pub restorer: &'a str,
+}
+
+/// The copy digest of a copy's bytes, in the same expression the delivery
+/// write records on the custody row.
+#[must_use]
+pub fn copy_digest_of(bytes: &[u8]) -> String {
+    format!("{DIGEST_ALGORITHM_PREFIX}{}", sha256_hex_bytes(bytes))
+}
+
+/// Run the copy-custody restore gate over the facts.
+///
+/// An absent row, or a row whose digest and receiver were never written, is no
+/// copy-custody manifest: the gate refuses `CopyManifestMissing` before the
+/// digest and receiver checks run.
+pub fn check_copy_custody(facts: &CopyCustodyFacts<'_>) -> Result<(), RestoreRefusal> {
+    let recorded = facts
+        .row
+        .as_ref()
+        .and_then(|row| row.copy_digest.as_deref());
+    let inputs = RestoreInputs {
+        manifest_present: recorded.is_some(),
+        digest_verified: recorded == Some(facts.copy_digest),
+        receiver_matches: facts
+            .row
+            .as_ref()
+            .is_some_and(|row| row.receiver.as_deref() == Some(facts.restorer)),
+    };
+    check_restore(&inputs)
+}
+
 /// The inputs of one guarded restore.
 ///
 /// A borrowed bundle, so a caller names each input once and `begin_restore`
@@ -236,6 +316,8 @@ pub struct RestoreRequest<'a> {
     pub claim: &'a ArchiveClaim,
     /// What the archive members show about subject references.
     pub members: &'a [MemberFacts],
+    /// The copy-custody facts the placement re-checks under the lock.
+    pub copy_custody: CopyCustodyFacts<'a>,
     /// The actor the durable intent records.
     pub actor: &'a str,
     /// The durable action id the intent is recorded under.
@@ -292,6 +374,13 @@ pub fn begin_restore(
         let _ = events.record_outcome(request.action_id, true, REFUSED_BEFORE_PLACEMENT);
         return Err(RestoreGuardRefusal::Authority(refusal));
     }
+    // The copy-custody gate runs beside the authority check, still under the
+    // same hold: its inputs were built before the lock, so the check here is
+    // pure and the lock's scope is unchanged.
+    if let Err(refusal) = check_copy_custody(&request.copy_custody) {
+        let _ = events.record_outcome(request.action_id, true, REFUSED_BEFORE_PLACEMENT);
+        return Err(RestoreGuardRefusal::Custody(refusal));
+    }
     Ok(RestoreGuard {
         _hold: hold,
         action_id: request.action_id.to_owned(),
@@ -337,6 +426,11 @@ pub fn reconcile_restore_actions(events: &dyn LocalEventStore) -> Result<Vec<Str
 #[cfg(test)]
 #[path = "restore_guard_tests.rs"]
 mod restore_guard_tests;
+
+/// The copy-custody gate facts and the placement-time refusal mapping.
+#[cfg(test)]
+#[path = "restore_guard_custody_tests.rs"]
+mod restore_guard_custody_tests;
 
 /// The journal resolution the guard and the erase boundary share, and the
 /// reconcile `begin_restore` runs under the journal lock.

@@ -126,8 +126,9 @@ pub use local_review::{
 };
 pub use local_review_export::write_review_export;
 pub use restore_guard::{
-    JournalHold, RESTORE_EVENT_KIND, RESTORE_EVENT_SCOPE, RestoreGuard, RestoreGuardRefusal,
-    RestoreRequest, begin_restore, check_restore_at_plan, reconcile_restore_actions,
+    CopyCustodyFacts, JournalHold, RESTORE_EVENT_KIND, RESTORE_EVENT_SCOPE, RestoreGuard,
+    RestoreGuardRefusal, RestoreRequest, begin_restore, check_copy_custody, check_restore_at_plan,
+    copy_digest_of, custody_refusal_parts, reconcile_restore_actions,
 };
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};

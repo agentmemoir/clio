@@ -40,6 +40,7 @@ mod backup_list_cli;
 mod backup_prune_cli;
 mod backup_restore_cli;
 mod backup_restore_counts;
+mod backup_restore_custody;
 mod backup_restore_exit;
 mod backup_restore_flow;
 mod backup_restore_postgres;

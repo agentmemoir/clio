@@ -241,6 +241,7 @@ pub(crate) fn plan(
         &authority.members,
     )
     .map_err(authority_refusal)?;
+    crate::backup_restore_custody::refuse_without_custody(&journal_path, &id, &archive)?;
     let postgres = manifest.store.backend == "postgres";
     let input = RestorePlanInput {
         parsed,
