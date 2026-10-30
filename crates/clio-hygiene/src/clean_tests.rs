@@ -4,16 +4,21 @@
 //! # Responsibility
 //!
 //! This module tests the confirmed `hygiene_clean` mutator (`clean.rs`):
-//! dry-run counts, archive retrieve exclusion, discard
-//! without DEK destroy, the `delete` alias, `keep`, the durable log
-//! And request validation. SQLite backend; the Postgres parity
+//! archive retrieve exclusion, discard
+//! without DEK destroy, the `delete` alias, the durable log
+//! and request validation. SQLite backend; the Postgres parity
 //! probe lives in `clio-store`'s `pg_hygiene_tests`.
 //!
 //! ## Owns
-//! - Test coverage for dry-run counting, archive/discard/keep outcomes, log
-//!   row shape, and fail-closed argument validation
+//! - Test coverage for confirmed counter consistency (would_* equals the
+//!   applied counts per action), archive/discard outcomes, log row shape,
+//!   and fail-closed argument validation
 //!
 //! ## Does not own
+//! - The preview branch: dry-run counting, the settled-target skip, and
+//!   preview→confirmed parity (`clean_preview_tests.rs`)
+//! - The per-target `apply_suggested` resolution and skip behaviour
+//!   (`clean_apply_suggested_tests.rs`)
 //! - Batch-abort and duplicate-target semantics (`clean_batch_tests.rs`)
 //! - The credential label a durable row carries (`clean_principal_tests.rs`)
 //! - The clean behavior itself (`clean.rs`) or store SQL
@@ -27,41 +32,6 @@
 use super::clean_test_support::{args, ctx, item, store, target};
 use crate::clean::{CleanAction, CleanOutcome, CleanTarget, clean};
 use clio_store::{ComplianceStore, HygieneStore, IndexStore, SqliteStore, Store};
-
-#[test]
-fn t21_02_dry_run_counts_only_and_writes_nothing() {
-    let s = store();
-    let bank = "bank-dry";
-    let s_ref = &*s as &dyn Store;
-    s_ref
-        .create_memory_item(&item("itm-1", bank, "scratch note one"), "actor")
-        .unwrap();
-    let before = s_ref.get_memory_item(bank, "itm-1").unwrap();
-    let outcome = clean(&args(
-        &s,
-        &ctx(bank),
-        &[target("itm-1")],
-        CleanAction::Archive,
-        false,
-    ))
-    .unwrap();
-    assert!(outcome.dry_run);
-    assert_eq!(outcome.would_archive, 1);
-    assert_eq!(outcome.would_flag + outcome.would_discard, 0);
-    assert!(outcome.applied.is_empty() && outcome.pending.is_empty() && outcome.failed.is_none());
-    // zero writes: item unchanged, no archive marker; the dry-run report row
-    // (dry_run=1, SHOULD ) is the only hygiene-log write.
-    assert!(!s_ref.item_is_archived(bank, "itm-1").unwrap());
-    let logs = s.list_hygiene_logs(Some(bank), 50, 0).unwrap();
-    assert_eq!(logs.len(), 1);
-    assert!(logs[0].dry_run && !logs[0].confirmed);
-    assert_eq!(logs[0].action, "archive");
-    let after = s_ref.get_memory_item(bank, "itm-1").unwrap();
-    assert_eq!(
-        after.as_ref().and_then(|i| i.gist.clone()),
-        before.as_ref().and_then(|i| i.gist.clone())
-    );
-}
 
 #[test]
 fn t21_03_confirmed_archive_hides_from_default_retrieve() {
@@ -217,24 +187,44 @@ fn confirm_flag_marks_for_review_but_stays_retrievable() {
 }
 
 #[test]
-fn keep_applies_each_targets_suggested_action() {
+fn confirmed_counters_equal_the_applied_counts_per_action() {
     let s = store();
-    let bank = "bank-keep";
+    let bank = "bank-counters";
     let s_ref = &*s as &dyn Store;
-    s_ref
-        .create_memory_item(&item("keep-arch", bank, "archive me"), "actor")
-        .unwrap();
-    let targets = vec![target("keep-arch")];
-    let outcome = clean(&args(&s, &ctx(bank), &targets, CleanAction::Keep, true)).unwrap();
-    assert_eq!(outcome.applied, vec!["keep-arch".to_owned()]);
-    assert!(s_ref.item_is_archived(bank, "keep-arch").unwrap());
-    // `keep` with no suggestion fails closed.
-    let empty = vec![CleanTarget {
-        item_id: "keep-arch".into(),
-        noise_score: None,
-        suggested_action: None,
-    }];
-    assert!(clean(&args(&s, &ctx(bank), &empty, CleanAction::Keep, true)).is_err());
+    for id in ["cnt-flag", "cnt-arch", "cnt-disc"] {
+        s_ref
+            .create_memory_item(&item(id, bank, "counter me"), "actor")
+            .unwrap();
+    }
+    let targets = vec![
+        suggested("cnt-flag", "flag"),
+        suggested("cnt-arch", "archive"),
+        suggested("cnt-disc", "discard"),
+    ];
+    let outcome = clean(&args(
+        &s,
+        &ctx(bank),
+        &targets,
+        CleanAction::ApplySuggested,
+        true,
+    ))
+    .unwrap();
+    assert!(outcome.failed.is_none());
+    assert_eq!(outcome.applied.len(), 3, "{:?}", outcome.applied);
+    // One meaning per field: on a confirmed run each would_* equals the
+    // applied count for its action, matching the preview's count.
+    assert_eq!(outcome.would_flag, 1);
+    assert_eq!(outcome.would_archive, 1);
+    assert_eq!(outcome.would_discard, 1);
+}
+
+/// One target with an explicit audit suggestion.
+fn suggested(id: &str, action: &str) -> CleanTarget {
+    CleanTarget {
+        item_id: id.into(),
+        noise_score: Some(0.5),
+        suggested_action: Some(action.into()),
+    }
 }
 
 #[test]
@@ -263,6 +253,9 @@ fn t21_07_confirmed_clean_writes_masked_durable_log_rows() {
         row.noise_score == Some(0.75),
         "the log row records the noise score"
     );
+    // The audit row shows why the action was taken.
+    assert_eq!(row.detail["reason"], "hygiene noise cleanup");
+    assert_eq!(row.detail["note"], "review me");
     // Rows never carry secret material or content — ids/scores/labels only.
     let detail = row.detail.to_string();
     assert!(!detail.contains("api_key") && !detail.contains("gist"));
@@ -345,6 +338,7 @@ fn clean_outcome_shape_is_stable() {
         would_archive: 2,
         would_discard: 3,
         applied: vec![],
+        skipped: vec![],
         pending: vec![],
         failed: None,
     };

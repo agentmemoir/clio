@@ -37,6 +37,7 @@
 
 mod audit;
 mod clean;
+mod clean_preview;
 mod detect;
 mod scoring;
 
