@@ -367,3 +367,9 @@ mod tests;
 #[cfg(test)]
 #[path = "cli_read_history_tests_limit_tests.rs"]
 mod limit_tests;
+
+// The `failure list` tests are their own child module for the same reason: the
+// history tests and the failure-list tests each stay inside the limit.
+#[cfg(test)]
+#[path = "cli_read_history_tests_failure_list_tests.rs"]
+mod failure_list_tests;

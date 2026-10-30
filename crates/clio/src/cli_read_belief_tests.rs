@@ -289,12 +289,12 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "limit",
                 "offset",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "belief history",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = BeliefGroup;

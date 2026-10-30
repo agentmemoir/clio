@@ -36,7 +36,7 @@
 //! Keep this module focused on the tranche list and the flag facts the
 //! records share.
 
-use crate::cli_command_registry::{GLOBAL_BACKEND, GLOBAL_BANK, GLOBAL_DB};
+use crate::cli_command_registry::{GLOBAL_BACKEND, GLOBAL_BANK, GLOBAL_DB, GLOBAL_OUTPUT};
 use crate::cli_command_spec::{CommandSpec, Flag};
 
 /// The globals a reserved surface accepts without printing: the shared parser
@@ -51,9 +51,19 @@ pub(crate) const RESERVED_GLOBALS: &[&str] = &[
 /// `--bank` still accepts without printing.
 const DB_BANK_UNDOCUMENTED_GLOBALS: &[&str] = &["actor", "output", "no-input", "yes"];
 
+/// The declared globals a record that also documents `--output` still accepts
+/// without printing: the same set as `DB_BANK_UNDOCUMENTED_GLOBALS` with
+/// `output` removed, because the record contract refuses a flag a record both
+/// accepts and documents.
+const DB_BANK_UNDOCUMENTED_GLOBALS_NO_OUTPUT: &[&str] = &["actor", "no-input", "yes"];
+
 /// The trio the `mcp` and `ops` subcommands print: the global value flags
 /// every one of them names on its usage line.
 const DB_BACKEND_BANK: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK];
+
+/// The trio plus the output mode: a record whose report renders through the
+/// shared `--output` mode names it on its usage line.
+const DB_BACKEND_BANK_OUTPUT: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK, GLOBAL_OUTPUT];
 
 /// The reserved-surface records: the seven single commands, then the eight
 /// `mcp` and `ops` subcommands, each group in its catalog order.

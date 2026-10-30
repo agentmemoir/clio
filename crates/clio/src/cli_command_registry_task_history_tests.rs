@@ -43,22 +43,19 @@ fn task_get_matches_the_registered_usage_and_parser() {
     let spec = record("task get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio task get TASK_ID [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio task get TASK_ID [--bank BANK] [--output json|text]",
         "task get full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio task get TASK_ID [--explain] [--bank BANK] [--output json|text]",
+        "clio task get TASK_ID [--bank BANK] [--output json|text]",
         "task get usage line"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "one task and its current state");
     assert_eq!(spec.tool, Some("task_get"));
     assert_eq!(spec.section, Section::Read);
@@ -72,22 +69,19 @@ fn task_history_matches_the_registered_usage_and_parser() {
     let spec = record("task history");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio task history TASK_ID [--limit N] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio task history TASK_ID [--limit N] [--bank BANK] [--output json|text]",
         "task history full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio task history TASK_ID [--limit N] [--explain] [--bank BANK] [--output json|text]",
+        "clio task history TASK_ID [--limit N] [--bank BANK] [--output json|text]",
         "task history usage line"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output", "limit"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "a task's recorded transitions");
     assert_eq!(spec.tool, Some("task_history"));
     assert_eq!(spec.section, Section::Read);
@@ -145,22 +139,19 @@ fn failure_list_matches_the_registered_usage_and_parser() {
     let spec = record("failure list");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio failure list TASK_ID [--limit N] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio failure list TASK_ID [--limit N] [--bank BANK] [--output json|text]",
         "failure list full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio failure list TASK_ID [--limit N] [--explain] [--bank BANK] [--output json|text]",
+        "clio failure list TASK_ID [--limit N] [--bank BANK] [--output json|text]",
         "failure list usage line"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output", "limit"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "failures recorded against one task");
     assert_eq!(spec.tool, Some("failures_for_task"));
     assert_eq!(spec.section, Section::Read);
@@ -224,12 +215,12 @@ fn memtree_query_matches_the_registered_usage_and_parser() {
     let spec = record("memtree query");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--bank BANK] [--output json|text]",
         "memtree query full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--explain] [--bank BANK] [--output json|text]",
+        "clio memtree query [--time-start TS] [--time-end TS] [--task-id ID] [--depth N] [--limit N] [--bank BANK] [--output json|text]",
         "memtree query usage line"
     );
     assert_eq!(
@@ -247,10 +238,7 @@ fn memtree_query_matches_the_registered_usage_and_parser() {
             "limit"
         ]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "walk the memory tree from a seed");
     assert_eq!(spec.tool, Some("memtree_query"));
     assert_eq!(spec.section, Section::Read);
@@ -267,22 +255,19 @@ fn memtree_get_matches_the_registered_usage_and_parser() {
     let spec = record("memtree get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio memtree get NODE_ID [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio memtree get NODE_ID [--bank BANK] [--output json|text]",
         "memtree get full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio memtree get NODE_ID [--explain] [--bank BANK] [--output json|text]",
+        "clio memtree get NODE_ID [--bank BANK] [--output json|text]",
         "memtree get usage line"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "one memory-tree node and its lineage");
     assert_eq!(spec.tool, Some("memtree_get"));
     assert_eq!(spec.section, Section::Read);
@@ -300,12 +285,12 @@ fn history_temporal_matches_the_registered_usage_and_parser() {
     let spec = record("history temporal");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]",
+        "usage: clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--bank BANK] [--output json|text]",
         "history temporal full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--explain] [--bank BANK] [--output json|text]",
+        "clio history temporal TARGET [--as-of TS] [--time-axis valid|transaction] [--bank BANK] [--output json|text]",
         "history temporal usage line"
     );
     assert_eq!(
@@ -320,10 +305,7 @@ fn history_temporal_matches_the_registered_usage_and_parser() {
             "time-axis"
         ]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(
         spec.summary,
         "the item history as it stood at a point in time"

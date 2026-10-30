@@ -382,6 +382,9 @@ fn build_erase_dry_run_returns_the_zero_write_preview() {
     }
 }
 
+/// The `export` and `erase` render contracts. The `import` render contract
+/// has its own suite (`cli_write_portability_import_render_tests`), which
+/// covers these dry-run and live shapes plus the detail lines.
 #[test]
 fn render_matches_the_contract_for_each_verb() {
     let group = super::PortabilityWriteGroup;
@@ -404,27 +407,6 @@ fn render_matches_the_contract_for_each_verb() {
         export,
         "export wrote /tmp/bundle.json (content_mode=dsar_plaintext, complete=true, \
          entities=5, sha256=abcdef123456…)"
-    );
-
-    let dry = group.render(
-        "import",
-        &json!({"ok": true, "report": {"dry_run": true, "would_create": 2, "would_skip": 1, "would_reject": 0}}),
-        crate::cli_style::Palette::new(false),
-    );
-    assert_eq!(
-        dry,
-        "import dry-run: would create 2, skip 1, reject 0 (zero writes)"
-    );
-
-    let live = group.render(
-        "import",
-        &json!({"ok": true, "report": {"dry_run": false, "applied": true, "would_create": 2,
-                 "would_skip": 1, "would_reject": 0, "would_overwrite": 4}}),
-        crate::cli_style::Palette::new(false),
-    );
-    assert_eq!(
-        live,
-        "import: created 2, skipped 1, rejected 0, overwrote 4"
     );
 
     let not_applied = group.render(

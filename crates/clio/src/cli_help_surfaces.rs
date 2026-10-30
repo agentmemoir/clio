@@ -189,11 +189,13 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     ),
     (
         "ops diagnose",
-        "clio ops diagnose [--db PATH] [--backend sqlite|postgres] [--bank BANK]",
+        "clio ops diagnose [--db PATH] [--backend sqlite|postgres] [--bank BANK] \
+         [--output json|text]",
     ),
     (
         "ops verify",
-        "clio ops verify [--db PATH] [--backend sqlite|postgres] [--bank BANK]",
+        "clio ops verify [--db PATH] [--backend sqlite|postgres] [--bank BANK] \
+         [--output json|text]",
     ),
     (
         "ops doctor",

@@ -18,13 +18,13 @@
 //! Test-only. Never compiled into production builds.
 
 use super::{
-    HistoryGroup, render_failure_list, render_node, render_node_list, render_task_get,
-    render_task_history, render_temporal,
+    HistoryGroup, render_node, render_node_list, render_task_get, render_task_history,
+    render_temporal,
 };
 use crate::cli_args::ParsedArgs;
 use crate::cli_read_group::ReadGroup;
 use crate::cli_read_test_support::{
-    call, json_of, run_state, seed_failure, seed_item, seed_task, seed_triple, state,
+    json_of, run_state, seed_failure, seed_item, seed_task, seed_triple, state,
 };
 use clio_mcp::runtime::McpState;
 use serde_json::json;
@@ -41,6 +41,22 @@ fn history_state() -> Arc<McpState> {
     seed_item(&s, "bank-a", "itm-1", "terse answers");
     seed_triple(&s, "bank-a", "rust", "used_by", "agent");
     s
+}
+
+#[test]
+fn task_get_rejects_the_undocumented_explain_flag() {
+    let s = history_state();
+    // `task get` lost its `--explain` help entry: the parser now fails closed
+    // on the flag instead of silently ignoring it.
+    let (code, out, err) = run_state(
+        "task get",
+        &["t1", "--bank", "bank-a", "--explain"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2));
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("unknown flag `--explain`"), "{err}");
 }
 
 #[test]
@@ -92,7 +108,7 @@ fn task_history_limit_and_truncation() {
 
     let (_, out, _) = run_state(
         "task history",
-        &["t1", "--bank", "bank-a", "--limit", "2", "--explain"],
+        &["t1", "--bank", "bank-a", "--limit", "2"],
         &s,
         true,
     );
@@ -102,77 +118,6 @@ fn task_history_limit_and_truncation() {
         render_task_history(&json!({"records": []})),
         "records: 0 of 0"
     );
-}
-
-#[test]
-fn failure_list_exact_truncation_and_none() {
-    let s = history_state();
-    let (code, out, _) = run_state("failure list", &["t1", "--bank", "bank-a"], &s, false);
-    assert_eq!(code, ExitCode::from(0));
-    let value = json_of(&out);
-    assert_eq!(value["mode"], json!("exact"));
-    assert_eq!(value["failures"].as_array().map(Vec::len), Some(2));
-    assert_eq!(value["truncated"], json!(false));
-
-    let (_, out, _) = run_state(
-        "failure list",
-        &["t1", "--bank", "bank-a", "--limit", "1"],
-        &s,
-        false,
-    );
-    let page = json_of(&out);
-    assert_eq!(page["failures"].as_array().map(Vec::len), Some(1));
-    assert_eq!(page["truncated"], json!(true));
-
-    // An argument that names no task and matches no failure is not found.
-    let (code, _, err) = run_state(
-        "failure list",
-        &["zzz-unknown", "--bank", "bank-a"],
-        &s,
-        false,
-    );
-    assert_eq!(code, ExitCode::from(1), "{err}");
-    assert!(err.contains("\"code\":\"not_found\""), "{err}");
-
-    let (_, out, _) = run_state("failure list", &["t1", "--bank", "bank-a"], &s, true);
-    assert!(out.contains("mode: exact"), "{out}");
-    assert!(out.contains("failures: 2 of"), "{out}");
-
-    assert_eq!(
-        render_failure_list(&json!({"failures": [{"task_id": "t", "attempt_n": 1}]})),
-        "mode: unknown\nfailures: 1 of 0\nt attempt 1"
-    );
-}
-
-/// `failure list` names its argument `TASK_ID` like the registry record, and
-/// the free-text fallback still matches task definitions only: text similar to
-/// a definition reaches that task's failures, and a known task id stays exact.
-#[test]
-fn failure_list_usage_names_the_task_id_and_the_fallback_matches_definitions() {
-    let s = history_state();
-    let (code, _, err) = run_state("failure list", &[], &s, false);
-    assert_eq!(code, ExitCode::from(2), "{err}");
-    assert!(err.contains("usage: clio failure list TASK_ID"), "{err}");
-    assert!(!err.contains("TASK_ID_OR_QUERY"), "{err}");
-    let record = crate::cli_command_registry::find("failure list").expect("a record");
-    assert_eq!(
-        crate::cli_command_registry_test_support::positionals(record),
-        [("TASK_ID", true)],
-        "the usage hint must name the label the registry record carries"
-    );
-
-    // The similarity fallback works over task definitions, so text equal to a
-    // definition reaches that task's failures without naming its id.
-    let (code, out, err) = run_state(
-        "failure list",
-        &["Run tests third", "--bank", "bank-a"],
-        &s,
-        false,
-    );
-    assert_eq!(code, ExitCode::from(0), "{err}");
-    let value = json_of(&out);
-    assert_eq!(value["mode"], json!("similar"));
-    assert_eq!(value["failures"].as_array().map(Vec::len), Some(2));
 }
 
 #[test]
@@ -312,17 +257,17 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
         (
             "task get",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "task history",
             &["db", "backend", "bank", "actor", "output", "limit"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "failure list",
             &["db", "backend", "bank", "actor", "output", "limit"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "memtree query",
@@ -338,12 +283,12 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "depth",
                 "limit",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "memtree get",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "history temporal",
@@ -356,7 +301,7 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "as-of",
                 "time-axis",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = HistoryGroup;
@@ -422,27 +367,4 @@ fn history_views_mask_planted_secrets() {
     );
     let masked = payload.to_string();
     assert!(!masked.contains("supersecret"), "{masked}");
-}
-
-#[test]
-fn failure_list_preserves_mcp_structured_fields() {
-    // `lesson_tokens` is a non-secret integer whose key contains the `token`
-    // marker. The defensive mask must not rewrite it: the CLI view has to
-    // return the same structured result as the MCP tool.
-    let s = state();
-    seed_failure(&s, "bank-a", "t-parity", 1, "retry once");
-    let tool = call(
-        &s,
-        "failures_for_task",
-        json!({"bank": "bank-a", "task_id_or_query": "t-parity"}),
-    );
-    let (code, out, err) = run_state("failure list", &["t-parity", "--bank", "bank-a"], &s, false);
-    assert_eq!(code, ExitCode::from(0), "{err}");
-    let cli = json_of(&out);
-    assert_eq!(cli["failures"], tool["failures"]);
-    let tokens = &cli["failures"][0]["lesson_tokens"];
-    assert!(
-        tokens.is_number(),
-        "lesson_tokens must stay numeric, got {tokens}"
-    );
 }

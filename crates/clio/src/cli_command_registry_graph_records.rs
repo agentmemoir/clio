@@ -93,9 +93,6 @@ const FACT_OBJECT: Positional = Positional {
 /// The `--as-of TS` timestamp of `triple query` and `belief observe`.
 const AS_OF: Flag = Flag::text("as-of", "TS", "Sets the reference `as_of` timestamp.");
 
-/// The `--explain` trace flag the read commands document.
-const EXPLAIN: Flag = Flag::toggle("explain", "Asks `read_args` for the trace detail.");
-
 /// The `--dry-run` preview flag the write commands document.
 const DRY_RUN: Flag = Flag::toggle("dry-run", "Previews with no durable change.");
 
@@ -123,7 +120,7 @@ const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a
 
 /// `triple query`'s usage line: its three positionals are nested optionals, a
 /// shape the assembled form cannot print.
-const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--explain] [--bank BANK] [--output json|text]";
+const TRIPLE_QUERY_USAGE: &str = "clio triple query [SUBJECT [PREDICATE [OBJECT]]] [--subject S] [--predicate P] [--object O] [--as-of TS] [--time-axis valid|transaction] [--limit N] [--offset N] [--bank BANK] [--output json|text]";
 
 /// `clio triple query`: match subject/predicate/object patterns, over the
 /// `triple_query` tool.
@@ -163,7 +160,6 @@ pub(crate) const TRIPLE_QUERY: CommandSpec = CommandSpec {
                 "Skips this many leading results; the tool defaults it to 0 when omitted.",
             )
         },
-        EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -177,7 +173,7 @@ pub(crate) const TRIPLE_QUERY: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio triple query itm-sample-1 --explain",
+            command: "clio triple query itm-sample-1",
             comment: Some("one subject term"),
         },
         Example {

@@ -1,0 +1,1 @@
+`clio inspect` now echoes the discard-filter state it actually applied, so the output itself says whether discarded rows were included in the result and a filtered read is no longer mistaken for a full one.

@@ -97,6 +97,8 @@ mod cli_read_group;
 mod cli_read_history;
 mod cli_read_hygiene;
 mod cli_read_render;
+mod cli_read_render_inspect;
+mod cli_read_render_stats;
 mod cli_read_workspace;
 mod cli_style;
 mod cli_top_level;
@@ -115,6 +117,7 @@ mod cli_write_hygiene;
 mod cli_write_mutate;
 mod cli_write_persona;
 mod cli_write_portability;
+mod cli_write_portability_import_render;
 mod cli_write_preview;
 mod cli_write_shared;
 mod cli_write_source_type;
@@ -136,6 +139,8 @@ mod http_bind;
 mod install_cli;
 mod mcp_cli;
 mod ops_cli;
+mod ops_cli_actions;
+mod ops_cli_render;
 /// The shared Postgres test address, declared once so two test modules share
 /// it through `use` rather than loading the file twice.
 #[cfg(test)]

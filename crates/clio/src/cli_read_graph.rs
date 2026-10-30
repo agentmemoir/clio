@@ -165,23 +165,64 @@ fn render_associations(payload: &Value) -> String {
     lines.join("\n")
 }
 
+/// Render the `persona get` payload as deterministic human text.
+///
+/// Each document section prints its count header and carries every entry
+/// beneath it, one line per entry field, so the text form carries the same
+/// fields as the JSON form. Entry fields print in the entry's own key order.
 fn render_persona(payload: &Value) -> String {
     let document = payload.get("document");
-    let count = |key: &str| {
-        document
-            .and_then(|document| document.get(key))
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len)
-    };
-    let dropped = payload
-        .get("dropped_keys")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    format!(
-        "stable: {}\npreferences: {}\ndropped_keys: {dropped}",
-        count("stable"),
-        count("preferences")
-    )
+    let section = |key: &str| document.and_then(|d| d.get(key)).and_then(Value::as_array);
+    let mut lines = Vec::new();
+    for key in ["stable", "preferences"] {
+        let entries = section(key);
+        lines.push(format!("{key}: {}", entries.map_or(0, Vec::len)));
+        if let Some(entries) = entries {
+            for entry in entries {
+                lines.extend(entry_lines(entry));
+            }
+        }
+    }
+    let dropped = payload.get("dropped_keys").and_then(Value::as_array);
+    lines.push(format!("dropped_keys: {}", dropped.map_or(0, Vec::len)));
+    if let Some(keys) = dropped {
+        for key in keys {
+            lines.push(format!("  {}", leaf(key)));
+        }
+    }
+    lines.join("\n")
+}
+
+/// The lines for one persona entry: `key: value` first, then every other
+/// field the entry carries, in the entry's own key order. An entry without a
+/// key or value prints its remaining fields only.
+fn entry_lines(entry: &Value) -> Vec<String> {
+    let head = entry
+        .get("key")
+        .and_then(Value::as_str)
+        .zip(entry.get("value"))
+        .map(|(key, value)| format!("  {key}: {}", leaf(value)));
+    let mut lines = head.into_iter().collect::<Vec<_>>();
+    if let Some(fields) = entry.as_object() {
+        for (field, value) in fields {
+            if matches!(field.as_str(), "key" | "value") && !lines.is_empty() {
+                continue;
+            }
+            lines.push(format!("  {field}: {}", leaf(value)));
+        }
+    }
+    lines
+}
+
+/// The text for one field value: strings bare, `null` as `null`, numbers and
+/// booleans as their text, a nested value as its compact JSON.
+fn leaf(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => "null".to_owned(),
+        Value::Object(_) | Value::Array(_) => value.to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn render_maintenance(payload: &Value) -> String {

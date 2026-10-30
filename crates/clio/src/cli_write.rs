@@ -12,6 +12,8 @@
 //! ## Owns
 //! - The write engine: flag parsing, `--help`, preview emission, and the
 //!   in-process `tools/call` bridge for mutating verbs
+//! - The write receipt's bank naming: the top-level `bank` result field, the
+//!   `bank_source` fallback disclosure, and the text-mode `bank:` lines
 //! - The exit-code mapping for writes: 0 ok, 1 refusal/operational/partial
 //!   failure, 2 usage
 //! - One bounded index drain after a successful mutating call (a one-shot
@@ -181,7 +183,7 @@ fn run_parsed(
             ExitCode::from(EXIT_OK)
         }
         WriteCall::Tool { tool, args } => match call_tool(state, tool, &args) {
-            Ok(payload) => {
+            Ok(mut payload) => {
                 if let Some(refusal) = group.refusal(verb, &payload) {
                     return fail(
                         io,
@@ -198,10 +200,11 @@ fn run_parsed(
                     )),
                 );
                 if group.mutates(verb)
-                    && let Some(bank) = receipt_bank(verb, &args, state)
+                    && let Some((bank, defaulted)) = receipt_bank(verb, &args, state)
                 {
-                    use std::fmt::Write as _;
-                    let _ = write!(text, " in bank `{bank}`");
+                    name_receipt_bank(&mut payload, bank, defaulted);
+                    let receipt = receipt_bank_lines(bank, defaulted);
+                    text = format!("{receipt}{text}");
                 }
                 emit(io, mode, &payload, &text);
                 drain_after_write(group, verb, state, &payload);
@@ -215,22 +218,52 @@ fn run_parsed(
     }
 }
 
-/// The bank a write receipt names: the caller's `--bank`, or the CLI default.
+/// The bank a write receipt names, and whether it was a fallback: the caller's
+/// `--bank`, or the CLI default with `defaulted` set when no bank was named.
 ///
-/// Only a command whose help documents `--bank` gets the suffix, so a command
+/// Only a command whose help documents `--bank` gets the naming, so a command
 /// that selects its bank another way (`--scope` for `summarize`, `--shared-bank`
 /// for the shared surface) returns `None` and keeps its receipt unchanged.
-fn receipt_bank<'a>(verb: &str, args: &'a Value, state: &'a McpState) -> Option<&'a str> {
+fn receipt_bank<'a>(verb: &str, args: &'a Value, state: &'a McpState) -> Option<(&'a str, bool)> {
     let advertises_bank = crate::cli_command_registry::find(verb)
         .is_some_and(|spec| spec.usage_line().contains("--bank"));
     if !advertises_bank {
         return None;
     }
-    Some(
-        args.get("bank")
-            .and_then(Value::as_str)
-            .unwrap_or(&state.default_bank),
-    )
+    let named = args.get("bank").and_then(Value::as_str);
+    Some((named.unwrap_or(&state.default_bank), named.is_none()))
+}
+
+/// Put the effective bank on the write result where a JSON reader cannot miss
+/// it: a top-level `bank` beside the per-item `written` entries, and when the
+/// caller named no bank, the `bank_source` disclosure that a fallback was used.
+/// A bank the tool itself reported stays untouched.
+fn name_receipt_bank(payload: &mut Value, bank: &str, defaulted: bool) {
+    let Some(fields) = payload.as_object_mut() else {
+        return;
+    };
+    fields
+        .entry("bank".to_owned())
+        .or_insert_with(|| Value::from(bank));
+    if defaulted {
+        fields
+            .entry("bank_source".to_owned())
+            .or_insert_with(|| Value::from("defaulted"));
+    }
+}
+
+/// The text-mode receipt lines that name the bank: one `bank:` line at the top,
+/// and when the caller named no bank, the sentence that says the fallback was
+/// used, so a write that landed in the default bank is never mistaken for data
+/// in the bank a later read targets.
+fn receipt_bank_lines(bank: &str, defaulted: bool) -> String {
+    let mut lines = format!("bank: {bank}\n");
+    if defaulted {
+        lines.push_str("notice: no --bank was named; this write used the fallback bank `");
+        lines.push_str(bank);
+        lines.push_str("`\n");
+    }
+    lines
 }
 
 /// Drain the index work a one-shot write just enqueued so the items are
