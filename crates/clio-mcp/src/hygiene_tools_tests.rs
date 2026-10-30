@@ -272,7 +272,7 @@ fn hygiene_clean_accepts_prior_audit_candidates() {
     let payload = ok_payload(&result);
     assert_eq!(payload["dry_run"], Value::Bool(true));
     assert_eq!(payload["would_archive"], candidates.len());
-    // `keep` resolves each candidate's suggested_action when one exists: a
+    // `apply_suggested` resolves each candidate's suggested_action when one exists: a
     // secret fixture lands in the discard band (≥ 0.90).
     let secret_item = clio_types::MemoryItem {
         id: "mcp-cand-2".into(),
@@ -315,7 +315,7 @@ fn hygiene_clean_accepts_prior_audit_candidates() {
     let result = dispatch(
         &st,
         "hygiene_clean",
-        &json!({ "candidates": candidates, "action": "keep", "confirm": false }),
+        &json!({ "candidates": candidates, "action": "apply_suggested", "confirm": false }),
     );
     let payload = ok_payload(&result);
     assert_eq!(payload["would_discard"], candidates.len());

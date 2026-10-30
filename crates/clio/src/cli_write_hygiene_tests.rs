@@ -132,6 +132,13 @@ fn confirmed_clean_discards_and_reports_the_applied_ids() {
         })),
         "hygiene clean: applied 1 item(s); failed b (not_found: gone); aborted, 1 pending"
     );
+    // A skipped `keep`-suggestion target is reported, and never as applied.
+    assert_eq!(
+        super::render_clean(&json!({
+            "dry_run": false, "applied": ["a"], "pending": [], "skipped": ["b"]
+        })),
+        "hygiene clean: applied 1 item(s); 1 skipped"
+    );
     let _ = std::fs::remove_file(&path);
 }
 
@@ -252,7 +259,7 @@ fn clean_rejects_unknown_actions_and_missing_files() {
     let (code, out, err) =
         run_write_state("hygiene clean", &[&file, "--action", "erase"], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
-    assert!(err.contains("flag|archive|discard|delete|keep"), "{err}");
+    assert!(err.contains("flag|archive|discard|delete|apply_suggested"), "{err}");
 
     let (code, out, err) = run_write_state("hygiene clean", &[], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");

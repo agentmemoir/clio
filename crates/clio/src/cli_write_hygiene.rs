@@ -36,8 +36,9 @@ use std::fmt::Write as _;
 pub(crate) struct HygieneWriteGroup;
 
 /// The closed action set; `delete` is the documented non-compliance alias of
-/// `discard` (it never touches DEKs or tombstones).
-const ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "keep"];
+/// `discard` (it never touches DEKs or tombstones). `apply_suggested` applies
+/// each candidate's own suggested action.
+const ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "apply_suggested"];
 
 impl WriteGroup for HygieneWriteGroup {
     fn verbs(&self) -> &'static [&'static str] {
@@ -129,7 +130,7 @@ fn clean_call(
     let candidates = parse_candidates(&raw)?;
     let action = match parsed.value("action") {
         Some(raw) => validate_choice("action", raw, ACTIONS)?,
-        None => "keep",
+        None => "apply_suggested",
     };
     let mut args = base_args(parsed);
     args.insert("candidates".into(), Value::Array(candidates));
@@ -227,8 +228,9 @@ fn candidate(entry: &Value) -> Result<Value, CliError> {
 }
 
 /// Human text for the clean outcome: a dry-run counts line, or the applied
-/// summary plus any per-target failure and pending count on a confirmed batch
-/// abort (a failure is never hidden).
+/// summary plus any per-target failure, pending count, and skipped count on a
+/// confirmed run (a failure is never hidden; a skipped `keep` suggestion is
+/// never counted as applied).
 fn render_clean(payload: &Value) -> String {
     if payload.get("dry_run") == Some(&Value::Bool(true)) {
         let count = |key: &str| payload.get(key).and_then(Value::as_u64).unwrap_or(0);
@@ -255,6 +257,10 @@ fn render_clean(payload: &Value) -> String {
     }
     if pending > 0 {
         let _ = write!(summary, "; aborted, {pending} pending");
+    }
+    let skipped = count_of(payload, "skipped");
+    if skipped > 0 {
+        let _ = write!(summary, "; {skipped} skipped");
     }
     summary
 }

@@ -36,7 +36,7 @@ use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 const IMPLICIT_GLOBALS_OUTSIDE_BANK: &[&str] = &["db", "backend", "actor", "no-input", "yes"];
 
 /// The closed `--action` set `cli_write_hygiene` validates against.
-const HYGIENE_ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "keep"];
+const HYGIENE_ACTIONS: &[&str] = &["flag", "archive", "discard", "delete", "apply_suggested"];
 
 /// The `--limit N` page cap the hygiene read commands document: the tool
 /// defaults it to 50 when omitted, and the CLI lowers an above-cap request to
@@ -74,9 +74,10 @@ const HYGIENE_CLEAN_ALTERNATE: &str =
 const HYGIENE_CLEAN_NOTE: &str =
     "without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only";
 
-/// The `hygiene clean` note: what `--action keep` does with each candidate.
-const HYGIENE_KEEP_NOTE: &str =
-    "--action keep applies each candidate's suggested action, including archive or discard";
+/// The `hygiene clean` note: what `--action apply_suggested` does with each
+/// candidate.
+const HYGIENE_APPLY_SUGGESTED_NOTE: &str =
+    "--action apply_suggested applies each candidate's suggested action, including archive or discard; a candidate suggested as keep is skipped";
 
 /// `clio hygiene audit`: score stored items and list the weakest.
 pub(crate) const HYGIENE_AUDIT: CommandSpec = CommandSpec {
@@ -127,16 +128,16 @@ pub(crate) const HYGIENE_CLEAN: CommandSpec = CommandSpec {
     name: "hygiene clean",
     aliases: &[],
     summary: "(or --file - for stdin; without --confirm, or with --dry-run: zero-write dry-run only)",
-    notes: &[HYGIENE_CLEAN_NOTE, HYGIENE_KEEP_NOTE],
+    notes: &[HYGIENE_CLEAN_NOTE, HYGIENE_APPLY_SUGGESTED_NOTE],
     positionals: &[],
     documented: &[
         FILE_REQUIRED,
         Flag {
-            default: Some("keep"),
+            default: Some("apply_suggested"),
             ..Flag::choice(
                 "action",
-                "flag|archive|discard|keep",
-                "Sets the action per candidate (`flag`, `archive`, `discard`, `delete`, `keep`); defaults to `keep`.",
+                "flag|archive|discard|apply_suggested",
+                "Sets the action per candidate (`flag`, `archive`, `discard`, `delete`, `apply_suggested`); defaults to `apply_suggested`.",
                 HYGIENE_ACTIONS,
             )
         },
@@ -157,7 +158,7 @@ pub(crate) const HYGIENE_CLEAN: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio hygiene clean --file candidates.json --confirm --action keep",
+            command: "clio hygiene clean --file candidates.json --confirm --action apply_suggested",
             comment: None,
         },
         Example {

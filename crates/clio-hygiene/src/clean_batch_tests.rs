@@ -5,12 +5,12 @@
 //!
 //! This module tests `hygiene_clean` batch semantics (`clean.rs`): the
 //! applied-vs-pending batch abort, duplicate target item ids writing
-//! collision-free log rows, and the preflight reason gate when `keep`
-//! resolves a target to discard.
+//! collision-free log rows, and the preflight reason gate when
+//! `apply_suggested` resolves a target to discard.
 //!
 //! ## Owns
 //! - Test coverage for batch abort (batch clause), duplicate-target
-//!   log-row uniqueness, and the confirmed-`keep` preflight rejection
+//!   log-row uniqueness, and the confirmed `apply_suggested` preflight rejection
 //!
 //! ## Does not own
 //! - The batch/log behavior itself (`clean.rs` and the store backends)
@@ -142,7 +142,7 @@ fn duplicate_targets_write_distinct_log_rows() {
 }
 
 #[test]
-fn preflight_rejects_confirmed_keep_that_resolves_discard_without_reason() {
+fn preflight_rejects_confirmed_apply_suggested_that_resolves_discard_without_reason() {
     let s = store();
     let bank = "bank-keepdisc";
     let s_ref = &*s as &dyn Store;
@@ -159,7 +159,7 @@ fn preflight_rejects_confirmed_keep_that_resolves_discard_without_reason() {
     };
     let targets = vec![target("keep-flag"), discard_suggested];
     let opctx = ctx(bank);
-    let mut a = args(&s, &opctx, &targets, CleanAction::Keep, true);
+    let mut a = args(&s, &opctx, &targets, CleanAction::ApplySuggested, true);
     a.reason = "";
     // Preflight must reject before any mutation — neither target is touched.
     let err = clean(&a).unwrap_err();
@@ -171,10 +171,10 @@ fn preflight_rejects_confirmed_keep_that_resolves_discard_without_reason() {
         "no log rows before or after preflight reject"
     );
 
-    // `keep` resolving only flag/archive still passes the preflight gate.
+    // `apply_suggested` resolving only flag/archive passes the preflight gate.
     let flag_only = vec![target("keep-flag")];
     let flag_ctx = ctx(bank);
-    let mut ok = args(&s, &flag_ctx, &flag_only, CleanAction::Keep, true);
+    let mut ok = args(&s, &flag_ctx, &flag_only, CleanAction::ApplySuggested, true);
     ok.reason = "";
     let outcome = clean(&ok).unwrap();
     assert!(outcome.failed.is_none());

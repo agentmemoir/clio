@@ -10,7 +10,7 @@
 //!
 //! ## Owns
 //! - [`clean`]: target resolution, confirmation gate, per-item executors,
-//!   batch abort semantics (applied vs pending), log-row persistence
+//!   batch abort vs skip semantics, and log-row persistence
 //! - [`CleanAction`]: the closed action set; `delete` is an alias of `discard`
 //!   documented as non-compliance (never `erase_request` / DEK destroy)
 //! - The presenting credential's label and the stated reason/note inside each
@@ -33,15 +33,15 @@ use clio_store::{HygieneLogEntry, HygieneStore, Store};
 use clio_types::{AmError, ErrorCode, OpContext, record_principal};
 use serde::Serialize;
 
-/// One clean target: an item id plus optional audit metadata (`keep` needs the
-/// suggested action; scores land in the log rows when present).
+/// One clean target: an item id plus optional audit metadata (`apply_suggested`
+/// needs the suggested action; scores land in the log rows when present).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CleanTarget {
     /// Item id (content is never accepted in clean requests).
     pub item_id: String,
     /// Noise score from the prior audit, when known.
     pub noise_score: Option<f64>,
-    /// Suggested action from the prior audit (required by `keep`).
+    /// Suggested action from the prior audit (required by `apply_suggested`).
     pub suggested_action: Option<String>,
 }
 
@@ -55,8 +55,8 @@ pub enum CleanAction {
     Archive,
     /// Operations removal via the existing discard path (not compliance erase).
     Discard,
-    /// Apply each target's `suggested_action`.
-    Keep,
+    /// Apply each target's `suggested_action`; a `keep` suggestion is skipped.
+    ApplySuggested,
 }
 
 impl CleanAction {
@@ -69,10 +69,12 @@ impl CleanAction {
             "flag" => Ok(Self::Flag),
             "archive" => Ok(Self::Archive),
             "discard" | "delete" => Ok(Self::Discard),
-            "keep" => Ok(Self::Keep),
+            "apply_suggested" => Ok(Self::ApplySuggested),
             other => Err(AmError::new(
                 ErrorCode::InvalidArgument,
-                format!("hygiene action must be flag|archive|discard|delete|keep, got `{other}`"),
+                format!(
+                    "hygiene action must be flag|archive|discard|delete|apply_suggested, got `{other}`"
+                ),
             )),
         }
     }
@@ -84,7 +86,7 @@ impl CleanAction {
             Self::Flag => "flag",
             Self::Archive => "archive",
             Self::Discard => "discard",
-            Self::Keep => "keep",
+            Self::ApplySuggested => "apply_suggested",
         }
     }
 }
@@ -99,7 +101,7 @@ pub struct CleanArgs<'a> {
     pub ctx: &'a OpContext,
     /// Targets: prior audit candidates or bare ids.
     pub targets: &'a [CleanTarget],
-    /// Requested action (`keep` resolves per-target suggestions).
+    /// Requested action (`apply_suggested` resolves per-target suggestions).
     pub action: CleanAction,
     /// `false` (default) = dry-run counts only; `true` = mutate.
     pub confirm: bool,
@@ -129,6 +131,9 @@ pub struct CleanOutcome {
     pub would_discard: usize,
     /// Confirmed: item ids mutated so far.
     pub applied: Vec<String>,
+    /// Confirmed: item ids skipped because their suggestion is `keep`.
+    /// The batch continued without them.
+    pub skipped: Vec<String>,
     /// Confirmed abort: targets not attempted after the first failure.
     pub pending: Vec<String>,
     /// Confirmed: per-item failure that aborted the batch.
@@ -149,18 +154,19 @@ pub struct FailedTarget {
 /// Without `confirm`: zero writes and zero durable rows; returns
 /// would-flag / would-archive / would-discard counts only, skipping targets
 /// already discarded or archived. With `confirm`: every mutation writes its
-/// telemetry row inside the store transaction,
-/// appends a durable `hygiene_audit_logs` row, and a first per-item failure
-/// aborts the remaining targets (reported as `pending`). The `would_*`
-/// counters keep one meaning in both modes: on a confirmed run each equals
-/// the applied count for its action. The action set never
-/// reaches compliance erasure: no DEK destruction or tombstone write exists on
-/// this path.
+/// telemetry row inside the store transaction and appends a durable
+/// `hygiene_audit_logs` row, and a first per-item failure aborts the
+/// remaining targets (reported as `pending`). A confirmed `apply_suggested`
+/// run skips a target suggested as `keep` (nothing to apply; reported as
+/// `skipped`) instead of failing the batch. The `would_*` counters keep one
+/// meaning in both modes: on a confirmed run each equals the applied count
+/// for its action. The action set never reaches compliance erasure: no DEK
+/// destruction or tombstone write exists on this path.
 ///
 /// # Errors
-/// Missing bank, empty targets, `keep` without a suggested action, empty ids,
-/// a state probe failure, unconfirmed discard without a reason, or a confirmed
-/// log write failure.
+/// Missing bank, empty targets, an `apply_suggested` target with no
+/// applicable suggested action (other than `keep`), empty ids, a state probe
+/// failure, unconfirmed discard without a reason, or a log write failure.
 pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
     if args.ctx.bank.as_str().is_empty() {
         return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
@@ -172,8 +178,8 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
         ));
     }
     // Preflight: the confirmed discard path needs a non-empty reason.
-    // `keep` resolves per-target suggestions, so it must reject too when any
-    // target resolves to discard — before any mutation is applied.
+    // `apply_suggested` resolves per-target suggestions, so it must reject too
+    // when any target resolves to discard — before any mutation is applied.
     if args.confirm && confirmed_discard_requested(args) && args.reason.trim().is_empty() {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
@@ -191,12 +197,17 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
         would_archive: 0,
         would_discard: 0,
         applied: Vec::new(),
+        skipped: Vec::new(),
         pending: Vec::new(),
         failed: None,
     };
     for (index, target) in args.targets.iter().enumerate() {
         validate_target_id(target.item_id.as_str())?;
-        let action = resolved_action(args.action, target)?;
+        // A `keep`-suggestion target is skipped: nothing applies to it.
+        let Some(action) = resolved_action(args.action, target)? else {
+            outcome.skipped.push(target.item_id.clone());
+            continue;
+        };
         let result = match action {
             CleanAction::Flag => args
                 .hygiene
@@ -227,7 +238,7 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
                     args.ctx.actor.as_str(),
                 )
                 .map(|_| ()),
-            CleanAction::Keep => Ok(()),
+            CleanAction::ApplySuggested => Ok(()),
         };
         match result {
             Ok(()) => {
@@ -240,7 +251,7 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
                     CleanAction::Flag => outcome.would_flag += 1,
                     CleanAction::Archive => outcome.would_archive += 1,
                     CleanAction::Discard => outcome.would_discard += 1,
-                    CleanAction::Keep => {}
+                    CleanAction::ApplySuggested => {}
                 }
                 outcome.applied.push(target.item_id.clone());
                 append_log(args, index, target, action)?;
@@ -263,23 +274,31 @@ pub fn clean(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
 }
 
 /// True when this clean call mutates or resolves any target to `discard`
-/// (explicit action, or `keep` over a target suggested as `discard`).
+/// (explicit action, or `apply_suggested` over a target suggested as
+/// `discard`).
 fn confirmed_discard_requested(args: &CleanArgs<'_>) -> bool {
     args.action == CleanAction::Discard
-        || (args.action == CleanAction::Keep
+        || (args.action == CleanAction::ApplySuggested
             && args
                 .targets
                 .iter()
                 .any(|t| t.suggested_action.as_deref() == Some("discard")))
 }
 
-/// Resolve the per-target action (`keep` needs an audit suggestion).
-fn resolved_action(action: CleanAction, target: &CleanTarget) -> Result<CleanAction, AmError> {
+/// Resolve the per-target action (`apply_suggested` needs an audit
+/// suggestion). `None` marks a target suggested as `keep`: nothing applies,
+/// so the caller skips it rather than aborting the batch. Other unmapped
+/// suggestions still fail closed.
+fn resolved_action(
+    action: CleanAction,
+    target: &CleanTarget,
+) -> Result<Option<CleanAction>, AmError> {
     match action {
-        CleanAction::Keep => match target.suggested_action.as_deref() {
-            Some("flag") => Ok(CleanAction::Flag),
-            Some("archive") => Ok(CleanAction::Archive),
-            Some("discard") => Ok(CleanAction::Discard),
+        CleanAction::ApplySuggested => match target.suggested_action.as_deref() {
+            Some("flag") => Ok(Some(CleanAction::Flag)),
+            Some("archive") => Ok(Some(CleanAction::Archive)),
+            Some("discard") => Ok(Some(CleanAction::Discard)),
+            Some("keep") => Ok(None),
             other => Err(AmError::new(
                 ErrorCode::InvalidArgument,
                 format!(
@@ -288,7 +307,7 @@ fn resolved_action(action: CleanAction, target: &CleanTarget) -> Result<CleanAct
                 ),
             )),
         },
-        explicit => Ok(explicit),
+        explicit => Ok(Some(explicit)),
     }
 }
 
@@ -353,12 +372,16 @@ fn preview_outcome(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
         would_archive: 0,
         would_discard: 0,
         applied: Vec::new(),
+        skipped: Vec::new(),
         pending: Vec::new(),
         failed: None,
     };
     for target in args.targets {
         validate_target_id(target.item_id.as_str())?;
-        let action = resolved_action(args.action, target)?;
+        // A `keep` suggestion has nothing to count: the preview skips it.
+        let Some(action) = resolved_action(args.action, target)? else {
+            continue;
+        };
         if target_already_settled(args, &target.item_id)? {
             continue;
         }
@@ -366,7 +389,7 @@ fn preview_outcome(args: &CleanArgs<'_>) -> Result<CleanOutcome, AmError> {
             CleanAction::Flag => outcome.would_flag += 1,
             CleanAction::Archive => outcome.would_archive += 1,
             CleanAction::Discard => outcome.would_discard += 1,
-            CleanAction::Keep => {}
+            CleanAction::ApplySuggested => {}
         }
     }
     Ok(outcome)
@@ -418,3 +441,7 @@ mod clean_batch_tests;
 #[cfg(test)]
 #[path = "clean_discard_cascade_tests.rs"]
 mod clean_discard_cascade_tests;
+
+#[cfg(test)]
+#[path = "clean_apply_suggested_tests.rs"]
+mod clean_apply_suggested_tests;

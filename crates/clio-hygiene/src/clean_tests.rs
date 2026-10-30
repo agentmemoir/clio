@@ -5,16 +5,18 @@
 //!
 //! This module tests the confirmed `hygiene_clean` mutator (`clean.rs`):
 //! dry-run counts, archive retrieve exclusion, discard
-//! without DEK destroy, the `delete` alias, `keep`, the durable log
-//! And request validation. SQLite backend; the Postgres parity
+//! without DEK destroy, the `delete` alias, the durable log
+//! and request validation. SQLite backend; the Postgres parity
 //! probe lives in `clio-store`'s `pg_hygiene_tests`.
 //!
 //! ## Owns
 //! - Test coverage for dry-run counting, confirmed counter consistency
-//!   (would_* equals the applied counts per action), archive/discard/keep
+//!   (would_* equals the applied counts per action), archive/discard
 //!   outcomes, log row shape, and fail-closed argument validation
 //!
 //! ## Does not own
+//! - The per-target `apply_suggested` resolution and skip behaviour
+//!   (`clean_apply_suggested_tests.rs`)
 //! - Batch-abort and duplicate-target semantics (`clean_batch_tests.rs`)
 //! - The credential label a durable row carries (`clean_principal_tests.rs`)
 //! - The clean behavior itself (`clean.rs`) or store SQL
@@ -274,27 +276,6 @@ fn confirm_flag_marks_for_review_but_stays_retrievable() {
 }
 
 #[test]
-fn keep_applies_each_targets_suggested_action() {
-    let s = store();
-    let bank = "bank-keep";
-    let s_ref = &*s as &dyn Store;
-    s_ref
-        .create_memory_item(&item("keep-arch", bank, "archive me"), "actor")
-        .unwrap();
-    let targets = vec![target("keep-arch")];
-    let outcome = clean(&args(&s, &ctx(bank), &targets, CleanAction::Keep, true)).unwrap();
-    assert_eq!(outcome.applied, vec!["keep-arch".to_owned()]);
-    assert!(s_ref.item_is_archived(bank, "keep-arch").unwrap());
-    // `keep` with no suggestion fails closed.
-    let empty = vec![CleanTarget {
-        item_id: "keep-arch".into(),
-        noise_score: None,
-        suggested_action: None,
-    }];
-    assert!(clean(&args(&s, &ctx(bank), &empty, CleanAction::Keep, true)).is_err());
-}
-
-#[test]
 fn confirmed_counters_equal_the_applied_counts_per_action() {
     let s = store();
     let bank = "bank-counters";
@@ -309,7 +290,14 @@ fn confirmed_counters_equal_the_applied_counts_per_action() {
         suggested("cnt-arch", "archive"),
         suggested("cnt-disc", "discard"),
     ];
-    let outcome = clean(&args(&s, &ctx(bank), &targets, CleanAction::Keep, true)).unwrap();
+    let outcome = clean(&args(
+        &s,
+        &ctx(bank),
+        &targets,
+        CleanAction::ApplySuggested,
+        true,
+    ))
+    .unwrap();
     assert!(outcome.failed.is_none());
     assert_eq!(outcome.applied.len(), 3, "{:?}", outcome.applied);
     // One meaning per field: on a confirmed run each would_* equals the
@@ -439,6 +427,7 @@ fn clean_outcome_shape_is_stable() {
         would_archive: 2,
         would_discard: 3,
         applied: vec![],
+        skipped: vec![],
         pending: vec![],
         failed: None,
     };

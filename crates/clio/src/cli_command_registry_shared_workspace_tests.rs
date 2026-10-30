@@ -331,7 +331,7 @@ fn the_shared_workspace_tranche_passes_the_metadata_check() {
 /// remaining flag stays free text or the shared `--output` global.
 #[test]
 fn the_shared_workspace_flag_kinds_match_their_consumers() {
-    let actions = ValueKind::Enum(&["flag", "archive", "discard", "delete", "keep"]);
+    let actions = ValueKind::Enum(&["flag", "archive", "discard", "delete", "apply_suggested"]);
     for spec in super::SHARED_WORKSPACE {
         for flag in spec.documented {
             let Some(value) = flag.value else { continue };
