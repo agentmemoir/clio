@@ -1,0 +1,1 @@
+`clio ops verify` and `clio ops diagnose` now honor the global `--output json|text` flag, print a full human-readable report in text mode, refuse an invalid value with a usage error and exit code 2, and list `--output` in their help, so terminal and piped readers get the same report in the shape they choose.

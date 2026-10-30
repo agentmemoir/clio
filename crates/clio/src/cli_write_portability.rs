@@ -14,11 +14,13 @@
 //! - The `erase` confirmation gate call and the irreversibility dry-run preview
 //! - The `compliance review-export` runner: store open, argument build, and the
 //!   in-process `review_export` dispatch
-//! - The `export` and `import` human text views; `erase` renders through
-//!   `compliance_request_cli::render_request`
+//! - The `export` human text view; `erase` renders through
+//!   `compliance_request_cli::render_request`, and `import` renders through
+//!   `cli_write_portability_import_render`
 //!
 //! ## Does not own
 //! - The write engine, parsing, and in-process call bridge (see `cli_write`)
+//! - The `import` human text view (see `cli_write_portability_import_render`)
 //! - The confirmation decision itself (see `cli_confirm`)
 //! - Bundle, import, and erasure semantics; the in-process tools own behavior
 //!   (see `clio-compliance`)
@@ -68,7 +70,7 @@ impl WriteGroup for PortabilityWriteGroup {
     fn render(&self, verb: &str, payload: &Value, _palette: crate::cli_style::Palette) -> String {
         match verb {
             "export" => render_export(payload),
-            "import" => render_import(payload),
+            "import" => crate::cli_write_portability_import_render::render_import(payload),
             // The erase handler returns the request report; render it through
             // the same separated request fields the request verbs use.
             _ => crate::compliance_request_cli::render_request(payload),
@@ -245,87 +247,6 @@ fn render_export(payload: &Value) -> String {
     )
 }
 
-fn render_import(payload: &Value) -> String {
-    let report = payload.get("report").unwrap_or(&Value::Null);
-    let count = |key: &str| report.get(key).and_then(Value::as_u64).unwrap_or(0);
-    let (create, skip, reject, overwrite) = (
-        count("would_create"),
-        count("would_skip"),
-        count("would_reject"),
-        count("would_overwrite"),
-    );
-    if report.get("dry_run") == Some(&Value::Bool(true)) {
-        return format!(
-            "import dry-run: would create {create}, skip {skip}, reject {reject} (zero writes)"
-        );
-    }
-    if report.get("applied") != Some(&Value::Bool(true)) {
-        return format!(
-            "import applied nothing: would create {create}, skip {skip}, \
-             reject {reject}, overwrite {overwrite}"
-        );
-    }
-    let invalid = skipped_invalid_tail(report);
-    // A live run that created and overwrote nothing restored nothing, however
-    // many rows it walked; "created 0" alone reads like a successful restore.
-    if create == 0 && overwrite == 0 {
-        return format!(
-            "import: nothing restored: created 0, overwrote 0, skipped {skip}, rejected {reject}{invalid}"
-        );
-    }
-    format!(
-        "import: created {create}, skipped {skip}, rejected {reject}, overwrote {overwrite}{invalid}"
-    )
-}
-
-/// Entities named per line before the text view falls back to a count.
-const INVALID_NAMED: usize = 3;
-
-/// The text-mode tail naming the entities an import skipped as invalid: the
-/// count, then up to `INVALID_NAMED` ids with their code and masked reason, then
-/// how many the report holds back. Empty when nothing was skipped as invalid, so
-/// the JSON report stays the authoritative record and the text only adds to it.
-fn skipped_invalid_tail(report: &Value) -> String {
-    let field = |row: &Value, key: &str| {
-        row.get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("?")
-            .to_owned()
-    };
-    let total = report
-        .get("would_skip_invalid")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let named: Vec<String> = report
-        .get("skipped_invalid")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-        .iter()
-        .take(INVALID_NAMED)
-        .map(|row| {
-            format!(
-                "{} ({}: {})",
-                field(row, "id"),
-                field(row, "code"),
-                field(row, "reason")
-            )
-        })
-        .collect();
-    if total == 0 && named.is_empty() {
-        return String::new();
-    }
-    let hidden = total.saturating_sub(named.len() as u64);
-    let more = match hidden {
-        0 => String::new(),
-        _ => format!(" and {hidden} more"),
-    };
-    if named.is_empty() {
-        return format!(", skipped invalid {total}{more}");
-    }
-    format!(", skipped invalid {total}: {}{more}", named.join("; "))
-}
-
 /// Run `clio compliance review-export`: parse the record's flags and export the
 /// ordered content-free local review events to `--out` under destination
 /// custody, through the in-process `review_export` tool.
@@ -433,10 +354,6 @@ mod category_tests;
 #[cfg(test)]
 #[path = "cli_write_portability_subject_tests.rs"]
 mod subject_tests;
-
-#[cfg(test)]
-#[path = "cli_write_portability_import_render_tests.rs"]
-mod import_render_tests;
 
 #[cfg(test)]
 #[path = "cli_write_portability_review_export_tests.rs"]

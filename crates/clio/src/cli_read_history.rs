@@ -161,9 +161,10 @@ fn task_history_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliEr
 }
 
 fn failure_list_call(parsed: &ParsedArgs) -> Result<(&'static str, Value), CliError> {
-    let query = one_positional(parsed, "failure list", "TASK_ID_OR_QUERY")?;
+    let task_id = one_positional(parsed, "failure list", "TASK_ID")?;
     let mut args = read_args(parsed);
-    args.insert("task_id_or_query".into(), Value::from(query));
+    // `task_id_or_query` stays the tool argument's name in the MCP schema.
+    args.insert("task_id_or_query".into(), Value::from(task_id));
     if let Some(limit) = parsed.value("limit") {
         // One shared page-size rule: `0` refused, above the cap clamped (the
         // policy's own bounds stay as the backstop for direct callers).
@@ -366,3 +367,9 @@ mod tests;
 #[cfg(test)]
 #[path = "cli_read_history_tests_limit_tests.rs"]
 mod limit_tests;
+
+// The `failure list` tests are their own child module for the same reason: the
+// history tests and the failure-list tests each stay inside the limit.
+#[cfg(test)]
+#[path = "cli_read_history_tests_failure_list_tests.rs"]
+mod failure_list_tests;

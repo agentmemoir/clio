@@ -1,0 +1,1 @@
+The text output of `stats`, `inspect`, `persona get`, and `import` now prints every field the JSON result carries, including the report counts and breakdowns, the inspect row and freshness details, the persona entries field by field, and the import summary with written ids, rejections, and notes, so terminal readers no longer see less than JSON readers do.

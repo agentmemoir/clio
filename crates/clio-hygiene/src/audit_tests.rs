@@ -394,7 +394,7 @@ fn audit_feeds_clean_targets_end_to_end() {
         hygiene: &*s,
         ctx: &ctx,
         targets: &targets,
-        action: CleanAction::Keep,
+        action: CleanAction::ApplySuggested,
         confirm: false,
         reason: "",
         timestamp: "2026-09-20T00:00:00Z",

@@ -194,16 +194,13 @@ fn intent_gate_matches_the_registered_usage_and_parser() {
     let spec = record("intent gate");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio intent gate TURN_TEXT [--explain] [--bank BANK] [--output json|text]"
+        "usage: clio intent gate TURN_TEXT [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "decide whether a turn should reach memory");
     assert_eq!(spec.tool, Some("intent_gate"));
     assert_eq!(spec.section, Section::Read);
@@ -277,16 +274,13 @@ fn audit_trail_matches_the_registered_usage_and_parser() {
     let spec = record("audit trail");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio audit trail ITEM_ID [--explain] [--bank BANK] [--output json|text]"
+        "usage: clio audit trail ITEM_ID [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "masked lifecycle reconstruction for one item");
     assert_eq!(spec.tool, Some("audit_trail"));
     assert_eq!(spec.section, Section::Read);
@@ -331,7 +325,7 @@ fn the_shared_workspace_tranche_passes_the_metadata_check() {
 /// remaining flag stays free text or the shared `--output` global.
 #[test]
 fn the_shared_workspace_flag_kinds_match_their_consumers() {
-    let actions = ValueKind::Enum(&["flag", "archive", "discard", "delete", "keep"]);
+    let actions = ValueKind::Enum(&["flag", "archive", "discard", "delete", "apply_suggested"]);
     for spec in super::SHARED_WORKSPACE {
         for flag in spec.documented {
             let Some(value) = flag.value else { continue };

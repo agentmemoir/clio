@@ -1,0 +1,1 @@
+`--explain` is no longer shown in the help of the commands that ignore it, and passing `--explain` to one of them now ends with an unknown-flag usage error and exit code 2 instead of being accepted and silently dropped, so a caller asking for a trace that never existed finds out at once.

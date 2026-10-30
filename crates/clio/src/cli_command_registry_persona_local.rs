@@ -78,9 +78,6 @@ const NUMBER: Positional = Positional {
     description: "The numeric observation fed into the preference's exponential moving average.",
 };
 
-/// The `--explain` trace flag this tranche's read commands document.
-const EXPLAIN: Flag = Flag::toggle("explain", "Asks `read_args` for the trace detail.");
-
 /// The `--dry-run` preview flag this tranche's write commands document; the
 /// `workspace` sibling's `canonical put` also uses it.
 const DRY_RUN: Flag = Flag::toggle("dry-run", "Previews with no durable change.");
@@ -157,7 +154,7 @@ pub(crate) const PERSONA_GET: CommandSpec = CommandSpec {
     summary: "the persona model, within a token budget",
     notes: &[],
     positionals: &[],
-    documented: &[BUDGET_TOKENS, EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[BUDGET_TOKENS, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -263,7 +260,7 @@ pub(crate) const MAINTENANCE_STATUS: CommandSpec = CommandSpec {
     summary: "queue depth, failures, and drain progress",
     notes: &[],
     positionals: &[],
-    documented: &[ITEM_ID, EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[ITEM_ID, GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: IMPLICIT_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -274,7 +271,7 @@ pub(crate) const MAINTENANCE_STATUS: CommandSpec = CommandSpec {
             comment: None,
         },
         Example {
-            command: "clio maintenance status --item-id itm-sample-1 --explain",
+            command: "clio maintenance status --item-id itm-sample-1",
             comment: None,
         },
     ],

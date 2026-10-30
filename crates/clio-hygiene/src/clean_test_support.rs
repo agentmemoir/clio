@@ -27,14 +27,14 @@ use clio_types::{
 use std::sync::Arc;
 
 /// A fresh in-memory store, so no test depends on another.
-pub(super) fn store() -> Arc<SqliteStore> {
+pub(crate) fn store() -> Arc<SqliteStore> {
     SqliteStore::open_in_memory(Arc::new(LocalDevKms::new()))
         .map(Arc::new)
         .expect("open sqlite")
 }
 
 /// One memory item for a bank.
-pub(super) fn item(id: &str, bank: &str, gist: &str) -> MemoryItem {
+pub(crate) fn item(id: &str, bank: &str, gist: &str) -> MemoryItem {
     MemoryItem {
         id: id.into(),
         bank_id: bank.into(),
@@ -60,17 +60,17 @@ pub(super) fn item(id: &str, bank: &str, gist: &str) -> MemoryItem {
 }
 
 /// An operation with no presenting credential (the local-transport case).
-pub(super) fn ctx(bank: &str) -> OpContext {
+pub(crate) fn ctx(bank: &str) -> OpContext {
     OpContext::new(Bank::new(bank), Actor::Agent)
 }
 
 /// The same operation presented by a named credential.
-pub(super) fn bound_ctx(bank: &str, label: &str) -> OpContext {
+pub(crate) fn bound_ctx(bank: &str, label: &str) -> OpContext {
     OpContext::with_principal(Bank::new(bank), Actor::Agent, PrincipalLabel::new(label))
 }
 
 /// One clean target.
-pub(super) fn target(id: &str) -> CleanTarget {
+pub(crate) fn target(id: &str) -> CleanTarget {
     CleanTarget {
         item_id: id.into(),
         noise_score: Some(0.75),
@@ -79,7 +79,7 @@ pub(super) fn target(id: &str) -> CleanTarget {
 }
 
 /// One clean call's arguments.
-pub(super) fn args<'a>(
+pub(crate) fn args<'a>(
     store: &'a SqliteStore,
     opctx: &'a OpContext,
     targets: &'a [CleanTarget],

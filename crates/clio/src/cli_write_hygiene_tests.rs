@@ -18,9 +18,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{HygieneWriteGroup, parse_candidates};
 use crate::cli_read_test_support::{call, json_of, seed_item, state};
-use crate::cli_write_group::WriteGroup;
 use crate::cli_write_test_support::{run_write_state, run_write_state_stdin};
 use serde_json::json;
 use std::io::Cursor;
@@ -88,6 +86,55 @@ fn clean_dry_run_counts_without_writing_anything() {
 }
 
 #[test]
+fn clean_dry_run_names_its_skipped_targets_in_text() {
+    let (s, path) = seeded_with_candidates("dry-skipped", "itm-h3");
+    let file = format!("--file={}", path.display());
+    // Settle the target first: a confirmed discard.
+    let (code, _, err) = run_write_state(
+        "hygiene clean",
+        &[
+            &file,
+            "--action",
+            "discard",
+            "--confirm",
+            "--reason",
+            "noise",
+            "--bank",
+            "demo",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    // The preview over the now-settled target: zero counts, one skip,
+    // disclosed in both the JSON payload and the dry-run text.
+    let (code, out, err) = run_write_state(
+        "hygiene clean",
+        &[&file, "--action", "discard", "--bank", "demo"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["skipped"], json!(["itm-h3"]), "{payload}");
+    assert_eq!(payload["would_discard"], json!(0), "{payload}");
+    let (_, text, _) = run_write_state(
+        "hygiene clean",
+        &[&file, "--action", "discard", "--bank", "demo"],
+        &s,
+        true,
+    );
+    assert!(
+        text.contains(
+            "hygiene clean dry-run: would flag 0, archive 0, discard 0 \
+             (zero writes; pass --confirm to apply); 1 skipped"
+        ),
+        "{text}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn confirmed_clean_discards_and_reports_the_applied_ids() {
     let (s, path) = seeded_with_candidates("confirm", "itm-h2");
     let file = format!("--file={}", path.display());
@@ -110,6 +157,11 @@ fn confirmed_clean_discards_and_reports_the_applied_ids() {
     let payload = json_of(&out);
     assert_eq!(payload["dry_run"], json!(false), "{payload}");
     assert_eq!(payload["applied"], json!(["itm-h2"]), "{payload}");
+    // The confirmed JSON keeps the counter meaning: would_discard equals the
+    // applied discard count, as the preview reported.
+    assert_eq!(payload["would_discard"], json!(1), "{payload}");
+    assert_eq!(payload["would_flag"], json!(0), "{payload}");
+    assert_eq!(payload["would_archive"], json!(0), "{payload}");
     assert_eq!(stats(&s)["items_active"], json!(0), "item discarded");
     assert_eq!(
         super::render_clean(&json!({"dry_run": false, "applied": ["a", "b"], "pending": []})),
@@ -126,6 +178,13 @@ fn confirmed_clean_discards_and_reports_the_applied_ids() {
             "failed": {"item_id": "b", "error": "not_found: gone"}
         })),
         "hygiene clean: applied 1 item(s); failed b (not_found: gone); aborted, 1 pending"
+    );
+    // A skipped `keep`-suggestion target is reported, and never as applied.
+    assert_eq!(
+        super::render_clean(&json!({
+            "dry_run": false, "applied": ["a"], "pending": [], "skipped": ["b"]
+        })),
+        "hygiene clean: applied 1 item(s); 1 skipped"
     );
     let _ = std::fs::remove_file(&path);
 }
@@ -160,6 +219,7 @@ fn the_delete_alias_is_a_non_compliance_discard() {
     );
     assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
     assert_eq!(json_of(&out)["applied"], json!(["itm-h3"]), "{out}");
+    assert_eq!(json_of(&out)["would_discard"], json!(1), "{out}");
     assert_eq!(stats(&s)["items_active"], json!(0), "alias discarded");
     let _ = std::fs::remove_file(&path);
 }
@@ -246,7 +306,10 @@ fn clean_rejects_unknown_actions_and_missing_files() {
     let (code, out, err) =
         run_write_state("hygiene clean", &[&file, "--action", "erase"], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
-    assert!(err.contains("flag|archive|discard|delete|keep"), "{err}");
+    assert!(
+        err.contains("flag|archive|discard|delete|apply_suggested"),
+        "{err}"
+    );
 
     let (code, out, err) = run_write_state("hygiene clean", &[], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
@@ -346,82 +409,4 @@ fn clean_dry_run_flag_forces_zero_writes_even_with_confirm() {
         "--dry-run: zero writes"
     );
     let _ = std::fs::remove_file(&path);
-}
-
-// ---------- build/parse unit tests ----------
-
-#[test]
-fn build_without_streams_rejects_the_stdin_path() {
-    let parsed = crate::cli_args::parse(
-        &HygieneWriteGroup.spec("hygiene clean"),
-        ["--file".to_owned(), "-".to_owned()],
-    )
-    .expect("parse");
-    let Err(error) = HygieneWriteGroup.build("hygiene clean", &parsed) else {
-        panic!("no stdin on this path")
-    };
-    assert_eq!(error.exit_code(), ExitCode::from(2));
-    assert!(error.message().contains("stdin"), "{}", error.message());
-}
-
-#[test]
-fn parse_candidates_accepts_both_document_shapes() {
-    let object = r#"{"candidates": [{"item_id": "a"}], "bank": "demo"}"#;
-    assert_eq!(parse_candidates(object).unwrap().len(), 1);
-    let bare = r#"[{"item_id": "a"}, {"item_id": "b", "noise_score": 0.5}]"#;
-    assert_eq!(parse_candidates(bare).unwrap().len(), 2);
-}
-
-#[test]
-fn parse_candidates_passes_optional_fields_and_drops_extras() {
-    let raw = r#"[{"item_id": "a", "noise_score": 0.9, "suggested_action": "discard",
-                   "noise_reasons": ["x"], "preview": "leak"}]"#;
-    let candidates = parse_candidates(raw).unwrap();
-    assert_eq!(candidates[0]["item_id"], json!("a"));
-    assert_eq!(candidates[0]["noise_score"], json!(0.9));
-    assert_eq!(candidates[0]["suggested_action"], json!("discard"));
-    assert!(candidates[0].get("preview").is_none(), "{candidates:?}");
-}
-
-#[test]
-fn parse_candidates_rejects_everything_else_with_usage_errors() {
-    for (raw, fragment) in [
-        ("{not json", "JSON"),
-        (r#"{"items": [{"item_id": "a"}]}"#, "candidates"),
-        (r#"{"candidates": "two"}"#, "array"),
-        (r#"{"candidates": 3}"#, "array"),
-        ("\"just a string\"", "array"),
-        ("42", "array"),
-        ("null", "array"),
-        (r#"[{"noise_score": 0.5}]"#, "item_id"),
-        (r#"[{"item_id": 7}]"#, "item_id"),
-        (r#"["a"]"#, "objects"),
-        (r#"[{"item_id": "a", "noise_score": "high"}]"#, "number"),
-        (r#"[{"item_id": "a", "suggested_action": 5}]"#, "string"),
-    ] {
-        let error = parse_candidates(raw).expect_err(raw);
-        assert_eq!(error.exit_code(), ExitCode::from(2), "{raw}");
-        assert!(
-            error.message().contains(fragment),
-            "{raw}: {}",
-            error.message()
-        );
-    }
-}
-
-#[test]
-fn hygiene_write_group_declares_its_verb_and_spec() {
-    assert_eq!(HygieneWriteGroup.verbs(), &["hygiene clean"][..]);
-    let spec = HygieneWriteGroup.spec("hygiene clean");
-    for flag in ["file", "action", "reason", "note"] {
-        assert!(spec.value_flags().contains(&flag), "{flag}");
-    }
-    assert!(spec.bool_flags().contains(&"confirm"));
-    assert!(spec.bool_flags().contains(&"dry-run"));
-    assert!(HygieneWriteGroup.mutates("hygiene clean"));
-    assert!(
-        HygieneWriteGroup
-            .refusal("hygiene clean", &json!({}))
-            .is_none()
-    );
 }

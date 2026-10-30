@@ -5,8 +5,8 @@
 //!
 //! This module is responsible for the MCP-bound hygiene tools:
 //!  `hygiene_audit` (read-only ranked noise scan), `hygiene_clean`
-//! (confirmed flag/archive/discard/keep), and `hygiene_log_list` (masked
-//! durable log rows), decoded from MCP args into in-process calls.
+//! (confirmed `flag/archive/discard/apply_suggested`), and `hygiene_log_list`
+//! (masked durable log rows), decoded from MCP args into in-process calls.
 //!
 //! ## Owns
 //! - JSON argument decoding and result shaping for the three hygiene tools
@@ -76,7 +76,7 @@ fn hygiene_audit_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
 fn hygiene_clean_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args)?;
-    let action_raw = opt_str(args, "action").unwrap_or("keep");
+    let action_raw = opt_str(args, "action").unwrap_or("apply_suggested");
     let action = CleanAction::parse(action_raw)?;
     let targets = clean_targets(args)?;
     let confirm = opt_bool(args, "confirm", false)?;

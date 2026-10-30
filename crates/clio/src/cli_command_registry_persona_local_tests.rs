@@ -103,20 +103,17 @@ fn persona_get_matches_the_registered_usage_and_parser() {
     let spec = record("persona get");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio persona get [--budget-tokens N] [--explain] [--bank BANK] [--output json|text]"
+        "usage: clio persona get [--budget-tokens N] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio persona get [--budget-tokens N] [--explain] [--bank BANK] [--output json|text]"
+        "clio persona get [--budget-tokens N] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output", "budget-tokens"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "the persona model, within a token budget");
     assert_eq!(spec.tool, Some("persona_get"));
     assert_eq!(spec.section, Section::Read);
@@ -211,16 +208,13 @@ fn maintenance_status_matches_the_registered_usage_and_parser() {
     let spec = record("maintenance status");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio maintenance status [--item-id ID] [--explain] [--bank BANK] [--output json|text]"
+        "usage: clio maintenance status [--item-id ID] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
         ["db", "backend", "bank", "actor", "output", "item-id"]
     );
-    assert_eq!(
-        spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "explain"]
-    );
+    assert_eq!(spec.parser_spec().bool_flags(), ["no-input", "yes"]);
     assert_eq!(spec.summary, "queue depth, failures, and drain progress");
     assert_eq!(spec.tool, Some("maintenance_status"));
     assert_eq!(spec.section, Section::Read);

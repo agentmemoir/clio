@@ -44,7 +44,7 @@ pub fn hygiene_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "hygiene_clean",
-            description: "Confirmed cleanup: flag | archive | discard (delete alias, non-compliance) | keep (apply each candidate's suggested_action). Without confirm=true: dry-run counts only, zero writes. Never performs compliance erasure or DEK destruction.",
+            description: "Confirmed cleanup: flag | archive | discard (delete alias, non-compliance) | apply_suggested (apply each candidate's suggested_action; a keep suggestion is skipped). Without confirm=true: dry-run counts only, zero writes. Never performs compliance erasure or DEK destruction.",
             required: &[],
             props: vec![
                 (
@@ -77,7 +77,7 @@ pub fn hygiene_defs() -> Vec<ToolDef> {
                     "action",
                     en(
                         "Requested action; `delete` is the documented non-compliance alias of `discard`.",
-                        &["flag", "archive", "discard", "delete", "keep"],
+                        &["flag", "archive", "discard", "delete", "apply_suggested"],
                     ),
                 ),
                 ("confirm", b("Perform the mutations; default false (dry-run counts only).")),
@@ -102,3 +102,7 @@ pub fn hygiene_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_hygiene_defs_tests.rs"]
+mod schema_hygiene_defs_tests;

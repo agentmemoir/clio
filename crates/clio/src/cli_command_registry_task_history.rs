@@ -40,11 +40,11 @@ const TASK_ID: Positional = Positional {
     description: "The task record the command reads or writes: `task upsert` writes it and the others read or file against it.",
 };
 
-/// The required `TASK_ID_OR_QUERY` positional of `failure list`.
-const TASK_ID_OR_QUERY: Positional = Positional {
-    label: "TASK_ID_OR_QUERY",
+/// The required `TASK_ID` positional of `failure list`.
+const FAILURE_LIST_TASK_ID: Positional = Positional {
+    label: "TASK_ID",
     required: true,
-    description: "A task id or free text; `failures_for_task` tries the exact id first, then a similar search over task definitions.",
+    description: "The task whose failures are listed; when that id has no recorded failures, `failures_for_task` also lists failures of tasks with a similar definition.",
 };
 
 /// The required `NODE_ID` positional of `memtree get`.
@@ -60,12 +60,6 @@ const TARGET: Positional = Positional {
     required: true,
     description: "The trajectory target: `triple:subject:predicate`, `preference:key`, or `belief:id-or-proposition`.",
 };
-
-/// The `--explain` trace flag the read commands here document.
-const EXPLAIN: Flag = Flag::toggle(
-    "explain",
-    "Requests the trace; `cli_read_args::read_args` sends `explain` as true to the read tool.",
-);
 
 /// The `--dry-run` preview flag the write commands here document.
 const DRY_RUN: Flag = Flag::toggle(
@@ -134,14 +128,14 @@ pub(crate) const TASK_GET: CommandSpec = CommandSpec {
     summary: "one task and its current state",
     notes: &[],
     positionals: &[TASK_ID],
-    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: UNPRINTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
     examples: &[
         Example::new("clio task get t-1 --db ./memory.db", None),
-        Example::new("clio task get t-1 --explain -o json", Some("trace")),
+        Example::new("clio task get t-1 -o json", None),
     ],
     tool: Some("task_get"),
     section: Section::Read,
@@ -164,7 +158,6 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
                 "Caps the recorded transitions; defaults to 20 when omitted; a limit above 200 is lowered to 200.",
             )
         },
-        EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -174,7 +167,7 @@ pub(crate) const TASK_HISTORY_RECORD: CommandSpec = CommandSpec {
     usage_alternates: &[],
     examples: &[
         Example::new("clio task history t-1 --limit 10 --db ./memory.db", None),
-        Example::new("clio task history t-1 --explain -o json", Some("trace")),
+        Example::new("clio task history t-1 -o json", None),
     ],
     tool: Some("task_history"),
     section: Section::Read,
@@ -234,7 +227,7 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     aliases: &[],
     summary: "failures recorded against one task",
     notes: &[],
-    positionals: &[TASK_ID_OR_QUERY],
+    positionals: &[FAILURE_LIST_TASK_ID],
     documented: &[
         Flag {
             default: Some("20"),
@@ -244,7 +237,6 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
                 "Caps the failures returned; defaults to 20 when omitted; a limit above 200 is lowered to 200.",
             )
         },
-        EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -254,7 +246,7 @@ pub(crate) const FAILURE_LIST: CommandSpec = CommandSpec {
     usage_alternates: &[],
     examples: &[
         Example::new("clio failure list t-1 --limit 10 --db ./memory.db", None),
-        Example::new("clio failure list \"import verb\" --limit 5 -o json", None),
+        Example::new("clio failure list t-1 --limit 5 -o json", None),
     ],
     tool: Some("failures_for_task"),
     section: Section::Read,
@@ -345,7 +337,6 @@ pub(crate) const MEMTREE_QUERY: CommandSpec = CommandSpec {
                 "Caps the nodes returned; defaults to 100 when omitted; a limit above 200 is lowered to 200.",
             )
         },
-        EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],
@@ -372,14 +363,14 @@ pub(crate) const MEMTREE_GET: CommandSpec = CommandSpec {
     summary: "one memory-tree node and its lineage",
     notes: &[],
     positionals: &[NODE_ID],
-    documented: &[EXPLAIN, GLOBAL_BANK, GLOBAL_OUTPUT],
+    documented: &[GLOBAL_BANK, GLOBAL_OUTPUT],
     accepted_extra: UNPRINTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
     examples: &[
         Example::new("clio memtree get node-1 --db ./memory.db", None),
-        Example::new("clio memtree get node-1 --explain -o json", None),
+        Example::new("clio memtree get node-1 -o json", None),
     ],
     tool: Some("memtree_get"),
     section: Section::Read,
@@ -405,7 +396,6 @@ pub(crate) const HISTORY_TEMPORAL: CommandSpec = CommandSpec {
             "Selects the bi-temporal axis; `cli_read_args::validate_time_axis` accepts `valid` or `transaction` for `temporal_history`.",
             &["valid", "transaction"],
         ),
-        EXPLAIN,
         GLOBAL_BANK,
         GLOBAL_OUTPUT,
     ],

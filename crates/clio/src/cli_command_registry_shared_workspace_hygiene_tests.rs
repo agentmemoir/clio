@@ -67,11 +67,11 @@ fn hygiene_clean_renders_the_or_alternate_and_the_trailing_note() {
     let text = spec.full_usage();
     assert_eq!(
         text,
-        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only\n       --action keep applies each candidate's suggested action, including archive or discard"
+        "usage: clio hygiene clean --file candidates.json [--action flag|archive|discard|apply_suggested] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]\n       or: clio hygiene clean --file - (reads the candidates JSON from stdin)\n       without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only\n       --action apply_suggested applies each candidate's suggested action, including archive or discard; a candidate suggested as keep is skipped"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio hygiene clean --file candidates.json [--action flag|archive|discard|keep] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]"
+        "clio hygiene clean --file candidates.json [--action flag|archive|discard|apply_suggested] [--confirm] [--dry-run] [--reason R] [--note N] [--bank BANK] [--output json|text]"
     );
     assert_eq!(
         spec.usage_alternates,
@@ -81,7 +81,7 @@ fn hygiene_clean_renders_the_or_alternate_and_the_trailing_note() {
         spec.notes,
         [
             "without --confirm (or with --dry-run) the call is a zero-write dry-run: counts only",
-            "--action keep applies each candidate's suggested action, including archive or discard"
+            "--action apply_suggested applies each candidate's suggested action, including archive or discard; a candidate suggested as keep is skipped"
         ]
     );
     let or_at = text.find("\n       or: ").expect("the alternate prints");
@@ -147,7 +147,8 @@ fn the_hygiene_records_carry_their_examples() {
 }
 
 /// The tranche's defaults record what the consumers apply when the flag is
-/// omitted: `cli_write_hygiene` keeps, and `clio_hygiene` scores at 0.40.
+/// omitted: `cli_write_hygiene` applies the suggested action, and
+/// `clio_hygiene` scores at 0.40.
 #[test]
 fn the_hygiene_defaults_record_the_values_the_consumers_apply() {
     let find = |name: &str, flag: &str| {
@@ -157,7 +158,10 @@ fn the_hygiene_defaults_record_the_values_the_consumers_apply() {
             .find(|candidate| candidate.long == flag)
             .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
     };
-    assert_eq!(find("hygiene clean", "action").default, Some("keep"));
+    assert_eq!(
+        find("hygiene clean", "action").default,
+        Some("apply_suggested")
+    );
     let min_score = find("hygiene audit", "min-score");
     assert_eq!(min_score.default, Some("0.40"), "the recorded default");
     assert_eq!(

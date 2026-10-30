@@ -20,7 +20,7 @@ use super::{BeliefGroup, render_belief, render_triples};
 use crate::cli_read_group::ReadGroup;
 use crate::cli_read_test_support::{json_of, run_state, seed_belief, seed_triple, state};
 use clio_mcp::runtime::McpState;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -191,6 +191,39 @@ fn triple_query_offset_pages_over_a_seeded_store() {
 }
 
 #[test]
+fn triple_query_names_a_missing_subject_and_keeps_a_real_one_empty() {
+    let s = belief_state();
+
+    // A subject the bank does not hold: not found, exit-code-1 class.
+    let (code, out, err) = run_state("triple query", &["ghost", "--bank", "bank-a"], &s, false);
+    assert_eq!(code, ExitCode::from(1), "{err}");
+    assert!(out.is_empty(), "{out}");
+    let error: Value = serde_json::from_str(err.trim()).expect("error envelope");
+    assert_eq!(error["ok"], json!(false));
+    assert_eq!(error["code"], json!("not_found"));
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ghost"),
+        "{error}"
+    );
+
+    // A subject that exists but matches no triples: an empty success page.
+    let (code, out, err) = run_state(
+        "triple query",
+        &["rust", "author_of", "--bank", "bank-a"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(0));
+    assert!(err.is_empty(), "{err}");
+    let value = json_of(&out);
+    assert_eq!(value["triples"].as_array().map(Vec::len), Some(0));
+    assert_eq!(value["ok"], json!(true));
+}
+
+#[test]
 fn belief_history_success_missing_and_text() {
     let s = belief_state();
     let (code, out, _) = run_state(
@@ -256,12 +289,12 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "limit",
                 "offset",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "belief history",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = BeliefGroup;
