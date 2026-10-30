@@ -1,0 +1,1 @@
+The two cross-path sync harnesses now derive their push and pull client cipher from the shared synthetic sync key instead of sending plaintext, so a serving peer is asked to classify a sealed row rather than refuse the envelope.

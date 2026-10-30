@@ -259,6 +259,7 @@ fn postgres_post_erasure_archive_restores_without_resurrecting_the_subject() {
         "pg-post-erasure",
         Some(current_authority(&journal)),
     );
+    crate::common::seed_restore_custody(&journal, &archive.id, &archive.path);
     record_denial(&journal, &denied_hash(), &[BANK.to_owned()]).expect("record the denial");
 
     let target = ScopedSchema::new(&base);

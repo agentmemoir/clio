@@ -5,7 +5,8 @@
 //!
 //! This module is responsible for export destination custody persistence: one
 //! row per export action, holding the destination path, owner, required
-//! action, and pending delivery state on both backends.
+//! action, pending delivery state, and the copy-custody digest and receiver
+//! on both backends.
 //!
 //! ## Owns
 //! - `DestinationCustodyStore`, the save/mark/load contract, and
@@ -35,8 +36,9 @@ use rusqlite::OptionalExtension;
 /// One export destination custody row, as saved and read back.
 ///
 /// The row records where an export will land, who owns the copy, the action
-/// the destination requires, and the delivery state. It carries no export
-/// content.
+/// the destination requires, and the delivery state. When a copy-custody
+/// manifest backs the copy, it also records the manifest's copy digest and
+/// receiver identity. It carries no export content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DestinationCustodyRow {
     /// The export action id; unique across all stored destinations.
@@ -51,6 +53,12 @@ pub struct DestinationCustodyRow {
     pub state: String,
     /// Why the delivery failed, when it did.
     pub exception_reason: Option<String>,
+    /// The copy digest the custody manifest recorded, prefixed with its
+    /// algorithm (`sha256:<hex>`); NULL until a delivery writes it.
+    pub copy_digest: Option<String>,
+    /// The receiver identity the custody manifest named; NULL until a
+    /// delivery writes it.
+    pub receiver: Option<String>,
     /// The last update time, RFC3339 UTC.
     pub updated_at: String,
 }
@@ -127,6 +135,17 @@ fn validate_row(row: &DestinationCustodyRow) -> Result<(), AmError> {
             "export destination exception reason cannot be blank",
         ));
     }
+    for (name, value) in [
+        ("copy_digest", row.copy_digest.as_deref()),
+        ("receiver", row.receiver.as_deref()),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            return Err(AmError::new(
+                ErrorCode::InvalidArgument,
+                format!("export destination {name} cannot be blank"),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -157,7 +176,7 @@ fn validate_action_id(action_id: &str) -> Result<(), AmError> {
 }
 
 const SQLITE_COLUMNS: &str = "action_id, destination_path, custody_owner, required_action, state, \
-     exception_reason, updated_at FROM export_destinations";
+     exception_reason, copy_digest, receiver, updated_at FROM export_destinations";
 
 fn sqlite_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DestinationCustodyRow> {
     Ok(DestinationCustodyRow {
@@ -167,7 +186,9 @@ fn sqlite_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DestinationCustodyRow
         required_action: row.get(3)?,
         state: row.get(4)?,
         exception_reason: row.get(5)?,
-        updated_at: row.get(6)?,
+        copy_digest: row.get(6)?,
+        receiver: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -202,8 +223,8 @@ impl DestinationCustodyStore for SqliteStore {
             tx.execute(
                 "INSERT INTO export_destinations
                     (action_id, destination_path, custody_owner, required_action, state, \
-                     exception_reason, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     exception_reason, copy_digest, receiver, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     row.action_id,
                     row.destination_path,
@@ -211,6 +232,8 @@ impl DestinationCustodyStore for SqliteStore {
                     row.required_action,
                     row.state,
                     row.exception_reason,
+                    row.copy_digest,
+                    row.receiver,
                     row.updated_at
                 ],
             )
@@ -292,12 +315,14 @@ fn pg_row(row: &postgres::Row) -> DestinationCustodyRow {
         required_action: row.get(3),
         state: row.get(4),
         exception_reason: row.get(5),
-        updated_at: row.get(6),
+        copy_digest: row.get(6),
+        receiver: row.get(7),
+        updated_at: row.get(8),
     }
 }
 
 const PG_COLUMNS: &str = "action_id, destination_path, custody_owner, required_action, state, \
-     exception_reason, updated_at FROM export_destinations";
+     exception_reason, copy_digest, receiver, updated_at FROM export_destinations";
 
 impl DestinationCustodyStore for PostgresStore {
     fn save_pending(&self, row: &DestinationCustodyRow) -> Result<(), AmError> {
@@ -316,8 +341,8 @@ impl DestinationCustodyStore for PostgresStore {
             tx.execute(
                 "INSERT INTO export_destinations
                     (action_id, destination_path, custody_owner, required_action, state, \
-                     exception_reason, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                     exception_reason, copy_digest, receiver, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 &[
                     &row.action_id,
                     &row.destination_path,
@@ -325,6 +350,8 @@ impl DestinationCustodyStore for PostgresStore {
                     &row.required_action,
                     &row.state,
                     &row.exception_reason,
+                    &row.copy_digest,
+                    &row.receiver,
                     &row.updated_at,
                 ],
             )

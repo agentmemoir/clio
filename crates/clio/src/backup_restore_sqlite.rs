@@ -41,7 +41,9 @@ use crate::backup_restore_flow::{
 };
 use crate::backup_restore_space::{key_destination, preflight};
 use crate::cli_error::CliError;
-use clio_compliance::{RestoreGuard, RestoreGuardRefusal, RestoreRequest, begin_restore};
+use clio_compliance::{
+    CopyCustodyFacts, RestoreGuard, RestoreGuardRefusal, RestoreRequest, begin_restore,
+};
 use clio_store::{DekProvider, LocalDevKms, LocalEventStore, SqliteFileState, SwapRequest};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -253,8 +255,8 @@ fn target_unmeasurable(error: &clio_types::AmError) -> CliError {
 }
 
 /// The file name of the durable event store a guarded restore writes to, beside
-/// the erasure journal.
-const RESTORE_EVENTS_FILE: &str = "restore-guard-events.db";
+/// the erasure journal. The copy-custody row lookup reads the same store.
+pub(crate) const RESTORE_EVENTS_FILE: &str = "restore-guard-events.db";
 
 /// The actor a guarded restore records: the operator acts for the deployment.
 pub(crate) const RESTORE_ACTOR: &str = clio_types::Actor::System.as_str();
@@ -326,11 +328,28 @@ impl RestorePlacement<'_> {
     /// the same hold; the lock is held until the guard settles.
     pub(crate) fn begin(&self, plan: &Plan) -> Result<RestoreGuard, CliError> {
         let action_id = next_restore_action_id();
+        // The placement rebuilds the copy-custody facts from the same
+        // resolution the plan used. The facts are read before the lock is
+        // taken, so the gate under the lock re-checks those facts, not a
+        // fresh read of the copy.
+        let archive = plan
+            .backup_dir
+            .join(clio_backup::archive_file_name(&plan.snapshot_id));
+        let facts = crate::backup_restore_custody::copy_custody_facts(
+            &plan.journal_path,
+            &plan.snapshot_id,
+            &archive,
+        )?;
         let request = RestoreRequest {
             journal_path: &plan.journal_path,
             presented: None,
             claim: &plan.claim,
             members: &plan.members,
+            copy_custody: CopyCustodyFacts {
+                row: facts.row,
+                copy_digest: &facts.digest,
+                restorer: RESTORE_ACTOR,
+            },
             actor: RESTORE_ACTOR,
             action_id: &action_id,
             now: self.now,

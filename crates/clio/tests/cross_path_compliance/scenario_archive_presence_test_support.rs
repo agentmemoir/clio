@@ -122,13 +122,15 @@ pub(super) fn gated_sqlite(scratch: &common::Scratch, backups: &Path, journal: &
     erase_subject(&store, DENIED_SUBJECT, "req-scenario05-sqlite");
     drop(store);
     initialize_new_empty(journal).expect("initialize the deployment");
-    archive_sqlite_with_authority(
+    let archive = archive_sqlite_with_authority(
         backups,
         &db,
         &kms,
         "sqlite-presence",
         Some(current_authority(journal)),
-    )
+    );
+    common::seed_restore_custody(journal, &archive.id, &archive.path);
+    archive
 }
 
 /// A clean SQLite archive that references no denied subject but carries one
@@ -178,13 +180,15 @@ pub(super) fn gated_pg(
     erase_subject(&store, DENIED_SUBJECT, "req-scenario05-pg");
     drop(store);
     initialize_new_empty(journal).expect("initialize the deployment");
-    archive_postgres_with_authority(
+    let archive = archive_postgres_with_authority(
         backups,
         source.url(),
         &kms,
         "pg-presence",
         Some(current_authority(journal)),
-    )
+    );
+    common::seed_restore_custody(journal, &archive.id, &archive.path);
+    archive
 }
 
 /// A clean Postgres archive that references no denied subject but carries one

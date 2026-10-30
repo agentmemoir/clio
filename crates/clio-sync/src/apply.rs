@@ -170,6 +170,34 @@ pub fn apply_mutation_guarded(
     m: &SyncMutation,
     envelope_json: &str,
 ) -> Result<ApplyResult, AmError> {
+    guarded(engine, denial, m, envelope_json, m)
+}
+
+/// [`apply_mutation_guarded`] for a row this node opened: the effects run on
+/// `m`, while `journal_as` is the row the journal relays. A serving peer opens a
+/// sealed row so its subject is guarded and its effects apply, but the journal
+/// keeps relaying the row the writer sealed: a reader downstream opens that row
+/// under the same key and refuses the plaintext one this node would write.
+///
+/// # Errors
+/// The same failures [`apply_mutation_guarded`] reports.
+pub fn apply_mutation_guarded_relaying(
+    engine: &ApplyEngine<'_>,
+    denial: Option<&dyn ErasureDenial>,
+    m: &SyncMutation,
+    envelope_json: &str,
+    journal_as: &SyncMutation,
+) -> Result<ApplyResult, AmError> {
+    guarded(engine, denial, m, envelope_json, journal_as)
+}
+
+fn guarded(
+    engine: &ApplyEngine<'_>,
+    denial: Option<&dyn ErasureDenial>,
+    m: &SyncMutation,
+    envelope_json: &str,
+    journal_as: &SyncMutation,
+) -> Result<ApplyResult, AmError> {
     if let Err(err) = m.validate() {
         return dead_letter(engine, m, envelope_json, &err).map(ApplyResult::plain);
     }
@@ -252,7 +280,9 @@ pub fn apply_mutation_guarded(
         }
     };
     if outcome == ApplyOutcome::Applied {
-        let appended = engine.sync.journal_append(&build_journal_row(engine, m)?)?;
+        let appended = engine
+            .sync
+            .journal_append(&build_journal_row(engine, journal_as)?)?;
         // The journal append is the only atomic dedupe in the path (a
         // per-bank unique key inside one transaction). A concurrent apply of
         // the same mutation id can pass every check above before either of

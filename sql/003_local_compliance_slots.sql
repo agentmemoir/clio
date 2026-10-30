@@ -91,7 +91,10 @@ CREATE TABLE IF NOT EXISTS copy_inventory
 -- required action, and the pending delivery state before the destination file
 -- is written, so a crash after the write leaves a known open copy that
 -- reconciliation can find by action id. `state` is pending until the delivery
--- completes or fails, and `exception_reason` carries the failure reason.
+-- completes or fails, and `exception_reason` carries the failure reason. When
+-- a copy-custody manifest backs the copy, `copy_digest` and `receiver` record
+-- the manifest's copy digest and receiver identity; they stay NULL until a
+-- delivery writes them.
 CREATE TABLE IF NOT EXISTS export_destinations
 (
   action_id                                                                                    text PRIMARY KEY,
@@ -100,6 +103,8 @@ CREATE TABLE IF NOT EXISTS export_destinations
   required_action                                                                              text NOT NULL,
   state                                                                                        text NOT NULL CHECK (state IN ('pending', 'delivered', 'failed')),
   exception_reason                                                                             text,
+  copy_digest                                                                                  text,
+  receiver                                                                                     text,
   updated_at                                                                                   text NOT NULL
 );
 

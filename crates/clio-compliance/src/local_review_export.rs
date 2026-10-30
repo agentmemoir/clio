@@ -79,7 +79,7 @@ pub fn write_review_export(
     authorize(ctx.actor)?;
     let page = review_local_events(ctx, events, query)?;
     let bytes = render_rows(&page.rows);
-    match deliver_export(ctx, events, custody, controls, spec, bytes.as_bytes()) {
+    match deliver_export(ctx, events, custody, controls, None, spec, bytes.as_bytes()) {
         DeliveryResult::Delivered => Ok(()),
         DeliveryResult::Refused(DeliveryRefusal::BindingNotAccepted) => Err(AmError::new(
             ErrorCode::Forbidden,

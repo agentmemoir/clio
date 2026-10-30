@@ -23,7 +23,9 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
-use crate::backup_cli_fixtures::{Scratch, key_store_path, populated_store, run_in, run_json_in};
+use crate::backup_cli_fixtures::{
+    Scratch, key_store_path, populated_store, run_json_in, run_json_in_with,
+};
 use crate::backup_cli_fixtures_handmade::{hand_built_archive, running_as_root};
 use clio_store::{DekProvider, LocalDevKms, SqliteStore, sqlite_content_digest};
 use std::path::PathBuf;
@@ -153,11 +155,30 @@ fn an_unwritable_target_directory_is_refused_before_any_snapshot() {
     }
     let scratch = Scratch::new("restore-unwritable-target");
     let id = snapshot_fixture(&scratch);
+    // The journal and its durable store sit in a subdirectory of their own, so
+    // the pre-plan gates read and write there while only the target's
+    // directory is not writable.
+    let journal_dir = scratch.join("journal");
+    std::fs::create_dir_all(&journal_dir).expect("create the journal directory");
+    let journal_name = clio_config::ERASURE_JOURNAL_FILE_NAME;
+    std::fs::copy(scratch.join(journal_name), journal_dir.join(journal_name))
+        .expect("copy the journal");
+    let archive = scratch
+        .join("backups")
+        .join(clio_backup::archive_file_name(&id));
+    crate::backup_cli_fixtures::seed_copy_custody_in(&journal_dir, &id, &archive);
     let before = sqlite_content_digest(&store_path(&scratch)).expect("digest the target");
     std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o555))
         .expect("chmod");
 
-    let (code, _, err) = run_in(&scratch, &["restore", &id, "--yes"], false);
+    let (code, _, err) = run_json_in_with(
+        &scratch,
+        &["restore", &id, "--yes"],
+        &[(
+            "CLIO_ERASURE_JOURNAL_FILE",
+            &journal_dir.join(journal_name).display().to_string(),
+        )],
+    );
 
     std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o700))
         .expect("chmod back");

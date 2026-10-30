@@ -12,6 +12,8 @@
 //! - `stop` and `resume`, the bounded offline-window controls
 //! - `hold`, the keepalive slot a backend-owned resource (a private database
 //!   schema) rides in
+//! - `shared_key_file` and `shared_key_secret`, the one sync key file the peer
+//!   process reads and the in-process clients seal under
 //!
 //! ## Does not own
 //! - The scratch directory and the cleared command environment (`NodeDir`,
@@ -43,6 +45,71 @@ const ANNOUNCE_BOUND: Duration = Duration::from_secs(90);
 /// The process's own foreground TTL; the guard's kill is the primary cleanup,
 /// and the TTL keeps a child left behind by a crash from outliving the run.
 const SERVE_TTL_SECS: &str = "600";
+
+/// The 32 raw bytes of the one sync key this harness derives its key from,
+/// computed from the process's synthetic secret so no key material is fixed in
+/// the repository.
+fn shared_key_bytes() -> [u8; 32] {
+    let hex = clio_store::sha256_hex(super::SYNC_KEY.as_bytes(), "sync-wire-shared-key");
+    let mut bytes = [0_u8; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).expect("hex digest");
+    }
+    bytes
+}
+
+/// Write the shared key file at `path`, owner-only: the loader refuses a file
+/// another account can read, so the mode comes from the call that creates it.
+fn write_key_file(path: &Path) {
+    let bytes = shared_key_bytes();
+    let _ = std::fs::remove_file(path);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .expect("the shared sync key file can be created");
+        file.write_all(&bytes)
+            .expect("the shared sync key can be written");
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, bytes).expect("the shared sync key can be written");
+    }
+}
+
+/// Write the shared sync key file into `dir` and return its path. The spawned
+/// peer reads it through `CLIO_SYNC_KEY_FILE`, which is what lets it resolve a
+/// sealed row's subject instead of storing the row unread.
+pub fn shared_key_file(dir: &Path) -> PathBuf {
+    let path = dir.join("clio-sync.key");
+    write_key_file(&path);
+    path
+}
+
+/// The secret form of the shared key: the CLI's own reader turns the key file's
+/// raw bytes into the base64 text a `SyncCipherKey` is derived from, so this one
+/// key file gives the spawned peer and an in-process client the same key.
+pub fn shared_key_secret() -> String {
+    static SECRET: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SECRET
+        .get_or_init(|| {
+            let path = std::env::temp_dir().join(format!(
+                "clio-sync-wire-{}-{:x}.key",
+                std::process::id(),
+                rand::random::<u32>()
+            ));
+            write_key_file(&path);
+            let secret = clio_config::sync_key::read_key_file_base64(&path)
+                .expect("the shared sync key file reads back as the CLI's secret form");
+            let _ = std::fs::remove_file(&path);
+            secret
+        })
+        .clone()
+}
 
 /// One spawned `clio sync serve` peer, killed and reaped when the guard drops.
 ///
@@ -138,6 +205,10 @@ impl ServedPeer {
             (None, None) => panic!("a peer requires either a database file or a database URL"),
         }
         command.env("CLIO_ERASURE_JOURNAL_FILE", journal);
+        // The peer serves with the same key this harness's clients seal under:
+        // without it, a sealed row's subject cannot be resolved, so a replay for
+        // an erased subject would be stored unread instead of refused.
+        command.env("CLIO_SYNC_KEY_FILE", shared_key_file(dir.path()));
         // The peer hashes subject identities under the same deployment salt the
         // driver verifies its proofs with; the driver's own process value is
         // passed through only when the host sets one, so both sides resolve the

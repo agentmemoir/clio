@@ -67,6 +67,7 @@ mod dek;
 mod dek_slots;
 mod derived_tables;
 mod destination_custody;
+mod destination_custody_converge;
 mod distill_intent;
 mod distilled_evidence;
 mod distilled_freshness;

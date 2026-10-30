@@ -61,6 +61,8 @@ fn reconcile_reports_open_destinations_without_overwriting() {
                 required_action: "delivery".to_owned(),
                 state: "pending".to_owned(),
                 exception_reason: None,
+                copy_digest: None,
+                receiver: None,
                 updated_at: NOW.to_owned(),
             })
             .expect("save pending");

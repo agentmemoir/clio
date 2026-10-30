@@ -26,16 +26,16 @@
 //! Test-only. Never compiled into production builds.
 
 use super::{
-    JournalHold, RESTORE_EVENT_KIND, RestoreGuardRefusal, RestoreRequest, begin_restore,
-    check_restore_at_plan,
+    CopyCustodyFacts, JournalHold, RESTORE_EVENT_KIND, RestoreGuardRefusal, RestoreRequest,
+    begin_restore, check_restore_at_plan,
 };
 use crate::erasure_journal::{
     ArchiveClaim, AuthorityRefusal, ErasureJournal, JournalState, MemberFacts, load_journal,
     record_denial,
 };
 use clio_store::{
-    DekProvider, LocalDevKms, LocalEventIntent, LocalEventState, LocalEventStore, LocalEventView,
-    SqliteStore,
+    DekProvider, DestinationCustodyRow, LocalDevKms, LocalEventIntent, LocalEventState,
+    LocalEventStore, LocalEventView, SqliteStore,
 };
 use clio_types::{AmError, ErrorCode};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,29 @@ const DENIED: &str = "subject-denied";
 
 /// The subject the fixture members reference without a denial.
 const CLEAR: &str = "subject-clear";
+
+/// The digest the fixture custody row records, in the delivery expression.
+const COPY_DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/// The facts a restore passes the copy-custody gate with: a row whose digest
+/// and receiver match the fixture restorer.
+pub(crate) fn passing() -> CopyCustodyFacts<'static> {
+    CopyCustodyFacts {
+        row: Some(DestinationCustodyRow {
+            action_id: "act-copy".to_owned(),
+            destination_path: "copy".to_owned(),
+            custody_owner: "owner".to_owned(),
+            required_action: "erase".to_owned(),
+            state: "delivered".to_owned(),
+            exception_reason: None,
+            copy_digest: Some(COPY_DIGEST.to_owned()),
+            receiver: Some("actor".to_owned()),
+            updated_at: NOW.to_owned(),
+        }),
+        copy_digest: COPY_DIGEST,
+        restorer: "actor",
+    }
+}
 
 /// In-memory SQLite store (the `local_action_probe_tests` fixture shape).
 pub(crate) fn open_sqlite() -> SqliteStore {
@@ -288,6 +311,7 @@ fn begin_restore_releases_the_lock_when_the_intent_write_fails() {
         presented: None,
         claim: &claim,
         members: &[],
+        copy_custody: passing(),
         actor: "actor",
         action_id: "act-intent",
         now: NOW,
@@ -317,6 +341,7 @@ fn begin_restore_refuses_placement_and_records_one_denial_when_the_authority_ref
         presented: Some(&presented),
         claim: &claim,
         members: &[MemberFacts::None],
+        copy_custody: passing(),
         actor: "actor",
         action_id: "act-refused",
         now: NOW,
@@ -347,6 +372,7 @@ fn begin_restore_defaults_to_the_live_authority_when_none_is_presented() {
         presented: None,
         claim: &claim_for(&journal),
         members: &[MemberFacts::None],
+        copy_custody: passing(),
         actor: "actor",
         action_id: "act-none",
         now: NOW,
@@ -365,6 +391,7 @@ fn begin_restore_holds_the_journal_lock_until_settle() {
         presented: Some(&presented),
         claim: &claim_for(&journal),
         members: &[MemberFacts::None],
+        copy_custody: passing(),
         actor: "actor",
         action_id: "act-lock",
         now: NOW,
@@ -397,6 +424,7 @@ fn settle_records_one_allowed_outcome() {
         presented: Some(&presented),
         claim: &claim_for(&journal),
         members: &members,
+        copy_custody: passing(),
         actor: "actor",
         action_id: "act-settle",
         now: NOW,

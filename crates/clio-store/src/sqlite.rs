@@ -129,6 +129,11 @@ impl SqliteStore {
         // existing placeholder table lacks the columns the event writer names,
         // and the slot DDL only declares a fresh table.
         crate::local_events_converge::converge_sqlite(&mut conn)?;
+        // The export-destination custody convergence must run BEFORE portable
+        // DDL: an existing export_destinations table lacks the copy-custody
+        // columns the custody store reads, and the slot DDL only declares a
+        // fresh table.
+        crate::destination_custody_converge::converge_sqlite(&conn)?;
         let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;

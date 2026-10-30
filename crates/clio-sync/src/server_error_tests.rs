@@ -73,6 +73,7 @@ fn serve_with_kms(
         ttl_secs: None,
         deadline_secs: None,
         device_id: "srv-1".into(),
+        sync_key: None,
     })
     .expect("serve");
     (server, store, kms)
@@ -112,6 +113,7 @@ fn bind_failure_returns_an_error() {
         ttl_secs: None,
         deadline_secs: None,
         device_id: "srv-1".into(),
+        sync_key: None,
     })
     .err()
     .expect("bad bind address");

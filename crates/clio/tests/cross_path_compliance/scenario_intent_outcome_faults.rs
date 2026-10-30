@@ -154,14 +154,37 @@ pub(crate) fn restore_request<'a>(
     journal: &'a Path,
     claim: &'a ArchiveClaim,
 ) -> RestoreRequest<'a> {
+    // The custody facts pass the copy-custody gate: the row's digest matches
+    // the copy and its receiver is the acting restorer.
+    let digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     RestoreRequest {
         journal_path: journal,
         presented: None,
         claim,
         members: &[MemberFacts::None],
+        copy_custody: clio_compliance::CopyCustodyFacts {
+            row: Some(custody_row(digest)),
+            copy_digest: digest,
+            restorer: "harness",
+        },
         actor: "harness",
         action_id: "restore-act",
         now: NOW,
+    }
+}
+
+/// A custody row recording `digest` for the restore-act copy.
+fn custody_row(digest: &str) -> clio::store::DestinationCustodyRow {
+    clio::store::DestinationCustodyRow {
+        action_id: "restore-act".to_owned(),
+        destination_path: "copy".to_owned(),
+        custody_owner: "owner".to_owned(),
+        required_action: "erase".to_owned(),
+        state: "delivered".to_owned(),
+        exception_reason: None,
+        copy_digest: Some(digest.to_owned()),
+        receiver: Some("harness".to_owned()),
+        updated_at: NOW.to_owned(),
     }
 }
 
@@ -242,6 +265,7 @@ fn an_export_intent_failure_refuses_before_any_effect() {
         &events,
         &store,
         &accepted(),
+        None,
         &spec("export-act", &destination, &staging),
         b"payload",
     );

@@ -52,6 +52,7 @@ use crate::bind_warning::warn_public_bind;
 use crate::clock::now_utc;
 use crate::conn_pool::{ConnectionPool, MAX_CONNECTIONS};
 use crate::credential::{AuthOutcome, CredentialStore};
+use crate::crypto::SyncCipherKey;
 use crate::protocol::{
     PullRequest, PullResponse, SyncContent, SyncMutation, decode_cursor, encode_cursor,
 };
@@ -101,6 +102,11 @@ pub struct SyncServerOptions {
     pub deadline_secs: Option<u64>,
     /// This server's device id (LWW tie-breaker participant).
     pub device_id: String,
+    /// The sync key this peer serves with, when it holds one. A sealed mutation
+    /// hides its subject inside the ciphertext, so the serving peer resolves it
+    /// with this key before the apply path writes anything; `None` serves sealed
+    /// rows exactly as it did before the sealed subject guard existed.
+    pub sync_key: Option<Arc<SyncCipherKey>>,
 }
 
 /// Per-connection serving options shared with `server_conn` (deadline, auth
@@ -118,6 +124,9 @@ pub(crate) struct ServeOptions {
     /// The deployment's erasure-denial authority, when one is wired. `None`
     /// keeps every route at its pre-denial behavior.
     pub(crate) denial: Option<Arc<dyn ErasureDenial>>,
+    /// The sync key this peer serves with, when it holds one: the only way a
+    /// sealed mutation's subject can be resolved before it is applied.
+    pub(crate) sync_key: Option<Arc<SyncCipherKey>>,
     /// One lock per authorized bank. The server runs a worker per accepted
     /// connection, so pushes for the same bank can otherwise interleave inside
     /// the apply path, which is a check-then-act sequence over the item, the
@@ -232,6 +241,7 @@ fn serve(
                 .unwrap_or(DEFAULT_REQUEST_DEADLINE_SECS),
             device_id: options.device_id,
             denial,
+            sync_key: options.sync_key,
             bank_locks: BankLocks::default(),
         }),
         ttl_secs: options.ttl_secs.unwrap_or(crate::SERVE_TTL_DEFAULT_SECS),
@@ -417,6 +427,9 @@ mod server_denial_tests;
 #[cfg(test)]
 #[path = "server_error_tests.rs"]
 mod server_error_tests;
+#[cfg(test)]
+#[path = "server_pull_tests.rs"]
+mod server_pull_tests;
 #[cfg(test)]
 #[path = "server_push_payload_measurement_tests.rs"]
 mod server_push_payload_measurement_tests;

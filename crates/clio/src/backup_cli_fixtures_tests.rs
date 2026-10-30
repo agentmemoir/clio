@@ -25,7 +25,10 @@
 
 use crate::cli_error::CliError;
 use crate::cli_read::CliIo;
-use clio_store::{DekProvider, LocalDevKms, SqliteStore, Store};
+use clio_compliance::copy_digest_of;
+use clio_store::{
+    DekProvider, DestinationCustodyRow, DestinationCustodyStore, LocalDevKms, SqliteStore, Store,
+};
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -292,6 +295,42 @@ pub(crate) fn ensure_journal_in(dir: &Path) -> clio_backup::manifest::ManifestAu
     }
 }
 
+/// Seed the passing copy-custody row the restore route's gate reads for an
+/// archive the fixtures built.
+///
+/// The row is written to the durable store beside the journal in `dir` — the
+/// store the route's custody lookup reads — keyed by the snapshot id, holding
+/// the digest over the archive's bytes in the delivery write's expression and
+/// the receiver the restore route acts as. A fixture archive without such a row
+/// is refused as a missing manifest before anything is placed.
+pub(crate) fn seed_copy_custody(scratch: &Scratch, id: &str, archive: &Path) {
+    seed_copy_custody_in(scratch.path(), id, archive);
+}
+
+/// [`seed_copy_custody`] for a directory the fixture derives rather than a
+/// `Scratch`, such as a backup directory's parent.
+pub(crate) fn seed_copy_custody_in(dir: &Path, id: &str, archive: &Path) {
+    let journal = dir.join(clio_config::ERASURE_JOURNAL_FILE_NAME);
+    let events = journal.with_file_name(crate::backup_restore_sqlite::RESTORE_EVENTS_FILE);
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = SqliteStore::open(&events, kms).expect("open the durable store beside the journal");
+    let bytes = std::fs::read(archive).expect("read the archive");
+    let row = DestinationCustodyRow {
+        action_id: id.to_owned(),
+        destination_path: archive.display().to_string(),
+        custody_owner: "clio".to_owned(),
+        required_action: "delivery".to_owned(),
+        state: "delivered".to_owned(),
+        exception_reason: None,
+        copy_digest: Some(copy_digest_of(&bytes)),
+        receiver: Some(crate::backup_restore_sqlite::RESTORE_ACTOR.to_owned()),
+        updated_at: "2026-01-01T00:00:00Z".to_owned(),
+    };
+    store
+        .save_pending(&row)
+        .expect("save the fixture's custody row");
+}
+
 /// A well-formed archive whose manifest records a payload digest the payload
 /// does not have.
 ///
@@ -314,6 +353,9 @@ pub(crate) fn archive_with_wrong_digest(scratch: &Scratch, store: &Path) -> (Str
 ///
 /// A fixture: the create is the real command, and a create that did not produce
 /// an id fails the fixture loudly instead of letting a test assert nothing.
+/// The real create also records the archive's copy-custody row beside the
+/// journal itself, so no row is seeded here — the restore paths these fixtures
+/// drive exercise the create's own record.
 pub(crate) fn snapshot(scratch: &Scratch, items: usize) -> String {
     populated_store(&scratch.join("clio.db"), items, 1);
     ensure_journal(scratch);
@@ -390,5 +432,6 @@ fn build_archive(
         tool_version: "clio 0.1.0".to_owned(),
     };
     let report = clio_backup::create_archive(&request).expect("create the archive");
+    seed_copy_custody(scratch, &report.id, &report.path);
     (report.id, report.path)
 }

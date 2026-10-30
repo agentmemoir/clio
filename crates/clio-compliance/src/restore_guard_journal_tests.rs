@@ -25,7 +25,7 @@
 //! Test-only. Never compiled into production builds.
 
 use super::restore_guard_tests::{
-    NOW, Scratch, claim_for, denied_journal, open_sqlite, restore_rows,
+    NOW, Scratch, claim_for, denied_journal, open_sqlite, passing, restore_rows,
 };
 use super::{
     JournalHold, RESTORE_EVENT_KIND, RESTORE_EVENT_SCOPE, RestoreRequest, begin_restore,
@@ -107,6 +107,7 @@ fn begin_restore_reconciles_a_pending_restore_intent_under_the_lock() {
         presented: None,
         claim: &claim_for(&journal),
         members: &[MemberFacts::None],
+        copy_custody: passing(),
         actor: "actor",
         action_id: "act-next",
         now: NOW,

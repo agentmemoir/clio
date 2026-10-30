@@ -60,6 +60,7 @@ fn a_review_export_outcome_failure_reconciles_without_redelivery() {
                 &store,
                 &store,
                 &accepted(),
+                None,
                 &spec("control-act", &control, &dir.join("control-staging")),
                 b"control",
             ),

@@ -72,6 +72,7 @@ fn serve_scoped() -> (
             ttl_secs: None,
             deadline_secs: None,
             device_id: "srv-1".into(),
+            sync_key: None,
         },
         Arc::clone(&denial) as Arc<dyn ErasureDenial>,
     )

@@ -4,9 +4,9 @@
 //! # Responsibility
 //!
 //! This module tests the export destination custody store on Postgres: a
-//! pending save and read-back after a reopen, refusal of a duplicate action
-//! id, the delivered and failed marks, the pending-only open read, and the
-//! not-found mark.
+//! pending save and read-back after a reopen, the copy-custody digest and
+//! receiver fields, refusal of a duplicate action id, the delivered and
+//! failed marks, the pending-only open read, and the not-found mark.
 //!
 //! ## Owns
 //! - The scratch-Postgres database fixture and its drop guard
@@ -39,6 +39,8 @@ fn row(action_id: &str) -> DestinationCustodyRow {
         required_action: "delivery".to_owned(),
         state: "pending".to_owned(),
         exception_reason: None,
+        copy_digest: None,
+        receiver: None,
         updated_at: "2026-02-01T00:00:00Z".to_owned(),
     }
 }
@@ -128,6 +130,31 @@ fn postgres_a_pending_row_saves_and_reads_back_after_a_reopen() {
         reopened.load("act-1").expect("load"),
         Some(row("act-1")),
         "the row restarts verbatim"
+    );
+}
+
+/// A Postgres pending row carrying the copy-custody digest and receiver
+/// saves and reads both back.
+#[test]
+fn postgres_a_pending_row_saves_and_reads_back_its_copy_custody_fields() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let db = ScratchDatabase::create(&mut admin, "custody");
+    drop(admin);
+    let Some(store) = open_pg(&url_for_database(&db.name)) else {
+        return;
+    };
+    let mut pending = row("act-1");
+    pending.copy_digest = Some("sha256:abc".to_owned());
+    pending.receiver = Some("receiver-1".to_owned());
+    want(store.save_pending(&pending), "save pending");
+    assert_eq!(
+        store.load("act-1").expect("load").expect("row exists"),
+        pending,
+        "the copy-custody fields restart verbatim"
     );
 }
 

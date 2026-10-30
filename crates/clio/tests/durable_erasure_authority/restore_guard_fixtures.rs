@@ -26,9 +26,10 @@
 
 use crate::support::{DENIED_SUBJECT, Scratch, load_current, open_sqlite, write_item};
 use clio::store::{
-    LocalEventIntent, LocalEventStore, LocalEventView, SqliteStore, SwapRequest, swap_sqlite_store,
+    DestinationCustodyRow, LocalEventIntent, LocalEventStore, LocalEventView, SqliteStore,
+    SwapRequest, swap_sqlite_store,
 };
-use clio_compliance::{ArchiveClaim, JournalState, MemberFacts, RestoreRequest};
+use clio_compliance::{ArchiveClaim, CopyCustodyFacts, JournalState, MemberFacts, RestoreRequest};
 use std::path::{Path, PathBuf};
 
 /// The event time every fixture records, so the read-back is deterministic.
@@ -140,11 +141,31 @@ pub(crate) fn request<'a>(
     presented: Option<&'a JournalState>,
     action_id: &'a str,
 ) -> RestoreRequest<'a> {
+    // The custody facts pass the copy-custody gate: the row's digest matches
+    // the copy and its receiver is the acting restorer.
     RestoreRequest {
         journal_path: journal,
         presented,
         claim,
         members,
+        copy_custody: CopyCustodyFacts {
+            row: Some(DestinationCustodyRow {
+                action_id: action_id.to_owned(),
+                destination_path: "copy".to_owned(),
+                custody_owner: "owner".to_owned(),
+                required_action: "erase".to_owned(),
+                state: "delivered".to_owned(),
+                exception_reason: None,
+                copy_digest: Some(
+                    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                        .to_owned(),
+                ),
+                receiver: Some(ACTOR.to_owned()),
+                updated_at: NOW.to_owned(),
+            }),
+            copy_digest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            restorer: ACTOR,
+        },
         actor: ACTOR,
         action_id,
         now: NOW,

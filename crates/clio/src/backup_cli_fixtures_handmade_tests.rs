@@ -21,7 +21,7 @@
 //! Changes to what the hand-built archive carries belong here. Changes to the
 //! assertions that use it do not.
 
-use crate::backup_cli_fixtures::{Scratch, ensure_journal, key_store_path};
+use crate::backup_cli_fixtures::{Scratch, ensure_journal, key_store_path, seed_copy_custody};
 use clio_store::{DekProvider, LocalDevKms};
 use std::path::{Path, PathBuf};
 
@@ -128,6 +128,7 @@ pub(crate) fn hand_built_archive(
         std::fs::write(&path, writer.finish().expect("finish the archive"))
             .expect("write the archive");
     }
+    seed_copy_custody(scratch, id, &path);
     (id.to_owned(), path)
 }
 

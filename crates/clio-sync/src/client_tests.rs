@@ -59,6 +59,7 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
         ttl_secs: None,
         deadline_secs: None,
         device_id: "srv-1".into(),
+        sync_key: None,
     })
     .expect("serve");
     (server, store, kms)

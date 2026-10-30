@@ -4,7 +4,8 @@
 //! # Responsibility
 //!
 //! This module tests the export destination custody store on SQLite: a pending
-//! save and read-back, refusal of a duplicate action id, the delivered and
+//! save and read-back, the copy-custody digest and receiver fields and their
+//! blank-field refusal, refusal of a duplicate action id, the delivered and
 //! failed marks, the pending-only open read, the ordered list read, the
 //! not-found mark, and the blank-field refusal.
 //!
@@ -37,6 +38,8 @@ fn row(action_id: &str) -> DestinationCustodyRow {
         required_action: "delivery".to_owned(),
         state: "pending".to_owned(),
         exception_reason: None,
+        copy_digest: None,
+        receiver: None,
         updated_at: "2026-02-01T00:00:00Z".to_owned(),
     }
 }
@@ -57,6 +60,45 @@ fn a_pending_row_saves_and_reads_back_with_its_fields() {
     want(store.save_pending(&row("act-1")), "save pending");
     let loaded = store.load("act-1").expect("load").expect("row exists");
     assert_eq!(loaded, row("act-1"));
+}
+
+/// A pending row carrying the copy-custody digest and receiver saves and
+/// reads both back.
+#[test]
+fn a_pending_row_saves_and_reads_back_its_copy_custody_fields() {
+    let store = open_sqlite();
+    let mut pending = row("act-1");
+    pending.copy_digest = Some("sha256:abc".to_owned());
+    pending.receiver = Some("receiver-1".to_owned());
+    want(store.save_pending(&pending), "save pending");
+    assert_eq!(
+        store.load("act-1").expect("load").expect("row exists"),
+        pending,
+        "the copy-custody fields restart verbatim"
+    );
+}
+
+/// A blank copy-custody field is refused before any write.
+#[test]
+fn a_blank_copy_custody_field_is_refused() {
+    let store = open_sqlite();
+    let mut bad_digest = row("act-1");
+    bad_digest.copy_digest = Some("  ".to_owned());
+    let err = store
+        .save_pending(&bad_digest)
+        .expect_err("a blank copy digest must refuse");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    let mut bad_receiver = row("act-1");
+    bad_receiver.receiver = Some("  ".to_owned());
+    let err = store
+        .save_pending(&bad_receiver)
+        .expect_err("a blank receiver must refuse");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        store.load("act-1").expect("load"),
+        None,
+        "nothing was written"
+    );
 }
 
 /// A duplicate pending save for the same action id is refused and changes

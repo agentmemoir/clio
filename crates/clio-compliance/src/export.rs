@@ -197,6 +197,7 @@ fn write_payload(args: &ExportArgs<'_>, bytes: &[u8]) -> Result<(), AmError> {
         delivery.events,
         delivery.custody,
         delivery.controls,
+        None,
         &spec,
         bytes,
     ) {

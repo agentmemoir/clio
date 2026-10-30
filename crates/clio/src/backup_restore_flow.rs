@@ -13,6 +13,8 @@
 //! - The pre-restore decision and the placement-time re-decision
 //!
 //! ## Does not own
+//! - The two archive-content refusals of that set (see
+//!   `backup_restore_refusals`)
 //! - The space pre-flight and the key placement (see `backup_restore_space`)
 //! - The ordered plan and placement per backend (see `backup_restore_sqlite`
 //!   and `backup_restore_postgres`)
@@ -31,8 +33,9 @@ use crate::backup_cli::{
     ResolvedTarget, resolve_backup_dir, resolve_restore_id, resolve_restore_target,
 };
 use crate::backup_create_cli::take_snapshot;
-use crate::backup_restore_exit::{self, RestoreFailure};
+use crate::backup_restore_exit;
 use crate::backup_restore_postgres::{place_postgres, plan_postgres};
+use crate::backup_restore_refusals::{refuse_backend_mismatch, refuse_missing_keys};
 use crate::backup_restore_schema::{Schema, compare_schema};
 use crate::backup_restore_sqlite::{RestorePlacement, open_restore_events};
 use crate::cli_args::ParsedArgs;
@@ -241,6 +244,7 @@ pub(crate) fn plan(
         &authority.members,
     )
     .map_err(authority_refusal)?;
+    crate::backup_restore_custody::refuse_without_custody(&journal_path, &id, &archive)?;
     let postgres = manifest.store.backend == "postgres";
     let input = RestorePlanInput {
         parsed,
@@ -353,6 +357,11 @@ pub(crate) fn pre_restore_from(plan: &Plan, decided: PreRestore) -> Result<PreRe
 }
 
 /// Take the pre-restore snapshot, or fail the run with the create error.
+///
+/// The snapshot the restore publishes is a copy like any other, so the same
+/// custody record `clio backup create` writes for its archives is written for
+/// it, beside the same journal, and a recording failure fails the restore
+/// rather than leaving a safety copy no later restore can place.
 pub(crate) fn take_pre_restore(plan: &Plan) -> Result<PreRestore, CliError> {
     let label = format!("pre-restore snapshot of {}", plan.snapshot_id);
     let authority = crate::backup_create_cli::current_authority(&plan.journal_path);
@@ -366,51 +375,19 @@ pub(crate) fn take_pre_restore(plan: &Plan) -> Result<PreRestore, CliError> {
     .map_err(|error| {
         backup_restore_exit::from_am_error(backup_restore_exit::snapshot_failure(&error), &error)
     })?;
+    crate::backup_create_custody::record_delivered_custody(
+        &plan.journal_path,
+        &created.archive.id,
+        &created.archive.path,
+    )
+    .map_err(|error| {
+        backup_restore_exit::from_am_error(backup_restore_exit::snapshot_failure(&error), &error)
+    })?;
     Ok(PreRestore {
         reason: None,
         id: Some(created.archive.id),
         path: Some(created.archive.path),
     })
-}
-
-/// Refuse an archive whose backend is not the target's, naming both.
-fn refuse_backend_mismatch(
-    manifest: &BackupManifest,
-    target: &ResolvedTarget,
-) -> Result<(), CliError> {
-    if manifest.store.backend == target.backend {
-        return Ok(());
-    }
-    Err(backup_restore_exit::error(
-        RestoreFailure::BackendMismatch,
-        "backend_mismatch",
-        format!(
-            "the archive records the {} backend, but the target store is {}; a restore replaces \
-             a store of the same backend and never converts one",
-            manifest.store.backend, target.backend
-        ),
-    )
-    .with_hint(format!(
-        "restore an archive taken from a {} store",
-        target.backend
-    )))
-}
-
-/// Refuse an archive without its keys unless the operator accepted the loss.
-fn refuse_missing_keys(manifest: &BackupManifest, parsed: &ParsedArgs) -> Result<(), CliError> {
-    if manifest.keys.included || parsed.has("allow-missing-keys") {
-        return Ok(());
-    }
-    Err(backup_restore_exit::error(
-        RestoreFailure::ArchiveWithoutKeys,
-        "missing_keys",
-        "the archive carries no key store, so the restored content would be permanently \
-         unreadable without its keys",
-    )
-    .with_hint(
-        "pass `--allow-missing-keys` only when the keys are kept elsewhere, or restore an \
-         archive that carries them",
-    ))
 }
 
 /// The pre-restore snapshot decision: take it, or say why not.
@@ -447,3 +424,8 @@ mod tests;
 #[cfg(test)]
 #[path = "backup_restore_flow_plan_tests.rs"]
 mod plan_refusal_tests;
+
+/// The pre-restore snapshot's custody record, through the real restore.
+#[cfg(test)]
+#[path = "backup_restore_flow_pre_snapshot_tests.rs"]
+mod pre_snapshot_tests;

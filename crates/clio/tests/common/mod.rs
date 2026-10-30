@@ -3,13 +3,16 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the one environment setting every integration
+//! This module is responsible for the shared harness support every integration
 //! harness needs before it runs the real `clio` binary: where the Clio
-//! encryption key lives.
+//! encryption key lives, the scratch guard, and the copy-custody row a restore
+//! scenario seeds for an archive it expects to restore.
 //!
 //! ## Owns
 //! - Seeding one owner-only key file per test binary and pointing `CLIO_KEY_FILE`
 //!   at it
+//! - `seed_restore_custody`, the passing custody row the restore route's gate
+//!   reads for an archive a scenario restores
 //!
 //! ## Does not own
 //! - Any scenario, database, or key-store behaviour (each harness owns its own)
@@ -17,8 +20,9 @@
 //!
 //! ## Boundary
 //!
-//! Keep this module to the key-file seed. If a harness needs more environment
-//! than this, it should set it itself rather than widen this.
+//! Keep this module to the key-file seed and the two shared harness helpers. If
+//! a harness needs more environment than this, it should set it itself rather
+//! than widen this.
 //!
 //! # Why every harness needs this
 //!
@@ -39,7 +43,7 @@
 // the same allowance for the same reason.
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -114,4 +118,43 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// The durable store file the restore route's custody lookup reads, beside the
+/// erasure journal.
+const RESTORE_EVENTS_FILE: &str = "restore-guard-events.db";
+
+/// Seed the passing copy-custody row the restore route's gate reads for an
+/// archive a scenario expects to restore.
+///
+/// The row goes to the durable store beside `journal`, keyed by the snapshot
+/// id, holding the digest over the archive's bytes in the delivery write's
+/// expression and the receiver the restore route acts as. An archive a scenario
+/// never restores does not need a row.
+pub fn seed_restore_custody(journal: &Path, id: &str, archive: &Path) {
+    use clio::Actor;
+    use clio_compliance::copy_digest_of;
+    use clio_store::{
+        DekProvider, DestinationCustodyRow, DestinationCustodyStore, LocalDevKms, SqliteStore,
+    };
+    use std::sync::Arc;
+
+    let events = journal.with_file_name(RESTORE_EVENTS_FILE);
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = SqliteStore::open(&events, kms).expect("open the durable store beside the journal");
+    let bytes = std::fs::read(archive).expect("read the archive");
+    let row = DestinationCustodyRow {
+        action_id: id.to_owned(),
+        destination_path: archive.display().to_string(),
+        custody_owner: "clio".to_owned(),
+        required_action: "delivery".to_owned(),
+        state: "delivered".to_owned(),
+        exception_reason: None,
+        copy_digest: Some(copy_digest_of(&bytes)),
+        receiver: Some(Actor::System.as_str().to_owned()),
+        updated_at: "2026-01-01T00:00:00Z".to_owned(),
+    };
+    store
+        .save_pending(&row)
+        .expect("save the scenario's custody row");
 }

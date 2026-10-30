@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use super::run::Run;
 use super::support::{AcceptanceStore, BANK, NOW};
-use crate::sync_wire_support::TOKEN;
+use crate::sync_wire_support::{TOKEN, sync_cipher};
 
 impl<T: AcceptanceStore + 'static> Run<T> {
     /// One delivery of this request's denial to `peer_id` at `remote`, riding
@@ -201,7 +201,7 @@ fn client<T: AcceptanceStore + 'static>(
         sync: store as Arc<dyn SyncStore>,
         remote: Some(remote.to_owned()),
         token: token.map(str::to_owned),
-        cipher: Vec::new(),
+        cipher: sync_cipher(),
     }
 }
 
