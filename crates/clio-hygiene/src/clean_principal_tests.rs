@@ -5,12 +5,14 @@
 //!
 //! This module pins what the presenting credential does to a durable hygiene
 //! log row: a bound clean names the credential, a local clean names nobody, and
-//! the label is recorded as text with nothing derived from it.
+//! the label is recorded as text with nothing derived from it. It also pins the
+//! stated reason and note beside the label.
 //!
 //! ## Owns
 //! - Test coverage for the credential key on a `hygiene_audit_logs` row
 //! - Test coverage for its absence on an unbound row, and for a preview
 //!   leaving no row to attribute
+//! - Test coverage for the stated reason/note on a row's detail
 //!
 //! ## Does not own
 //! - Clean counts, outcomes and validation (`clean_tests`)
@@ -58,6 +60,35 @@ fn a_local_clean_row_carries_no_credential_key() {
         row.detail.get(PRINCIPAL_DETAIL_KEY).is_none(),
         "an unbound operation must not carry an empty or null label: {}",
         row.detail
+    );
+}
+
+#[test]
+fn the_stated_reason_and_note_ride_the_log_row() {
+    let row = clean_and_read_log("bank-reason", "itm-rn", &ctx("bank-reason"));
+    assert_eq!(row.detail["reason"], "hygiene noise cleanup");
+    assert_eq!(row.detail["note"], "review me");
+}
+
+#[test]
+fn a_clean_without_a_note_leaves_no_note_key_on_the_log_row() {
+    let bank = "bank-nonote";
+    let s = store();
+    let s_ref = &*s as &dyn Store;
+    s_ref
+        .create_memory_item(&item("itm-nn", bank, "no note"), "actor")
+        .unwrap();
+    let opctx = ctx(bank);
+    let targets = [target("itm-nn")];
+    let mut a = args(&s, &opctx, &targets, CleanAction::Archive, true);
+    a.note = None;
+    clean(&a).unwrap();
+    let rows = s.list_hygiene_logs(Some(bank), 50, 0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].detail.get("note").is_none(),
+        "an absent note leaves no empty or null key: {}",
+        rows[0].detail
     );
 }
 

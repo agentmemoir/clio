@@ -13,7 +13,8 @@
 //!   batch abort semantics (applied vs pending), log-row persistence
 //! - [`CleanAction`]: the closed action set; `delete` is an alias of `discard`
 //!   documented as non-compliance (never `erase_request` / DEK destroy)
-//! - The presenting credential's label inside each durable log row's detail
+//! - The presenting credential's label and the stated reason/note inside each
+//!   durable log row's detail
 //!
 //! ## Does not own
 //! - Store SQL (flags, archive markers, discard columns — `clio-store`)
@@ -318,6 +319,15 @@ fn append_log(
     // A bound transport names the credential beside the claimed role. A local
     // one has none, so the key is absent rather than empty.
     record_principal(&mut detail, args.ctx.principal());
+    // The stated reason and note ride the same row, the way the audit event
+    // carries them: present when supplied, absent rather than empty otherwise.
+    let reason = args.reason.trim();
+    if !reason.is_empty() {
+        detail["reason"] = serde_json::json!(reason);
+    }
+    if let Some(note) = args.note {
+        detail["note"] = serde_json::json!(note);
+    }
     let entry = HygieneLogEntry {
         id: format!("hlg-{}-{}-{}", args.batch_id, index, target.item_id),
         bank_id: args.ctx.bank.as_str().to_owned(),

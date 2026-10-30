@@ -354,6 +354,9 @@ fn t21_07_confirmed_clean_writes_masked_durable_log_rows() {
         row.noise_score == Some(0.75),
         "the log row records the noise score"
     );
+    // The audit row shows why the action was taken.
+    assert_eq!(row.detail["reason"], "hygiene noise cleanup");
+    assert_eq!(row.detail["note"], "review me");
     // Rows never carry secret material or content — ids/scores/labels only.
     let detail = row.detail.to_string();
     assert!(!detail.contains("api_key") && !detail.contains("gist"));
