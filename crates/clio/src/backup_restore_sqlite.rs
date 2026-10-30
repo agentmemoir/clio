@@ -329,8 +329,9 @@ impl RestorePlacement<'_> {
     pub(crate) fn begin(&self, plan: &Plan) -> Result<RestoreGuard, CliError> {
         let action_id = next_restore_action_id();
         // The placement rebuilds the copy-custody facts from the same
-        // resolution the plan used, before the lock is taken, so the gate
-        // under the lock checks the copy as it exists now.
+        // resolution the plan used. The facts are read before the lock is
+        // taken, so the gate under the lock re-checks those facts, not a
+        // fresh read of the copy.
         let archive = plan
             .backup_dir
             .join(clio_backup::archive_file_name(&plan.snapshot_id));
