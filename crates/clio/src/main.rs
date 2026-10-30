@@ -45,6 +45,7 @@ mod backup_restore_custody;
 mod backup_restore_exit;
 mod backup_restore_flow;
 mod backup_restore_postgres;
+mod backup_restore_refusals;
 mod backup_restore_report;
 mod backup_restore_result;
 mod backup_restore_schema;

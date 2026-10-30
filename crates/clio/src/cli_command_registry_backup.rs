@@ -288,7 +288,7 @@ pub(crate) const BACKUP_RESTORE: CommandSpec = CommandSpec {
         ),
         Flag::toggle(
             "allow-missing-keys",
-            "Accepts an archive with no key member; `backup_restore_flow::refuse_missing_keys` then restores content that stays permanently unreadable.",
+            "Accepts an archive with no key member; `backup_restore_refusals::refuse_missing_keys` then restores content that stays permanently unreadable.",
         ),
         Flag::toggle(
             "dry-run",
