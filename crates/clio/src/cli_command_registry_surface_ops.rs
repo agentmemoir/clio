@@ -29,7 +29,9 @@
 //! Keep this module focused on the five `ops` records.
 //
 
-use super::{DB_BACKEND_BANK, DB_BANK_UNDOCUMENTED_GLOBALS};
+use super::{
+    DB_BACKEND_BANK_OUTPUT, DB_BANK_UNDOCUMENTED_GLOBALS, DB_BANK_UNDOCUMENTED_GLOBALS_NO_OUTPUT,
+};
 use crate::cli_command_registry::{GLOBAL_BACKEND, GLOBAL_BANK, GLOBAL_DB};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
@@ -65,8 +67,8 @@ pub(crate) const OPS_DIAGNOSE: CommandSpec = CommandSpec {
     summary: "Read-only install/database health snapshot",
     notes: &[],
     positionals: &[],
-    documented: DB_BACKEND_BANK,
-    accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
+    documented: DB_BACKEND_BANK_OUTPUT,
+    accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS_NO_OUTPUT,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],
@@ -95,8 +97,8 @@ pub(crate) const OPS_VERIFY: CommandSpec = CommandSpec {
     summary: "Referential-integrity and index-coverage checks",
     notes: &[],
     positionals: &[],
-    documented: DB_BACKEND_BANK,
-    accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
+    documented: DB_BACKEND_BANK_OUTPUT,
+    accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS_NO_OUTPUT,
     flag_aliases: &[],
     usage_override: None,
     usage_alternates: &[],

@@ -7,12 +7,14 @@
 //! operator health commands and mapping their outcomes to process exit codes.
 //!
 //! ## Owns
-//! - The `clio ops` subcommand dispatcher and its flag handling
-//! - Opening the operator store/index/embedder and rendering JSON results
+//! - The `clio ops` subcommand dispatcher and its flag handling, including the
+//!   documented global `--output` mode selection
+//! - Opening the operator store/index/embedder and emitting report results
 //! - The documented exit-code contract for the operator commands
 //!
 //! ## Does not own
 //! - The operator checks and repair policy (`clio-ops`)
+//! - The report text renderings and output emitters (`ops_cli_render`)
 //! - Backend SQL (`clio-store`) or the MCP transports (`clio-mcp`)
 //!
 //! ## Boundary
@@ -30,9 +32,16 @@ use clio_store::{
 };
 use clio_types::AmError;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
+
+use crate::cli_output::OutputMode;
+use crate::ops_cli_actions::{run_doctor, run_reindex, run_repair};
+use crate::ops_cli_render::{
+    emit_error, emit_report, emit_usage_error, render_diagnose, render_verify, report_output_error,
+};
 
 /// Exit-code contract for the operator commands.
 ///
@@ -57,6 +66,22 @@ pub(crate) fn ops(args: impl IntoIterator<Item = String>) -> ExitCode {
     ops_with(args, &|key| std::env::var(key).ok())
 }
 
+/// `ops` against an injected environment lookup.
+///
+/// Every other command surface reads its environment through a lookup the
+/// caller supplies (`cli_read`, `sync_cli`, `backup_cli`, `mcp_cli`,
+/// `status_cli`); this one read `std::env::var` inline in three places, so a
+/// test here had no way to express "this machine has no deployment config" and
+/// its verdict depended on the developer's own sidecar setup (#90). The seam is
+/// the same one `mcp_cli`'s `mcp_options_with` already provides.
+pub(crate) fn ops_with<F>(args: impl IntoIterator<Item = String>, get: &F) -> ExitCode
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let mut stdout = std::io::stdout();
+    ops_with_out(args, get, &mut stdout)
+}
+
 /// The flag names each `clio ops` subcommand parses with, from its record. A
 /// subcommand with no record keeps the old empty list: only the globals and
 /// the help spelling are accepted, and the dispatcher refuses the subcommand
@@ -71,15 +96,13 @@ fn ops_flag_names(sub: &str) -> Vec<&'static str> {
     }
 }
 
-/// `ops` against an injected environment lookup.
-///
-/// Every other command surface reads its environment through a lookup the
-/// caller supplies (`cli_read`, `sync_cli`, `backup_cli`, `mcp_cli`,
-/// `status_cli`); this one read `std::env::var` inline in three places, so a
-/// test here had no way to express "this machine has no deployment config" and
-/// its verdict depended on the developer's own sidecar setup (#90). The seam is
-/// the same one `mcp_cli`'s `mcp_options_with` already provides.
-pub(crate) fn ops_with<F>(args: impl IntoIterator<Item = String>, get: &F) -> ExitCode
+/// The same surface against a caller-supplied output writer, so a test can read
+/// what `diagnose` and `verify` printed instead of racing the real stdout.
+pub(crate) fn ops_with_out<F>(
+    args: impl IntoIterator<Item = String>,
+    get: &F,
+    out: &mut dyn Write,
+) -> ExitCode
 where
     F: Fn(&str) -> Option<String>,
 {
@@ -104,8 +127,19 @@ where
         println!("{}", crate::cli_top_level::database_help_block(get));
         return ExitCode::SUCCESS;
     }
+    // The documented global `--output` selects the renderer, the way every other
+    // command surface resolves it; an invalid value reports like the other
+    // surfaces too.
+    let is_tty = crate::cli_output::stdout_is_tty();
+    let mode =
+        match crate::cli_output::resolve_output(flags.get("output").map(String::as_str), is_tty) {
+            Ok(mode) => mode,
+            Err(error) => return report_output_error(&error, &raw, is_tty),
+        };
     match sub {
-        "diagnose" | "verify" | "doctor" | "repair" | "reindex" => run_backend(sub, &flags, get),
+        "diagnose" | "verify" | "doctor" | "repair" | "reindex" => {
+            run_backend(sub, &flags, get, mode, out)
+        }
         other => {
             eprintln!(
                 "unknown ops command `{other}`; try `clio ops diagnose|verify|doctor|repair|reindex`"
@@ -123,12 +157,18 @@ fn ops_usage(sub: &str) -> String {
 }
 
 /// Every backend view the operator commands need from one concrete store.
-trait OpsRepos: Store + OpsStore + IndexStore {}
+pub(crate) trait OpsRepos: Store + OpsStore + IndexStore {}
 impl<T: Store + OpsStore + IndexStore> OpsRepos for T {}
 
 /// Open the selected backend through the shared precedence resolver and run
 /// the command against its concrete store.
-fn run_backend<F>(sub: &str, flags: &HashMap<String, String>, get: &F) -> ExitCode
+fn run_backend<F>(
+    sub: &str,
+    flags: &HashMap<String, String>,
+    get: &F,
+    mode: OutputMode,
+    out: &mut dyn Write,
+) -> ExitCode
 where
     F: Fn(&str) -> Option<String>,
 {
@@ -173,7 +213,7 @@ where
             };
             match opened {
                 Ok(mut store) => match reconcile_space(&mut store, get) {
-                    Ok(()) => dispatch(sub, flags, &store, get),
+                    Ok(()) => dispatch(sub, flags, &store, get, mode, out),
                     Err(e) => emit_error(&e, 1),
                 },
                 Err(e) => emit_error(&e, 1),
@@ -181,7 +221,7 @@ where
         }
         "postgres" => match PostgresStore::open(database, kms) {
             Ok(mut store) => match reconcile_space(&mut store, get) {
-                Ok(()) => dispatch(sub, flags, &store, get),
+                Ok(()) => dispatch(sub, flags, &store, get, mode, out),
                 Err(e) => emit_error(&e, 1),
             },
             Err(e) => emit_error(&e, 1),
@@ -211,7 +251,17 @@ where
 }
 
 /// Dispatch one operator subcommand against an already-open store.
-fn dispatch<S, F>(sub: &str, flags: &HashMap<String, String>, store: &S, get: &F) -> ExitCode
+///
+/// `doctor`, `repair`, and `reindex` keep their JSON-only emission; only the
+/// read-only `diagnose` and `verify` reports follow the resolved output mode.
+fn dispatch<S, F>(
+    sub: &str,
+    flags: &HashMap<String, String>,
+    store: &S,
+    get: &F,
+    mode: OutputMode,
+    out: &mut dyn Write,
+) -> ExitCode
 where
     S: OpsRepos,
     F: Fn(&str) -> Option<String>,
@@ -226,8 +276,8 @@ where
     };
     let plans = clio_ops::PlanRegistry::new();
     match sub {
-        "diagnose" => run_diagnose(store, embedder.as_deref(), &timestamp),
-        "verify" => run_verify(store, bank.as_deref(), &timestamp),
+        "diagnose" => run_diagnose(store, embedder.as_deref(), &timestamp, mode, out),
+        "verify" => run_verify(store, bank.as_deref(), &timestamp, mode, out),
         "doctor" => run_doctor(store, bank.as_deref(), flags, &timestamp, &plans),
         "repair" => run_repair(
             store,
@@ -246,6 +296,8 @@ fn run_diagnose<S: OpsRepos>(
     store: &S,
     embedder: Option<&dyn Embedder>,
     timestamp: &str,
+    mode: OutputMode,
+    out: &mut dyn Write,
 ) -> ExitCode {
     let report = clio_ops::diagnose_unscoped(&clio_ops::DiagnoseArgs {
         store,
@@ -253,7 +305,7 @@ fn run_diagnose<S: OpsRepos>(
         embedder,
         timestamp,
     });
-    print_json(&report);
+    emit_report(&report, &render_diagnose(&report), mode, out);
     if report.ok && report.backend_reachable {
         ExitCode::SUCCESS
     } else {
@@ -261,7 +313,13 @@ fn run_diagnose<S: OpsRepos>(
     }
 }
 
-fn run_verify<S: OpsRepos>(store: &S, bank: Option<&str>, timestamp: &str) -> ExitCode {
+fn run_verify<S: OpsRepos>(
+    store: &S,
+    bank: Option<&str>,
+    timestamp: &str,
+    mode: OutputMode,
+    out: &mut dyn Write,
+) -> ExitCode {
     match clio_ops::verify(&clio_ops::VerifyArgs {
         store,
         index: store,
@@ -269,7 +327,7 @@ fn run_verify<S: OpsRepos>(store: &S, bank: Option<&str>, timestamp: &str) -> Ex
         timestamp,
     }) {
         Ok(report) => {
-            print_json(&report);
+            emit_report(&report, &render_verify(&report), mode, out);
             if report.ok {
                 ExitCode::SUCCESS
             } else {
@@ -278,163 +336,6 @@ fn run_verify<S: OpsRepos>(store: &S, bank: Option<&str>, timestamp: &str) -> Ex
         }
         Err(e) => emit_error(&e, 1),
     }
-}
-
-fn run_doctor<S: OpsRepos>(
-    store: &S,
-    bank: Option<&str>,
-    flags: &HashMap<String, String>,
-    timestamp: &str,
-    plans: &clio_ops::PlanRegistry,
-) -> ExitCode {
-    let dry_run = flags.get("dry-run").is_none_or(|v| v != "false");
-    match clio_ops::doctor_unscoped(&clio_ops::DoctorArgs {
-        store,
-        index: store,
-        bank,
-        dry_run,
-        timestamp,
-        plans,
-    }) {
-        Ok(plan) => {
-            print_json(&plan);
-            if plan.ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(1)
-            }
-        }
-        Err(e) => emit_error(&e, 1),
-    }
-}
-
-fn run_repair<S: OpsRepos>(
-    store: &S,
-    bank: Option<&str>,
-    flags: &HashMap<String, String>,
-    timestamp: &str,
-    plans: &clio_ops::PlanRegistry,
-    embedder: Option<&dyn Embedder>,
-) -> ExitCode {
-    let actions: Vec<String> = flags
-        .get("actions")
-        .map(|raw| {
-            raw.split(',')
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    match clio_ops::repair(&clio_ops::RepairArgs {
-        store,
-        writer: store,
-        index: store,
-        embedder,
-        plans,
-        plan_id: flags.get("plan").map(String::as_str),
-        actions: &actions,
-        bank,
-        confirm: flags.contains_key("confirm"),
-        timestamp,
-    }) {
-        Ok(outcome) => {
-            print_json(&outcome);
-            if outcome.ok {
-                ExitCode::SUCCESS
-            } else if outcome
-                .findings
-                .iter()
-                .any(|finding| finding.code == clio_ops::codes::PLAN_NOT_FOUND)
-            {
-                ExitCode::from(1)
-            } else if !outcome.findings.is_empty() {
-                ExitCode::from(2)
-            } else {
-                ExitCode::from(1)
-            }
-        }
-        Err(e) => emit_error(&e, 1),
-    }
-}
-
-fn run_reindex<S: OpsRepos>(
-    store: &S,
-    bank: Option<&str>,
-    flags: &HashMap<String, String>,
-    embedder: Option<&dyn Embedder>,
-) -> ExitCode {
-    let target = match flags.get("target") {
-        Some(raw) => match clio_index::RebuildTargets::parse(raw) {
-            Ok(target) => target,
-            Err(e) => return emit_usage_error(e.message),
-        },
-        None => clio_index::RebuildTargets::All,
-    };
-    // `--confirm` alone starts the live rebuild, the way `repair` treats it. The
-    // value decides, not presence: the parser stores the token after a bare flag,
-    // so `--confirm false` is not a confirmation. `--dry-run true` asks for a report.
-    let confirm = flags.get("confirm").is_some_and(|v| v != "false");
-    let dry_run = match flags.get("dry-run") {
-        Some(v) => v != "false",
-        None => !confirm,
-    };
-    match clio_ops::reindex(&clio_ops::ReindexArgs {
-        store,
-        index: store,
-        embedder,
-        bank,
-        target,
-        dry_run,
-        confirm,
-    }) {
-        Ok(report) => {
-            print_json(&report);
-            if report.ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(3)
-            }
-        }
-        Err(e) => emit_error(&e, 3),
-    }
-}
-
-/// Render an error as structured JSON and return the mapped exit code.
-fn emit_error(error: &AmError, code: u8) -> ExitCode {
-    let exit_code = if error.code == clio_types::ErrorCode::StorageBusy {
-        crate::cli_error::CliError::from_am_error(error).exit_code()
-    } else {
-        ExitCode::from(code)
-    };
-    print_json(&serde_json::json!({
-        "ok": false,
-        "code": error.code.as_str(),
-        "message": redact(&error.message),
-    }));
-    exit_code
-}
-
-/// Render a bad flag value with the shared usage code and exit group.
-fn emit_usage_error(message: impl AsRef<str>) -> ExitCode {
-    print_json(&serde_json::json!({
-        "ok": false,
-        "code": "usage",
-        "message": redact(message.as_ref()),
-    }));
-    ExitCode::from(2)
-}
-
-/// Print a serializable value as one JSON line.
-fn print_json(value: &impl serde::Serialize) {
-    let line = serde_json::to_string(value).unwrap_or_else(|_| "{}".into());
-    println!("{line}");
-}
-
-/// Strip credentials from any URL embedded in a driver error message (shared
-/// redactor, also applied by the MCP ops surfaces).
-fn redact(message: &str) -> String {
-    clio_ops::redact_credentials(message)
 }
 
 #[cfg(test)]
@@ -444,6 +345,10 @@ mod ops_cli_fault_tests;
 #[cfg(test)]
 #[path = "ops_cli_open_tests.rs"]
 mod ops_cli_open_tests;
+
+#[cfg(test)]
+#[path = "ops_cli_output_tests.rs"]
+mod ops_cli_output_tests;
 
 #[cfg(test)]
 #[path = "ops_cli_tests.rs"]

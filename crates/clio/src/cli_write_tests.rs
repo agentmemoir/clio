@@ -295,6 +295,82 @@ fn remember_arguments_route_to_store() {
 }
 
 #[test]
+fn write_without_bank_reports_the_fallback_bank() {
+    // No `--bank` lands the write in the literal default bank. The result must
+    // name that bank at the top level and disclose the fallback, so a later
+    // read scoped to another bank is not mistaken for data loss.
+    let s = state();
+    let (code, out, err) = run_write_state(
+        "remember",
+        &["prefers terse answers", "--category", "persona"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["bank"], json!("default"), "{payload}");
+    assert_eq!(payload["bank_source"], json!("defaulted"), "{payload}");
+}
+
+#[test]
+fn write_with_bank_names_the_bank_and_omits_the_fallback_disclosure() {
+    let s = state();
+    let (code, out, err) = run_write_state(
+        "remember",
+        &[
+            "prefers terse answers",
+            "--category",
+            "persona",
+            "--bank",
+            "b",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["bank"], json!("b"), "{payload}");
+    assert!(payload.get("bank_source").is_none(), "{payload}");
+}
+
+#[test]
+fn write_without_bank_text_receipt_opens_with_the_fallback_disclosure() {
+    let s = state();
+    let (code, out, err) = run_write_state(
+        "remember",
+        &["prefers terse answers", "--category", "persona"],
+        &s,
+        true,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(out.starts_with("bank: default\n"), "{out}");
+    assert!(
+        out.contains("notice: no --bank was named; this write used the fallback bank `default`"),
+        "{out}"
+    );
+}
+
+#[test]
+fn write_with_bank_text_receipt_names_the_bank_without_a_notice() {
+    let s = state();
+    let (code, out, err) = run_write_state(
+        "remember",
+        &[
+            "prefers terse answers",
+            "--category",
+            "persona",
+            "--bank",
+            "b",
+        ],
+        &s,
+        true,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(out.starts_with("bank: b\n"), "{out}");
+    assert!(!out.contains("notice:"), "{out}");
+}
+
+#[test]
 fn preview_call_shape_is_tool_free() {
     // The `Preview` variant carries no tool name, so a no-write preview can
     // never be turned into a dispatcher call by the engine.

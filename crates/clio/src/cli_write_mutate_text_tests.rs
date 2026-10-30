@@ -29,7 +29,7 @@ fn invalidate_text_mode_view_without_replacement() {
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert_eq!(
         out.trim(),
-        "invalidated (closed 1, already_ended 0) in bank `demo`",
+        "bank: demo\ninvalidated (closed 1, already_ended 0)",
         "{out}"
     );
 }
@@ -45,7 +45,10 @@ fn update_text_mode_view_is_deterministic() {
         true,
     );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(out.starts_with("updated (discrete): closed 1"), "{out}");
+    assert!(
+        out.starts_with("bank: demo\nupdated (discrete): closed 1"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -59,7 +62,7 @@ fn discard_text_mode_view_reports_the_removed_item() {
         true,
     );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert_eq!(out.trim(), "discarded itm-d5 in bank `demo`", "{out}");
+    assert_eq!(out.trim(), "bank: demo\ndiscarded itm-d5", "{out}");
 }
 
 #[test]

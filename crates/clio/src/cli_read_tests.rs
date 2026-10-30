@@ -312,7 +312,9 @@ fn text_views_for_get_and_inspect() {
     );
     assert_eq!(
         crate::cli_read_render::render_text("stats", &json!({}), Palette::new(false)),
-        "bank: ?\nitems_total: ?\nitems_active: ?\nitems_discarded: ?"
+        "bank: ?\nitems_total: ?\nitems_active: ?\nitems_discarded: ?\nby_tier: ?\n\
+         by_category: ?\nby_epistemic_kind: ?\nby_age_band: ?\nby_provenance_class: ?\n\
+         pressure_counts: ?"
     );
     assert_eq!(
         crate::cli_read_render::render_text("get", &json!({}), Palette::new(false)),

@@ -44,6 +44,22 @@ fn history_state() -> Arc<McpState> {
 }
 
 #[test]
+fn task_get_rejects_the_undocumented_explain_flag() {
+    let s = history_state();
+    // `task get` lost its `--explain` help entry: the parser now fails closed
+    // on the flag instead of silently ignoring it.
+    let (code, out, err) = run_state(
+        "task get",
+        &["t1", "--bank", "bank-a", "--explain"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2));
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("unknown flag `--explain`"), "{err}");
+}
+
+#[test]
 fn task_get_success_missing_and_text() {
     let s = history_state();
     let (code, out, err) = run_state("task get", &["t1", "--bank", "bank-a"], &s, false);
@@ -92,7 +108,7 @@ fn task_history_limit_and_truncation() {
 
     let (_, out, _) = run_state(
         "task history",
-        &["t1", "--bank", "bank-a", "--limit", "2", "--explain"],
+        &["t1", "--bank", "bank-a", "--limit", "2"],
         &s,
         true,
     );
@@ -281,17 +297,17 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
         (
             "task get",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "task history",
             &["db", "backend", "bank", "actor", "output", "limit"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "failure list",
             &["db", "backend", "bank", "actor", "output", "limit"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "memtree query",
@@ -307,12 +323,12 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "depth",
                 "limit",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "memtree get",
             &["db", "backend", "bank", "actor", "output"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "history temporal",
@@ -325,7 +341,7 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "as-of",
                 "time-axis",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = HistoryGroup;

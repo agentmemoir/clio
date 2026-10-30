@@ -51,7 +51,7 @@ fn validate_attest_reports_applied_false_without_content_change() {
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert_eq!(
         out.trim(),
-        "validated itm-v action=attest applied=false in bank `demo`",
+        "bank: demo\nvalidated itm-v action=attest applied=false",
         "{out}"
     );
 }

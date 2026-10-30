@@ -178,7 +178,7 @@ fn render_variants_cover_missing_fields() {
         render_persona(
             &json!({"document": {"stable": [{}], "preferences": [{}]}, "dropped_keys": ["k"]})
         ),
-        "stable: 1\npreferences: 1\ndropped_keys: 1"
+        "stable: 1\npreferences: 1\ndropped_keys: 1\n  k"
     );
     assert_eq!(
         render_maintenance(&json!({"leaf_queryable": true, "item_id": "i"})),
@@ -204,6 +204,77 @@ fn render_variants_cover_missing_fields() {
     );
 }
 
+/// Every field of the `persona get` document appears in the text view, field
+/// by field: the counts, every stable entry and preference field, and the
+/// dropped keys.
+#[test]
+fn persona_text_carries_every_field_the_json_document_carries() {
+    let payload = json!({
+        "document": {
+            "stable": [{
+                "key": "style", "value": "concise", "confidence": 0.9,
+                "source": "explicit", "source_ref": "turn-1",
+                "context": "stated in the first session",
+                "admission_score": 0.8, "as_of": "2026-01-01T00:00:00Z"
+            }],
+            "preferences": [{
+                "key": "brevity_affinity", "value": 0.4, "trend": 0.4,
+                "confidence": 0.5, "source": "inferred", "source_ref": null,
+                "admission_score": 0.7, "as_of": "2026-01-02T00:00:00Z"
+            }]
+        },
+        "dropped_keys": ["too_long_key"]
+    });
+    let text = render_persona(&payload);
+    for key in ["stable", "preferences", "dropped_keys"] {
+        assert!(text.contains(key), "{key} missing from text: {text}");
+    }
+    for entry in [
+        "style",
+        "concise",
+        "confidence: 0.9",
+        "source: explicit",
+        "source_ref: turn-1",
+        "context: stated in the first session",
+        "admission_score: 0.8",
+        "as_of: 2026-01-01T00:00:00Z",
+        "brevity_affinity: 0.4",
+        "trend: 0.4",
+        "confidence: 0.5",
+        "source: inferred",
+        "source_ref: null",
+        "admission_score: 0.7",
+        "as_of: 2026-01-02T00:00:00Z",
+        "too_long_key",
+    ] {
+        assert!(text.contains(entry), "{entry} missing from text: {text}");
+    }
+    assert_eq!(
+        text,
+        [
+            "stable: 1",
+            "  style: concise",
+            "  admission_score: 0.8",
+            "  as_of: 2026-01-01T00:00:00Z",
+            "  confidence: 0.9",
+            "  context: stated in the first session",
+            "  source: explicit",
+            "  source_ref: turn-1",
+            "preferences: 1",
+            "  brevity_affinity: 0.4",
+            "  admission_score: 0.7",
+            "  as_of: 2026-01-02T00:00:00Z",
+            "  confidence: 0.5",
+            "  source: inferred",
+            "  source_ref: null",
+            "  trend: 0.4",
+            "dropped_keys: 1",
+            "  too_long_key",
+        ]
+        .join("\n")
+    );
+}
+
 /// Every verb's spec is its record's, and the accepted set that record carries is
 /// the one the group's own list held: same flags, same order, globals included.
 #[test]
@@ -221,22 +292,22 @@ fn spec_answers_from_the_registry_with_the_original_accepted_set() {
                 "edge-type",
                 "min-weight",
             ],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "associations",
             &["db", "backend", "bank", "actor", "output", "min-weight"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "persona get",
             &["db", "backend", "bank", "actor", "output", "budget-tokens"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
         (
             "maintenance status",
             &["db", "backend", "bank", "actor", "output", "item-id"],
-            &["no-input", "yes", "explain"],
+            &["no-input", "yes"],
         ),
     ];
     let group = GraphGroup;
