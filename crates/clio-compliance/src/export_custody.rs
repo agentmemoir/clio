@@ -41,7 +41,7 @@
 pub(crate) mod export_custody_files;
 
 use self::export_custody_files::{
-    destination_present, fsync_dir, io_error, remove_leftover, stage_staging, sweep_leftovers,
+    destination_present, fsync_dir, io_error, remove_staged, stage_staging, sweep_leftovers,
     write_destination_temp,
 };
 use crate::bundle::sha256_hex_bytes;
@@ -227,21 +227,21 @@ pub fn deliver_export(
             let recorded = custody
                 .mark_delivered(spec.action_id, spec.now)
                 .and_then(|()| events.record_outcome(spec.action_id, false, "export delivered"));
-            remove_leftover(&staging);
+            remove_staged(&staging);
             match recorded {
                 Ok(()) => DeliveryResult::Delivered,
                 Err(cause) => DeliveryResult::Failed(format!("delivered but not settled: {cause}")),
             }
         }
         Err(DeliveryFailure::Refused(refusal)) => {
-            remove_leftover(&staging);
+            remove_staged(&staging);
             let reason = refusal_reason(refusal);
             let _ = custody.mark_failed(spec.action_id, reason, spec.now);
             let _ = events.record_outcome(spec.action_id, true, reason);
             DeliveryResult::Refused(refusal)
         }
         Err(DeliveryFailure::BeforeWrite(cause)) => {
-            remove_leftover(&staging);
+            remove_staged(&staging);
             let reason = cause.to_string();
             let _ = custody.mark_failed(spec.action_id, &reason, spec.now);
             let _ = events.record_outcome(spec.action_id, true, &reason);
@@ -250,7 +250,7 @@ pub fn deliver_export(
         Err(DeliveryFailure::AfterWrite(cause)) => {
             // The destination may already exist: keep the row pending so
             // reconciliation reports it as an open copy and never redelivers.
-            remove_leftover(&staging);
+            remove_staged(&staging);
             DeliveryResult::Failed(format!("destination may have been written: {cause}"))
         }
     }

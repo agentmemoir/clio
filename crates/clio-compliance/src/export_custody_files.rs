@@ -11,6 +11,8 @@
 //!
 //! ## Owns
 //! - The staging write and removal and the destination temp name and write
+//! - The unpredictable per-run staging-directory naming and the owner-only
+//!   staging-directory creation with its fail-closed reuse rule
 //! - The managed-leftover sweep reconciliation uses, by exact managed name
 //! - The owner-only file open, the directory flush, and the io-error mapping
 //!
@@ -27,18 +29,43 @@
 
 use super::DeliveryFailure;
 use clio_types::{AmError, ErrorCode};
+use std::collections::hash_map::RandomState;
 use std::fs;
+use std::hash::BuildHasher;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The product staging directory names the managed sweep covers. The runtime
 /// stages subject export bytes in `clio-export-staging` and review exports in
 /// `clio-review-staging`.
 pub(crate) const STAGING_DIR_NAMES: [&str; 2] = ["clio-export-staging", "clio-review-staging"];
 
-/// The full path of one product staging directory.
-pub(crate) fn staging_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(name)
+/// The staging directory one delivery uses: an unpredictable unique name next
+/// to the product staging area under the temp root. Another local user can
+/// neither guess the name nor plant anything at it before delivery creates it
+/// owner-only through [`stage_staging`].
+#[must_use]
+pub fn unique_staging_dir(product: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("{product}-{}", random_suffix()))
+}
+
+/// A 128-bit random suffix: two independent hash seeds the standard library
+/// draws from the operating system at process start, mixed with the process
+/// id, the clock, and a call counter, so no two calls in any process share a
+/// name.
+fn random_suffix() -> String {
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    let calls = CALLS.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_nanos()).unwrap_or(u64::MAX)
+        });
+    let first = RandomState::new().hash_one((std::process::id(), nanos, calls));
+    let second = RandomState::new().hash_one((calls, nanos, std::process::id()));
+    format!("{first:016x}{second:016x}")
 }
 
 /// The staged-bytes path of one action inside a staging directory.
@@ -66,7 +93,7 @@ pub(crate) fn stage_staging(
     action_id: &str,
     bytes: &[u8],
 ) -> Result<PathBuf, AmError> {
-    fs::create_dir_all(staging_dir).map_err(|err| io_error("create", staging_dir, &err))?;
+    ensure_staging_dir(staging_dir)?;
     let path = staging_path(staging_dir, action_id);
     if let Ok(meta) = fs::symlink_metadata(&path)
         && meta.file_type().is_file()
@@ -80,6 +107,105 @@ pub(crate) fn stage_staging(
     Ok(path)
 }
 
+/// Create `dir` owner-only when absent, or accept an existing one only when it
+/// is a plain directory owned by the current user with 0o700 permissions on
+/// unix. Anything else at that path — a link, another user's directory, a
+/// wider mode — fails closed and never becomes a staging directory.
+fn ensure_staging_dir(dir: &Path) -> Result<(), AmError> {
+    match fs::symlink_metadata(dir) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => create_owner_only(dir),
+        Err(err) => Err(io_error("inspect", dir, &err)),
+        Ok(meta) if is_plain_owned_dir(&meta) && is_owner_only_mode(&meta) => Ok(()),
+        Ok(_) => Err(AmError::new(
+            ErrorCode::Internal,
+            format!(
+                "refusing staging directory {}: it exists but is not a plain directory owned by \
+                 the current user with owner-only permissions",
+                dir.display()
+            ),
+        )),
+    }
+}
+
+/// Whether a directory entry is a plain directory owned by the current user;
+/// a link never passes, so a managed removal never follows one.
+fn is_plain_owned_dir(meta: &fs::Metadata) -> bool {
+    if !meta.is_dir() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if current_uid().is_none_or(|uid| meta.uid() != uid) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether the directory mode is owner-only 0o700 on unix.
+#[cfg(unix)]
+fn is_owner_only_mode(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o777 == 0o700
+}
+
+#[cfg(not(unix))]
+fn is_owner_only_mode(_meta: &fs::Metadata) -> bool {
+    true
+}
+
+#[cfg(unix)]
+fn current_uid() -> Option<u32> {
+    use std::os::unix::fs::MetadataExt;
+    let probe = std::env::temp_dir().join(format!(".clio-owner-probe-{}", random_suffix()));
+    let uid = match open_owner_only(&probe) {
+        Ok(file) => file.metadata().ok().map(|meta| meta.uid()),
+        Err(_) => None,
+    };
+    let _ = fs::remove_file(&probe);
+    uid
+}
+
+/// Create a directory with owner-only 0o700 permissions on unix. The owner
+/// bits are the only bits requested, so no umask can widen the result.
+#[cfg(unix)]
+fn create_owner_only(dir: &Path) -> Result<(), AmError> {
+    use std::os::unix::fs::DirBuilderExt;
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+    builder
+        .create(dir)
+        .map_err(|err| io_error("create", dir, &err))
+}
+
+#[cfg(not(unix))]
+fn create_owner_only(dir: &Path) -> Result<(), AmError> {
+    fs::DirBuilder::new()
+        .create(dir)
+        .map_err(|err| io_error("create", dir, &err))
+}
+
+/// Remove a delivered action's staged file, and drop the staging directory
+/// itself when that removal left it empty. A directory that still holds
+/// another action's files fails the removal silently and stays.
+pub(crate) fn remove_staged(staging: &Path) {
+    remove_leftover(staging);
+    if let Some(dir) = staging.parent() {
+        remove_dir_if_empty(dir);
+    }
+}
+
+/// Remove a staging directory when it is a plain directory owned by the
+/// current user and empty; anything else fails silently and stays.
+fn remove_dir_if_empty(dir: &Path) {
+    if let Ok(meta) = fs::symlink_metadata(dir)
+        && is_plain_owned_dir(&meta)
+    {
+        let _ = fs::remove_dir(dir);
+    }
+}
+
 /// Remove a managed leftover: a regular file at an exact managed path, never
 /// following a link out of its parent.
 pub(crate) fn remove_leftover(path: &Path) {
@@ -91,18 +217,49 @@ pub(crate) fn remove_leftover(path: &Path) {
 }
 
 /// Sweep the managed leftovers a crash left for `action_id`: the staged bytes
-/// in each product staging directory and the deterministic destination temp
-/// beside the recorded destination. Only exact managed names are removed; a
-/// destination file itself is never touched.
+/// in each product staging directory under the temp root and the deterministic
+/// destination temp beside the recorded destination. Staging directories are
+/// per-run unpredictable names next to the legacy fixed names, so the sweep
+/// covers both. Only exact managed names are removed, and only inside plain
+/// directories owned by the current user; a destination file itself is never
+/// touched.
 pub(crate) fn sweep_leftovers(action_id: &str, destination: &Path) {
-    for name in STAGING_DIR_NAMES {
-        remove_leftover(&staging_path(&staging_root(name), action_id));
-    }
+    sweep_staging_leftovers(&std::env::temp_dir(), action_id);
     let has_parent = destination
         .parent()
         .is_some_and(|parent| !parent.as_os_str().is_empty());
     if has_parent {
         remove_leftover(&destination_temp_path(destination, action_id));
+    }
+}
+
+/// The staging part of the sweep over one temp root, so tests can point it at
+/// a scratch base instead of the shared system temp root.
+pub(crate) fn sweep_staging_leftovers(base: &Path, action_id: &str) {
+    let Ok(entries) = fs::read_dir(base) else {
+        return;
+    };
+    let staged_name = format!("{}.staging", sanitize(action_id));
+    for entry in entries.flatten() {
+        let raw_name = entry.file_name();
+        let Some(name) = raw_name.to_str() else {
+            continue;
+        };
+        if !STAGING_DIR_NAMES.iter().any(|product| {
+            name == *product
+                || (name.len() > product.len()
+                    && name.starts_with(product)
+                    && name.as_bytes()[product.len()] == b'-')
+        }) {
+            continue;
+        }
+        let dir = entry.path();
+        if let Ok(meta) = fs::symlink_metadata(&dir)
+            && is_plain_owned_dir(&meta)
+        {
+            remove_leftover(&dir.join(&staged_name));
+            remove_dir_if_empty(&dir);
+        }
     }
 }
 
@@ -182,3 +339,7 @@ pub(crate) fn io_error(action: &str, path: &Path, err: &std::io::Error) -> AmErr
         format!("failed to {action} {}: {err}", path.display()),
     )
 }
+
+#[cfg(test)]
+#[path = "export_custody_files_tests.rs"]
+mod export_custody_files_tests;
