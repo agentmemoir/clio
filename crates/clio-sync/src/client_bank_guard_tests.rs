@@ -11,7 +11,10 @@
 //! ## Owns
 //! - Refusal tests for foreign-bank plain, valid-cipher, and invalid-cipher
 //!   rows, for a mixed page, and the same-bank control
-//! - The one-page hostile relay used by these tests only
+//! - Raw wire-page refusal tests: a hostile relay serves a hand-crafted pull
+//!   page as verbatim bytes, the request it received names the pulled bank,
+//!   and the client refuses a foreign-bank row with nothing applied
+//! - The hostile relay used by these tests only
 //!
 //! ## Does not own
 //! - The guard itself (`client`)
@@ -34,7 +37,7 @@ use clio_types::AmError;
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 const BANK_A: &str = "bA";
@@ -52,12 +55,23 @@ fn hostile_page(mutations: &[SyncMutation], times: usize) -> String {
         "has_more": false,
     }))
     .expect("page json");
+    hostile_raw_page(page, times, None)
+}
+
+/// Serve `page` as verbatim JSON bytes to the first `times` connections and
+/// record each request body when `seen` is given. It ignores the requested
+/// bank in the request it reads: that mismatch is what the pull loop must
+/// catch.
+fn hostile_raw_page(page: String, times: usize, seen: Option<Arc<Mutex<Vec<String>>>>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr").to_string();
     thread::spawn(move || {
         for stream in listener.incoming().take(times) {
             let mut stream = stream.expect("accept");
-            read_declared_request(&mut stream);
+            let request = read_declared_request(&mut stream);
+            if let Some(seen) = &seen {
+                seen.lock().expect("seen lock").push(request);
+            }
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
                  Content-Length: {}\r\nConnection: close\r\n\r\n{page}",
@@ -71,8 +85,8 @@ fn hostile_page(mutations: &[SyncMutation], times: usize) -> String {
 
 /// Read one client request to its declared end: the head terminator plus the
 /// `Content-Length` body, so the page is written after the client finished
-/// sending and the close never resets the client mid-read.
-fn read_declared_request(stream: &mut std::net::TcpStream) {
+/// sending and the close never resets the client mid-read. Returns the body.
+fn read_declared_request(stream: &mut std::net::TcpStream) -> String {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -93,7 +107,7 @@ fn read_declared_request(stream: &mut std::net::TcpStream) {
             })
             .unwrap_or(0);
         if buf.len() >= pos + 4 + declared {
-            return;
+            return String::from_utf8_lossy(&buf[pos + 4..]).into_owned();
         }
     }
 }
@@ -263,4 +277,83 @@ fn same_bank_rows_still_apply_and_replay_deduplicates() {
     pull(&cfg_b, &[BANK_A.to_owned()]).expect("replay pull");
     let rows = b.journal_list_since(BANK_A, 0, 200).expect("journal");
     assert_eq!(rows.len(), 1, "the replay deduplicates: {rows:?}");
+}
+
+/// A pull page as raw wire JSON: hand-built envelope text, rows embedded as
+/// JSON values, served verbatim by the hostile relay.
+fn wire_page(rows: &[serde_json::Value]) -> String {
+    serde_json::to_string(&json!({
+        "mutations": rows,
+        "next_cursor": encode_cursor(BANK_A, 1),
+        "has_more": false,
+    }))
+    .expect("wire page json")
+}
+
+/// One mutation as the wire value a relay would send.
+fn row_json(m: &SyncMutation) -> serde_json::Value {
+    serde_json::to_value(m).expect("row json")
+}
+
+/// The pull request the client put on the wire named the bank it pulled.
+fn assert_request_named_bank_a(seen: &Arc<Mutex<Vec<String>>>) {
+    let bodies = seen.lock().expect("seen lock");
+    assert!(
+        bodies
+            .iter()
+            .any(|b| b.contains(&format!("\"bank\":\"{BANK_A}\""))),
+        "the pull request must carry bank {BANK_A}: {bodies:?}"
+    );
+}
+
+#[test]
+fn wire_page_with_a_plain_foreign_bank_row_is_refused() {
+    let b = sqlite();
+    create_item(&b, BANK_B, VICTIM, VICTIM_GIST);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let addr = hostile_raw_page(
+        wire_page(&[row_json(&foreign_discard(BANK_B, VICTIM))]),
+        1,
+        Some(seen.clone()),
+    );
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let err = pull(&cfg_b, &[BANK_A.to_owned()]).expect_err("the wire row is refused");
+    assert_bank_error(&err);
+    assert_request_named_bank_a(&seen);
+    assert_victim_untouched(&b);
+}
+
+#[test]
+fn wire_page_with_a_valid_cipher_foreign_bank_row_is_refused_before_it_opens() {
+    let b = sqlite();
+    create_item(&b, BANK_B, VICTIM, VICTIM_GIST);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    // Sealed under the key this node holds, so only the bank stamp stands
+    // between the wire bytes and decrypt.
+    let sealed = seal_content_for(foreign_discard(BANK_B, VICTIM), &paired_key(), &json!({}));
+    let addr = hostile_raw_page(wire_page(&[row_json(&sealed)]), 1, Some(seen.clone()));
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    let err = pull(&cfg_b, &[BANK_A.to_owned()]).expect_err("the wire row is refused");
+    assert_bank_error(&err);
+    assert_request_named_bank_a(&seen);
+    assert_victim_untouched(&b);
+}
+
+#[test]
+fn wire_page_with_a_same_bank_row_still_applies() {
+    let b = sqlite();
+    let page = wire_page(&[row_json(&seal_own_content(upsert_row(BANK_A, "i-wire")))]);
+    let addr = hostile_raw_page(page, 1, None);
+    let cfg_b = cfg("dev-b", &b, &addr, vec![paired_key()]);
+    pull(&cfg_b, &[BANK_A.to_owned()]).expect("the same-bank wire row applies");
+    assert!(
+        b.get_memory_item(BANK_A, "i-wire")
+            .expect("row read")
+            .is_some()
+    );
+    let cursor = b
+        .cursor_get(BANK_A, "pull")
+        .expect("cursor")
+        .unwrap_or_default();
+    assert!(!cursor.is_empty(), "the cursor advanced: {cursor:?}");
 }
