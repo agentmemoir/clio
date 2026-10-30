@@ -23,6 +23,8 @@
 //!
 //! Keep this module focused on the sealed subject guard.
 
+use crate::client::client_tests::paired_key;
+use crate::credential_fixtures::secret;
 use crate::crypto::SyncCipherKey;
 use crate::denial_fixtures::FakeDenial;
 use crate::denial_guard::{sealed_content, sealed_subject_id, sealed_verdict, subject_verdict};
@@ -37,9 +39,11 @@ const DENIED_SUBJECT: &str = "subject-denied";
 /// A subject no denial covers.
 const CLEAR_SUBJECT: &str = "subject-clear";
 
-/// The one key this peer serves with.
+/// The one key this peer serves with: the sync suite's shared paired key,
+/// derived once per process, so a case that seals and then serves holds the
+/// same key on both sides and no fixture pins key material.
 fn key() -> SyncCipherKey {
-    SyncCipherKey::from_secret("sealed-guard-key")
+    paired_key()
 }
 
 /// The authority's fingerprint value; the guard never reads it.
@@ -158,7 +162,9 @@ fn an_unreadable_authority_is_never_clear() {
 fn a_payload_another_key_sealed_resolves_nothing() {
     let authority = denial();
     authority.deny(DENIED_SUBJECT, &[BANK]);
-    let foreign = SyncCipherKey::from_secret("a-key-this-peer-never-held");
+    // A second generated secret, tagged apart from the shared key's own, so the
+    // two derivations cannot coincide and this peer never holds this one.
+    let foreign = SyncCipherKey::from_secret(&secret("a-key-this-peer-never-held"));
     let m = sealed(
         &foreign,
         item("i-denied", json!({ "subject_id": DENIED_SUBJECT })),
