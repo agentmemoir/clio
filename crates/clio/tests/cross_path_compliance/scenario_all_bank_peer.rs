@@ -138,12 +138,10 @@ fn assert_restarted_peer_quarantines_the_stale_replay(deployment: &Deployment, p
     peer.push(&writer, "writer-1", &[BANK])
         .expect("the restarted peer answers the wire");
     let probe = PeerProbe::new(&deployment.peer_dir.join("peer.db"));
+    let reasons = probe.dead_letter_reasons();
     assert!(
-        probe
-            .dead_letter_reasons()
-            .iter()
-            .any(|reason| reason == "erased_subject"),
-        "the stale replay is quarantined as the erased subject"
+        reasons.iter().any(|reason| reason == "erased_subject"),
+        "the stale replay is quarantined as the erased subject: {reasons:?}"
     );
     assert_eq!(
         probe.subject_items(BANK, DENIED_SUBJECT),

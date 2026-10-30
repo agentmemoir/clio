@@ -285,6 +285,22 @@ pub fn write_credential_store_for(dir: &NodeDir, banks: &[&str]) -> PathBuf {
     path
 }
 
+/// The client-side sealing keys an in-process harness client presents.
+///
+/// The derivation is the production client's own: `SyncCipherKey::from_secret`
+/// over the one synthetic [`SYNC_KEY`] this module shares, which is the same
+/// call the sync tool makes on the secret it reads from its key store or from
+/// the file `CLIO_SYNC_KEY_FILE` names. A client holding no cipher sends every
+/// mutation as plaintext, and a serving peer refuses plaintext as malformed
+/// before it can classify the row, so a harness that asserts what the peer
+/// decided — rather than that it refused the envelope — must configure one.
+#[must_use]
+pub fn sync_cipher() -> Vec<clio_sync::crypto::SyncCipherKey> {
+    vec![clio_sync::crypto::SyncCipherKey::from_secret(
+        SYNC_KEY.as_str(),
+    )]
+}
+
 /// A spawned `clio sync serve`, killed and reaped when the guard drops.
 ///
 /// The relay binds an ephemeral port and reports the address it got, so this

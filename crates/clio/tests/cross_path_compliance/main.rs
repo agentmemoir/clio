@@ -28,6 +28,8 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+#[path = "../sync_wire_support/mod.rs"]
+mod sync_wire_support;
 
 mod case_fixtures;
 mod cli_test_support;

@@ -440,7 +440,7 @@ fn client<T: Store + SyncStore + 'static>(
         sync: store as Arc<dyn SyncStore>,
         remote: Some(remote.to_owned()),
         token: Some(PEER_TOKEN.to_owned()),
-        cipher: Vec::new(),
+        cipher: crate::sync_wire_support::sync_cipher(),
     }
 }
 
