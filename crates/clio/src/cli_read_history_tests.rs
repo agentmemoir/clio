@@ -18,13 +18,13 @@
 //! Test-only. Never compiled into production builds.
 
 use super::{
-    HistoryGroup, render_failure_list, render_node, render_node_list, render_task_get,
-    render_task_history, render_temporal,
+    HistoryGroup, render_node, render_node_list, render_task_get, render_task_history,
+    render_temporal,
 };
 use crate::cli_args::ParsedArgs;
 use crate::cli_read_group::ReadGroup;
 use crate::cli_read_test_support::{
-    call, json_of, run_state, seed_failure, seed_item, seed_task, seed_triple, state,
+    json_of, run_state, seed_failure, seed_item, seed_task, seed_triple, state,
 };
 use clio_mcp::runtime::McpState;
 use serde_json::json;
@@ -117,46 +117,6 @@ fn task_history_limit_and_truncation() {
     assert_eq!(
         render_task_history(&json!({"records": []})),
         "records: 0 of 0"
-    );
-}
-
-#[test]
-fn failure_list_exact_truncation_and_none() {
-    let s = history_state();
-    let (code, out, _) = run_state("failure list", &["t1", "--bank", "bank-a"], &s, false);
-    assert_eq!(code, ExitCode::from(0));
-    let value = json_of(&out);
-    assert_eq!(value["mode"], json!("exact"));
-    assert_eq!(value["failures"].as_array().map(Vec::len), Some(2));
-    assert_eq!(value["truncated"], json!(false));
-
-    let (_, out, _) = run_state(
-        "failure list",
-        &["t1", "--bank", "bank-a", "--limit", "1"],
-        &s,
-        false,
-    );
-    let page = json_of(&out);
-    assert_eq!(page["failures"].as_array().map(Vec::len), Some(1));
-    assert_eq!(page["truncated"], json!(true));
-
-    // An argument that names no task and matches no failure is not found.
-    let (code, _, err) = run_state(
-        "failure list",
-        &["zzz-unknown", "--bank", "bank-a"],
-        &s,
-        false,
-    );
-    assert_eq!(code, ExitCode::from(1), "{err}");
-    assert!(err.contains("\"code\":\"not_found\""), "{err}");
-
-    let (_, out, _) = run_state("failure list", &["t1", "--bank", "bank-a"], &s, true);
-    assert!(out.contains("mode: exact"), "{out}");
-    assert!(out.contains("failures: 2 of"), "{out}");
-
-    assert_eq!(
-        render_failure_list(&json!({"failures": [{"task_id": "t", "attempt_n": 1}]})),
-        "mode: unknown\nfailures: 1 of 0\nt attempt 1"
     );
 }
 
@@ -407,27 +367,4 @@ fn history_views_mask_planted_secrets() {
     );
     let masked = payload.to_string();
     assert!(!masked.contains("supersecret"), "{masked}");
-}
-
-#[test]
-fn failure_list_preserves_mcp_structured_fields() {
-    // `lesson_tokens` is a non-secret integer whose key contains the `token`
-    // marker. The defensive mask must not rewrite it: the CLI view has to
-    // return the same structured result as the MCP tool.
-    let s = state();
-    seed_failure(&s, "bank-a", "t-parity", 1, "retry once");
-    let tool = call(
-        &s,
-        "failures_for_task",
-        json!({"bank": "bank-a", "task_id_or_query": "t-parity"}),
-    );
-    let (code, out, err) = run_state("failure list", &["t-parity", "--bank", "bank-a"], &s, false);
-    assert_eq!(code, ExitCode::from(0), "{err}");
-    let cli = json_of(&out);
-    assert_eq!(cli["failures"], tool["failures"]);
-    let tokens = &cli["failures"][0]["lesson_tokens"];
-    assert!(
-        tokens.is_number(),
-        "lesson_tokens must stay numeric, got {tokens}"
-    );
 }

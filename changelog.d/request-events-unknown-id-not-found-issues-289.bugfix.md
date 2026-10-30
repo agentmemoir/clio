@@ -1,0 +1,1 @@
+`clio compliance request-events` now refuses an unknown request id with the same not-found error as `request-status` instead of printing an empty event page.

@@ -278,6 +278,25 @@ fn triple_query(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let offset = opt_usize(args, "offset").unwrap_or(0);
     let total = rows.len();
     let triples: Vec<_> = rows.into_iter().skip(offset).take(limit).collect();
+    // A named subject that matched nothing is either a subject the bank does
+    // not hold (not found) or a real one whose predicate/object pattern does
+    // not match (an empty page). Re-read with the subject alone to tell the
+    // two apart; the full-bank listing keeps its empty success.
+    if triples.is_empty() && query.subject.is_some() {
+        let existence = TripleQuery {
+            subject: query.subject.clone(),
+            predicate: None,
+            object: None,
+            ..query
+        };
+        if state.store.query_triples(&existence)?.is_empty() {
+            let subject = existence.subject.as_deref().expect("named subject");
+            return Err(AmError::new(
+                ErrorCode::NotFound,
+                format!("triple subject `{subject}` not found in bank"),
+            ));
+        }
+    }
     Ok(json!({
         "triples": triples,
         "total": total,

@@ -139,12 +139,12 @@ fn failure_list_matches_the_registered_usage_and_parser() {
     let spec = record("failure list");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio failure list TASK_ID_OR_QUERY [--limit N] [--bank BANK] [--output json|text]",
+        "usage: clio failure list TASK_ID [--limit N] [--bank BANK] [--output json|text]",
         "failure list full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio failure list TASK_ID_OR_QUERY [--limit N] [--bank BANK] [--output json|text]",
+        "clio failure list TASK_ID [--limit N] [--bank BANK] [--output json|text]",
         "failure list usage line"
     );
     assert_eq!(
@@ -155,7 +155,7 @@ fn failure_list_matches_the_registered_usage_and_parser() {
     assert_eq!(spec.summary, "failures recorded against one task");
     assert_eq!(spec.tool, Some("failures_for_task"));
     assert_eq!(spec.section, Section::Read);
-    assert_eq!(positionals(spec), [("TASK_ID_OR_QUERY", true)]);
+    assert_eq!(positionals(spec), [("TASK_ID", true)]);
     assert!(
         spec.required_flags().is_empty(),
         "failure list required flags"

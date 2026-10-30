@@ -299,6 +299,7 @@ pub fn review_events(
     limit: usize,
     cursor: Option<&str>,
 ) -> Result<LocalReviewPage, AmError> {
+    let _record = load_record(env, request_id)?;
     let query = LocalReviewQuery {
         limit,
         cursor: cursor.map(str::to_owned),
