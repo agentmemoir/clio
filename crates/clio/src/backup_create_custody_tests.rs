@@ -24,6 +24,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::record_delivered_custody;
 use crate::backup_cli_fixtures::{Scratch, ensure_journal, populated_store, run_json_in};
 use crate::backup_restore_sqlite::{RESTORE_ACTOR, RESTORE_EVENTS_FILE};
 use clio_compliance::copy_digest_of;
@@ -113,5 +114,26 @@ fn a_create_whose_custody_record_cannot_be_written_reports_the_failure() {
     assert!(
         err.contains("durable store beside the erasure journal cannot be opened"),
         "the failure names the custody record: {err}"
+    );
+}
+
+#[test]
+fn a_custody_record_for_an_archive_that_cannot_be_read_reports_the_failure() {
+    let scratch = Scratch::new("create-custody-unreadable-archive");
+    let journal = scratch.join(clio_config::ERASURE_JOURNAL_FILE_NAME);
+    // The row's digest is taken over the archive's bytes, so an archive that
+    // cannot be read has nothing to record: the create reports that rather than
+    // recording a row the restore route would then refuse.
+    let archive = scratch
+        .join("backups")
+        .join(clio_backup::archive_file_name("snap-not-written"));
+
+    let error = record_delivered_custody(&journal, "snap-not-written", &archive)
+        .expect_err("an archive that cannot be read cannot be recorded");
+
+    assert_eq!(error.code, clio_types::ErrorCode::Internal, "{error:?}");
+    assert!(
+        error.message.contains("the archive bytes cannot be read"),
+        "the failure names the bytes it could not digest: {error}"
     );
 }

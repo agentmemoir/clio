@@ -138,3 +138,7 @@ fn serve_sync_key(
         .first()
         .map(|secret| Arc::new(SyncCipherKey::from_secret(secret))))
 }
+
+#[cfg(test)]
+#[path = "sync_cli_serve_tests.rs"]
+mod tests;
