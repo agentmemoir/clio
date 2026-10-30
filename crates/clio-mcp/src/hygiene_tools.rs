@@ -180,6 +180,9 @@ fn usize_arg(args: &Value, key: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
+#[path = "hygiene_tools_bank_scope_tests.rs"]
+mod hygiene_tools_bank_scope_tests;
+#[cfg(test)]
 #[path = "hygiene_tools_principal_tests.rs"]
 mod hygiene_tools_principal_tests;
 #[cfg(test)]
