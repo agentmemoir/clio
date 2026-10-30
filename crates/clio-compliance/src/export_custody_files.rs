@@ -38,8 +38,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The product staging directory names the managed sweep covers. The runtime
-/// stages subject export bytes in `clio-export-staging` and review exports in
-/// `clio-review-staging`.
+/// stages each delivery in a unique per-run staging directory named from the
+/// legacy product prefix, `temp_dir/{product}-{32-hex}`; the fixed names
+/// remain only for legacy sweep coverage.
 pub(crate) const STAGING_DIR_NAMES: [&str; 2] = ["clio-export-staging", "clio-review-staging"];
 
 /// The staging directory one delivery uses: an unpredictable unique name next
