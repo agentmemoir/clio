@@ -95,7 +95,7 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         std::process::id(),
         EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     );
-    let staging_dir = std::env::temp_dir().join("clio-export-staging");
+    let staging_dir = clio_compliance::unique_staging_dir("clio-export-staging");
     let facts = state
         .inventory_measured
         .then(|| state.inventory_facts.as_ref());
@@ -156,7 +156,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
         std::process::id(),
         REVIEW_EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     );
-    let staging_dir = std::env::temp_dir().join("clio-review-staging");
+    let staging_dir = clio_compliance::unique_staging_dir("clio-review-staging");
     let spec = DeliverySpec {
         action_id: &action_id,
         destination: std::path::Path::new(destination),
