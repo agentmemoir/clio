@@ -76,8 +76,7 @@ const HYGIENE_CLEAN_NOTE: &str =
 
 /// The `hygiene clean` note: what `--action apply_suggested` does with each
 /// candidate.
-const HYGIENE_APPLY_SUGGESTED_NOTE: &str =
-    "--action apply_suggested applies each candidate's suggested action, including archive or discard; a candidate suggested as keep is skipped";
+const HYGIENE_APPLY_SUGGESTED_NOTE: &str = "--action apply_suggested applies each candidate's suggested action, including archive or discard; a candidate suggested as keep is skipped";
 
 /// `clio hygiene audit`: score stored items and list the weakest.
 pub(crate) const HYGIENE_AUDIT: CommandSpec = CommandSpec {

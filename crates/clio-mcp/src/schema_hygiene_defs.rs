@@ -102,3 +102,7 @@ pub fn hygiene_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_hygiene_defs_tests.rs"]
+mod schema_hygiene_defs_tests;

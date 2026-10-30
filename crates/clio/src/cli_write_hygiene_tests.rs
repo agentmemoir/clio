@@ -259,7 +259,10 @@ fn clean_rejects_unknown_actions_and_missing_files() {
     let (code, out, err) =
         run_write_state("hygiene clean", &[&file, "--action", "erase"], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
-    assert!(err.contains("flag|archive|discard|delete|apply_suggested"), "{err}");
+    assert!(
+        err.contains("flag|archive|discard|delete|apply_suggested"),
+        "{err}"
+    );
 
     let (code, out, err) = run_write_state("hygiene clean", &[], &s, false);
     assert_eq!(code, ExitCode::from(2), "{out}{err}");

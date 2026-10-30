@@ -158,7 +158,10 @@ fn the_hygiene_defaults_record_the_values_the_consumers_apply() {
             .find(|candidate| candidate.long == flag)
             .unwrap_or_else(|| panic!("`{name}` documents `--{flag}`"))
     };
-    assert_eq!(find("hygiene clean", "action").default, Some("apply_suggested"));
+    assert_eq!(
+        find("hygiene clean", "action").default,
+        Some("apply_suggested")
+    );
     let min_score = find("hygiene audit", "min-score");
     assert_eq!(min_score.default, Some("0.40"), "the recorded default");
     assert_eq!(
