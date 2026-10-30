@@ -200,6 +200,41 @@ fn bound_caller_without_a_bank_never_reaches_the_whole_store() {
     }
 }
 
+/// An explicit `bank` the grant covers still runs, scoped to that bank: the
+/// omitted-argument narrowing must not refuse a request the grant authorizes.
+#[test]
+fn bound_verify_and_doctor_with_an_explicit_granted_bank_stay_scoped() {
+    let original = state(false);
+    seed_item(&original, "bank-a", "itm-a");
+    let restricted = bound(&original, &["bank-a"]);
+
+    let verify = dispatch(
+        &restricted,
+        "verify",
+        &json!({ "bank": "bank-a", "timestamp": TS }),
+    );
+    assert_eq!(verify["scope"], "bank:bank-a", "{verify}");
+    assert!(
+        !verify.to_string().contains("bank-b"),
+        "verify left its grant: {verify}"
+    );
+
+    let doctor = dispatch(
+        &restricted,
+        "doctor",
+        &json!({ "bank": "bank-a", "dry_run": true, "timestamp": TS }),
+    );
+    assert_eq!(doctor["bank"], "bank-a", "{doctor}");
+    let actions: Vec<&str> = doctor["actions"]
+        .as_array()
+        .map(|actions| actions.iter().filter_map(|a| a["id"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        !actions.contains(&"drop_orphan_assoc_edge"),
+        "doctor planned work outside the named bank: {doctor}"
+    );
+}
+
 /// Both banks populated, with distinct volumes so a narrowed report is visible.
 fn two_bank_store() -> Arc<McpState> {
     let st = state(false);
