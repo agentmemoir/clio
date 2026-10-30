@@ -437,3 +437,9 @@ mod restore_guard_custody_tests;
 #[cfg(test)]
 #[path = "restore_guard_journal_tests.rs"]
 mod restore_guard_journal_tests;
+
+/// The placement-time copy-custody refusal `begin_restore` records under the
+/// journal lock.
+#[cfg(test)]
+#[path = "restore_guard_placement_tests.rs"]
+mod restore_guard_placement_tests;
