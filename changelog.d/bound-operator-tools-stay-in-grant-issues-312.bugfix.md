@@ -1,0 +1,1 @@
+An authenticated MCP caller granted specific banks no longer receives store-wide integrity results or a whole-store repair plan from the verify and doctor operator tools when the bank argument is omitted; every operator call now resolves its context and stays inside the scope the credential's grant covers.
