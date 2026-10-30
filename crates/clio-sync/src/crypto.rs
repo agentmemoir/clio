@@ -30,6 +30,7 @@
 //!
 //! Keep this module focused on the client-side sync encryption adapter.
 
+use argon2::Argon2;
 use base64::Engine;
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
@@ -77,6 +78,10 @@ impl SyncCipherKey {
     /// derivation in the workspace, including the status fingerprint's.
     const KEY_ID_DOMAIN: &[u8] = b"am-sync-key-id";
 
+    /// Domain label for the key-derivation salt, distinct from every other
+    /// derivation in the workspace, including the key identifier's.
+    const SALT_DOMAIN: &str = "am-sync-salt";
+
     /// Separator between the domain label and the key bytes, the same byte the
     /// workspace's other key derivations join with.
     const KEY_ID_SEP: u8 = 0x1f;
@@ -85,11 +90,25 @@ impl SyncCipherKey {
     const KEY_ID_CHARS: usize = 16;
 
     /// Derive a sync key from a profile-provided secret (never transmitted).
+    ///
+    /// # Panics
+    /// Panics if Argon2id rejects its own default parameters or the 32-byte
+    /// output length, which cannot happen for this fixed call shape.
     #[must_use]
     pub fn from_secret(secret: &str) -> Self {
-        let digest = clio_store::sha256_hex(secret.as_bytes(), "am-sync-key");
+        // The salt is derived deterministically instead of stored: both peers
+        // hold only the secret string, so each must reach the same key and
+        // identifier from it alone, with no wire-format change. It stays
+        // unique per secret, and Argon2id's cost applies to every guess.
+        let salt_hex = clio_store::sha256_hex(secret.as_bytes(), Self::SALT_DOMAIN);
+        let salt = hex_to_bytes(&salt_hex[..32]);
         let mut key = [0u8; 32];
-        key.copy_from_slice(hex_to_bytes(&digest).as_slice());
+        // Argon2id's only documented failure modes are invalid parameters or
+        // an output length above the cap; this call uses the defaults and a
+        // 32-byte output, so it cannot fail.
+        Argon2::default()
+            .hash_password_into(secret.as_bytes(), &salt, &mut key)
+            .expect("argon2 key derivation with default parameters");
         Self {
             key: std::sync::Arc::new(Zeroizing::new(key)),
         }
