@@ -169,13 +169,15 @@ fn sqlite_archive(
         isolate_store(&connection, kind);
     }
     isolate_key_store(&kms, kind);
-    archive_sqlite_with_authority(
+    let archive = archive_sqlite_with_authority(
         backups,
         &source,
         &kms,
         &unique("artifact"),
         Some(current_authority(journal)),
-    )
+    );
+    common::seed_restore_custody(journal, &archive.id, &archive.path);
+    archive
 }
 
 /// Seed one Postgres source schema, really erase the denied subject, keep only
@@ -202,13 +204,15 @@ fn postgres_archive(
     drop(store);
     isolate_schema(&source, kind);
     isolate_key_store(&kms, kind);
-    archive_postgres_with_authority(
+    let archive = archive_postgres_with_authority(
         backups,
         source.url(),
         &kms,
         &unique("artifact"),
         Some(current_authority(journal)),
-    )
+    );
+    common::seed_restore_custody(journal, &archive.id, &archive.path);
+    archive
 }
 
 /// The SQLite arm: one archive per content-free artifact kind, each carrying

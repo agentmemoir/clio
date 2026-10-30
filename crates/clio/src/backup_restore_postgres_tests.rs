@@ -61,10 +61,15 @@ pub(crate) fn snapshot(scratch: &Scratch, scoped: &ScopedSchema, kms_path_string
         ],
     );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    payload["snapshot_id"]
+    let id = payload["snapshot_id"]
         .as_str()
         .expect("the create produced a snapshot id")
-        .to_owned()
+        .to_owned();
+    let archive = scratch
+        .join("backups")
+        .join(clio_backup::archive_file_name(&id));
+    crate::backup_cli_fixtures::seed_copy_custody(scratch, &id, &archive);
+    id
 }
 
 /// An orphan insert into the schema's vector table must be refused, and a

@@ -60,6 +60,7 @@ fn sqlite_restore_holds_the_erase_journal_lock_and_refuses_a_denial_after_plan()
         "sqlite-denial-after-plan",
         Some(current_authority(&journal)),
     );
+    crate::common::seed_restore_custody(&journal, &archive.id, &archive.path);
 
     let target_db = scratch.join("target/clio.db");
     let target_kms = scratch.join("target/clio.kms.json");

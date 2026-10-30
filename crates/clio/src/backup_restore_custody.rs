@@ -110,6 +110,13 @@ pub(crate) fn custody_refusal(refusal: RestoreRefusal) -> CliError {
     CliError::refusal(code.as_str(), message)
 }
 
+/// The route-level copy-custody refusals through the restore CLI: the missing
+/// row, the differing digest, and the receiver mismatch, each before anything
+/// is placed. The Postgres custody tests build on the fixtures here.
+#[cfg(test)]
+#[path = "backup_restore_custody_route_tests.rs"]
+pub(crate) mod route_tests;
+
 #[cfg(test)]
 #[path = "backup_restore_custody_tests.rs"]
 mod tests;

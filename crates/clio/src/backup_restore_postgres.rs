@@ -368,6 +368,13 @@ mod tests;
 #[path = "backup_restore_postgres_refusal_tests.rs"]
 mod refusal_tests;
 
+/// The route-level copy-custody refusals against a Postgres target: the
+/// missing row, the differing digest, and the receiver mismatch, each before
+/// anything is placed.
+#[cfg(test)]
+#[path = "backup_restore_postgres_custody_tests.rs"]
+mod custody_tests;
+
 /// The shared hand-built-archive harness the two test modules above build on.
 #[cfg(test)]
 #[path = "backup_restore_postgres_assemble_tests.rs"]

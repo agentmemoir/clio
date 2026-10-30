@@ -170,6 +170,13 @@ fn build_pg_archive(
         tool_version: clio::identity(),
     };
     let report = clio_backup::create_archive(&request).expect("assemble the archive");
+    crate::backup_cli_fixtures::seed_copy_custody_in(
+        backup_dir
+            .parent()
+            .expect("the backup directory has a parent"),
+        &report.id,
+        &report.path,
+    );
     report.id
 }
 

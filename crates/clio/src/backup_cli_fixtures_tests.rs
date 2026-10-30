@@ -25,7 +25,10 @@
 
 use crate::cli_error::CliError;
 use crate::cli_read::CliIo;
-use clio_store::{DekProvider, LocalDevKms, SqliteStore, Store};
+use clio_compliance::copy_digest_of;
+use clio_store::{
+    DekProvider, DestinationCustodyRow, DestinationCustodyStore, LocalDevKms, SqliteStore, Store,
+};
 use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -292,6 +295,42 @@ pub(crate) fn ensure_journal_in(dir: &Path) -> clio_backup::manifest::ManifestAu
     }
 }
 
+/// Seed the passing copy-custody row the restore route's gate reads for an
+/// archive the fixtures built.
+///
+/// The row is written to the durable store beside the journal in `dir` — the
+/// store the route's custody lookup reads — keyed by the snapshot id, holding
+/// the digest over the archive's bytes in the delivery write's expression and
+/// the receiver the restore route acts as. A fixture archive without such a row
+/// is refused as a missing manifest before anything is placed.
+pub(crate) fn seed_copy_custody(scratch: &Scratch, id: &str, archive: &Path) {
+    seed_copy_custody_in(scratch.path(), id, archive);
+}
+
+/// [`seed_copy_custody`] for a directory the fixture derives rather than a
+/// `Scratch`, such as a backup directory's parent.
+pub(crate) fn seed_copy_custody_in(dir: &Path, id: &str, archive: &Path) {
+    let journal = dir.join(clio_config::ERASURE_JOURNAL_FILE_NAME);
+    let events = journal.with_file_name(crate::backup_restore_sqlite::RESTORE_EVENTS_FILE);
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = SqliteStore::open(&events, kms).expect("open the durable store beside the journal");
+    let bytes = std::fs::read(archive).expect("read the archive");
+    let row = DestinationCustodyRow {
+        action_id: id.to_owned(),
+        destination_path: archive.display().to_string(),
+        custody_owner: "clio".to_owned(),
+        required_action: "delivery".to_owned(),
+        state: "delivered".to_owned(),
+        exception_reason: None,
+        copy_digest: Some(copy_digest_of(&bytes)),
+        receiver: Some(crate::backup_restore_sqlite::RESTORE_ACTOR.to_owned()),
+        updated_at: "2026-01-01T00:00:00Z".to_owned(),
+    };
+    store
+        .save_pending(&row)
+        .expect("save the fixture's custody row");
+}
+
 /// A well-formed archive whose manifest records a payload digest the payload
 /// does not have.
 ///
@@ -318,10 +357,15 @@ pub(crate) fn snapshot(scratch: &Scratch, items: usize) -> String {
     populated_store(&scratch.join("clio.db"), items, 1);
     ensure_journal(scratch);
     let (_, payload, _) = run_json_in(scratch, &["create"]);
-    payload["snapshot_id"]
+    let id = payload["snapshot_id"]
         .as_str()
         .expect("the create fixture produced a snapshot id")
-        .to_owned()
+        .to_owned();
+    let archive = scratch
+        .join("backups")
+        .join(clio_backup::archive_file_name(&id));
+    seed_copy_custody(scratch, &id, &archive);
+    id
 }
 
 /// An archive whose manifest records the chosen backend, schema version, and
@@ -390,5 +434,6 @@ fn build_archive(
         tool_version: "clio 0.1.0".to_owned(),
     };
     let report = clio_backup::create_archive(&request).expect("create the archive");
+    seed_copy_custody(scratch, &report.id, &report.path);
     (report.id, report.path)
 }

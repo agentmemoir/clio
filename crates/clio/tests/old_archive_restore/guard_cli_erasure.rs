@@ -87,6 +87,7 @@ fn sqlite_post_erasure_archive_restores_without_resurrecting_the_subject() {
         "sqlite-post-erasure",
         Some(current_authority(&journal)),
     );
+    crate::common::seed_restore_custody(&journal, &post_erasure.id, &post_erasure.path);
     record_denial(&journal, &denied_hash(), &[BANK.to_owned()]).expect("record the denial");
 
     let target_db = scratch.join("target/clio.db");
