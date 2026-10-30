@@ -44,8 +44,9 @@ use self::export_custody_files::{
     destination_present, fsync_dir, io_error, remove_leftover, stage_staging, sweep_leftovers,
     write_destination_temp,
 };
+use crate::bundle::sha256_hex_bytes;
 use crate::subject_request_events::BindingControls;
-use crate::subject_request_manifest::CopyCustodyManifest;
+use crate::subject_request_manifest::{CopyCustodyManifest, DIGEST_ALGORITHM_PREFIX};
 use clio_store::{
     DestinationCustodyRow, DestinationCustodyStore, LocalEventIntent, LocalEventStore,
 };
@@ -151,7 +152,8 @@ pub(crate) enum DeliveryFailure {
 /// The event intent is recorded first; its failure refuses before any stage or
 /// destination write. The pending custody row is persisted before staging; a
 /// supplied copy-custody manifest records its copy digest and receiver on that
-/// row, and a delivery without a manifest leaves both fields unset. The bytes
+/// row, and a delivery without a manifest records the export digest over the
+/// delivered bytes and the acting receiver the event intent records. The bytes
 /// are staged in `staging_dir`, then delivered through a same-directory
 /// temp sibling created with create-new, synced, and hard-linked onto the
 /// destination, refusing an existing caller file. On success the row is marked
@@ -182,6 +184,19 @@ pub fn deliver_export(
     if events.record_intent(&intent).is_err() {
         return DeliveryResult::Refused(DeliveryRefusal::DurableIntentFailed);
     }
+    let (copy_digest, receiver) = match manifest {
+        Some(manifest) => (
+            Some(manifest.copy_digest.clone()),
+            Some(manifest.receiver.clone()),
+        ),
+        None => (
+            Some(format!(
+                "{DIGEST_ALGORITHM_PREFIX}{}",
+                sha256_hex_bytes(bytes)
+            )),
+            Some(ctx.actor.as_str().to_owned()),
+        ),
+    };
     let row = DestinationCustodyRow {
         action_id: spec.action_id.to_owned(),
         destination_path: spec.destination.display().to_string(),
@@ -189,8 +204,8 @@ pub fn deliver_export(
         required_action: spec.required_action.to_owned(),
         state: CustodyState::Pending.as_str().to_owned(),
         exception_reason: None,
-        copy_digest: manifest.map(|manifest| manifest.copy_digest.clone()),
-        receiver: manifest.map(|manifest| manifest.receiver.clone()),
+        copy_digest,
+        receiver,
         updated_at: spec.now.to_owned(),
     };
     if let Err(cause) = custody.save_pending(&row) {

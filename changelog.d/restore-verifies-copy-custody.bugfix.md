@@ -1,0 +1,1 @@
+Restores now check copy custody before placing a copy. A restore refuses when the copy has no recorded custody, when the copy's digest does not match the recorded digest, or when the restorer is not the receiver the custody record names.
