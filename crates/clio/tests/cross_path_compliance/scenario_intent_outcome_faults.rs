@@ -242,6 +242,7 @@ fn an_export_intent_failure_refuses_before_any_effect() {
         &events,
         &store,
         &accepted(),
+        None,
         &spec("export-act", &destination, &staging),
         b"payload",
     );

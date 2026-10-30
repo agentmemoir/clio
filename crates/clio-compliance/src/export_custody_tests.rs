@@ -45,12 +45,12 @@ pub(super) fn open_sqlite() -> SqliteStore {
 }
 
 /// An operation context that holds the copy controls.
-fn ctx() -> OpContext {
+pub(super) fn ctx() -> OpContext {
     OpContext::new(Bank::new("export-bank"), Actor::Harness)
 }
 
 /// The controls that accept the copy for a gated delivery.
-fn accepted() -> BindingControls {
+pub(super) fn accepted() -> BindingControls {
     BindingControls {
         copy_controls_accepted: true,
         ..BindingControls::default()
@@ -87,7 +87,11 @@ impl Drop for Scratch {
 }
 
 /// A delivery spec with fixed owner and action.
-fn spec<'a>(action_id: &'a str, destination: &'a Path, staging_dir: &'a Path) -> DeliverySpec<'a> {
+pub(super) fn spec<'a>(
+    action_id: &'a str,
+    destination: &'a Path,
+    staging_dir: &'a Path,
+) -> DeliverySpec<'a> {
     DeliverySpec {
         action_id,
         destination,
@@ -154,6 +158,7 @@ fn a_missing_binding_control_refuses_before_any_write() {
         &store,
         &store,
         &BindingControls::default(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );
@@ -177,6 +182,7 @@ fn an_intent_write_failure_refuses_before_staging() {
         &IntentWriteFails,
         &custody,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );
@@ -203,6 +209,7 @@ fn an_existing_destination_is_refused_and_left_unchanged() {
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );
@@ -241,6 +248,7 @@ fn a_second_delivery_to_the_same_destination_refuses_and_keeps_the_first_bytes()
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"first-payload",
     );
@@ -250,6 +258,7 @@ fn a_second_delivery_to_the_same_destination_refuses_and_keeps_the_first_bytes()
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-2", &destination, &staging),
         b"second-payload",
     );
@@ -281,6 +290,7 @@ fn a_successful_delivery_writes_once_and_removes_staging() {
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );
@@ -316,6 +326,7 @@ fn a_staging_failure_settles_the_row_and_the_event() {
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );
@@ -352,6 +363,7 @@ fn a_directory_destination_is_refused_and_left_in_place() {
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );
@@ -390,6 +402,7 @@ fn a_symlink_destination_is_refused_and_left_untouched() {
         &store,
         &store,
         &accepted(),
+        None,
         &spec("act-1", &destination, &staging),
         b"payload",
     );

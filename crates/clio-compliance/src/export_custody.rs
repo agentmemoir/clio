@@ -45,6 +45,7 @@ use self::export_custody_files::{
     write_destination_temp,
 };
 use crate::subject_request_events::BindingControls;
+use crate::subject_request_manifest::CopyCustodyManifest;
 use clio_store::{
     DestinationCustodyRow, DestinationCustodyStore, LocalEventIntent, LocalEventStore,
 };
@@ -148,8 +149,10 @@ pub(crate) enum DeliveryFailure {
 /// Deliver `bytes` to a new destination under durable custody control.
 ///
 /// The event intent is recorded first; its failure refuses before any stage or
-/// destination write. The pending custody row is persisted before staging. The
-/// bytes are staged in `staging_dir`, then delivered through a same-directory
+/// destination write. The pending custody row is persisted before staging; a
+/// supplied copy-custody manifest records its copy digest and receiver on that
+/// row, and a delivery without a manifest leaves both fields unset. The bytes
+/// are staged in `staging_dir`, then delivered through a same-directory
 /// temp sibling created with create-new, synced, and hard-linked onto the
 /// destination, refusing an existing caller file. On success the row is marked
 /// delivered and the event outcome recorded. On a failure before the link the
@@ -162,6 +165,7 @@ pub fn deliver_export(
     events: &dyn LocalEventStore,
     custody: &dyn DestinationCustodyStore,
     controls: &BindingControls,
+    manifest: Option<&CopyCustodyManifest>,
     spec: &DeliverySpec<'_>,
     bytes: &[u8],
 ) -> DeliveryResult {
@@ -185,8 +189,8 @@ pub fn deliver_export(
         required_action: spec.required_action.to_owned(),
         state: CustodyState::Pending.as_str().to_owned(),
         exception_reason: None,
-        copy_digest: None,
-        receiver: None,
+        copy_digest: manifest.map(|manifest| manifest.copy_digest.clone()),
+        receiver: manifest.map(|manifest| manifest.receiver.clone()),
         updated_at: spec.now.to_owned(),
     };
     if let Err(cause) = custody.save_pending(&row) {
@@ -361,6 +365,10 @@ fn attempt_delivery(
 #[cfg(test)]
 #[path = "export_custody_tests.rs"]
 mod export_custody_tests;
+
+#[cfg(test)]
+#[path = "export_custody_manifest_tests.rs"]
+mod export_custody_manifest_tests;
 
 #[cfg(test)]
 #[path = "export_custody_reconcile_tests.rs"]

@@ -73,6 +73,7 @@ fn an_export_outcome_failure_reconciles_without_a_second_effect() {
             &events,
             &store,
             &accepted(),
+            None,
             &spec("export-act", &destination, &staging),
             b"payload",
         );
@@ -93,6 +94,7 @@ fn an_export_outcome_failure_reconciles_without_a_second_effect() {
             &events,
             &store,
             &accepted(),
+            None,
             &spec("export-act", &destination, &staging),
             b"second",
         );
@@ -351,6 +353,7 @@ fn a_postgres_export_outcome_failure_reconciles_without_a_second_effect() {
             &events,
             &store,
             &accepted(),
+            None,
             &spec("pg-export-act", &destination, &staging),
             b"payload",
         );
