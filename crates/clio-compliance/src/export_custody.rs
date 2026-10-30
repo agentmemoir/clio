@@ -185,6 +185,8 @@ pub fn deliver_export(
         required_action: spec.required_action.to_owned(),
         state: CustodyState::Pending.as_str().to_owned(),
         exception_reason: None,
+        copy_digest: None,
+        receiver: None,
         updated_at: spec.now.to_owned(),
     };
     if let Err(cause) = custody.save_pending(&row) {

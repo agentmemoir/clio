@@ -285,6 +285,8 @@ fn subject_export_pg_reconcile_completes_a_delivered_action_exactly_once() {
             required_action: "delivery".to_owned(),
             state: "pending".to_owned(),
             exception_reason: None,
+            copy_digest: None,
+            receiver: None,
             updated_at: NOW.to_owned(),
         })
         .expect("save pending");

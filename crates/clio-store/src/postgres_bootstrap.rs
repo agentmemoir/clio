@@ -59,6 +59,11 @@ pub(crate) fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, b
     // existing placeholder table lacks the columns the event writer names, and
     // the slot DDL only declares a fresh table.
     crate::local_events_converge::converge_pg(client)?;
+    // The export-destination custody convergence must run BEFORE the migrate
+    // batch: an existing export_destinations table lacks the copy-custody
+    // columns the custody store reads, and the slot DDL only declares a fresh
+    // table.
+    crate::destination_custody_converge::converge_pg(client)?;
     if bootstrap_is_current(client)?
         && let Some(space) = read_space(client)?
     {
