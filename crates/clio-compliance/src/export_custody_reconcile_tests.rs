@@ -23,7 +23,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::export_custody_files::{STAGING_DIR_NAMES, destination_temp_path, staging_root};
+use super::export_custody_files::{STAGING_DIR_NAMES, destination_temp_path};
 use super::export_custody_tests::{NOW, Scratch, open_sqlite};
 use super::reconcile_open_destinations;
 use crate::export_tests::seed_pending;
@@ -98,7 +98,7 @@ fn reconcile_sweeps_only_the_managed_leftovers_of_an_open_action() {
     let action_id = unique("act-sweep");
     let destination = scratch.destination();
     // A crash between staging and the link leaves the managed staging file.
-    let staging_root = staging_root(STAGING_DIR_NAMES[0]);
+    let staging_root = std::env::temp_dir().join(STAGING_DIR_NAMES[0]);
     let staging_leftover = staging_root.join(format!("{action_id}.staging"));
     std::fs::create_dir_all(&staging_root).expect("create the managed staging root");
     std::fs::write(&staging_leftover, b"leftover").expect("seed the staging leftover");
