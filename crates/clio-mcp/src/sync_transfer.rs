@@ -10,6 +10,8 @@
 //!
 //! ## Owns
 //! - JSON argument decoding and result shaping for the transfer tools
+//! - The transfer tools' authorization: principal resolution and the
+//!   bank-grant refusal that keeps a bound caller inside its credential's list
 //! - The pull and bidirectional runs under `pull_with_denial` /
 //!   `bidirectional_with_denial`, so a denied subject is dead-lettered before
 //!   it can become readable and a journal this host cannot resolve refuses
@@ -44,6 +46,12 @@ use serde_json::{Value, json};
 /// The tool name fixes the default mode; an explicit `mode` argument overrides
 /// it (`bidirectional` pulls then pushes in one operator action). The remote
 /// bearer token is echoed masked (last 4 at most), never in the clear.
+///
+/// A bound credential authorizes the whole run: the context resolves first,
+/// then every bank the run touches — named or default-resolved — must sit
+/// inside the credential's list. A bank outside the list is refused, never
+/// silently dropped from the caller's list, because a dropped bank would
+/// report success while the transfer reached nothing it named.
 #[inline(never)]
 pub(crate) fn transfer(
     state: &McpState,
@@ -72,9 +80,19 @@ pub(crate) fn transfer_with(
             "`sync_push`/`sync_pull` no longer accept `sync_key`; the key is read from this node's recorded sync key store (run `clio sync keygen`)",
         ));
     }
+    // Authorization runs before any custody read: the context resolves the
+    // principal and its actor, and then every bank the run would touch — the
+    // caller's list, or the default bank when the list is omitted — must sit
+    // inside the credential's own list. An out-of-list bank is refused, never
+    // intersected away: the caller would otherwise see success while the
+    // transfer reached a bank the credential does not hold.
+    let ctx = state.resolve_ctx(args)?;
+    let banks = banks_of(state, args)?;
+    for bank in &banks {
+        state.require_bank_grant(bank)?;
+    }
     let mut cfg = client_cfg(state, opt_str(args, "remote"), opt_str(args, "token"));
     cfg.cipher = required_custody_cipher(get)?;
-    let banks = banks_of(state, args)?;
     let mode = SyncModes::parse(opt_str(args, "mode").unwrap_or(default_mode))?;
     let rows = match mode {
         SyncModes::Push => push(&cfg, &banks)?,
@@ -90,14 +108,20 @@ pub(crate) fn transfer_with(
             bidirectional_with_denial(&cfg, &banks, Some(&authority))?
         }
     };
-    Ok(json!({
+    // The bound label rides on the response rows, so the record of the run
+    // names the credential that presented it; an unbound run carries no key.
+    let mut out = json!({
         "mode": opt_str(args, "mode").unwrap_or(default_mode),
         "remote": cfg.remote,
         "token": mask_token(cfg.token.as_ref()),
         "encryption": !cfg.cipher.is_empty(),
         "banks": rows,
         "timestamp": now_utc(),
-    }))
+    });
+    if let Some(label) = ctx.principal() {
+        out["principal"] = json!(label.as_str());
+    }
+    Ok(out)
 }
 
 /// The journal-backed erasure-denial authority one pulled mutation passes
@@ -135,3 +159,7 @@ fn mask_token(token: Option<&String>) -> Option<String> {
 #[cfg(test)]
 #[path = "sync_transfer_tests.rs"]
 mod sync_transfer_tests;
+
+#[cfg(test)]
+#[path = "sync_transfer_grant_tests.rs"]
+mod sync_transfer_grant_tests;
