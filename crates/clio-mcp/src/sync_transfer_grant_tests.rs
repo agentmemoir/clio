@@ -6,13 +6,15 @@
 //! This module tests that a bound MCP caller's sync transfer tools stay inside
 //! the credential's bank grant: an out-of-list bank is refused on push and on
 //! pull, before any remote contact, a default bank outside the list is refused
-//! the same way, a scoped list that excludes the default still runs, and the
-//! shared-bank and unbound contracts hold.
+//! the same way, a scoped list that excludes the default still runs and names
+//! the credential on its response, and the shared-bank and unbound contracts
+//! hold.
 //!
 //! ## Owns
 //! - The push and pull refusals for a named bank outside the credential's list
 //! - The refusal when the default bank resolves outside the list
-//! - The successful scoped run whose list excludes the default bank
+//! - The successful scoped run whose list excludes the default bank, with the
+//!   `principal` and masked token its response carries
 //! - The shared gate on a named bank and the unbound actor/bank contract
 //!
 //! ## Does not own
@@ -83,7 +85,8 @@ fn a_default_bank_outside_the_list_is_refused() {
 
 /// A scoped run succeeds when its list names only a granted bank: the default
 /// bank is not checked, because the run never touches it. The pre-gate resolver
-/// authorized the default and refused this run.
+/// authorized the default and refused this run. The response names the
+/// credential and echoes the token's last four characters only.
 #[test]
 fn a_scoped_list_runs_when_it_excludes_the_default_bank() {
     let st = bound(&["b-allowed"]);
@@ -112,13 +115,14 @@ fn a_scoped_list_runs_when_it_excludes_the_default_bank() {
         .to_owned();
     let out = transfer_with(
         &st,
-        &json!({ "remote": addr, "banks": ["b-allowed"] }),
+        &json!({ "remote": addr, "banks": ["b-allowed"], "token": "tok-abcdefghij" }),
         "push",
         &get,
     )
     .expect("a scoped push inside the credential's banks runs");
     assert_eq!(out["banks"][0]["bank_id"], "b-allowed");
     assert_eq!(out["principal"], "sync-runner");
+    assert_eq!(out["token"], "***ghij");
 }
 
 /// Naming `shared` in the list does not bypass the deployment gate: the shared

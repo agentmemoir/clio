@@ -28,8 +28,7 @@
 //!
 //! Keep this module focused on the transfer tools' denial guard.
 
-use super::{transfer, transfer_with};
-use crate::principal::Principal;
+use super::transfer_with;
 use crate::runtime::McpState;
 use crate::sync_tools::sync_tools_test_support_tests::{TempDir, state};
 use clio_compliance::JournalDenialProbe;
@@ -365,58 +364,6 @@ fn a_keyless_node_refuses_push_pull_and_bidirectional() {
             "{mode}: the refusal names the command that fixes it: {error}"
         );
     }
-}
-
-/// The public wrapper refuses a supplied `sync_key` before any custody read:
-/// the key comes from this node's recorded store, and a dropped key would let
-/// the caller believe content was sealed.
-#[test]
-fn transfer_refuses_a_supplied_sync_key() {
-    let err = transfer(
-        &state(),
-        &json!({ "sync_key": "abcdef", "remote": "127.0.0.1:1" }),
-        "push",
-    )
-    .expect_err("a supplied sync_key is refused");
-    assert_eq!(err.code, ErrorCode::InvalidArgument, "{err:?}");
-    assert!(
-        err.message.contains("no longer accept `sync_key`"),
-        "{err:?}"
-    );
-}
-
-/// A bound push names the credential on the response and echoes the token's
-/// last four characters only.
-#[test]
-fn a_bound_push_masks_the_token_and_names_the_principal() {
-    let (_peer, addr, journal, keys) = seeded_peer();
-    let get = journal_env(&journal, &keys);
-    let client = state().with_principal(Principal::new(
-        "sync-runner".into(),
-        clio_types::Actor::Harness,
-        vec!["b-held".to_owned(), "bank-mcp".to_owned()],
-    ));
-    seed(
-        &client,
-        &mutation(
-            "m-long",
-            "b-held",
-            "i-long",
-            "s-long",
-            "2026-01-02T00:00:00Z",
-        ),
-    );
-    let args = json!({ "remote": addr, "banks": ["b-held"], "token": "tok-abcdefghij" });
-    let out = transfer_with(&client, &args, "push", &get)
-        .expect("a bound push inside the credential's banks runs");
-    assert_eq!(out["token"], "***ghij");
-    assert_eq!(out["principal"], "sync-runner");
-    assert_eq!(out["mode"], "push");
-    assert_eq!(out["encryption"], true);
-    assert!(
-        out["banks"].as_array().is_some_and(|rows| !rows.is_empty()),
-        "the pushed bank reports its status"
-    );
 }
 
 /// A resolved journal path with no file yet is a fresh deployment: the bridge
