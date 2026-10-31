@@ -10,8 +10,9 @@
 //!
 //! ## Owns
 //! - JSON argument decoding and result shaping for the transfer tools
-//! - The transfer tools' authorization: principal resolution and the
-//!   bank-grant refusal that keeps a bound caller inside its credential's list
+//! - The transfer tools' authorization: actor and principal resolution, then
+//!   the per-bank gate that keeps a run inside its credential's list and out
+//!   of a shared bank the deployment has not enabled
 //! - The pull and bidirectional runs under `pull_with_denial` /
 //!   `bidirectional_with_denial`, so a denied subject is dead-lettered before
 //!   it can become readable and a journal this host cannot resolve refuses
@@ -47,10 +48,10 @@ use serde_json::{Value, json};
 /// it (`bidirectional` pulls then pushes in one operator action). The remote
 /// bearer token is echoed masked (last 4 at most), never in the clear.
 ///
-/// A bound credential authorizes the whole run: the context resolves first,
-/// then every bank the run touches — named or default-resolved — must sit
-/// inside the credential's list. A bank outside the list is refused, never
-/// silently dropped from the caller's list, because a dropped bank would
+/// A bound credential authorizes the whole run: the actor and credential
+/// resolve first, then every bank the run touches — named or default-resolved —
+/// must sit inside the credential's list. A bank outside the list is refused,
+/// never silently dropped from the caller's list, because a dropped bank would
 /// report success while the transfer reached nothing it named.
 #[inline(never)]
 pub(crate) fn transfer(
@@ -80,16 +81,17 @@ pub(crate) fn transfer_with(
             "`sync_push`/`sync_pull` no longer accept `sync_key`; the key is read from this node's recorded sync key store (run `clio sync keygen`)",
         ));
     }
-    // Authorization runs before any custody read: the context resolves the
-    // principal and its actor, and then every bank the run would touch — the
-    // caller's list, or the default bank when the list is omitted — must sit
-    // inside the credential's own list. An out-of-list bank is refused, never
-    // intersected away: the caller would otherwise see success while the
-    // transfer reached a bank the credential does not hold.
-    let ctx = state.resolve_ctx(args)?;
+    // Authorization runs before any custody read: the actor and the
+    // credential's label resolve first, then every bank the run would touch —
+    // the caller's list, or the default bank when the list is omitted — must
+    // sit inside the credential's own list. An out-of-list bank is refused,
+    // never intersected away: the caller would otherwise see success while the
+    // transfer reached a bank the credential does not hold. The default bank is
+    // checked only because an omitted list resolves to it.
+    let (_actor, label) = state.resolve_actor(args)?;
     let banks = banks_of(state, args)?;
     for bank in &banks {
-        state.require_bank_grant(bank)?;
+        state.require_sync_bank(bank)?;
     }
     let mut cfg = client_cfg(state, opt_str(args, "remote"), opt_str(args, "token"));
     cfg.cipher = required_custody_cipher(get)?;
@@ -118,7 +120,7 @@ pub(crate) fn transfer_with(
         "banks": rows,
         "timestamp": now_utc(),
     });
-    if let Some(label) = ctx.principal() {
+    if let Some(label) = label {
         out["principal"] = json!(label.as_str());
     }
     Ok(out)

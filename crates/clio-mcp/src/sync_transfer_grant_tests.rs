@@ -5,12 +5,15 @@
 //!
 //! This module tests that a bound MCP caller's sync transfer tools stay inside
 //! the credential's bank grant: an out-of-list bank is refused on push and on
-//! pull, before any remote contact, and a default bank outside the list is
-//! refused the same way.
+//! pull, before any remote contact, a default bank outside the list is refused
+//! the same way, a scoped list that excludes the default still runs, and the
+//! shared-bank and unbound contracts hold.
 //!
 //! ## Owns
 //! - The push and pull refusals for a named bank outside the credential's list
 //! - The refusal when the default bank resolves outside the list
+//! - The successful scoped run whose list excludes the default bank
+//! - The shared gate on a named bank and the unbound actor/bank contract
 //!
 //! ## Does not own
 //! - The grant rule itself (`principal`, `runtime_context`)
@@ -26,8 +29,8 @@
 
 use super::transfer_with;
 use crate::principal::Principal;
-use crate::runtime::McpState;
-use crate::sync_tools::sync_tools_test_support_tests::state;
+use crate::runtime::{McpOpenOptions, McpState};
+use crate::sync_tools::sync_tools_test_support_tests::{TempDir, state};
 use clio_types::ErrorCode;
 use serde_json::json;
 
@@ -76,4 +79,92 @@ fn a_default_bank_outside_the_list_is_refused() {
     let err = transfer_with(&st, &json!({}), "push", &|_| None)
         .expect_err("foreign default bank refused");
     assert_eq!(err.code, ErrorCode::Forbidden, "{err:?}");
+}
+
+/// A scoped run succeeds when its list names only a granted bank: the default
+/// bank is not checked, because the run never touches it. The pre-gate resolver
+/// authorized the default and refused this run.
+#[test]
+fn a_scoped_list_runs_when_it_excludes_the_default_bank() {
+    let st = bound(&["b-allowed"]);
+    let dir = TempDir::new("mcp-scoped-grant");
+    let key_path = dir.key().display().to_string();
+    let journal_path = dir
+        .key()
+        .with_file_name("erasure-journal.json")
+        .display()
+        .to_string();
+    let get = move |name: &str| match name {
+        clio_config::SYNC_KEY_FILE_ENV => Some(key_path.clone()),
+        clio_config::ERASURE_JOURNAL_FILE_ENV => Some(journal_path.clone()),
+        _ => None,
+    };
+    clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File)).expect("generate");
+    let serve = crate::sync_tools::sync_serve_with(
+        &st,
+        &json!({ "dev": true, "ttl_secs": 5, "banks": ["b-allowed"] }),
+        &get,
+    )
+    .expect("the peer starts serving");
+    let addr = serve["addr"]
+        .as_str()
+        .expect("the bound address")
+        .to_owned();
+    let out = transfer_with(
+        &st,
+        &json!({ "remote": addr, "banks": ["b-allowed"] }),
+        "push",
+        &get,
+    )
+    .expect("a scoped push inside the credential's banks runs");
+    assert_eq!(out["banks"][0]["bank_id"], "b-allowed");
+    assert_eq!(out["principal"], "sync-runner");
+}
+
+/// Naming `shared` in the list does not bypass the deployment gate: the shared
+/// namespace is refused while the deployment has not enabled it, even though
+/// the credential names it.
+#[test]
+fn a_shared_bank_in_the_list_still_needs_the_deployment_gate() {
+    let st = bound(&["bank-mcp", "shared"]);
+    let err = transfer_with(&st, &json!({ "banks": ["shared"] }), "push", &|_| None)
+        .expect_err("the shared gate refuses");
+    assert_eq!(err.code, ErrorCode::Forbidden, "{err:?}");
+    assert!(err.message.contains("shared"), "{err:?}");
+}
+
+/// Unbound local calls keep the argument contract: an unknown actor is
+/// `invalid_argument`, a `shared` bank needs the deployment gate, and an empty
+/// default bank is `missing_bank`.
+#[test]
+fn unbound_transfers_keep_the_actor_shared_and_missing_bank_contract() {
+    let st = state();
+    let no_key = |_name: &str| -> Option<String> { None };
+    let actor = transfer_with(&st, &json!({ "actor": "robot" }), "push", &no_key)
+        .expect_err("an unknown actor is refused");
+    assert_eq!(actor.code, ErrorCode::InvalidArgument, "{actor:?}");
+    let shared = transfer_with(&st, &json!({ "banks": ["shared"] }), "push", &no_key)
+        .expect_err("the shared gate refuses");
+    assert_eq!(shared.code, ErrorCode::Forbidden, "{shared:?}");
+    assert!(shared.message.contains("shared"), "{shared:?}");
+    let missing = transfer_with(&empty_bank_state(), &json!({}), "push", &no_key)
+        .expect_err("an empty bank is refused");
+    assert_eq!(missing.code, ErrorCode::MissingBank, "{missing:?}");
+}
+
+/// One state whose connection default bank is empty, so an omitted list
+/// resolves to the empty bank the unbound contract refuses.
+fn empty_bank_state() -> std::sync::Arc<McpState> {
+    McpState::open_with_effective(
+        &McpOpenOptions {
+            backend: "sqlite".into(),
+            database_url: "sqlite::memory:".into(),
+            default_bank: String::new(),
+            default_actor: clio_types::Actor::Agent,
+            shared_bank_enabled: false,
+            kms_path: None,
+        },
+        &json!({}),
+    )
+    .expect("mcp state")
 }

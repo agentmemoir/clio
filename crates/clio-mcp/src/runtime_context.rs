@@ -8,8 +8,8 @@
 //! non-blocking maintenance dispatch hook.
 //!
 //! ## Owns
-//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` / `require_bank_grant`
-//!   on `McpState`
+//! - `next_item_id` / `resolve_ctx` / `resolve_actor` / `resolve_timestamp` /
+//!   `require_bank_grant` / `require_sync_bank` on `McpState`
 //! - `dispatch_maintenance` (off-path maintenance handoff)
 //! - `now_utc` (RFC 3339 UTC stamping; the calendar arithmetic is the shared
 //!   `clio_types::civil_from_days`)
@@ -33,6 +33,11 @@ use clio_write::{
 };
 use serde_json::Value;
 use std::sync::Arc;
+
+/// The one refusal a bank outside a bound credential's grant gets, shared by
+/// every sync surface so the text never reveals which list named the bank.
+pub(crate) const BANK_SCOPE_REFUSAL: &str =
+    "the bank scope this request reaches is outside this credential's banks";
 
 impl McpState {
     /// Generate a unique item id for caller-omitted ids.
@@ -141,6 +146,69 @@ impl McpState {
         // next tick instead of listing every bank in the store.
         self.maintenance_trigger.note_bank(bank);
         Ok(ctx)
+    }
+
+    /// Resolve the actor and the principal label for a call that authorizes its
+    /// own bank scope.
+    ///
+    /// A tool that acts on a list of banks resolves each one itself, so it
+    /// needs the actor rule and the credential's label without this module's
+    /// single-bank gate. The bound actor is still enforced and the unbound
+    /// `actor` argument is still parsed; every bank the call acts on passes
+    /// [`Self::require_sync_bank`].
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] for a declared actor the credential does not
+    /// name, [`ErrorCode::InvalidArgument`] for an unknown `actor` value on the
+    /// unbound path.
+    pub(crate) fn resolve_actor(
+        &self,
+        args: &Value,
+    ) -> Result<(Actor, Option<PrincipalLabel>), AmError> {
+        if let Some(principal) = &self.principal {
+            return Ok((
+                principal.authorize_actor(args.get("actor").and_then(Value::as_str))?,
+                Some(PrincipalLabel::new(principal.label.clone())),
+            ));
+        }
+        let actor = match args.get("actor").and_then(Value::as_str) {
+            Some(raw) => Actor::parse(raw)?,
+            None => self.default_actor,
+        };
+        Ok((actor, None))
+    }
+
+    /// Refuse a bank one sync run may not touch.
+    ///
+    /// Every bank a sync tool names passes this gate, whether it came from the
+    /// caller's list, a resolved default, or the mutation an ack-skip targets:
+    /// the shared namespace needs the deployment to enable it, an empty bank
+    /// is refused, and a bound credential must cover the bank. A bank outside
+    /// the list is refused, never dropped, so the caller cannot see success
+    /// while the run reached nothing it named. The text is the same whichever
+    /// way the bank was resolved.
+    ///
+    /// # Errors
+    /// [`ErrorCode::MissingBank`] for an empty bank, [`ErrorCode::Forbidden`] for
+    /// a `shared` bank the deployment has not enabled or a bank outside a bound
+    /// credential's list.
+    pub(crate) fn require_sync_bank(&self, bank: &str) -> Result<(), AmError> {
+        if bank.is_empty() {
+            return Err(AmError::new(ErrorCode::MissingBank, "bank is required"));
+        }
+        if bank == SHARED_BANK && !self.shared_enabled {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                format!(
+                    "bank `{SHARED_BANK}` requires the deployment to enable the shared bank surface"
+                ),
+            ));
+        }
+        match &self.principal {
+            Some(principal) if principal.covers_bank(bank) => Ok(()),
+            Some(_) => Err(AmError::new(ErrorCode::Forbidden, BANK_SCOPE_REFUSAL)),
+            None => Ok(()),
+        }
     }
 
     /// Refuse a bank-scoped read when the bank is unknown.

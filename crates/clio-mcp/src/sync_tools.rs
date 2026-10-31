@@ -6,14 +6,13 @@
 //! This module is responsible for the MCP-bound multi-host sync tools'
 //! dispatch and local surfaces: `sync_status` (masked local report),
 //! `sync_key_status` (masked key management report), `sync_serve` (background
-//! server with a removed-token rejection, dev-mode refusal, and TTL),
-//! `sync_ack_skip` (confirmed dead-letter ack), and the bank/client-config
-//! helpers the transfer tools read.
+//! server with a removed-token rejection, dev-mode refusal, and TTL), and the
+//! bank/client-config helpers the transfer tools read.
 //!
 //! ## Owns
 //! - Dispatch routing for the six sync tool names
 //! - JSON argument decoding and result shaping for the status, key-status,
-//!   serve, and ack-skip tools
+//!   and serve tools
 //! - Client config assembly (`device_id`, store/sync handles, remote, token,
 //!   and encryption keys): the status path takes a `sync_key` override and
 //!   otherwise reads the recorded store, marker-authoritative, while the
@@ -21,10 +20,13 @@
 //!   `CLIO_SYNC_KEY_FILE` names one, else the recorded store, so the two paths
 //!   can read different custody
 //! - Dev-mode refusal mirroring on `sync_serve` and its journal-backed
-//!   erasure-denial authority; dry-run gating on `sync_ack_skip`
+//!   erasure-denial authority
+//! - The per-bank gate on `sync_status` and `sync_serve`, the same gate the
+//!   transfer tools apply to every bank of a run
 //!
 //! ## Does not own
 //! - The push/pull/bidirectional transfer run (see `sync_transfer`)
+//! - The ack-skip tool and its mutation-bank resolution (see `sync_ack`)
 //! - Sync protocol semantics, apply matrix, cursors (see `clio-sync`)
 //! - Server transport internals (`clio-sync::server`)
 //! - Store binding / DEKs (`McpState` wiring in `runtime`)
@@ -38,11 +40,11 @@
 //! Keep this module focused on MCP sync dispatch.
 
 use crate::runtime::{McpState, now_utc};
-use crate::write_tools::{opt_bool, opt_str, req_str};
+use crate::write_tools::{opt_bool, opt_str};
 use clio_compliance::JournalDenialProbe;
 use clio_sync::prelude::{
-    SyncCipherKey, SyncClientConfig, SyncServerOptions, SyncStatusReport, ack_skip,
-    sync_serve_with_denial, sync_status,
+    SyncCipherKey, SyncClientConfig, SyncServerOptions, SyncStatusReport, sync_serve_with_denial,
+    sync_status,
 };
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
@@ -51,6 +53,9 @@ use std::sync::Arc;
 
 #[path = "sync_transfer.rs"]
 mod sync_transfer;
+
+#[path = "sync_ack.rs"]
+mod sync_ack;
 
 /// Route a sync tool name to its in-process handler (raw result).
 #[inline(never)]
@@ -61,14 +66,15 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
         "sync_status" => sync_status_tool(state, args),
         "sync_key_status" => sync_key_status_tool(state, args),
         "sync_serve" => sync_serve_with(state, args, &|key| std::env::var(key).ok()),
-        "sync_ack_skip" => sync_ack_skip_tool(state, args),
+        "sync_ack_skip" => sync_ack::ack_skip_tool(state, args),
         other => Err(AmError::not_implemented(other)),
     }
 }
 
 /// `sync_status()`: masked local report (device id, cursors, pending,
 /// conflicts, DLQ, auth/encryption state). The report shape carries no
-/// secrets by construction; serialization is the response.
+/// secrets by construction; serialization is the response. Every bank the
+/// report covers passes the per-bank gate before any bank data is read.
 #[inline(never)]
 fn sync_status_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     sync_status_with(state, args, &|key| std::env::var(key).ok())
@@ -81,6 +87,12 @@ pub(crate) fn sync_status_with(
     args: &Value,
     get: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, AmError> {
+    // Authorization runs before any bank data or custody is read: every bank
+    // the report would cover must pass the same per-bank gate as a transfer.
+    let banks = banks_of(state, args)?;
+    for bank in &banks {
+        state.require_sync_bank(bank)?;
+    }
     let mut cfg = client_cfg(state, opt_str(args, "remote"), opt_str(args, "token"));
     cfg.cipher = cipher_keys(args)?;
     // With no keys supplied, the recorded custody store fills the client
@@ -89,7 +101,6 @@ pub(crate) fn sync_status_with(
     // the two surfaces agree only when no explicit file is named. That
     // divergence is accepted and pinned by the key tests.
     apply_custody_fallback(&mut cfg, args, get)?;
-    let banks = banks_of(state, args)?;
     let mut report = sync_status(&cfg, &banks)?;
     fill_encryption_summary(&mut report, get);
     Ok(serde_json::to_value(report).expect("serialize status report"))
@@ -210,7 +221,13 @@ pub fn sync_serve_with(
         ));
     }
     let ttl_secs = args.get("ttl_secs").and_then(Value::as_u64);
+    // The served banks pass the per-bank gate before the server starts, so a
+    // bound credential can never serve a bank outside its grant and a shared
+    // bank is served only where the deployment enabled it.
     let banks = banks_of(state, args)?;
+    for bank in &banks {
+        state.require_sync_bank(bank)?;
+    }
     // The authority is the journal this host resolves: the erase boundary's own.
     let probe = JournalDenialProbe::resolved(state.journal_path.as_deref(), get)?;
     let denial = Arc::new(probe);
@@ -235,29 +252,6 @@ pub fn sync_serve_with(
         "ttl_secs": ttl_secs.unwrap_or(clio_sync::SERVE_TTL_DEFAULT_SECS),
         "banks": banks,
         "dev": dev,
-        "timestamp": now_utc(),
-    }))
-}
-
-/// `sync_ack_skip(sync_mutation_id, confirm?, reason?)`: operator ack-skip of
-/// one permanently rejected mutation. Without `confirm=true` the call is a
-/// dry-run shape (`{acked: false, would_ack: id}`); with it, the dead-letter
-/// is acknowledged and the pull cursor may advance past the id.
-#[inline(never)]
-fn sync_ack_skip_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
-    let id = req_str(args, "sync_mutation_id")?.to_owned();
-    let confirm = opt_bool(args, "confirm", false)?;
-    if !confirm {
-        return Ok(json!({ "acked": false, "would_ack": id }));
-    }
-    // Acknowledging a dead letter is a local store write: it needs neither an
-    // endpoint, a token, nor keys, so none is read from the call.
-    let cfg = client_cfg(state, None, None);
-    let acked = ack_skip(&cfg, &id, &state.resolve_timestamp(args)?)?;
-    Ok(json!({
-        "acked": acked,
-        "sync_mutation_id": id,
-        "reason": opt_str(args, "reason"),
         "timestamp": now_utc(),
     }))
 }
@@ -423,3 +417,7 @@ mod sync_tools_tests;
 #[cfg(test)]
 #[path = "sync_tools_key_tests.rs"]
 mod sync_tools_key_tests;
+
+#[cfg(test)]
+#[path = "sync_tools_grant_tests.rs"]
+mod sync_tools_grant_tests;
