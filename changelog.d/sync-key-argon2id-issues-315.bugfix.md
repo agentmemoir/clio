@@ -1,0 +1,1 @@
+Sync keys are now stretched with Argon2id instead of a single SHA-256 pass, so a low-entropy sync key secret can no longer be brute-forced offline from stolen ciphertext. Every row sealed before this change fails authentication and is quarantined by the existing receive path, so peers must upgrade together and hold the same sync key secret.
