@@ -141,3 +141,7 @@ pub fn portability_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_portability_defs_tests.rs"]
+mod schema_portability_defs_tests;

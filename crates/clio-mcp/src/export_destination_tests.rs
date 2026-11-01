@@ -178,6 +178,57 @@ fn a_created_root_is_owner_only() {
     assert_eq!(mode & 0o777, 0o700, "{mode:o}");
 }
 
+/// An empty destination names no file at all, so it is refused before any
+/// filesystem work, and whitespace is the same refusal rather than a file
+/// literally named a space.
+#[test]
+fn empty_and_whitespace_only_destinations_are_refused() {
+    let scratch = Scratch::new("empty");
+    let root = scratch.path().join("root");
+    for destination in ["", " ", "\t\n "] {
+        let message = refusal(&root, destination);
+        assert!(
+            message.contains("must not be empty"),
+            "the refusal explains the empty destination: {message}"
+        );
+    }
+    assert!(!root.exists(), "{}", root.display());
+}
+
+/// A root that is a regular file cannot hold a destination. The refusal is an
+/// argument error naming the shape, and the file is left as it was.
+#[test]
+fn a_root_that_is_a_regular_file_is_refused() {
+    let scratch = Scratch::new("file-root");
+    let root = scratch.path().join("root");
+    std::fs::write(&root, b"not a directory").expect("file root");
+    let message = refusal(&root, "bundle.json");
+    assert!(
+        message.contains("is not a plain directory"),
+        "the refusal explains the root shape: {message}"
+    );
+    assert!(root.is_file(), "{}", root.display());
+}
+
+/// A symlinked root is refused even when it points at a real directory: the
+/// confinement would otherwise be decided by the link's target, which the
+/// deployment did not configure.
+#[cfg(unix)]
+#[test]
+fn a_root_that_is_a_symlink_to_a_directory_is_refused() {
+    let scratch = Scratch::new("symlink-root");
+    let real = scratch.path().join("real-root");
+    std::fs::create_dir_all(&real).expect("real root");
+    let root = scratch.path().join("root");
+    std::os::unix::fs::symlink(&real, &root).expect("symlink root");
+    let message = refusal(&root, "bundle.json");
+    assert!(
+        message.contains("is not a plain directory"),
+        "the refusal explains the root shape: {message}"
+    );
+    assert!(!real.join("bundle.json").exists(), "nothing was written");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_pre_existing_root_keeps_its_mode() {

@@ -97,6 +97,9 @@ pub mod sync_tools;
 pub mod write_tools;
 mod write_tools_handlers;
 
+#[cfg(test)]
+mod lib_tests;
+
 /// Pinned MCP specification revision (item 3).
 ///
 /// Transport and tool rules come from this single revision; later revisions
