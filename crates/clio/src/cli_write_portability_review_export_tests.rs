@@ -55,9 +55,18 @@ impl Drop for Scratch {
     }
 }
 
-/// Run one `review-export` invocation against injected streams and no env keys.
+/// Run one `review-export` invocation against injected streams, with only the
+/// export root key answered (the process temp directory, so the scratch
+/// destination inside it is confined under that root).
 fn run(args: &[&str]) -> (ExitCode, String, String) {
-    let env = |_key: &str| -> Option<String> { None };
+    let export_root = std::env::temp_dir().to_string_lossy().into_owned();
+    let env = |key: &str| -> Option<String> {
+        if key == clio_config::EXPORT_ROOT_ENV {
+            Some(export_root.clone())
+        } else {
+            None
+        }
+    };
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut input = std::io::Cursor::new(Vec::new());

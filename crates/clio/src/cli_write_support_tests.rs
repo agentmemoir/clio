@@ -132,6 +132,31 @@ pub(crate) fn run_write_resolved(verb: &str, args: &[&str]) -> (ExitCode, String
     (code, utf8(out), utf8(err))
 }
 
+/// Run a resolved write verb through the database-opening `run_resolved` seam
+/// with injected streams and an injected environment lookup, so a test can pin a
+/// deployment key the store open would otherwise read from the live process.
+pub(crate) fn run_write_resolved_env(
+    verb: &str,
+    args: &[&str],
+    env: &dyn Fn(&str) -> Option<String>,
+) -> (ExitCode, String, String) {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut input = std::io::empty();
+    let code = {
+        let mut io = CliIo {
+            out: &mut out,
+            err: &mut err,
+            stdin: &mut input,
+            is_tty: false,
+            no_color: true,
+            env,
+        };
+        crate::cli_write::run_resolved(verb, crate::cli_read_test_support::tokens(args), &mut io)
+    };
+    (code, utf8(out), utf8(err))
+}
+
 /// Run a top-level command through the read engine's group resolution (which
 /// delegates write verbs to the write engine and opens state).
 pub(crate) fn run_write_open(cmd: &str, args: &[&str], is_tty: bool) -> (ExitCode, String, String) {

@@ -82,6 +82,9 @@ pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     cmd.env("CLIO_ERASURE_JOURNAL_FILE", journal);
     cmd.env("CLIO_COMPLIANCE_SALT", salt_text());
     cmd.env("CLIO_BACKUP_DIR", backups);
+    // The export root owns every export destination the scenarios hand the
+    // child; the system temp root already contains their scratch directories.
+    cmd.env("CLIO_EXPORT_ROOT", std::env::temp_dir());
     crate::common::seed_key(&mut cmd);
     cmd
 }

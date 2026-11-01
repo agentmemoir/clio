@@ -73,7 +73,7 @@ const OUT_REQUIRED: Flag = Flag {
     ..Flag::text(
         "out",
         "FILE",
-        "Names the bundle file that `cli_write_portability::export_call` passes to the `export` tool as `destination`.",
+        "Names the bundle file that `cli_write_portability::export_call` passes to the `export` tool as `destination`; the destination must lie inside the deployment export root, a relative path is joined to that root, and a path outside it is refused: the root is `CLIO_EXPORT_ROOT` when it is set, else `<data directory>/exports`, else `<working directory>/clio-exports`.",
     )
 };
 

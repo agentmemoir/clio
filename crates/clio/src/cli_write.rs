@@ -98,7 +98,17 @@ pub(crate) fn run_resolved(verb: &str, args: Vec<String>, io: &mut CliIo) -> Exi
         kms_path,
     };
     match McpState::open_one_shot(&options) {
-        Ok(state) => run_parsed(verb, &parsed, mode, &state, io),
+        Ok(mut state) => {
+            // A bundle delivery is confined to the deployment export root, which
+            // the store open resolves from the live process environment. This CLI
+            // resolves it from the injected lookup instead, so the same seam that
+            // answers `CLIO_DATABASE_URL` and the key store also answers
+            // `CLIO_EXPORT_ROOT`, exactly as `compliance review-export` does.
+            if crate::cli_write_portability::writes_bundle(verb) {
+                crate::cli_write_portability::install_export_root(&mut state, io.env);
+            }
+            run_parsed(verb, &parsed, mode, &state, io)
+        }
         Err(error) => fail(io, mode, &CliError::from_am_error(&error)),
     }
 }

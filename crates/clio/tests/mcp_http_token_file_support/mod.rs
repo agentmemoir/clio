@@ -49,8 +49,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 /// Calls served so far in this test binary, so no two tests share a scratch name.
@@ -106,10 +106,45 @@ pub fn clio() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_clio"));
     cmd.env_clear();
     super::common::seed_key(&mut cmd);
+    // A served `export` confines its destination to this root before the
+    // compliance authorization gate runs, and `env_clear` above dropped any
+    // inherited value, so the suite names one itself.
+    cmd.env("CLIO_EXPORT_ROOT", export_root());
     if let Some(pattern) = std::env::var_os("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", pattern);
     }
     cmd
+}
+
+/// The export root every child is given as `CLIO_EXPORT_ROOT`: one scratch
+/// directory per test binary, under the OS temp directory and carrying the pid
+/// and a nanosecond stamp, so two binaries never share a root.
+fn export_root() -> &'static str {
+    static ROOT: OnceLock<String> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "am-http-token-file-exports-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("export root");
+        path.to_str().expect("utf-8 export root").to_owned()
+    })
+}
+
+/// An `export` destination inside [`export_root`], unique per call so two
+/// probes in one process never write the same file.
+pub fn export_probe() -> String {
+    Path::new(export_root())
+        .join(format!(
+            "export-probe-{}.json",
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Run one `mcp http` to completion (the refusal paths all exit on their own).

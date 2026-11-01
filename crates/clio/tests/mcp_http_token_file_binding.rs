@@ -35,7 +35,8 @@ mod common;
 mod mcp_http_token_file_support;
 
 use mcp_http_token_file_support::{
-    Server, Store, bearer, call, digests_on_disk, forbidden, minted_token, ok, post, run_to_end,
+    Server, Store, bearer, call, digests_on_disk, export_probe, forbidden, minted_token, ok, post,
+    run_to_end,
 };
 use serde_json::json;
 // Only the store writers tighten a file's mode, so the import is gated with them.
@@ -111,7 +112,7 @@ fn assert_credential_class(
 ) {
     let export = call(
         "export",
-        json!({"bank": "demo", "destination": "/dev/null"}),
+        json!({"bank": "demo", "destination": export_probe()}),
     );
     let (status, body) = post(port, &export, header);
     assert_eq!(status, want_status, "{name}: {body}");

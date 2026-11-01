@@ -122,7 +122,7 @@ const REVIEW_OUT_REQUIRED: Flag = Flag {
     ..Flag::text(
         "out",
         "FILE",
-        "Names the review file to write; `cli_write_portability::run_review_export` passes it to the `review_export` tool as `destination`, which refuses to overwrite an existing caller file.",
+        "Names the review file to write; `cli_write_portability::run_review_export` passes it to the `review_export` tool as `destination`, which refuses to overwrite an existing caller file; the destination must lie inside the deployment export root, a relative path is joined to that root, and a path outside it is refused: the root is `CLIO_EXPORT_ROOT` when it is set, else `<data directory>/exports`, else `<working directory>/clio-exports`.",
     )
 };
 

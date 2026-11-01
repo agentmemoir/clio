@@ -46,6 +46,7 @@ pub mod db_effective;
 pub mod db_path;
 pub mod db_url_env;
 pub mod erasure_journal_path;
+pub mod export_path;
 pub mod history_knobs;
 pub mod hygiene_knobs;
 pub mod kms_path;
@@ -102,6 +103,10 @@ pub use config::{
 pub use db_path::{ResolvedDatabase, default_sqlite_path, infer_backend, resolve_database};
 pub use erasure_journal_path::{
     ERASURE_JOURNAL_FILE_ENV, ERASURE_JOURNAL_FILE_NAME, new_deployment_id, resolve_journal_path,
+};
+pub use export_path::{
+    EXPORT_DIR_NAME, EXPORT_ROOT_ENV, ExportRootTier, FALLBACK_DIR_NAME, ResolvedExportRoot,
+    default_export_root, resolve_export_root,
 };
 pub use history_knobs::HistoryKnobs;
 pub use profile::{Profile, ToolImplStatus, ToolInventoryEntry, coding_tool_inventory};

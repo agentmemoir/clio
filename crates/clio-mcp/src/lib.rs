@@ -39,6 +39,7 @@ pub mod batch_preflight_records;
 pub mod batch_tools;
 pub mod config_tools;
 mod conn_pool;
+mod export_destination;
 pub mod http;
 pub mod http_auth;
 mod http_guard;
@@ -95,6 +96,9 @@ mod summarize_tools;
 pub mod sync_tools;
 pub mod write_tools;
 mod write_tools_handlers;
+
+#[cfg(test)]
+mod lib_tests;
 
 /// Pinned MCP specification revision (item 3).
 ///

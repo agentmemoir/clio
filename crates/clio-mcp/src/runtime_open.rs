@@ -181,6 +181,14 @@ impl McpState {
         let ops_store: Arc<dyn OpsStore> = store.clone();
         let sync: Arc<dyn SyncStore> = store.clone();
         let (inventory_facts, inventory_backend, inventory_measured) = measure_inventory(options)?;
+        // Deployment-owned destination root; only reported here, never created
+        // here — the first confined export destination creates it. The relative
+        // fallback tier is not deployment-owned: a stdio server inherits the
+        // working directory of whatever client project launched it.
+        let resolved_export_root = clio_config::resolve_export_root(
+            &|key| std::env::var(key).ok(),
+            &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        );
         // One embedder resolution, shared by retrieval and the index drain.
         let ops_embedder = build_ops_embedder_from(&OpsEmbedConfig::from_effective(
             effective,
@@ -286,6 +294,9 @@ impl McpState {
             retention: Arc::new(std::sync::Mutex::new(load_retention_store())),
             retention_path: clio_config::retention_store::resolve_retention_path(None),
             journal_path,
+            export_root: resolved_export_root.path,
+            export_root_trusted: resolved_export_root.tier
+                != clio_config::ExportRootTier::RelativeFallback,
             config: Arc::new(std::sync::Mutex::new(config)),
             id_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             // Unbound at construction: only a credential-bearing transport ever

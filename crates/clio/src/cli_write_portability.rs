@@ -304,6 +304,35 @@ fn review_export_spec() -> FlagSpec {
     }
 }
 
+/// Whether `verb` delivers a bundle, so the engine that opened its state must
+/// install the deployment export root before dispatch.
+pub(crate) fn writes_bundle(verb: &str) -> bool {
+    // Only `export` takes a caller destination this CLI binds; `import` and
+    // `erase` read or destroy content and never write a bundle.
+    verb == "export"
+}
+
+/// Install the deployment export root on a freshly opened, uniquely owned state.
+///
+/// The root is resolved from the same injected environment lookup the database
+/// and key store use, so `CLIO_EXPORT_ROOT` reaches the in-process tool without
+/// a second process-environment read; the store open's own resolution would see
+/// only the live process environment. Both bundle-writing commands come through
+/// here, so the CLI and the MCP surface share one root.
+pub(crate) fn install_export_root(
+    state: &mut std::sync::Arc<clio_mcp::runtime::McpState>,
+    get: &dyn Fn(&str) -> Option<String>,
+) {
+    let export_root = clio_config::resolve_export_root(
+        &get,
+        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )
+    .path;
+    std::sync::Arc::get_mut(state)
+        .expect("a freshly opened state is uniquely owned")
+        .set_export_root(export_root);
+}
+
 /// Open the store and run the in-process `review_export` tool against it.
 fn review_export_write(io: &CliIo, parsed: &ParsedArgs) -> Result<(), CliError> {
     let get = |key: &str| (io.env)(key);
@@ -318,8 +347,9 @@ fn review_export_write(io: &CliIo, parsed: &ParsedArgs) -> Result<(), CliError> 
         shared_bank_enabled: false,
         kms_path: clio_config::kms_path::resolve_kms_path(&get, &target.url),
     };
-    let state = clio_mcp::runtime::McpState::open_one_shot(&options)
+    let mut state = clio_mcp::runtime::McpState::open_one_shot(&options)
         .map_err(|error| CliError::from_am_error(&error))?;
+    install_export_root(&mut state, &get);
     let mut args = base_args(parsed);
     args.insert("destination".into(), Value::from(flag(parsed, "out")));
     if let Some(limit) = parsed.value("limit") {

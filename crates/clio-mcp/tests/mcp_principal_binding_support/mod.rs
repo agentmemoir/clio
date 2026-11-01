@@ -49,8 +49,8 @@ use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 /// Calls served so far, so no two tests share a scratch name.
@@ -160,13 +160,38 @@ pub fn spawn_server_with_journal(
 
 /// Open one state against `document` and serve it in a background thread.
 fn spawn_server_document(cfg: HttpConfig, options: &McpOpenOptions, document: &Value) -> u16 {
-    let state = McpState::open_with_effective(options, document).expect("state");
+    let mut state = McpState::open_with_effective(options, document).expect("state");
+    // A served `export` confines its destination to this root before the
+    // authorization gate runs, so the state carries the harness's scratch root;
+    // set while the `Arc` is uniquely owned, before the thread shares it.
+    Arc::get_mut(&mut state)
+        .expect("fresh state")
+        .set_export_root(export_root());
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
         let _ = clio_mcp::http::serve_with_listener(state, cfg, listener);
     });
     port
+}
+
+/// The export root every served state confines an `export` destination to: one
+/// scratch directory per test binary, under the OS temp directory and carrying
+/// the pid and a nanosecond stamp, so two binaries never share a root.
+fn export_root() -> &'static Path {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "am-mcp-binding-exports-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).expect("export root");
+        path
+    })
 }
 
 /// A unique journal path under the OS temp dir; never a path another server or
@@ -358,9 +383,16 @@ pub fn call(tool: &str, arguments: Value) -> String {
 }
 
 /// An `export` call at `bank`, the compliance verb whose authorization depends
-/// on the acting actor.
+/// on the acting actor, at a fresh destination inside [`export_root`].
 pub fn export_at(bank: &str) -> String {
-    call("export", json!({"bank": bank, "destination": "/dev/null"}))
+    let destination = export_root()
+        .join(format!(
+            "export-probe-{}.json",
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ))
+        .to_string_lossy()
+        .into_owned();
+    call("export", json!({"bank": bank, "destination": destination}))
 }
 
 /// An `erase_request` at `bank`, the other actor-gated compliance verb.

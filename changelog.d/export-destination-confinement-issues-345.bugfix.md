@@ -1,0 +1,1 @@
+The MCP `export` and `review_export` tools and the `clio export` and `clio compliance review-export` commands now keep a bundle inside the deployment export root; the root is `CLIO_EXPORT_ROOT`, else `<data directory>/exports`, else `<working directory>/clio-exports`; a relative destination is joined to the root; a destination outside it is refused.

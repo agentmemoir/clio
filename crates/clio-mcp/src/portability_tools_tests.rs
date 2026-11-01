@@ -28,12 +28,50 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Default sqlite-backed test state (matches the additive fixture builder).
+///
+/// The export root is the OS temp directory, because the destinations these
+/// tests use are absolute paths under it and an `export` / `review_export`
+/// destination outside the root is refused.
 pub(crate) fn state() -> std::sync::Arc<crate::runtime::McpState> {
-    crate::runtime::McpState::open_with_effective(
+    let mut state = crate::runtime::McpState::open_with_effective(
         &crate::runtime::McpOpenOptions::default(),
         &serde_json::json!({}),
     )
-    .expect("state")
+    .expect("state");
+    std::sync::Arc::get_mut(&mut state)
+        .expect("fresh state")
+        .set_export_root(std::env::temp_dir());
+    state
+}
+
+/// One per-test scratch directory, removed when the guard drops.
+///
+/// `tempfile` is not a workspace dependency, so this is the repo's own fixture
+/// pattern: a unique path under the OS temp directory with explicit cleanup.
+struct Scratch {
+    dir: std::path::PathBuf,
+}
+
+impl Scratch {
+    fn new(tag: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "am-port-{tag}-{}-{nanos}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        Self { dir }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -98,6 +136,26 @@ fn export_writes_bundle_manifest_for_privileged_actor() {
     let text = fs::read_to_string(&dest).expect("bundle file");
     assert!(text.contains("clio.memory_export"));
     fs::remove_file(&dest).ok();
+}
+
+#[test]
+fn export_refuses_a_destination_outside_the_export_root() {
+    let root_scratch = Scratch::new("root");
+    let outside_scratch = Scratch::new("outside");
+    let mut state = state();
+    std::sync::Arc::get_mut(&mut state)
+        .expect("fresh state")
+        .set_export_root(root_scratch.dir.join("exports"));
+    let dest = outside_scratch.dir.join("bundle.json");
+    let dest_text = dest.to_string_lossy().into_owned();
+    let out = call(
+        &state,
+        "export",
+        json!({"destination": dest_text, "bank": "bank-a", "actor": "harness"}),
+    );
+    assert_eq!(out["ok"], Value::Bool(false), "{out}");
+    assert_eq!(out["code"], "invalid_argument", "{out}");
+    assert!(!dest.exists(), "{}", dest.display());
 }
 
 #[test]
@@ -314,7 +372,11 @@ fn review_export_writes_ordered_content_free_rows() {
         }),
     );
     assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    assert_eq!(out["destination"], Value::from(dest.as_str()));
+    // Confinement validates without rewriting, so the destination the reply
+    // names is exactly the one the caller passed — the same path the custody
+    // row records and the file lands on.
+    let written = out["destination"].as_str().expect("destination");
+    assert_eq!(written, dest.as_str(), "{out}");
     let text = fs::read_to_string(&dest).expect("review export file");
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 2, "{text}");

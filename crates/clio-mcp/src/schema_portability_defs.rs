@@ -38,7 +38,10 @@ pub fn portability_defs() -> Vec<ToolDef> {
                           harness/system actor; no DEKs, API keys, or sync credentials in the file.",
             required: &["destination"],
             props: vec![
-                ("destination", s("File path for the bundle JSON.")),
+                (
+                    "destination",
+                    s("File path for the bundle JSON; must lie inside the export root."),
+                ),
                 (
                     "content_mode",
                     s("dsar_plaintext (default) | ciphertext_backup."),
@@ -71,7 +74,10 @@ pub fn portability_defs() -> Vec<ToolDef> {
                           destination.",
             required: &["destination"],
             props: vec![
-                ("destination", s("File path for the review export.")),
+                (
+                    "destination",
+                    s("File path for the review export; must lie inside the export root."),
+                ),
                 (
                     "limit",
                     num("Maximum rows to export (default 100, max 1000)."),
@@ -135,3 +141,7 @@ pub fn portability_defs() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+#[path = "schema_portability_defs_tests.rs"]
+mod schema_portability_defs_tests;

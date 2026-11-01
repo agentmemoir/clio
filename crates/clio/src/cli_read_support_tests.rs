@@ -84,10 +84,16 @@ pub(crate) fn json_of(text: &str) -> Value {
     serde_json::from_str(text.trim()).expect("json output")
 }
 
-/// Open in-memory state with no deployment overlay.
+/// Open in-memory state with no deployment overlay, owned by the process temp
+/// directory so a caller-supplied export destination stays inside it.
 pub(crate) fn state() -> Arc<McpState> {
-    McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
-        .expect("state")
+    let mut state =
+        McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
+            .expect("state");
+    Arc::get_mut(&mut state)
+        .expect("fresh state")
+        .set_export_root(std::env::temp_dir());
+    state
 }
 
 /// Open in-memory state with a template extractor configured, so summarize
