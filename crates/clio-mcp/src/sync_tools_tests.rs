@@ -314,9 +314,8 @@ fn sync_serve_admits_an_administrative_principal() {
     let dir = TempDir::new("mcp-serve-admin");
     let journal = dir.key().with_file_name("erasure-journal.json");
     let journal = journal.display().to_string();
-    let get = move |name: &str| {
-        (name == clio_config::ERASURE_JOURNAL_FILE_ENV).then(|| journal.clone())
-    };
+    let get =
+        move |name: &str| (name == clio_config::ERASURE_JOURNAL_FILE_ENV).then(|| journal.clone());
     let served = super::sync_serve_with(
         &st,
         &json!({ "dev": true, "bind": "127.0.0.1:0", "ttl_secs": 1 }),
