@@ -302,6 +302,33 @@ fn sync_serve_refuses_a_bank_limited_agent_principal() {
     assert_eq!(served["ok"], Value::Bool(true), "{served}");
 }
 
+/// A `harness` credential whose grant covers the served bank is admitted, so
+/// the admin gate refuses only the credential that is not an administrator.
+#[test]
+fn sync_serve_admits_an_administrative_principal() {
+    let st = state().with_principal(Principal::new(
+        "harness-key".to_owned(),
+        clio_types::Actor::Harness,
+        vec!["bank-mcp".to_owned()],
+    ));
+    let dir = TempDir::new("mcp-serve-admin");
+    let journal = dir.key().with_file_name("erasure-journal.json");
+    let journal = journal.display().to_string();
+    let get = move |name: &str| {
+        (name == clio_config::ERASURE_JOURNAL_FILE_ENV).then(|| journal.clone())
+    };
+    let served = super::sync_serve_with(
+        &st,
+        &json!({ "dev": true, "bind": "127.0.0.1:0", "ttl_secs": 1 }),
+        &get,
+    )
+    .expect("an administrative credential serves a bank inside its grant");
+    assert_eq!(served["dev"], Value::Bool(true), "{served}");
+    assert_eq!(served["banks"], json!(["bank-mcp"]), "{served}");
+    let addr = served["addr"].as_str().expect("addr");
+    assert!(addr.starts_with("127.0.0.1:"), "{addr}");
+}
+
 #[test]
 fn sync_tools_are_schema_published() {
     let defs = crate::schema::catalog_defs();

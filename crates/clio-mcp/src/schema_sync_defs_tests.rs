@@ -137,6 +137,41 @@ fn the_serve_descriptions_advertise_only_the_scoped_credential_store() {
     }
 }
 
+/// The published serve contract names the gate the handler applies: an
+/// administrator when a principal is present, the served banks inside that
+/// credential's grant, `dev` as the unauthenticated exercise path, and the
+/// operator setting a non-loopback bind needs. A bank-limited credential that
+/// reads only the old text cannot tell why its call comes back `Forbidden`.
+#[test]
+fn the_serve_description_names_the_admin_gate_the_grant_dev_mode_and_the_bind_rule() {
+    let serve = sync_defs()
+        .into_iter()
+        .find(|def| def.name == "sync_serve")
+        .expect("the sync server tool");
+    let tool = serve.to_tool();
+    let description = tool["description"].as_str().expect("a serve description");
+
+    for fact in [
+        "harness or system",
+        "administrator",
+        "every served bank must be inside that credential's grant",
+        "out-of-grant bank is refused",
+        "`dev: true` serves without authentication",
+        "exercise/debug path",
+        "non-loopback bind is refused",
+        "sync.allow_public_bind",
+    ] {
+        assert!(
+            description.contains(fact),
+            "the sync_serve description never names `{fact}`: {description}"
+        );
+    }
+    assert!(
+        !description.contains("unless dev=true"),
+        "dev mode is not the only unauthenticated path any more: {description}"
+    );
+}
+
 /// `sync_status` keeps its `sync_key` override while the transfer tools lost
 /// theirs, so the two contracts cannot be read as the same shape.
 #[test]
