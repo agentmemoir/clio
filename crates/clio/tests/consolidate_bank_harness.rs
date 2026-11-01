@@ -30,7 +30,9 @@ mod common;
 #[path = "consolidate_wave_support/mod.rs"]
 mod consolidate_wave_support;
 
-use consolidate_wave_support::{BANK, Fixture, HUB_ITEMS, McpSession, distilled_count};
+use consolidate_wave_support::{
+    BANK, EXIT_OPERATIONAL, Fixture, HUB_ITEMS, McpSession, distilled_count, json_stderr,
+};
 use serde_json::Value;
 
 /// A second bank, so a selector that fell back to the context bank would be
@@ -186,6 +188,50 @@ fn an_unknown_bank_name_does_not_fall_back_to_the_context_bank() {
     assert!(
         f.distilled_ids_in("ghost").is_empty(),
         "an empty bank has no units"
+    );
+}
+
+#[test]
+fn cli_refuses_an_unknown_bank_with_not_found() {
+    let f = Fixture::new();
+    let out = f.output(&["--bank", "nope", "consolidate", "--output", "json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(EXIT_OPERATIONAL),
+        "an unknown bank is an operational failure: {out:?}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.is_empty(), "no payload: {stdout}");
+    let envelope = json_stderr(&out);
+    assert_eq!(envelope["ok"], Value::Bool(false), "{envelope}");
+    assert_eq!(
+        envelope["code"],
+        Value::String("not_found".into()),
+        "{envelope}"
+    );
+    assert!(
+        envelope["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("nope"),
+        "the refusal must name the bank: {envelope}"
+    );
+}
+
+#[test]
+fn a_refused_consolidate_writes_no_bank_row_and_no_hub_audit() {
+    let f = Fixture::new();
+    let out = f.output(&["--bank", "ghost-bank", "consolidate", "--output", "json"]);
+    assert_eq!(out.status.code(), Some(EXIT_OPERATIONAL), "{out:?}");
+    assert!(
+        f.rows("select id, 0 from banks where id = 'ghost-bank'")
+            .is_empty(),
+        "the refused bank must not be registered"
+    );
+    assert!(
+        f.hub_audit().is_empty(),
+        "a refusal must write no hub audit event: {:?}",
+        f.hub_audit()
     );
 }
 

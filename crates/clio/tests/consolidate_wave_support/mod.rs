@@ -69,6 +69,10 @@ pub const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 /// duration happened to elapse.
 pub const WAVE_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The exit code the CLI reports for an operational failure rather than a
+/// usage error.
+pub const EXIT_OPERATIONAL: i32 = 1;
+
 /// The bank every scenario consolidates.
 pub const BANK: &str = "hubbank";
 /// Items that form a hub at the *default* degree limit of 16: every node is

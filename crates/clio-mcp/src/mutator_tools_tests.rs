@@ -258,6 +258,19 @@ fn a_one_shot_binding_completes_the_consolidate_wave() {
 }
 
 #[test]
+fn consolidate_refuses_an_unknown_bank() {
+    let s = state();
+    let out = call(&s, "consolidate", json!({"bank": "no-such-bank"}));
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("not_found"), "{out}");
+    assert_eq!(
+        out["message"],
+        json!("bank `no-such-bank` not found"),
+        "{out}"
+    );
+}
+
+#[test]
 fn update_continuous_routes_to_ema_engine() {
     let s = state();
     // Register the attribute through the persona create gate, then update it.
