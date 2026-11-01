@@ -177,7 +177,8 @@ fn keys_payload(keys: &[clio_config::sync_key::SyncKeyEntry]) -> Vec<Value> {
 /// input was removed; the store file is the one credential source) and an
 /// anonymous bind outside dev mode (mirroring the clio-sync server's refusal).
 /// The response carries the resolved address (ephemeral port included), the
-/// effective TTL, and the served banks.
+/// effective TTL, and the served banks: the caller's request clamped to the
+/// credential's grant.
 ///
 /// `get` is the environment lookup, so a host or a test can point the route at
 /// this deployment's erasure journal without reading the process environment. A
@@ -214,6 +215,7 @@ pub fn sync_serve_with(
     }
     let ttl_secs = args.get("ttl_secs").and_then(Value::as_u64);
     let banks = banks_of(state, args)?;
+    let banks = state.served_banks_within_grant(banks, dev)?;
     // The authority is the journal this host resolves: the erase boundary's own.
     let probe = JournalDenialProbe::resolved(state.journal_path.as_deref(), get)?;
     let denial = Arc::new(probe);
@@ -426,3 +428,7 @@ mod sync_tools_tests;
 #[cfg(test)]
 #[path = "sync_tools_key_tests.rs"]
 mod sync_tools_key_tests;
+
+#[cfg(test)]
+#[path = "sync_tools_serve_gate_tests.rs"]
+mod sync_tools_serve_gate_tests;

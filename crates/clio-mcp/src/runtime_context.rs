@@ -8,8 +8,8 @@
 //! non-blocking maintenance dispatch hook.
 //!
 //! ## Owns
-//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` / `require_bank_grant`
-//!   on `McpState`
+//! - `next_item_id` / `resolve_ctx` / `resolve_timestamp` / `require_bank_grant` /
+//!   `served_banks_within_grant` on `McpState`
 //! - `dispatch_maintenance` (off-path maintenance handoff)
 //! - `now_utc` (RFC 3339 UTC stamping; the calendar arithmetic is the shared
 //!   `clio_types::civil_from_days`)
@@ -190,6 +190,47 @@ impl McpState {
             ErrorCode::Forbidden,
             "the operator scope for this request is outside this credential's banks",
         ))
+    }
+
+    /// Keep only the banks the bound credential's grant covers.
+    ///
+    /// A sync server answers for every bank it was handed, so a bank outside the
+    /// credential's list would open this node's store to a bank the credential
+    /// was never granted.
+    ///
+    /// Dev mode is a convenience for a local bind, not a grant, so a `dev` start
+    /// that names a bank outside the list is refused rather than quietly served
+    /// narrower. The message names neither the bank nor the scope, so a caller
+    /// cannot learn from the refusal which banks the credential holds.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Forbidden`] when `dev` names a bank outside the list, or when
+    /// no requested bank is inside it.
+    pub(crate) fn served_banks_within_grant(
+        &self,
+        banks: Vec<String>,
+        dev: bool,
+    ) -> Result<Vec<String>, AmError> {
+        let Some(principal) = &self.principal else {
+            return Ok(banks);
+        };
+        if dev && !banks.iter().all(|bank| principal.covers_bank(bank)) {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                "dev mode may not serve a bank outside this credential's banks",
+            ));
+        }
+        let served: Vec<String> = banks
+            .into_iter()
+            .filter(|bank| principal.covers_bank(bank))
+            .collect();
+        if served.is_empty() {
+            return Err(AmError::new(
+                ErrorCode::Forbidden,
+                "the bank list for this request is outside this credential's banks",
+            ));
+        }
+        Ok(served)
     }
 
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.

@@ -1,1 +1,1 @@
-Starting a network sync server now requires an administrator credential, so a bank-limited agent key can no longer open this node's store to other hosts.
+Starting a network sync server now requires an administrator credential, and the served bank list is clamped to the caller's grant, with dev mode refusing a bank outside it.

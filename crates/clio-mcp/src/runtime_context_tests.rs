@@ -10,6 +10,7 @@
 //! ## Owns
 //! - Test coverage for the bound-versus-local principal label on `resolve_ctx`
 //! - Test coverage for the actor-conflict and out-of-list-bank refusals
+//! - Test coverage for the served-bank clamp and its dev-mode refusal
 //! - Test coverage for the UTC stamp helper at a known second
 //!
 //! ## Does not own
@@ -149,6 +150,53 @@ fn an_empty_resolved_bank_is_refused_on_both_paths() {
             .code,
         ErrorCode::Forbidden
     );
+}
+
+#[test]
+fn an_unbound_caller_keeps_every_requested_serve_bank() {
+    let requested = vec!["bank-a".to_owned(), "bank-b".to_owned()];
+    assert_eq!(
+        state()
+            .served_banks_within_grant(requested.clone(), false)
+            .expect("an unbound caller already holds the store"),
+        requested
+    );
+    // The unbound branch answers before the dev-mode refusal, so dev mode cannot
+    // narrow a caller that has no grant to narrow against.
+    assert_eq!(
+        state()
+            .served_banks_within_grant(requested.clone(), true)
+            .expect("the unbound branch precedes the dev refusal"),
+        requested
+    );
+}
+
+#[test]
+fn a_bound_serve_bank_list_is_clamped_to_the_grant() {
+    assert_eq!(
+        bound("ops-key")
+            .served_banks_within_grant(vec!["bank-b".to_owned(), "bank-a".to_owned()], false)
+            .expect("the covered bank is kept"),
+        vec!["bank-a".to_owned()]
+    );
+}
+
+#[test]
+fn dev_mode_refuses_a_serve_bank_outside_the_grant() {
+    let err = bound("ops-key")
+        .served_banks_within_grant(vec!["bank-a".to_owned(), "bank-b".to_owned()], true)
+        .expect_err("dev mode is not a grant");
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(!err.message.contains("bank-b"), "{err}");
+}
+
+#[test]
+fn a_serve_bank_list_with_nothing_inside_the_grant_is_refused() {
+    let err = bound("ops-key")
+        .served_banks_within_grant(vec!["bank-b".to_owned()], false)
+        .expect_err("no covered bank is left to serve");
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(!err.message.contains("bank-b"), "{err}");
 }
 
 #[test]
