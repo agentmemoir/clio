@@ -323,3 +323,32 @@ fn a_timestamp_that_cannot_be_placed_is_refused_with_invalid_argument() {
         ErrorCode::InvalidArgument
     );
 }
+
+/// A state whose process-environment lookup reports
+/// `CLIO_SYNC_ALLOW_PUBLIC_BIND` as `value`, or no value at all when `None`. The
+/// lookup is injected, so this test never mutates the process environment.
+fn state_with_public_bind_setting(value: Option<&str>) -> Arc<McpState> {
+    let runtime = clio_config::Runtime::with_env(&|key: &str| match (key, value) {
+        ("CLIO_SYNC_ALLOW_PUBLIC_BIND", Some(raw)) => Some(raw.to_owned()),
+        _ => None,
+    });
+    McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state")
+}
+
+#[test]
+fn the_public_bind_setting_defaults_to_refused() {
+    let state = state_with_public_bind_setting(None);
+    assert!(
+        !state.sync_allow_public_bind(),
+        "a deployment that never set the operator setting must refuse a bind outside loopback"
+    );
+}
+
+#[test]
+fn the_public_bind_setting_is_read_from_the_effective_config() {
+    let state = state_with_public_bind_setting(Some("true"));
+    assert!(
+        state.sync_allow_public_bind(),
+        "the environment overlay must reach the serve decision, not only the config view"
+    );
+}
