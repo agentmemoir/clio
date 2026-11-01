@@ -69,6 +69,7 @@ fn serve_scoped() -> (
             banks: vec!["b-a".into(), "b-b".into()],
             token_file: Some(scratch.path().to_path_buf()),
             dev_mode: false,
+            allow_public_bind: false,
             ttl_secs: None,
             deadline_secs: None,
             device_id: "srv-1".into(),

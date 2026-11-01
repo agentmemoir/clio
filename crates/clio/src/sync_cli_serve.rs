@@ -78,6 +78,7 @@ pub(crate) fn start_serve(
         banks: banks.clone(),
         token_file,
         dev_mode: dev,
+        allow_public_bind: false,
         ttl_secs,
         deadline_secs: None,
         device_id: state.device_id.clone(),

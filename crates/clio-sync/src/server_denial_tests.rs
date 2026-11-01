@@ -59,6 +59,7 @@ fn options(
         banks: vec!["b-a".into(), "b-b".into(), "b-c".into()],
         token_file: Some(store_path.to_path_buf()),
         dev_mode: false,
+        allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
         device_id: "srv-1".into(),

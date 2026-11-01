@@ -48,6 +48,9 @@
 //!   `sync_push` talks directly to the remote endpoint.
 //! - Outside dev mode the server refuses to bind without auth material,
 //!   and every request must present a valid bearer token.
+//! - A bind outside loopback is refused unless the operator setting
+//!   `sync.allow_public_bind` allows it, and an admitted one still warns about
+//!   what crosses the network in the clear.
 //! - `sync_status` and logs never carry tokens or DEK material (masked).
 
 #![forbid(unsafe_code)]
@@ -60,6 +63,7 @@
 pub mod apply;
 mod apply_history;
 mod apply_records;
+mod bind_admission;
 mod bind_warning;
 pub mod client;
 mod client_feed;

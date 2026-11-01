@@ -244,6 +244,7 @@ pub fn sync_serve_with(
             banks: banks.clone(),
             token_file,
             dev_mode: dev,
+            allow_public_bind: false,
             ttl_secs,
             deadline_secs: None,
             device_id: state.device_id.clone(),
