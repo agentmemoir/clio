@@ -208,6 +208,11 @@ pub struct McpState {
     /// `CLIO_ERASURE_JOURNAL_FILE` override over the resolved data directory.
     /// Internal configuration, never a caller or MCP argument.
     pub journal_path: Option<std::path::PathBuf>,
+    /// Deployment-owned root every `export` / `review_export` destination must
+    /// resolve inside; resolved at open from the export-root precedence chain
+    /// (`CLIO_EXPORT_ROOT`, then the data directory, then a relative fallback).
+    /// Opening never creates it: the first confined destination does.
+    pub export_root: std::path::PathBuf,
     /// Monotonic counter for caller-omitted item ids (see `runtime_context`).
     ///
     /// Behind an `Arc` because the counter must stay process-wide: a per-request
@@ -342,6 +347,12 @@ impl McpState {
                  credential",
             )),
         }
+    }
+
+    /// Override the deployment-owned export root (embedders and tests); the
+    /// path is not created here, the first confined destination creates it.
+    pub fn set_export_root(&mut self, path: impl Into<std::path::PathBuf>) {
+        self.export_root = path.into();
     }
 
     /// Open MCP runtime state over one backend.

@@ -63,6 +63,11 @@ pub(crate) fn dispatch_inner(state: &McpState, name: &str, args: &Value) -> Resu
 #[inline(never)]
 fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    let destination = crate::export_destination::confine_export_destination(
+        &state.export_root,
+        req_str(args, "destination")?,
+    )?;
+    let destination = destination.to_string_lossy().into_owned();
     let ts = state.resolve_timestamp(args)?;
     let category = strict_opt_str(args, "category")?.map(str::to_owned);
     if let Some(category) = category.as_deref() {
@@ -106,7 +111,7 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
         history: &*state.history,
         belief: &*state.belief,
         ctx: &ctx,
-        destination: req_str(args, "destination")?,
+        destination: &destination,
         filter,
         content_mode,
         timestamp: &ts,
@@ -140,8 +145,11 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
 #[inline(never)]
 fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
+    let destination = crate::export_destination::confine_export_destination(
+        &state.export_root,
+        req_str(args, "destination")?,
+    )?;
     let now = state.resolve_timestamp(args)?;
-    let destination = req_str(args, "destination")?;
     let query = LocalReviewQuery {
         limit: opt_usize(args, "limit").unwrap_or(DEFAULT_REVIEW_LIMIT),
         cursor: strict_opt_str(args, "cursor")?.map(str::to_owned),
@@ -159,7 +167,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     let staging_dir = clio_compliance::unique_staging_dir("clio-review-staging");
     let spec = DeliverySpec {
         action_id: &action_id,
-        destination: std::path::Path::new(destination),
+        destination: &destination,
         staging_dir: &staging_dir,
         custody_owner: "clio",
         required_action: "delivery",
@@ -173,7 +181,10 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
         &controls,
         &spec,
     )?;
-    Ok(json!({ "ok": true, "destination": destination }))
+    Ok(json!({
+        "ok": true,
+        "destination": destination.to_string_lossy()
+    }))
 }
 
 /// `import(source, dry_run?, force?, reason?)`: manifest-validated, idempotent,

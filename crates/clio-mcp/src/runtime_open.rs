@@ -286,6 +286,13 @@ impl McpState {
             retention: Arc::new(std::sync::Mutex::new(load_retention_store())),
             retention_path: clio_config::retention_store::resolve_retention_path(None),
             journal_path,
+            // Deployment-owned destination root; only reported here, never
+            // created here — the first confined export destination creates it.
+            export_root: clio_config::resolve_export_root(
+                &|key| std::env::var(key).ok(),
+                &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )
+            .path,
             config: Arc::new(std::sync::Mutex::new(config)),
             id_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             // Unbound at construction: only a credential-bearing transport ever
