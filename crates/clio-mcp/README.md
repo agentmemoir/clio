@@ -37,11 +37,11 @@ The Clio-managed PostgreSQL setup is unchanged by any of this: loopback-only, no
 
 ## Bound write tools
 
-`admit_preview`, `store`, `update`, `invalidate`, `discard`, `consolidate`, `persona_put_stable`, `persona_observe_preference`, `task_upsert`, `failure_record`, `triple_add`, `triple_end`, `belief_observe`, `graph_link`.
+`admit_preview`, `store`, `update`, `invalidate`, `discard`, `consolidate`, `persona_put_stable`, `persona_observe_preference`, `task_upsert`, `failure_record`, `triple_add`, `triple_end`, `belief_observe`, `graph_link`, `sync_push`, `sync_pull`, `sync_serve`, `sync_ack_skip`. A sync transfer names the presenting credential as `principal` in the response; an unbound local call omits the field.
 
 ## Bound read tools
 
-`intent_gate`, `retrieve`, `compose_context`, `associations`, `get`, `get_snapshot`, `get_gist`, `maintenance_status`, `persona_get`, `task_get`, `task_history`, `failures_for_task`, `memtree_query`, `memtree_get`, `temporal_history`, `triple_query`, `belief_history`, `graph_query`, `inspect`. Every read tool accepts `bank`, `actor`, and `explain` (§4.9.4.G).
+`intent_gate`, `retrieve`, `compose_context`, `associations`, `get`, `get_snapshot`, `get_gist`, `maintenance_status`, `persona_get`, `task_get`, `task_history`, `failures_for_task`, `memtree_query`, `memtree_get`, `temporal_history`, `triple_query`, `belief_history`, `graph_query`, `inspect`, `sync_status`, `sync_key_status`. Every read tool except the sync routes accepts `bank`, `actor`, and `explain` (§4.9.4.G). The sync routes take `banks` and refuse any bank outside the credential's list or a `shared` bank the deployment has not enabled.
 
 ## Raw-ingest binding decision
 

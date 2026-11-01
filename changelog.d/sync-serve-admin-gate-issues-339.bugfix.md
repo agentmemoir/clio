@@ -1,1 +1,1 @@
-Starting a network sync server now requires an administrator credential, and the served bank list is clamped to the caller's grant, with dev mode refusing a bank outside it.
+Starting a network sync server from the MCP surface now requires an administrator credential, and every bank in the served set must pass the credential's bank gate: a bank outside the caller's grant is refused rather than dropped. [Issue #339](https://github.com/agentmemoir/clio/issues/339)

@@ -110,6 +110,7 @@ pub use erasure_reconcile::{
 };
 pub use erasure_retry::erase_confirmed_request;
 pub use export::{ExportArgs, ExportDelivery, ExportFilter, ExportOutcome, export};
+pub use export_custody::export_custody_files::unique_staging_dir;
 pub use export_custody::{
     CustodyState, DeliveryRefusal, DeliveryResult, DeliverySpec, OpenDestination, deliver_export,
     reconcile_open_destinations,

@@ -54,7 +54,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "sync_push",
-            description: "Push local mutations for the given banks to the remote sync server since the durable push cursor; cursors advance only after durable accept.",
+            description: "Push local mutations for the given banks to the remote sync server since the durable push cursor; cursors advance only after durable accept. A bound call refuses a bank outside the credential's list or a `shared` bank the deployment has not enabled, and names the credential as `principal` in the response.",
             required: &["remote"],
             props: vec![
                 ("remote", s("Remote sync server endpoint `host:port`.")),
@@ -76,7 +76,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "sync_pull",
-            description: "Pull remote mutations and apply them idempotently (LWW + conflict journal); the pull cursor freezes at the last durable position when a mutation is dead-lettered.",
+            description: "Pull remote mutations and apply them idempotently (LWW + conflict journal); the pull cursor freezes at the last durable position when a mutation is dead-lettered. A bound call refuses a bank outside the credential's list or a `shared` bank the deployment has not enabled, and names the credential as `principal` in the response.",
             required: &["remote"],
             props: vec![
                 ("remote", s("Remote sync server endpoint `host:port`.")),
@@ -98,7 +98,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "sync_status",
-            description: "Masked local sync status: per-bank cursors, pending pushes, conflicts, open dead letters, endpoint, and auth/encryption state. Never returns tokens or DEK material.",
+            description: "Masked local sync status: per-bank cursors, pending pushes, conflicts, open dead letters, endpoint, and auth/encryption state. Never returns tokens or DEK material. A bound call refuses a bank outside the credential's list or a `shared` bank the deployment has not enabled.",
             required: &[],
             props: vec![
                 ("banks", banks.clone()),
@@ -130,7 +130,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "sync_serve",
-            description: "Start the sync server on a background thread for the given banks; auto-stops after the TTL (default 30 minutes). Requires a scoped credential store passed as `token_file` (add records with `clio auth token add`) unless dev=true (dev profile).",
+            description: "Start the sync server on a background thread for the given banks; auto-stops after the TTL (default 30 minutes). Requires a scoped credential store passed as `token_file` (add records with `clio auth token add`) unless dev=true (dev profile). A bound call refuses a bank outside the credential's list or a `shared` bank the deployment has not enabled.",
             required: &[],
             props: vec![
                 (
@@ -155,7 +155,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "sync_ack_skip",
-            description: "Operator ack-skip of one dead-lettered (permanently rejected) sync mutation so the pull cursor may advance past it. Without confirm=true: dry-run shape only.",
+            description: "Operator ack-skip of one dead-lettered (permanently rejected) sync mutation so the pull cursor may advance past it. Without confirm=true: dry-run shape only. A bound call refuses an acknowledgement whose mutation bank is outside the credential's list or a `shared` bank the deployment has not enabled.",
             required: &["sync_mutation_id"],
             props: vec![
                 (

@@ -339,7 +339,15 @@ fn subject_export_pg_refuses_an_existing_destination_and_leaves_outside_files() 
     };
     let scratch = Scratch::new();
     let staging = scratch.staging_dir();
-    std::fs::create_dir_all(&staging).expect("create staging");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder.create(&staging).expect("create staging");
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir(&staging).expect("create staging");
     let foreign = staging.join("keep.bin");
     std::fs::write(&foreign, b"caller-staging").expect("write the foreign file");
     let dest = scratch.destination();

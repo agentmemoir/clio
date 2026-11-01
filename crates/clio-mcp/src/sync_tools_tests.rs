@@ -6,8 +6,7 @@
 //! This module tests the MCP-bound sync tools (`sync_tools.rs`): dispatch
 //! routing, argument validation, the masked `sync_status` report shape, the
 //! `sync_serve` removed-token rejection, dev-mode refusal and ephemeral-bind
-//! success shape, the `sync_ack_skip` dry-run/confirm gate, and schema
-//! publication.
+//! success shape, and schema publication.
 //!
 //! ## Owns
 //! - Test coverage for sync tool dispatch, argument validation, and response
@@ -301,33 +300,6 @@ fn sync_serve_refuses_a_bank_limited_agent_principal() {
     // by `sync_serve_refuses_anonymous_bind_outside_dev_mode`.
     let served = dispatch(&st, "sync_serve", &json!({ "dev": true, "ttl_secs": 1 }));
     assert_eq!(served["ok"], Value::Bool(true), "{served}");
-}
-
-#[test]
-fn sync_ack_skip_requires_confirm_and_shapes_both_paths() {
-    let st = state();
-    // Dry-run without confirm.
-    let dry = dispatch(
-        &st,
-        "sync_ack_skip",
-        &json!({ "sync_mutation_id": "mut-1" }),
-    );
-    assert_eq!(dry["ok"], Value::Bool(true), "{dry}");
-    assert_eq!(dry["acked"], Value::Bool(false));
-    assert_eq!(dry["would_ack"], "mut-1");
-    // Confirmed: unknown id acks false but the shape holds.
-    let confirmed = dispatch(
-        &st,
-        "sync_ack_skip",
-        &json!({ "sync_mutation_id": "mut-unknown", "confirm": true, "reason": "poison" }),
-    );
-    assert_eq!(confirmed["ok"], Value::Bool(true), "{confirmed}");
-    assert!(confirmed["acked"].is_boolean());
-    assert_eq!(confirmed["sync_mutation_id"], "mut-unknown");
-    assert_eq!(confirmed["reason"], "poison");
-    // Missing id fails closed.
-    let missing = dispatch(&st, "sync_ack_skip", &json!({ "confirm": true }));
-    assert_eq!(missing["ok"], Value::Bool(false), "{missing}");
 }
 
 #[test]

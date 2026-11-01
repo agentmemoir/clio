@@ -19,7 +19,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use crate::export_custody::export_custody_files::{STAGING_DIR_NAMES, staging_root};
+use crate::export_custody::export_custody_files::STAGING_DIR_NAMES;
 use crate::export_custody::reconcile_open_destinations;
 use crate::export_subject_scenarios_tests::{SubjectExport, accepted_controls, harness_ctx};
 use crate::export_tests::{Scratch, seed_pending, staging_entries};
@@ -38,7 +38,7 @@ fn reconcile_reports_open_destinations_without_writing_or_overwriting() {
     let absent_id = unique("crash-stage");
     seed_pending(&fixture.store, &fixture.store, &absent_id, &absent);
     // The crash left the managed staging file behind.
-    let staging_root = staging_root(STAGING_DIR_NAMES[0]);
+    let staging_root = std::env::temp_dir().join(STAGING_DIR_NAMES[0]);
     let staging_leftover = staging_root.join(format!("{absent_id}.staging"));
     std::fs::create_dir_all(&staging_root).expect("create the managed staging root");
     std::fs::write(&staging_leftover, b"leftover").expect("stage");
@@ -84,7 +84,15 @@ fn subject_export_refuses_an_existing_destination_and_leaves_outside_files() {
     let fixture = MapFixture::create();
     let scratch = Scratch::new();
     let staging = scratch.staging_dir();
-    std::fs::create_dir_all(&staging).expect("create staging");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder.create(&staging).expect("create staging");
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir(&staging).expect("create staging");
     let foreign = staging.join("keep.bin");
     std::fs::write(&foreign, b"caller-staging").expect("write the foreign file");
     let dest = scratch.destination();

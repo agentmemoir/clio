@@ -1,0 +1,1 @@
+The MCP hygiene read tools `hygiene_audit` and `hygiene_log_list` now resolve their bank through the caller's credential: a call from a bank-bound credential that names a bank the credential does not carry is refused with `forbidden`, instead of reading that bank's scan or log. [Issue #311](https://github.com/agentmemoir/clio/issues/311)
