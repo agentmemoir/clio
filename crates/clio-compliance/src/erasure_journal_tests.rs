@@ -90,7 +90,7 @@ fn a_recorded_denial_survives_a_fresh_load() {
     assert_eq!(first.deployment_id.len(), 64);
     assert_eq!(
         first.salt_fingerprint,
-        Some(crate::tombstone_salt_fingerprint()),
+        Some(crate::tombstone_salt_fingerprint_at(&path).expect("fingerprint the deployment salt")),
         "the journal records the salt fingerprint it was written under"
     );
     assert_eq!(first.denials.len(), 1, "one denial");

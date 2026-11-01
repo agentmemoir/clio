@@ -23,13 +23,10 @@
 //!
 //! Keep this module focused on the deployment salt.
 
-use super::{fingerprint_for, resolve_salt, tombstone_salt_fingerprint_at};
+use super::{resolve_salt, tombstone_salt_fingerprint_at, tombstone_salt_fingerprint_of};
 use crate::test_unique::unique;
 use clio_types::ErrorCode;
 use std::path::{Path, PathBuf};
-
-/// The built-in salt this module must never fall back to.
-const PUBLISHED: &[u8] = b"clio-compliance-tombstone-v1";
 
 /// A unique scratch directory removed on drop.
 struct Scratch {
@@ -90,10 +87,11 @@ fn an_unset_value_never_yields_the_published_constant() {
     let scratch = Scratch::new();
     let salt = resolve_salt(None, &scratch.journal()).expect("a first-use salt is generated");
     assert_eq!(salt.len(), 32, "a generated salt is 32 bytes");
+    let second = Scratch::new();
+    let other = resolve_salt(None, &second.journal()).expect("a second deployment's salt");
     assert_ne!(
-        salt.as_slice(),
-        PUBLISHED,
-        "a deployment with no override is not hashed under the published constant"
+        salt, other,
+        "each deployment mints its own salt, so no shared constant keys two deployments"
     );
 }
 
@@ -154,20 +152,38 @@ fn the_fingerprint_follows_the_recorded_salt() {
     let recorded = resolve_salt(None, &journal).expect("the recorded salt");
     assert_eq!(
         fingerprint,
-        fingerprint_for(&recorded),
+        tombstone_salt_fingerprint_of(&recorded),
         "the fingerprint describes the recorded salt"
     );
-    let other = fingerprint_for(
+    let other = tombstone_salt_fingerprint_of(
         &resolve_salt(Some("another-deployment"), &journal).expect("a configured salt resolves"),
     );
     assert_ne!(
         fingerprint, other,
         "a different salt yields a different fingerprint"
     );
+    let second = Scratch::new();
     assert_ne!(
         fingerprint,
-        fingerprint_for(PUBLISHED),
-        "the fingerprint is not a function of the published constant"
+        tombstone_salt_fingerprint_at(&second.journal())
+            .expect("a second deployment's fingerprint"),
+        "the fingerprint is keyed by each deployment's own salt, not a shared constant"
+    );
+}
+
+#[test]
+fn a_salt_with_whitespace_at_an_end_reads_back_unchanged() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let mut seeded = [b'a'; 32];
+    seeded[0] = b' ';
+    seeded[31] = b'\n';
+    seed_owner_only(&sidecar(&journal), &seeded);
+    let salt = resolve_salt(None, &journal).expect("an exact-length salt is read as written");
+    assert_eq!(
+        salt,
+        seeded.to_vec(),
+        "a generated salt may begin or end with a whitespace byte and must still be reused"
     );
 }
 

@@ -20,6 +20,9 @@
 //! Changes to how identifiers are hashed should not require changes here.
 //!
 //! Keep this module focused on the deployment salt.
+//!
+//! The salt is write-once: re-minting it would invalidate every hash recorded
+//! under the old one, so an existing sidecar is read and never replaced.
 
 use clio_store::sha256_hex;
 use clio_types::{AmError, ErrorCode};
@@ -41,10 +44,26 @@ const SALT_SUFFIX: &str = ".salt";
 
 /// Domain string keyed by the deployment salt so a fingerprint reveals nothing
 /// about the salt itself.
-///
-/// The bytes match the one the erase module keys its fingerprint with, so a
-/// fingerprint recorded beside an erasure still describes this salt.
 const SALT_FINGERPRINT_DOMAIN: &str = "clio-compliance-salt-fingerprint-v1";
+
+/// The deployment tombstone salt this process resolves.
+///
+/// # Errors
+/// The journal path does not resolve from the process environment, or the same
+/// failures [`tombstone_salt_at`] reports.
+pub fn tombstone_salt() -> Result<Vec<u8>, AmError> {
+    let journal_path = clio_config::resolve_journal_path(&|key: &str| std::env::var(key).ok())?;
+    tombstone_salt_at(&journal_path)
+}
+
+/// A non-reversible fingerprint of the deployment salt this process resolves.
+///
+/// # Errors
+/// The same failures [`tombstone_salt`] reports.
+pub fn tombstone_salt_fingerprint() -> Result<String, AmError> {
+    let journal_path = clio_config::resolve_journal_path(&|key: &str| std::env::var(key).ok())?;
+    tombstone_salt_fingerprint_at(&journal_path)
+}
 
 /// The deployment tombstone salt for the journal at `journal_path`.
 ///
@@ -63,7 +82,18 @@ pub fn tombstone_salt_at(journal_path: &Path) -> Result<Vec<u8>, AmError> {
 /// # Errors
 /// The same failures [`tombstone_salt_at`] reports.
 pub fn tombstone_salt_fingerprint_at(journal_path: &Path) -> Result<String, AmError> {
-    Ok(fingerprint_for(&tombstone_salt_at(journal_path)?))
+    let salt = tombstone_salt_at(journal_path)?;
+    Ok(tombstone_salt_fingerprint_of(&salt))
+}
+
+/// The fingerprint of `salt` under the domain string.
+///
+/// The archive manifest and the erasure journal each record it, so a restore
+/// can refuse an archive whose subject ids were hashed under a different salt
+/// than the live authority recorded.
+#[must_use]
+pub fn tombstone_salt_fingerprint_of(salt: &[u8]) -> String {
+    sha256_hex(salt, SALT_FINGERPRINT_DOMAIN)
 }
 
 /// Resolve the deployment salt from an explicit override and the journal path.
@@ -79,11 +109,6 @@ pub(crate) fn resolve_salt(raw: Option<&str>, journal_path: &Path) -> Result<Vec
         Some(value) => configured_salt(value),
         None => persisted_salt(journal_path),
     }
-}
-
-/// The fingerprint of `salt` under the fingerprint domain.
-fn fingerprint_for(salt: &[u8]) -> String {
-    sha256_hex(salt, SALT_FINGERPRINT_DOMAIN)
 }
 
 /// An operator-supplied salt. A blank value is a configuration mistake rather
@@ -124,8 +149,15 @@ fn read_salt(path: &Path) -> Result<Option<Vec<u8>>, AmError> {
 /// `bytes` as a salt, or a refusal when they are not exactly [`SALT_LEN`] once
 /// surrounding ASCII whitespace is dropped, so a trailing newline is tolerated
 /// and a truncated or widened body is not.
+///
+/// A body already the exact length is taken as written: a generated salt is
+/// uniform random bytes, so one of them may itself be a whitespace byte.
 fn exact_salt(bytes: &[u8], path: &Path) -> Result<Vec<u8>, AmError> {
-    let salt = bytes.trim_ascii();
+    let salt = if bytes.len() == SALT_LEN {
+        bytes
+    } else {
+        bytes.trim_ascii()
+    };
     if salt.len() != SALT_LEN {
         return Err(AmError::new(
             ErrorCode::ConfigCorrupt,

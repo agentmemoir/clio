@@ -25,7 +25,7 @@ use clio_store::{DenialVerdict, ErasureDenial, sha256_hex};
 use clio_types::ErrorCode;
 
 use super::JournalDenialProbe;
-use crate::erase::tombstone_salt;
+use crate::salt::tombstone_salt_at;
 use crate::test_unique::unique;
 
 /// A unique scratch directory removed on drop (the `erasure_journal_tests`
@@ -68,7 +68,7 @@ fn write_raw(path: &Path, bytes: &[u8]) {
 #[test]
 fn a_fresh_deployment_is_clear_and_a_recorded_denial_keeps_its_generation() {
     let scratch = Scratch::new();
-    let probe = JournalDenialProbe::new(scratch.journal());
+    let probe = JournalDenialProbe::new(scratch.journal()).expect("resolve the probe");
     assert_eq!(probe.verdict("subject-a"), DenialVerdict::Clear);
     assert_eq!(
         probe
@@ -111,10 +111,11 @@ fn a_fresh_deployment_is_clear_and_a_recorded_denial_keeps_its_generation() {
 fn the_probe_reads_the_identity_the_erasure_path_writes() {
     let scratch = Scratch::new();
     let path = scratch.journal();
-    let hash = sha256_hex(&tombstone_salt(), "subject-x");
+    let salt = tombstone_salt_at(&path).expect("resolve the deployment salt");
+    let hash = sha256_hex(&salt, "subject-x");
     crate::erasure_journal::record_denial(&path, &hash, &["bank-a".to_owned()])
         .expect("record through the journal operation");
-    let probe = JournalDenialProbe::new(path);
+    let probe = JournalDenialProbe::new(path).expect("resolve the probe");
     assert_eq!(probe.verdict("subject-x"), DenialVerdict::Denied);
 }
 
@@ -126,7 +127,7 @@ fn a_damaged_journal_is_unavailable_and_a_write_refuses() {
     let path = scratch.journal();
     let bytes = b"not a journal".to_vec();
     write_raw(&path, &bytes);
-    let probe = JournalDenialProbe::new(path.clone());
+    let probe = JournalDenialProbe::new(path.clone()).expect("resolve the probe");
     assert_eq!(
         probe.verdict("subject-a"),
         DenialVerdict::AuthorityUnavailable
@@ -188,7 +189,7 @@ fn a_document_path_this_deployment_resolves_is_the_journals_path() {
 #[test]
 fn the_seam_answers_through_a_trait_object() {
     let scratch = Scratch::new();
-    let probe = JournalDenialProbe::new(scratch.journal());
+    let probe = JournalDenialProbe::new(scratch.journal()).expect("resolve the probe");
     let seam: &dyn ErasureDenial = &probe;
     assert_eq!(seam.verdict("subject-a"), DenialVerdict::Clear);
     assert_eq!(seam.salt_fingerprint(), probe.salt_fingerprint());

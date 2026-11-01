@@ -154,15 +154,15 @@ fn write_journal(
     write_body(path, expected, &bytes)
 }
 
-/// A fresh empty journal for a new empty deployment.
-fn empty_journal() -> ErasureJournal {
-    ErasureJournal {
+/// A fresh empty journal for a new empty deployment at `path`.
+fn empty_journal(path: &Path) -> Result<ErasureJournal, AmError> {
+    Ok(ErasureJournal {
         schema_version: SCHEMA_VERSION,
         deployment_id: clio_config::new_deployment_id(),
         generation: 0,
-        salt_fingerprint: Some(crate::erase::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(crate::salt::tombstone_salt_fingerprint_at(path)?),
         denials: Vec::new(),
-    }
+    })
 }
 
 /// The refusal for a journal this build will not trust at `path`.
@@ -183,7 +183,8 @@ fn damaged_journal(path: &Path, action: &str) -> AmError {
 /// and returns the current generation, so a recorded scope is never widened.
 ///
 /// # Errors
-/// [`ErrorCode::ConfigCorrupt`] when the journal is damaged;
+/// [`ErrorCode::ConfigCorrupt`] when the journal is damaged or the deployment
+/// salt beside a missing journal cannot be resolved;
 /// [`ErrorCode::OutOfRange`] when the generation is exhausted;
 /// [`ErrorCode::Internal`] when the write fails or when the journal changed
 /// under the write, which is refused rather than clobbered. The write is
@@ -196,7 +197,7 @@ pub fn record_denial(path: &Path, subject_hash: &str, banks: &[String]) -> Resul
     };
     let mut journal = match parsed {
         Some(journal) => journal,
-        None if matches!(loaded, ReadBody::Absent) => empty_journal(),
+        None if matches!(loaded, ReadBody::Absent) => empty_journal(path)?,
         None => return Err(damaged_journal(path, "refusing")),
     };
     if journal.is_denied(subject_hash) {
@@ -230,8 +231,10 @@ pub fn record_denial(path: &Path, subject_hash: &str, banks: &[String]) -> Resul
 /// certifies no restore by itself.
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] when the path is occupied; [`ErrorCode::Internal`]
-/// when the write fails or refuses a path that appeared under it.
+/// [`ErrorCode::Forbidden`] when the path is occupied;
+/// [`ErrorCode::ConfigCorrupt`] when the deployment salt beside the path cannot
+/// be resolved; [`ErrorCode::Internal`] when the write fails or refuses a path
+/// that appeared under it.
 pub fn initialize_new_empty(path: &Path) -> Result<ErasureJournal, AmError> {
     match fs::symlink_metadata(path) {
         Ok(_) => {
@@ -241,7 +244,7 @@ pub fn initialize_new_empty(path: &Path) -> Result<ErasureJournal, AmError> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(io_error("inspect", path, &err)),
     }
-    let journal = empty_journal();
+    let journal = empty_journal(path)?;
     write_journal(path, &ExpectedBody::Absent, &journal)?;
     Ok(journal)
 }
