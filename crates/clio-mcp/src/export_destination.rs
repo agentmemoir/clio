@@ -39,6 +39,16 @@ use std::path::{Path, PathBuf};
 /// `..`-traversing parent that resolves elsewhere is refused. The final file
 /// name is not canonicalized: the file need not exist yet.
 ///
+/// Confinement is a validation gate, not a rewrite: the path returned is the
+/// candidate the caller supplied, not its canonical form. The root and the
+/// parent are canonicalized only to prove containment, then discarded, because
+/// the destination identity is what the caller asked for and what the custody
+/// row records, and the write must land on the path the caller chose. Returning
+/// the canonical form would change that identity wherever the parent is reached
+/// through a symlink — the system temp directory on macOS is reached through
+/// `/var` -> `/private/var` — so the recorded destination would no longer match
+/// the destination the caller holds.
+///
 /// # Errors
 /// [`ErrorCode::InvalidArgument`] when the destination is empty, names no file,
 /// names a parent directory that does not exist, or resolves outside `root`;
@@ -64,7 +74,7 @@ pub(crate) fn confine_export_destination(
     let root_canonical = root
         .canonicalize()
         .map_err(|err| internal("canonicalize the export root", root, &err))?;
-    let Some(file_name) = candidate.file_name() else {
+    if candidate.file_name().is_none() {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
             format!(
@@ -72,7 +82,7 @@ pub(crate) fn confine_export_destination(
                 requested.display()
             ),
         ));
-    };
+    }
     let Some(parent) = candidate.parent() else {
         return Err(AmError::new(
             ErrorCode::InvalidArgument,
@@ -105,7 +115,10 @@ pub(crate) fn confine_export_destination(
             ),
         ));
     }
-    Ok(parent_canonical.join(file_name))
+    // Containment is proven; the caller's own candidate is what is returned, so
+    // the destination identity the caller holds and the custody row records is
+    // the one they supplied.
+    Ok(candidate)
 }
 
 /// Ensure the export root exists as a plain directory, creating it owner-only.

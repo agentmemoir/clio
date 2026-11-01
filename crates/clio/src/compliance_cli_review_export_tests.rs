@@ -24,9 +24,18 @@
 use super::*;
 use serde_json::{Value, json};
 
-/// Run one `compliance` invocation against injected streams and a scratch cwd.
+/// Run one `compliance` invocation against injected streams and a scratch cwd,
+/// with only the export root key answered: the process temp directory, which
+/// owns every scratch destination these tests hand the command.
 fn run_compliance(args: &[&str], current_dir: &Path) -> (ExitCode, String, String) {
-    let env = |_key: &str| -> Option<String> { None };
+    let export_root = std::env::temp_dir().to_string_lossy().into_owned();
+    let env = |key: &str| -> Option<String> {
+        if key == clio_config::EXPORT_ROOT_ENV {
+            Some(export_root.clone())
+        } else {
+            None
+        }
+    };
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut input = std::io::Cursor::new(Vec::new());

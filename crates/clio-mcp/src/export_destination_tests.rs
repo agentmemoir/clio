@@ -64,12 +64,6 @@ impl Drop for Scratch {
     }
 }
 
-/// The root every assertion compares against, canonicalized because the OS temp
-/// directory is reached through a symlink on some platforms.
-fn canonical(path: &Path) -> PathBuf {
-    path.canonicalize().expect("canonical root")
-}
-
 /// Assert one refusal and return its message for further inspection.
 fn refusal(root: &Path, destination: &str) -> String {
     let err = confine_export_destination(root, destination)
@@ -78,8 +72,11 @@ fn refusal(root: &Path, destination: &str) -> String {
     err.message
 }
 
+/// Confinement validates; it does not rewrite. The returned path is the
+/// caller's own absolute destination, so its identity survives the check even
+/// where the parent is reached through a symlink.
 #[test]
-fn destination_inside_the_root_is_accepted_and_normalised() {
+fn destination_inside_the_root_is_accepted_as_given() {
     let scratch = Scratch::new("inside");
     let root = scratch.path().join("root");
     std::fs::create_dir_all(root.join("nested")).expect("root");
@@ -87,10 +84,8 @@ fn destination_inside_the_root_is_accepted_and_normalised() {
     let confined = confine_export_destination(&root, &destination.to_string_lossy())
         .expect("a destination inside the root is accepted");
     assert!(confined.is_absolute(), "{}", confined.display());
-    assert_eq!(
-        confined,
-        canonical(&root).join("nested").join("bundle.json")
-    );
+    assert_eq!(confined, destination);
+    assert_eq!(confined, root.join("nested").join("bundle.json"));
 }
 
 #[test]
@@ -141,7 +136,7 @@ fn relative_bare_file_name_lands_under_the_root() {
     let confined =
         confine_export_destination(&root, "bundle.json").expect("a bare file name is accepted");
     assert!(root.is_dir(), "the root is created on first use");
-    assert_eq!(confined, canonical(&root).join("bundle.json"));
+    assert_eq!(confined, root.join("bundle.json"));
 }
 
 #[test]

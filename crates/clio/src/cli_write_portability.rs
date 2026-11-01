@@ -318,8 +318,19 @@ fn review_export_write(io: &CliIo, parsed: &ParsedArgs) -> Result<(), CliError> 
         shared_bank_enabled: false,
         kms_path: clio_config::kms_path::resolve_kms_path(&get, &target.url),
     };
-    let state = clio_mcp::runtime::McpState::open_one_shot(&options)
+    let mut state = clio_mcp::runtime::McpState::open_one_shot(&options)
         .map_err(|error| CliError::from_am_error(&error))?;
+    // The caller's `--out` is confined to the deployment export root, resolved
+    // from the same injected environment lookup as the database and key store,
+    // so `CLIO_EXPORT_ROOT` reaches the tool without a second process read.
+    let export_root = clio_config::resolve_export_root(
+        &get,
+        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )
+    .path;
+    std::sync::Arc::get_mut(&mut state)
+        .expect("a freshly opened state is uniquely owned")
+        .set_export_root(export_root);
     let mut args = base_args(parsed);
     args.insert("destination".into(), Value::from(flag(parsed, "out")));
     if let Some(limit) = parsed.value("limit") {

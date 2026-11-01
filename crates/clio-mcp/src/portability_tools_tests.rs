@@ -372,16 +372,11 @@ fn review_export_writes_ordered_content_free_rows() {
         }),
     );
     assert_eq!(out["ok"], Value::Bool(true), "{out}");
-    // Confinement returns the canonical parent, which differs from the temp path
-    // wherever the OS temp directory is reached through a symlink, so the name
-    // written is what the reply has to agree on.
+    // Confinement validates without rewriting, so the destination the reply
+    // names is exactly the one the caller passed — the same path the custody
+    // row records and the file lands on.
     let written = out["destination"].as_str().expect("destination");
-    assert!(std::path::Path::new(written).is_absolute(), "{out}");
-    assert_eq!(
-        std::path::Path::new(written).file_name(),
-        std::path::Path::new(&dest).file_name(),
-        "{out}"
-    );
+    assert_eq!(written, dest.as_str(), "{out}");
     let text = fs::read_to_string(&dest).expect("review export file");
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 2, "{text}");
