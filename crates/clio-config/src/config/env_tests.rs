@@ -73,6 +73,7 @@ fn all_pairs() -> Vec<(&'static str, &'static str)> {
         ("CLIO_EXTRACT_MODEL", "some/extract-model"),
         ("CLIO_EXTRACT_API_KEY", "ek-extract-token-0123456789"),
         ("CLIO_BANK", "env-bank"),
+        ("CLIO_SYNC_ALLOW_PUBLIC_BIND", "true"),
         ("CLIO_REPO_ROOT", "/tmp/from-env"),
     ]
 }
@@ -106,6 +107,12 @@ fn every_variable_reaches_the_path_it_owns() {
     // A batch cap cannot stay text any more than a dimension can, so it is
     // folded in as the number that was read.
     assert_eq!(rt.env_overlay.get("rerank.max_batch"), Some(&json!(16_u64)));
+
+    // The one boolean is folded in as a boolean for the same reason.
+    assert_eq!(
+        rt.env_overlay.get("sync.allow_public_bind"),
+        Some(&json!(true))
+    );
 
     let secrets = [
         ("credentials.embed_api_key", "sk-embed-token-0123456789"),
@@ -198,6 +205,48 @@ fn a_rerank_cap_above_the_service_limit_leaves_the_path_alone() {
         accepted.env_overlay.get("rerank.max_batch"),
         Some(&json!(1000_u64))
     );
+}
+
+/// A shell, a service unit, and a container compose file each spell an on flag differently, so the word and the digit both reach the path as the boolean they mean.
+#[test]
+fn the_public_bind_opt_in_is_read_as_true() {
+    for spelling in ["true", "1"] {
+        let mut rt = Runtime::with_env(&|_| None);
+        rt.apply_process_env(&mut env(&[("CLIO_SYNC_ALLOW_PUBLIC_BIND", spelling)]));
+        assert_eq!(
+            rt.env_overlay.get("sync.allow_public_bind"),
+            Some(&json!(true)),
+            "`{spelling}` did not read as true"
+        );
+    }
+}
+
+/// The off spellings reach the path as a boolean too, rather than as the text that was read, so a config file that already turned the setting on is overridden by an explicit off.
+#[test]
+fn the_public_bind_opt_in_is_read_as_false() {
+    for spelling in ["false", "0"] {
+        let mut rt = Runtime::with_env(&|_| None);
+        rt.apply_process_env(&mut env(&[("CLIO_SYNC_ALLOW_PUBLIC_BIND", spelling)]));
+        assert_eq!(
+            rt.env_overlay.get("sync.allow_public_bind"),
+            Some(&json!(false)),
+            "`{spelling}` did not read as false"
+        );
+    }
+}
+
+/// A word this cannot read is not guessed at in either direction, so the overlay leaves the path alone and the config default — off — stands.
+#[test]
+fn an_unreadable_public_bind_value_leaves_the_path_alone() {
+    for spelling in ["yes", "on", "", "TRUE"] {
+        let mut rt = Runtime::with_env(&|_| None);
+        rt.apply_process_env(&mut env(&[("CLIO_SYNC_ALLOW_PUBLIC_BIND", spelling)]));
+        assert!(
+            !rt.env_overlay.contains_key("sync.allow_public_bind"),
+            "`{spelling}` was guessed at: {:?}",
+            rt.env_overlay.get("sync.allow_public_bind")
+        );
+    }
 }
 
 /// The database URL is the one variable every code path has to agree on, so the

@@ -310,6 +310,21 @@ fn history_knob_validation() {
 }
 
 #[test]
+fn sync_allow_public_bind_is_a_settable_boolean() {
+    validate_set_path("sync.allow_public_bind").expect("allowlisted");
+    validate_set_value("sync.allow_public_bind", &json!(true)).expect("true is a boolean");
+    validate_set_value("sync.allow_public_bind", &json!(false)).expect("false is a boolean");
+}
+
+/// A quoted `"true"` is not the boolean, so the set path refuses it with the message the operator sees rather than reading it as on.
+#[test]
+fn a_non_boolean_public_bind_setting_is_rejected() {
+    let err = validate_set_value("sync.allow_public_bind", &json!("true")).expect_err("text");
+    assert_eq!(err.code, ErrorCode::InvalidType);
+    assert_eq!(err.message, "sync.allow_public_bind must be a boolean");
+}
+
+#[test]
 fn extract_knob_validation() {
     validate_set_path("extract.url").unwrap();
     validate_set_value("extract.url", &json!("http://localhost:34311")).unwrap();

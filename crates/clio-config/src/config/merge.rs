@@ -70,7 +70,10 @@ where
             "max_limit": clio_types::MAX_HISTORY_LIMIT
         },
         "credentials": {},
-        "sync": { "omit": true },
+        "sync": {
+            "omit": true,
+            "allow_public_bind": false
+        },
         "mcp": {
             "revision": "2025-11-25",
             "transports": ["stdio", "streamable_http"]
@@ -242,5 +245,16 @@ mod tests {
             defaults["store"]["sqlite_path"],
             json!("/home/u/.local/share/clio/clio.db")
         );
+    }
+
+    #[test]
+    fn sync_allow_public_bind_defaults_to_false() {
+        let defaults = system_defaults(&|_key: &str| None);
+        assert_eq!(
+            defaults.pointer("/sync/allow_public_bind").cloned(),
+            Some(json!(false)),
+            "a public sync bind must be off unless the operator turns it on"
+        );
+        assert_eq!(defaults.pointer("/sync/omit").cloned(), Some(json!(true)));
     }
 }

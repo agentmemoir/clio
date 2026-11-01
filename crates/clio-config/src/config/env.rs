@@ -120,6 +120,13 @@ impl Runtime {
             self.env_overlay
                 .insert("bank.fixed".into(), Value::String(bank));
         }
+        if let Some(allow) = get("CLIO_SYNC_ALLOW_PUBLIC_BIND")
+            .as_deref()
+            .and_then(env_bool)
+        {
+            self.env_overlay
+                .insert("sync.allow_public_bind".into(), Value::Bool(allow));
+        }
         if let Some(root) = get("CLIO_REPO_ROOT") {
             self.repo_root = Some(root);
         }
@@ -131,6 +138,17 @@ impl Runtime {
     #[must_use]
     pub fn bearer_for(&self, service: &str) -> Option<String> {
         bearer_for_effective(&self.effective_raw(), service)
+    }
+}
+
+/// Read a boolean environment value, or nothing at all.
+///
+/// `true`/`1` and `false`/`0` are the four spellings a shell, a service unit, or a container compose file uses for a flag, so all four are read; surrounding whitespace is ignored because an inherited value often carries it. Every other text is dropped rather than guessed, which leaves the operator setting at its default: reading `yes` or `on` as true would turn a typo into a public bind, and reading it as false would silently contradict the operator's intent.
+fn env_bool(raw: &str) -> Option<bool> {
+    match raw.trim() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
     }
 }
 

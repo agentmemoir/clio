@@ -48,6 +48,7 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "bank.policy",
     "credentials.api_key",
     "sync.omit",
+    "sync.allow_public_bind",
     "store.database_url",
     "store.sqlite_path",
     "extract.provider",
@@ -250,6 +251,15 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 return Err(AmError::new(
                     ErrorCode::InvalidType,
                     "sync.omit must be a boolean",
+                ));
+            }
+        },
+        "sync.allow_public_bind" => match value {
+            Value::Bool(_) => {}
+            _ => {
+                return Err(AmError::new(
+                    ErrorCode::InvalidType,
+                    "sync.allow_public_bind must be a boolean",
                 ));
             }
         },
