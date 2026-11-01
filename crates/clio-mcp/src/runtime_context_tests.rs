@@ -152,6 +152,23 @@ fn an_empty_resolved_bank_is_refused_on_both_paths() {
 }
 
 #[test]
+fn an_operator_scope_outside_the_grant_is_refused() {
+    // The scope an operator tool acts on is checked against the credential's
+    // list, not only the `bank` argument. An unbound local caller is allowed,
+    // because the process owner already holds the store.
+    assert!(state().require_bank_grant("bank-b").is_ok(), "local owner");
+    let bound = bound("ops-key");
+    assert!(bound.require_bank_grant("bank-a").is_ok(), "listed bank");
+    assert_eq!(
+        bound
+            .require_bank_grant("bank-b")
+            .expect_err("scope outside the grant")
+            .code,
+        ErrorCode::Forbidden
+    );
+}
+
+#[test]
 fn utc_stamp_formats_a_known_second_and_now_utc_is_stamped() {
     // 1970-01-01T00:00:00Z and one second past a day boundary.
     assert_eq!(utc_stamp(0), "1970-01-01T00:00:00Z");
@@ -166,6 +183,14 @@ fn utc_stamp_formats_a_known_second_and_now_utc_is_stamped() {
 fn clean_batch_ids_do_not_repeat() {
     let s = state();
     assert_ne!(s.next_clean_batch_id(), s.next_clean_batch_id());
+}
+
+#[test]
+fn item_ids_do_not_repeat() {
+    // The counter alone must separate two ids minted in one process: a fresh CLI
+    // one-shot starts it at 1 again, so the process id and clock ride along.
+    let s = state();
+    assert_ne!(s.next_item_id(), s.next_item_id());
 }
 
 #[test]
@@ -350,5 +375,76 @@ fn the_public_bind_setting_is_read_from_the_effective_config() {
     assert!(
         state.sync_allow_public_bind(),
         "the environment overlay must reach the serve decision, not only the config view"
+    );
+}
+
+/// A state whose config document layers `document` as a config file does, over
+/// the defaults a deployment boots with, so a value no environment variable can
+/// spell — a non-boolean, say — is reachable without touching the process env.
+fn state_with_config_document(document: &serde_json::Value) -> Arc<McpState> {
+    let mut runtime = clio_config::Runtime::with_env(&|_| None);
+    runtime
+        .load_file_json(&document.to_string())
+        .expect("config");
+    McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state")
+}
+
+/// The document the serve decision reads, so a test pins *why* it got its answer.
+fn effective_document(state: &McpState) -> serde_json::Value {
+    state.config.lock().expect("config").effective_raw()
+}
+
+#[test]
+fn the_public_bind_setting_is_refused_when_the_operator_says_false() {
+    let state = state_with_config_document(&json!({"sync": {"allow_public_bind": false}}));
+    // The explicit false, not an omitted key: this is the value being refused.
+    let setting = effective_document(&state)["sync"]["allow_public_bind"].clone();
+    assert_eq!(setting, json!(false));
+    assert!(
+        !state.sync_allow_public_bind(),
+        "an operator who wrote the setting false must not get a public bind"
+    );
+}
+
+#[test]
+fn a_non_boolean_public_bind_setting_is_refused() {
+    // A hand-written config file can hold any JSON at the path. Only a boolean
+    // admits a bind: everything else is the refusal, never a guess.
+    let state = state_with_config_document(&json!({"sync": {"allow_public_bind": "yes"}}));
+    let setting = effective_document(&state)["sync"]["allow_public_bind"].clone();
+    assert_eq!(setting, json!("yes"));
+    assert!(
+        !state.sync_allow_public_bind(),
+        "a value that is not a boolean must fall back to the refusal"
+    );
+}
+
+#[test]
+fn a_missing_public_bind_key_is_refused() {
+    // A document that names the `/sync` object but not the setting: the defaults
+    // supply the refusal. A document with no `/sync` object at all is not
+    // reachable, because the system defaults always carry one.
+    let state = state_with_config_document(&json!({"sync": {"omit": false}}));
+    assert!(
+        !state.sync_allow_public_bind(),
+        "a setting the deployment never named must refuse the public bind"
+    );
+}
+
+#[test]
+fn a_poisoned_config_lock_is_refused() {
+    let state = state();
+    // Poison the config mutex the way the drain test poisons the forest lock: a
+    // holder panics, `join` reports it, and the verdict is asserted afterwards.
+    let config = Arc::clone(&state.config);
+    let poisoned = std::thread::spawn(move || {
+        let _guard = config.lock().expect("config");
+        panic!("poison the config lock");
+    })
+    .join();
+    assert!(poisoned.is_err(), "the lock holder panicked");
+    assert!(
+        !state.sync_allow_public_bind(),
+        "a config lock that cannot be read must refuse the bind, never admit it"
     );
 }
