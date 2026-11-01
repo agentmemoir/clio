@@ -172,6 +172,18 @@ impl Fixture {
             .expect("checkpoint the write-ahead log");
     }
 
+    /// Register `bank` in this store without writing anything to it, so a
+    /// scenario can consolidate a bank that exists and holds no content.
+    pub fn register_bank(&self, bank: &str) {
+        use clio_store::{DekProvider, LocalDevKms, OpsStore, SqliteStore};
+        use std::sync::Arc;
+        let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+        let store = SqliteStore::open(&self.db, kms).expect("open the store to register a bank");
+        store
+            .register_bank(bank, "2024-01-01T00:00:00Z")
+            .expect("register an empty bank");
+    }
+
     /// The `clio` binary, with a cleared environment, the shared key seed, and
     /// this store selected.
     pub fn command(&self) -> Command {

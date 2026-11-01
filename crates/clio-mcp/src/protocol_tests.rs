@@ -63,6 +63,10 @@ fn t03_tools_list_returns_bound_set() {
 #[test]
 fn tools_call_success_wraps_result() {
     let (h, state) = handler();
+    state
+        .ops_store
+        .register_bank("bank-a", "2024-01-01T00:00:00Z")
+        .expect("register empty bank fixture");
     let _ = h.handle_message(&init_msg());
     let res = h
         .handle_message(&json!({
@@ -75,7 +79,6 @@ fn tools_call_success_wraps_result() {
     let text = res["result"]["content"][0]["text"].as_str().expect("text");
     let parsed: Value = serde_json::from_str(text).expect("text is JSON");
     assert_eq!(parsed["ok"], json!(true));
-    let _ = state;
 }
 
 #[test]

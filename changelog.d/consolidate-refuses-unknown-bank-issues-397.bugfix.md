@@ -1,0 +1,1 @@
+`clio consolidate` and the MCP `consolidate` tool refuse a bank name that no bank is registered under, reporting `not_found` and exiting 1, instead of reporting a completed wave and leaving a bank row plus `hub_distill_enqueue` and `hub_distill_complete` audit events keyed by the mistyped name.

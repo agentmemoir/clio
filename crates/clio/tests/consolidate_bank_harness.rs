@@ -157,17 +157,26 @@ fn an_unknown_bank_name_does_not_fall_back_to_the_context_bank() {
     let f = Fixture::new();
     f.seed_coactivated_bank(HUB_ITEMS);
 
-    // An unknown bank is an empty bank, exactly as it was before the rename:
-    // the call is accepted and must do its work there, never in the context
-    // bank it was not asked for.
+    // No bank is registered under this name, so the call is refused before the
+    // wave starts and can never do its work in the context bank it was not
+    // asked for.
     let mut session = McpSession::open(&f);
-    let queued = session.call(2, "consolidate", serde_json::json!({"bank": "ghost"}));
+    let result = session.call_raw(2, "consolidate", serde_json::json!({"bank": "ghost"}));
+    assert_eq!(result["isError"], Value::Bool(true), "{result}");
+    let structured = &result["structuredContent"];
+    assert_eq!(structured["ok"], Value::Bool(false), "{result}");
     assert_eq!(
-        queued["status"],
-        Value::String("accepted".into()),
-        "{queued}"
+        structured["code"],
+        Value::String("not_found".into()),
+        "{result}"
     );
-    f.await_hub_wave();
+    assert!(
+        structured["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ghost"),
+        "the refusal must name the bank: {result}"
+    );
     assert!(
         session.finish().success(),
         "the MCP session must exit cleanly"

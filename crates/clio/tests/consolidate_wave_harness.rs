@@ -33,7 +33,9 @@ mod common;
 #[path = "consolidate_wave_support/mod.rs"]
 mod consolidate_wave_support;
 
-use consolidate_wave_support::{Fixture, HUB_ITEMS, McpSession, TUNABLE_ITEMS, distilled_count};
+use consolidate_wave_support::{
+    BANK, Fixture, HUB_ITEMS, McpSession, TUNABLE_ITEMS, distilled_count,
+};
 use serde_json::Value;
 
 /// The co-activation degree `n` fully connected items produce: each one links
@@ -389,6 +391,7 @@ fn a_wave_that_cannot_run_reports_a_failure_not_a_completed_wave() {
 #[test]
 fn consolidate_on_an_empty_bank_reports_no_hubs_and_writes_none() {
     let f = Fixture::new();
+    f.register_bank(BANK);
     let payload = f.json(&["consolidate", "--force", "--output", "json"]);
     assert_eq!(payload["ok"], Value::Bool(true), "{payload}");
     assert_eq!(
