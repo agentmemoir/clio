@@ -3,25 +3,19 @@
 //
 //! # Responsibility
 //!
-//! This module tests the `clio` portability write commands: the export→import
-//! round trip and its idempotency, the dry-run and confirmation gates for
-//! erasure, usage fail-closed paths, the privileged-actor gate, and secret
-//! masking in export output.
+//! This module tests the `clio` portability write commands: the export→import round trip and its idempotency, the erasure dry-run and confirmation gates, usage fail-closed paths, the privileged-actor gate, secret masking in export output, and export-root confinement on the production write seam; the test-only module never reaches a production build.
 //!
 //! ## Owns
 //! - Behavior, golden, and group-contract tests for `cli_write_portability`
 //!
-//! ## Does not own
-//! - The command under test (`cli_write_portability`)
-//! - Bundle, import, and erasure semantics (see `clio-compliance`)
-//!
 //! ## Boundary
-//!
-//! Test-only. Never compiled into production builds.
+//! Test-only, never compiled into production builds, and it owns neither the command under test (`cli_write_portability`) nor its bundle, import, and erasure semantics (see `clio-compliance`).
 
 use crate::cli_read_test_support::{json_of, seed_item, state};
 use crate::cli_write_group::WriteGroup;
-use crate::cli_write_test_support::{bank_count, journal_state, run_write_state};
+use crate::cli_write_test_support::{
+    bank_count, journal_state, run_write_resolved_env, run_write_state,
+};
 use serde_json::{Value, json};
 use std::process::ExitCode;
 
@@ -308,6 +302,30 @@ fn usage_failures_exit_two_and_name_the_missing_flag() {
     );
     assert_eq!(code, ExitCode::from(2), "{out}{err}");
     assert!(err.contains("include-archived"), "{err}");
+}
+
+/// The production `run_resolved` seam installs the root from the injected
+/// lookup, so an out-of-root `--out` is refused with `invalid_argument`.
+#[test]
+fn export_refuses_a_destination_outside_the_export_root() {
+    let base = std::env::temp_dir().join(format!("clio-export-root-{}", std::process::id()));
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&outside).expect("create an outside directory");
+    let dest = outside.join("bundle.json");
+    let root_arg = base.join("root").display().to_string();
+    let dest_arg = dest.display().to_string();
+    let store_arg = base.join("store.db").display().to_string();
+    let env = |key: &str| (key == clio_config::EXPORT_ROOT_ENV).then(|| root_arg.clone());
+    let args: [&str; 6] = ["--out", &dest_arg, "--actor", "harness", "--db", &store_arg];
+    let (code, out, err) = run_write_resolved_env("export", &args, &env);
+    let refused = ExitCode::from(crate::cli_error::EXIT_OPERATIONAL);
+    assert_eq!(code, refused, "{out}{err}");
+    assert_eq!(json_of(&err)["code"], json!("invalid_argument"), "{err}");
+    let quiet = out.trim().is_empty() && !dest.exists();
+    assert!(quiet, "a refusal writes nothing: {out}");
+    let landed = std::fs::read_dir(&outside).expect("read outside").count();
+    assert_eq!(landed, 0, "the refused export wrote no other file");
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 // ---------- masking ----------
