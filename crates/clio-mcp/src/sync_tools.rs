@@ -185,12 +185,15 @@ fn keys_payload(keys: &[clio_config::sync_key::SyncKeyEntry]) -> Vec<Value> {
 /// authority would ignore every recorded denial.
 ///
 /// # Errors
-/// Those refusals, or a bind, auth, or store failure.
+/// Those refusals, a non-administrative credential, or a bind, auth, or store
+/// failure.
 pub fn sync_serve_with(
     state: &McpState,
     args: &Value,
     get: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, AmError> {
+    // Opening this store to other hosts is administrative, like a config write.
+    state.authorize_admin()?;
     // Reject a supplied `token` loudly rather than silently ignore it: the
     // caller would otherwise believe the bind is authenticated while a
     // token-only request can never resolve to a scoped record.

@@ -26,6 +26,7 @@
 //! Keep this module focused on MCP sync tool tests.
 
 use super::sync_tools_test_support_tests::{TempDir, state};
+use crate::principal::Principal;
 use crate::write_tools::dispatch;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -281,6 +282,25 @@ fn sync_serve_gate_is_token_file_or_explicit_dev_mode() {
     );
     assert_eq!(missing["ok"], Value::Bool(false), "{missing}");
     assert_eq!(missing["code"], "config_corrupt", "{missing}");
+}
+
+/// Serving this node's store to other hosts is an administrative act, so a
+/// bank-limited `agent` credential is refused before any server work runs.
+#[test]
+fn sync_serve_refuses_a_bank_limited_agent_principal() {
+    let st = state();
+    let bound = st.with_principal(Principal::new(
+        "agent-key".to_owned(),
+        clio_types::Actor::Agent,
+        vec!["bank-mcp".to_owned()],
+    ));
+    let err = super::sync_serve_with(&bound, &json!({ "dev": true }), &|_n: &str| None)
+        .expect_err("a bank-limited agent credential must not serve");
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden, "{err:?}");
+    // An unbound local state still serves in dev mode; its full shape is pinned
+    // by `sync_serve_refuses_anonymous_bind_outside_dev_mode`.
+    let served = dispatch(&st, "sync_serve", &json!({ "dev": true, "ttl_secs": 1 }));
+    assert_eq!(served["ok"], Value::Bool(true), "{served}");
 }
 
 #[test]
