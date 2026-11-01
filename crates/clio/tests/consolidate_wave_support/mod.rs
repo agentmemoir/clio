@@ -69,6 +69,13 @@ pub const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 /// duration happened to elapse.
 pub const WAVE_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The exit code the CLI reports for an operational failure rather than a
+/// usage error.
+///
+/// Must match `cli_error::EXIT_OPERATIONAL`, which is crate-private and so
+/// unreadable from this test binary.
+pub const EXIT_OPERATIONAL: i32 = 1;
+
 /// The bank every scenario consolidates.
 pub const BANK: &str = "hubbank";
 /// Items that form a hub at the *default* degree limit of 16: every node is
@@ -170,6 +177,21 @@ impl Fixture {
         let conn = rusqlite::Connection::open(&self.db).expect("open the store to checkpoint");
         conn.execute_batch("pragma wal_checkpoint(truncate);")
             .expect("checkpoint the write-ahead log");
+    }
+
+    /// Register `bank` in this store without writing anything to it, so a
+    /// scenario can consolidate a bank that exists and holds no content.
+    ///
+    /// Only for a fixture store that holds no encrypted rows yet: the local
+    /// dev key setup this opens with cannot read rows another setup sealed.
+    pub fn register_bank(&self, bank: &str) {
+        use clio_store::{DekProvider, LocalDevKms, OpsStore, SqliteStore};
+        use std::sync::Arc;
+        let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+        let store = SqliteStore::open(&self.db, kms).expect("open the store to register a bank");
+        store
+            .register_bank(bank, "2024-01-01T00:00:00Z")
+            .expect("register an empty bank");
     }
 
     /// The `clio` binary, with a cleared environment, the shared key seed, and

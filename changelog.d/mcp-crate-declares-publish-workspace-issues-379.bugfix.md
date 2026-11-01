@@ -1,0 +1,1 @@
+The `clio-mcp` crate now declares `publish.workspace = true`, so it stays out of a crates.io release like every other workspace member instead of defaulting to publishable and being skipped by `cargo publish` only because it was never named.

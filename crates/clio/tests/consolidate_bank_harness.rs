@@ -30,7 +30,9 @@ mod common;
 #[path = "consolidate_wave_support/mod.rs"]
 mod consolidate_wave_support;
 
-use consolidate_wave_support::{BANK, Fixture, HUB_ITEMS, McpSession, distilled_count};
+use consolidate_wave_support::{
+    BANK, EXIT_OPERATIONAL, Fixture, HUB_ITEMS, McpSession, distilled_count, json_stderr,
+};
 use serde_json::Value;
 
 /// A second bank, so a selector that fell back to the context bank would be
@@ -157,26 +159,75 @@ fn an_unknown_bank_name_does_not_fall_back_to_the_context_bank() {
     let f = Fixture::new();
     f.seed_coactivated_bank(HUB_ITEMS);
 
-    // An unknown bank is an empty bank, exactly as it was before the rename:
-    // the call is accepted and must do its work there, never in the context
-    // bank it was not asked for.
+    // No bank is registered under this name, so the call is refused before the
+    // wave starts and can never do its work in the context bank it was not
+    // asked for.
     let mut session = McpSession::open(&f);
-    let queued = session.call(2, "consolidate", serde_json::json!({"bank": "ghost"}));
+    let result = session.call_raw(2, "consolidate", serde_json::json!({"bank": "ghost"}));
+    assert_eq!(result["isError"], Value::Bool(true), "{result}");
+    let structured = &result["structuredContent"];
+    assert_eq!(structured["ok"], Value::Bool(false), "{result}");
     assert_eq!(
-        queued["status"],
-        Value::String("accepted".into()),
-        "{queued}"
+        structured["code"],
+        Value::String("not_found".into()),
+        "{result}"
     );
-    f.await_hub_wave();
+    assert!(
+        structured["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ghost"),
+        "the refusal must name the bank: {result}"
+    );
     assert!(
         session.finish().success(),
         "the MCP session must exit cleanly"
     );
 
     assert!(f.distilled_ids_in(BANK).is_empty(), "no fallback allowed");
+}
+
+#[test]
+fn cli_refuses_an_unknown_bank_with_not_found() {
+    let f = Fixture::new();
+    let out = f.output(&["--bank", "nope", "consolidate", "--output", "json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(EXIT_OPERATIONAL),
+        "an unknown bank is an operational failure: {out:?}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.is_empty(), "no payload: {stdout}");
+    let envelope = json_stderr(&out);
+    assert_eq!(envelope["ok"], Value::Bool(false), "{envelope}");
+    assert_eq!(
+        envelope["code"],
+        Value::String("not_found".into()),
+        "{envelope}"
+    );
     assert!(
-        f.distilled_ids_in("ghost").is_empty(),
-        "an empty bank has no units"
+        envelope["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("nope"),
+        "the refusal must name the bank: {envelope}"
+    );
+}
+
+#[test]
+fn a_refused_consolidate_writes_no_bank_row_and_no_hub_audit() {
+    let f = Fixture::new();
+    let out = f.output(&["--bank", "ghost-bank", "consolidate", "--output", "json"]);
+    assert_eq!(out.status.code(), Some(EXIT_OPERATIONAL), "{out:?}");
+    assert!(
+        f.rows("select id, 0 from banks where id = 'ghost-bank'")
+            .is_empty(),
+        "the refused bank must not be registered"
+    );
+    assert!(
+        f.hub_audit().is_empty(),
+        "a refusal must write no hub audit event: {:?}",
+        f.hub_audit()
     );
 }
 

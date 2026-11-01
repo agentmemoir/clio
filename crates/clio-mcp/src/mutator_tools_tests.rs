@@ -180,6 +180,9 @@ fn failure_record_caps_lesson() {
 #[test]
 fn consolidate_accepts_without_blocking() {
     let s = state();
+    s.ops_store
+        .register_bank("bank-a", "2024-01-01T00:00:00Z")
+        .expect("register empty bank fixture");
     let out = call(&s, "consolidate", json!({"bank": "bank-a"}));
     assert_eq!(out["ok"], json!(true), "{out}");
     assert!(out["job_id"].as_str().is_some());
@@ -192,6 +195,9 @@ fn consolidate_accepts_without_blocking() {
 #[test]
 fn consolidate_force_refreshes() {
     let s = state();
+    s.ops_store
+        .register_bank("bank-a", "2024-01-01T00:00:00Z")
+        .expect("register empty bank fixture");
     let out = call(&s, "consolidate", json!({"bank": "bank-a", "force": true}));
     assert_eq!(out["ok"], json!(true), "{out}");
 }
@@ -214,6 +220,9 @@ fn consolidate_rejects_the_removed_scope_argument() {
 #[test]
 fn a_long_lived_binding_keeps_the_async_consolidate_response() {
     let s = state();
+    s.ops_store
+        .register_bank("bank-a", "2024-01-01T00:00:00Z")
+        .expect("register empty bank fixture");
     let out = call(&s, "consolidate", json!({"bank": "bank-a"}));
     assert_eq!(out["ok"], json!(true), "{out}");
     assert_eq!(out["status"], json!("accepted"), "{out}");
@@ -233,6 +242,9 @@ fn a_one_shot_binding_completes_the_consolidate_wave() {
         None,
     )
     .expect("one-shot state");
+    s.ops_store
+        .register_bank("bank-a", "2024-01-01T00:00:00Z")
+        .expect("register empty bank fixture");
     let out = call(&s, "consolidate", json!({"bank": "bank-a"}));
     assert_eq!(out["ok"], json!(true), "{out}");
     assert_eq!(out["status"], json!("completed"), "{out}");
@@ -242,6 +254,19 @@ fn a_one_shot_binding_completes_the_consolidate_wave() {
             .unwrap_or_default()
             .starts_with("hub_distill:"),
         "a joined wave must report the real hub summary, got {out}"
+    );
+}
+
+#[test]
+fn consolidate_refuses_an_unknown_bank() {
+    let s = state();
+    let out = call(&s, "consolidate", json!({"bank": "no-such-bank"}));
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("not_found"), "{out}");
+    assert_eq!(
+        out["message"],
+        json!("bank `no-such-bank` not found"),
+        "{out}"
     );
 }
 
