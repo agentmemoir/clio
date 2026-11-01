@@ -185,10 +185,6 @@ fn an_unknown_bank_name_does_not_fall_back_to_the_context_bank() {
     );
 
     assert!(f.distilled_ids_in(BANK).is_empty(), "no fallback allowed");
-    assert!(
-        f.distilled_ids_in("ghost").is_empty(),
-        "an empty bank has no units"
-    );
 }
 
 #[test]

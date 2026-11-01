@@ -71,6 +71,9 @@ pub const WAVE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The exit code the CLI reports for an operational failure rather than a
 /// usage error.
+///
+/// Must match `cli_error::EXIT_OPERATIONAL`, which is crate-private and so
+/// unreadable from this test binary.
 pub const EXIT_OPERATIONAL: i32 = 1;
 
 /// The bank every scenario consolidates.
@@ -178,6 +181,9 @@ impl Fixture {
 
     /// Register `bank` in this store without writing anything to it, so a
     /// scenario can consolidate a bank that exists and holds no content.
+    ///
+    /// Only for a fixture store that holds no encrypted rows yet: the local
+    /// dev key setup this opens with cannot read rows another setup sealed.
     pub fn register_bank(&self, bank: &str) {
         use clio_store::{DekProvider, LocalDevKms, OpsStore, SqliteStore};
         use std::sync::Arc;

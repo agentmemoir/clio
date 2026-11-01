@@ -391,6 +391,9 @@ fn a_wave_that_cannot_run_reports_a_failure_not_a_completed_wave() {
 #[test]
 fn consolidate_on_an_empty_bank_reports_no_hubs_and_writes_none() {
     let f = Fixture::new();
+    // This scenario used to consolidate against a store with no bank row. An
+    // unknown bank is now refused before the wave starts, so the bank has to
+    // exist, and the no-bank-row shape lives in the refusal tests.
     f.register_bank(BANK);
     let payload = f.json(&["consolidate", "--force", "--output", "json"]);
     assert_eq!(payload["ok"], Value::Bool(true), "{payload}");

@@ -391,7 +391,7 @@ fn consolidate(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let bank = ctx.bank.as_str().to_owned();
     // The wave registers the bank it runs in, so an unknown name must be
     // refused here: resolving the context does not check that the bank exists.
-    state.require_known_bank(ctx.bank.as_str())?;
+    state.require_known_bank(&bank)?;
     let force = opt_bool(args, "force", false)?;
     // Take the process's current ranking environment as the wave's policy, so a
     // `ranking_env_set` earlier in this process governs the wave this call
