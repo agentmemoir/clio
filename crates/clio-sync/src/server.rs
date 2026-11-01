@@ -48,7 +48,8 @@
 //!
 //! Keep this module focused on the sync server's routes and public surface.
 
-use crate::bind_warning::warn_public_bind;
+use crate::bind_admission::{bind_admission, refusal_message};
+use crate::bind_warning::{bind_is_loopback, warn_public_bind};
 use crate::clock::now_utc;
 use crate::conn_pool::{ConnectionPool, MAX_CONNECTIONS};
 use crate::credential::{AuthOutcome, CredentialStore};
@@ -91,6 +92,8 @@ pub struct SyncServerOptions {
     pub token_file: Option<PathBuf>,
     /// Dev mode: profile explicitly marked dev; may relax auth.
     pub dev_mode: bool,
+    /// Operator permission to bind outside loopback; off refuses the bind.
+    pub allow_public_bind: bool,
     /// Auto-stop TTL. `None` uses the 30-minute interactive default.
     pub ttl_secs: Option<u64>,
     /// Total request deadline seconds, bounding the *read* of one request
@@ -183,7 +186,7 @@ impl SyncServer {
 /// server with one wired.
 ///
 /// # Errors
-/// Bind failure, or auth material missing outside dev mode.
+/// Bind failure, a refused public bind, or auth material missing outside dev mode.
 pub fn sync_serve(options: SyncServerOptions) -> Result<SyncServer, AmError> {
     serve(options, None)
 }
@@ -196,7 +199,7 @@ pub fn sync_serve(options: SyncServerOptions) -> Result<SyncServer, AmError> {
 /// unreadable authority refuses the affected action instead of clearing it.
 ///
 /// # Errors
-/// Bind failure, or auth material missing outside dev mode.
+/// Bind failure, a refused public bind, or auth material missing outside dev mode.
 pub fn sync_serve_with_denial(
     options: SyncServerOptions,
     denial: Arc<dyn ErasureDenial>,
@@ -223,6 +226,9 @@ fn serve(
         .set_nonblocking(true)
         .expect("listener nonblocking setup");
     let local = listener.local_addr().expect("listener local addr");
+    if bind_admission(bind_is_loopback(local), options.allow_public_bind).is_some() {
+        return Err(AmError::new(ErrorCode::Forbidden, refusal_message(local)));
+    }
     warn_public_bind(local);
     let addr = local.to_string();
     let stop = Arc::new(AtomicBool::new(false));

@@ -6,13 +6,20 @@
 //! This module is responsible for the MCP-bound multi-host sync tools'
 //! dispatch and local surfaces: `sync_status` (masked local report),
 //! `sync_key_status` (masked key management report), `sync_serve` (background
-//! server with a removed-token rejection, dev-mode refusal, and TTL), and the
-//! bank/client-config helpers the transfer tools read.
+//! server behind an administrator gate, with a removed-token rejection,
+//! dev-mode refusal, and TTL), and the bank/client-config helpers the transfer
+//! tools read.
 //!
 //! ## Owns
 //! - Dispatch routing for the six sync tool names
 //! - JSON argument decoding and result shaping for the status, key-status,
 //!   and serve tools
+//! - The `sync_serve` administrator gate: `authorize_admin` refuses a caller
+//!   whose principal is an agent or a user, so a harness or system credential
+//!   is required when a principal is present
+//! - The serve admission wiring: `sync_serve` hands the operator's
+//!   `sync.allow_public_bind` setting to `SyncServerOptions`, so the server
+//!   refuses a non-loopback bind the setting has not admitted
 //! - Client config assembly (`device_id`, store/sync handles, remote, token,
 //!   and encryption keys): the status path takes a `sync_key` override and
 //!   otherwise reads the recorded store, marker-authoritative, while the
@@ -188,7 +195,8 @@ fn keys_payload(keys: &[clio_config::sync_key::SyncKeyEntry]) -> Vec<Value> {
 /// input was removed; the store file is the one credential source) and an
 /// anonymous bind outside dev mode (mirroring the clio-sync server's refusal).
 /// The response carries the resolved address (ephemeral port included), the
-/// effective TTL, and the served banks.
+/// effective TTL, and the served banks, each of which passed the per-bank gate:
+/// a bank outside the credential's grant is refused, never dropped.
 ///
 /// `get` is the environment lookup, so a host or a test can point the route at
 /// this deployment's erasure journal without reading the process environment. A
@@ -196,12 +204,15 @@ fn keys_payload(keys: &[clio_config::sync_key::SyncKeyEntry]) -> Vec<Value> {
 /// authority would ignore every recorded denial.
 ///
 /// # Errors
-/// Those refusals, or a bind, auth, or store failure.
+/// Those refusals, a non-administrative credential, or a bind, auth, or store
+/// failure.
 pub fn sync_serve_with(
     state: &McpState,
     args: &Value,
     get: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, AmError> {
+    // Opening this store to other hosts is administrative, like a config write.
+    state.authorize_admin()?;
     // Reject a supplied `token` loudly rather than silently ignore it: the
     // caller would otherwise believe the bind is authenticated while a
     // token-only request can never resolve to a scoped record.
@@ -240,6 +251,7 @@ pub fn sync_serve_with(
             banks: banks.clone(),
             token_file,
             dev_mode: dev,
+            allow_public_bind: state.sync_allow_public_bind(),
             ttl_secs,
             deadline_secs: None,
             device_id: state.device_id.clone(),

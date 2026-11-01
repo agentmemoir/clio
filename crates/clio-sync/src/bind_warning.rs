@@ -3,9 +3,9 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the one operator warning a sync-server bind
-//! can raise: a bind to a non-loopback address is told what crosses the
-//! network in the clear, and the bind proceeds.
+//! This module is responsible for the one operator warning an admitted
+//! sync-server bind can raise: a bind to a non-loopback address is told what
+//! crosses the network in the clear, and the serve proceeds with it.
 //!
 //! ## Owns
 //! - `bind_is_loopback`: the single loopback classification for a bind address
@@ -15,6 +15,8 @@
 //! ## Does not own
 //! - The anonymous-bind refusal outside dev mode (`server`, mirrored by the
 //!   MCP tool binding)
+//! - The non-loopback bind refusal, which runs before this warning ever fires
+//!   (`bind_admission`)
 //! - Any request handling or transport framing (`server_conn`, `http`)
 //! - The wire fields themselves (`protocol`, `client_feed`)
 //!
@@ -26,15 +28,16 @@
 //!
 //! Keep this module focused on the bind warning and nothing past it.
 //!
-//! # Why warn rather than refuse
+//! # Why warn an admitted bind rather than refuse it
 //!
-//! The dangerous case is already refused: a non-loopback bind without auth
-//! material is rejected outside dev mode. An operator who has supplied a token
-//! and bound publicly is running a supported configuration, typically behind a
-//! proxy, so this warning names the exposure and leaves the decision with the
-//! operator. It fires in every mode, dev included, because dev is where an
-//! operator is most likely to try a public bind; it goes to stderr only, so a
-//! machine-readable response stream is never touched.
+//! Whether a bind outside loopback may serve at all is settled before this
+//! module is reached: without auth material it is refused outside dev mode, and
+//! with the operator setting off it is refused by `bind_admission`. So the
+//! warning runs only on the path the operator has explicitly allowed, and its
+//! job there is to name what that admitted bind exposes rather than to argue
+//! about whether it should happen. It fires in every mode, dev included,
+//! because dev is where an operator is most likely to allow a public bind; it
+//! goes to stderr only, so a machine-readable response stream is never touched.
 
 use std::net::SocketAddr;
 
@@ -82,7 +85,8 @@ pub(crate) fn public_bind_warning(addr: SocketAddr) -> String {
 /// Warn once per bind when the address is not loopback.
 ///
 /// The warning is on stderr only, so an `--output json` stream or an MCP
-/// response body is never corrupted. The bind always proceeds.
+/// response body is never corrupted. It runs only on a bind the operator
+/// setting has admitted.
 pub(crate) fn warn_public_bind(addr: SocketAddr) {
     if !bind_is_loopback(addr) {
         eprintln!("{}", public_bind_warning(addr));

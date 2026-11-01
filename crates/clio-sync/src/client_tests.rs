@@ -56,6 +56,7 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
         banks: banks.iter().map(|b| (*b).to_owned()).collect(),
         token_file: Some(credentials.path().to_path_buf()),
         dev_mode: false,
+        allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
         device_id: "srv-1".into(),

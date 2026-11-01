@@ -112,6 +112,7 @@ fn denial_relay(banks: &[&str]) -> (SyncServer, Arc<FakeDenial>) {
             banks: banks.iter().map(|bank| (*bank).to_owned()).collect(),
             token_file: Some(credentials.path().to_path_buf()),
             dev_mode: false,
+            allow_public_bind: false,
             ttl_secs: None,
             deadline_secs: None,
             device_id: "srv-1".into(),

@@ -4,9 +4,10 @@
 //! # Responsibility
 //!
 //! This module is responsible for process-level contract tests of
-//! `clio sync serve` startup: the non-loopback bind warning on stderr in dev
-//! mode and with a credential store, its absence on a loopback bind, and stdout
-//! purity under `--output json`.
+//! `clio sync serve` startup: the non-loopback bind warning on stderr once the
+//! operator setting admits the bind, the refusal of a public bind without that
+//! setting, the warning's absence on a loopback bind, and stdout purity under
+//! `--output json`.
 //!
 //! ## Owns
 //! - Spawning the real `clio` binary for `sync serve` and asserting its
@@ -37,17 +38,27 @@ use sync_wire_support::{NodeDir, clio, write_credential_store};
 
 /// The warning prefix the sync server writes to stderr on a public bind.
 const WARNING_PREFIX: &str = "sync serve: bind ";
+/// The refusal prefix the sync server writes to stderr on a refused bind. It
+/// shares no prefix with the warning, so neither stream can satisfy the other's
+/// assertion.
+const REFUSAL_PREFIX: &str = "sync serve: refusing the bind at ";
+/// The operator setting that admits a bind outside loopback.
+const ALLOW_PUBLIC_BIND_ENV: &str = "CLIO_SYNC_ALLOW_PUBLIC_BIND";
 /// The line `clio sync serve` prints once the server is up.
 const LISTENING_PREFIX: &str = "sync serve listening on ";
 
 /// Spawn `clio sync serve` with the test's own scratch directory, so every
 /// writable path a start resolves — the erasure journal a serve start refuses
 /// to bind without, among them — stays inside this test's scratch directory.
-fn spawn_serve(scratch: &NodeDir, extra: &[&str]) -> Child {
+///
+/// `env` is set on top of the cleared harness environment, so a test opts into
+/// an operator setting explicitly and never inherits one from the runner.
+fn spawn_serve(scratch: &NodeDir, extra: &[&str], env: &[(&str, &str)]) -> Child {
     let mut args = vec!["sync", "serve"];
     args.extend_from_slice(extra);
     clio(scratch.path())
         .args(&args)
+        .envs(env.iter().copied())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -132,11 +143,12 @@ fn kill_and_collect_stderr(mut child: Child) -> Vec<u8> {
     bytes
 }
 
-/// A public bind warns on stderr — naming the routing fields, the fields that
-/// cross in the clear in a keyed form, the sealed pair, and the residual — in dev
-/// mode, and stdout stays a parseable json document. Which side of the line each
-/// name sits on is checked against the shared table, not by substring presence;
-/// this harness checks that a real binary's stderr carries the names at all.
+/// A public bind admits on the operator setting, then warns on stderr — naming
+/// the routing fields, the fields that cross in the clear in a keyed form, the
+/// sealed pair, and the residual — in dev mode, and stdout stays a parseable
+/// json document. Which side of the line each name sits on is checked against
+/// the shared table, not by substring presence; this harness checks that a real
+/// binary's stderr carries the names at all.
 #[test]
 fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
     let scratch = NodeDir::new("bind-public-dev");
@@ -153,6 +165,7 @@ fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
             "--db",
             "sqlite::memory:",
         ],
+        &[(ALLOW_PUBLIC_BIND_ENV, "true")],
     );
     let stderr = stderr_until(&mut child, WARNING_PREFIX);
     assert!(
@@ -192,9 +205,10 @@ fn a_public_dev_bind_warns_on_stderr_and_keeps_stdout_json() {
     );
 }
 
-/// A public bind warns in normal mode too: a credential store is configured, so
-/// the anonymous-bind refusal does not fire, and the warning still does. The
-/// store is a per-test scratch file that removes itself with the guard.
+/// A public bind warns in normal mode too once the operator setting admits it:
+/// a credential store is configured, so the anonymous-bind refusal does not
+/// fire, and the warning still does. The store is a per-test scratch file that
+/// removes itself with the guard.
 #[test]
 fn a_public_bind_warns_with_a_credential_store() {
     let credentials = NodeDir::new("bind-credentials");
@@ -211,6 +225,7 @@ fn a_public_bind_warns_with_a_credential_store() {
             "--db",
             "sqlite::memory:",
         ],
+        &[(ALLOW_PUBLIC_BIND_ENV, "true")],
     );
     let stderr = stderr_until(&mut child, WARNING_PREFIX);
     assert!(
@@ -237,6 +252,7 @@ fn a_loopback_bind_stays_silent() {
             "--db",
             "sqlite::memory:",
         ],
+        &[],
     );
     let listening = stdout_listening(&mut child);
     assert!(listening, "the loopback bind must proceed");
@@ -263,11 +279,48 @@ fn an_anonymous_public_bind_outside_dev_mode_is_still_refused() {
             "--db",
             "sqlite::memory:",
         ],
+        &[],
     );
     let stderr = stderr_until(&mut child, "refusing anonymous bind");
     assert!(
         stderr.contains("refusing anonymous bind"),
         "the refusal must stay: {stderr:?}"
+    );
+    let stdout = kill_and_collect_stdout(child);
+    assert!(
+        stdout.is_empty(),
+        "a refused bind must not answer: {:?}",
+        String::from_utf8_lossy(&stdout)
+    );
+}
+
+/// A public bind without the operator setting is refused before it serves, and
+/// the refusal names the setting, on stderr, with no answer on stdout. Dev mode
+/// is on so the anonymous-bind refusal cannot stand in for this one.
+#[test]
+fn a_public_bind_is_refused_without_the_setting() {
+    let scratch = NodeDir::new("bind-refused");
+    let mut child = spawn_serve(
+        &scratch,
+        &[
+            "--bind",
+            "0.0.0.0:0",
+            "--dev",
+            "--ttl-secs",
+            "30",
+            "--db",
+            "sqlite::memory:",
+        ],
+        &[],
+    );
+    let stderr = stderr_until(&mut child, REFUSAL_PREFIX);
+    assert!(
+        stderr.contains(REFUSAL_PREFIX),
+        "the public bind must be refused, naming the address: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("sync.allow_public_bind"),
+        "the refusal must name the operator setting: {stderr:?}"
     );
     let stdout = kill_and_collect_stdout(child);
     assert!(

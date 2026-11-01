@@ -130,7 +130,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "sync_serve",
-            description: "Start the sync server on a background thread for the given banks; auto-stops after the TTL (default 30 minutes). Requires a scoped credential store passed as `token_file` (add records with `clio auth token add`) unless dev=true (dev profile). A bound call refuses a bank outside the credential's list or a `shared` bank the deployment has not enabled.",
+            description: "Start the sync server on a background thread for the given banks; auto-stops after the TTL (default 30 minutes). Requires a harness or system (administrator) credential when a principal is present, and the scoped credential store passed as `token_file` (records added with `clio auth token add`); every served bank must be inside that credential's grant, so an out-of-grant bank is refused. `dev: true` serves without authentication, so it is an exercise/debug path, and a non-loopback bind is refused unless the operator setting `sync.allow_public_bind` is enabled.",
             required: &[],
             props: vec![
                 (

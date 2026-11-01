@@ -25,6 +25,7 @@
 //! Keep this module focused on MCP sync tool tests.
 
 use super::sync_tools_test_support_tests::{TempDir, state};
+use crate::principal::Principal;
 use crate::write_tools::dispatch;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -280,6 +281,51 @@ fn sync_serve_gate_is_token_file_or_explicit_dev_mode() {
     );
     assert_eq!(missing["ok"], Value::Bool(false), "{missing}");
     assert_eq!(missing["code"], "config_corrupt", "{missing}");
+}
+
+/// Serving this node's store to other hosts is an administrative act, so a
+/// bank-limited `agent` credential is refused before any server work runs.
+#[test]
+fn sync_serve_refuses_a_bank_limited_agent_principal() {
+    let st = state();
+    let bound = st.with_principal(Principal::new(
+        "agent-key".to_owned(),
+        clio_types::Actor::Agent,
+        vec!["bank-mcp".to_owned()],
+    ));
+    let err = super::sync_serve_with(&bound, &json!({ "dev": true }), &|_n: &str| None)
+        .expect_err("a bank-limited agent credential must not serve");
+    assert_eq!(err.code, clio_types::ErrorCode::Forbidden, "{err:?}");
+    // An unbound local state still serves in dev mode; its full shape is pinned
+    // by `sync_serve_refuses_anonymous_bind_outside_dev_mode`.
+    let served = dispatch(&st, "sync_serve", &json!({ "dev": true, "ttl_secs": 1 }));
+    assert_eq!(served["ok"], Value::Bool(true), "{served}");
+}
+
+/// A `harness` credential whose grant covers the served bank is admitted, so
+/// the admin gate refuses only the credential that is not an administrator.
+#[test]
+fn sync_serve_admits_an_administrative_principal() {
+    let st = state().with_principal(Principal::new(
+        "harness-key".to_owned(),
+        clio_types::Actor::Harness,
+        vec!["bank-mcp".to_owned()],
+    ));
+    let dir = TempDir::new("mcp-serve-admin");
+    let journal = dir.key().with_file_name("erasure-journal.json");
+    let journal = journal.display().to_string();
+    let get =
+        move |name: &str| (name == clio_config::ERASURE_JOURNAL_FILE_ENV).then(|| journal.clone());
+    let served = super::sync_serve_with(
+        &st,
+        &json!({ "dev": true, "bind": "127.0.0.1:0", "ttl_secs": 1 }),
+        &get,
+    )
+    .expect("an administrative credential serves a bank inside its grant");
+    assert_eq!(served["dev"], Value::Bool(true), "{served}");
+    assert_eq!(served["banks"], json!(["bank-mcp"]), "{served}");
+    let addr = served["addr"].as_str().expect("addr");
+    assert!(addr.starts_with("127.0.0.1:"), "{addr}");
 }
 
 #[test]

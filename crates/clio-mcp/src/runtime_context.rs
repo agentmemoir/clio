@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - `next_item_id` / `resolve_ctx` / `resolve_actor` / `resolve_timestamp` /
-//!   `require_bank_grant` / `require_sync_bank` on `McpState`
+//!   `require_bank_grant` / `require_sync_bank` / `sync_allow_public_bind` on
+//!   `McpState`
 //! - `dispatch_maintenance` (off-path maintenance handoff)
 //! - `now_utc` (RFC 3339 UTC stamping; the calendar arithmetic is the shared
 //!   `clio_types::civil_from_days`)
@@ -258,6 +259,26 @@ impl McpState {
             ErrorCode::Forbidden,
             "the operator scope for this request is outside this credential's banks",
         ))
+    }
+
+    /// Whether the operator allows a sync bind outside loopback.
+    ///
+    /// The answer is read from the effective config on every call, at the same
+    /// `/sync/allow_public_bind` pointer the `config_get` view reports, so the
+    /// serve path and the operator's view of the setting cannot disagree. A
+    /// missing key, a non-boolean value, or a poisoned config lock is the
+    /// default, which refuses the public bind: the failure mode of this read is
+    /// a refused bind, never an admitted one.
+    #[must_use]
+    pub fn sync_allow_public_bind(&self) -> bool {
+        let Ok(runtime) = self.config.lock() else {
+            return false;
+        };
+        runtime
+            .effective_raw()
+            .pointer("/sync/allow_public_bind")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.

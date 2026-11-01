@@ -1,0 +1,1 @@
+`sync_serve` and `clio sync serve` now require a harness or system administrator credential when a principal is present, and a bind outside loopback is refused unless the operator setting `sync.allow_public_bind` is enabled (`CLIO_SYNC_ALLOW_PUBLIC_BIND` also works).
