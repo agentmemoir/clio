@@ -144,10 +144,16 @@ pub fn seed_pg(url: &str, kms: &Path, items: &[(&str, &str, &str)]) {
 
 /// A journal path under the scratch root whose parent directory exists, so a
 /// refusal that never writes still has a place the authority could live.
+///
+/// The path is a new deployment, so it is given the salt this test binary
+/// resolved before any authority call reads it: the in-process
+/// `initialize_new_empty` records the fingerprint of those bytes, and every
+/// child spawned against this journal resolves the same ones from the sidecar.
 pub fn journal_file(scratch: &common::Scratch, relative: &str) -> PathBuf {
     let path = scratch.join(relative);
     std::fs::create_dir_all(path.parent().expect("the journal path has a parent"))
         .expect("create the journal directory");
+    common::seed_salt(&path, &crate::cli_test_support::salt_bytes());
     path
 }
 

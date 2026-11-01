@@ -5,8 +5,9 @@
 //!
 //! This module tests the production erasure-denial seam: a fresh deployment is
 //! clear, a recorded denial survives and keeps its generation, a damaged
-//! journal is unavailable and refuses a write, a journal this deployment cannot
-//! name is refused rather than probed, and the seam is usable as a trait object.
+//! journal is unavailable and refuses a write, a probe that resolved no
+//! deployment salt fails closed, a journal this deployment cannot name is
+//! refused rather than probed, and the seam is usable as a trait object.
 //!
 //! ## Owns
 //! - The scratch journal fixture and the seam assertions
@@ -68,7 +69,7 @@ fn write_raw(path: &Path, bytes: &[u8]) {
 #[test]
 fn a_fresh_deployment_is_clear_and_a_recorded_denial_keeps_its_generation() {
     let scratch = Scratch::new();
-    let probe = JournalDenialProbe::new(scratch.journal()).expect("resolve the probe");
+    let probe = JournalDenialProbe::new(scratch.journal());
     assert_eq!(probe.verdict("subject-a"), DenialVerdict::Clear);
     assert_eq!(
         probe
@@ -115,7 +116,7 @@ fn the_probe_reads_the_identity_the_erasure_path_writes() {
     let hash = sha256_hex(&salt, "subject-x");
     crate::erasure_journal::record_denial(&path, &hash, &["bank-a".to_owned()])
         .expect("record through the journal operation");
-    let probe = JournalDenialProbe::new(path).expect("resolve the probe");
+    let probe = JournalDenialProbe::new(path);
     assert_eq!(probe.verdict("subject-x"), DenialVerdict::Denied);
 }
 
@@ -127,7 +128,7 @@ fn a_damaged_journal_is_unavailable_and_a_write_refuses() {
     let path = scratch.journal();
     let bytes = b"not a journal".to_vec();
     write_raw(&path, &bytes);
-    let probe = JournalDenialProbe::new(path.clone()).expect("resolve the probe");
+    let probe = JournalDenialProbe::new(path.clone());
     assert_eq!(
         probe.verdict("subject-a"),
         DenialVerdict::AuthorityUnavailable
@@ -145,6 +146,56 @@ fn a_damaged_journal_is_unavailable_and_a_write_refuses() {
         std::fs::read(&path).expect("reread the damaged journal"),
         bytes,
         "the damaged journal was not overwritten"
+    );
+}
+
+/// `path` with production's salt suffix pushed on.
+fn salt_sidecar(path: &Path) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(".salt");
+    PathBuf::from(sidecar)
+}
+
+/// A probe that resolved no deployment salt fails closed on every answer: no
+/// subject reads as clear, a write refuses with the code and the missing salt
+/// named, and the fingerprint is blank rather than fabricated, so a caller that
+/// refuses a blank fingerprint never records an acknowledgement.
+#[test]
+fn a_probe_with_no_resolved_salt_fails_closed() {
+    if std::env::var("CLIO_COMPLIANCE_SALT").is_ok() {
+        // The override supplies the salt as text, so resolution cannot fail
+        // here; the deployment in this test would resolve like any other.
+        return;
+    }
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    // A sidecar that is not exactly the required length is refused and never
+    // regenerated, so construction holds no salt.
+    write_raw(&salt_sidecar(&path), b"not-a-salt");
+    let probe = JournalDenialProbe::new(path.clone());
+
+    assert_eq!(
+        probe.verdict("subject-a"),
+        DenialVerdict::AuthorityUnavailable,
+        "no salt means no identity to answer about, never clear"
+    );
+    let err = probe
+        .record_denial("subject-a", &["bank-a".to_owned()])
+        .expect_err("a probe with no salt must refuse the write");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        err.message.contains("deployment salt"),
+        "the refusal names the missing salt: {}",
+        err.message
+    );
+    assert_eq!(
+        probe.salt_fingerprint(),
+        String::new(),
+        "the fingerprint is blank rather than invented"
+    );
+    assert!(
+        !path.exists(),
+        "no journal was written by a probe that could not hash"
     );
 }
 
@@ -189,7 +240,7 @@ fn a_document_path_this_deployment_resolves_is_the_journals_path() {
 #[test]
 fn the_seam_answers_through_a_trait_object() {
     let scratch = Scratch::new();
-    let probe = JournalDenialProbe::new(scratch.journal()).expect("resolve the probe");
+    let probe = JournalDenialProbe::new(scratch.journal());
     let seam: &dyn ErasureDenial = &probe;
     assert_eq!(seam.verdict("subject-a"), DenialVerdict::Clear);
     assert_eq!(seam.salt_fingerprint(), probe.salt_fingerprint());

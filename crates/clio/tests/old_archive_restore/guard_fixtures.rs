@@ -10,7 +10,7 @@
 //! `clio` drivers, and the real `clio` binary driver.
 //!
 //! ## Owns
-//! - `salt_text`, `subject_hash`, and `denied_hash`
+//! - `salt_bytes`, `subject_hash`, and `denied_hash`
 //! - `file_sha256`, `journal_file`, `backup_dir`, and `seed_sqlite`
 //! - `clio_command`, `spawn_restore`, `run_restore`, `RestoreChild`, `RestoreOutput`, and
 //!   `assert_refused`
@@ -48,21 +48,17 @@ use std::time::{Duration, Instant};
 pub const RESTORE_WAIT: Duration = Duration::from_secs(120);
 
 /// The one deployment salt the journal denial and the member classification
-/// share, so a hashed reference matches the recorded denial. It is resolved
-/// from a scratch journal path this harness owns, so no case reads the host's
-/// deployment state and every spawned child is handed this same value.
+/// share, resolved once from a scratch journal path this harness owns: no case
+/// reads the host's deployment state, and two cases never race to mint it.
 pub fn salt_bytes() -> Vec<u8> {
-    let journal = std::env::temp_dir().join(format!(
-        "clio-old-archive-restore-salt-{}.json",
-        std::process::id()
-    ));
-    tombstone_salt_at(&journal).expect("resolve the harness deployment salt")
-}
-
-/// [`salt_bytes`] as the raw text the child process receives, so the CLI's
-/// classification hashes with the same salt this process derives hashes with.
-pub fn salt_text() -> String {
-    String::from_utf8(salt_bytes()).expect("the deployment salt is UTF-8")
+    static SALT: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+        let journal = std::env::temp_dir().join(format!(
+            "clio-old-archive-restore-salt-{}.json",
+            std::process::id()
+        ));
+        tombstone_salt_at(&journal).expect("resolve the harness deployment salt")
+    });
+    SALT.clone()
 }
 
 /// The deployment-wide identity of `subject` under the shared salt.
@@ -95,10 +91,13 @@ pub fn file_sha256(path: &Path) -> String {
 
 /// A journal path under the scratch root whose parent directory exists, so a
 /// refusal that never writes still has a place the authority could live.
+///
+/// A new deployment is given this binary's salt here, before any authority read.
 pub fn journal_file(scratch: &Scratch, relative: &str) -> PathBuf {
     let path = scratch.join(relative);
     std::fs::create_dir_all(path.parent().expect("the journal path has a parent"))
         .expect("create the journal directory");
+    crate::common::seed_salt(&path, &salt_bytes());
     path
 }
 
@@ -120,6 +119,10 @@ pub fn seed_sqlite(db: &Path, kms: &Path, items: &[(&str, &str, &str)]) {
 
 /// The real `clio` binary, with a cleared environment and the scenario's key
 /// store, journal, backup directory, and deployment salt.
+///
+/// The salt is seeded beside `journal` rather than handed over as text: it is
+/// thirty-two random bytes, and the child resolving those same bytes is what
+/// makes its hashes and its fingerprint match this process's.
 pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_clio"));
     cmd.env_clear();
@@ -128,7 +131,7 @@ pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     }
     cmd.env("CLIO_KMS_FILE", kms);
     cmd.env("CLIO_ERASURE_JOURNAL_FILE", journal);
-    cmd.env("CLIO_COMPLIANCE_SALT", salt_text());
+    crate::common::share_salt(&mut cmd, journal, &salt_bytes());
     cmd.env("CLIO_BACKUP_DIR", backups);
     crate::common::seed_key(&mut cmd);
     cmd

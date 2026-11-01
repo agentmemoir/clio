@@ -5,24 +5,29 @@
 //!
 //! This module is responsible for the shared harness support every integration
 //! harness needs before it runs the real `clio` binary: where the Clio
-//! encryption key lives, the scratch guard, and the copy-custody row a restore
-//! scenario seeds for an archive it expects to restore.
+//! encryption key lives, where the deployment salt both sides hash under lives,
+//! the scratch guard, and the copy-custody row a restore scenario seeds for an
+//! archive it expects to restore.
 //!
 //! ## Owns
 //! - Seeding one owner-only key file per test binary and pointing `CLIO_KEY_FILE`
 //!   at it
 //! - `seed_restore_custody`, the passing custody row the restore route's gate
 //!   reads for an archive a scenario restores
+//! - `seed_salt` and `share_salt`, the deployment salt one test binary resolved
+//!   written beside the journal a child process reads, so both hash subject
+//!   identities under the same bytes
 //!
 //! ## Does not own
 //! - Any scenario, database, or key-store behaviour (each harness owns its own)
 //! - The key's lifecycle rules (see `clio-config`'s `secret_key`)
+//! - The salt's own lifecycle rules (see `clio-compliance`'s `salt`)
 //!
 //! ## Boundary
 //!
-//! Keep this module to the key-file seed and the two shared harness helpers. If
-//! a harness needs more environment than this, it should set it itself rather
-//! than widen this.
+//! Keep this module to the key-file seed, the deployment-salt hand-off, and the
+//! two shared harness helpers. If a harness needs more environment than this, it
+//! should set it itself rather than widen this.
 //!
 //! # Why every harness needs this
 //!
@@ -43,6 +48,7 @@
 // the same allowance for the same reason.
 #![allow(dead_code)]
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -84,6 +90,58 @@ fn key_file() -> &'static PathBuf {
 pub fn seed_key(cmd: &mut Command) -> &mut Command {
     cmd.env("CLIO_KEY_FILE", key_file())
         .env("CLIO_KEY_FILE_ONLY", "1")
+}
+
+/// The override an operator sets to supply the deployment salt directly.
+const SALT_ENV: &str = "CLIO_COMPLIANCE_SALT";
+
+/// The suffix production appends to an erasure-journal path for its salt.
+const SALT_SUFFIX: &str = ".salt";
+
+/// Give the deployment at `journal` the salt this process resolved, so a child
+/// spawned against that journal hashes under the same bytes.
+///
+/// The salt is thirty-two random bytes per deployment, so it is not text and is
+/// never turned into one here: the exact bytes go into the sidecar the resolver
+/// reads beside the journal, which is how one process and the child it spawns
+/// reach the same salt without an encoding. The file is written once, like the
+/// resolver's own, so a second command against the same journal reads what the
+/// first one seeded.
+///
+/// A host that set `CLIO_COMPLIANCE_SALT` has already given every process the
+/// same text, so nothing is written: [`share_salt`] hands that override on and
+/// the sidecar is never consulted.
+pub fn seed_salt(journal: &Path, salt: &[u8]) {
+    if std::env::var(SALT_ENV).is_ok() {
+        return;
+    }
+    let mut sidecar = journal.as_os_str().to_os_string();
+    sidecar.push(SALT_SUFFIX);
+    let sidecar = PathBuf::from(sidecar);
+    if let Some(dir) = sidecar.parent() {
+        std::fs::create_dir_all(dir).expect("create the deployment salt directory");
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    match options.open(&sidecar) {
+        Ok(mut file) => file.write_all(salt).expect("seed the deployment salt"),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => panic!("create the deployment salt {}: {error}", sidecar.display()),
+    }
+}
+
+/// Let `cmd`'s deployment resolve the exact salt this process resolved.
+///
+/// A child is handed its journal and nothing else about the salt: it reads those
+/// same bytes from the sidecar beside that journal, so its subject hashes and
+/// its salt fingerprint match this process's. The one exception is a host that
+/// set [`SALT_ENV`], which is already the text both sides resolve.
+pub fn share_salt(cmd: &mut Command, journal: &Path, salt: &[u8]) {
+    if let Ok(text) = std::env::var(SALT_ENV) {
+        cmd.env(SALT_ENV, text);
+        return;
+    }
+    seed_salt(journal, salt);
 }
 
 /// A per-test scratch directory, removed when the guard drops.

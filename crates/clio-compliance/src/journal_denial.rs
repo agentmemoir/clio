@@ -12,7 +12,8 @@
 //!   classification, the durable denial write, and the salt and fingerprint it
 //!   answers under
 //! - `resolved`: the fail-closed construction of the probe from the journal
-//!   path this deployment resolves
+//!   path this deployment resolves, and `new`: the test and in-process
+//!   constructor, which holds no salt when none resolves and fails closed
 //!
 //! ## Does not own
 //! - The journal model, its load classification, and the denial operation
@@ -34,7 +35,7 @@
 use std::path::{Path, PathBuf};
 
 use clio_store::{DenialVerdict, ErasureDenial, sha256_hex};
-use clio_types::AmError;
+use clio_types::{AmError, ErrorCode};
 
 use crate::erasure_journal::{JournalState, load_journal, record_denial};
 use crate::restore_guard::JournalHold;
@@ -43,22 +44,52 @@ use crate::salt::{tombstone_salt_at, tombstone_salt_fingerprint_of};
 /// The erasure-denial seam over the owner-only erasure journal at one path.
 pub struct JournalDenialProbe {
     journal_path: PathBuf,
-    salt: Vec<u8>,
-    salt_fingerprint: String,
+    /// The deployment salt resolved once at construction, or `None` when this
+    /// process could not resolve one beside the journal.
+    ///
+    /// Absent never means "hash under nothing": every answer below fails closed
+    /// instead, so no subject identity is ever derived from an empty salt and
+    /// no fingerprint is ever invented.
+    salt: Option<Vec<u8>>,
+    /// The fingerprint of [`Self::salt`], `None` exactly when it is absent.
+    salt_fingerprint: Option<String>,
 }
 
 impl JournalDenialProbe {
     /// A probe for the journal at `journal_path`.
     ///
-    /// # Errors
-    /// The same failures the deployment salt beside that path reports.
-    pub fn new(journal_path: PathBuf) -> Result<Self, AmError> {
-        let salt = tombstone_salt_at(&journal_path)?;
-        Ok(Self {
+    /// This is the test and in-process constructor: it never refuses, so a
+    /// journal this process cannot resolve a deployment salt for still yields a
+    /// probe. That probe fails closed rather than hashing under an empty or
+    /// fabricated salt — [`ErasureDenial::verdict`] answers
+    /// [`DenialVerdict::AuthorityUnavailable`],
+    /// [`ErasureDenial::record_denial`] refuses with `ConfigCorrupt` naming the
+    /// missing deployment salt, and [`ErasureDenial::salt_fingerprint`] is blank,
+    /// which its callers already refuse.
+    ///
+    /// Production does not build a probe this way:
+    /// [`JournalDenialProbe::resolved`] is the only constructor the deployment
+    /// paths call, and it propagates a salt-resolution failure instead of
+    /// holding a fail-closed probe.
+    #[must_use]
+    pub fn new(journal_path: PathBuf) -> Self {
+        match tombstone_salt_at(&journal_path) {
+            Ok(salt) => Self::under_salt(journal_path, salt),
+            Err(_) => Self {
+                journal_path,
+                salt: None,
+                salt_fingerprint: None,
+            },
+        }
+    }
+
+    /// A probe whose deployment salt is already resolved.
+    fn under_salt(journal_path: PathBuf, salt: Vec<u8>) -> Self {
+        Self {
             journal_path,
-            salt_fingerprint: tombstone_salt_fingerprint_of(&salt),
-            salt,
-        })
+            salt_fingerprint: Some(tombstone_salt_fingerprint_of(&salt)),
+            salt: Some(salt),
+        }
     }
 
     /// The journal path this probe reads and writes.
@@ -67,13 +98,31 @@ impl JournalDenialProbe {
         &self.journal_path
     }
 
-    /// The deployment-wide identity the journal stores for `subject_id`.
+    /// The deployment-wide identity the journal stores for `subject_id`, or
+    /// `None` when no deployment salt resolved so there is nothing honest to
+    /// hash under.
     ///
     /// The hash is the same one the erasure path records and the tombstone
     /// hashes carry, so the probe answers about the identity the rest of the
     /// deployment uses.
-    fn subject_hash(&self, subject_id: &str) -> String {
-        sha256_hex(&self.salt, subject_id)
+    fn subject_hash(&self, subject_id: &str) -> Option<String> {
+        self.salt
+            .as_deref()
+            .map(|salt| sha256_hex(salt, subject_id))
+    }
+
+    /// The refusal a probe with no resolved deployment salt answers a write
+    /// with: a denial that names no salt is not a durable denial.
+    fn missing_salt(&self) -> AmError {
+        AmError::new(
+            ErrorCode::ConfigCorrupt,
+            format!(
+                "the deployment salt beside the erasure journal {} could not be resolved, so this \
+                 probe cannot record a denial: a subject hashed under an empty salt would not be \
+                 a durable denial",
+                self.journal_path.display()
+            ),
+        )
     }
 
     /// The probe for the journal this deployment resolves, or a refusal.
@@ -86,7 +135,9 @@ impl JournalDenialProbe {
     /// the denials this probe answers with.
     ///
     /// There is no fallback: a route that cannot name its journal holds no
-    /// authority and must refuse its action rather than run unguarded.
+    /// authority and must refuse its action rather than run unguarded. The
+    /// deployment salt is resolved here and a failure propagates, so production
+    /// never degrades to a probe that can answer nothing.
     ///
     /// # Errors
     /// `ConfigCorrupt` when no path resolves, or when a document-named path
@@ -96,27 +147,38 @@ impl JournalDenialProbe {
         document: Option<&Path>,
         get: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, AmError> {
-        Self::new(JournalHold::resolve_journal_path(document, get)?)
+        let journal_path = JournalHold::resolve_journal_path(document, get)?;
+        let salt = tombstone_salt_at(&journal_path)?;
+        Ok(Self::under_salt(journal_path, salt))
     }
 }
 
 impl ErasureDenial for JournalDenialProbe {
     fn verdict(&self, subject_id: &str) -> DenialVerdict {
+        // No salt resolved, so no identity can be derived: the authority is
+        // unavailable and the caller refuses, rather than any subject reading
+        // as clear.
+        let Some(hash) = self.subject_hash(subject_id) else {
+            return DenialVerdict::AuthorityUnavailable;
+        };
         match load_journal(&self.journal_path) {
-            JournalState::Current(journal) if journal.is_denied(&self.subject_hash(subject_id)) => {
-                DenialVerdict::Denied
-            }
+            JournalState::Current(journal) if journal.is_denied(&hash) => DenialVerdict::Denied,
             JournalState::Current(_) | JournalState::Missing => DenialVerdict::Clear,
             JournalState::Damaged => DenialVerdict::AuthorityUnavailable,
         }
     }
 
     fn record_denial(&self, subject_id: &str, banks: &[String]) -> Result<u64, AmError> {
-        record_denial(&self.journal_path, &self.subject_hash(subject_id), banks)
+        let hash = self
+            .subject_hash(subject_id)
+            .ok_or_else(|| self.missing_salt())?;
+        record_denial(&self.journal_path, &hash, banks)
     }
 
     fn salt_fingerprint(&self) -> String {
-        self.salt_fingerprint.clone()
+        // A blank fingerprint is the signal a caller refuses on; it is never
+        // filled in with a fabricated value.
+        self.salt_fingerprint.clone().unwrap_or_default()
     }
 }
 

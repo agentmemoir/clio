@@ -41,6 +41,11 @@ use std::process::{Output, Stdio};
 
 #[path = "sync_wire_support/mod.rs"]
 mod sync_wire_support;
+// The shared harness support `sync_wire_support` points every child it spawns
+// at: the seeded Clio key file and the one deployment salt those children
+// resolve.
+#[path = "common/mod.rs"]
+mod common;
 use sync_wire_support::{
     BANK, NodeDir, Relay, SYNC_KEY, TOKEN, clio, expect_ok, json_stdout, relay_rows, run,
 };

@@ -10,7 +10,7 @@
 //! and the bounded run that captures the exit and both streams of a refusal.
 //!
 //! ## Owns
-//! - `salt_bytes`, `salt_text`, `subject_hash`, and `denied_hash`
+//! - `salt_bytes`, `subject_hash`, and `denied_hash`
 //! - `clio_command`, `run_captured`, `run_cli`, `CliOutput`, `assert_refused`,
 //!   and `assert_refusal`
 //! - `Refusal` and the production refusals the CLI returns
@@ -48,12 +48,6 @@ pub fn salt_bytes() -> Vec<u8> {
     crate::sync_wire_support::harness_salt()
 }
 
-/// [`salt_bytes`] as the raw text the child process receives, so the CLI's
-/// classification hashes with the same salt this process derives hashes with.
-pub fn salt_text() -> String {
-    String::from_utf8(salt_bytes()).expect("the deployment salt is UTF-8")
-}
-
 /// The deployment-wide identity of `subject` under the shared salt.
 pub fn subject_hash(subject: &str) -> String {
     clio::store::sha256_hex(&salt_bytes(), subject)
@@ -75,6 +69,11 @@ pub struct CliOutput {
 
 /// The real `clio` binary, with a cleared environment and the scenario's key
 /// store, journal, backup directory, and deployment salt.
+///
+/// The salt goes into the sidecar beside `journal` rather than into the
+/// environment: it is thirty-two random bytes, so it is not text, and the child
+/// resolving those same bytes is what makes its subject hashes and its salt
+/// fingerprint match the ones this process derives.
 pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_clio"));
     cmd.env_clear();
@@ -83,7 +82,7 @@ pub fn clio_command(journal: &Path, kms: &Path, backups: &Path) -> Command {
     }
     cmd.env("CLIO_KMS_FILE", kms);
     cmd.env("CLIO_ERASURE_JOURNAL_FILE", journal);
-    cmd.env("CLIO_COMPLIANCE_SALT", salt_text());
+    crate::common::share_salt(&mut cmd, journal, &salt_bytes());
     cmd.env("CLIO_BACKUP_DIR", backups);
     // The export root owns every export destination the scenarios hand the
     // child; the system temp root already contains their scratch directories.
