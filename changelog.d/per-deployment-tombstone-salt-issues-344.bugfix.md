@@ -1,0 +1,1 @@
+Tombstone subject hashes now use a random per-deployment salt recorded once beside the erasure journal, so an unset `CLIO_COMPLIANCE_SALT` no longer falls back to a published constant that let a ledger reader confirm a guessed subject.
