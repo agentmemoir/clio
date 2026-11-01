@@ -204,10 +204,34 @@ pub fn clio(node: &Path) -> Command {
         "CLIO_DEPLOYMENT_CONFIG",
         node.join("no-such-deployment-overlay.json"),
     );
+    // The one deployment salt this harness resolves: a child that resolved its
+    // own would hash the journal's subject identities under a different salt
+    // than the in-process side of the same case.
+    cmd.env("CLIO_COMPLIANCE_SALT", harness_salt_text());
     if let Some(pattern) = std::env::var_os("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", pattern);
     }
     cmd
+}
+
+/// The one deployment salt this test binary resolves, and hands every child it
+/// spawns through `CLIO_COMPLIANCE_SALT`, so an in-process driver and a spawned
+/// peer hash subject identities under the same salt.
+///
+/// It is resolved from a scratch journal path the harness owns, never from the
+/// machine's data directory, so no case depends on the host's own deployment
+/// state. The first resolve mints the sidecar; every later one reads it back.
+#[must_use]
+pub fn harness_salt() -> Vec<u8> {
+    let journal =
+        std::env::temp_dir().join(format!("clio-sync-wire-salt-{}.json", std::process::id()));
+    clio_compliance::tombstone_salt_at(&journal).expect("resolve the harness deployment salt")
+}
+
+/// [`harness_salt`] as the text a child process receives.
+#[must_use]
+pub fn harness_salt_text() -> String {
+    String::from_utf8(harness_salt()).expect("the deployment salt is UTF-8")
 }
 
 /// Run one command to completion against a node's store, with piped streams.

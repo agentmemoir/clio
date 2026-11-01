@@ -161,7 +161,10 @@ fn the_locked_check_refuses_missing_damaged_and_other_deployment_authority() {
     let other_claim = ArchiveClaim {
         deployment_id: "another-deployment".to_owned(),
         generation: 0,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(
+            clio_compliance::tombstone_salt_fingerprint_at(&journal)
+                .expect("resolve the live journal's deployment salt"),
+        ),
     };
     let Err(refusal) = begin_restore(
         &store,
@@ -204,7 +207,10 @@ fn a_known_old_presented_authority_and_a_newer_claim_both_refuse_at_the_lock() {
     let claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(
+            clio_compliance::tombstone_salt_fingerprint_at(&journal)
+                .expect("resolve the live journal's deployment salt"),
+        ),
     };
     let none = [MemberFacts::None];
 
@@ -234,7 +240,10 @@ fn a_known_old_presented_authority_and_a_newer_claim_both_refuse_at_the_lock() {
     let newer_claim = ArchiveClaim {
         deployment_id: claim.deployment_id.clone(),
         generation: claim.generation + 1,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(
+            clio_compliance::tombstone_salt_fingerprint_at(&journal)
+                .expect("resolve the live journal's deployment salt"),
+        ),
     };
     let Err(refusal) = begin_restore(
         &store,

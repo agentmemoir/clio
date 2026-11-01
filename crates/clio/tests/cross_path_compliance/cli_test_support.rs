@@ -41,8 +41,11 @@ pub const CLI_WAIT: Duration = Duration::from_secs(120);
 
 /// The one deployment salt the journal denial and the member classification
 /// share, so a hashed reference matches the recorded denial.
+///
+/// It is the harness salt the sync peers are spawned with, so an in-process
+/// erase and a child CLI both hash under the same bytes.
 pub fn salt_bytes() -> Vec<u8> {
-    clio_compliance::tombstone_salt()
+    crate::sync_wire_support::harness_salt()
 }
 
 /// [`salt_bytes`] as the raw text the child process receives, so the CLI's

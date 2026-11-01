@@ -28,7 +28,7 @@ use crate::support::{
     subject_key_destroyed, write_item,
 };
 use clio::{Actor, Bank, ErrorCode, OpContext};
-use clio_compliance::{EraseArgs, EraseVecSink, erase_request, tombstone_salt};
+use clio_compliance::{EraseArgs, EraseVecSink, erase_request};
 
 #[test]
 fn unauthorized_and_unconfirmed_erases_are_refused_without_state_change() {
@@ -40,7 +40,7 @@ fn unauthorized_and_unconfirmed_erases_are_refused_without_state_change() {
     write_item(&store, DENIED_ITEM, DENIED_SUBJECT, "denied sentinel gist");
 
     let sink = EraseVecSink::default();
-    let salt = tombstone_salt();
+    let salt = crate::guard_fixtures::salt_bytes();
     // A sibling of the scenario's scratch root; both refusals below precede
     // any journal write, so nothing is recorded at this path.
     let journal = journal_path("negative-journal");

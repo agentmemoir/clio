@@ -63,12 +63,23 @@ pub(super) struct Built {
     pub(super) manifest: clio_backup::BackupManifest,
 }
 
-/// The authority the fixtures record.
-pub(super) fn authority() -> ManifestAuthority {
+/// The deployment salt every fixture hashes and fingerprints under, resolved
+/// from the scratch directory's own erasure-journal path.
+///
+/// The path is passed in rather than read from the host environment, so a case
+/// never depends on a deployment directory the machine happens to have and the
+/// sidecar it mints is removed with the scratch directory.
+pub(super) fn deployment_salt(scratch: &Scratch) -> Vec<u8> {
+    clio_compliance::tombstone_salt_at(&scratch.join("erasure-journal.json"))
+        .expect("resolve the fixture deployment salt")
+}
+
+/// The authority the fixtures record, fingerprinted under `salt`.
+pub(super) fn authority(salt: &[u8]) -> ManifestAuthority {
     ManifestAuthority {
         deployment_id: "deploy-1".to_owned(),
         generation: 3,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint_of(salt)),
     }
 }
 
@@ -135,11 +146,13 @@ pub(super) fn build_sqlite_archive(
 }
 
 /// Assemble a Postgres archive over `tables`: each is a table name, its column
-/// names in dump order, and its `COPY` text. `key` adds a key member.
+/// names in dump order, and its `COPY` text. `key` adds a key member, and the
+/// recorded authority is fingerprinted under `salt`.
 pub(super) fn build_postgres_archive(
     scratch: &Scratch,
     tables: &[(&str, &[&str], &[u8])],
     key: Option<&Path>,
+    salt: &[u8],
 ) -> Built {
     use clio_backup::dump_meta::{
         DUMP_FORMAT_VERSION, DUMP_KIND, DUMP_META_MEMBER, DumpColumn, DumpMeta, DumpTable,
@@ -209,7 +222,7 @@ pub(super) fn build_postgres_archive(
         }),
         label: None,
         note: None,
-        authority: Some(authority()),
+        authority: Some(authority(salt)),
         tool_version: "clio 0.1.0".to_owned(),
     };
     let report = clio_backup::create_archive(&request).expect("create the archive");

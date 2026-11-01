@@ -24,7 +24,10 @@
 //! `mutator_tools` module performs before it calls an in-process tool.
 
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::sync_tools::sync_tools_test_support_tests::TempDir;
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 fn state() -> Arc<McpState> {
@@ -267,4 +270,93 @@ fn erase_request_never_mutates_without_confirmation() {
             .is_none(),
         "an unconfirmed erase request must not be recorded"
     );
+}
+
+/// The marker that turns a re-executed copy of this binary into the child half
+/// of the erase-gate check, carrying that child's scratch journal path.
+const ERASE_GATE_CHILD_ENV: &str = "CLIO_MCP_ERASE_GATE_CHILD";
+
+/// The line the child prints once its assertions held, so the parent can tell a
+/// child that ran from a child the harness never selected.
+const ERASE_GATE_CHILD_RAN: &str = "clio-mcp-erase-gate-child-ran";
+
+/// This test's own path, so the child runs it and nothing else.
+const ERASE_GATE_TEST_NAME: &str =
+    "mutator_tools::mutator_tools_correct_tests::an_unconfirmed_erase_provisions_no_salt_file";
+
+/// The salt override, cleared for the child: with no override the salt falls to
+/// the sidecar, so a salt resolved ahead of the gate must leave that file behind.
+const ERASE_GATE_SALT_ENV: &str = "CLIO_COMPLIANCE_SALT";
+
+const ERASE_GATE_JOURNAL_ENV: &str = "CLIO_ERASURE_JOURNAL_FILE";
+
+/// The confirm gate precedes salt provisioning: an unconfirmed `erase_request`
+/// must not create `<journal>.salt`, which resolving the salt mints on first use.
+///
+/// The journal is the deployment resolution, read from the process environment,
+/// so the call runs in a re-executed child that the parent hands a scratch
+/// journal through that environment. Nothing here reads or mutates the handler's
+/// own environment.
+#[test]
+fn an_unconfirmed_erase_provisions_no_salt_file() {
+    match std::env::var_os(ERASE_GATE_CHILD_ENV) {
+        Some(journal) => unconfirmed_erase_rejects_and_writes_nothing(Path::new(&journal)),
+        None => run_erase_gate_child(),
+    }
+}
+
+/// Hand the body a scratch journal its own process owns, and fail unless that
+/// child actually ran it.
+fn run_erase_gate_child() {
+    let scratch = TempDir::new("mcp-erase-gate");
+    let journal = scratch.key().with_file_name("erasure-journal.json");
+    let output = Command::new(std::env::current_exe().expect("locate the test executable"))
+        .args(["--exact", ERASE_GATE_TEST_NAME, "--nocapture"])
+        .env(ERASE_GATE_CHILD_ENV, &journal)
+        .env(ERASE_GATE_JOURNAL_ENV, &journal)
+        .env_remove(ERASE_GATE_SALT_ENV)
+        .output()
+        .expect("run the erase-gate child");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains(ERASE_GATE_CHILD_RAN),
+        "the erase-gate child did not report success:\n{stdout}\n{stderr}"
+    );
+}
+
+/// The child half: one unconfirmed call, then the scratch directory must be as
+/// empty as the gate left it.
+fn unconfirmed_erase_rejects_and_writes_nothing(journal: &Path) {
+    let s = state();
+    let out = call(
+        &s,
+        "erase_request",
+        json!({
+            "request_id": "req-mcp-gate-salt",
+            "subject_id": "subj-mcp-gate-salt",
+            "legal_basis": "GDPR_ART_17",
+            "bank": "bank-mcp-erase-gate",
+            "confirm": false
+        }),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["code"], json!("forbidden"), "{out}");
+    let mut salt = journal.as_os_str().to_os_string();
+    salt.push(".salt");
+    let salt = PathBuf::from(salt);
+    assert!(
+        !salt.exists(),
+        "an unconfirmed erase provisioned {}",
+        salt.display()
+    );
+    let created: Vec<_> = std::fs::read_dir(journal.parent().expect("the scratch directory"))
+        .expect("read the scratch directory")
+        .map(|entry| entry.expect("a scratch entry").file_name())
+        .collect();
+    assert!(
+        created.is_empty(),
+        "an unconfirmed erase created {created:?}"
+    );
+    println!("{ERASE_GATE_CHILD_RAN}");
 }

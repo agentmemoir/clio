@@ -420,7 +420,7 @@ pub fn banks_of(state: &McpState, args: &Value) -> Result<Vec<String>, AmError> 
 
 #[cfg(test)]
 #[path = "sync_tools_test_support_tests.rs"]
-mod sync_tools_test_support_tests;
+pub(crate) mod sync_tools_test_support_tests;
 
 #[cfg(test)]
 #[path = "sync_tools_tests.rs"]

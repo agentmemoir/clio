@@ -116,7 +116,10 @@ pub(crate) fn run(
     };
     // Record the deployment's current erasure authority; a missing or damaged
     // journal records none, and the create warns rather than failing silently.
-    let authority = current_authority(&journal_path);
+    let authority = match current_authority(&journal_path) {
+        Ok(authority) => authority,
+        Err(error) => return fail(io, mode, &CliError::from_am_error(&error)),
+    };
     let authority_recorded = authority.is_some();
     match take_snapshot(
         &target,
@@ -365,17 +368,27 @@ fn request(
 }
 
 /// The authority the journal records, or `None` for a missing or damaged one.
-pub(crate) fn current_authority(journal_path: &Path) -> Option<ManifestAuthority> {
+///
+/// # Errors
+/// The journal is current but the deployment salt beside it could not be
+/// resolved. `None` means exactly "there is no current journal", so a salt
+/// failure is reported instead of being folded into `None`: an archive that
+/// claims no authority is refused at restore, and the run would fail silently.
+pub(crate) fn current_authority(journal_path: &Path) -> Result<Option<ManifestAuthority>, AmError> {
     let JournalState::Current(journal) = load_journal(journal_path) else {
-        return None;
+        return Ok(None);
     };
-    Some(ManifestAuthority {
+    Ok(Some(ManifestAuthority {
         deployment_id: journal.deployment_id,
         generation: journal.generation,
         // The fingerprint of the salt in effect now, which is the salt the
-        // archive's subject ids will be re-hashed under at restore.
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
-    })
+        // archive's subject ids will be re-hashed under at restore. Resolved
+        // from the journal path this call already holds, so the archive records
+        // the salt a restore will compare against.
+        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint_at(
+            journal_path,
+        )?),
+    }))
 }
 
 /// The key member for this store, or `None` when there is no key-store file.

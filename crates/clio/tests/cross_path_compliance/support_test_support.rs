@@ -43,7 +43,6 @@ use clio_backup::{
 };
 use clio_compliance::{
     EraseArgs, EraseVecSink, JournalState, erase_request, load_journal, sha256_hex_bytes,
-    tombstone_salt,
 };
 use std::path::{Path, PathBuf};
 
@@ -213,7 +212,10 @@ pub(crate) fn extract_into(archive: &Archive, dir: &Path) -> ExtractedArchive {
 pub fn erase_subject(store: &dyn ComplianceStore, subject: &str, request_id: &str) {
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(BANK), Actor::Harness);
-    let salt = tombstone_salt();
+    // The CLI children this harness spawns are handed the same deployment salt
+    // through `CLIO_COMPLIANCE_SALT`, so the denial recorded here is the one
+    // they verify.
+    let salt = crate::cli_test_support::salt_bytes();
     // The journal lives in its own per-call scratch directory: it stays outside
     // every path a restore replaces, and goes away with the guard on drop.
     let scratch = scratch("erase-journal");

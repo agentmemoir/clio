@@ -264,6 +264,7 @@ fn a_pulled_denied_subject_is_dead_lettered_while_an_unrelated_bank_applies() {
     let held = wire_id(&peer, "b-held");
     let get = journal_env(&journal, &keys);
     JournalDenialProbe::new(journal.path().to_path_buf())
+        .expect("resolve the denial probe for the scratch journal")
         .record_denial("s-held", &["b-held".to_owned()])
         .expect("record the subject denial");
 
@@ -297,6 +298,7 @@ fn a_bidirectional_transfer_dead_letters_a_pulled_denied_subject_too() {
     let held = wire_id(&peer, "b-held");
     let get = journal_env(&journal, &keys);
     JournalDenialProbe::new(journal.path().to_path_buf())
+        .expect("resolve the denial probe for the scratch journal")
         .record_denial("s-held", &["b-held".to_owned()])
         .expect("record the subject denial");
 

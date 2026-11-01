@@ -28,7 +28,7 @@ use super::{
     SUBJECT_KEYS_TABLE, TOMBSTONE_HASH_COLUMN, TOMBSTONE_TABLE, facts_from_hashes,
 };
 use clio_backup::ExtractedMember;
-use clio_compliance::{MemberFacts, tombstone_salt};
+use clio_compliance::MemberFacts;
 use clio_store::sha256_hex;
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeSet;
@@ -39,6 +39,7 @@ use std::path::Path;
 /// An item row keeps its subject link after the subject's key was destroyed,
 /// so the item's subject id is a presence the archive carries.
 pub(super) fn classify_sqlite_payload(
+    salt: &[u8],
     payload: &Path,
     live: &BTreeSet<String>,
     keys_present: bool,
@@ -49,12 +50,11 @@ pub(super) fn classify_sqlite_payload(
             hashes.insert(hash);
         }
     }
-    let salt = tombstone_salt();
     for id in sqlite_column(payload, SUBJECT_KEYS_TABLE, SUBJECT_ID_COLUMN)? {
-        hashes.insert(sha256_hex(&salt, &id));
+        hashes.insert(sha256_hex(salt, &id));
     }
     for id in sqlite_column(payload, ITEMS_TABLE, SUBJECT_ID_COLUMN)? {
-        hashes.insert(sha256_hex(&salt, &id));
+        hashes.insert(sha256_hex(salt, &id));
     }
     Ok(facts_from_hashes(hashes, live, keys_present))
 }
@@ -67,6 +67,7 @@ pub(super) fn classify_sqlite_payload(
 /// does not carry the slot table this build reads cannot be classified at all,
 /// so it refuses rather than yielding an empty live set.
 pub(super) fn live_key_hashes(
+    salt: &[u8],
     key: Option<&ExtractedMember>,
 ) -> Result<BTreeSet<String>, ClassifyRefusal> {
     let Some(key) = key else {
@@ -86,22 +87,21 @@ pub(super) fn live_key_hashes(
     } else {
         sqlite_column(path, KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)?
     };
-    let salt = tombstone_salt();
-    Ok(ids.into_iter().map(|id| sha256_hex(&salt, &id)).collect())
+    Ok(ids.into_iter().map(|id| sha256_hex(salt, &id)).collect())
 }
 
 /// Classify the archive's key member: one fact per key slot id.
 pub(super) fn classify_key_store(
+    salt: &[u8],
     key: Option<&ExtractedMember>,
     live: &BTreeSet<String>,
 ) -> Result<Vec<MemberFacts>, ClassifyRefusal> {
     let Some(key) = key else {
         return Ok(vec![MemberFacts::None]);
     };
-    let salt = tombstone_salt();
     let mut hashes = BTreeSet::new();
     for id in sqlite_column(key.file.path(), KEY_SLOTS_TABLE, SUBJECT_ID_COLUMN)? {
-        hashes.insert(sha256_hex(&salt, &id));
+        hashes.insert(sha256_hex(salt, &id));
     }
     // The key member is present by definition here, so its slot facts are
     // classified against the usable-key set.

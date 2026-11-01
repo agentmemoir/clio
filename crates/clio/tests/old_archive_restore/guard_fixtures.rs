@@ -33,7 +33,7 @@
 use crate::support::{DENIED_SUBJECT, Scratch, open_sqlite, write_item};
 use clio::ErrorCode;
 use clio_backup::manifest::ManifestAuthority;
-use clio_compliance::{JournalState, load_journal, sha256_hex_bytes, tombstone_salt};
+use clio_compliance::{JournalState, load_journal, sha256_hex_bytes, tombstone_salt_at};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -48,9 +48,15 @@ use std::time::{Duration, Instant};
 pub const RESTORE_WAIT: Duration = Duration::from_secs(120);
 
 /// The one deployment salt the journal denial and the member classification
-/// share, so a hashed reference matches the recorded denial.
+/// share, so a hashed reference matches the recorded denial. It is resolved
+/// from a scratch journal path this harness owns, so no case reads the host's
+/// deployment state and every spawned child is handed this same value.
 pub fn salt_bytes() -> Vec<u8> {
-    tombstone_salt()
+    let journal = std::env::temp_dir().join(format!(
+        "clio-old-archive-restore-salt-{}.json",
+        std::process::id()
+    ));
+    tombstone_salt_at(&journal).expect("resolve the harness deployment salt")
 }
 
 /// [`salt_bytes`] as the raw text the child process receives, so the CLI's

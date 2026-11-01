@@ -306,7 +306,6 @@ fn correct(state: &McpState, args: &Value) -> Result<Value, AmError> {
 fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let ts = state.resolve_timestamp(args)?;
-    let salt = clio_compliance::tombstone_salt();
     let journal = clio_compliance::JournalHold::resolve_journal_path(
         state.journal_path.as_deref(),
         &|key| std::env::var(key).ok(),
@@ -322,6 +321,9 @@ fn erase_request(state: &McpState, args: &Value) -> Result<Value, AmError> {
             "erase_request requires confirm=true; unconfirmed calls never mutate",
         ));
     }
+    // The erasure and its denial must hash under the same salt, so the salt is
+    // resolved from the journal path this call already holds.
+    let salt = clio_compliance::tombstone_salt_at(&journal)?;
     let e_args = clio_compliance::EraseArgs {
         store: &*state.compliance,
         journal_path: &journal,

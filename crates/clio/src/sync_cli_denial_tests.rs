@@ -91,6 +91,7 @@ fn journal_env(journal: &Scratch) -> impl Fn(&str) -> Option<String> + '_ {
 /// the way the erase path would.
 fn record_bank_denial(journal: &Scratch, bank: &str) {
     JournalDenialProbe::new(journal.path().to_path_buf())
+        .expect("resolve the denial probe for the scratch journal")
         .record_denial(&denied_bank_marker(bank), &[bank.to_owned()])
         .expect("record the bank denial");
 }

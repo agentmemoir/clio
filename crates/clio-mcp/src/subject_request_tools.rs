@@ -35,7 +35,7 @@ use crate::write_tools::{opt_bool, opt_str, req_str, strict_opt_str};
 use clio_compliance::subject_request_service as svc;
 use clio_compliance::{
     DEFAULT_REVIEW_LIMIT, EraseArgs, ErasureRetryEnv, JournalHold, PeerEnablement, RequestKind,
-    RequestScope, SubjectRequestEnv, VerificationResult, tombstone_salt,
+    RequestScope, SubjectRequestEnv, VerificationResult, tombstone_salt_at,
 };
 use clio_store::{CopyInventoryRow, LocalEventState, PeerActionDisposition};
 use clio_types::{AmError, ErrorCode};
@@ -118,10 +118,12 @@ fn retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
         ));
     }
     let timestamp = state.resolve_timestamp(args)?;
-    let salt = tombstone_salt();
     let journal = JournalHold::resolve_journal_path(state.journal_path.as_deref(), &|key| {
         std::env::var(key).ok()
     })?;
+    // The erasure and its denial must hash under the same salt, so the salt is
+    // resolved from the journal path this call already holds.
+    let salt = tombstone_salt_at(&journal)?;
     let e_args = EraseArgs {
         store: &*state.compliance,
         journal_path: &journal,
@@ -255,10 +257,12 @@ fn peer_retry(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let request_id = req_str(args, "request_id")?.to_owned();
     let timestamp = state.resolve_timestamp(args)?;
-    let salt = tombstone_salt();
     let journal = JournalHold::resolve_journal_path(state.journal_path.as_deref(), &|key| {
         std::env::var(key).ok()
     })?;
+    // The erasure and its denial must hash under the same salt, so the salt is
+    // resolved from the journal path this call already holds.
+    let salt = tombstone_salt_at(&journal)?;
     let retry = ErasureRetryEnv {
         store: &*state.compliance,
         peers: &*state.peer_actions,
