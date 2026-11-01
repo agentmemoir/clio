@@ -1,0 +1,1 @@
+The `export` and `review_export` tools now keep a delivered bundle inside the deployment's export root, which is `CLIO_EXPORT_ROOT` when it is set and `<data directory>/exports` otherwise, and they refuse a destination outside that root with an invalid-argument error.
