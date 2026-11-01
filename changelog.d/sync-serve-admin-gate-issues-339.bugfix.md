@@ -1,1 +1,1 @@
-Starting a network sync server from the MCP surface now requires an administrator credential, and every bank in the served set must pass the credential's bank gate: a bank outside the caller's grant is refused rather than dropped. [Issue #339](https://github.com/agentmemoir/clio/issues/339)
+`sync_serve` and `clio sync serve` now require a harness or system administrator credential when a principal is present, and a bind outside loopback is refused unless the operator setting `sync.allow_public_bind` is enabled (`CLIO_SYNC_ALLOW_PUBLIC_BIND` also works).

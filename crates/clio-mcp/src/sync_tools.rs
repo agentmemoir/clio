@@ -6,13 +6,20 @@
 //! This module is responsible for the MCP-bound multi-host sync tools'
 //! dispatch and local surfaces: `sync_status` (masked local report),
 //! `sync_key_status` (masked key management report), `sync_serve` (background
-//! server with a removed-token rejection, dev-mode refusal, and TTL), and the
-//! bank/client-config helpers the transfer tools read.
+//! server behind an administrator gate, with a removed-token rejection,
+//! dev-mode refusal, and TTL), and the bank/client-config helpers the transfer
+//! tools read.
 //!
 //! ## Owns
 //! - Dispatch routing for the six sync tool names
 //! - JSON argument decoding and result shaping for the status, key-status,
 //!   and serve tools
+//! - The `sync_serve` administrator gate: `authorize_admin` refuses a caller
+//!   whose principal is an agent or a user, so a harness or system credential
+//!   is required when a principal is present
+//! - The serve admission wiring: `sync_serve` hands the operator's
+//!   `sync.allow_public_bind` setting to `SyncServerOptions`, so the server
+//!   refuses a non-loopback bind the setting has not admitted
 //! - Client config assembly (`device_id`, store/sync handles, remote, token,
 //!   and encryption keys): the status path takes a `sync_key` override and
 //!   otherwise reads the recorded store, marker-authoritative, while the
