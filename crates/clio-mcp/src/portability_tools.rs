@@ -65,6 +65,7 @@ fn export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> {
     let ctx = state.resolve_ctx(args)?;
     let destination = crate::export_destination::confine_export_destination(
         &state.export_root,
+        state.export_root_trusted,
         req_str(args, "destination")?,
     )?;
     let destination = destination.to_string_lossy().into_owned();
@@ -147,6 +148,7 @@ fn review_export_tool(state: &McpState, args: &Value) -> Result<Value, AmError> 
     let ctx = state.resolve_ctx(args)?;
     let destination = crate::export_destination::confine_export_destination(
         &state.export_root,
+        state.export_root_trusted,
         req_str(args, "destination")?,
     )?;
     let now = state.resolve_timestamp(args)?;

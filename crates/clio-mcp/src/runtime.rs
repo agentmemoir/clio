@@ -67,6 +67,7 @@ pub const SHARED_BANK: &str = "shared";
 /// instance of each and can differ only in [`Self::principal`], which is what
 /// makes a per-request principal cheap and safe to attach.
 #[derive(Clone)]
+#[expect(clippy::struct_excessive_bools, reason = "deployment flags")]
 pub struct McpState {
     /// Discrete/episodic repository.
     pub store: Arc<dyn Store>,
@@ -164,11 +165,9 @@ pub struct McpState {
     /// soon as the command returns, where a detached wave would be lost.
     /// It changes when the work is observed, not what the work is.
     pub(crate) join_consolidate_wave: bool,
-    /// Automatic maintenance-trigger decision state, keyed by bank.
-    ///
-    /// The background sweeper's trigger evaluation (`maintenance_trigger`)
-    /// writes it; the status surfaces read it non-blockingly. Behind an `Arc`
-    /// so every clone of the state reads one record.
+    /// Automatic maintenance-trigger decision state, keyed by bank: the
+    /// background sweeper writes it and the status surfaces read it
+    /// non-blockingly. Behind an `Arc` so every clone reads one record.
     pub maintenance_trigger: Arc<MaintenanceTriggerState>,
     /// Sync journal / cursors / conflicts / DLQ view of the same backend
     /// (multi-host sync surfaces).
@@ -209,10 +208,11 @@ pub struct McpState {
     /// Internal configuration, never a caller or MCP argument.
     pub journal_path: Option<std::path::PathBuf>,
     /// Deployment-owned root every `export` / `review_export` destination must
-    /// resolve inside; resolved at open from the export-root precedence chain
-    /// (`CLIO_EXPORT_ROOT`, then the data directory, then a relative fallback).
-    /// Opening never creates it: the first confined destination does.
+    /// resolve inside, from the export-root precedence chain; never created here.
     pub export_root: std::path::PathBuf,
+    /// Whether `export_root` is deployment-owned rather than the relative
+    /// fallback tier resolved against a client project's working directory.
+    pub export_root_trusted: bool,
     /// Monotonic counter for caller-omitted item ids (see `runtime_context`).
     ///
     /// Behind an `Arc` because the counter must stay process-wide: a per-request
@@ -349,10 +349,11 @@ impl McpState {
         }
     }
 
-    /// Override the deployment-owned export root (embedders and tests); the
-    /// path is not created here, the first confined destination creates it.
+    /// Override the export root with an explicitly supplied, deployment-owned
+    /// path (embedders and tests); the first confined destination creates it.
     pub fn set_export_root(&mut self, path: impl Into<std::path::PathBuf>) {
         self.export_root = path.into();
+        self.export_root_trusted = true;
     }
 
     /// Open MCP runtime state over one backend.
