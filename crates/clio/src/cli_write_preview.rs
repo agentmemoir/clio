@@ -38,10 +38,10 @@ use serde_json::{Value, json};
 /// the caller's `--bank` (or the runtime default) and refuse an unknown or
 /// invalid bank, so every dry run of this dispatcher reports a missing bank
 /// the same way. For `summarize` that refusal matches the real call: the
-/// read dispatch runs the same known-bank check. For `consolidate` the dry
-/// run is stricter than the real call: the real consolidate write call
-/// currently accepts an unknown bank (only an empty bank is refused), so the
-/// refusal exists only in the dry run, as the issue scopes it. `summarize`
+/// read dispatch runs the same known-bank check. For `consolidate` that
+/// refusal matches the real call too: the consolidate write dispatch refuses
+/// the same unknown name with `not_found`, so the dry run and the real call
+/// accept and refuse exactly the same banks. `summarize`
 /// additionally checks its scope: a bank scope is fine, but an item scope
 /// must name an existing item. Returns the resolved bank, which the
 /// pending-work counts read against.
