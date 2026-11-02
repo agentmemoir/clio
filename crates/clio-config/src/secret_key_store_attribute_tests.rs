@@ -159,6 +159,25 @@ fn a_store_that_refuses_an_attribute_write_says_so() {
 }
 
 #[test]
+fn a_locked_store_reports_an_attribute_write_error() {
+    let store = store_over(&FakeCredential::locked_on_read());
+
+    let err = err_of(store.set_attribute("created_at", "2026-10-01T00:00:00Z"));
+
+    assert!(
+        err.message.contains("write an attribute of"),
+        "{}",
+        err.message
+    );
+    assert!(
+        err.message
+            .contains("the store is locked or refused access"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
 fn reading_attributes_of_a_missing_entry_is_empty_rather_than_a_failure() {
     let store = store_over(&FakeCredential::empty());
 
@@ -168,6 +187,20 @@ fn reading_attributes_of_a_missing_entry_is_empty_rather_than_a_failure() {
         attributes.is_empty(),
         "an empty credential carries no attributes"
     );
+}
+
+#[test]
+fn writing_an_attribute_before_there_is_a_key_asks_for_a_key_first() {
+    let store = store_over(&FakeCredential::empty());
+
+    let err = err_of(store.set_attribute("created_at", "2026-10-01T00:00:00Z"));
+
+    assert!(
+        err.message.contains("write an attribute of"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("there is no entry"), "{}", err.message);
 }
 
 // ------------------------------------------------------- the Windows shape
