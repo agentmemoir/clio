@@ -255,3 +255,7 @@ impl OpsStore for SqliteStore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_ops_tests.rs"]
+mod tests;
