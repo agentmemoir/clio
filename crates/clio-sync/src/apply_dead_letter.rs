@@ -194,3 +194,7 @@ pub(crate) fn stale_refused(sync: &dyn SyncStore, bank_id: &str) -> Result<i64, 
 pub(crate) fn last_stale_refusal(sync: &dyn SyncStore) -> Result<Option<String>, AmError> {
     sync.cursor_get(STATUS_SLOT, LAST_STALE_REFUSAL_KEY)
 }
+
+#[cfg(test)]
+#[path = "apply_dead_letter_tests.rs"]
+mod apply_dead_letter_tests;

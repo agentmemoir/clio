@@ -148,3 +148,7 @@ fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
         opened.admission_receipt = Some(receipt.clone());
     }
 }
+
+#[cfg(test)]
+#[path = "client_decrypt_tests.rs"]
+mod client_decrypt_tests;

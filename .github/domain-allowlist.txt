@@ -15,4 +15,5 @@ h
 host
 huggingface.co
 localhost
+status.invalid
 x
