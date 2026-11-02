@@ -34,8 +34,12 @@
 //! pass that runs on every open, before the batch, and is a no-op once the shape
 //! is current.
 //!
-//! A probe before the DDL is what makes this safe on a read-only connection. An
-//! earlier shape carried `PRIMARY KEY (bank_id, device_id)`, but only on this
+//! A probe before the DDL is what makes this safe on a read-only connection. The
+//! probe is best effort against a second open converging the same database at
+//! once: both can see the table absent, and `IF NOT EXISTS` makes the second
+//! create a no-op.
+//!
+//! An earlier shape carried `PRIMARY KEY (bank_id, device_id)`, but only on this
 //! branch before it merged, so no shipped database holds it. A database that did
 //! get that shape keeps it, because the step creates only a missing table;
 //! dropping it once is a local development cleanup, not a migration step.
@@ -69,10 +73,13 @@ CREATE TABLE IF NOT EXISTS sync_device_high_water
 
 /// Create `sync_device_high_water` on an existing SQLite database.
 ///
-/// A fresh database is untouched: the portable DDL declares the table itself.
-/// The table is probed first, so a current database issues no write at all:
-/// `CREATE TABLE IF NOT EXISTS` still opens a write transaction when the table
-/// exists, and a read-only connection refuses that.
+/// A fresh database has no table, so this step creates it and the portable DDL
+/// that follows finds it already there.
+///
+/// The table is probed first, so a current database issues no write at all.
+/// SQLite accepts `CREATE TABLE IF NOT EXISTS` on an existing table even on a
+/// read-only connection, so the probe saves a pointless write attempt rather
+/// than making a read-only open possible.
 ///
 /// # Errors
 /// Storage failures.
@@ -93,9 +100,9 @@ pub(crate) fn converge_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError
 
 /// Create `sync_device_high_water` on an existing Postgres database.
 ///
-/// A fresh database is untouched: the migrate batch declares the table itself,
-/// and this statement is a no-op by then. On a database whose bootstrap is
-/// already current this is the only statement that creates the table at all.
+/// A fresh database has no table, so this step creates it, and the migrate batch
+/// that follows finds it already there. On a database whose bootstrap is already
+/// current this is the only step that creates the table at all.
 ///
 /// The table is probed first, so a current database issues no write at all.
 /// Postgres refuses `CREATE TABLE` in a read-only transaction even with

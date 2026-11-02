@@ -5,11 +5,12 @@
 //!
 //! This module tests the Postgres `sync_device_high_water` convergence: a
 //! database whose bootstrap stamp is already current gains the table on the next
-//! open, the convergence is idempotent, and a fresh database gets it from the
-//! migrate batch as well.
+//! open, the convergence is idempotent, a fresh database gets the table from the
+//! step before the batch, and a current schema opens read-only.
 //!
 //! ## Owns
-//! - Test assertions for `converge_pg`, including the already-stamped path
+//! - Test assertions for `converge_pg`, including the already-stamped path and
+//!   the read-only open
 //!
 //! ## Does not own
 //! - Production convergence DDL (`sync_schema_converge`)
@@ -20,10 +21,13 @@
 //! Test-only. Never compiled into production builds. Every case runs inside a
 //! private schema, so it neither reads nor writes `public`.
 
+use crate::dek::{DekProvider, LocalDevKms};
 use crate::pg_lock::lock_pg_test;
 use crate::pg_scoped_schema::ScopedSchema;
+use crate::postgres::PostgresStore;
 use crate::sync_schema_converge::converge_pg;
 use crate::sync_store::SyncStore;
+use std::sync::Arc;
 
 /// The shared Postgres URL, or `None` after the fail-closed skip line.
 fn shared_url() -> Option<String> {
@@ -61,12 +65,12 @@ fn columns(client: &mut postgres::Client) -> Vec<String> {
     names
 }
 
-/// The columns a fresh database gets from the migrate batch, sorted.
+/// The columns a fresh database ends up with after one open, sorted.
 ///
-/// The batch embeds the portable schema text, so this reads the declaration the
-/// convergence statement restates rather than a list copied into this file. A
-/// column added to one and not the other fails the comparison below instead of
-/// drifting unnoticed.
+/// One open runs the convergence step and then the migrate batch, and both
+/// declare this table, so this reads the shape the convergence statement
+/// restates rather than a list copied into this file. A column added to one and
+/// not the other fails the comparison below instead of drifting unnoticed.
 fn fresh_columns(schema: &ScopedSchema) -> Vec<String> {
     drop(schema.open());
     let mut client = crate::pg_tls::connect(schema.url()).expect("connect");
@@ -109,7 +113,8 @@ fn postgres_an_already_stamped_database_gains_the_table() {
         return;
     };
     let schema = ScopedSchema::new(&url);
-    // First open: the batch stamps both versions and creates the table.
+    // First open: the convergence step creates the table and the batch stamps
+    // both versions.
     drop(schema.open());
     // Remove only the table, leaving both stamps current: this is exactly the
     // state an already-bootstrapped database is in before the table existed.
@@ -158,10 +163,10 @@ fn postgres_an_already_stamped_database_gains_the_table() {
     );
 }
 
-/// A fresh database gets the table from the migrate batch, and the convergence
-/// step that follows it is a no-op rather than an error.
+/// A fresh database gets the table from the convergence step, and the migrate
+/// batch that follows declares the same shape rather than failing.
 #[test]
-fn postgres_a_fresh_database_gets_the_table_from_both_paths() {
+fn postgres_a_fresh_database_gets_the_table_before_the_batch() {
     let _shared = lock_pg_test();
     let Some(url) = shared_url() else {
         return;
@@ -173,12 +178,60 @@ fn postgres_a_fresh_database_gets_the_table_from_both_paths() {
     let mut client = crate::pg_tls::connect(schema.url()).expect("connect");
     assert!(
         table_exists(&mut client),
-        "the migrate batch must create the table on a fresh database"
+        "the convergence step must create the table on a fresh database"
     );
     converge_pg(&mut client).expect("the step after the batch must be a no-op");
     assert_eq!(
         columns(&mut client),
         fresh,
         "the batch and the convergence step must declare the same shape"
+    );
+}
+
+/// A current schema needs no DDL, so a store opens on a read-only connection.
+///
+/// Postgres refuses `CREATE TABLE` in a read-only transaction even with
+/// `IF NOT EXISTS`, so only the probe keeps this open from failing. The row
+/// written before the read-only open is read back unchanged, which shows the
+/// open wrote nothing.
+#[test]
+fn postgres_a_current_schema_opens_read_only() {
+    let _shared = lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let fresh = fresh_columns(&ScopedSchema::new(&url));
+    let schema = ScopedSchema::new(&url);
+    let store = schema.open();
+    store
+        .device_high_water_set("b-readonly", "dev-a", "item", "2026-01-01T00:00:00Z")
+        .expect("seed the mark");
+    drop(store);
+
+    let readonly = crate::db_url::postgres_read_only_url(schema.url());
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = PostgresStore::open(&readonly, kms)
+        .expect("a current schema needs no DDL on a read-only connection");
+    assert_eq!(
+        store
+            .device_high_water_get("b-readonly", "dev-a", "item")
+            .expect("the read-only open serves the read"),
+        Some("2026-01-01T00:00:00Z".to_owned())
+    );
+    drop(store);
+
+    // The seed row is still the only row, unchanged, and the shape is the fresh
+    // one: the read-only open added nothing and rewrote nothing.
+    assert_eq!(
+        schema
+            .query_value("SELECT count(*)::text FROM sync_device_high_water")
+            .expect("row count after the read-only open"),
+        Some("1".to_owned())
+    );
+    let mut client = crate::pg_tls::connect(schema.url()).expect("connect");
+    assert_eq!(
+        columns(&mut client),
+        fresh,
+        "the open must leave the shape alone"
     );
 }
