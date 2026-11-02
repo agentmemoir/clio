@@ -1,0 +1,1 @@
+A change to an MCP tool's parameter or description now fails the build until the committed schema pack at `crates/clio-mcp/tests/fixtures/schema_pack.json` is regenerated with `clio mcp schema-export --out`.
