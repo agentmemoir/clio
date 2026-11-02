@@ -1,0 +1,26 @@
+name: OSV scan
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    name: Scan Cargo.lock
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    with:
+      # Weekly, on Monday morning, and the results land in the Security tab rather than on a pull request.
+      scan-args: |-
+        --lockfile=Cargo.lock
+      results-file-name: osv-results.sarif
+      fail-on-vuln: false
+    permissions:
+      actions: read
+      contents: read
+      security-events: write

@@ -1,0 +1,44 @@
+name: Lockfile diff
+
+on:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - scripts/lockfile_diff.py
+      - .github/workflows/lockfile-diff.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lockfile-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  diff:
+    name: Cargo.lock summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The script's own fixtures run before it reads a real lockfile, so a
+      # change to the summary rules fails here rather than in the job summary.
+      - name: Self-test the summary script
+        run: python3 scripts/lockfile_diff.py --self-test
+      # The base is resolved through a merge base rather than taken as the base
+      # branch tip, because the branch tip has moved on since this pull request
+      # forked and the diff must describe the change rather than the drift.
+      # The base branch is passed through the environment, so the shell body
+      # never interpolates an event field into a command.
+      - name: Summarise the Cargo.lock change
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          SUMMARY: ${{ runner.temp }}/lockfile-diff.md
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          python3 scripts/lockfile_diff.py --base "$base" --head HEAD --output "$SUMMARY"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"

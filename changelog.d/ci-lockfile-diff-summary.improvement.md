@@ -1,0 +1,1 @@
+A pull request that changes Cargo.lock now gets a summary of the crates added, removed, and moved between versions, in the job summary, so a dependency bump is read at the crate level instead of as a page of rewritten checksum lines.

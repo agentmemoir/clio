@@ -29,6 +29,31 @@ jobs:
             --files='**/*.{rs,toml,lock,md,yml,yaml,json,sh,py,js,ts}' \
             --verbose
 
+  # A case-only path collision breaks a macOS checkout, an oversized binary bloats every clone, and an orphan branch collapses `git blame`.
+  git-hygiene:
+    name: Git hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The history check asks for the merge base with the base branch, so the clone carries full history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Git hygiene self-test
+        run: python3 scripts/git_hygiene_check.py --self-test
+      # The base is read from the environment and never interpolated into this body, so a branch name cannot become shell syntax.
+      - name: Git hygiene check
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            base="origin/$BASE_REF"
+          else
+            base="HEAD~1"
+          fi
+          python3 scripts/git_hygiene_check.py --base "$base"
+
   secrets:
     name: TruffleHog credentials
     runs-on: ubuntu-latest
