@@ -121,3 +121,7 @@ pub(super) fn apply_triple_invalidate(
     }
     Ok(ApplyOutcome::Applied)
 }
+
+#[cfg(test)]
+#[path = "apply_edges_tests.rs"]
+mod apply_edges_tests;
