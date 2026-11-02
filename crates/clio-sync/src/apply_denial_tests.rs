@@ -24,7 +24,7 @@
 //! Keep this module focused on the guarded apply entry.
 
 use crate::apply::apply_tests::{env, fixture, item_value};
-use crate::apply::{ApplyEngine, ApplyOutcome, ApplyResult, apply_mutation_guarded};
+use crate::apply::{ApplyOutcome, ApplyResult, apply_mutation_guarded};
 use crate::denial::{DenialCarrier, bank_verdict, denial_mutation, denied_bank_marker};
 use crate::denial_fixtures::{FakeDenial, store_with_counting_kms};
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation};
@@ -39,12 +39,8 @@ fn apply_guarded(
     denial: Option<&dyn ErasureDenial>,
     m: &SyncMutation,
 ) -> Result<ApplyResult, AmError> {
-    let engine = ApplyEngine {
-        store,
-        sync: store,
-        device_id: "srv-1".into(),
-        kms: None,
-    };
+    let engine =
+        crate::apply::apply_freshness::test_engine(store, store, "srv-1", None, &m.transaction_time);
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     apply_mutation_guarded(&engine, denial, m, &envelope)
 }

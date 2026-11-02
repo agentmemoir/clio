@@ -284,6 +284,7 @@ pub(crate) fn client_cfg(
         token: token.map(str::to_owned),
         cipher: Vec::new(),
         allow_plaintext: false,
+        max_envelope_skew_secs: 0,
     }
 }
 

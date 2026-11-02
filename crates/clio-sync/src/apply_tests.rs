@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on apply engine tests.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
+use crate::apply::{ApplyOutcome, apply_mutation};
 use crate::protocol::{ENTITY_KIND_ASSOC, ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation};
 use clio_store::{
     AssocEdgeRecord, AssocKind, DeadLetterStatus, DekProvider, LocalDevKms, SqliteStore, Store,
@@ -168,12 +168,8 @@ pub(crate) fn apply_result(
     kms: Option<&dyn DekProvider>,
     m: &SyncMutation,
 ) -> Result<ApplyOutcome, clio_types::AmError> {
-    let engine = ApplyEngine {
-        store,
-        sync: store,
-        device_id: "node-1".into(),
-        kms,
-    };
+    let engine =
+        super::apply_freshness::test_engine(store, store, "node-1", kms, &m.transaction_time);
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     apply_mutation(&engine, m, &envelope)
 }

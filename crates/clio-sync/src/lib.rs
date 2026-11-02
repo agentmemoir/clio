@@ -126,3 +126,7 @@ pub const PULL_PAGE_LIMIT: usize = 200;
 
 /// Default auto-stop TTL for interactive `sync_serve`.
 pub const SERVE_TTL_DEFAULT_SECS: u64 = 30 * 60;
+
+/// Default freshness window for an applied envelope, in seconds either side of
+/// the local clock. `0` disables the window.
+pub const ENVELOPE_SKEW_DEFAULT_SECS: u64 = 300;

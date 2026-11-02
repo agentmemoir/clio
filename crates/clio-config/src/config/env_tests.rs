@@ -74,6 +74,7 @@ fn all_pairs() -> Vec<(&'static str, &'static str)> {
         ("CLIO_EXTRACT_API_KEY", "ek-extract-token-0123456789"),
         ("CLIO_BANK", "env-bank"),
         ("CLIO_SYNC_ALLOW_PUBLIC_BIND", "true"),
+        ("CLIO_SYNC_MAX_ENVELOPE_SKEW_SECS", "45"),
         ("CLIO_REPO_ROOT", "/tmp/from-env"),
     ]
 }
@@ -112,6 +113,12 @@ fn every_variable_reaches_the_path_it_owns() {
     assert_eq!(
         rt.env_overlay.get("sync.allow_public_bind"),
         Some(&json!(true))
+    );
+
+    // A freshness window is a count, so it is folded in as the number read.
+    assert_eq!(
+        rt.env_overlay.get("sync.max_envelope_skew_secs"),
+        Some(&json!(45_u64))
     );
 
     let secrets = [
@@ -247,6 +254,41 @@ fn an_unreadable_public_bind_value_leaves_the_path_alone() {
             rt.env_overlay.get("sync.allow_public_bind")
         );
     }
+}
+
+/// A window of zero is the switch that turns the freshness rule off, so the
+/// overlay keeps it as a value rather than dropping it as a bad count.
+#[test]
+fn a_zero_envelope_skew_reaches_the_path_as_zero() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.apply_process_env(&mut env(&[("CLIO_SYNC_MAX_ENVELOPE_SKEW_SECS", "0")]));
+    assert_eq!(
+        rt.env_overlay.get("sync.max_envelope_skew_secs"),
+        Some(&json!(0_u64)),
+        "the off switch did not reach the overlay"
+    );
+}
+
+/// A negative count is not a window and text is not a count, so both are
+/// dropped and the config default stands in their place.
+#[test]
+fn an_unreadable_envelope_skew_leaves_the_path_alone() {
+    for spelling in ["-1", "many", ""] {
+        let mut rt = Runtime::with_env(&|_| None);
+        rt.apply_process_env(&mut env(&[("CLIO_SYNC_MAX_ENVELOPE_SKEW_SECS", spelling)]));
+        assert!(
+            !rt.env_overlay.contains_key("sync.max_envelope_skew_secs"),
+            "`{spelling}` reached the overlay: {:?}",
+            rt.env_overlay.get("sync.max_envelope_skew_secs")
+        );
+    }
+    assert_eq!(
+        crate::config::merge::system_defaults(&|_key: &str| None)
+            .pointer("/sync/max_envelope_skew_secs")
+            .cloned(),
+        Some(json!(300)),
+        "the default the dropped value falls back to moved"
+    );
 }
 
 /// The database URL is the one variable every code path has to agree on, so the

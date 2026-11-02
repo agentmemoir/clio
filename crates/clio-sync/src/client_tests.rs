@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on sync client tests.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
+use crate::apply::{ApplyOutcome, apply_mutation};
 use crate::client::{SyncClientConfig, ack_skip, pull, push, sync_status};
 use crate::credential_fixtures::scoped_store;
 use crate::crypto::SyncCipherKey;
@@ -80,6 +80,7 @@ pub(crate) fn cfg(
         token: Some(TOKEN.to_owned()),
         cipher,
         allow_plaintext: false,
+        max_envelope_skew_secs: 0,
     }
 }
 
@@ -360,12 +361,9 @@ fn t24_08_crash_between_page_and_cursor_is_idempotent() {
     let m = super::decrypt_for_apply(&cfg_b, &relayed, &envelope)
         .expect("open the held row")
         .expect("the held key opens the row");
-    let engine = ApplyEngine {
-        store: b.as_ref(),
-        sync: b.as_ref(),
-        device_id: "dev-b".into(),
-        kms: None,
-    };
+    let engine = crate::apply::apply_freshness::test_engine(
+        b.as_ref(), b.as_ref(), "dev-b", None, &m.transaction_time,
+    );
     assert_eq!(
         apply_mutation(&engine, &m, &envelope).expect("apply page"),
         ApplyOutcome::Applied

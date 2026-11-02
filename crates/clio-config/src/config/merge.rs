@@ -72,7 +72,8 @@ where
         "credentials": {},
         "sync": {
             "omit": true,
-            "allow_public_bind": false
+            "allow_public_bind": false,
+            "max_envelope_skew_secs": 300
         },
         "mcp": {
             "revision": "2025-11-25",
@@ -256,5 +257,18 @@ mod tests {
             "a public sync bind must be off unless the operator turns it on"
         );
         assert_eq!(defaults.pointer("/sync/omit").cloned(), Some(json!(true)));
+    }
+
+    /// The freshness window is on by default: a stamp more than five minutes
+    /// from this node's clock is stale in either direction, and `0` switches
+    /// the rule off.
+    #[test]
+    fn sync_max_envelope_skew_defaults_to_300_seconds() {
+        let defaults = system_defaults(&|_key: &str| None);
+        assert_eq!(
+            defaults.pointer("/sync/max_envelope_skew_secs").cloned(),
+            Some(json!(300)),
+            "a mutation stamp outside the default window must be refused"
+        );
     }
 }

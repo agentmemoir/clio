@@ -130,7 +130,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "sync_serve",
-            description: "Start the sync server on a background thread for the given banks; auto-stops after the TTL (default 30 minutes). Requires a harness or system (administrator) credential when a principal is present, and the scoped credential store passed as `token_file` (records added with `clio auth token add`); every served bank must be inside that credential's grant, so an out-of-grant bank is refused. `dev: true` serves without authentication, so it is an exercise/debug path, and a non-loopback bind is refused unless the operator setting `sync.allow_public_bind` is enabled.",
+            description: "Start the sync server on a background thread for the given banks; auto-stops after the TTL (default 30 minutes). Requires a harness or system (administrator) credential when a principal is present, and the scoped credential store passed as `token_file` (records added with `clio auth token add`); every served bank must be inside that credential's grant, so an out-of-grant bank is refused. `dev: true` serves without authentication, so it is an exercise/debug path, and a non-loopback bind is refused unless the operator setting `sync.allow_public_bind` is enabled. The freshness of an applied push is bounded by the operator setting `sync.max_envelope_skew_secs` (default 300 seconds): an envelope whose authenticated `transaction_time` differs from the applying node's clock by more than that, in either direction, is refused as stale, and `0` disables the window.",
             required: &[],
             props: vec![
                 (

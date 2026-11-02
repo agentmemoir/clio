@@ -143,6 +143,9 @@ fn seed(client: &McpState, m: &SyncMutation) {
         sync: client.sync.as_ref(),
         device_id: "dev-seed".into(),
         kms: None,
+        clock: &clio_sync::clock::now_epoch,
+        // The seed rows carry fixed fixture dates, so the window stays off here.
+        max_envelope_skew_secs: 0,
     };
     let outcome = apply_mutation(&engine, m, &envelope).expect("the seed mutation applies");
     assert_eq!(

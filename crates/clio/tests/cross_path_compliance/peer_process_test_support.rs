@@ -398,6 +398,7 @@ fn client<T: Store + SyncStore + 'static>(
         token: Some(PEER_TOKEN.to_owned()),
         cipher: crate::sync_wire_support::sync_cipher(),
         allow_plaintext: false,
+        max_envelope_skew_secs: 0,
     }
 }
 

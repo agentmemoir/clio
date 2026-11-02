@@ -53,7 +53,7 @@ fn format_utc(secs: i64) -> String {
 /// place. A `u64` second count too large for `i64` clamps to `i64::MAX`; no real
 /// clock reaches it.
 #[must_use]
-pub(crate) fn now_epoch() -> i64 {
+pub fn now_epoch() -> i64 {
     let elapsed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -69,10 +69,6 @@ pub(crate) fn now_epoch() -> i64 {
 /// not check it: an impossible day would otherwise become a real instant in
 /// the next month.
 #[must_use]
-#[allow(
-    dead_code,
-    reason = "called by this module's tests until the freshness read uses it"
-)]
 pub(crate) fn parse_utc_epoch(stamp: &str) -> Option<i64> {
     let bytes = stamp.as_bytes();
     if bytes.len() != 20 {

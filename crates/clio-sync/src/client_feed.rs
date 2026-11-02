@@ -246,7 +246,7 @@ pub(crate) fn push_bank(
         bank_id: bank.to_owned(),
         push_cursor: Some(response.cursor),
         pull_cursor: cfg.sync.cursor_get(bank, "pull")?,
-        pending_push: crate::client::pending_push(cfg, bank)?,
+        pending_push: pending_push(cfg, bank)?,
         dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
         conflicts: cfg.sync.conflict_count(bank)?,
         conflict_sample: Vec::new(),
@@ -360,6 +360,21 @@ fn package_record_kinds(
         end: mutations.len(),
     });
     Ok(batches)
+}
+
+/// Outbound mutation count for `bank`: each feed kind's rows past that kind's
+/// own push watermark (item, assoc edge, triple, persona stable/preference,
+/// belief, task, failure; the retired shared `push_wm` converts once).
+/// `push_bank`, `pull_bank`, and `sync_status` report it, never a hard-coded
+/// zero. Bounded by `PULL_PAGE_LIMIT` per kind and approximate: it never
+/// subtracts rows a push would skip for a missing carrier.
+pub(crate) fn pending_push(cfg: &SyncClientConfig, bank: &str) -> Result<i64, AmError> {
+    let mut count = 0usize;
+    for kind in PUSH_KINDS {
+        let since = kind_watermark(cfg, bank, kind)?;
+        count += feed_kind_count(cfg, bank, kind, &since)?;
+    }
+    Ok(i64::try_from(count).unwrap_or(i64::MAX))
 }
 
 /// One kind's next feed page size (bounded by `PULL_PAGE_LIMIT`), used for

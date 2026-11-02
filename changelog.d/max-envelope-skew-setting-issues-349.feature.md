@@ -1,0 +1,1 @@
+A new operator setting, `sync.max_envelope_skew_secs`, holds the sync envelope freshness window in seconds and defaults to `300`; `0` disables the window. `CLIO_SYNC_MAX_ENVELOPE_SKEW_SECS` overlays it from the environment, and `clio config set sync.max_envelope_skew_secs` accepts any non-negative integer, including `0`, and refuses a value that is not a count.

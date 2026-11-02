@@ -227,6 +227,11 @@ pub(crate) fn handle_push(
         sync: options.sync.as_ref(),
         device_id: options.device_id.clone(),
         kms: Some(options.kms.as_ref()),
+        clock: &crate::clock::now_epoch,
+        // This route runs the freshness guard with the window off: the serve
+        // options carry no window value, so a serve-side window is not
+        // selectable here.
+        max_envelope_skew_secs: 0,
     };
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();

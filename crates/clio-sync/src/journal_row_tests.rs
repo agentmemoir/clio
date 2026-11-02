@@ -6,7 +6,6 @@
 //! runs, so a row identity that falls back to the entity id fails here. Never
 //! compiled into production builds.
 
-use crate::apply::ApplyEngine;
 use crate::apply::apply_tests::{fixture, upsert};
 use crate::journal_row::{journal_row, open_journal_content};
 use clio_types::ErrorCode;
@@ -16,12 +15,8 @@ const STAMP: &str = "2026-01-01T00:00:00Z";
 #[test]
 fn journal_content_is_bound_to_one_mutation() {
     let (store, kms) = fixture();
-    let engine = ApplyEngine {
-        store: &*store,
-        sync: &*store,
-        device_id: "node-1".into(),
-        kms: Some(&*kms),
-    };
+    let engine =
+        crate::apply::apply_freshness::test_engine(&*store, &*store, "node-1", Some(&*kms), STAMP);
     // Two mutations of one entity: only the mutation id tells them apart.
     let first = upsert("mutation-a", "bank-1", STAMP, "dev-a", "gist-a");
     let second = upsert("mutation-b", "bank-1", STAMP, "dev-a", "gist-b");
@@ -44,12 +39,8 @@ fn journal_content_is_bound_to_one_mutation() {
 #[test]
 fn journal_content_is_bound_to_its_bank() {
     let (store, kms) = fixture();
-    let engine = ApplyEngine {
-        store: &*store,
-        sync: &*store,
-        device_id: "node-1".into(),
-        kms: Some(&*kms),
-    };
+    let engine =
+        crate::apply::apply_freshness::test_engine(&*store, &*store, "node-1", Some(&*kms), STAMP);
     let first = upsert("mutation-a", "bank-1", STAMP, "dev-a", "gist-a");
     let mut second = first.clone();
     second.bank = "bank-2".into();

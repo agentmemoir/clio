@@ -21,7 +21,7 @@
 //! Keep this module focused on the apply-matrix tail tests.
 
 use crate::apply::apply_tests::{apply, assoc, edge_value, env, fixture, item, upsert};
-use crate::apply::{ApplyEngine, ApplyOutcome, quarantine};
+use crate::apply::{ApplyOutcome, quarantine};
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
     ENTITY_KIND_ITEM, ENTITY_KIND_TRIPLE, OP_ARCHIVE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE,
@@ -346,12 +346,13 @@ fn cipher_and_keyless_journal_paths() {
 fn quarantine_helper_opens_an_open_dead_letter_row() {
     let (store, _kms) = fixture();
     let m = upsert("m-q", "b-q", "2026-01-01T00:00:00Z", "dev-a", "g");
-    let engine = ApplyEngine {
-        store: store.as_ref(),
-        sync: store.as_ref(),
-        device_id: "node-1".into(),
-        kms: None,
-    };
+    let engine = crate::apply::apply_freshness::test_engine(
+        store.as_ref(),
+        store.as_ref(),
+        "node-1",
+        None,
+        &m.transaction_time,
+    );
     let envelope = serde_json::to_string(&m).expect("envelope");
     let out =
         quarantine(&engine, &m.bank, &m, &envelope, "malformed", "no key").expect("quarantine");

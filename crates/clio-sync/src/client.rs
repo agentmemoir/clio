@@ -60,6 +60,10 @@ pub struct SyncClientConfig {
     pub cipher: Vec<crate::crypto::SyncCipherKey>,
     /// Local development and tests only: without it a node with no key refuses export.
     pub allow_plaintext: bool,
+    /// How far a pulled envelope's writer stamp may sit from this node's clock,
+    /// in seconds, in either direction. `0` disables the freshness window, which
+    /// makes every pulled envelope eligible to apply.
+    pub max_envelope_skew_secs: u64,
 }
 
 /// One sync operation mode.
@@ -173,7 +177,7 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
     for bank in banks {
         let push_cursor = cfg.sync.cursor_get(bank, "push")?;
         let pull_cursor = cfg.sync.cursor_get(bank, "pull")?;
-        let pending = pending_push(cfg, bank)?;
+        let pending = crate::client_feed::pending_push(cfg, bank)?;
         let conflicts = cfg.sync.conflict_count(bank)?;
         let sample = cfg
             .sync
@@ -208,21 +212,6 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
     })
 }
 
-/// Outbound mutation count for `bank`: each feed kind's rows past that kind's
-/// own push watermark (item, assoc edge, triple, persona stable/preference,
-/// belief, task, failure; the retired shared `push_wm` converts once).
-/// `push_bank`, `pull_bank`, and `sync_status` report it, never a hard-coded
-/// zero. Bounded by `PULL_PAGE_LIMIT` per kind and approximate: it never
-/// subtracts rows a push would skip for a missing carrier.
-pub(crate) fn pending_push(cfg: &SyncClientConfig, bank: &str) -> Result<i64, AmError> {
-    let mut count = 0usize;
-    for kind in crate::client_feed::PUSH_KINDS {
-        let since = crate::client_feed::kind_watermark(cfg, bank, kind)?;
-        count += crate::client_feed::feed_kind_count(cfg, bank, kind, &since)?;
-    }
-    Ok(i64::try_from(count).unwrap_or(i64::MAX))
-}
-
 fn required_remote(cfg: &SyncClientConfig) -> Result<String, AmError> {
     cfg.remote.clone().ok_or_else(|| {
         AmError::new(
@@ -244,6 +233,8 @@ fn pull_bank(
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
+        clock: &crate::clock::now_epoch,
+        max_envelope_skew_secs: cfg.max_envelope_skew_secs,
     };
     loop {
         let request = PullRequest {
@@ -294,7 +285,7 @@ fn pull_bank(
         bank_id: bank.to_owned(),
         push_cursor: cfg.sync.cursor_get(bank, "push")?,
         pull_cursor: Some(cursor),
-        pending_push: pending_push(cfg, bank)?,
+        pending_push: crate::client_feed::pending_push(cfg, bank)?,
         dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
         conflicts: cfg.sync.conflict_count(bank)?,
         conflict_sample: Vec::new(),
@@ -324,6 +315,8 @@ fn decrypt_for_apply(
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
+        clock: &crate::clock::now_epoch,
+        max_envelope_skew_secs: cfg.max_envelope_skew_secs,
     };
     // One refusal shape for every row this node cannot trust: quarantine it
     // under the row's own bank and stop, so the cursor freezes at the prior id
