@@ -177,7 +177,7 @@ fn postgres_belief_context_unreadable_reads_none() {
     let shred = unique("pg-shred-ctx-subj");
     let ghost = kms
         .as_ref()
-        .encrypt(&shred, b"ghost context")
+        .encrypt(&id, &shred, b"ghost context")
         .unwrap()
         .to_storage_string();
     store

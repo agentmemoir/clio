@@ -372,7 +372,7 @@ fn journal_row_to_mutation(
         } else {
             let envelope: clio_store::CiphertextEnvelope = serde_json::from_str(sealed)
                 .map_err(|e| AmError::new(ErrorCode::Internal, format!("bad sealed row: {e}")))?;
-            let bytes = kms.decrypt(&envelope)?;
+            let bytes = kms.decrypt(&row.entity_id, &envelope)?;
             SyncContent::Plain(serde_json::from_slice::<Value>(&bytes).map_err(|e| {
                 AmError::new(ErrorCode::Internal, format!("bad journal content: {e}"))
             })?)

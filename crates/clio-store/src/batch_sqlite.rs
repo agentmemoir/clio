@@ -45,7 +45,7 @@ impl SqliteStore {
     fn seal_item(&self, item: &clio_types::MemoryItem) -> Result<(String, String), AmError> {
         item.validate()?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         Ok((cipher, dek_ref))
     }
 }
@@ -133,6 +133,7 @@ fn apply_one(
             let (cipher, dek_ref) = store.seal_item(item)?;
             let object_cipher = crate::triple_cipher::seal_object(
                 store.kms().as_ref(),
+                &edge.id,
                 &item.subject_id,
                 &edge.object,
             )?;
@@ -170,8 +171,8 @@ fn apply_one(
         } => {
             let (cipher, dek_ref) = store.seal_item(item)?;
             let definition =
-                seal_history_text(store.kms().as_ref(), &item.subject_id, &record.definition)?;
-            let steps = seal_steps(store.kms().as_ref(), &item.subject_id, &record.steps)?;
+                seal_history_text(store.kms().as_ref(), &record.id, &item.subject_id, &record.definition)?;
+            let steps = seal_steps(store.kms().as_ref(), &record.id, &item.subject_id, &record.steps)?;
             commit_task_upsert_tx(
                 tx,
                 item,
@@ -191,8 +192,8 @@ fn apply_one(
         } => {
             let (cipher, dek_ref) = store.seal_item(item)?;
             let what_failed =
-                seal_history_text(store.kms().as_ref(), &item.subject_id, &record.what_failed)?;
-            let lesson = seal_history_text(store.kms().as_ref(), &item.subject_id, &record.lesson)?;
+                seal_history_text(store.kms().as_ref(), &record.id, &item.subject_id, &record.what_failed)?;
+            let lesson = seal_history_text(store.kms().as_ref(), &record.id, &item.subject_id, &record.lesson)?;
             commit_failure_record_tx(
                 tx,
                 item,
@@ -209,10 +210,16 @@ fn apply_one(
             entry.validate()?;
             require_actor(actor)?;
             let dek_ref = store.kms().ensure_dek(&entry.bank_id)?;
-            let cipher = seal_persona_value(store.kms().as_ref(), &entry.bank_id, &entry.value)?;
+            let cipher = seal_persona_value(
+                store.kms().as_ref(),
+                &entry.bank_id,
+                &entry.key,
+                &entry.value,
+            )?;
             let context_cipher = seal_persona_context(
                 store.kms().as_ref(),
                 &entry.bank_id,
+                &entry.key,
                 entry.context.as_deref(),
             )?;
             put_stable_entry_tx_audited(
@@ -251,6 +258,7 @@ fn apply_one(
             let context_cipher = seal_persona_context(
                 store.kms().as_ref(),
                 &preference.bank_id,
+                &preference.key,
                 preference.context.as_deref(),
             )?;
             put_preference_state_tx_audited(
@@ -266,11 +274,13 @@ fn apply_one(
             let dek_ref = store.kms().ensure_dek(&belief.subject_id)?;
             let cipher = seal_proposition(
                 store.kms().as_ref(),
+                &belief.id,
                 &belief.subject_id,
                 &belief.proposition,
             )?;
             let context_cipher = seal_belief_context(
                 store.kms().as_ref(),
+                &belief.id,
                 &belief.subject_id,
                 belief.context.as_deref(),
             )?;

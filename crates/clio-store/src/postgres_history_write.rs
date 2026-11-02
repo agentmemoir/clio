@@ -287,10 +287,10 @@ impl PostgresStore {
         require_nonempty(&item.bank_id, "bank_id")?;
         require_nonempty(&draft.task_id, "task_id")?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         let definition =
-            seal_history_text(self.kms().as_ref(), &item.subject_id, &draft.definition)?;
-        let steps = seal_steps(self.kms().as_ref(), &item.subject_id, &draft.steps)?;
+            seal_history_text(self.kms().as_ref(), &draft.id, &item.subject_id, &draft.definition)?;
+        let steps = seal_steps(self.kms().as_ref(), &draft.id, &item.subject_id, &draft.steps)?;
         let version = self.with_client(|client| {
             let mut tx = client.transaction().am("task upsert begin")?;
             let version = commit_task_upsert_tx(
@@ -324,10 +324,10 @@ impl PostgresStore {
         require_actor(actor)?;
         validate_failure_carrier(item, draft)?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         let what_failed =
-            seal_history_text(self.kms().as_ref(), &item.subject_id, &draft.what_failed)?;
-        let lesson = seal_history_text(self.kms().as_ref(), &item.subject_id, &draft.lesson)?;
+            seal_history_text(self.kms().as_ref(), &draft.id, &item.subject_id, &draft.what_failed)?;
+        let lesson = seal_history_text(self.kms().as_ref(), &draft.id, &item.subject_id, &draft.lesson)?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("failure record begin")?;
             commit_failure_record_tx(

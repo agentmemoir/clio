@@ -59,7 +59,8 @@ impl PostgresStore {
                         .map(|row| row.map(|r| r.get::<_, Option<String>>(0)))
                 })?
                 .flatten();
-            record.context = open_context(self.kms().as_ref(), cipher.as_deref());
+            let item_id = record.item_id.clone();
+            record.context = open_context(self.kms().as_ref(), &item_id, cipher.as_deref());
         }
         Ok(())
     }
@@ -76,6 +77,7 @@ impl PostgresStore {
             r.get(4),
             crate::triple_cipher::open_optional_object(
                 self.kms().as_ref(),
+                &r.get::<_, String>(0),
                 r.get::<_, Option<String>>(5).as_deref(),
             )?,
             r.get(6),
@@ -101,13 +103,14 @@ impl PostgresStore {
             subject_id: t.get(4),
             version: i64::from(t.get::<_, i32>(5)),
             status: t.get(6),
-            definition: open_history_text(self.kms().as_ref(), &t.get::<_, String>(7))?,
-            steps: open_steps(self.kms().as_ref(), &t.get::<_, String>(8))?,
+            definition: open_history_text(self.kms().as_ref(), &t.get::<_, String>(0), &t.get::<_, String>(7))?,
+            steps: open_steps(self.kms().as_ref(), &t.get::<_, String>(0), &t.get::<_, String>(8))?,
             evidence_ref: t.get(9),
             admission_score: t.get(10),
             created_at: t.get(11),
             context: open_context(
                 self.kms().as_ref(),
+                &t.get::<_, String>(2),
                 t.get::<_, Option<String>>(12).as_deref(),
             ),
         })
@@ -121,8 +124,8 @@ impl PostgresStore {
             task_id: f.get(3),
             subject_id: f.get(4),
             attempt_n: i64::from(f.get::<_, i32>(5)),
-            what_failed: open_history_text(self.kms().as_ref(), &f.get::<_, String>(6))?,
-            lesson: open_history_text(self.kms().as_ref(), &f.get::<_, String>(7))?,
+            what_failed: open_history_text(self.kms().as_ref(), &f.get::<_, String>(0), &f.get::<_, String>(6))?,
+            lesson: open_history_text(self.kms().as_ref(), &f.get::<_, String>(0), &f.get::<_, String>(7))?,
             lesson_tokens: i64::from(f.get::<_, i32>(8)),
             evidence_ref: f.get(9),
             admission_score: f.get(10),
@@ -130,6 +133,7 @@ impl PostgresStore {
             created_at: f.get(12),
             context: open_context(
                 self.kms().as_ref(),
+                &f.get::<_, String>(2),
                 f.get::<_, Option<String>>(13).as_deref(),
             ),
         })

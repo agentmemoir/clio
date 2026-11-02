@@ -210,18 +210,21 @@ fn reject_dropped_record_context(
 /// Seal one text field under the subject DEK for storage.
 pub(crate) fn seal_history_text(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     value: &str,
 ) -> Result<String, AmError> {
-    Ok(kms
-        .encrypt(subject_id, value.as_bytes())?
-        .to_storage_string())
+    Ok(kms.encrypt(row_id, subject_id, value.as_bytes())?.to_storage_string())
 }
 
 /// Open one history text field back into plaintext.
-pub(crate) fn open_history_text(kms: &dyn DekProvider, cipher: &str) -> Result<String, AmError> {
+pub(crate) fn open_history_text(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: &str,
+) -> Result<String, AmError> {
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(&envelope)?;
+    let bytes = kms.decrypt(row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| {
         AmError::new(
             ErrorCode::Internal,
@@ -233,16 +236,21 @@ pub(crate) fn open_history_text(kms: &dyn DekProvider, cipher: &str) -> Result<S
 /// Seal an ordered `steps` list as a JSON array string.
 pub(crate) fn seal_steps(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     steps: &[String],
 ) -> Result<String, AmError> {
     let encoded = serde_json::to_string(steps).expect("steps always serialize");
-    seal_history_text(kms, subject_id, &encoded)
+    seal_history_text(kms, row_id, subject_id, &encoded)
 }
 
 /// Open a sealed `steps` list; an undecodable payload fails closed.
-pub(crate) fn open_steps(kms: &dyn DekProvider, cipher: &str) -> Result<Vec<String>, AmError> {
-    let raw = open_history_text(kms, cipher)?;
+pub(crate) fn open_steps(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: &str,
+) -> Result<Vec<String>, AmError> {
+    let raw = open_history_text(kms, row_id, cipher)?;
     serde_json::from_str(&raw)
         .map_err(|e| AmError::new(ErrorCode::Internal, format!("steps decode: {e}")))
 }
@@ -318,29 +326,29 @@ mod tests {
             ErrorCode::InvalidArgument
         );
         let kms = crate::dek::LocalDevKms::new();
-        let cipher = seal_history_text(&kms, "s", "hello").expect("seal");
-        assert_eq!(open_history_text(&kms, &cipher).expect("open"), "hello");
+        let cipher = seal_history_text(&kms, "rec-1", "s", "hello").expect("seal");
+        assert_eq!(open_history_text(&kms, "rec-1", &cipher).expect("open"), "hello");
         assert_eq!(
-            open_history_text(&kms, "not-json").unwrap_err().code,
+            open_history_text(&kms, "rec-1", "not-json").unwrap_err().code,
             ErrorCode::UnreadableContent
         );
         let steps = vec!["a".to_owned(), "b".to_owned()];
-        let sealed = seal_steps(&kms, "s", &steps).expect("seal steps");
-        assert_eq!(open_steps(&kms, &sealed).expect("open steps"), steps);
-        let bad = seal_history_text(&kms, "s", "not json").expect("seal bad");
+        let sealed = seal_steps(&kms, "rec-1", "s", &steps).expect("seal steps");
+        assert_eq!(open_steps(&kms, "rec-1", &sealed).expect("open steps"), steps);
+        let bad = seal_history_text(&kms, "rec-1", "s", "not json").expect("seal bad");
         assert_eq!(
-            open_steps(&kms, &bad).unwrap_err().code,
+            open_steps(&kms, "rec-1", &bad).unwrap_err().code,
             ErrorCode::Internal
         );
         let detail = history_audit_detail(&item("i", "b", EpisodicType::Task), "task", "t1", 2, 3);
         assert!(detail.contains("\"version\":2"));
         assert!(detail.contains("\"context_present\":false"));
         // Non-UTF-8 plaintext hits the open_history_text conversion guard.
-        let raw = crate::dek::DekProvider::encrypt(&kms, "s", &[0xFF_u8, 0xFE])
+        let raw = crate::dek::DekProvider::encrypt(&kms, "rec-1", "s", &[0xFF_u8, 0xFE])
             .expect("encrypt raw")
             .to_storage_string();
         assert_eq!(
-            open_history_text(&kms, &raw).unwrap_err().code,
+            open_history_text(&kms, "rec-1", &raw).unwrap_err().code,
             ErrorCode::Internal
         );
     }

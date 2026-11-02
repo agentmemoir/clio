@@ -80,10 +80,16 @@ impl PersonaStore for SqliteStore {
         require_actor(actor)?;
         persona_require_nonempty(&entry.bank_id, "bank_id")?;
         let dek_ref = self.kms().ensure_dek(&entry.bank_id)?;
-        let cipher = seal_persona_value(self.kms().as_ref(), &entry.bank_id, &entry.value)?;
+        let cipher = seal_persona_value(
+            self.kms().as_ref(),
+            &entry.bank_id,
+            &entry.key,
+            &entry.value,
+        )?;
         let context_cipher = seal_persona_context(
             self.kms().as_ref(),
             &entry.bank_id,
+            &entry.key,
             entry.context.as_deref(),
         )?;
         self.with_conn(|conn| {
@@ -107,8 +113,12 @@ impl PersonaStore for SqliteStore {
     fn put_preference_state(&self, pref: &PersonaPreference, actor: &str) -> Result<(), AmError> {
         pref.validate()?;
         require_actor(actor)?;
-        let context_cipher =
-            seal_persona_context(self.kms().as_ref(), &pref.bank_id, pref.context.as_deref())?;
+        let context_cipher = seal_persona_context(
+            self.kms().as_ref(),
+            &pref.bank_id,
+            &pref.key,
+            pref.context.as_deref(),
+        )?;
         self.with_conn(|conn| {
             let tx = conn.transaction().am("persona preference begin")?;
             // The shared tx helper emits the audit row (a supplied
@@ -171,13 +181,15 @@ impl PersonaStore for SqliteStore {
                 )| {
                     Ok(PersonaStableEntry {
                         bank_id: bank_id.to_owned(),
-                        key,
-                        value: open_persona_value(self.kms().as_ref(), &cipher)?,
+                        key: key.clone(),
+                        value: open_persona_value(self.kms().as_ref(), bank_id, &key, &cipher)?,
                         confidence,
                         source,
                         source_ref,
                         context: open_persona_context(
                             self.kms().as_ref(),
+                            bank_id,
+                            &key,
                             context_cipher.as_deref(),
                         ),
                         admission_score,
@@ -303,12 +315,14 @@ impl PersonaStore for SqliteStore {
                     Ok(PersonaStableEntry {
                         bank_id: bank_id.to_owned(),
                         key: key.to_owned(),
-                        value: open_persona_value(self.kms().as_ref(), &cipher)?,
+                        value: open_persona_value(self.kms().as_ref(), bank_id, key, &cipher)?,
                         confidence,
                         source,
                         source_ref,
                         context: open_persona_context(
                             self.kms().as_ref(),
+                            bank_id,
+                            key,
                             context_cipher.as_deref(),
                         ),
                         admission_score,
@@ -368,13 +382,13 @@ fn pref_rows_to_preferences(
             )| {
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value,
                     trend,
                     confidence,
                     source,
                     source_ref,
-                    context: open_persona_context(kms, context_cipher.as_deref()),
+                    context: open_persona_context(kms, bank_id, &key, context_cipher.as_deref()),
                     admission_score,
                     as_of,
                 }

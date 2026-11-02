@@ -81,7 +81,7 @@ fn internal(e: impl std::fmt::Display) -> AmError {
 /// `item_subject_id`, which falls back to the literal `sync-journal` for
 /// persona payloads — a DEK erasure never destroys.
 fn sealed_journal_payload(kms: &dyn DekProvider, plaintext: &[u8]) -> String {
-    kms.encrypt("sync-journal", plaintext)
+    kms.encrypt("persona-stable:communication_style", "sync-journal", plaintext)
         .expect("seal journal payload")
         .to_storage_string()
 }
@@ -247,7 +247,10 @@ fn sqlite_erase_destroys_persona_derived_sync_copies() {
     let sealed = seed_persona_and_sync(&store, kms.as_ref(), &bank, &subject);
     // The sealed journal copy decrypts before the erase: this is the defect.
     assert_eq!(
-        kms.decrypt(&CiphertextEnvelope::from_storage_string(&sealed).unwrap())
+        kms.decrypt(
+            "persona-stable:communication_style",
+            &CiphertextEnvelope::from_storage_string(&sealed).unwrap(),
+        )
             .unwrap(),
         b"secret journal context"
     );
@@ -280,7 +283,10 @@ fn postgres_erase_destroys_persona_derived_sync_copies() {
     let subject = unique("subject");
     let sealed = seed_persona_and_sync(&store, kms.as_ref(), &bank, &subject);
     assert_eq!(
-        kms.decrypt(&CiphertextEnvelope::from_storage_string(&sealed).unwrap())
+        kms.decrypt(
+            "persona-stable:communication_style",
+            &CiphertextEnvelope::from_storage_string(&sealed).unwrap(),
+        )
             .unwrap(),
         b"secret journal context"
     );

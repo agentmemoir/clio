@@ -159,7 +159,7 @@ fn sqlite_history_erased_subject_fails_closed_and_hides_context() {
         .inspect_content_ciphertext(&bank, &failure_item)
         .unwrap()
         .expect("sealed body still present");
-    assert_eq!(open_context(kms.as_ref(), Some(&raw)), None);
+    assert_eq!(open_context(kms.as_ref(), "row", Some(&raw)), None);
     let task_err = store.get_task(&bank, "task-a").unwrap_err();
     assert_eq!(task_err.code, ErrorCode::ErasedSubject);
     let failure_err = store.get_failure(&bank, &stored.id).unwrap_err();

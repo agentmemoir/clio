@@ -67,13 +67,14 @@ impl SqliteStore {
             .am("triples get")?
             .map(|t| {
                 let mut rec = map_triple_row(
-                    t.0,
+                    t.0.clone(),
                     t.1,
-                    t.2,
+                    t.2.clone(),
                     t.3,
                     t.4,
                     crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &t.0,
                         t.5.as_deref(),
                     )?,
                     t.6,
@@ -88,7 +89,7 @@ impl SqliteStore {
                     t.15,
                     t.16,
                 )?;
-                rec.context = open_context(self.kms().as_ref(), t.17.as_deref());
+                rec.context = open_context(self.kms().as_ref(), &t.2, t.17.as_deref());
                 Ok(rec)
             })
             .transpose()
@@ -139,13 +140,14 @@ impl SqliteStore {
             for row in mapped {
                 let t = row.am("triples row")?;
                 let mut rec = map_triple_row(
-                    t.0,
+                    t.0.clone(),
                     t.1,
-                    t.2,
+                    t.2.clone(),
                     t.3,
                     t.4,
                     crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &t.0,
                         t.5.as_deref(),
                     )?,
                     t.6,
@@ -160,7 +162,7 @@ impl SqliteStore {
                     t.15,
                     t.16,
                 )?;
-                rec.context = open_context(self.kms().as_ref(), t.17.as_deref());
+                rec.context = open_context(self.kms().as_ref(), &t.2, t.17.as_deref());
                 out.push(rec);
             }
             Ok(out)
@@ -212,13 +214,14 @@ impl SqliteStore {
             for row in mapped {
                 let t = row.am("triples row")?;
                 let mut rec = map_triple_row(
-                    t.0,
+                    t.0.clone(),
                     t.1,
-                    t.2,
+                    t.2.clone(),
                     t.3,
                     t.4,
                     crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &t.0,
                         t.5.as_deref(),
                     )?,
                     t.6,
@@ -233,7 +236,7 @@ impl SqliteStore {
                     t.15,
                     t.16,
                 )?;
-                rec.context = open_context(self.kms().as_ref(), t.17.as_deref());
+                rec.context = open_context(self.kms().as_ref(), &t.2, t.17.as_deref());
                 out.push(rec);
             }
             Ok(out)
@@ -289,6 +292,7 @@ impl SqliteStore {
                 if let Some(wanted) = object
                     && crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &id,
                         cipher.as_deref(),
                     )? != wanted
                 {

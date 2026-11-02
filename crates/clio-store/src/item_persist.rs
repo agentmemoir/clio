@@ -27,11 +27,13 @@ use clio_types::{AmError, ErrorCode, MemoryItem};
 /// Encrypt dual snapshot/gist into a storage string.
 pub(crate) fn seal_dual(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     item: &MemoryItem,
 ) -> Result<String, AmError> {
     seal_dual_content(
         kms,
+        row_id,
         subject_id,
         item.snapshot.clone(),
         item.gist.clone(),
@@ -44,6 +46,7 @@ pub(crate) fn seal_dual(
 /// while preserving the sealed gist and context byte for byte.
 pub(crate) fn seal_dual_content(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     snapshot: Option<serde_json::Value>,
     gist: Option<String>,
@@ -51,7 +54,7 @@ pub(crate) fn seal_dual_content(
 ) -> Result<String, AmError> {
     let dual = DualContent::new(snapshot, gist, context);
     let bytes = dual.to_bytes();
-    let envelope = kms.encrypt(subject_id, &bytes)?;
+    let envelope = kms.encrypt(row_id, subject_id, &bytes)?;
     Ok(envelope.to_storage_string())
 }
 
@@ -82,12 +85,16 @@ pub(crate) fn context_audit_detail(item: &MemoryItem) -> String {
 /// Legacy `put_item` rows store opaque plaintext (not DualContent v1). Those
 /// decrypt but fail parse and map to `content_format_mismatch`, as do rows a
 /// newer build wrote in a version this build cannot read.
-pub(crate) fn open_dual(kms: &dyn DekProvider, cipher_text: &str) -> Result<DualContent, AmError> {
+pub(crate) fn open_dual(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher_text: &str,
+) -> Result<DualContent, AmError> {
     if cipher_text.is_empty() {
         return Err(missing_ciphertext());
     }
     let envelope = crate::dek::CiphertextEnvelope::from_storage_string(cipher_text)?;
-    let bytes = kms.decrypt(&envelope)?;
+    let bytes = kms.decrypt(row_id, &envelope)?;
     // The row decrypted, so a failure here is the row's own bytes, never the
     // backend. `from_bytes` documents that its only error is
     // `UnreadableContent`, so this mapping is total: no caller has to match on
@@ -102,9 +109,13 @@ pub(crate) fn open_dual(kms: &dyn DekProvider, cipher_text: &str) -> Result<Dual
 /// unreadable body (for example a crypto-shredded subject). Audit views must
 /// keep working after erasure, so decryption failures are not errors here; the
 /// erased subject's tombstone remains the erasure attestation.
-pub(crate) fn open_context(kms: &dyn DekProvider, cipher_text: Option<&str>) -> Option<String> {
+pub(crate) fn open_context(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher_text: Option<&str>,
+) -> Option<String> {
     let cipher_text = cipher_text.filter(|s| !s.is_empty())?;
-    open_dual(kms, cipher_text)
+    open_dual(kms, row_id, cipher_text)
         .ok()
         .and_then(|dual| dual.context)
 }
@@ -282,29 +293,29 @@ mod tests {
                 .contains("content_format_mismatch")
         );
         let kms = crate::dek::LocalDevKms::new();
-        assert!(open_dual(&kms, "").is_err());
-        let sealed = kms.encrypt("s", b"not-json").unwrap().to_storage_string();
+        assert!(open_dual(&kms, "row", "").is_err());
+        let sealed = kms.encrypt("row", "s", b"not-json").unwrap().to_storage_string();
         assert_eq!(
-            open_dual(&kms, &sealed).unwrap_err().message,
+            open_dual(&kms, "row", &sealed).unwrap_err().message,
             content_format_mismatch().message
         );
         let dual = DualContent::new(None, Some("g".into()), None);
         let ok = kms
-            .encrypt("s", &dual.to_bytes())
+            .encrypt("row", "s", &dual.to_bytes())
             .unwrap()
             .to_storage_string();
-        assert_eq!(open_dual(&kms, &ok).unwrap().gist.as_deref(), Some("g"));
+        assert_eq!(open_dual(&kms, "row", &ok).unwrap().gist.as_deref(), Some("g"));
         // A content version this build cannot read is skippable for the same
         // reason a legacy row is: the bytes are the row's, and the backend is
         // fine. It used to keep its own message, which meant the index workers
         // — which matched on that text — aborted the whole drain on it.
-        let bad_ver = kms.encrypt("s", br#"{"v":9}"#).unwrap().to_storage_string();
-        let err = open_dual(&kms, &bad_ver).unwrap_err();
+        let bad_ver = kms.encrypt("row", "s", br#"{"v":9}"#).unwrap().to_storage_string();
+        let err = open_dual(&kms, "row", &bad_ver).unwrap_err();
         assert_eq!(err.code, ErrorCode::UnreadableContent);
         assert_eq!(err.message, content_format_mismatch().message);
         // An envelope-shaped column whose JSON is broken is skippable too.
         let not_envelope = "not-json".to_owned();
-        let err = open_dual(&kms, &not_envelope).unwrap_err();
+        let err = open_dual(&kms, "row", &not_envelope).unwrap_err();
         assert_eq!(err.code, ErrorCode::UnreadableContent);
     }
 
@@ -336,12 +347,27 @@ mod tests {
     #[test]
     fn seal_open_carries_context_inside_the_content_boundary() {
         let kms = crate::dek::LocalDevKms::new();
-        let sealed = seal_dual(&kms, "s", &context_item(Some("team chat"))).unwrap();
+        let sealed = seal_dual(&kms, "i-ctx", "s", &context_item(Some("team chat"))).unwrap();
         assert!(!sealed.contains("team chat"), "context must be encrypted");
-        let opened = open_dual(&kms, &sealed).unwrap();
+        let opened = open_dual(&kms, "i-ctx", &sealed).unwrap();
         assert_eq!(opened.context.as_deref(), Some("team chat"));
-        let absent = seal_dual(&kms, "s", &context_item(None)).unwrap();
-        assert!(open_dual(&kms, &absent).unwrap().context.is_none());
+        let absent = seal_dual(&kms, "i-ctx", "s", &context_item(None)).unwrap();
+        assert!(open_dual(&kms, "i-ctx", &absent).unwrap().context.is_none());
+    }
+
+    #[test]
+    fn a_sealed_body_copied_to_another_item_row_does_not_open() {
+        let kms = crate::dek::LocalDevKms::new();
+        let a = seal_dual(&kms, "item-a", "s", &context_item(Some("alpha"))).unwrap();
+        let b = seal_dual(&kms, "item-b", "s", &context_item(Some("beta"))).unwrap();
+        assert_eq!(
+            open_dual(&kms, "item-a", &a).unwrap().context.as_deref(),
+            Some("alpha")
+        );
+        let err = open_dual(&kms, "item-b", &a).unwrap_err();
+        assert!(crate::is_unreadable_content(&err), "{err:?}");
+        let err = open_dual(&kms, "item-a", &b).unwrap_err();
+        assert!(crate::is_unreadable_content(&err), "{err:?}");
     }
 
     #[test]

@@ -86,7 +86,7 @@ fn map_item_row(
     let cipher = cipher
         .filter(|s| !s.is_empty())
         .ok_or_else(missing_ciphertext)?;
-    let dual = open_dual(kms, &cipher)?;
+    let dual = open_dual(kms, &id, &cipher)?;
     Ok(Some(MemoryItem {
         id,
         bank_id,
@@ -265,7 +265,7 @@ impl PostgresStore {
         item.validate()?;
         require_actor(actor)?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("item create begin")?;
             create_memory_item_tx(&mut tx, item, &cipher, &dek_ref, actor)?;
@@ -282,7 +282,7 @@ impl PostgresStore {
         item.validate()?;
         require_actor(actor)?;
         let _ = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("item update begin")?;
             crate::item_update::update_memory_item_postgres_tx(&mut tx, item, &cipher, actor)?;

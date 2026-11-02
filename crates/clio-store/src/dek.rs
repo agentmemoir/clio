@@ -26,14 +26,52 @@
 //! Keep this module focused on the DEK provider and its crypto.
 
 use crate::dek_slots::{KeySlot, SlotStore};
-use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 const NONCE_LEN: usize = 24;
+
+/// Domain label at the head of every envelope AAD.
+const AAD_LABEL: &[u8] = b"clio-dek-envelope-v1";
+/// Envelope AAD format version, one byte after the label.
+const AAD_VERSION: u8 = 1;
+
+/// Build the associated data that binds one envelope to its row and subject.
+///
+/// The encoding is the label, one version byte, each field length-prefixed with
+/// a big-endian `u32`, then the key version as four bytes. Length prefixes keep
+/// two adjacent fields from running into each other, so no pair of different
+/// `(row_id, subject_id)` inputs can produce the same bytes.
+fn envelope_aad(row_id: &str, subject_id: &str, key_version: u32) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(64);
+    aad.extend_from_slice(AAD_LABEL);
+    aad.push(AAD_VERSION);
+    for field in [row_id.as_bytes(), subject_id.as_bytes()] {
+        aad.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        aad.extend_from_slice(field);
+    }
+    aad.extend_from_slice(&key_version.to_be_bytes());
+    aad
+}
+
+/// Build an unambiguous composite row id from ordered text fields.
+///
+/// Each field is preceded by its length as eight lowercase hex digits, so a
+/// reader can split the result at the recorded boundaries. Persona rows use it
+/// to bind one envelope to `(bank_id, attr_key)` when no row id exists yet.
+pub(crate) fn composite_row_id(fields: &[&str]) -> String {
+    let mut out = String::new();
+    for field in fields {
+        let _ = write!(out, "{:08x}", field.len());
+        out.push_str(field);
+    }
+    out
+}
 
 /// Reserved key-store subject id for the store's lexical blind-index key.
 ///
@@ -129,13 +167,26 @@ pub trait DekProvider: Send + Sync {
     /// Provider failures (an unreadable or unwritable key store, for example).
     fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError>;
 
-    /// Seal plaintext under the subject's active DEK.
+    /// Seal plaintext under the subject's active DEK, bound to one row.
+    ///
+    /// `row_id` is hashed into the AEAD associated data with the subject id and
+    /// the key version, so a ciphertext copied to another row of the same
+    /// subject no longer authenticates.
     ///
     /// # Errors
     /// Missing/destroyed key or AEAD failure.
-    fn encrypt(&self, subject_id: &str, plaintext: &[u8]) -> Result<CiphertextEnvelope, AmError>;
+    fn encrypt(
+        &self,
+        row_id: &str,
+        subject_id: &str,
+        plaintext: &[u8],
+    ) -> Result<CiphertextEnvelope, AmError>;
 
-    /// Open a ciphertext envelope.
+    /// Open a ciphertext envelope bound to `row_id`.
+    ///
+    /// The subject id and key version come from the envelope; the associated
+    /// data is rebuilt from `row_id` plus those fields. An envelope sealed for a
+    /// different row fails authentication.
     ///
     /// # Errors
     /// Destroyed key, version mismatch, or AEAD failure.
@@ -151,7 +202,7 @@ pub trait DekProvider: Send + Sync {
     /// - **The key store is unavailable** — an unreadable, locked, or corrupt key
     ///   backend. Report [`clio_types::ErrorCode::Internal`], which that
     ///   predicate deliberately excludes.
-    fn decrypt(&self, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError>;
+    fn decrypt(&self, row_id: &str, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError>;
 
     /// Destroy the subject's DEK (crypto-shred). Irreversible for that subject.
     ///
@@ -265,14 +316,26 @@ impl DekProvider for LocalDevKms {
         Ok(key)
     }
 
-    fn encrypt(&self, subject_id: &str, plaintext: &[u8]) -> Result<CiphertextEnvelope, AmError> {
+    fn encrypt(
+        &self,
+        row_id: &str,
+        subject_id: &str,
+        plaintext: &[u8],
+    ) -> Result<CiphertextEnvelope, AmError> {
         let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
         let (version, key_bytes) = store.ensure(subject_id)?;
         let cipher = XChaCha20Poly1305::new((&key_bytes).into());
         let nonce_bytes: [u8; NONCE_LEN] = rand::random();
         let nonce = XNonce::from_slice(&nonce_bytes);
+        let aad = envelope_aad(row_id, subject_id, version);
         let ciphertext = cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: plaintext,
+                    aad: &aad,
+                },
+            )
             .expect("XChaCha20Poly1305 encrypt with valid key/nonce");
         Ok(CiphertextEnvelope {
             subject_id: subject_id.to_owned(),
@@ -288,7 +351,7 @@ impl DekProvider for LocalDevKms {
         })
     }
 
-    fn decrypt(&self, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(&self, row_id: &str, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
         let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
         let slot = store.lookup(&envelope.subject_id)?;
         let (key, version) = match slot {
@@ -333,8 +396,15 @@ impl DekProvider for LocalDevKms {
         .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid ciphertext encoding"))?;
         let cipher = XChaCha20Poly1305::new((&key.bytes).into());
         let nonce = XNonce::from_slice(&nonce_bytes);
+        let aad = envelope_aad(row_id, &envelope.subject_id, envelope.key_version);
         cipher
-            .decrypt(nonce, ct.as_ref())
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ct.as_ref(),
+                    aad: &aad,
+                },
+            )
             .map_err(|_| AmError::new(ErrorCode::Forbidden, "content decryption failed"))
     }
 

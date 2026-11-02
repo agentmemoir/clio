@@ -232,13 +232,17 @@ pub(crate) fn feed_persona_stable_pg(
                 row.get(8),
                 PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value: crate::persona_store::open_persona_value(
                         store.kms().as_ref(),
+                        bank_id,
+                        &key,
                         &value_cipher,
                     )?,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        bank_id,
+                        &key,
                         context_cipher.as_deref(),
                     ),
                     confidence: row.get(3),
@@ -283,7 +287,7 @@ pub(crate) fn feed_persona_prefs_pg(
                 row.get(9),
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value: row.get(1),
                     trend: row.get(2),
                     confidence: row.get(4),
@@ -291,6 +295,8 @@ pub(crate) fn feed_persona_prefs_pg(
                     source_ref: row.get(6),
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        bank_id,
+                        &key,
                         context_cipher.as_deref(),
                     ),
                     admission_score: row.get(7),
@@ -367,6 +373,7 @@ pub(crate) fn feed_beliefs_pg(
             let created_at: String = row.get(6);
             let proposition = crate::belief_store::open_proposition(
                 store.kms().as_ref(),
+                &id,
                 &row.get::<_, String>(3),
             )?;
             let history: Vec<ConfidenceEntry> = entries
@@ -381,12 +388,13 @@ pub(crate) fn feed_beliefs_pg(
             out.push((
                 row.get::<_, String>(7),
                 BeliefObject {
-                    id,
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     subject_id: row.get(2),
                     proposition,
                     context: crate::belief_store::open_belief_context(
                         store.kms().as_ref(),
+                        &id,
                         context_cipher.as_deref(),
                     ),
                     context_as_of,

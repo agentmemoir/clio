@@ -139,7 +139,7 @@ fn assert_damage_table(
 
         // The row is stored normally, then damaged the way storage damage would
         // damage it: the sealed column is rewritten in place.
-        let mut envelope = kms.encrypt("subject-damage", b"sealed bytes").unwrap();
+        let mut envelope = kms.encrypt("row", "subject-damage", b"sealed bytes").unwrap();
         let replacement = match (damage.tamper)(&mut envelope) {
             Some(text) => text,
             None => envelope.to_storage_string(),

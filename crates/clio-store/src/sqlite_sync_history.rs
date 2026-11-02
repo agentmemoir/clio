@@ -109,7 +109,7 @@ pub(crate) fn feed_tasks_sqlite(
             out.push((
                 created_at.clone(),
                 TaskRecord {
-                    id,
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     item_id,
                     task_id,
@@ -117,9 +117,14 @@ pub(crate) fn feed_tasks_sqlite(
                     version,
                     definition: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        &id,
                         &definition_cipher,
                     )?,
-                    steps: crate::history_store::open_steps(store.kms().as_ref(), &steps_cipher)?,
+                    steps: crate::history_store::open_steps(
+                        store.kms().as_ref(),
+                        &id,
+                        &steps_cipher,
+                    )?,
                     status,
                     evidence_ref,
                     context: None,
@@ -186,7 +191,7 @@ pub(crate) fn feed_failures_sqlite(
             out.push((
                 created_at.clone(),
                 FailureRecord {
-                    id,
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     item_id,
                     task_id,
@@ -194,10 +199,12 @@ pub(crate) fn feed_failures_sqlite(
                     attempt_n,
                     what_failed: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        &id,
                         &what_failed_cipher,
                     )?,
                     lesson: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        &id,
                         &lesson_cipher,
                     )?,
                     lesson_tokens,

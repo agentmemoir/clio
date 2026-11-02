@@ -62,12 +62,13 @@ pub(crate) fn feed_tasks_pg(
             .am("sync feed tasks")?;
         let mut out = Vec::new();
         for row in &rows {
+            let id: String = row.get(0);
             let definition_cipher: String = row.get(6);
             let steps_cipher: String = row.get(7);
             out.push((
                 row.get(10),
                 TaskRecord {
-                    id: row.get(0),
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     item_id: row.get(1),
                     task_id: row.get(2),
@@ -75,9 +76,14 @@ pub(crate) fn feed_tasks_pg(
                     version: i64::from(row.get::<_, i32>(4)),
                     definition: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        &id,
                         &definition_cipher,
                     )?,
-                    steps: crate::history_store::open_steps(store.kms().as_ref(), &steps_cipher)?,
+                    steps: crate::history_store::open_steps(
+                        store.kms().as_ref(),
+                        &id,
+                        &steps_cipher,
+                    )?,
                     status: row.get(5),
                     evidence_ref: row.get(8),
                     context: None,
@@ -113,12 +119,13 @@ pub(crate) fn feed_failures_pg(
             .am("sync feed failures")?;
         let mut out = Vec::new();
         for row in &rows {
+            let id: String = row.get(0);
             let what_failed_cipher: String = row.get(5);
             let lesson_cipher: String = row.get(6);
             out.push((
                 row.get(11),
                 FailureRecord {
-                    id: row.get(0),
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     item_id: row.get(1),
                     task_id: row.get(2),
@@ -126,10 +133,12 @@ pub(crate) fn feed_failures_pg(
                     attempt_n: i64::from(row.get::<_, i32>(4)),
                     what_failed: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        &id,
                         &what_failed_cipher,
                     )?,
                     lesson: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        &id,
                         &lesson_cipher,
                     )?,
                     lesson_tokens: i64::from(row.get::<_, i32>(7)),

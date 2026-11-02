@@ -144,18 +144,23 @@ pub(crate) fn unique_entry_id(belief_id: &str, as_of: &str) -> String {
 /// Seal proposition text under the subject DEK for storage.
 pub(crate) fn seal_proposition(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     proposition: &str,
 ) -> Result<String, AmError> {
     Ok(kms
-        .encrypt(subject_id, proposition.as_bytes())?
+        .encrypt(row_id, subject_id, proposition.as_bytes())?
         .to_storage_string())
 }
 
 /// Open proposition ciphertext back into plaintext.
-pub(crate) fn open_proposition(kms: &dyn DekProvider, cipher: &str) -> Result<String, AmError> {
+pub(crate) fn open_proposition(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: &str,
+) -> Result<String, AmError> {
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(&envelope)?;
+    let bytes = kms.decrypt(row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| {
         AmError::new(
             ErrorCode::Internal,
@@ -168,12 +173,13 @@ pub(crate) fn open_proposition(kms: &dyn DekProvider, cipher: &str) -> Result<St
 /// `CiphertextEnvelope` mechanism as the proposition).
 pub(crate) fn seal_belief_context(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     context: Option<&str>,
 ) -> Result<Option<String>, AmError> {
     match context {
         Some(context) => Ok(Some(
-            kms.encrypt(subject_id, context.as_bytes())?
+            kms.encrypt(row_id, subject_id, context.as_bytes())?
                 .to_storage_string(),
         )),
         None => Ok(None),
@@ -186,10 +192,14 @@ pub(crate) fn seal_belief_context(
 /// example a crypto-shredded subject whose DEK was destroyed). Belief reads
 /// must keep working when only the context became unreadable; the erasure
 /// tombstone remains the attestation.
-pub(crate) fn open_belief_context(kms: &dyn DekProvider, cipher: Option<&str>) -> Option<String> {
+pub(crate) fn open_belief_context(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: Option<&str>,
+) -> Option<String> {
     let cipher = cipher.filter(|s| !s.is_empty())?;
     let envelope = CiphertextEnvelope::from_storage_string(cipher).ok()?;
-    let bytes = kms.decrypt(&envelope).ok()?;
+    let bytes = kms.decrypt(row_id, &envelope).ok()?;
     String::from_utf8(bytes).ok()
 }
 

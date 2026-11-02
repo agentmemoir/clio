@@ -40,14 +40,15 @@ impl PostgresStore {
         self.with_client(|client| {
             let rows = client
                 .query(
-                    "SELECT object_ciphertext FROM triples
+                    "SELECT id, object_ciphertext FROM triples
                      WHERE bank_id = $1 AND subject = $2 AND predicate = $3",
                     &[&bank_id, &subject, &predicate],
                 )
                 .am("triple asserted query")?;
             for row in rows {
-                let cipher: Option<String> = row.get(0);
-                if object_matches(self.kms().as_ref(), cipher.as_deref(), object)? {
+                let id: String = row.get(0);
+                let cipher: Option<String> = row.get(1);
+                if object_matches(self.kms().as_ref(), &id, cipher.as_deref(), object)? {
                     return Ok(true);
                 }
             }

@@ -385,7 +385,7 @@ fn stored_preference_context(
     let Some((cipher, context_as_of, row_as_of)) = row else {
         return Ok(None);
     };
-    let Some(text) = open_persona_context(kms, cipher.as_deref()) else {
+    let Some(text) = open_persona_context(kms, bank_id, attr_key, cipher.as_deref()) else {
         return Ok(None);
     };
     Ok(Some((text, context_as_of.unwrap_or(row_as_of))))

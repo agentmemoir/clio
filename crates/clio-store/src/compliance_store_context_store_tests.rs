@@ -104,7 +104,7 @@ fn assert_legacy_payload_reads(
         .unwrap();
     let legacy = DualContent::new(None, Some("legacy gist".into()), None).to_bytes();
     let sealed = kms
-        .encrypt("legacy-subject", &legacy)
+        .encrypt(&id, "legacy-subject", &legacy)
         .unwrap()
         .to_storage_string();
     exec(&format!(

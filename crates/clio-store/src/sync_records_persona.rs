@@ -124,13 +124,17 @@ pub(crate) fn feed_persona_stable_sqlite(
                 stamp,
                 PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value: crate::persona_store::open_persona_value(
                         store.kms().as_ref(),
+                        bank_id,
+                        &key,
                         &value_cipher,
                     )?,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        bank_id,
+                        &key,
                         context_cipher.as_deref(),
                     ),
                     confidence,
@@ -195,7 +199,7 @@ pub(crate) fn feed_persona_prefs_sqlite(
                 stamp,
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value,
                     trend,
                     confidence,
@@ -203,6 +207,8 @@ pub(crate) fn feed_persona_prefs_sqlite(
                     source_ref,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        bank_id,
+                        &key,
                         context_cipher.as_deref(),
                     ),
                     admission_score,
@@ -318,7 +324,7 @@ pub(crate) fn feed_beliefs_sqlite(
                 .collect::<Result<Vec<_>, AmError>>()
                 .am("sync feed belief entries parse")?;
             let proposition =
-                crate::belief_store::open_proposition(store.kms().as_ref(), &proposition_cipher)?;
+                crate::belief_store::open_proposition(store.kms().as_ref(), &id, &proposition_cipher)?;
             let updated_at = history
                 .last()
                 .map(|entry| entry.as_of.clone())
@@ -326,12 +332,13 @@ pub(crate) fn feed_beliefs_sqlite(
             out.push((
                 stamp,
                 BeliefObject {
-                    id,
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     subject_id,
                     proposition,
                     context: crate::belief_store::open_belief_context(
                         store.kms().as_ref(),
+                        &id,
                         context_cipher.as_deref(),
                     ),
                     context_as_of,

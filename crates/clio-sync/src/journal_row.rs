@@ -34,7 +34,7 @@ pub fn journal_row(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<SyncJou
             let subject_id = item_subject_id(v);
             let bytes = serde_json::to_vec(v).expect("serialize journal content");
             Some(
-                serde_json::to_string(&kms.encrypt(&subject_id, &bytes)?)
+                serde_json::to_string(&kms.encrypt(&m.entity_id, &subject_id, &bytes)?)
                     .expect("serialize envelope"),
             )
         }
