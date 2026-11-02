@@ -181,7 +181,9 @@ fn the_encryption_summary_counts_held_keys_and_leaves_provenance_to_custody() {
         "provenance is not this layer's fact"
     );
 
-    // An empty list means encryption off, with no summary at all.
+    // An empty list is not encryption off: the status call still answers
+    // `encryption: false` with no summary, but export from such a node is
+    // refused, so the flag describes the report and not a permitted export.
     let cfg_none = cfg("dev-none", &sqlite(), &addr, Vec::new());
     let report = sync_status(&cfg_none, &["bz".to_owned()]).expect("status");
     assert!(!report.encryption, "an empty list is not an error");
