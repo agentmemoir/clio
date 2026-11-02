@@ -326,11 +326,11 @@ impl DekProvider for LocalDevKms {
         let (version, key_bytes) = store.ensure(subject_id)?;
         let cipher = XChaCha20Poly1305::new((&key_bytes).into());
         let nonce_bytes: [u8; NONCE_LEN] = rand::random();
-        let nonce = XNonce::from_slice(&nonce_bytes);
+        let nonce = XNonce::from(nonce_bytes);
         let aad = envelope_aad(row_id, subject_id, version);
         let ciphertext = cipher
             .encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: plaintext,
                     aad: &aad,
@@ -395,11 +395,12 @@ impl DekProvider for LocalDevKms {
         )
         .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid ciphertext encoding"))?;
         let cipher = XChaCha20Poly1305::new((&key.bytes).into());
-        let nonce = XNonce::from_slice(&nonce_bytes);
+        let nonce = XNonce::try_from(nonce_bytes.as_slice())
+            .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid nonce length"))?;
         let aad = envelope_aad(row_id, &envelope.subject_id, envelope.key_version);
         cipher
             .decrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: ct.as_ref(),
                     aad: &aad,
