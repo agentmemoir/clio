@@ -256,11 +256,11 @@ fn ports_and_db_userinfo_are_reported_redacted() {
     assert!(!report.database.url.contains("topsecret"));
     assert_eq!(
         report.database.encryption,
-        "encrypted and verified when offered, remote"
+        "encrypted and verified, remote"
     );
     let text = render_text(&report);
     assert!(
-        text.contains("postgres://***@db:5432/clio (encrypted and verified when offered, remote)"),
+        text.contains("postgres://***@db:5432/clio (encrypted and verified, remote)"),
         "{text}"
     );
     assert!(!text.contains("topsecret"), "{text}");
