@@ -67,6 +67,7 @@ mod bind_admission;
 mod bind_warning;
 pub mod client;
 mod client_feed;
+mod client_pull_row;
 mod client_refusal;
 pub mod clock;
 mod conn_pool;
