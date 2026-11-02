@@ -1,5 +1,5 @@
-Sync apply now rejects an envelope whose authenticated timestamp is far in the future. Such a row is recorded as a dead letter with reason `stale_envelope`, so an operator sees it in the pull acknowledgement instead of a silent duplicate that looks already applied.
+Sync apply now refuses a replayed envelope by a durable per-device, per-entity-kind ordering mark, so replay protection no longer depends on the mutation-id journal alone.
 
-Sync apply now keeps a durable per-device high-water mark, so a replayed envelope from a device is rejected by ordering even after the local mutation journal loses that id.
+An envelope at or below the newest stamp already applied from the same device and kind is recorded as a dead letter with reason `stale_envelope`, so an operator sees it in the pull acknowledgement instead of a silent duplicate that looks already applied.
 
-An environment whose sync backlog is legitimately old is unaffected, because the past-age bound ships disabled by default.
+Both wall-clock bounds ship off: a legitimate backlog can be arbitrarily old, and some entity kinds stamp the envelope with a valid time or a transaction time rather than the change time, so a legitimate row can carry a stamp in the future. Each bound stays configurable for a deployment whose stamps are known to be change times.

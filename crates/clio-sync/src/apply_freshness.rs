@@ -4,9 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for the two envelope-order guards of the sync
-//! apply engine: refusing a stamp that sits too far ahead of the local clock,
-//! and refusing a replay at or below the newest stamp already applied from the
-//! same device.
+//! apply engine: refusing a stamp that sits outside a configured wall-clock
+//! bound, and refusing a replay at or below the newest stamp already applied
+//! from the same device.
 //!
 //! ## Owns
 //! - `guard`: the future-skew check and the per-device high-water check, in
@@ -36,11 +36,15 @@ use clio_types::AmError;
 /// Refuse an envelope that is ahead of the clock or strictly older than the
 /// device mark.
 ///
-/// The future half is the only age test that runs: the past bound ships
-/// disabled, and a legitimate backlog can be arbitrarily old, so age cannot
-/// tell a replay from an ordinary catch-up delivery. The ordering half is the
-/// defence: a stamp strictly older than the newest one already applied from
-/// the same device is a replay, whatever its age.
+/// Each wall-clock half runs only when its bound is configured. Both ship off
+/// by default, because a legitimate stamp is not always a change time: a triple
+/// ships a transaction-time or valid-time close, and a non-upsert item
+/// operation ships a stored transaction or valid time, so a row can carry a
+/// world-time stamp years ahead. The past bound is off because a legitimate
+/// backlog can be arbitrarily old.
+///
+/// The ordering half is the defence: a stamp strictly older than the newest one
+/// already applied from the same device is a replay, whatever its age.
 ///
 /// An equal stamp is accepted, deliberately. `transaction_time` has second
 /// granularity, so two different mutations from one device can carry the same
@@ -62,8 +66,9 @@ use clio_types::AmError;
 /// and a legitimate row would be refused. Keeping the mark per kind compares
 /// only stamps written in one encoding.
 ///
-/// An unparsable `now` skips the future half rather than refusing: the shape
-/// of `transaction_time` is the envelope check's business, not this one's.
+/// An unparsable `now` skips the wall-clock halves rather than refusing: the
+/// shape of `transaction_time` is the envelope check's business, not this
+/// one's.
 ///
 /// # Errors
 /// Storage failures.
@@ -73,15 +78,28 @@ pub(crate) fn guard(
     envelope_json: &str,
     now: &str,
 ) -> Result<Option<ApplyResult>, AmError> {
-    if let Some(now_secs) = parse_utc_secs(now)
-        && engine.policy.classify_text(&m.transaction_time, now_secs) == Freshness::Future
-    {
-        return refuse(
-            engine,
-            m,
-            envelope_json,
-            "transaction_time is ahead of the local clock",
-        );
+    if let Some(now_secs) = parse_utc_secs(now) {
+        // `classify_text` consults each bound only when it is non-zero, so a
+        // disabled side can never produce its refusal here.
+        match engine.policy.classify_text(&m.transaction_time, now_secs) {
+            Freshness::Future => {
+                return refuse(
+                    engine,
+                    m,
+                    envelope_json,
+                    "transaction_time is ahead of the local clock",
+                );
+            }
+            Freshness::Stale => {
+                return refuse(
+                    engine,
+                    m,
+                    envelope_json,
+                    "transaction_time is older than the configured age bound",
+                );
+            }
+            Freshness::Fresh => {}
+        }
     }
     if let Some(mark) = engine
         .sync

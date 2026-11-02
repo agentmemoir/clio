@@ -30,29 +30,35 @@
 
 use clio_types::{days_from_civil, days_in_month};
 
-/// Default allowance for an old stamp: 0 seconds, so the past side is off.
+/// Default allowance for an old stamp: 0 seconds, so the past side ships off.
 ///
-/// Absolute age is not a usable bound in this protocol. `transaction_time` is
-/// the origin device's own write stamp, and it travels unchanged through push,
-/// the journal, and pull. Push resumes from a durable per-kind cursor, and pull
-/// serves the whole journal from an empty cursor, so a device that was offline
-/// for weeks, or a brand-new device, delivers a backlog whose stamps are
-/// arbitrarily old. Nothing bounds that backlog and nothing deletes journal
-/// rows, so an age bound would stall sync on legitimate traffic: a rejection
-/// dead-letters the row and freezes the pull cursor for the bank.
+/// Absolute age is not a usable bound here. `transaction_time` is the origin
+/// device's own write stamp, and push and pull both deliver stamps unchanged,
+/// so a device that was offline for weeks, or a new device reading the whole
+/// journal, sends a backlog whose stamps are arbitrarily old. A rejection
+/// dead-letters the row and freezes the pull cursor for the bank, so an age
+/// bound would stall sync on legitimate traffic.
 ///
-/// The field stays, so a deployment that does bound its backlog can still set
-/// its own age limit. Only the default is off.
+/// The field stays, so a deployment that does bound its backlog can set its own
+/// limit. Only the default is off.
 pub const DEFAULT_FRESHNESS_MAX_AGE_SECS: i64 = 0;
 
-/// Default allowance for a future-dated stamp: 60 seconds, one minute.
+/// Default allowance for a future-dated stamp: 0 seconds, so the future side
+/// ships off.
 ///
-/// A writer's clock can sit ahead of this one, so a short lead is expected.
-/// A far-future stamp is a different thing: it is an attack signal, not clock
-/// error, because a writer can choose the value freely. This side is sized for
-/// clock error and nothing more, and it cannot reject a backlog, since backlog
-/// stamps are old rather than ahead.
-pub const DEFAULT_FRESHNESS_MAX_FUTURE_SECS: i64 = 60;
+/// Some entity kinds do not stamp the envelope with the change time. A triple
+/// ships its transaction-time close, or its valid-time close when no
+/// transaction-time close exists, and a non-upsert item operation ships the
+/// row's stored transaction or valid time. A valid time is world time: a row
+/// that is valid for years ahead carries a stamp years ahead, and the change
+/// that shipped it happened now. Refusing such a stamp would dead-letter a
+/// legitimate row, freeze the bank's pull cursor, and set that kind's ordering
+/// mark to the same future value, so every later legitimate row of that kind
+/// would compare below it and be refused too.
+///
+/// The field stays, so a deployment whose stamps are known to be change times
+/// can set its own lead. Only the default is off.
+pub const DEFAULT_FRESHNESS_MAX_FUTURE_SECS: i64 = 0;
 
 /// Length of the one accepted stamp shape, `YYYY-MM-DDTHH:MM:SSZ`.
 const STAMP_LEN: usize = 20;
@@ -131,17 +137,23 @@ pub enum Freshness {
 
 /// The age bounds applied to an incoming `transaction_time`.
 ///
-/// The two sides exist for different reasons, and they do not carry equal
-/// weight. The past side ships disabled by default: a legitimate backlog is
-/// arbitrarily old here, because push resumes from a durable cursor and pull
-/// replays the whole journal, so an absolute age limit would reject real
-/// traffic and freeze the bank's cursor. The future side stays at a minute,
-/// because a writer's clock can be slightly ahead while a far-future stamp is
-/// an attack signal.
+/// Both sides ship off, for different reasons, and both stay available for a
+/// deployment whose stamps are known to be change times. A bound of 0 or less
+/// disables only its own side and leaves the other one working.
 ///
-/// The past side remains settable for a deployment that bounds its own
-/// backlog. A bound of 0 or less disables that side and leaves the other one
-/// working.
+/// The past side ships off because a legitimate sync backlog can be arbitrarily
+/// old: push and pull both deliver the origin stamp unchanged, so an offline
+/// device, or a new device reading the whole journal, sends old stamps.
+///
+/// The future side ships off because not every kind stamps the envelope with
+/// the change time. A triple ships a transaction-time or valid-time close, and
+/// a non-upsert item operation ships a stored transaction or valid time. A
+/// valid time is world time, so a legitimate row can carry a stamp in the
+/// future. A refusal would dead-letter that row and freeze the bank's pull
+/// cursor.
+///
+/// The per-device ordering mark, not either wall-clock bound, is the defence
+/// against a replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreshnessPolicy {
     /// How old a stamp may be, in seconds. 0 or less disables this side.

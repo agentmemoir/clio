@@ -92,9 +92,12 @@ fn classify_is_fresh_at_a_configured_old_boundary() {
 
 #[test]
 fn classify_is_fresh_at_the_future_boundary() {
-    let policy = FreshnessPolicy::default();
+    let policy = FreshnessPolicy {
+        max_age_secs: 0,
+        max_future_secs: 60,
+    };
     let now = 1_800_000_000;
-    let ahead = DEFAULT_FRESHNESS_MAX_FUTURE_SECS;
+    let ahead = 60;
     assert_eq!(policy.classify(now + ahead, now), Freshness::Fresh);
     assert_eq!(policy.classify(now + ahead + 1, now), Freshness::Future);
 }
@@ -159,22 +162,33 @@ fn disabled_policy_accepts_old_and_far_future_stamps() {
 }
 
 #[test]
-fn default_policy_disables_the_past_side_and_keeps_the_future_side() {
+fn default_policy_disables_both_wall_clock_bounds() {
     let policy = FreshnessPolicy::default();
     assert_eq!(policy.max_age_secs, 0);
-    assert_eq!(policy.max_future_secs, 60);
+    assert_eq!(policy.max_future_secs, 0);
     assert_eq!(DEFAULT_FRESHNESS_MAX_AGE_SECS, 0);
-    assert_eq!(DEFAULT_FRESHNESS_MAX_FUTURE_SECS, 60);
+    assert_eq!(DEFAULT_FRESHNESS_MAX_FUTURE_SECS, 0);
 }
 
 #[test]
-fn default_policy_accepts_old_stamps_and_rejects_far_future_only() {
+fn default_policy_accepts_old_and_far_future_stamps() {
     let policy = FreshnessPolicy::default();
     let now = 1_800_000_000;
     assert_eq!(policy.classify(now - 901, now), Freshness::Fresh);
     assert_eq!(policy.classify(now - 899, now), Freshness::Fresh);
-    assert_eq!(policy.classify(now + 61, now), Freshness::Future);
+    assert_eq!(policy.classify(now + 61, now), Freshness::Fresh);
     assert_eq!(policy.classify(now + 59, now), Freshness::Fresh);
+}
+
+#[test]
+fn default_policy_keeps_a_year_ahead_stamp_fresh() {
+    // A valid time is world time, so a legitimate row can be stamped years
+    // ahead. The default must not reject it, because a rejection dead-letters
+    // the row, freezes the pull cursor, and poisons that kind's mark.
+    let policy = FreshnessPolicy::default();
+    let now = 1_800_000_000;
+    let one_year: i64 = 365 * 86_400;
+    assert_eq!(policy.classify(now + one_year, now), Freshness::Fresh);
 }
 
 #[test]
@@ -205,7 +219,7 @@ fn classify_text_reads_a_stamp_at_each_boundary() {
         max_future_secs: 60,
     };
     let age = 900;
-    let ahead = DEFAULT_FRESHNESS_MAX_FUTURE_SECS;
+    let ahead = 60;
     // The known stamp is the epoch second KNOWN_SECS, so now is derived from it.
     assert_eq!(
         policy.classify_text(KNOWN_STAMP, KNOWN_SECS),

@@ -4,9 +4,10 @@
 //! # Responsibility
 //!
 //! This module tests the envelope-order guards of the sync apply engine: the
-//! future-skew refusal, the per-device high-water refusal, the accepted equal
-//! stamp, and the way a refusal answers through the dead-letter path so the
-//! pull cursor freezes instead of advancing.
+//! wall-clock refusals when their bounds are set, the default that sets neither
+//! bound, the per-device high-water refusal, the accepted equal stamp, and the
+//! way a refusal answers through the dead-letter path so the pull cursor
+//! freezes instead of advancing.
 //!
 //! ## Owns
 //! - Behavior coverage for `apply_freshness`: which envelopes are refused and
@@ -25,7 +26,7 @@
 use crate::apply::apply_freshness::guard;
 use crate::apply::apply_tests::{apply, env, fixture, item_value, upsert};
 use crate::apply::{ApplyEngine, ApplyOutcome};
-use crate::freshness::FreshnessPolicy;
+use crate::freshness::{Freshness, FreshnessPolicy};
 use crate::protocol::{ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA, OP_UPSERT, REASON_STALE_ENVELOPE};
 use clio_store::{DeadLetterStatus, SqliteStore, Store, SyncStore};
 
@@ -33,18 +34,27 @@ use clio_store::{DeadLetterStatus, SqliteStore, Store, SyncStore};
 const NOW: &str = "2026-01-01T00:00:00Z";
 
 /// Run the guard with an injected `now` and report whether it refused.
-fn guarded_at(store: &SqliteStore, m: &crate::protocol::SyncMutation) -> Option<ApplyOutcome> {
+fn guarded_with_at(
+    store: &SqliteStore,
+    m: &crate::protocol::SyncMutation,
+    policy: FreshnessPolicy,
+) -> Option<ApplyOutcome> {
     let engine = ApplyEngine {
         store,
         sync: store,
         device_id: "node-1".into(),
         kms: None,
-        policy: FreshnessPolicy::default(),
+        policy,
     };
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     guard(&engine, m, &envelope, NOW)
         .expect("guard runs")
         .map(|result| result.outcome)
+}
+
+/// Run the guard under the shipped default policy.
+fn guarded_at(store: &SqliteStore, m: &crate::protocol::SyncMutation) -> Option<ApplyOutcome> {
+    guarded_with_at(store, m, FreshnessPolicy::default())
 }
 
 /// The open dead-letter reason codes recorded for a bank.
@@ -58,11 +68,28 @@ fn open_reasons(store: &SqliteStore, bank: &str) -> Vec<String> {
 }
 
 #[test]
-fn t25_01_envelope_ahead_of_now_by_61_seconds_is_dead_lettered() {
+fn t25_00_the_default_policy_never_refuses_on_age() {
+    // Both wall-clock bounds ship off, so no outcome here depends on the host
+    // clock. `apply` reads the real clock, and this is what makes the
+    // apply-based cases below deterministic at any date.
+    let policy = FreshnessPolicy::default();
+    let now = 1_767_225_600;
+    let century: i64 = 100 * 365 * 86_400;
+    assert_eq!(policy.classify(now, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now - century, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now + century, now), Freshness::Fresh);
+}
+
+#[test]
+fn t25_01_envelope_ahead_of_now_by_61_seconds_is_dead_lettered_when_the_bound_is_set() {
     let (store, _kms) = fixture();
     let m = upsert("m-future", "b-future", "2026-01-01T00:01:01Z", "dev-a", "g");
+    let policy = FreshnessPolicy {
+        max_age_secs: 0,
+        max_future_secs: 60,
+    };
     assert_eq!(
-        guarded_at(&store, &m),
+        guarded_with_at(&store, &m, policy),
         Some(ApplyOutcome::DeadLettered {
             reason_code: REASON_STALE_ENVELOPE.into()
         })
@@ -86,11 +113,47 @@ fn t25_01_envelope_ahead_of_now_by_61_seconds_is_dead_lettered() {
 }
 
 #[test]
-fn t25_02_envelope_ahead_of_now_by_59_seconds_applies() {
+fn t25_02_a_stamp_one_year_in_the_future_is_not_refused_by_default() {
     let (store, _kms) = fixture();
-    let m = upsert("m-lead", "b-lead", "2026-01-01T00:00:59Z", "dev-a", "g");
+    // A triple or discard can stamp the envelope with a valid time, which is
+    // world time. Under the shipped default that arrives with no refusal.
+    let m = upsert("m-lead", "b-lead", "2027-01-01T00:00:00Z", "dev-a", "g");
     assert_eq!(guarded_at(&store, &m), None);
     assert_eq!(apply(&store, None, &m), ApplyOutcome::Applied);
+}
+
+#[test]
+fn t25_02b_a_far_future_stamp_is_refused_when_the_bound_is_set() {
+    let (store, _kms) = fixture();
+    let m = upsert("m-far", "b-far", "2027-01-01T00:00:00Z", "dev-a", "g");
+    let policy = FreshnessPolicy {
+        max_age_secs: 0,
+        max_future_secs: 60,
+    };
+    assert_eq!(
+        guarded_with_at(&store, &m, policy),
+        Some(ApplyOutcome::DeadLettered {
+            reason_code: REASON_STALE_ENVELOPE.into()
+        })
+    );
+    assert_eq!(open_reasons(&store, "b-far"), vec![REASON_STALE_ENVELOPE]);
+}
+
+#[test]
+fn t25_02c_an_old_stamp_is_refused_when_the_age_bound_is_set() {
+    let (store, _kms) = fixture();
+    let m = upsert("m-aged", "b-aged", "2025-01-01T00:00:00Z", "dev-a", "g");
+    let policy = FreshnessPolicy {
+        max_age_secs: 900,
+        max_future_secs: 0,
+    };
+    assert_eq!(
+        guarded_with_at(&store, &m, policy),
+        Some(ApplyOutcome::DeadLettered {
+            reason_code: REASON_STALE_ENVELOPE.into()
+        })
+    );
+    assert_eq!(open_reasons(&store, "b-aged"), vec![REASON_STALE_ENVELOPE]);
 }
 
 #[test]
