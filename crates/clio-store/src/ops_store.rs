@@ -9,9 +9,11 @@
 //!
 //! ## Owns
 //! - `OpsStore` behavioral contract (ping, schema version, bank ids, item and
-//!   subject counts, integrity signal counts, orphan edge cleanup)
+//!   subject counts, integrity signal counts, orphan edge cleanup, durable
+//!   device id)
 //! - `IntegritySignals` count shape (ids/counts only; never memory content)
 //! - `StoreCounts`: the memory and subject totals the setup switch gate reads
+//! - The minted shape of a first-open device id
 //!
 //! ## Does not own
 //! - Backend SQL statements (see `sqlite_ops` / `postgres_ops`)
@@ -123,6 +125,31 @@ pub trait OpsStore: Send + Sync {
     /// # Errors
     /// Empty bank or storage failures.
     fn drop_orphan_assoc_edges(&self, bank: &str) -> Result<u64, AmError>;
+
+    /// The installation's durable sync device id.
+    ///
+    /// Mints and stores one on first call; every later call returns the stored
+    /// id. The first writer wins, so two processes opening a fresh store cannot
+    /// replace each other's id.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn device_id(&self) -> Result<String, AmError>;
+}
+
+/// Mint a device id: `device-` followed by 32 lowercase hex characters.
+///
+/// The store mints this once and keeps it, so the id only needs to be unique
+/// across installations, not secret.
+pub(crate) fn mint_device_id() -> String {
+    use std::fmt::Write;
+    let bytes: [u8; 16] = rand::random();
+    let mut id = String::with_capacity("device-".len() + 32);
+    id.push_str("device-");
+    for byte in bytes {
+        write!(id, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    id
 }
 
 #[cfg(test)]

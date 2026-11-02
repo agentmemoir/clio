@@ -23,6 +23,7 @@
 //! Keep this module focused on Postgres operator-health tests.
 
 use crate::db_url::postgres_url_from_env;
+use crate::migrate::IntoAmError;
 use crate::model::{AssocEdgeRecord, AssocKind};
 use crate::ops_store::{IntegritySignals, OpsStore};
 use crate::postgres::PostgresStore;
@@ -273,4 +274,61 @@ fn pg_drop_orphan_assoc_edges() {
     assert!(pg.get_assoc_edge(&bank, &orphan_id).unwrap().is_none());
 
     cleanup(&pg, &bank);
+}
+
+fn drop_device_id(pg: &PostgresStore) {
+    pg.test_execute("DELETE FROM schema_settings WHERE key = 'device_id'")
+        .unwrap();
+}
+
+#[test]
+fn pg_device_id_is_minted_in_the_documented_shape() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    drop_device_id(&pg);
+    let id = pg.device_id().unwrap();
+    let suffix = id.strip_prefix("device-").expect("device- prefix");
+    assert_eq!(suffix.len(), 32, "{id}");
+    assert!(
+        suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{id}"
+    );
+    let stored: String = pg
+        .with_client(|client| {
+            Ok(client
+                .query_one(
+                    "SELECT value FROM schema_settings WHERE key = 'device_id'",
+                    &[],
+                )
+                .am("read device id row")?
+                .get(0))
+        })
+        .unwrap();
+    assert_eq!(stored, id);
+    drop_device_id(&pg);
+}
+
+#[test]
+fn pg_device_id_is_stable_across_calls() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    drop_device_id(&pg);
+    assert_eq!(pg.device_id().unwrap(), pg.device_id().unwrap());
+    drop_device_id(&pg);
+}
+
+#[test]
+fn pg_device_id_keeps_the_first_written_row() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    pg.test_execute(
+        "INSERT INTO schema_settings (key, value, created_at, updated_at)
+         VALUES ('device_id', 'device-first', 't0', 't0')
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    )
+    .unwrap();
+    assert_eq!(pg.device_id().unwrap(), "device-first");
+    drop_device_id(&pg);
 }

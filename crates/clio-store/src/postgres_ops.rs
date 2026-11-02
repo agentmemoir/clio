@@ -187,6 +187,38 @@ impl OpsStore for PostgresStore {
             Ok(n)
         })
     }
+
+    fn device_id(&self) -> Result<String, AmError> {
+        self.with_client(|client| {
+            let stored = client
+                .query_opt(
+                    "SELECT value FROM schema_settings WHERE key = 'device_id'",
+                    &[],
+                )
+                .am("device id read")?;
+            if let Some(row) = stored {
+                return Ok(row.get::<_, String>(0));
+            }
+            client
+                .execute(
+                    "INSERT INTO schema_settings (key, value, created_at, updated_at)
+                     VALUES ('device_id', $1, $2, $2)
+                     ON CONFLICT (key) DO NOTHING",
+                    &[
+                        &crate::ops_store::mint_device_id(),
+                        &crate::migrate::now_iso(),
+                    ],
+                )
+                .am("device id insert")?;
+            let row = client
+                .query_one(
+                    "SELECT value FROM schema_settings WHERE key = 'device_id'",
+                    &[],
+                )
+                .am("device id reread")?;
+            Ok(row.get::<_, String>(0))
+        })
+    }
 }
 
 #[cfg(test)]
