@@ -148,6 +148,21 @@ fn try_bounded(file: &File, wait: Duration, store: &Path, lock_path: &Path) -> R
 
 /// Open the lock file, creating it owner-only when missing.
 fn open_lock_file(lock_path: &Path) -> Result<File, AmError> {
+    open_lock_owner_only(lock_path).map_err(|error| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!(
+                "failed to open the token store lock {}: {error}",
+                lock_path.display()
+            ),
+        )
+    })
+}
+
+/// The lock file's flags, with the owner-only mode applied where the platform
+/// has Unix permission bits — the same split the key files use.
+#[cfg(unix)]
+fn open_lock_owner_only(lock_path: &Path) -> std::io::Result<File> {
     OpenOptions::new()
         .read(true)
         .write(true)
@@ -155,15 +170,19 @@ fn open_lock_file(lock_path: &Path) -> Result<File, AmError> {
         .truncate(false)
         .mode(0o600)
         .open(lock_path)
-        .map_err(|error| {
-            AmError::new(
-                ErrorCode::Internal,
-                format!(
-                    "failed to open the token store lock {}: {error}",
-                    lock_path.display()
-                ),
-            )
-        })
+}
+
+/// See the `unix` definition. The owner-only mode is omitted rather than
+/// emulated: a permission bit has no equivalent here, so the lock file takes
+/// the access its directory grants, as the key files do on this platform.
+#[cfg(not(unix))]
+fn open_lock_owner_only(lock_path: &Path) -> std::io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
 }
 
 #[cfg(test)]

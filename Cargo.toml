@@ -60,17 +60,28 @@ rand = "0.10"
 # The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
 # so a closed stdout ends the process quietly rather than panicking.
 libc = "0.2"
-# OS secret store for the Clio encryption key. The three features are the
-# native backend for each supported platform; keyring gates the backing crate
-# per target itself, so one unconditional entry resolves to Keychain on macOS,
-# Credential Manager on Windows, and the persistent Secret Service on Linux.
-# `vendored` builds libdbus from C source on Linux instead of linking the system
-# one, so the Linux build needs no pkg-config and no libdbus-1-dev. CI installs
-# no system packages, so without it the Linux build fails before it compiles.
-keyring = { version = "3", features = [
-    "apple-native",
-    "windows-native",
-    "linux-native-sync-persistent",
+# OS secret store for the Clio encryption key. `keyring-core` owns the entry
+# type, the credential trait, and the error; one platform store crate below
+# supplies the backend, and `clio-config` installs exactly one of them at
+# startup. There is deliberately no `keyring` facade in between: its `v1`
+# feature selects the `zbus` Secret Service store on Linux, which drags in
+# `zvariant`, `zbus_names`, and `zvariant_derive` — crates RustSec reports
+# unmaintained with no patched version and no upgrade path.
+keyring-core = "1"
+# macOS Keychain, through the Security framework. `default-features = false`
+# leaves the `keychain` backend as the only one this build compiles in.
+apple-native-keyring-store = { version = "1", default-features = false, features = [
+    "keychain",
+] }
+# Windows Credential Manager, through the Win32 credential API.
+windows-native-keyring-store = "1"
+# Linux Secret Service, over D-Bus. `crypto-rust` seals the session handshake
+# with RustCrypto AES/CBC rather than OpenSSL, and `vendored` compiles the
+# bundled libdbus through `cc` — the same C library master already ships — so
+# the Linux build needs no system `libdbus` or `openssl` and no `pkg-config`
+# probe for either.
+dbus-secret-service-keyring-store = { version = "1", features = [
+    "crypto-rust",
     "vendored",
 ] }
 # `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations

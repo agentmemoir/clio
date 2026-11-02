@@ -26,9 +26,10 @@
 #   MUSL_EXTRA_CFLAGS carries target-specific flags that must also reach only the
 #   C compiler. The aarch64 musl build needs `-mno-outline-atomics` there: GCC
 #   otherwise emits calls to __aarch64_ldadd4_sync and friends, which glibc
-#   provides and musl does not, so linking the vendored libdbus fails with an
-#   undefined reference. It is aarch64-only and would be rejected on x86_64, so
-#   the release workflow sets it for that one target rather than here.
+#   provides and musl does not, so a C or assembly object in the build can fail
+#   to link with an undefined reference. It is aarch64-only and would be
+#   rejected on x86_64, so the release workflow sets it for that one target
+#   rather than here.
 #
 # Used by .github/workflows/release.yml for the two *-unknown-linux-musl
 # targets. Not used by `make build`, `make test`, or CI, which are unaffected.

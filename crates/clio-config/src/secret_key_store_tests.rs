@@ -3,15 +3,15 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for unit-testing the `keyring` wrapper: that a
-//! missing entry reads as "no key" rather than a failure, that a locked or
+//! This module is responsible for unit-testing the `keyring_core` wrapper: that
+//! a missing entry reads as "no key" rather than a failure, that a locked or
 //! broken store becomes a Clio error naming the store, and that nothing the
 //! store holds reaches a message.
 //!
 //! ## Owns
 //! - The [`KeyringStore`] read, write, and delete tests
 //! - The [`NoKeystore`] answers, which are the other store this module defines
-//! - The message tests, including the two upstream variants that carry bytes
+//! - The message tests, including the three upstream variants that carry bytes
 //!
 //! ## Does not own
 //! - The injected credential and factory (see `secret_key_store_test_support`)
@@ -20,17 +20,21 @@
 //!
 //! ## Boundary
 //!
-//! These tests drive the production [`KeyringStore`] through keyring's own
-//! `Entry`, over an in-memory credential, so no OS store is reached. The one
-//! function with no test is `os_entry`, and it is the only code that names the
-//! real Keychain.
+//! These tests drive the production [`KeyringStore`] through a `keyring_core`
+//! entry over an in-memory credential, so no OS store is reached. The one entry
+//! that does reach an OS store is the production one, and it is tested in
+//! `secret_key_store_platform_tests` beside the install it depends on.
 //!
 //! Keep this module focused on the wrapper's entry lifecycle.
 
 use super::*;
 use crate::secret_key::KEY_LEN;
-use crate::secret_key_store_test_support::{FakeCredential, err_of, store_over};
+use crate::secret_key_store_test_support::{
+    FakeCredential, entry_over, err_of, hex_of, store_over,
+};
 use clio_types::ErrorCode;
+use keyring_core::api::CredentialApi;
+use std::sync::Arc;
 
 // ------------------------------------------------------- the store that is not there
 
@@ -194,12 +198,16 @@ fn a_store_that_refuses_deletion_says_so() {
 #[test]
 fn no_keystore_failure_message_carries_the_stored_bytes() {
     let wanted = rand::random::<[u8; KEY_LEN]>();
-    // `BadEncoding` holds the stored bytes and `Ambiguous` formats whole
-    // credentials with `Debug`. Those are the two variants that would leak, so
-    // they are the two that must be rendered here.
+    // `BadEncoding` and `BadDataFormat` hold the stored bytes and `Ambiguous`
+    // formats whole credentials with `Debug`. Those are the three variants that
+    // would leak, so they are the three that must be rendered here.
     let leaks = [
-        keyring::Error::BadEncoding(wanted.to_vec()),
-        keyring::Error::Ambiguous(vec![Box::new(SecretCredential(wanted))]),
+        keyring_core::Error::BadEncoding(wanted.to_vec()),
+        keyring_core::Error::BadDataFormat(
+            wanted.to_vec(),
+            Box::new(std::io::Error::other("not a sealed blob")),
+        ),
+        keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential(wanted))]),
     ];
 
     for err in &leaks {
@@ -226,13 +234,26 @@ fn the_production_store_can_be_built_without_reaching_the_keychain() {
 
 #[test]
 fn every_failure_gets_its_own_wording() {
+    // Every variant `keyring-core` 1.0.1 names, the three data-carrying ones
+    // included, so a variant added in a later release cannot land on the
+    // wildcard without this count noticing.
     let shapes = [
-        keyring::Error::NoEntry,
-        keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
-        keyring::Error::PlatformFailure(Box::new(std::io::Error::other("bus down"))),
-        keyring::Error::BadEncoding(vec![0xAB; 4]),
-        keyring::Error::TooLong("service".to_owned(), 900),
-        keyring::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::NoEntry,
+        keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
+        keyring_core::Error::PlatformFailure(Box::new(std::io::Error::other("bus down"))),
+        keyring_core::Error::BadEncoding(vec![0xAB; 4]),
+        keyring_core::Error::BadDataFormat(
+            vec![0xAB; 4],
+            Box::new(std::io::Error::other("not a sealed blob")),
+        ),
+        keyring_core::Error::BadStoreFormat(
+            "the store header is not one this build reads".to_owned(),
+        ),
+        keyring_core::Error::TooLong("service".to_owned(), 900),
+        keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential([0xAB; KEY_LEN]))]),
+        keyring_core::Error::NoDefaultStore,
+        keyring_core::Error::NotSupportedByStore("attributes".to_owned()),
     ];
 
     let mut summaries: Vec<&str> = shapes.iter().map(classify).collect();
@@ -241,20 +262,15 @@ fn every_failure_gets_its_own_wording() {
     summaries.dedup();
 
     assert_eq!(
+        count, 11,
+        "the test covers every variant the error type names"
+    );
+    assert_eq!(
         summaries.len(),
         count,
         "each failure reads differently, so none is mistaken for another"
     );
     assert!(summaries.contains(&"there is no entry"));
-}
-
-/// Lower-case hex, the encoding a message would most plausibly leak a key in.
-fn hex_of(key: &[u8; KEY_LEN]) -> String {
-    use std::fmt::Write as _;
-    key.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
 }
 
 /// A platform credential whose `Debug` prints its secret, the way a real
@@ -268,17 +284,25 @@ impl std::fmt::Debug for SecretCredential {
     }
 }
 
-impl keyring::credential::CredentialApi for SecretCredential {
-    fn set_secret(&self, _: &[u8]) -> keyring::Result<()> {
+impl CredentialApi for SecretCredential {
+    fn set_secret(&self, _: &[u8]) -> keyring_core::Result<()> {
         Ok(())
     }
 
-    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+    fn get_secret(&self) -> keyring_core::Result<Vec<u8>> {
         Ok(self.0.to_vec())
     }
 
-    fn delete_credential(&self) -> keyring::Result<()> {
+    fn delete_credential(&self) -> keyring_core::Result<()> {
         Ok(())
+    }
+
+    fn get_credential(&self) -> keyring_core::Result<Option<Arc<keyring_core::Credential>>> {
+        Ok(None)
+    }
+
+    fn get_specifiers(&self) -> Option<(String, String)> {
+        None
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

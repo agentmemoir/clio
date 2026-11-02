@@ -9,13 +9,15 @@
 //!
 //! ## Owns
 //! - The [`SecretStore`] seam every keystore read and write goes through
-//! - [`KeyringStore`], the production `keyring` wrapper and its entry seam
+//! - [`KeyringStore`], the production `keyring_core` wrapper and its entry seam
 //! - [`NoKeystore`], the store that does not exist, for a key file that is the
 //!   only key
 //! - The platform name of the store used in operator-facing messages
 //! - Keeping store contents out of error text
 //!
 //! ## Does not own
+//! - Which platform store is installed, and when (see
+//!   `secret_key_store_platform`)
 //! - Which store wins when both hold a key (see `secret_key`)
 //! - The key file, its permissions, and its length check (see `secret_key`)
 //! - Deciding whether the keystore is consulted at all (see `secret_key`)
@@ -23,32 +25,33 @@
 //!
 //! ## Boundary
 //!
-//! Changes to the OS secret store, its entry name, or the `keyring` features
-//! should normally require changes here. Changes to key precedence or to the
-//! key file should not require changes here.
+//! Changes to the entry this key is filed under, or to how a `keyring_core`
+//! failure is described, should normally require changes here. Changes to which
+//! platform store crate this build installs should require changes in
+//! `secret_key_store_platform`; changes to key precedence or to the key file
+//! should require changes in neither.
 //!
-//! Keep this module focused on the operating-system secret store.
+//! Keep this module focused on the operating-system secret store's entry.
 
-// The `keyring` dependency is a single unconditional workspace entry with the
-// three native features (`apple-native`, `windows-native`,
-// `linux-native-sync-persistent`) plus `vendored`. keyring gates its own backing
-// crate per target, so this resolves to the Keychain on macOS, Credential
-// Manager on Windows, and the kernel-keyring-backed persistent Secret Service
-// on Linux without a target-conditional dependency here.
+// `keyring-core` owns the entry type, the credential trait, and the error. The
+// store behind it is chosen per target and installed once per process, lazily on
+// the first entry, in `secret_key_store_platform`; this module never names a
+// platform store crate.
 //
-// `vendored` matters on Linux and only there: the Secret Service backend reaches
-// the session bus through `libdbus`, whose default build shells out to
-// `pkg-config` for a system `libdbus-1`. `vendored` compiles that C source
-// instead, so a Linux build needs no system packages. This was not a
-// theoretical concern — without it the build fails on a clean machine with
-// "The pkg-config command could not be found", which is the state CI is in.
-//
-// On Linux that backend reaches the session bus, so a headless machine with no
-// Secret Service daemon gets an error from `get` and takes the key-file path
-// instead.
+// The keystore path refuses when no store could be installed: it never redirects
+// the key into a file the operator did not choose, and a machine that never
+// chose the keystore reads the key file instead, because an absent marker means
+// the file store.
 
 use clio_types::{AmError, ErrorCode};
 use std::collections::HashMap;
+
+/// The platform store this build installs, and the production entry over it.
+#[path = "secret_key_store_platform.rs"]
+mod secret_key_store_platform;
+
+/// The platform store's entry seam, used by [`KeyringStore::os`].
+use secret_key_store_platform::os_entry;
 
 /// Service the keys are filed under in the OS secret store.
 pub(crate) const SERVICE: &str = "clio";
@@ -70,7 +73,7 @@ pub(crate) const SYNC_KEY: &str = "the Clio sync key";
 
 /// One store that can hand back the Clio encryption key.
 ///
-/// A trait rather than a direct `keyring` call so the precedence rules can be
+/// A trait rather than a direct keystore call so the precedence rules can be
 /// tested without touching the machine's real Keychain or Secret Service. An
 /// implementation reports a locked, denied, or absent backend as an error;
 /// `Ok(None)` means "reachable, and there is no entry".
@@ -106,9 +109,8 @@ pub trait SecretStore {
 
     /// Set one non-secret named attribute on the entry.
     ///
-    /// A store that ignores unsupported attribute names returns `Ok(())` without
-    /// storing anything, because that is what the `keyring` layer does. The
-    /// caller reads the attribute back before believing it was kept.
+    /// The default implementation refuses the write, because `keyring-core`'s default `update_attributes` answers `Error::NotSupportedByStore`: a store with no attribute support cannot record the value, and saying so is the honest answer.
+    /// A caller that tolerates that refusal discards the result on purpose with `let _ =`, which is what the sync key's creation time does, and a store that does support attributes overrides this method.
     ///
     /// # Errors
     /// The store is unreachable, locked, or refused the write.
@@ -120,11 +122,15 @@ pub trait SecretStore {
     }
 }
 
-/// Builds the `keyring` entry every operation goes through.
+/// Builds the `keyring_core` entry every operation goes through.
 ///
 /// The account name is a parameter rather than a captured constant so one
 /// wrapper serves both key roles and a test can prove which account it reached.
-pub(crate) type EntryFactory = Box<dyn Fn(&str) -> keyring::Result<keyring::Entry> + Send + Sync>;
+/// The failure is an [`AmError`] rather than a `keyring_core::Error` because a
+/// store that could not be installed has a reason to report, and no
+/// `keyring_core` variant carries one.
+pub(crate) type EntryFactory =
+    Box<dyn Fn(&str) -> Result<keyring_core::Entry, AmError> + Send + Sync>;
 
 /// A store that is not there at all: the key file is the only key.
 ///
@@ -158,12 +164,13 @@ impl SecretStore for NoKeystore {
     }
 }
 
-/// The production [`SecretStore`]: one `keyring` entry per machine.
+/// The production [`SecretStore`]: one `keyring_core` entry per machine.
 ///
 /// The entry is built through an injected factory rather than inline, which is
 /// the second half of the test seam. [`Self::os`] supplies the real OS store; a
 /// test supplies an entry over an in-memory credential and exercises this whole
-/// impl, including the `keyring` error mapping, without any store being touched.
+/// impl, including the `keyring_core` error mapping, without any store being
+/// touched.
 ///
 /// The account name is the only thing that separates the encryption key from the
 /// sync key in the store, so it is carried explicitly and passed to the factory.
@@ -183,17 +190,21 @@ impl KeyringStore {
         }
     }
 
-    /// A store over an arbitrary `keyring` entry, so the wrapper above can be
-    /// tested without an OS store behind it.
+    /// A store over an arbitrary `keyring_core` entry, so the wrapper above can
+    /// be tested without an OS store behind it.
     #[cfg(test)]
     pub(crate) fn over<F>(account: &'static str, what: &'static str, build: F) -> Self
     where
-        F: Fn(&str) -> keyring::Result<keyring::Entry> + Send + Sync + 'static,
+        F: Fn(&str) -> keyring_core::Result<keyring_core::Entry> + Send + Sync + 'static,
     {
         Self {
             account,
             what,
-            build: Box::new(build),
+            // A test entry has no store to install, so its failure is the
+            // ordinary "cannot open" one.
+            build: Box::new(move |account| {
+                build(account).map_err(|err| store_error("open", what, &err))
+            }),
         }
     }
 }
@@ -203,7 +214,7 @@ impl SecretStore for KeyringStore {
         match self.entry()?.get_secret() {
             Ok(secret) => Ok(Some(secret)),
             // "No entry" is the answer to the question, not a failure to read.
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(err) => Err(store_error("read from", self.what, &err)),
         }
     }
@@ -220,7 +231,7 @@ impl SecretStore for KeyringStore {
     fn delete(&self) -> Result<(), AmError> {
         match self.entry()?.delete_credential() {
             // Deleting an absent entry is the state the caller asked for.
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(err) => Err(store_error("delete from", self.what, &err)),
         }
     }
@@ -230,7 +241,7 @@ impl SecretStore for KeyringStore {
             Ok(attributes) => Ok(attributes),
             // A store that keeps the entry answers even when it keeps no
             // attributes; "no entry" here means the caller asked too early.
-            Err(keyring::Error::NoEntry) => Ok(HashMap::new()),
+            Err(keyring_core::Error::NoEntry) => Ok(HashMap::new()),
             Err(err) => Err(store_error("read the attributes of", self.what, &err)),
         }
     }
@@ -245,42 +256,53 @@ impl SecretStore for KeyringStore {
 }
 
 impl KeyringStore {
-    /// The entry this store operates on, with a failure to build it reported the
-    /// same way as any other keystore failure.
-    fn entry(&self) -> Result<keyring::Entry, AmError> {
-        (self.build)(self.account).map_err(|err| store_error("open", self.what, &err))
+    /// The entry this store operates on, with a failure to build it — a store
+    /// that could not be installed included — reported the same way as any
+    /// other keystore failure.
+    fn entry(&self) -> Result<keyring_core::Entry, AmError> {
+        (self.build)(self.account)
     }
 }
 
-/// The one entry this build uses in production: the OS secret store.
-fn os_entry(account: &str) -> keyring::Result<keyring::Entry> {
-    keyring::Entry::new(SERVICE, account)
-}
+/// Operator-facing name of the store this build installs.
+///
+/// One constant per target rather than a chain of `cfg!` tests, so the name is
+/// the store the build actually installs and no branch survives compilation to
+/// describe a store this build cannot reach.
+#[cfg(target_os = "macos")]
+const STORE_NAME: &str = "macOS Keychain";
+
+/// Operator-facing name of the store this build installs.
+#[cfg(target_os = "windows")]
+const STORE_NAME: &str = "Windows Credential Manager";
+
+/// Operator-facing name of the store this build installs.
+#[cfg(target_os = "linux")]
+const STORE_NAME: &str = "Linux Secret Service";
+
+/// Operator-facing name of the store this build installs.
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+const STORE_NAME: &str = "the OS secret store";
 
 /// Operator-facing name of the OS secret store on this platform.
 ///
-/// Named from the backend `keyring` actually selects, so the message matches
-/// what the operator has to go and look at.
+/// Named from the store this build installs, so the message matches what the
+/// operator has to go and look at.
 #[must_use]
 pub(crate) fn display_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macOS Keychain"
-    } else if cfg!(target_os = "windows") {
-        "Windows Credential Manager"
-    } else if cfg!(target_os = "linux") {
-        "Linux Secret Service"
-    } else {
-        "the OS secret store"
-    }
+    STORE_NAME
 }
 
 /// A keystore failure as a Clio error, with nothing from the store in the text.
 ///
-/// The `keyring` error is classified rather than rendered. Two of its variants
-/// carry store contents — `BadEncoding` holds the raw bytes and `Ambiguous`
-/// formats whole credentials, secret included — so printing it would put key
-/// material into a message that ends up in logs and on a terminal.
-pub(crate) fn store_error(action: &str, what: &str, err: &keyring::Error) -> AmError {
+/// The `keyring_core` error is classified rather than rendered. Three of its
+/// variants can carry store contents — `BadEncoding` and `BadDataFormat` hold the
+/// raw bytes and `Ambiguous` formats whole credentials, secret included — so
+/// printing it would put key material into a message that ends up in logs and on
+/// a terminal. `BadStoreFormat` holds a description of the store rather than the
+/// key, and it is summarised for the same reason: the only text allowed out of
+/// this function is [`classify`]'s fixed wording.
+pub(crate) fn store_error(action: &str, what: &str, err: &keyring_core::Error) -> AmError {
     AmError::new(
         ErrorCode::Internal,
         format!(
@@ -291,21 +313,32 @@ pub(crate) fn store_error(action: &str, what: &str, err: &keyring::Error) -> AmE
     )
 }
 
-/// Secret-free summary of a `keyring` failure.
+/// Secret-free summary of a `keyring_core` failure.
 ///
-/// The wildcard arm is required because the upstream enum is
-/// `#[non_exhaustive]`, and it is the one arm no test can reach: an unknown
-/// variant cannot be constructed from outside the crate. It is also the arm that
-/// keeps an unrecognised failure from falling through to a rendered error, so it
-/// is the arm that must never grow a `{err}`.
-pub(crate) fn classify(err: &keyring::Error) -> &'static str {
+/// The wildcard arm is required because the upstream enum is `#[non_exhaustive]`, and it is the one arm no test can reach: an unknown variant cannot be constructed from outside the crate.
+/// Every variant `keyring-core` 1.0.1 names has an arm of its own above, so none of them falls through to the wildcard by omission — the three that carry store contents (`BadEncoding`, `BadDataFormat`, and `Ambiguous`) among them.
+/// The wildcard is also the arm that keeps an unrecognised failure from falling through to a rendered error, so it is the arm that must never grow a `{err}`.
+pub(crate) fn classify(err: &keyring_core::Error) -> &'static str {
     match err {
-        keyring::Error::NoEntry => "there is no entry",
-        keyring::Error::NoStorageAccess(_) => "the store is locked or refused access",
-        keyring::Error::PlatformFailure(_) => "the platform store failed",
-        keyring::Error::BadEncoding(_) => "the stored value is not readable",
-        keyring::Error::TooLong(_, _) => "an entry attribute is too long",
-        keyring::Error::Invalid(_, _) => "an entry attribute is invalid",
+        keyring_core::Error::NoEntry => "there is no entry",
+        keyring_core::Error::NoStorageAccess(_) => "the store is locked or refused access",
+        keyring_core::Error::PlatformFailure(_) => "the platform store failed",
+        keyring_core::Error::BadEncoding(_) => "the stored value is not readable",
+        // The bytes this arm refuses to render are the stored secret blob, and
+        // the platform error beside them can carry the same bytes, so neither is
+        // formatted here.
+        keyring_core::Error::BadDataFormat(_, _) => "the stored entry is in an unexpected format",
+        keyring_core::Error::BadStoreFormat(_) => "the store itself is in an unexpected format",
+        keyring_core::Error::TooLong(_, _) => "an entry attribute is too long",
+        keyring_core::Error::Invalid(_, _) => "an entry attribute is invalid",
+        // The vector this arm refuses to render holds whole credentials, and
+        // their `Debug` prints the stored secret, so neither the entries nor
+        // their count is formatted here.
+        keyring_core::Error::Ambiguous(_) => "the entry matched more than one stored credential",
+        keyring_core::Error::NoDefaultStore => {
+            "no store was installed for this platform, so nothing could be reached"
+        }
+        keyring_core::Error::NotSupportedByStore(_) => "the store does not support this operation",
         _ => "the store reported a failure this build does not classify",
     }
 }
