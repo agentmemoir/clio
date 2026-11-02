@@ -1,0 +1,39 @@
+name: Prompt surface diff
+
+on:
+  pull_request:
+    paths:
+      - crates/clio-mcp/**
+      - crates/clio-types/src/mcp_tools.rs
+      - scripts/prompt_surface_diff.py
+      - .github/workflows/prompt-surface-diff.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prompt-surface-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  diff:
+    name: MCP tool schema diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Both revisions are read out of the history, so the clone carries all of it.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Self-test the diff script
+        run: python3 scripts/prompt_surface_diff.py --self-test
+      - name: Summarise the schema change
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          SUMMARY: ${{ runner.temp }}/prompt-surface.md
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          python3 scripts/prompt_surface_diff.py --base "$base" --head HEAD --output "$SUMMARY"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"

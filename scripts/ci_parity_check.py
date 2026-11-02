@@ -40,7 +40,9 @@ WORKFLOW_FILE = ROOT / ".github" / "workflows" / "ci.yml"
 #: suite when it checks that suite on another operating system, and that is a
 #: deliberate cost rather than a mistake. The list is the record of that
 #: choice, so a suite that runs in two jobs and is not named here is a finding.
-ALLOWED_MULTI_JOB_SUITES = ("scripts-check-gate-install",)
+#: The record is empty since the macOS gate installer job was dropped: no suite
+#: runs on a second operating system any more, so there is no cost to record.
+ALLOWED_MULTI_JOB_SUITES = ()
 
 
 def multi_job_suites(workflow: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
