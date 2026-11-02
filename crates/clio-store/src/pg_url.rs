@@ -274,7 +274,7 @@ fn url_query_start(input: &str) -> Option<usize> {
         Some(at) => (rest_start + at + 1, &rest[at + 1..]),
         None => (rest_start, rest),
     };
-    let at = after.find(|c| c == '/' || c == '?')?;
+    let at = after.find(['/', '?'])?;
     if after.as_bytes()[at] == b'?' {
         return Some(after_start + at);
     }
