@@ -46,6 +46,21 @@ const ANNOUNCE_BOUND: Duration = Duration::from_secs(90);
 /// and the TTL keeps a child left behind by a crash from outliving the run.
 const SERVE_TTL_SECS: &str = "600";
 
+/// The variable the product's device-identity resolver reads first: a non-empty
+/// value here wins over the stored setting, so the harness and the spawned peer
+/// agree on one identity without either of them persisting it.
+const DEVICE_ID_ENV: &str = "CLIO_SYNC_DEVICE_ID";
+
+/// One harness-owned device id, unique per spawned peer and stable for the whole
+/// life of that process. The sequence separates two peers in one test binary and
+/// the random suffix separates two binaries running on a shared host, so the
+/// value never depends on a process id the product stopped using.
+fn harness_device_id() -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("device-harness-{sequence}-{:x}", rand::random::<u64>())
+}
+
 /// The 32 raw bytes of the one sync key this harness derives its key from,
 /// computed from the process's synthetic secret so no key material is fixed in
 /// the repository.
@@ -214,8 +229,14 @@ impl ServedPeer {
         // beside the peer's own journal: both sides then resolve the identical
         // fingerprint without either of them holding the bytes as text.
         crate::common::share_salt(&mut command, journal, &super::harness_salt());
+        // The peer's device identity is named here, not read back from the
+        // process: the product persists and mints its own id, so the harness
+        // must hand it the one value the driver will bind into a delivery
+        // target. A process id answered a different question and broke every
+        // denial proof's peer comparison.
+        let device_id = harness_device_id();
+        command.env(DEVICE_ID_ENV, &device_id);
         let mut child = command.spawn().expect("spawn clio sync serve");
-        let device_id = format!("device-{}", child.id());
         let addr = drain_stdout(&mut child, &stdout_log);
         Self {
             child,
