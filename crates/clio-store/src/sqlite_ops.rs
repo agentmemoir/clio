@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on SQLite operator health SQL.
 
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, now_iso};
 use crate::ops_store::{IntegritySignals, OpsStore, StoreCounts};
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode};
@@ -86,6 +86,33 @@ impl OpsStore for SqliteStore {
             )
             .optional()
             .am("schema version")
+        })
+    }
+
+    fn setting_get(&self, key: &str) -> Result<Option<String>, AmError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT value FROM schema_settings WHERE key = ?1",
+                params![key],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .am("setting get")
+        })
+    }
+
+    fn setting_set(&self, key: &str, value: &str) -> Result<(), AmError> {
+        let ts = now_iso();
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO schema_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?3)
+                 ON CONFLICT (key) DO UPDATE
+                 SET value = excluded.value, updated_at = excluded.updated_at",
+                params![key, value, ts],
+            )
+            .am("setting set")?;
+            Ok(())
         })
     }
 

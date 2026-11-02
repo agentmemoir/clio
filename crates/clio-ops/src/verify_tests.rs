@@ -96,6 +96,14 @@ impl OpsStore for AllSignalsOps {
     fn schema_version(&self) -> Result<Option<String>, AmError> {
         Ok(None)
     }
+    fn setting_get(&self, _key: &str) -> Result<Option<String>, AmError> {
+        Ok(None)
+    }
+
+    fn setting_set(&self, _key: &str, _value: &str) -> Result<(), AmError> {
+        Ok(())
+    }
+
     fn embedding_space(&self) -> Result<clio_store::EmbeddingSpace, AmError> {
         Ok(clio_store::EmbeddingSpace::default_space())
     }

@@ -23,6 +23,7 @@
 //! Keep this module focused on Postgres operator-health tests.
 
 use crate::db_url::postgres_url_from_env;
+use crate::migrate::IntoAmError;
 use crate::model::{AssocEdgeRecord, AssocKind};
 use crate::ops_store::{IntegritySignals, OpsStore};
 use crate::postgres::PostgresStore;
@@ -93,6 +94,60 @@ fn cleanup(pg: &PostgresStore, bank: &str) {
          DELETE FROM memtree_nodes WHERE bank_id = '{bank}';
          DELETE FROM items WHERE bank_id = '{bank}';"
     ));
+}
+
+/// Remove one settings row this suite created.
+fn cleanup_setting(pg: &PostgresStore, key: &str) {
+    let _ = pg.with_client(|client| {
+        client
+            .execute("DELETE FROM schema_settings WHERE key = $1", &[&key])
+            .am("cleanup setting")
+    });
+}
+
+#[test]
+fn pg_setting_get_missing_key_is_none() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    assert!(
+        pg.setting_get(&unique("ops-pg-absent-setting"))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn pg_setting_set_then_get_round_trips_hex_id() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    let key = unique("ops-pg-round-trip-setting");
+    let value = "9f2c-1a4b-7d3e-0b6f";
+    pg.setting_set(&key, value).unwrap();
+    assert_eq!(pg.setting_get(&key).unwrap().as_deref(), Some(value));
+    cleanup_setting(&pg, &key);
+}
+
+#[test]
+fn pg_setting_set_twice_updates_in_place() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    let key = unique("ops-pg-overwrite-setting");
+    pg.setting_set(&key, "first").unwrap();
+    pg.setting_set(&key, "second").unwrap();
+    assert_eq!(pg.setting_get(&key).unwrap().as_deref(), Some("second"));
+    let rows = pg
+        .with_client(|client| {
+            let row = client
+                .query_one(
+                    "SELECT COUNT(*) FROM schema_settings WHERE key = $1",
+                    &[&key],
+                )
+                .am("count settings rows")?;
+            Ok(row.get::<_, i64>(0))
+        })
+        .expect("row count");
+    assert_eq!(rows, 1, "an upsert must not duplicate the row");
+    cleanup_setting(&pg, &key);
 }
 
 #[test]

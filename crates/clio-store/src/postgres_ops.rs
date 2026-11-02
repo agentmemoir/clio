@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on Postgres operator health SQL.
 
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, now_iso};
 use crate::ops_store::{IntegritySignals, OpsStore, StoreCounts};
 use crate::postgres::PostgresStore;
 use clio_types::{AmError, ErrorCode};
@@ -52,6 +52,31 @@ impl OpsStore for PostgresStore {
                 )
                 .am("schema version")?;
             Ok(row.map(|r| r.get::<_, String>(0)))
+        })
+    }
+
+    fn setting_get(&self, key: &str) -> Result<Option<String>, AmError> {
+        self.with_client(|client| {
+            let row = client
+                .query_opt("SELECT value FROM schema_settings WHERE key = $1", &[&key])
+                .am("setting get")?;
+            Ok(row.map(|r| r.get::<_, String>(0)))
+        })
+    }
+
+    fn setting_set(&self, key: &str, value: &str) -> Result<(), AmError> {
+        let ts = now_iso();
+        self.with_client(|client| {
+            client
+                .execute(
+                    "INSERT INTO schema_settings (key, value, created_at, updated_at)
+                     VALUES ($1, $2, $3, $3)
+                     ON CONFLICT (key) DO UPDATE
+                     SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                    &[&key, &value, &ts],
+                )
+                .am("setting set")?;
+            Ok(())
         })
     }
 

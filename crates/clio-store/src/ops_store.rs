@@ -87,6 +87,26 @@ pub trait OpsStore: Send + Sync {
     /// Storage failures.
     fn schema_version(&self) -> Result<Option<String>, AmError>;
 
+    /// Read one `schema_settings` value, or `None` when the key has no row.
+    ///
+    /// Generic on purpose: the settings writers that already exist each
+    /// hardcode their own key, so a caller in another crate has no way to read
+    /// an arbitrary setting through this contract.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn setting_get(&self, key: &str) -> Result<Option<String>, AmError>;
+
+    /// Insert or update one `schema_settings` row.
+    ///
+    /// The first write stamps `created_at`; every write stamps `updated_at`.
+    /// A second write to the same key updates the row in place and never adds
+    /// a duplicate.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn setting_set(&self, key: &str, value: &str) -> Result<(), AmError>;
+
     /// The active embedding space `(model_id, dims)` this store serves.
     ///
     /// # Errors

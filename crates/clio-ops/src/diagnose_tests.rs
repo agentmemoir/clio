@@ -55,6 +55,14 @@ impl OpsStore for FakeOps {
             .map_err(|()| failed("schema unreadable"))
     }
 
+    fn setting_get(&self, _key: &str) -> Result<Option<String>, AmError> {
+        Err(failed("settings unreadable"))
+    }
+
+    fn setting_set(&self, _key: &str, _value: &str) -> Result<(), AmError> {
+        Err(failed("settings unreadable"))
+    }
+
     fn embedding_space(&self) -> Result<clio_store::EmbeddingSpace, AmError> {
         if self.space_ok {
             Ok(clio_store::EmbeddingSpace::new("fake/model", 384).expect("space"))

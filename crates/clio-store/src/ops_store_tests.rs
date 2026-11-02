@@ -74,6 +74,43 @@ fn edge(id: &str, bank: &str, source: &str, target: &str) -> AssocEdgeRecord {
 }
 
 #[test]
+fn sqlite_setting_get_missing_key_is_none() {
+    let store = store();
+    assert!(store.setting_get("absent-setting").unwrap().is_none());
+}
+
+#[test]
+fn sqlite_setting_set_then_get_round_trips_hex_id() {
+    let store = store();
+    let value = "9f2c-1a4b-7d3e-0b6f";
+    store.setting_set("round-trip-setting", value).unwrap();
+    assert_eq!(
+        store.setting_get("round-trip-setting").unwrap().as_deref(),
+        Some(value)
+    );
+}
+
+#[test]
+fn sqlite_setting_set_twice_updates_in_place() {
+    let store = store();
+    let key = "overwrite-setting";
+    store.setting_set(key, "first").unwrap();
+    store.setting_set(key, "second").unwrap();
+    assert_eq!(store.setting_get(key).unwrap().as_deref(), Some("second"));
+    let rows: i64 = store
+        .with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM schema_settings WHERE key = ?1",
+                rusqlite::params![key],
+                |r| r.get(0),
+            )
+            .am("count settings rows")
+        })
+        .expect("row count");
+    assert_eq!(rows, 1, "an upsert must not duplicate the row");
+}
+
+#[test]
 fn sqlite_ping_and_schema_version() {
     let store = store();
     assert!(store.ping().is_ok());

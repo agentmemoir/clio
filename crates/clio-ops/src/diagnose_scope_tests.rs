@@ -138,6 +138,14 @@ impl OpsStore for BlindOps {
         Ok(Some(SCHEMA_VERSION.to_owned()))
     }
 
+    fn setting_get(&self, _key: &str) -> Result<Option<String>, AmError> {
+        Ok(None)
+    }
+
+    fn setting_set(&self, _key: &str, _value: &str) -> Result<(), AmError> {
+        Ok(())
+    }
+
     fn embedding_space(&self) -> Result<EmbeddingSpace, AmError> {
         Ok(EmbeddingSpace::new(DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMS).expect("space"))
     }
