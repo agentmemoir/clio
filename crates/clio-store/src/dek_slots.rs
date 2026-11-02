@@ -25,7 +25,7 @@
 
 use crate::local_kms_db::{KEY_LEN, KmsDb, PersistedSlot, decode_key, encode_key};
 use clio_types::{AmError, ErrorCode};
-use rand::RngCore;
+use rand::Rng;
 use std::path::PathBuf;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
