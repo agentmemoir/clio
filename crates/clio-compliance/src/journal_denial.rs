@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use clio_store::{DenialVerdict, ErasureDenial, sha256_hex};
 use clio_types::{AmError, ErrorCode};
 
-use crate::erasure_journal::{JournalState, load_journal, record_denial};
+use crate::erasure_journal::{ErasureJournal, JournalState, load_journal, record_denial};
 use crate::restore_guard::JournalHold;
 use crate::salt::{tombstone_salt_at, tombstone_salt_fingerprint_of};
 
@@ -125,6 +125,16 @@ impl JournalDenialProbe {
         )
     }
 
+    /// Whether `journal` was recorded under a salt other than the one this probe
+    /// holds.
+    ///
+    /// A journal with no recorded fingerprint cannot be verified against any
+    /// salt, so it counts as another salt: an unverifiable journal is never
+    /// read as one this deployment's salt answers for.
+    fn under_another_salt(&self, journal: &ErasureJournal) -> bool {
+        journal.salt_fingerprint.as_deref() != self.salt_fingerprint.as_deref()
+    }
+
     /// The probe for the journal this deployment resolves, or a refusal.
     ///
     /// `document` is the erasure-journal path a host-supplied effective document
@@ -162,6 +172,14 @@ impl ErasureDenial for JournalDenialProbe {
             return DenialVerdict::AuthorityUnavailable;
         };
         match load_journal(&self.journal_path) {
+            // A journal recorded under another salt cannot be compared with this
+            // probe's salt: the denials it holds were hashed under a salt this
+            // process does not hold, so a hash that does not match here is no
+            // evidence that the subject is undenied. Unverifiable is never
+            // reported as clear.
+            JournalState::Current(journal) if self.under_another_salt(&journal) => {
+                DenialVerdict::AuthorityUnavailable
+            }
             JournalState::Current(journal) if journal.is_denied(&hash) => DenialVerdict::Denied,
             JournalState::Current(_) | JournalState::Missing => DenialVerdict::Clear,
             JournalState::Damaged => DenialVerdict::AuthorityUnavailable,

@@ -22,8 +22,8 @@
 //! Keep this module focused on the journal's model, operations, and check.
 
 use super::{
-    ErasureJournal, JournalState, SCHEMA_VERSION, handoff, initialize_new_empty, load_journal,
-    record_denial,
+    DenialRecord, ErasureJournal, JournalState, SCHEMA_VERSION, handoff, initialize_new_empty,
+    load_journal, record_denial,
 };
 use crate::test_unique::unique;
 use clio_types::ErrorCode;
@@ -75,6 +75,34 @@ fn load_current(path: &Path) -> ErasureJournal {
 fn record(path: &Path, subject: &str, banks: &[&str]) -> u64 {
     let banks: Vec<String> = banks.iter().map(|bank| (*bank).to_owned()).collect();
     record_denial(path, subject, &banks).expect("record the denial")
+}
+
+/// The sidecar path production appends to the journal's own path.
+fn salt_sidecar(journal: &Path) -> PathBuf {
+    let mut sidecar = journal.as_os_str().to_os_string();
+    sidecar.push(".salt");
+    PathBuf::from(sidecar)
+}
+
+/// The fingerprint that describes `salt`, so a seeded journal names the salt it
+/// was written under without consulting the process environment.
+fn fingerprint_of(salt: &[u8]) -> String {
+    crate::salt::tombstone_salt_fingerprint_of(salt)
+}
+
+/// A journal body at generation 1 denying `subject_hash` under `fingerprint`.
+fn journal_body(fingerprint: Option<&str>, subject_hash: &str) -> Vec<u8> {
+    let journal = ErasureJournal {
+        schema_version: SCHEMA_VERSION,
+        deployment_id: "seeded-deployment".to_owned(),
+        generation: 1,
+        salt_fingerprint: fingerprint.map(str::to_owned),
+        denials: vec![DenialRecord {
+            subject_hash: subject_hash.to_owned(),
+            banks: Vec::new(),
+        }],
+    };
+    serde_json::to_vec(&journal).expect("encode the seeded journal")
 }
 
 #[test]
@@ -171,8 +199,11 @@ fn recording_the_same_subject_again_keeps_generation_and_scope() {
 fn recording_a_denial_at_an_exhausted_generation_refuses() {
     let scratch = Scratch::new();
     let path = scratch.root.join("erasure-journal.json");
+    // The journal names the salt this process resolves, so the exhausted
+    // generation is the refusal this test is about.
+    let live = crate::tombstone_salt_fingerprint_at(&path).expect("resolve the deployment salt");
     let body = format!(
-        r#"{{"schema_version":1,"deployment_id":"d","generation":{},"denials":[]}}"#,
+        r#"{{"schema_version":1,"deployment_id":"d","generation":{},"salt_fingerprint":"{live}","denials":[]}}"#,
         u64::MAX
     );
     write_raw(&path, body.as_bytes());
@@ -180,6 +211,83 @@ fn recording_a_denial_at_an_exhausted_generation_refuses() {
     assert_eq!(err.code, ErrorCode::OutOfRange, "{}", err.message);
     let kept = std::fs::read(&path).expect("read back");
     assert_eq!(kept, body.as_bytes(), "the saturated journal is untouched");
+}
+
+/// A journal recorded under the salt this deployment resolves takes the denial.
+#[test]
+fn a_journal_recorded_under_the_resolved_salt_accepts_a_denial() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    let live = crate::tombstone_salt_fingerprint_at(&path).expect("resolve the deployment salt");
+    let body = journal_body(Some(&live), "subject-recorded");
+    write_raw(&path, &body);
+    assert_eq!(
+        record(&path, "subject-new", &["bank-a"]),
+        2,
+        "the denial lands"
+    );
+    let loaded = load_current(&path);
+    assert!(
+        loaded.is_denied("subject-recorded"),
+        "the recorded denial is kept"
+    );
+    assert!(loaded.is_denied("subject-new"));
+    assert_eq!(
+        loaded.salt_fingerprint,
+        Some(live),
+        "the fingerprint is unchanged"
+    );
+}
+
+/// A journal written under another salt cannot take a denial: the hash this
+/// process would write is not comparable with the denials already recorded, so
+/// the write refuses and leaves the authority byte-identical.
+#[test]
+fn a_journal_recorded_under_another_salt_refuses_a_denial_and_writes_nothing() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    let recorded = [b'a'; 32];
+    let other = [b'b'; 32];
+    write_raw(&salt_sidecar(&path), &recorded);
+    let body = journal_body(Some(&fingerprint_of(&recorded)), "subject-recorded");
+    write_raw(&path, &body);
+    // The deployment now resolves a different salt beside the same journal.
+    write_raw(&salt_sidecar(&path), &other);
+    let err = record_denial(&path, "subject-new", &[]).expect_err("another salt refuses the write");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    assert!(
+        err.message.contains("different deployment salt"),
+        "the refusal names the salt-fingerprint divergence: {}",
+        err.message
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read back"),
+        body,
+        "the journal recorded under the other salt is byte-identical"
+    );
+}
+
+/// A journal with no recorded fingerprint cannot be verified against any salt,
+/// so a denial under this deployment's salt refuses rather than adopting it.
+#[test]
+fn a_journal_with_no_recorded_fingerprint_refuses_a_denial() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    let body = journal_body(None, "subject-recorded");
+    write_raw(&path, &body);
+    let err =
+        record_denial(&path, "subject-new", &[]).expect_err("an unverifiable journal refuses");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    assert!(
+        err.message.contains("different deployment salt"),
+        "the refusal names the divergence: {}",
+        err.message
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read back"),
+        body,
+        "the unverifiable journal is never overwritten"
+    );
 }
 
 #[test]
@@ -260,6 +368,11 @@ fn handoff_refuses_a_same_deployment_destination_at_a_newer_generation() {
     let (source, destination) = (scratch.root.join("src.json"), scratch.root.join("dst.json"));
     assert_eq!(record(&source, "subject-a", &[]), 1);
     handoff(&source, &destination).expect("copy the source");
+    // A handoff carries the salt sidecar with the journal, so the destination
+    // resolves the salt the copied authority was recorded under and its own
+    // denial can be recorded against it.
+    std::fs::copy(salt_sidecar(&source), salt_sidecar(&destination))
+        .expect("carry the deployment salt with the journal");
     assert_eq!(record(&destination, "subject-b", &[]), 2, "moved on");
     let kept = std::fs::read(&destination).expect("read back");
     let err = handoff(&source, &destination).expect_err("a newer destination refuses");
