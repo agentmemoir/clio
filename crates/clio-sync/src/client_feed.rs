@@ -56,7 +56,6 @@
 //! its current cursor and peer-side dedupe absorbs the re-sends until the
 //! carrier arrives, without blocking the other kinds.
 
-use crate::apply::apply_freshness::writer_stamp_order;
 use crate::client::SyncClientConfig;
 use crate::http::post_json;
 use crate::protocol::{BankSyncStatus, PushAck, SyncMutation, SyncPayload, join_watermark_body};
@@ -89,16 +88,12 @@ pub(crate) const PUSH_KINDS: [&str; 8] = [
 ];
 
 /// One feed kind's packaging result for a push: the compound `(stamp, entity)`
-/// of the last returned row, the returned row count, whether any row was
-/// skipped, the largest packaged mutation stamp (an item's
-/// discard/invalidate close stamp can sit above the row's ordering stamp), and
-/// the half-open `mutations` range this kind contributed.
+/// of the last returned row, in the store's own stamp text, and the half-open
+/// `mutations` range this kind contributed.
 struct KindBatch {
     kind: &'static str,
     last: Option<(String, String)>,
-    page_rows: usize,
     skipped: bool,
-    max_mutation_stamp: Option<String>,
     base: usize,
     end: usize,
 }
@@ -113,42 +108,8 @@ impl KindBatch {
     }
 }
 
-/// The largest packaged mutation stamp by instant, so a mixed-encoding page
-/// never reports the older stamp as its maximum. A pair the reader cannot
-/// place compares as text, as it always did.
-fn max_stamp(mutations: &[SyncMutation]) -> Option<String> {
-    mutations
-        .iter()
-        .map(|m| m.transaction_time.as_str())
-        .fold(None, |best: Option<&str>, stamp| match best {
-            Some(current) if writer_stamp_order(stamp, current).is_le() => Some(current),
-            _ => Some(stamp),
-        })
-        .map(str::to_owned)
-}
-
-/// The stamp a kind's watermark advances to after a page: the last returned
-/// row's own stamp, or the largest packaged mutation stamp when the page was
-/// complete and that stamp is the later instant.
-///
-/// The comparison is by instant, not text. An item page's close stamp can be
-/// epoch-millis text while the row it follows carries ISO-8601, and text order
-/// puts `1` before `2`: advancing to the text-greater stamp would move the
-/// cursor behind rows whose stamps are the other encoding.
-fn advance_stamp(row_stamp: &str, batch: &KindBatch, page: usize) -> String {
-    match &batch.max_mutation_stamp {
-        Some(max)
-            if batch.page_rows < page
-                && writer_stamp_order(max, row_stamp) == std::cmp::Ordering::Greater =>
-        {
-            max.clone()
-        }
-        _ => row_stamp.to_owned(),
-    }
-}
-
-/// Record one packaged feed page's bookkeeping (last row position, page
-/// size, skipped rows) for the post-ack cursor advance.
+/// Record one packaged feed page's bookkeeping (last row position, skipped
+/// rows) for the post-ack cursor advance.
 fn record_kind_batch(
     kind: &'static str,
     rows: &[clio_store::SyncFeedRow],
@@ -162,9 +123,7 @@ fn record_kind_batch(
         last: rows
             .last()
             .map(|r| (r.transaction_time.clone(), r.entity_id.clone())),
-        page_rows: rows.len(),
         skipped,
-        max_mutation_stamp: max_stamp(&mutations[base..]),
         base,
         end: mutations.len(),
     });
@@ -244,10 +203,13 @@ pub(crate) fn push_bank(
     }
     // Per-kind advance: each kind moves to the compound position of its last
     // returned row, so a page-full push resumes strictly after it and no row
-    // is skipped by a stamp tie. A kind that skipped any row holds. When an
-    // item page was not full, the largest packaged close stamp may exceed the
-    // rows' ordering stamps (discard/invalidate); advancing to it is safe
-    // because the page was complete and stops a post-dated close re-sending.
+    // is skipped by a stamp tie. A kind that skipped any row holds.
+    //
+    // The stamp written here is always the store's own row text, never the
+    // mutation's wire stamp. A store column may carry epoch millis while the
+    // wire now carries canonical ISO-8601, and every feed predicate compares
+    // that column to this cursor as text: an ISO cursor over millis rows
+    // selects nothing, and the kind silently reports an empty backlog forever.
     //
     // The advance is deliberately NOT nested inside the `rejected.is_empty()`
     // guard above: the bank-level cursor must hold when anything was rejected,
@@ -262,12 +224,11 @@ pub(crate) fn push_bank(
         let Some((stamp, entity)) = &batch.last else {
             continue;
         };
-        let stamp = advance_stamp(stamp, batch, page);
         kind_watermark_set(
             cfg,
             bank,
             batch.kind,
-            &join_watermark_body(stamp.as_str(), entity),
+            &join_watermark_body(stamp, entity),
         )?;
     }
     Ok(BankSyncStatus {
@@ -305,9 +266,7 @@ fn package_record_kinds(
     batches.push(KindBatch {
         kind: "persona_stable",
         last: rows.last().map(|(s, e)| (s.clone(), e.key.clone())),
-        page_rows: rows.len(),
         skipped: false,
-        max_mutation_stamp: max_stamp(&mutations[base..]),
         base,
         end: mutations.len(),
     });
@@ -321,9 +280,7 @@ fn package_record_kinds(
     batches.push(KindBatch {
         kind: "persona_preference",
         last: rows.last().map(|(s, p)| (s.clone(), p.key.clone())),
-        page_rows: rows.len(),
         skipped: false,
-        max_mutation_stamp: max_stamp(&mutations[base..]),
         base,
         end: mutations.len(),
     });
@@ -337,9 +294,7 @@ fn package_record_kinds(
     batches.push(KindBatch {
         kind: "belief",
         last: rows.last().map(|(s, b)| (s.clone(), b.id.clone())),
-        page_rows: rows.len(),
         skipped: false,
-        max_mutation_stamp: max_stamp(&mutations[base..]),
         base,
         end: mutations.len(),
     });
@@ -361,9 +316,7 @@ fn package_record_kinds(
         // orders versions by record id.
         kind: "task",
         last: rows.last().map(|(s, t)| (s.clone(), t.id.clone())),
-        page_rows: rows.len(),
         skipped,
-        max_mutation_stamp: max_stamp(&mutations[base..]),
         base,
         end: mutations.len(),
     });
@@ -382,9 +335,7 @@ fn package_record_kinds(
     batches.push(KindBatch {
         kind: "failure",
         last: rows.last().map(|(s, f)| (s.clone(), f.id.clone())),
-        page_rows: rows.len(),
         skipped,
-        max_mutation_stamp: max_stamp(&mutations[base..]),
         base,
         end: mutations.len(),
     });

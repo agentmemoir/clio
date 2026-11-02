@@ -297,3 +297,103 @@ fn a_journaled_id_still_answers_duplicate_before_the_age_bound() {
         "the journal wins over the age bound"
     );
 }
+
+/// The canonicaliser every packaging path runs before a stamp goes on the
+/// wire: one encoding at whole seconds, whichever legend the store column
+/// carries. The expected values are fixed literals, so a host clock cannot
+/// satisfy them.
+#[test]
+fn the_canonical_writer_stamp_puts_every_store_legend_on_one_second() {
+    use super::canonical_writer_stamp;
+    let iso = "2026-01-01T00:00:00Z";
+    assert_eq!(
+        canonical_writer_stamp(iso).expect("an ISO stamp places"),
+        iso,
+        "the canonical form is left exactly as it was"
+    );
+    assert_eq!(
+        canonical_writer_stamp("1767225600000").expect("epoch millis place"),
+        iso,
+        "the store's own millis stamp becomes the same second"
+    );
+    assert_eq!(
+        canonical_writer_stamp("2026-01-01").expect("a bare date places"),
+        iso,
+        "a date column becomes midnight UTC"
+    );
+    assert_eq!(
+        canonical_writer_stamp("2026-01-01T02:00:00+02:00").expect("an offset zone places"),
+        iso,
+        "an offset is applied and cut to UTC whole seconds"
+    );
+    assert_eq!(
+        canonical_writer_stamp("2026-01-01T00:00:00.750Z").expect("a fraction places"),
+        iso,
+        "a fraction is dropped rather than carried to the wire"
+    );
+    assert_eq!(
+        canonical_writer_stamp("2026-01-01 00:00:00").expect("the space form places"),
+        iso,
+        "the store's space-separated legacy form places at the same second"
+    );
+}
+
+/// A stamp that names no instant is refused loudly and names the value, so a
+/// packaging path can never copy it to the wire.
+#[test]
+fn an_unplaceable_writer_stamp_is_refused_naming_the_value() {
+    use super::canonical_writer_stamp;
+    use clio_types::ErrorCode as Code;
+    let err = canonical_writer_stamp(UNREADABLE).expect_err("junk is refused");
+    assert_eq!(err.code, Code::InvalidArgument, "the refusal code");
+    assert!(
+        err.message.contains(UNREADABLE),
+        "the message names the value: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("transaction_time"),
+        "the message names the field: {}",
+        err.message
+    );
+    assert!(
+        canonical_writer_stamp("2026-01-01T00:00:00+99:00").is_err(),
+        "an offset no zone has is refused"
+    );
+}
+
+/// The test-engine seam pins its clock to the fixture stamp it is given, and
+/// to an explicit second when a case needs one. A fixture the seam cannot place
+/// panics instead of pinning the epoch, so a malformed fixture cannot pass by
+/// taking a bound branch.
+#[test]
+fn the_test_engine_seam_reads_the_stamp_it_is_given() {
+    let (store, kms) = fixture();
+    let engine = super::test_engine(
+        store.as_ref(),
+        store.as_ref(),
+        "node-1",
+        Some(kms.as_ref()),
+        STAMP,
+    );
+    assert_eq!(
+        (engine.clock)(),
+        parse_utc_epoch(STAMP).expect("the fixture stamp parses"),
+        "the clock reads the fixture stamp"
+    );
+    let explicit = super::test_engine_at(store.as_ref(), store.as_ref(), "node-1", None, 42);
+    assert_eq!((explicit.clock)(), 42, "an explicit second is pinned");
+}
+
+#[test]
+#[should_panic(expected = "names no instant")]
+fn the_test_engine_seam_refuses_an_unplaceable_fixture_stamp() {
+    let (store, kms) = fixture();
+    let _ = super::test_engine(
+        store.as_ref(),
+        store.as_ref(),
+        "node-1",
+        Some(kms.as_ref()),
+        UNREADABLE,
+    );
+}

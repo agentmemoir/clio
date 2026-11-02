@@ -38,6 +38,26 @@ use crate::crypto::SyncCipherKey;
 use crate::protocol::SyncContent;
 use clio_types::ErrorCode;
 
+/// The packaging functions put one encoding of the writer stamp on the wire:
+/// canonical ISO-8601 UTC at whole seconds, whatever legend the store column
+/// carries. The store stamps an association edge with epoch millis, so a row
+/// taken straight from the feed is the case that has to be normalised.
+#[test]
+fn a_millisecond_store_stamp_carries_iso_seconds_on_the_wire() {
+    use crate::client_feed::package::assoc_mutation;
+    use crate::client_feed_package_fixtures::{
+        BANK, MILLIS_STAMP, MILLIS_STAMP_ISO, millis_edge,
+    };
+    let cfg = crate::client_feed_package_fixtures::plain_cfg();
+    let edge = millis_edge("e-millis");
+    assert_eq!(edge.last_updated_at, MILLIS_STAMP, "the fixture column is millis");
+    let m = assoc_mutation(&cfg, BANK, &edge).expect("package the millis edge");
+    assert_eq!(
+        m.transaction_time, MILLIS_STAMP_ISO,
+        "the wire carries the canonical second, not the store's millis text"
+    );
+}
+
 /// A node that holds no sync key refuses the export instead of putting memory on
 /// the wire unsealed. The refusal is a configuration error that names the
 /// missing key, the remedy, and the flag that exists only for development.
@@ -122,5 +142,35 @@ fn content_seals_with_the_first_entry_of_the_list() {
         opened,
         serde_json::to_vec(&content).expect("serialize"),
         "the sealed bytes are the serialized content"
+    );
+}
+
+/// The idempotency key is derived from the store's own stamp text at the
+/// mutation's construction, and canonicalisation runs at the packaging choke
+/// point afterwards, so no existing key moves: a stamp that was already
+/// canonical keeps the exact id it always had, and a millis-stamped row keeps
+/// the id derived from its millis text.
+#[test]
+fn no_idempotency_key_moves_when_the_stamp_is_canonicalised() {
+    use crate::client_feed::package::assoc_mutation;
+    use crate::client_feed_package_fixtures::{BANK, RELATIONSHIP, edge, millis_edge};
+    /// The stamp the shared edge fixture already carries.
+    const EDGE_STAMP: &str = "2026-01-01T02:00:00Z";
+    let cfg = crate::client_feed_package_fixtures::plain_cfg();
+    let canonical = assoc_mutation(&cfg, BANK, &edge("e-id", RELATIONSHIP)).expect("package");
+    assert_eq!(
+        canonical.transaction_time, EDGE_STAMP,
+        "an already-canonical stamp stays byte-identical on the wire"
+    );
+    let millis = assoc_mutation(&cfg, BANK, &millis_edge("e-id")).expect("package");
+    assert_eq!(
+        canonical.sync_mutation_id,
+        "b57b4597267625b4ba1320e375186d147d3f4285f03fbe7fdf909586b636baa5",
+        "the canonical-stamp edge keeps the id it always had"
+    );
+    assert_eq!(
+        millis.sync_mutation_id,
+        "277953b8fab6cce58c84b3c503b3201fda4d41002eb9c0395a66eb0e38672a1c",
+        "the millis-stamped edge keeps the id derived from its millis text"
     );
 }

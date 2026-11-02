@@ -24,7 +24,7 @@
 //!
 //! Keep this module focused on the push watermark contract tests.
 
-use crate::client::client_tests::{TOKEN, cfg, item, paired_cfg, paired_key, serve, sqlite};
+use crate::client::client_tests::{TOKEN, cfg, edge, item, paired_cfg, paired_key, serve, sqlite};
 use crate::client::{SyncClientConfig, push, sync_status};
 use crate::protocol::encode_watermark;
 use clio_store::{HistoryStore, SqliteStore, Store, SyncStore};
@@ -246,120 +246,82 @@ fn compound_cursor_resumes_strictly_after_the_tiebreak_entity() {
     );
 }
 
-/// A kind's watermark advance is chosen by instant, never by text. An item
-/// page's close stamp can be epoch-millis text while the last returned row
-/// carries ISO-8601, and text order puts `1` before `2`; taking the
-/// text-greater stamp puts the cursor at the earlier instant, behind rows the
-/// peer has not seen. These cases pin the advance rule across encodings and
-/// the unchanged rules beside it.
+/// A kind whose store column carries epoch millis keeps its cursor in that
+/// same text, while the wire carries canonical ISO-8601 at whole seconds.
+///
+/// The feed predicates compare the stored column to the cursor as text, and
+/// `'1793597865118' > '2026-11-02T05:37:45Z'` is false: an ISO cursor over
+/// millis rows selects nothing, the kind reports an empty backlog, and no row
+/// ever ships. The second push proves the millis cursor still selects rows.
 #[test]
-fn watermark_advance_orders_stamps_by_instant_not_text() {
-    use crate::client_feed::{KindBatch, advance_stamp};
+fn a_millisecond_stamped_kind_keeps_a_store_text_watermark() {
+    let (server, srv, _kms) = serve(&["bms"]);
+    let addr = server.addr().to_owned();
+    let a = sqlite();
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    // The store's own stamp form: epoch millis as text.
+    a.put_assoc_edge(&edge("bms", "e-ms-1", "i-1", "i-2", "1793597865118"))
+        .expect("seed the millis edge");
 
-    let page = crate::PULL_PAGE_LIMIT;
-    let batch = |max: Option<&str>, page_rows: usize| KindBatch {
-        kind: "item",
-        last: Some(("row".to_owned(), "e".to_owned())),
-        page_rows,
-        skipped: false,
-        max_mutation_stamp: max.map(str::to_owned),
-        base: 0,
-        end: 1,
-    };
+    push(&cfg_a, &["bms".to_owned()]).expect("push page 1");
+    let rows = srv.journal_list_since("bms", 0, 50).unwrap();
+    assert_eq!(rows.len(), 1, "the millis-stamped edge reached the relay");
+    assert_eq!(
+        rows[0].transaction_time, "2026-11-02T05:37:45Z",
+        "the wire carries canonical ISO seconds, not the store's millis text"
+    );
+    let cursor = crate::client_feed::kind_watermark(&cfg_a, "bms", "assoc_edge").expect("cursor");
+    assert!(
+        cursor.starts_with("1793597865118"),
+        "the persisted cursor stays in the store's own stamp text: {cursor}"
+    );
 
-    // The millis close (2026-11-02) is the later instant and the lower text.
+    // A later row is still selected by the millis cursor, so the next page
+    // ships it and the kind drains.
+    a.put_assoc_edge(&edge("bms", "e-ms-2", "i-1", "i-3", "1793597925118"))
+        .expect("seed a later millis edge");
     assert_eq!(
-        advance_stamp(
-            "2026-01-01T00:00:00Z",
-            &batch(Some("1793597865118"), 1),
-            page
-        ),
-        "1793597865118",
-        "a later millis close advances the watermark above the ISO row"
+        sync_status(&cfg_a, &["bms".to_owned()]).unwrap().banks[0].pending_push,
+        1,
+        "the millis cursor selects the later millis row"
     );
-    // The millis row is the later instant, so the ISO close is never taken.
+    push(&cfg_a, &["bms".to_owned()]).expect("push page 2");
+    let rows = srv.journal_list_since("bms", 0, 50).unwrap();
+    assert_eq!(rows.len(), 2, "the later row shipped exactly once");
     assert_eq!(
-        advance_stamp(
-            "1793597865118",
-            &batch(Some("2026-01-01T00:00:00Z"), 1),
-            page
-        ),
-        "1793597865118",
-        "an earlier ISO close never pulls the watermark behind the millis row"
+        sync_status(&cfg_a, &["bms".to_owned()]).unwrap().banks[0].pending_push,
+        0,
+        "the kind drained instead of reporting a silent empty backlog"
     );
-    // A page-full kind keeps the last row's own stamp, as before.
-    assert_eq!(
-        advance_stamp(
-            "2026-01-01T00:00:00Z",
-            &batch(Some("1793597865118"), page),
-            page
-        ),
-        "2026-01-01T00:00:00Z",
-        "a page-full kind never advances past its last returned row"
-    );
-    // One encoding on both sides keeps the rule it had.
-    assert_eq!(
-        advance_stamp(
-            "2026-01-01T00:00:00Z",
-            &batch(Some("2026-06-01T00:00:00Z"), 1),
-            page
-        ),
-        "2026-06-01T00:00:00Z",
-        "a later ISO close still advances the watermark"
-    );
-    assert_eq!(
-        advance_stamp(
-            "2026-06-01T00:00:00Z",
-            &batch(Some("2026-01-01T00:00:00Z"), 1),
-            page
-        ),
-        "2026-06-01T00:00:00Z",
-        "an earlier ISO close still leaves the row stamp in place"
-    );
+    server.stop();
 }
 
-/// The page maximum offered to the advance rule is the latest instant, not the
-/// greatest text: a millis stamp that sorts below an ISO stamp but names the
-/// later time must be the maximum, or the kind is advanced from the wrong
-/// candidate.
+/// The page maximum still advances the cursor: after a page the cursor sits at
+/// the last returned row's own store stamp, which is the maximum in the store's
+/// text, and never at a wire stamp.
 #[test]
-fn page_maximum_is_the_latest_instant_not_the_greatest_text() {
-    use crate::client_feed::max_stamp;
-    use crate::protocol::{SyncContent, SyncMutation};
+fn a_page_maximum_in_store_text_still_advances_the_cursor() {
+    let (server, _srv, _kms) = serve(&["bmax2"]);
+    let addr = server.addr().to_owned();
+    let a = sqlite();
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    a.put_assoc_edge(&edge("bmax2", "e-1", "i-1", "i-2", "1793597865118"))
+        .expect("seed the first edge");
+    a.put_assoc_edge(&edge("bmax2", "e-2", "i-1", "i-3", "1793597925118"))
+        .expect("seed the second edge");
 
-    let mutation = |stamp: &str| SyncMutation {
-        sync_mutation_id: format!("m-{stamp}"),
-        bank: "bmax".to_owned(),
-        entity_kind: "item".to_owned(),
-        entity_id: "e".to_owned(),
-        op: "upsert".to_owned(),
-        transaction_time: stamp.to_owned(),
-        device_id: "dev-a".to_owned(),
-        content: SyncContent::Plain(serde_json::json!({})),
-        content_hash: "h".to_owned(),
-        admission_receipt: None,
-    };
-
-    assert_eq!(
-        max_stamp(&[mutation("2026-01-01T00:00:00Z"), mutation("1793597865118")]).as_deref(),
-        Some("1793597865118"),
-        "the later millis instant is the page maximum"
+    push(&cfg_a, &["bmax2".to_owned()]).expect("push the page");
+    let cursor = crate::client_feed::kind_watermark(&cfg_a, "bmax2", "assoc_edge").expect("cursor");
+    assert!(
+        cursor.starts_with("1793597925118"),
+        "the cursor advances to the page maximum in store text: {cursor}"
     );
     assert_eq!(
-        max_stamp(&[mutation("1793597865118"), mutation("2026-01-01T00:00:00Z")]).as_deref(),
-        Some("1793597865118"),
-        "order in the page never decides the maximum across encodings"
+        sync_status(&cfg_a, &["bmax2".to_owned()]).unwrap().banks[0].pending_push,
+        0,
+        "the page drained"
     );
-    assert_eq!(
-        max_stamp(&[
-            mutation("2026-01-01T00:00:00Z"),
-            mutation("2026-06-01T00:00:00Z")
-        ])
-        .as_deref(),
-        Some("2026-06-01T00:00:00Z"),
-        "one encoding on both sides keeps the text-later maximum"
-    );
-    assert_eq!(max_stamp(&[]), None, "an empty page has no maximum");
+    server.stop();
 }
 
 /// A kind's watermark holds only when one of *its own* mutations was
@@ -389,9 +351,7 @@ fn a_kind_holds_only_for_its_own_rejected_mutations() {
     let batch = |kind, base, end| KindBatch {
         kind,
         last: Some(("2026-01-01T00:00:00Z".to_owned(), "e".to_owned())),
-        page_rows: 1,
         skipped: false,
-        max_mutation_stamp: None,
         base,
         end,
     };

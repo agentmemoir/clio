@@ -29,9 +29,10 @@
 //! Keep this module focused on the freshness decision.
 
 use crate::apply::ApplyEngine;
-use crate::clock::parse_utc_epoch;
+use crate::clock::{format_utc, parse_utc_epoch};
 #[cfg(test)]
 use clio_store::{DekProvider, Store, SyncStore};
+use clio_types::{AmError, ErrorCode};
 
 /// How far ahead of this node's clock a writer stamp may sit, in seconds.
 ///
@@ -101,6 +102,32 @@ pub(crate) fn writer_stamp_order(a: &str, b: &str) -> std::cmp::Ordering {
     match (writer_stamp_epoch(a), writer_stamp_epoch(b)) {
         (Some(a_instant), Some(b_instant)) => a_instant.cmp(&b_instant),
         _ => a.cmp(b),
+    }
+}
+
+/// The one encoding a writer stamp leaves this node in: canonical ISO-8601 UTC
+/// at whole seconds, or the refusal of a stamp no clock reading can place.
+///
+/// The store stamps rows in more than one legend (epoch millis from `now_iso`,
+/// bare dates, ISO with a fraction or an offset zone), and a row's stored stamp
+/// travels unchanged as a mutation's `transaction_time`. Every writer puts the
+/// same second on the wire so a peer never compares two legends. Placement is
+/// the store's own canonicaliser first, because it is what every write path
+/// already stores, and then the legacy forms this module places for freshness.
+///
+/// # Errors
+/// [`ErrorCode::InvalidArgument`] naming the value that cannot be placed: a
+/// stamp that names no instant must be refused, never copied to the wire.
+pub(crate) fn canonical_writer_stamp(raw: &str) -> Result<String, AmError> {
+    if let Some(canonical) = clio_store::canonical_stamp(raw) {
+        return Ok(canonical);
+    }
+    match writer_stamp_epoch(raw) {
+        Some(secs) => Ok(format_utc(secs)),
+        None => Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("transaction_time `{raw}` is not a timestamp this build can place"),
+        )),
     }
 }
 
