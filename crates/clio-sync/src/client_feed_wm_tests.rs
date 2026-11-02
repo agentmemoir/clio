@@ -246,6 +246,122 @@ fn compound_cursor_resumes_strictly_after_the_tiebreak_entity() {
     );
 }
 
+/// A kind's watermark advance is chosen by instant, never by text. An item
+/// page's close stamp can be epoch-millis text while the last returned row
+/// carries ISO-8601, and text order puts `1` before `2`; taking the
+/// text-greater stamp puts the cursor at the earlier instant, behind rows the
+/// peer has not seen. These cases pin the advance rule across encodings and
+/// the unchanged rules beside it.
+#[test]
+fn watermark_advance_orders_stamps_by_instant_not_text() {
+    use crate::client_feed::{KindBatch, advance_stamp};
+
+    let page = crate::PULL_PAGE_LIMIT;
+    let batch = |max: Option<&str>, page_rows: usize| KindBatch {
+        kind: "item",
+        last: Some(("row".to_owned(), "e".to_owned())),
+        page_rows,
+        skipped: false,
+        max_mutation_stamp: max.map(str::to_owned),
+        base: 0,
+        end: 1,
+    };
+
+    // The millis close (2026-11-02) is the later instant and the lower text.
+    assert_eq!(
+        advance_stamp(
+            "2026-01-01T00:00:00Z",
+            &batch(Some("1793597865118"), 1),
+            page
+        ),
+        "1793597865118",
+        "a later millis close advances the watermark above the ISO row"
+    );
+    // The millis row is the later instant, so the ISO close is never taken.
+    assert_eq!(
+        advance_stamp(
+            "1793597865118",
+            &batch(Some("2026-01-01T00:00:00Z"), 1),
+            page
+        ),
+        "1793597865118",
+        "an earlier ISO close never pulls the watermark behind the millis row"
+    );
+    // A page-full kind keeps the last row's own stamp, as before.
+    assert_eq!(
+        advance_stamp(
+            "2026-01-01T00:00:00Z",
+            &batch(Some("1793597865118"), page),
+            page
+        ),
+        "2026-01-01T00:00:00Z",
+        "a page-full kind never advances past its last returned row"
+    );
+    // One encoding on both sides keeps the rule it had.
+    assert_eq!(
+        advance_stamp(
+            "2026-01-01T00:00:00Z",
+            &batch(Some("2026-06-01T00:00:00Z"), 1),
+            page
+        ),
+        "2026-06-01T00:00:00Z",
+        "a later ISO close still advances the watermark"
+    );
+    assert_eq!(
+        advance_stamp(
+            "2026-06-01T00:00:00Z",
+            &batch(Some("2026-01-01T00:00:00Z"), 1),
+            page
+        ),
+        "2026-06-01T00:00:00Z",
+        "an earlier ISO close still leaves the row stamp in place"
+    );
+}
+
+/// The page maximum offered to the advance rule is the latest instant, not the
+/// greatest text: a millis stamp that sorts below an ISO stamp but names the
+/// later time must be the maximum, or the kind is advanced from the wrong
+/// candidate.
+#[test]
+fn page_maximum_is_the_latest_instant_not_the_greatest_text() {
+    use crate::client_feed::max_stamp;
+    use crate::protocol::{SyncContent, SyncMutation};
+
+    let mutation = |stamp: &str| SyncMutation {
+        sync_mutation_id: format!("m-{stamp}"),
+        bank: "bmax".to_owned(),
+        entity_kind: "item".to_owned(),
+        entity_id: "e".to_owned(),
+        op: "upsert".to_owned(),
+        transaction_time: stamp.to_owned(),
+        device_id: "dev-a".to_owned(),
+        content: SyncContent::Plain(serde_json::json!({})),
+        content_hash: "h".to_owned(),
+        admission_receipt: None,
+    };
+
+    assert_eq!(
+        max_stamp(&[mutation("2026-01-01T00:00:00Z"), mutation("1793597865118")]).as_deref(),
+        Some("1793597865118"),
+        "the later millis instant is the page maximum"
+    );
+    assert_eq!(
+        max_stamp(&[mutation("1793597865118"), mutation("2026-01-01T00:00:00Z")]).as_deref(),
+        Some("1793597865118"),
+        "order in the page never decides the maximum across encodings"
+    );
+    assert_eq!(
+        max_stamp(&[
+            mutation("2026-01-01T00:00:00Z"),
+            mutation("2026-06-01T00:00:00Z")
+        ])
+        .as_deref(),
+        Some("2026-06-01T00:00:00Z"),
+        "one encoding on both sides keeps the text-later maximum"
+    );
+    assert_eq!(max_stamp(&[]), None, "an empty page has no maximum");
+}
+
 /// A kind's watermark holds only when one of *its own* mutations was
 /// rejected. Before the fix every per-kind advance sat inside the
 /// `response.rejected.is_empty()` guard, so a single dead-lettered mutation in

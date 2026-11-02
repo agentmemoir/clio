@@ -13,6 +13,8 @@
 //! - The disabled window (`0` tolerance checks nothing)
 //! - The refusal of a stamp the reader cannot place, and the documented legacy
 //!   stamp forms this reader places instead of refusing
+//! - The instant-aware order of two writer stamps carried in different
+//!   encodings
 //!
 //! ## Does not own
 //! - Clock reads and the strict wire-form parse (see `clock`)
@@ -85,6 +87,21 @@ pub(crate) fn writer_stamp_epoch(stamp: &str) -> Option<i64> {
         _ => return None,
     };
     parse_utc_epoch(&normalized)
+}
+
+/// Order two writer stamps by the instant each names, not by its text.
+///
+/// One field carries stamps in more than one encoding, so text order can put a
+/// later instant below an earlier one: `1793597865118` (epoch millis) sorts
+/// before `2026-01-01T00:00:00Z` although it names the later time. When both
+/// sides place, the instants decide. A pair with a side this reader cannot
+/// place has no two instants to compare, so it falls back to text and keeps the
+/// order every caller had before.
+pub(crate) fn writer_stamp_order(a: &str, b: &str) -> std::cmp::Ordering {
+    match (writer_stamp_epoch(a), writer_stamp_epoch(b)) {
+        (Some(a_instant), Some(b_instant)) => a_instant.cmp(&b_instant),
+        _ => a.cmp(b),
+    }
 }
 
 /// Is the mutation's writer stamp outside the bounds this engine allows?

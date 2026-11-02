@@ -22,7 +22,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::{is_stale, pinned, writer_stamp_epoch};
+use super::{is_stale, pinned, writer_stamp_epoch, writer_stamp_order};
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
 use crate::apply::apply_freshness::ENVELOPE_FUTURE_ALLOWANCE_SECS;
 use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
@@ -241,6 +241,42 @@ fn a_documented_legacy_stamp_is_placed_instead_of_refused() {
         max_envelope_skew_secs: WINDOW,
     };
     assert!(!is_stale(&engine, &millis), "ten seconds old is fresh");
+}
+
+/// The store stamps rows in more than one encoding, so two stamps must be
+/// ordered by the instant each names. Text order puts `1` before `2` and would
+/// call the millis form the older one; a pair this reader cannot place keeps
+/// the text order it always had.
+#[test]
+fn stamps_are_ordered_by_instant_and_unplaceable_pairs_by_text() {
+    // 1793597865118 millis is 2026-11-02T05:37:45Z, later than STAMP.
+    assert_eq!(
+        writer_stamp_order("1793597865118", "2026-01-01T00:00:00Z"),
+        std::cmp::Ordering::Greater
+    );
+    assert_eq!(
+        writer_stamp_order("2026-01-01T00:00:00Z", "1793597865118"),
+        std::cmp::Ordering::Less
+    );
+    // One instant in two encodings: 2026-01-01T00:00:00Z is 1767225600000 ms.
+    assert_eq!(
+        writer_stamp_order("1767225600000", "2026-01-01T00:00:00Z"),
+        std::cmp::Ordering::Equal
+    );
+    assert_eq!(
+        writer_stamp_order("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        std::cmp::Ordering::Equal
+    );
+    assert_eq!(
+        writer_stamp_order("zzz", "aaa"),
+        std::cmp::Ordering::Greater,
+        "neither side places, so the pair compares as text"
+    );
+    assert_eq!(
+        writer_stamp_order("aaa", "zzz"),
+        std::cmp::Ordering::Less,
+        "neither side places, so the pair compares as text"
+    );
 }
 
 /// The id pre-check runs first: a journaled id answers `Duplicate` even when

@@ -56,6 +56,7 @@
 //! its current cursor and peer-side dedupe absorbs the re-sends until the
 //! carrier arrives, without blocking the other kinds.
 
+use crate::apply::apply_freshness::writer_stamp_order;
 use crate::client::SyncClientConfig;
 use crate::http::post_json;
 use crate::protocol::{BankSyncStatus, PushAck, SyncMutation, SyncPayload, join_watermark_body};
@@ -112,8 +113,38 @@ impl KindBatch {
     }
 }
 
+/// The largest packaged mutation stamp by instant, so a mixed-encoding page
+/// never reports the older stamp as its maximum. A pair the reader cannot
+/// place compares as text, as it always did.
 fn max_stamp(mutations: &[SyncMutation]) -> Option<String> {
-    mutations.iter().map(|m| m.transaction_time.clone()).max()
+    mutations
+        .iter()
+        .map(|m| m.transaction_time.as_str())
+        .fold(None, |best: Option<&str>, stamp| match best {
+            Some(current) if writer_stamp_order(stamp, current).is_le() => Some(current),
+            _ => Some(stamp),
+        })
+        .map(str::to_owned)
+}
+
+/// The stamp a kind's watermark advances to after a page: the last returned
+/// row's own stamp, or the largest packaged mutation stamp when the page was
+/// complete and that stamp is the later instant.
+///
+/// The comparison is by instant, not text. An item page's close stamp can be
+/// epoch-millis text while the row it follows carries ISO-8601, and text order
+/// puts `1` before `2`: advancing to the text-greater stamp would move the
+/// cursor behind rows whose stamps are the other encoding.
+fn advance_stamp(row_stamp: &str, batch: &KindBatch, page: usize) -> String {
+    match &batch.max_mutation_stamp {
+        Some(max)
+            if batch.page_rows < page
+                && writer_stamp_order(max, row_stamp) == std::cmp::Ordering::Greater =>
+        {
+            max.clone()
+        }
+        _ => row_stamp.to_owned(),
+    }
 }
 
 /// Record one packaged feed page's bookkeeping (last row position, page
@@ -231,10 +262,7 @@ pub(crate) fn push_bank(
         let Some((stamp, entity)) = &batch.last else {
             continue;
         };
-        let stamp = match &batch.max_mutation_stamp {
-            Some(max) if batch.page_rows < page && max.as_str() > stamp.as_str() => max.clone(),
-            _ => stamp.clone(),
-        };
+        let stamp = advance_stamp(stamp, batch, page);
         kind_watermark_set(
             cfg,
             bank,

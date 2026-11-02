@@ -88,6 +88,63 @@ fn lww_rule_orders_time_score_device() {
     );
 }
 
+/// One field carries writer stamps in more than one encoding: an item row is
+/// stamped as ISO-8601 text and an association edge as epoch milliseconds. The
+/// comparison must order the pair by the instant each names, because text order
+/// puts `1` before `2` and would let the older write win the merge.
+#[test]
+fn lww_compare_orders_across_encodings_by_instant() {
+    // Epoch millis 1793597865118 is 2026-11-02T05:37:45Z, later than the ISO
+    // fixture, and its text sorts lower.
+    assert_eq!(
+        lww_compare(
+            "1793597865118",
+            None,
+            "dev-a",
+            "2026-01-01T00:00:00Z",
+            None,
+            "dev-a"
+        ),
+        std::cmp::Ordering::Greater,
+        "the later instant wins whichever encoding carries it"
+    );
+    assert_eq!(
+        lww_compare(
+            "2026-01-01T00:00:00Z",
+            None,
+            "dev-a",
+            "1793597865118",
+            None,
+            "dev-a"
+        ),
+        std::cmp::Ordering::Less,
+        "the same pair reversed reports the ISO stamp as the older one"
+    );
+    // 2026-01-01T00:00:00Z is 1767225600000 in epoch milliseconds.
+    assert_eq!(
+        lww_compare(
+            "1767225600000",
+            None,
+            "dev-a",
+            "2026-01-01T00:00:00Z",
+            None,
+            "dev-a"
+        ),
+        std::cmp::Ordering::Equal,
+        "one instant in two encodings ties on the stamp"
+    );
+    assert_eq!(
+        lww_compare("zzz", None, "dev-a", "aaa", None, "dev-a"),
+        std::cmp::Ordering::Greater,
+        "neither stamp places, so the pair still compares as text"
+    );
+    assert_eq!(
+        lww_compare("2026-01-01T00:00:00Z", None, "dev-a", "junk", None, "dev-a"),
+        std::cmp::Ordering::Less,
+        "a pair with one unplaceable stamp keeps the text comparison"
+    );
+}
+
 #[test]
 fn mutation_validation_rejects_bad_envelopes() {
     let ok = mutation();
