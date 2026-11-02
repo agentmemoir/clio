@@ -127,11 +127,24 @@ fn bad_envelope_fields_fail_decrypt() {
         "an undecodable nonce must be skippable"
     );
     let mut env = kms.encrypt("sub-3", b"x").unwrap();
-    env.nonce_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 3]);
+    env.nonce_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 12]);
     assert_eq!(
         kms.decrypt(&env).unwrap_err().code,
         ErrorCode::UnreadableContent,
-        "a wrong-length nonce must be skippable"
+        "a legacy 12-byte nonce must be skippable"
+    );
+    let mut env = kms.encrypt("sub-3", b"x").unwrap();
+    let mut nonce = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &env.nonce_b64,
+    )
+    .unwrap();
+    nonce[23] ^= 0xff;
+    env.nonce_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, nonce);
+    assert_eq!(
+        kms.decrypt(&env).unwrap_err().code,
+        ErrorCode::Forbidden,
+        "a tampered 24-byte nonce must fail authentication"
     );
     let mut env = kms.encrypt("sub-3", b"x").unwrap();
     env.ciphertext_b64 = "!!!".into();
@@ -161,6 +174,20 @@ fn bad_envelope_fields_fail_decrypt() {
     raw[0] ^= 0xff;
     env.ciphertext_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, raw);
     assert_eq!(kms.decrypt(&env).unwrap_err().code, ErrorCode::Forbidden);
+}
+
+/// An envelope sealed under the older 12-byte nonce layout cannot be opened by
+/// the XChaCha20-Poly1305 cipher, so it must report as skippable content.
+#[test]
+fn legacy_twelve_byte_nonce_envelope_is_rejected() {
+    let kms = LocalDevKms::new();
+    let mut env = kms.encrypt("sub-legacy", b"old").unwrap();
+    env.nonce_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [7u8; 12]);
+    assert_eq!(
+        kms.decrypt(&env).unwrap_err().code,
+        ErrorCode::UnreadableContent,
+        "a legacy nonce length must be skippable, never opened"
+    );
 }
 
 #[test]

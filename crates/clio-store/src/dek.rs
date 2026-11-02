@@ -27,13 +27,13 @@
 
 use crate::dek_slots::{KeySlot, SlotStore};
 use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-const NONCE_LEN: usize = 12;
+const NONCE_LEN: usize = 24;
 
 /// Reserved key-store subject id for the store's lexical blind-index key.
 ///
@@ -49,7 +49,7 @@ pub struct CiphertextEnvelope {
     pub subject_id: String,
     /// DEK version used at seal time.
     pub key_version: u32,
-    /// Base64 nonce.
+    /// Base64 24-byte nonce.
     pub nonce_b64: String,
     /// Base64 ciphertext (includes Poly1305 tag).
     pub ciphertext_b64: String,
@@ -268,12 +268,12 @@ impl DekProvider for LocalDevKms {
     fn encrypt(&self, subject_id: &str, plaintext: &[u8]) -> Result<CiphertextEnvelope, AmError> {
         let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
         let (version, key_bytes) = store.ensure(subject_id)?;
-        let cipher = ChaCha20Poly1305::new((&key_bytes).into());
+        let cipher = XChaCha20Poly1305::new((&key_bytes).into());
         let nonce_bytes: [u8; NONCE_LEN] = rand::random();
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = XNonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
             .encrypt(nonce, plaintext)
-            .expect("ChaCha20Poly1305 encrypt with valid key/nonce");
+            .expect("XChaCha20Poly1305 encrypt with valid key/nonce");
         Ok(CiphertextEnvelope {
             subject_id: subject_id.to_owned(),
             key_version: version,
@@ -331,8 +331,8 @@ impl DekProvider for LocalDevKms {
             &envelope.ciphertext_b64,
         )
         .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid ciphertext encoding"))?;
-        let cipher = ChaCha20Poly1305::new((&key.bytes).into());
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let cipher = XChaCha20Poly1305::new((&key.bytes).into());
+        let nonce = XNonce::from_slice(&nonce_bytes);
         cipher
             .decrypt(nonce, ct.as_ref())
             .map_err(|_| AmError::new(ErrorCode::Forbidden, "content decryption failed"))
