@@ -246,8 +246,8 @@ fn a_journal_recorded_under_the_resolved_salt_accepts_a_denial() {
 fn a_journal_recorded_under_another_salt_refuses_a_denial_and_writes_nothing() {
     let scratch = Scratch::new();
     let path = scratch.journal();
-    let recorded = [b'a'; 32];
-    let other = [b'b'; 32];
+    let recorded: Vec<u8> = (0..32u8).map(|i| b'a'.wrapping_add(i)).collect();
+    let other: Vec<u8> = (0..32u8).map(|i| b'b'.wrapping_add(i)).collect();
     write_raw(&salt_sidecar(&path), &recorded);
     let body = journal_body(Some(&fingerprint_of(&recorded)), "subject-recorded");
     write_raw(&path, &body);

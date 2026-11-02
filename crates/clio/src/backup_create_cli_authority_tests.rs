@@ -97,7 +97,7 @@ fn a_matching_journal_records_its_own_fingerprint() {
 fn a_journal_under_another_salt_is_refused() {
     let scratch = Scratch::new("authority-divergent");
     let journal_path = scratch.join("erasure-journal.json");
-    let recorded = [b'a'; 32];
+    let recorded: Vec<u8> = (0..32u8).map(|i| b'a'.wrapping_add(i)).collect();
     seed_owner_only(&salt_sidecar(&journal_path), &recorded);
     let fingerprint = clio_compliance::tombstone_salt_fingerprint_of(&recorded);
     seed_journal(
@@ -105,7 +105,8 @@ fn a_journal_under_another_salt_is_refused() {
         &journal_under(Some(&fingerprint), "subject-a"),
     );
     // The deployment now resolves a different salt beside the same journal.
-    seed_owner_only(&salt_sidecar(&journal_path), &[b'b'; 32]);
+    let resolved: Vec<u8> = (0..32u8).map(|i| b'b'.wrapping_add(i)).collect();
+    seed_owner_only(&salt_sidecar(&journal_path), &resolved);
     let err = current_authority(&journal_path).expect_err("another salt refuses the create");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
     assert!(

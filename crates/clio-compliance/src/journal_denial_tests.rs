@@ -172,7 +172,8 @@ fn journal_body(fingerprint: &str, subject_hash: &str) -> Vec<u8> {
 fn a_journal_recorded_under_the_resolved_salt_answers_as_before() {
     let scratch = Scratch::new();
     let path = scratch.journal();
-    write_raw(&salt_sidecar(&path), &[b'a'; 32]);
+    let deployment_salt: Vec<u8> = (0..32u8).map(|i| b'a'.wrapping_add(i)).collect();
+    write_raw(&salt_sidecar(&path), &deployment_salt);
     let salt = tombstone_salt_at(&path).expect("resolve the deployment salt");
     let body = journal_body(
         &tombstone_salt_fingerprint_of(&salt),
@@ -200,10 +201,11 @@ fn a_journal_recorded_under_another_salt_is_unavailable() {
     let scratch = Scratch::new();
     let path = scratch.journal();
     // This deployment resolves salt A from the sidecar beside the journal.
-    write_raw(&salt_sidecar(&path), &[b'a'; 32]);
+    let deployment_salt: Vec<u8> = (0..32u8).map(|i| b'a'.wrapping_add(i)).collect();
+    write_raw(&salt_sidecar(&path), &deployment_salt);
     // The journal was written under salt B: it denies B's hash of a subject and
     // records B's fingerprint.
-    let recorded = [b'b'; 32];
+    let recorded: Vec<u8> = (0..32u8).map(|i| b'b'.wrapping_add(i)).collect();
     let body = journal_body(
         &tombstone_salt_fingerprint_of(&recorded),
         &sha256_hex(&recorded, "subject-a"),

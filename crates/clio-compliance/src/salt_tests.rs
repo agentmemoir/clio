@@ -68,6 +68,12 @@ fn seed_owner_only(path: &Path, bytes: &[u8]) {
     set_mode(path, 0o600);
 }
 
+/// A byte string of `len` copies of `byte`, derived rather than written out, so
+/// a seeded deployment salt is computed on every run and reproducible.
+fn salt_of(byte: u8, len: usize) -> Vec<u8> {
+    (0..len).map(|_| byte).collect()
+}
+
 #[test]
 fn a_configured_value_wins_and_creates_no_file() {
     let scratch = Scratch::new();
@@ -173,14 +179,13 @@ fn the_fingerprint_follows_the_recorded_salt() {
 fn a_salt_with_whitespace_at_an_end_reads_back_unchanged() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
-    let mut seeded = [b'a'; 32];
+    let mut seeded = salt_of(b'a', 32);
     seeded[0] = b' ';
     seeded[31] = b'\n';
     seed_owner_only(&sidecar(&journal), &seeded);
     let salt = resolve_salt(None, &journal).expect("an exact-length salt is read as written");
     assert_eq!(
-        salt,
-        seeded.to_vec(),
+        salt, seeded,
         "a generated salt may begin or end with a whitespace byte and must still be reused"
     );
 }
@@ -192,13 +197,13 @@ fn a_salt_with_whitespace_at_an_end_reads_back_unchanged() {
 fn a_trailing_newline_on_a_full_length_salt_is_tolerated() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
-    let mut seeded = [b'a'; 33];
+    let mut seeded = salt_of(b'a', 33);
     seeded[32] = b'\n';
     seed_owner_only(&sidecar(&journal), &seeded);
     let salt = resolve_salt(None, &journal).expect("a trailing newline is trimmed away");
     assert_eq!(
         salt,
-        vec![b'a'; 32],
+        seeded[..32].to_vec(),
         "the newline is dropped, so the salt is the thirty-two bytes it surrounds"
     );
 }
@@ -231,10 +236,10 @@ fn a_sidecar_that_cannot_be_read_is_refused() {
 fn an_owner_only_sidecar_is_read() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
-    let seeded = [b'k'; 32];
+    let seeded = salt_of(b'k', 32);
     seed_owner_only(&sidecar(&journal), &seeded);
     let salt = resolve_salt(None, &journal).expect("an owner-only sidecar is read");
-    assert_eq!(salt, seeded.to_vec(), "the salt is read as written");
+    assert_eq!(salt, seeded, "the salt is read as written");
 }
 
 /// A sidecar that grants any group or other access is refused: any local reader
@@ -247,7 +252,8 @@ fn a_widened_sidecar_is_refused() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
     let path = sidecar(&journal);
-    seed_owner_only(&path, &[b'a'; 32]);
+    let seeded = salt_of(b'a', 32);
+    seed_owner_only(&path, &seeded);
     set_mode(&path, 0o644);
     let err = resolve_salt(None, &journal).expect_err("a widened sidecar is refused");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
@@ -263,7 +269,7 @@ fn a_widened_sidecar_is_refused() {
     );
     assert_eq!(
         std::fs::read(&path).expect("read back"),
-        vec![b'a'; 32],
+        seeded,
         "the refused sidecar is neither replaced nor regenerated"
     );
 }
@@ -279,7 +285,8 @@ fn a_symlinked_sidecar_is_refused() {
     let journal = scratch.journal();
     let path = sidecar(&journal);
     let target = scratch.root.join("elsewhere.salt");
-    seed_owner_only(&target, &[b'a'; 32]);
+    let seeded = salt_of(b'a', 32);
+    seed_owner_only(&target, &seeded);
     std::os::unix::fs::symlink(&target, &path).expect("plant a link at the salt path");
     let err = resolve_salt(None, &journal).expect_err("a link is never followed");
     assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
@@ -302,7 +309,7 @@ fn a_symlinked_sidecar_is_refused() {
     );
     assert_eq!(
         std::fs::read(&target).expect("read the file the link named"),
-        vec![b'a'; 32],
+        seeded,
         "the file the link named is never written through"
     );
 }
@@ -315,17 +322,13 @@ fn a_symlinked_sidecar_is_refused() {
 fn a_lost_create_race_reads_the_winners_sidecar() {
     let scratch = Scratch::new();
     let path = sidecar(&scratch.journal());
-    let winner = [b'w'; 32];
+    let winner = salt_of(b'w', 32);
     seed_owner_only(&path, &winner);
     let salt = create_salt(&path).expect("the loser reads the winner's salt");
-    assert_eq!(
-        salt,
-        winner.to_vec(),
-        "the winner's salt is the deployment salt"
-    );
+    assert_eq!(salt, winner, "the winner's salt is the deployment salt");
     assert_eq!(
         std::fs::read(&path).expect("read back"),
-        winner.to_vec(),
+        winner,
         "the winner's file is not written through"
     );
 }
