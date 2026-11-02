@@ -26,8 +26,8 @@
 use crate::db_url::postgres_url_from_env;
 use crate::pg_fixtures::{ScratchDatabase, url_for_database};
 use crate::pg_lock::lock_pg_test;
-use crate::pg_probe::{probe, probe_within};
-use crate::pg_tls::connect;
+use crate::pg_probe::{probe, probe_within, report_from_values};
+use crate::pg_tls::{SslChoice, connect};
 use std::time::Duration;
 
 #[test]
@@ -64,18 +64,53 @@ fn the_probe_reports_the_version_and_the_extension() {
         report.has_vector,
         "the scratch database installed the extension"
     );
-    // The version and cipher are present exactly when the connection is
-    // encrypted, so a report cannot claim one half of the TLS answer.
+    // The version and cipher arrive exactly when the server reports TLS, so a
+    // report cannot claim one half of the server's answer.
     assert_eq!(
-        report.tls_version.is_some(),
-        report.tls,
-        "the TLS version is reported exactly when the connection is encrypted"
+        report.server_tls_version.is_some(),
+        report.server_tls,
+        "the server TLS version is reported exactly when the server reports TLS"
     );
     assert_eq!(
-        report.tls_cipher.is_some(),
-        report.tls,
-        "the cipher is reported exactly when the connection is encrypted"
+        report.server_tls_cipher.is_some(),
+        report.server_tls,
+        "the cipher is reported exactly when the server reports TLS"
     );
+}
+
+#[test]
+fn the_report_keeps_the_server_tls_answers_and_the_requested_policy() {
+    // A plaintext server cannot prove the encrypted branch, so the mapping from
+    // the row's values is asked directly, with TLS present.
+    let encrypted = report_from_values(
+        "16.4".to_owned(),
+        true,
+        true,
+        Some("TLSv1.3".to_owned()),
+        Some("TLS_AES_256_GCM_SHA384".to_owned()),
+        SslChoice::Prefer,
+    );
+    assert!(encrypted.server_tls, "the server reported TLS");
+    assert_eq!(encrypted.server_tls_version.as_deref(), Some("TLSv1.3"));
+    assert_eq!(
+        encrypted.server_tls_cipher.as_deref(),
+        Some("TLS_AES_256_GCM_SHA384")
+    );
+    assert_eq!(encrypted.requested_tls, SslChoice::Prefer);
+
+    // A cleartext server and a policy that forbids TLS stay distinct answers.
+    let cleartext = report_from_values(
+        "16.4".to_owned(),
+        false,
+        false,
+        None,
+        None,
+        SslChoice::Disable,
+    );
+    assert!(!cleartext.server_tls, "the server reported no TLS");
+    assert_eq!(cleartext.server_tls_version, None);
+    assert_eq!(cleartext.server_tls_cipher, None);
+    assert_eq!(cleartext.requested_tls, SslChoice::Disable);
 }
 
 #[test]

@@ -34,9 +34,10 @@ fn report(version: &str, has_vector: bool) -> DatabaseReport {
     DatabaseReport {
         server_version: version.to_owned(),
         has_vector,
-        tls: false,
-        tls_version: None,
-        tls_cipher: None,
+        server_tls: false,
+        server_tls_version: None,
+        server_tls_cipher: None,
+        requested_tls: SslChoice::Prefer,
     }
 }
 
@@ -45,7 +46,8 @@ fn a_vector_enabled_database_reports_the_transcript_detail() {
     let detail = database_detail(&report("16.4", true)).expect("a vector-enabled database passes");
     assert_eq!(
         detail,
-        "connected, PostgreSQL 16.4, vector extension present, connection not encrypted"
+        "connected, PostgreSQL 16.4, vector extension present, client asks for TLS and allows \
+         cleartext, server reports no TLS"
     );
 }
 
@@ -54,16 +56,62 @@ fn an_encrypted_connection_reports_the_negotiated_version_and_cipher() {
     let detail = database_detail(&DatabaseReport {
         server_version: "16.4".to_owned(),
         has_vector: true,
-        tls: true,
-        tls_version: Some("TLSv1.3".to_owned()),
-        tls_cipher: Some("TLS_AES_256_GCM_SHA384".to_owned()),
+        server_tls: true,
+        server_tls_version: Some("TLSv1.3".to_owned()),
+        server_tls_cipher: Some("TLS_AES_256_GCM_SHA384".to_owned()),
+        requested_tls: SslChoice::VerifyFull,
     })
     .expect("a vector-enabled database passes");
     assert_eq!(
         detail,
-        "connected, PostgreSQL 16.4, vector extension present, connection encrypted with TLSv1.3 \
-         using TLS_AES_256_GCM_SHA384"
+        "connected, PostgreSQL 16.4, vector extension present, client requires verified TLS, \
+         server reports TLS with TLSv1.3 using TLS_AES_256_GCM_SHA384"
     );
+}
+
+#[test]
+fn the_two_legs_are_named_separately_when_they_disagree() {
+    // A pooler that terminates TLS: the client leg is plaintext while the
+    // server's own leg reports TLS. Neither answer may stand for both.
+    let detail = database_detail(&DatabaseReport {
+        server_version: "16.4".to_owned(),
+        has_vector: true,
+        server_tls: true,
+        server_tls_version: None,
+        server_tls_cipher: None,
+        requested_tls: SslChoice::Disable,
+    })
+    .expect("a vector-enabled database passes");
+    assert_eq!(
+        detail,
+        "connected, PostgreSQL 16.4, vector extension present, client uses no TLS, server reports \
+         TLS"
+    );
+}
+
+#[test]
+fn a_server_that_reports_tls_without_details_says_only_that() {
+    let cases: [(Option<&str>, Option<&str>); 3] = [
+        (None, None),
+        (Some("TLSv1.3"), None),
+        (None, Some("TLS_AES_256_GCM_SHA384")),
+    ];
+    for (version, cipher) in cases {
+        let detail = database_detail(&DatabaseReport {
+            server_version: "16.4".to_owned(),
+            has_vector: true,
+            server_tls: true,
+            server_tls_version: version.map(ToOwned::to_owned),
+            server_tls_cipher: cipher.map(ToOwned::to_owned),
+            requested_tls: SslChoice::Disable,
+        })
+        .expect("a vector-enabled database passes");
+        assert_eq!(
+            detail,
+            "connected, PostgreSQL 16.4, vector extension present, client uses no TLS, server \
+             reports TLS"
+        );
+    }
 }
 
 #[test]
