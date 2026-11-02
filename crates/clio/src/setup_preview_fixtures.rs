@@ -378,7 +378,7 @@ impl Harness {
 /// why the answer and everything the context printed come back as a pair.
 pub(crate) fn with_ctx<R>(
     input: &str,
-    flags: HashMap<String, String>,
+    flags: &HashMap<String, String>,
     interactive: bool,
     defaults: Defaults,
     body: impl FnOnce(&mut Ctx<'_>) -> R,
@@ -388,7 +388,7 @@ pub(crate) fn with_ctx<R>(
     let mut err: Vec<u8> = Vec::new();
     let probes = Probes::ok();
     let mut ctx = Ctx::new(
-        &flags,
+        flags,
         &mut reader,
         &mut out,
         &mut err,

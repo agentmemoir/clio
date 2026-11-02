@@ -62,7 +62,7 @@ fn a_stored_prefer_does_not_override_a_remote_host() {
 
 #[test]
 fn a_first_run_off_this_machine_defaults_to_verify_full() {
-    let (answer, _) = with_ctx("\n", no_flags(), true, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("\n", &no_flags(), true, Defaults::empty(), |ctx| {
         ask_ssl(ctx, "db.example.com")
     });
     assert_eq!(answer, Ok(SslChoice::VerifyFull));
@@ -70,7 +70,7 @@ fn a_first_run_off_this_machine_defaults_to_verify_full() {
 
 #[test]
 fn a_first_run_on_this_machine_defaults_to_prefer() {
-    let (answer, _) = with_ctx("\n", no_flags(), true, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("\n", &no_flags(), true, Defaults::empty(), |ctx| {
         ask_ssl(ctx, "127.0.0.1")
     });
     assert_eq!(answer, Ok(SslChoice::Prefer));
@@ -80,7 +80,7 @@ fn a_first_run_on_this_machine_defaults_to_prefer() {
 fn a_stored_mode_is_kept_on_this_machine() {
     // The last run's answer for this machine is the best default there is: it
     // was chosen for the same local server.
-    let (answer, _) = with_ctx("\n", no_flags(), true, stored("disable"), |ctx| {
+    let (answer, _) = with_ctx("\n", &no_flags(), true, stored("disable"), |ctx| {
         ask_ssl(ctx, "127.0.0.1")
     });
     assert_eq!(answer, Ok(SslChoice::Disable));
@@ -88,7 +88,7 @@ fn a_stored_mode_is_kept_on_this_machine() {
 
 #[test]
 fn a_stored_mode_gives_way_to_the_remote_default() {
-    let (answer, _) = with_ctx("\n", no_flags(), true, stored("disable"), |ctx| {
+    let (answer, _) = with_ctx("\n", &no_flags(), true, stored("disable"), |ctx| {
         ask_ssl(ctx, "db.example.com")
     });
     assert_eq!(answer, Ok(SslChoice::VerifyFull));
@@ -97,7 +97,7 @@ fn a_stored_mode_gives_way_to_the_remote_default() {
 #[test]
 fn the_ssl_flag_beats_both_defaults() {
     let flags = HashMap::from([("database-ssl".to_owned(), "disable".to_owned())]);
-    let (answer, _) = with_ctx("\n", flags, true, stored("verify-full"), |ctx| {
+    let (answer, _) = with_ctx("\n", &flags, true, stored("verify-full"), |ctx| {
         ask_ssl(ctx, "db.example.com")
     });
     assert_eq!(answer, Ok(SslChoice::Disable));
@@ -105,7 +105,7 @@ fn the_ssl_flag_beats_both_defaults() {
 
 #[test]
 fn a_non_interactive_run_takes_the_derived_mode() {
-    let (answer, _) = with_ctx("", no_flags(), false, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("", &no_flags(), false, Defaults::empty(), |ctx| {
         ask_ssl(ctx, "db.example.com")
     });
     assert_eq!(answer, Ok(SslChoice::VerifyFull));
@@ -113,7 +113,7 @@ fn a_non_interactive_run_takes_the_derived_mode() {
 
 #[test]
 fn the_no_check_mode_is_recorded_and_explained_at_the_choice() {
-    let (answer, printed) = with_ctx("4\n", no_flags(), true, Defaults::empty(), |ctx| {
+    let (answer, printed) = with_ctx("4\n", &no_flags(), true, Defaults::empty(), |ctx| {
         ask_ssl(ctx, "db.example.com")
     });
     assert_eq!(answer, Ok(SslChoice::EncryptNoVerify));
@@ -126,7 +126,7 @@ fn the_no_check_mode_is_recorded_and_explained_at_the_choice() {
 #[test]
 fn going_back_at_the_ssl_question_stops_the_step() {
     // Four modes, then the way out the prompt appends.
-    let (answer, _) = with_ctx("5\n", no_flags(), true, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("5\n", &no_flags(), true, Defaults::empty(), |ctx| {
         ask_ssl(ctx, "db.example.com")
     });
     assert_eq!(answer, Err(Signal::Back));
@@ -135,7 +135,7 @@ fn going_back_at_the_ssl_question_stops_the_step() {
 #[test]
 fn a_field_takes_its_flag_without_asking() {
     let flags = HashMap::from([("database-host".to_owned(), "db.example.com".to_owned())]);
-    let (answer, _) = with_ctx("", flags, true, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("", &flags, true, Defaults::empty(), |ctx| {
         flagged_or_asked(ctx, "database-host", "Host", None, |_| Ok(()))
     });
     assert_eq!(answer, Ok("db.example.com".to_owned()));
@@ -144,7 +144,7 @@ fn a_field_takes_its_flag_without_asking() {
 #[test]
 fn a_refused_flag_names_the_flag() {
     let flags = HashMap::from([("database-port".to_owned(), "not-a-port".to_owned())]);
-    let (answer, _) = with_ctx("", flags, true, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("", &flags, true, Defaults::empty(), |ctx| {
         flagged_or_asked(ctx, "database-port", "Port", None, |_| {
             Err("is not a number".to_owned())
         })
@@ -155,7 +155,7 @@ fn a_refused_flag_names_the_flag() {
 
 #[test]
 fn a_non_interactive_field_takes_its_default() {
-    let (answer, _) = with_ctx("", no_flags(), false, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("", &no_flags(), false, Defaults::empty(), |ctx| {
         flagged_or_asked(
             ctx,
             "database-port",
@@ -169,7 +169,7 @@ fn a_non_interactive_field_takes_its_default() {
 
 #[test]
 fn a_non_interactive_field_with_no_value_says_which_flag_is_missing() {
-    let (answer, _) = with_ctx("", no_flags(), false, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("", &no_flags(), false, Defaults::empty(), |ctx| {
         flagged_or_asked(ctx, "database-host", "Host", None, |_| Ok(()))
     });
     let signal = answer.expect_err("there is no value");
@@ -184,7 +184,7 @@ fn a_non_interactive_field_with_no_value_says_which_flag_is_missing() {
 
 #[test]
 fn an_interactive_field_takes_the_answered_value() {
-    let (answer, _) = with_ctx("5433\n", no_flags(), true, Defaults::empty(), |ctx| {
+    let (answer, _) = with_ctx("5433\n", &no_flags(), true, Defaults::empty(), |ctx| {
         flagged_or_asked(
             ctx,
             "database-port",
