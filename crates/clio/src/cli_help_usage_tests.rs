@@ -105,13 +105,14 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
 #[test]
 fn correct_usage_and_catalog_name_the_confirm_flag() {
     let usage = usage_for("correct").expect("correct has a usage line");
-    assert!(usage.contains("[--confirm]"), "{usage}");
+    assert!(usage.contains(" --confirm "), "{usage}");
+    assert!(!usage.contains("[--confirm]"), "{usage}");
 
     let block = crate::help_flags_test_support::entry_block(
         &crate::command_catalog::catalog_text(),
         "correct",
     );
-    assert!(block.contains("[--confirm]"), "{block}");
+    assert!(block.contains(" --confirm "), "{block}");
 }
 
 /// Every verb that takes `--epistemic-kind` and `--source-type` documents the

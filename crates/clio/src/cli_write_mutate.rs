@@ -170,11 +170,12 @@ fn discard_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     })
 }
 
-/// `correct ID VALUE --reason R [--context C]` → `correct`: an attributable
-/// correction that preserves history; `--context C` explicitly replaces the
-/// item's bounded source context. The CLI invocation is itself the operator
-/// confirmation, so it runs the confirmed path unless `--dry-run` asks for the
-/// zero-write preview.
+/// `correct ID VALUE --reason R [--context C] --confirm` → `correct`: an
+/// attributable correction that preserves history; `--context C` explicitly
+/// replaces the item's bounded source context.
+///
+/// The shared confirm gate refuses without `--confirm`/`--yes` (exit 2) and
+/// `--dry-run` prints the zero-write preview.
 fn correct_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     let positionals = parsed.positionals();
     if positionals.len() != 2 {
@@ -206,11 +207,15 @@ fn correct_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             ),
         });
     }
+    crate::cli_confirm::require_confirm("correct", parsed)?;
     let mut args = base_args(parsed);
     args.insert("item_id".into(), Value::from(item_id));
     args.insert("new_value".into(), Value::from(new_value));
     args.insert("reason".into(), Value::from(reason));
-    args.insert("confirm".into(), Value::Bool(true));
+    args.insert(
+        "confirm".into(),
+        Value::Bool(crate::cli_confirm::confirmed(parsed)),
+    );
     if let Some(context) = context {
         args.insert("context".into(), Value::from(context));
     }

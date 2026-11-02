@@ -341,17 +341,17 @@ fn correct_pins_the_line_and_prints_the_confirm_flag() {
     let spec = record("correct");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio correct ID VALUE --reason R [--context TEXT] [--confirm] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "usage: clio correct ID VALUE --reason R [--context TEXT] --confirm [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "correct full usage"
     );
     assert_eq!(
         spec.usage_line(),
-        "clio correct ID VALUE --reason R [--context TEXT] [--confirm] [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
+        "clio correct ID VALUE --reason R [--context TEXT] --confirm [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]",
         "correct usage line"
     );
     assert!(
-        spec.usage_line().contains("[--confirm]"),
-        "the gating --confirm flag must print in the line: {}",
+        spec.usage_line().contains(" --confirm "),
+        "the gating --confirm flag must print bare in the line: {}",
         spec.usage_line()
     );
     assert_eq!(

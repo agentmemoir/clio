@@ -1,0 +1,1 @@
+Destructive write commands now share one confirmation rule: `clio shared discard` refuses with exit 2 when it has neither `--confirm` nor `--yes`, instead of reporting a preview as success, and `clio correct` refuses the same way instead of superseding the stored item.
