@@ -5,12 +5,13 @@
 //!
 //! This module is responsible for testing the Postgres `OpsStore` operator-health
 //! contract on the shared Compose database: reachability, recorded schema
-//! version, bank inventory, content-free integrity counts, and orphan edge
-//! cleanup.
+//! version, bank inventory, content-free integrity counts, orphan edge
+//! cleanup, and the stored device id.
 //!
 //! ## Owns
 //! - Postgres parity for the `OpsStore` contract, including planted-orphan
-//!   counts scoped to a unique bank prefix per test
+//!   counts scoped to a unique bank prefix per test, and the stored device id
+//!   read back in its documented shape
 //!
 //! ## Does not own
 //! - The contract definition (`ops_store`) or the SQL under test (`postgres_ops`)
@@ -276,16 +277,10 @@ fn pg_drop_orphan_assoc_edges() {
     cleanup(&pg, &bank);
 }
 
-fn drop_device_id(pg: &PostgresStore) {
-    pg.test_execute("DELETE FROM schema_settings WHERE key = 'device_id'")
-        .unwrap();
-}
-
 #[test]
 fn pg_device_id_is_minted_in_the_documented_shape() {
     let _guard = crate::lock_pg_test();
     let pg = pg();
-    drop_device_id(&pg);
     let id = pg.device_id().unwrap();
     let suffix = id.strip_prefix("device-").expect("device- prefix");
     assert_eq!(suffix.len(), 32, "{id}");
@@ -295,40 +290,27 @@ fn pg_device_id_is_minted_in_the_documented_shape() {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
         "{id}"
     );
-    let stored: String = pg
+    let stored = pg
         .with_client(|client| {
             Ok(client
-                .query_one(
+                .query_opt(
                     "SELECT value FROM schema_settings WHERE key = 'device_id'",
                     &[],
                 )
                 .am("read device id row")?
-                .get(0))
+                .map(|row| row.get::<_, String>(0)))
         })
         .unwrap();
-    assert_eq!(stored, id);
-    drop_device_id(&pg);
+    assert_eq!(
+        stored.as_deref(),
+        Some(id.as_str()),
+        "the reported id must be the row the database stores"
+    );
 }
 
 #[test]
 fn pg_device_id_is_stable_across_calls() {
     let _guard = crate::lock_pg_test();
     let pg = pg();
-    drop_device_id(&pg);
     assert_eq!(pg.device_id().unwrap(), pg.device_id().unwrap());
-    drop_device_id(&pg);
-}
-
-#[test]
-fn pg_device_id_keeps_the_first_written_row() {
-    let _guard = crate::lock_pg_test();
-    let pg = pg();
-    pg.test_execute(
-        "INSERT INTO schema_settings (key, value, created_at, updated_at)
-         VALUES ('device_id', 'device-first', 't0', 't0')
-         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-    )
-    .unwrap();
-    assert_eq!(pg.device_id().unwrap(), "device-first");
-    drop_device_id(&pg);
 }

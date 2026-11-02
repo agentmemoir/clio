@@ -6,8 +6,8 @@
 //! This module tests the inventory measurement an open performs: a measurement
 //! failure fails the open with the measurement's own error code instead of
 //! yielding a silent empty inventory behind a successful open, an in-memory
-//! store is the only store that opens unmeasured, and extraction readiness
-//! stays fail-closed.
+//! store is the only store that opens unmeasured, extraction readiness stays
+//! fail-closed, and the reported device id comes from the store.
 //!
 //! ## Owns
 //! - The returned-error contract of `measure_inventory` for both backends
@@ -15,9 +15,12 @@
 //!   hermetic open constructor
 //! - The refusal of an unknown backend and of an unopenable Postgres target
 //! - The extraction-readiness fail-closed rules
+//! - The device id an open reports, read from the store it opens
 //!
 //! ## Does not own
 //! - The measurement itself or its error codes (`clio-store`)
+//! - The device id's minting and storage (`clio-store`) or its override rule
+//!   (`clio-config`)
 //! - The runtime state assembly (`runtime_open`)
 //! - The CLI exit-code mapping for an open error (`clio`)
 //!
@@ -155,10 +158,10 @@ fn build_refuses_a_failed_measurement() {
     );
 }
 
+/// The identity is durable, so an open must report what the store already
+/// holds. A per-process id would differ from the value the store minted.
 #[test]
-fn two_opens_over_one_store_share_the_device_id() {
-    // The identity must survive a restart, so the second open reads what the
-    // first one minted into the store instead of deriving a per-process id.
+fn open_reports_the_device_id_the_store_holds() {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
@@ -167,33 +170,36 @@ fn two_opens_over_one_store_share_the_device_id() {
         std::process::id()
     ));
     let url = path.to_str().expect("a utf-8 temp path");
-    let open = || {
-        let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
-        let store = Arc::new(SqliteStore::open(&path, Arc::clone(&kms)).expect("file store"));
-        let belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector> = store.clone();
-        let store: Arc<dyn Repos> = store;
-        McpState::build(
-            &store,
-            belief_corrector,
-            &options("sqlite", url),
-            &json!({}),
-            kms,
-            clio_config::Runtime::with_env(&|_| None),
-            false,
-            None,
-        )
-        .expect("the file-backed store opens")
-    };
-    let first = open();
-    let second = open();
-    assert!(
-        !first.device_id.is_empty(),
-        "the first open must mint a device id"
-    );
-    assert_eq!(
-        first.device_id, second.device_id,
-        "two opens over one store must report one device id"
-    );
+    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+    let store = Arc::new(SqliteStore::open(&path, Arc::clone(&kms)).expect("file store"));
+    // Mint the identity through the store first, so the assertion below compares
+    // the open against a value the store already holds.
+    let stored = store.device_id().expect("the store mints its device id");
+    let belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector> = store.clone();
+    let store: Arc<dyn Repos> = store;
+    let state = McpState::build(
+        &store,
+        belief_corrector,
+        &options("sqlite", url),
+        &json!({}),
+        kms,
+        clio_config::Runtime::with_env(&|_| None),
+        false,
+        None,
+    )
+    .expect("the file-backed store opens");
+    // `build` reads the override from the process environment, not from the
+    // injected runtime, so the assertion follows whichever value applies.
+    match clio_config::resolve_sync_device_id(&|key| std::env::var(key).ok()) {
+        Some(override_id) => assert_eq!(
+            state.device_id, override_id,
+            "a configured override must win over the stored id"
+        ),
+        None => assert_eq!(
+            state.device_id, stored,
+            "the open must report the id the store already holds"
+        ),
+    }
     let _ = std::fs::remove_file(&path);
 }
 
