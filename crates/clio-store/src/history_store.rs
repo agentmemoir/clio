@@ -210,18 +210,24 @@ fn reject_dropped_record_context(
 /// Seal one text field under the subject DEK for storage.
 pub(crate) fn seal_history_text(
     kms: &dyn DekProvider,
+    field: &str,
+    row_id: &str,
     subject_id: &str,
     value: &str,
 ) -> Result<String, AmError> {
-    Ok(kms
-        .encrypt(subject_id, value.as_bytes())?
-        .to_storage_string())
+    let sealed = kms.encrypt(field, row_id, subject_id, value.as_bytes())?;
+    Ok(sealed.to_storage_string())
 }
 
 /// Open one history text field back into plaintext.
-pub(crate) fn open_history_text(kms: &dyn DekProvider, cipher: &str) -> Result<String, AmError> {
+pub(crate) fn open_history_text(
+    kms: &dyn DekProvider,
+    field: &str,
+    row_id: &str,
+    cipher: &str,
+) -> Result<String, AmError> {
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(&envelope)?;
+    let bytes = kms.decrypt(field, row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| {
         AmError::new(
             ErrorCode::Internal,
@@ -233,16 +239,23 @@ pub(crate) fn open_history_text(kms: &dyn DekProvider, cipher: &str) -> Result<S
 /// Seal an ordered `steps` list as a JSON array string.
 pub(crate) fn seal_steps(
     kms: &dyn DekProvider,
+    field: &str,
+    row_id: &str,
     subject_id: &str,
     steps: &[String],
 ) -> Result<String, AmError> {
     let encoded = serde_json::to_string(steps).expect("steps always serialize");
-    seal_history_text(kms, subject_id, &encoded)
+    seal_history_text(kms, field, row_id, subject_id, &encoded)
 }
 
 /// Open a sealed `steps` list; an undecodable payload fails closed.
-pub(crate) fn open_steps(kms: &dyn DekProvider, cipher: &str) -> Result<Vec<String>, AmError> {
-    let raw = open_history_text(kms, cipher)?;
+pub(crate) fn open_steps(
+    kms: &dyn DekProvider,
+    field: &str,
+    row_id: &str,
+    cipher: &str,
+) -> Result<Vec<String>, AmError> {
+    let raw = open_history_text(kms, field, row_id, cipher)?;
     serde_json::from_str(&raw)
         .map_err(|e| AmError::new(ErrorCode::Internal, format!("steps decode: {e}")))
 }
@@ -307,130 +320,8 @@ fn audit_detail_with_context(mut detail: serde_json::Value, item: &MemoryItem) -
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn helpers_seal_open_and_map() {
-        require_nonempty("x", "x").unwrap();
-        assert_eq!(
-            require_nonempty("", "bank_id").unwrap_err().code,
-            ErrorCode::InvalidArgument
-        );
-        let kms = crate::dek::LocalDevKms::new();
-        let cipher = seal_history_text(&kms, "s", "hello").expect("seal");
-        assert_eq!(open_history_text(&kms, &cipher).expect("open"), "hello");
-        assert_eq!(
-            open_history_text(&kms, "not-json").unwrap_err().code,
-            ErrorCode::UnreadableContent
-        );
-        let steps = vec!["a".to_owned(), "b".to_owned()];
-        let sealed = seal_steps(&kms, "s", &steps).expect("seal steps");
-        assert_eq!(open_steps(&kms, &sealed).expect("open steps"), steps);
-        let bad = seal_history_text(&kms, "s", "not json").expect("seal bad");
-        assert_eq!(
-            open_steps(&kms, &bad).unwrap_err().code,
-            ErrorCode::Internal
-        );
-        let detail = history_audit_detail(&item("i", "b", EpisodicType::Task), "task", "t1", 2, 3);
-        assert!(detail.contains("\"version\":2"));
-        assert!(detail.contains("\"context_present\":false"));
-        // Non-UTF-8 plaintext hits the open_history_text conversion guard.
-        let raw = crate::dek::DekProvider::encrypt(&kms, "s", &[0xFF_u8, 0xFE])
-            .expect("encrypt raw")
-            .to_storage_string();
-        assert_eq!(
-            open_history_text(&kms, &raw).unwrap_err().code,
-            ErrorCode::Internal
-        );
-    }
-
-    fn item(id: &str, bank: &str, episodic: EpisodicType) -> MemoryItem {
-        MemoryItem {
-            id: id.into(),
-            bank_id: bank.into(),
-            subject_id: "s".into(),
-            kind: clio_types::ItemKind::Episodic,
-            category: None,
-            episodic_type: Some(episodic),
-            epistemic_kind: clio_types::EpistemicKind::Fact,
-            source_type: None,
-            confidence: None,
-            admission_score: Some(0.5),
-            source_ref: None,
-            snapshot: None,
-            gist: Some("g".into()),
-            valid_from: "t".into(),
-            valid_until: None,
-            tx_from: "t".into(),
-            tx_until: None,
-            created_at: "t".into(),
-            updated_at: "t".into(),
-            context: None,
-        }
-    }
-
-    #[test]
-    fn carrier_guards_reject_mismatches() {
-        let task = TaskRecord {
-            id: "r".into(),
-            bank_id: "b".into(),
-            item_id: "i".into(),
-            task_id: "t".into(),
-            subject_id: "s".into(),
-            version: 1,
-            definition: "d".into(),
-            steps: vec![],
-            status: "s".into(),
-            evidence_ref: None,
-            context: None,
-            admission_score: 0.5,
-            created_at: "t".into(),
-        };
-        let failure = FailureRecord {
-            id: "r".into(),
-            bank_id: "b".into(),
-            item_id: "i".into(),
-            task_id: "t".into(),
-            subject_id: "s".into(),
-            attempt_n: 1,
-            what_failed: "w".into(),
-            lesson: "l".into(),
-            lesson_tokens: 1,
-            evidence_ref: None,
-            context: None,
-            admission_score: 0.5,
-            epistemic_kind: clio_types::EpistemicKind::Belief,
-            created_at: "t".into(),
-        };
-        assert!(validate_task_carrier(&item("i", "b", EpisodicType::Task), &task).is_ok());
-        assert!(validate_failure_carrier(&item("i", "b", EpisodicType::Failure), &failure).is_ok());
-        assert_eq!(
-            validate_task_carrier(&item("other", "b", EpisodicType::Task), &task)
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidArgument
-        );
-        assert_eq!(
-            validate_task_carrier(&item("i", "b", EpisodicType::Failure), &task)
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidArgument
-        );
-        assert_eq!(
-            validate_failure_carrier(&item("other", "b", EpisodicType::Failure), &failure)
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidArgument
-        );
-        assert_eq!(
-            validate_failure_carrier(&item("i", "b", EpisodicType::Task), &failure)
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidArgument
-        );
-    }
-}
+#[path = "history_store_helpers_tests.rs"]
+mod history_store_helpers_tests;
 
 #[cfg(test)]
 #[path = "history_store_audit_tests.rs"]

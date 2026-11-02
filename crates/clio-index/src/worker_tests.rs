@@ -212,14 +212,16 @@ fn exhausted_and_legacy_jobs_are_handled() {
         "a capped row stays pending for status and rebuild"
     );
 
-    // A restored legacy-format row never enqueues on write, but a manual one skips.
+    // A restored legacy-format row never enqueues on write, but a manual one
+    // is counted as unreadable and drains without a retry.
     assert!(failing.enqueue_leaf(bank, "env-1").unwrap());
     let report = failing.process_pending_forced(10).unwrap();
-    assert_eq!(report.skipped, 1, "the legacy row skips and drains");
+    assert_eq!(report.unreadable, 1, "the legacy row counts as damage");
+    assert_eq!(report.skipped, 0, "damage is no longer reported as a skip");
     let pending2 = store.pending_index_jobs(10, None, u32::MAX).unwrap();
     assert!(
         pending2.iter().all(|j| j.item_id != "env-1"),
-        "legacy rows are skipped and drained, not errored"
+        "legacy rows are counted and drained, not errored"
     );
     let _ = RETRY_BACKOFF_MS;
 }

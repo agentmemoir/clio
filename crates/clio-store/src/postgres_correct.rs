@@ -47,6 +47,7 @@ impl PostgresStore {
         let dek_ref = self.kms().ensure_dek(&spec.new_item.subject_id)?;
         let cipher = seal_dual(
             self.kms().as_ref(),
+            &spec.new_item.id,
             &spec.new_item.subject_id,
             &spec.new_item,
         )?;

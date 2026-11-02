@@ -136,7 +136,7 @@ fn map_item_row(
     let cipher = cipher
         .filter(|s| !s.is_empty())
         .ok_or_else(missing_ciphertext)?;
-    let dual = open_dual(kms, &cipher)?;
+    let dual = open_dual(kms, &id, &cipher)?;
     Ok(Some(MemoryItem {
         id,
         bank_id,
@@ -281,7 +281,7 @@ impl SqliteStore {
         item.validate()?;
         require_actor(actor)?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         self.with_conn(|conn| {
             let tx = conn.transaction().am("item create begin")?;
             create_memory_item_tx(&tx, item, &cipher, &dek_ref, actor)?;
@@ -299,7 +299,7 @@ impl SqliteStore {
         item.validate()?;
         require_actor(actor)?;
         let _ = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         self.with_conn(|conn| {
             let tx = conn.transaction().am("item update begin")?;
             crate::item_update::update_memory_item_sqlite_tx(&tx, item, &cipher, actor)?;
@@ -385,3 +385,7 @@ impl SqliteStore {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_memory_tests.rs"]
+mod sqlite_memory_tests;

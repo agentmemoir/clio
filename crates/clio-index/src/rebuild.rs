@@ -26,7 +26,7 @@
 //! a lexical-only run works without one.
 
 use crate::embed::{Embedder, embed_text, lexical_text};
-use crate::report::{RebuildReport, RebuildTargets};
+use crate::report::{RebuildReport, RebuildTargets, RowLoss, classify_row_loss};
 use clio_store::{IndexStore, Store, VectorSlot};
 use clio_types::{AmError, ErrorCode};
 
@@ -34,6 +34,34 @@ use clio_types::{AmError, ErrorCode};
 pub const REBUILD_EMBED_BATCH: usize = 16;
 /// Rebuild page size (visible items per sweep step).
 pub const REBUILD_PAGE: usize = 200;
+
+/// What one visible item yielded for a sweep.
+#[derive(Debug)]
+pub(crate) enum Fetched {
+    /// The item opened; derive from it.
+    Item(Box<clio_types::MemoryItem>),
+    /// No row: gone or invalidated while the sweep ran.
+    Gone,
+    /// The row exists but its content cannot be opened.
+    Lost(RowLoss),
+}
+
+/// Row-loss totals for one sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct RowCounts {
+    pub(crate) unreadable: u64,
+    pub(crate) erased: u64,
+}
+
+impl RowCounts {
+    /// Count one lost row.
+    pub(crate) fn record(&mut self, loss: RowLoss) {
+        match loss {
+            RowLoss::Unreadable => self.unreadable += 1,
+            RowLoss::Erased => self.erased += 1,
+        }
+    }
+}
 
 /// Rebuild derived indexes for `bank` (or every indexable bank when `None`).
 ///
@@ -92,11 +120,21 @@ pub fn rebuild(
         if dry_run {
             continue;
         }
+        let mut counts = None;
         if wants_dense && let Some(embedder) = embedder {
-            report.dense_applied += sweep_dense(store, index, embedder, scope)?;
+            let (applied, swept) = sweep_dense(store, index, embedder, scope)?;
+            report.dense_applied += applied;
+            counts = Some(swept);
         }
         if matches!(targets, RebuildTargets::Lexical | RebuildTargets::All) {
-            report.lexical_applied += sweep_lexical(store, index, scope)?;
+            let (applied, swept) = sweep_lexical(store, index, scope)?;
+            report.lexical_applied += applied;
+            // Both sweeps visit the same rows, so a loss is counted once.
+            counts = Some(swept);
+        }
+        if let Some(swept) = counts {
+            report.unreadable += swept.unreadable;
+            report.erased += swept.erased;
         }
     }
     // Orphan cleanup runs once per call and never exceeds the requested scope:
@@ -114,15 +152,20 @@ fn sweep_dense(
     index: &dyn IndexStore,
     embedder: &dyn Embedder,
     bank: &str,
-) -> Result<u64, AmError> {
+) -> Result<(u64, RowCounts), AmError> {
     let mut applied = 0_u64;
+    let mut counts = RowCounts::default();
     for_each_visible_page(index, bank, |ids| {
         let mut pairs: Vec<(String, String)> = Vec::with_capacity(ids.len());
         for id in ids {
-            if let Some(item) = fetch_indexable_item(store, bank, id)?
-                && let Some(text) = embed_text(&item)
-            {
-                pairs.push((id.clone(), text));
+            match fetch_indexable_item(store, bank, id)? {
+                Fetched::Item(item) => {
+                    if let Some(text) = embed_text(&item) {
+                        pairs.push((id.clone(), text));
+                    }
+                }
+                Fetched::Gone => {}
+                Fetched::Lost(loss) => counts.record(loss),
             }
         }
         for chunk in pairs.chunks(REBUILD_EMBED_BATCH) {
@@ -141,42 +184,54 @@ fn sweep_dense(
         }
         Ok(())
     })?;
-    Ok(applied)
+    Ok((applied, counts))
 }
 
 /// Re-derive lexical docs for every visible indexable item.
-fn sweep_lexical(store: &dyn Store, index: &dyn IndexStore, bank: &str) -> Result<u64, AmError> {
+fn sweep_lexical(
+    store: &dyn Store,
+    index: &dyn IndexStore,
+    bank: &str,
+) -> Result<(u64, RowCounts), AmError> {
     let mut applied = 0_u64;
+    let mut counts = RowCounts::default();
     for_each_visible_page(index, bank, |ids| {
         for id in ids {
-            if let Some(item) = fetch_indexable_item(store, bank, id)?
-                && let Some(text) = lexical_text(&item)
-            {
-                index.put_lexical_doc(bank, id, &text)?;
-                index.finish_index_job(bank, id)?;
-                applied += 1;
+            match fetch_indexable_item(store, bank, id)? {
+                Fetched::Item(item) => {
+                    if let Some(text) = lexical_text(&item) {
+                        index.put_lexical_doc(bank, id, &text)?;
+                        index.finish_index_job(bank, id)?;
+                        applied += 1;
+                    }
+                }
+                Fetched::Gone => {}
+                Fetched::Lost(loss) => counts.record(loss),
             }
         }
         Ok(())
     })?;
-    Ok(applied)
+    Ok((applied, counts))
 }
 
-/// Fetch one item for indexing: `None` when gone, invalidated, or unreadable
-/// (nothing to derive from).
+/// Fetch one item for indexing: `Gone` when it vanished, `Lost` when its
+/// content cannot be opened, and the item itself when it opened.
 ///
-/// An unreadable row is skipped rather than failing the rebuild. That covers a
-/// legacy opaque envelope, a content version this build cannot read, a damaged
+/// A lost row is counted, never retried and never fatal. That covers a legacy
+/// opaque envelope, a content version this build cannot read, a damaged
 /// ciphertext, and a crypto-shredded subject. A broken backend still errors.
-fn fetch_indexable_item(
+pub(crate) fn fetch_indexable_item(
     store: &dyn Store,
     bank: &str,
     id: &str,
-) -> Result<Option<clio_types::MemoryItem>, AmError> {
+) -> Result<Fetched, AmError> {
     match store.get_memory_item(bank, id) {
-        Ok(item) => Ok(item),
-        Err(e) if clio_store::is_unreadable_content(&e) => Ok(None),
-        Err(e) => Err(e),
+        Ok(Some(item)) => Ok(Fetched::Item(Box::new(item))),
+        Ok(None) => Ok(Fetched::Gone),
+        Err(e) => match classify_row_loss(&e) {
+            Some(loss) => Ok(Fetched::Lost(loss)),
+            None => Err(e),
+        },
     }
 }
 

@@ -45,10 +45,11 @@ pub(crate) struct TripleSeal<'a> {
 /// are the plaintext identity key and are not part of the sealed body.
 pub(crate) fn seal_object(
     kms: &dyn DekProvider,
+    row_id: &str,
     subject_id: &str,
     object: &str,
 ) -> Result<String, AmError> {
-    let envelope = kms.encrypt(subject_id, object.as_bytes())?;
+    let envelope = kms.encrypt("triple.object", row_id, subject_id, object.as_bytes())?;
     Ok(envelope.to_storage_string())
 }
 
@@ -60,12 +61,16 @@ pub(crate) fn seal_object(
 /// last case is the compliance path working as specified: after a
 /// verified erasure the value is permanently unrecoverable, so callers that
 /// must keep serving reads treat it as unreadable rather than failing.
-pub(crate) fn open_object(kms: &dyn DekProvider, cipher: &str) -> Result<String, AmError> {
+pub(crate) fn open_object(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: &str,
+) -> Result<String, AmError> {
     if cipher.is_empty() {
         return Err(missing_object());
     }
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(&envelope)?;
+    let bytes = kms.decrypt("triple.object", row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| unreadable_object("triple value is not valid UTF-8"))
 }
 
@@ -78,21 +83,23 @@ pub(crate) fn open_object(kms: &dyn DekProvider, cipher: &str) -> Result<String,
 /// real assertion as a blank one.
 pub(crate) fn open_optional_object(
     kms: &dyn DekProvider,
+    row_id: &str,
     cipher: Option<&str>,
 ) -> Result<String, AmError> {
-    open_object(kms, cipher.unwrap_or_default())
+    open_object(kms, row_id, cipher.unwrap_or_default())
 }
 
 /// Whether one sealed row's object is the wanted object. With no object wanted,
 /// every row matches. Both backends compare through this, so the rule is one.
 pub(crate) fn object_matches(
     kms: &dyn DekProvider,
+    row_id: &str,
     cipher: Option<&str>,
     wanted: Option<&str>,
 ) -> Result<bool, AmError> {
     match wanted {
         None => Ok(true),
-        Some(wanted) => Ok(open_optional_object(kms, cipher)? == wanted),
+        Some(wanted) => Ok(open_optional_object(kms, row_id, cipher)? == wanted),
     }
 }
 
@@ -119,10 +126,10 @@ mod tests {
     #[test]
     fn value_is_sealed_under_the_subject_and_opens_back() {
         let kms = LocalDevKms::new();
-        let cipher = seal_object(&kms, "alice", "host:db.example.com:5432").unwrap();
+        let cipher = seal_object(&kms, "edge-1", "alice", "host:db.example.com:5432").unwrap();
         assert!(!cipher.contains("db.example.com"));
         assert_eq!(
-            open_object(&kms, &cipher).unwrap(),
+            open_object(&kms, "edge-1", &cipher).unwrap(),
             "host:db.example.com:5432"
         );
     }
@@ -130,24 +137,34 @@ mod tests {
     #[test]
     fn a_tampered_value_body_does_not_authenticate() {
         let kms = LocalDevKms::new();
-        let cipher = seal_object(&kms, "alice", "hunter2").unwrap();
+        let cipher = seal_object(&kms, "edge-1", "alice", "hunter2").unwrap();
         let mut envelope = CiphertextEnvelope::from_storage_string(&cipher).unwrap();
         // Flip one base64 character of the ciphertext.
         let first = envelope.ciphertext_b64.remove(0);
         envelope
             .ciphertext_b64
             .insert(0, if first == 'A' { 'B' } else { 'A' });
-        let err = open_object(&kms, &envelope.to_storage_string()).unwrap_err();
+        let err = open_object(&kms, "edge-1", &envelope.to_storage_string()).unwrap_err();
         assert_eq!(err.code, ErrorCode::Forbidden);
         assert!(crate::is_unreadable_content(&err), "{err:?}");
     }
 
     #[test]
+    fn a_value_copied_to_another_edge_row_does_not_open() {
+        let kms = LocalDevKms::new();
+        let a = seal_object(&kms, "edge-a", "alice", "alpha").unwrap();
+        let b = seal_object(&kms, "edge-b", "alice", "beta").unwrap();
+        assert_eq!(open_object(&kms, "edge-a", &a).unwrap(), "alpha");
+        assert!(open_object(&kms, "edge-b", &a).is_err());
+        assert!(open_object(&kms, "edge-a", &b).is_err());
+    }
+
+    #[test]
     fn a_shredded_subject_leaves_the_value_unrecoverable() {
         let kms = LocalDevKms::new();
-        let cipher = seal_object(&kms, "alice", "hunter2").unwrap();
+        let cipher = seal_object(&kms, "edge-1", "alice", "hunter2").unwrap();
         kms.destroy_dek("alice").unwrap();
-        let err = open_object(&kms, &cipher).unwrap_err();
+        let err = open_object(&kms, "edge-1", &cipher).unwrap_err();
         assert_eq!(err.code, ErrorCode::ErasedSubject);
     }
 
@@ -155,19 +172,21 @@ mod tests {
     fn an_absent_or_malformed_body_is_unreadable_content() {
         let kms = LocalDevKms::new();
         assert_eq!(
-            open_object(&kms, "").unwrap_err().code,
+            open_object(&kms, "edge-1", "").unwrap_err().code,
             ErrorCode::UnreadableContent
         );
         assert_eq!(
-            open_object(&kms, "not-an-envelope").unwrap_err().code,
+            open_object(&kms, "edge-1", "not-an-envelope")
+                .unwrap_err()
+                .code,
             ErrorCode::UnreadableContent
         );
         let non_utf8 = kms
-            .encrypt("alice", &[0xff, 0xfe])
+            .encrypt("triple.object", "edge-1", "alice", &[0xff, 0xfe])
             .unwrap()
             .to_storage_string();
         assert_eq!(
-            open_object(&kms, &non_utf8).unwrap_err().code,
+            open_object(&kms, "edge-1", &non_utf8).unwrap_err().code,
             ErrorCode::UnreadableContent
         );
     }

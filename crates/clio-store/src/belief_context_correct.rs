@@ -65,14 +65,19 @@ impl SqliteStore {
                 .am("belief correct lookup")?;
             let (subject_id, prior_cipher) =
                 row.ok_or_else(|| crate::belief_tx::belief_not_found(belief_id))?;
-            let prior_plain = open_belief_context(self.kms().as_ref(), prior_cipher.as_deref());
+            let prior_plain =
+                open_belief_context(self.kms().as_ref(), belief_id, prior_cipher.as_deref());
             // Hash-only prior/new stats: the prior sealed cipher never
             // enters the audit row, so the prior context is unrecoverable.
             let detail =
                 belief_context_correction_detail(prior_plain.as_deref(), new_context, reason);
-            let new_cipher =
-                seal_belief_context(self.kms().as_ref(), &subject_id, Some(new_context))?
-                    .expect("sealing a present context yields a cipher");
+            let new_cipher = seal_belief_context(
+                self.kms().as_ref(),
+                belief_id,
+                &subject_id,
+                Some(new_context),
+            )?
+            .expect("sealing a present context yields a cipher");
             // A correction is a change the change feed must see: bump the row's
             // change stamp so peers replicate the corrected context (the ISO
             // stamp keeps the same ordering axis as the confidence-entry times).
@@ -135,14 +140,19 @@ impl PostgresStore {
                 .map(|r| (r.get(0), r.get(1)));
             let (subject_id, prior_cipher) =
                 row.ok_or_else(|| crate::belief_tx::belief_not_found(belief_id))?;
-            let prior_plain = open_belief_context(self.kms().as_ref(), prior_cipher.as_deref());
+            let prior_plain =
+                open_belief_context(self.kms().as_ref(), belief_id, prior_cipher.as_deref());
             // Hash-only prior/new stats: the prior sealed cipher never
             // enters the audit row, so the prior context is unrecoverable.
             let detail =
                 belief_context_correction_detail(prior_plain.as_deref(), new_context, reason);
-            let new_cipher =
-                seal_belief_context(self.kms().as_ref(), &subject_id, Some(new_context))?
-                    .expect("sealing a present context yields a cipher");
+            let new_cipher = seal_belief_context(
+                self.kms().as_ref(),
+                belief_id,
+                &subject_id,
+                Some(new_context),
+            )?
+            .expect("sealing a present context yields a cipher");
             // A correction is a change the change feed must see: bump the row's
             // change stamp so peers replicate the corrected context (the ISO
             // stamp keeps the same ordering axis as the confidence-entry times).
@@ -179,3 +189,7 @@ impl PostgresStore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "belief_context_correct_tests.rs"]
+mod belief_context_correct_tests;

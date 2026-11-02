@@ -119,8 +119,11 @@ impl SqliteStore {
                     .optional()
                     .am("audit trail revision read")?;
                 if let Some((mut revision, cipher)) = row {
-                    revision.context =
-                        crate::item_persist::open_context(self.kms().as_ref(), cipher.as_deref());
+                    revision.context = crate::item_persist::open_context(
+                        self.kms().as_ref(),
+                        id,
+                        cipher.as_deref(),
+                    );
                     trail.revisions.push(revision);
                 }
             }
@@ -327,3 +330,7 @@ fn in_clause(n: usize) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+#[path = "sqlite_audit_tests.rs"]
+mod sqlite_audit_tests;

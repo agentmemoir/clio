@@ -137,6 +137,29 @@ fn postgres_adds_the_copy_custody_columns_and_is_idempotent() {
     );
 }
 
+/// A converged table needs no write, so convergence succeeds on a read-only
+/// connection. Any `ALTER TABLE` there fails with `READ_ONLY_SQL_TRANSACTION`,
+/// which is the refusal an open on a current schema must never reach.
+#[test]
+fn postgres_a_converged_table_needs_no_write() {
+    let _shared = crate::lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let mut admin = crate::pg_tls::connect(&url).expect("admin connect");
+    let db = ScratchDatabase::create(&mut admin, "readonly");
+    drop(admin);
+    let writable = url_for_database(&db.name);
+    let mut client = crate::pg_tls::connect(&writable).expect("scratch connect");
+    client
+        .batch_execute("CREATE TABLE export_destinations (copy_digest text, receiver text);")
+        .expect("create the converged table");
+    drop(client);
+    let mut readonly = crate::pg_tls::connect(&crate::db_url::postgres_read_only_url(&writable))
+        .expect("read-only connect");
+    converge_pg(&mut readonly).expect("a converged table needs no DDL");
+}
+
 /// A database without the table is a no-op: the slot DDL declares the columns
 /// itself on a fresh database.
 #[test]

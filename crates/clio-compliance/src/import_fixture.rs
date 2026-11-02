@@ -393,6 +393,16 @@ impl Harness {
 }
 
 pub(super) fn write_bundle(entities: &ExportEntities, mode: ExportContentMode) -> TempBundle {
+    write_bundle_for_bank(entities, mode, EXPORTED_BANK)
+}
+
+/// Bundle writer for a caller-chosen manifest bank, needed by `ciphertext_backup`
+/// restores, which are accepted only when the manifest names the target bank.
+pub(super) fn write_bundle_for_bank(
+    entities: &ExportEntities,
+    mode: ExportContentMode,
+    bank: &str,
+) -> TempBundle {
     let envelope = BundleEnvelope {
         format: BUNDLE_FORMAT.to_owned(),
         format_version: BUNDLE_FORMAT_VERSION,
@@ -400,7 +410,7 @@ pub(super) fn write_bundle(entities: &ExportEntities, mode: ExportContentMode) -
         manifest: CompletenessManifest {
             format_version: BUNDLE_FORMAT_VERSION,
             content_mode: mode,
-            bank_ids: vec![EXPORTED_BANK.to_owned()],
+            bank_ids: vec![bank.to_owned()],
             counts_by_type: entities.counts_by_type(),
             counts_by_category: vec![],
             content_sha256: entities_checksum(entities),

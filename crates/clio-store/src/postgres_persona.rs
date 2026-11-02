@@ -29,7 +29,7 @@ use crate::item_persist::require_actor;
 use crate::migrate::{IntoAmError, now_iso};
 use crate::persona_store::{
     PersonaStore, open_persona_context, open_persona_value, persona_require_nonempty,
-    seal_persona_context, seal_persona_value, unique_persona_id,
+    preference_row_id, seal_persona_context, seal_persona_value, stable_row_id, unique_persona_id,
 };
 use crate::postgres::PostgresStore;
 use clio_types::{AmError, PersonaDocument, PersonaPreference, PersonaStableEntry};
@@ -82,9 +82,13 @@ impl PostgresStore {
         require_actor(actor)?;
         persona_require_nonempty(&entry.bank_id, "bank_id")?;
         let dek_ref = self.kms().ensure_dek(&entry.bank_id)?;
-        let cipher = seal_persona_value(self.kms().as_ref(), &entry.bank_id, &entry.value)?;
+        let id = unique_persona_id("pse", &entry.bank_id, &entry.key);
+        let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of, &id);
+        let cipher =
+            seal_persona_value(self.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
         let context_cipher = seal_persona_context(
             self.kms().as_ref(),
+            &row_id,
             &entry.bank_id,
             entry.context.as_deref(),
         )?;
@@ -96,6 +100,7 @@ impl PostgresStore {
                 &mut tx,
                 self.kms().as_ref(),
                 entry,
+                &id,
                 &cipher,
                 &dek_ref,
                 context_cipher.as_deref(),
@@ -113,8 +118,12 @@ impl PostgresStore {
     ) -> Result<(), AmError> {
         pref.validate()?;
         require_actor(actor)?;
-        let context_cipher =
-            seal_persona_context(self.kms().as_ref(), &pref.bank_id, pref.context.as_deref())?;
+        let context_cipher = seal_persona_context(
+            self.kms().as_ref(),
+            &preference_row_id(&pref.bank_id, &pref.key),
+            &pref.bank_id,
+            pref.context.as_deref(),
+        )?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("persona preference begin")?;
             // The shared tx helper emits the audit row (a supplied
@@ -164,9 +173,10 @@ impl PostgresStore {
             })?
             .map(|r| {
                 let context_cipher: Option<String> = r.get(8);
+                let key: String = r.get(0);
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key: r.get(0),
+                    key: key.clone(),
                     value: r.get(1),
                     trend: r.get(2),
                     confidence: r.get(3),
@@ -174,7 +184,11 @@ impl PostgresStore {
                     source_ref: r.get(5),
                     admission_score: r.get(6),
                     as_of: r.get(7),
-                    context: open_persona_context(self.kms().as_ref(), context_cipher.as_deref()),
+                    context: open_persona_context(
+                        self.kms().as_ref(),
+                        &preference_row_id(bank_id, &key),
+                        context_cipher.as_deref(),
+                    ),
                 }
             }))
     }
@@ -190,7 +204,7 @@ impl PostgresStore {
             client
                 .query(
                     "SELECT value_cipher, context_cipher, confidence::float8, source, source_ref,
-                            admission_score::float8, valid_from, valid_until
+                            admission_score::float8, valid_from, valid_until, id
                      FROM persona_stable_entries
                      WHERE bank_id = $1 AND attr_key = $2
                      ORDER BY valid_from, id",
@@ -202,16 +216,23 @@ impl PostgresStore {
             .map(|r| -> Result<PersonaStableEntry, AmError> {
                 let cipher: String = r.get(0);
                 let context_cipher: Option<String> = r.get(1);
+                let valid_from: String = r.get(6);
+                let id: String = r.get(8);
+                let row_id = stable_row_id(bank_id, key, &valid_from, &id);
                 Ok(PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
                     key: key.to_owned(),
-                    value: open_persona_value(self.kms().as_ref(), &cipher)?,
+                    value: open_persona_value(self.kms().as_ref(), &row_id, &cipher)?,
                     confidence: r.get(2),
                     source: r.get(3),
                     source_ref: r.get(4),
-                    context: open_persona_context(self.kms().as_ref(), context_cipher.as_deref()),
+                    context: open_persona_context(
+                        self.kms().as_ref(),
+                        &row_id,
+                        context_cipher.as_deref(),
+                    ),
                     admission_score: r.get(5),
-                    as_of: r.get(6),
+                    as_of: valid_from,
                     valid_until: r.get(7),
                 })
             })
@@ -241,7 +262,7 @@ impl PostgresStore {
             client
                 .query(
                     "SELECT attr_key, value_cipher, context_cipher, confidence::float8, source,
-                            source_ref, admission_score::float8, valid_from
+                            source_ref, admission_score::float8, valid_from, id
                      FROM persona_stable_entries
                      WHERE bank_id = $1 AND valid_until IS NULL
                      ORDER BY attr_key",
@@ -253,16 +274,24 @@ impl PostgresStore {
             .map(|r| -> Result<PersonaStableEntry, AmError> {
                 let cipher: String = r.get(1);
                 let context_cipher: Option<String> = r.get(2);
+                let key: String = r.get(0);
+                let as_of: String = r.get(7);
+                let id: String = r.get(8);
+                let row_id = stable_row_id(bank_id, &key, &as_of, &id);
                 Ok(PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
-                    key: r.get(0),
-                    value: open_persona_value(self.kms().as_ref(), &cipher)?,
+                    key: key.clone(),
+                    value: open_persona_value(self.kms().as_ref(), &row_id, &cipher)?,
                     confidence: r.get(3),
                     source: r.get(4),
                     source_ref: r.get(5),
-                    context: open_persona_context(self.kms().as_ref(), context_cipher.as_deref()),
+                    context: open_persona_context(
+                        self.kms().as_ref(),
+                        &row_id,
+                        context_cipher.as_deref(),
+                    ),
                     admission_score: r.get(6),
-                    as_of: r.get(7),
+                    as_of,
                     valid_until: None,
                 })
             })
@@ -286,9 +315,10 @@ impl PostgresStore {
             .into_iter()
             .map(|r| {
                 let context_cipher: Option<String> = r.get(8);
+                let key: String = r.get(0);
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key: r.get(0),
+                    key: key.clone(),
                     value: r.get(1),
                     trend: r.get(2),
                     confidence: r.get(3),
@@ -296,7 +326,11 @@ impl PostgresStore {
                     source_ref: r.get(5),
                     admission_score: r.get(6),
                     as_of: r.get(7),
-                    context: open_persona_context(self.kms().as_ref(), context_cipher.as_deref()),
+                    context: open_persona_context(
+                        self.kms().as_ref(),
+                        &preference_row_id(bank_id, &key),
+                        context_cipher.as_deref(),
+                    ),
                 }
             })
             .collect())

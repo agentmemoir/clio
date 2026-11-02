@@ -1,0 +1,1 @@
+Opening a current PostgreSQL schema through a read-only connection no longer fails: the export-destination column convergence reads the columns first and runs no DDL when both copy-custody columns already exist.

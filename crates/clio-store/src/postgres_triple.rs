@@ -237,9 +237,13 @@ impl PostgresStore {
             ));
         }
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
-        let object_cipher =
-            crate::triple_cipher::seal_object(self.kms().as_ref(), &item.subject_id, &edge.object)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
+        let object_cipher = crate::triple_cipher::seal_object(
+            self.kms().as_ref(),
+            &edge.id,
+            &item.subject_id,
+            &edge.object,
+        )?;
         let seal = TripleSeal {
             carrier: &cipher,
             object: &object_cipher,

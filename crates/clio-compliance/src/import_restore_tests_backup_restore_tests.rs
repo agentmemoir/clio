@@ -161,12 +161,14 @@ fn backup_bundle_of_two_beliefs_restores_into_a_fresh_store() {
     assert_ne!(propositions[0], propositions[1]);
     assert_triple_placeholders_distinct(&envelope.entities.triples);
 
-    // Restore into a fresh bank.
+    // Restore into a fresh store's same bank: an opaque backup is accepted
+    // only when the manifest names the target bank.
     let h = Harness::new();
-    let report = import(&h.args(&h.ctx(), h.policy(), dest.as_str(), false, false, None))
+    let restore_ctx = OpContext::new(Bank::new(bank.clone()), Actor::Agent);
+    let report = import(&h.args(&restore_ctx, h.policy(), dest.as_str(), false, false, None))
         .expect("a ciphertext_backup bundle of two beliefs must restore cleanly");
     assert_eq!(report.would_create, 4, "two opaque carriers + two beliefs");
-    let beliefs = h.store.list_beliefs(&h.bank).unwrap();
+    let beliefs = h.store.list_beliefs(&bank).unwrap();
     assert_eq!(beliefs.len(), 2, "both beliefs restore");
     let mut keys: Vec<String> = beliefs
         .iter()

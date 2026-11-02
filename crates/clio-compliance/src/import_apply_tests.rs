@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use clio_store::BatchWrite;
-use clio_types::{Actor, Bank, OpContext};
+use clio_types::{Actor, Bank, ErrorCode, OpContext};
 
 use super::{Planner, import_id};
 use crate::bundle::ExportContentMode;
@@ -39,6 +39,23 @@ fn id_derivation_is_deterministic_across_calls() {
     let again = import_id("bank-b", "bank-a", "itm-1").into_owned();
     assert_eq!(first, again);
     assert_eq!(first, import_id("bank-b", "bank-a", "itm-1"));
+}
+
+#[test]
+fn cross_bank_opaque_import_is_refused() {
+    let h = Harness::new();
+    let bundle = write_bundle(&h.opaque_entities(), ExportContentMode::CiphertextBackup);
+    let value: serde_json::Value = serde_json::from_str(&bundle.text()).expect("bundle json");
+    let parsed = crate::bundle::parse_bundle(&value).expect("bundle parses");
+    let ctx = h.ctx();
+    let args = h.args(&ctx, h.policy(), bundle.path(), false, false, None);
+    let mut planner = Planner::new(&args, &parsed.envelope);
+    let err = planner
+        .plan_opaque()
+        .expect_err("cross-bank opaque restore must fail closed");
+    assert_eq!(err.code, ErrorCode::InvalidArgument, "{err:?}");
+    assert!(err.message.contains("opaque item"), "{err:?}");
+    assert!(planner.staged.is_empty());
 }
 
 /// The bundle's rows exist only in the exported bank, so the target-bank plan

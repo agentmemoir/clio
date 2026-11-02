@@ -64,6 +64,7 @@ mod copy_inventory;
 mod copy_inventory_converge;
 mod db_url;
 mod dek;
+mod dek_row;
 mod dek_slots;
 mod derived_tables;
 mod destination_custody;
@@ -228,7 +229,7 @@ pub use compliance_store::{
 pub use content_read_errors::is_unreadable_content;
 pub use continuous::ContinuousStore;
 pub use copy_inventory::{CopyInventoryRow, CopyInventoryStore};
-pub use dek::{CiphertextEnvelope, DekProvider, LocalDevKms};
+pub use dek::{CiphertextEnvelope, DekProvider, LocalDevKms, composite_row_id};
 pub use derived_tables::{TableDataClass, table_data_class};
 pub use destination_custody::{DestinationCustodyRow, DestinationCustodyStore};
 pub use distill_intent::DistillIntent;

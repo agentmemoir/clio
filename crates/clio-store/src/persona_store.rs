@@ -127,13 +127,29 @@ pub(crate) fn unique_persona_id(prefix: &str, bank_id: &str, key: &str) -> Strin
     format!("{prefix}-{bank_id}-{key}-{nanos}-{seq}")
 }
 
+/// Row identity for one stored version of a stable persona entry.
+///
+/// The stored row id is part of the identity: `valid_from` alone is not unique
+/// when two writes share one `as_of`, so it cannot separate their ciphertexts.
+pub(crate) fn stable_row_id(bank_id: &str, key: &str, as_of: &str, id: &str) -> String {
+    crate::dek::composite_row_id(&["pse", bank_id, key, as_of, id])
+}
+
+/// Row identity for one preference row.
+pub(crate) fn preference_row_id(bank_id: &str, key: &str) -> String {
+    crate::dek::composite_row_id(&["ppf", bank_id, key])
+}
+
 /// Seal a persona value string under the bank's DEK (subject id = bank id).
 pub(crate) fn seal_persona_value(
     kms: &dyn DekProvider,
+    row_id: &str,
     bank_id: &str,
     value: &str,
 ) -> Result<String, AmError> {
-    Ok(kms.encrypt(bank_id, value.as_bytes())?.to_storage_string())
+    Ok(kms
+        .encrypt("persona.value", row_id, bank_id, value.as_bytes())?
+        .to_storage_string())
 }
 
 /// Seal an optional persona `context` string under the subject's DEK (for
@@ -147,7 +163,8 @@ pub(crate) fn seal_persona_value(
 /// Invalid context (empty or over `CONTEXT_MAX_BYTES`) or crypto failures.
 pub(crate) fn seal_persona_context(
     kms: &dyn DekProvider,
-    subject: &str,
+    row_id: &str,
+    bank_id: &str,
     context: Option<&str>,
 ) -> Result<Option<String>, AmError> {
     match context {
@@ -155,7 +172,8 @@ pub(crate) fn seal_persona_context(
         Some(text) => {
             validate_context(text)?;
             Ok(Some(
-                kms.encrypt(subject, text.as_bytes())?.to_storage_string(),
+                kms.encrypt("persona.context", row_id, bank_id, text.as_bytes())?
+                    .to_storage_string(),
             ))
         }
     }
@@ -167,17 +185,25 @@ pub(crate) fn seal_persona_context(
 /// unreadable body (for example a crypto-shredded subject). Persona reads must
 /// keep working after erasure, so decryption failures are not errors here —
 /// the same tolerance as [`crate::item_persist::open_context`].
-pub(crate) fn open_persona_context(kms: &dyn DekProvider, cipher: Option<&str>) -> Option<String> {
+pub(crate) fn open_persona_context(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: Option<&str>,
+) -> Option<String> {
     let cipher = cipher.filter(|s| !s.is_empty())?;
     let envelope = CiphertextEnvelope::from_storage_string(cipher).ok()?;
-    let bytes = kms.decrypt(&envelope).ok()?;
+    let bytes = kms.decrypt("persona.context", row_id, &envelope).ok()?;
     String::from_utf8(bytes).ok()
 }
 
 /// Open persona value ciphertext back into plaintext.
-pub(crate) fn open_persona_value(kms: &dyn DekProvider, cipher: &str) -> Result<String, AmError> {
+pub(crate) fn open_persona_value(
+    kms: &dyn DekProvider,
+    row_id: &str,
+    cipher: &str,
+) -> Result<String, AmError> {
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(&envelope)?;
+    let bytes = kms.decrypt("persona.value", row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| {
         AmError::new(
             ErrorCode::Internal,
@@ -329,43 +355,66 @@ mod tests {
         );
         // DEK seal/open roundtrip, plus the non-UTF-8 plaintext boundary.
         let kms = crate::dek::LocalDevKms::new();
-        let cipher = seal_persona_value(&kms, "bank", "plain-value").expect("seal");
+        let row = stable_row_id("bank", "key", "2026-01-01", "row-a");
+        let cipher = seal_persona_value(&kms, &row, "bank", "plain-value").expect("seal");
         assert_eq!(
-            open_persona_value(&kms, &cipher).expect("open"),
+            open_persona_value(&kms, &row, &cipher).expect("open"),
             "plain-value"
         );
         let bad = kms
-            .encrypt("bank", &[0xFF_u8, 0xFE])
+            .encrypt("persona.value", &row, "bank", &[0xFF_u8, 0xFE])
             .expect("encrypt raw bytes")
             .to_storage_string();
         // Non-UTF-8 sealed bytes keep persona's own mapping; only the envelope
         // decode is classified as unreadable content.
         assert_eq!(
-            open_persona_value(&kms, &bad).unwrap_err().code,
+            open_persona_value(&kms, &row, &bad).unwrap_err().code,
             ErrorCode::Internal
         );
         assert_eq!(
-            open_persona_value(&kms, "not-json").unwrap_err().code,
+            open_persona_value(&kms, &row, "not-json").unwrap_err().code,
             ErrorCode::UnreadableContent
         );
         // Optional context seal/open: None stays None, valid round-trips,
         // invalid fails closed, and unreadable ciphertext opens to None.
-        assert_eq!(seal_persona_context(&kms, "bank", None).unwrap(), None);
-        let sealed = seal_persona_context(&kms, "bank", Some("why recorded"))
+        assert_eq!(
+            seal_persona_context(&kms, &row, "bank", None).unwrap(),
+            None
+        );
+        let sealed = seal_persona_context(&kms, &row, "bank", Some("why recorded"))
             .expect("seal context")
             .expect("some cipher");
         assert!(!sealed.contains("why recorded"));
         assert_eq!(
-            open_persona_context(&kms, Some(&sealed)).as_deref(),
+            open_persona_context(&kms, &row, Some(&sealed)).as_deref(),
             Some("why recorded")
         );
-        assert_eq!(open_persona_context(&kms, None), None);
-        assert_eq!(open_persona_context(&kms, Some("")), None);
-        assert_eq!(open_persona_context(&kms, Some("not-json")), None);
-        let err = seal_persona_context(&kms, "bank", Some("")).unwrap_err();
+        assert_eq!(open_persona_context(&kms, &row, None), None);
+        assert_eq!(open_persona_context(&kms, &row, Some("")), None);
+        assert_eq!(open_persona_context(&kms, &row, Some("not-json")), None);
+        let err = seal_persona_context(&kms, &row, "bank", Some("")).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidArgument);
-        let err = seal_persona_context(&kms, "bank", Some(&"a".repeat(4097))).unwrap_err();
+        let err = seal_persona_context(&kms, &row, "bank", Some(&"a".repeat(4097))).unwrap_err();
         assert_eq!(err.code, ErrorCode::OutOfRange);
+        // Version and table identity: an older version's value and a stable
+        // context do not open as a newer version or as a preference context.
+        let next = stable_row_id("bank", "key", "2027-01-01", "row-b");
+        let value = seal_persona_value(&kms, &row, "bank", "v1").expect("seal value");
+        assert_eq!(
+            open_persona_value(&kms, &next, &value).unwrap_err().code,
+            ErrorCode::Forbidden
+        );
+        // Two stored rows may share one `as_of`; their ids keep the AAD apart.
+        let twin = stable_row_id("bank", "key", "2026-01-01", "row-b");
+        assert_ne!(row, twin);
+        assert_eq!(
+            open_persona_value(&kms, &twin, &value).unwrap_err().code,
+            ErrorCode::Forbidden
+        );
+        assert_eq!(
+            open_persona_context(&kms, &preference_row_id("bank", "key"), Some(&sealed)),
+            None
+        );
     }
 }
 

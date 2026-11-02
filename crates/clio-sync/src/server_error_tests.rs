@@ -179,7 +179,9 @@ fn corrupt_sealed_envelope_is_a_server_error() {
 fn sealed_content_that_is_not_json_is_a_server_error() {
     let (server, store, kms) = serve_with_kms("b1", "t1");
     let addr = server.addr().to_owned();
-    let envelope = kms.encrypt("subj", b"not json").expect("encrypt");
+    let envelope = kms
+        .encrypt("test.field", "row", "subj", b"not json")
+        .expect("encrypt");
     store
         .journal_append(&row(
             "m-bad-content",

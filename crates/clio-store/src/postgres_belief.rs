@@ -37,10 +37,15 @@ impl PostgresStore {
     ) -> Result<(), AmError> {
         crate::belief_tx::validate_belief_create(belief, actor)?;
         let dek_ref = self.kms().ensure_dek(&belief.subject_id)?;
-        let cipher =
-            seal_proposition(self.kms().as_ref(), &belief.subject_id, &belief.proposition)?;
+        let cipher = seal_proposition(
+            self.kms().as_ref(),
+            &belief.id,
+            &belief.subject_id,
+            &belief.proposition,
+        )?;
         let context_cipher = seal_belief_context(
             self.kms().as_ref(),
+            &belief.id,
             &belief.subject_id,
             belief.context.as_deref(),
         )?;
@@ -98,7 +103,7 @@ impl PostgresStore {
                     .am("belief context lookup")?
                     .map(|r| r.get(0));
                 let stored = stored.ok_or_else(|| crate::belief_tx::belief_not_found(belief_id))?;
-                if open_belief_context(self.kms().as_ref(), stored.as_deref()).as_deref()
+                if open_belief_context(self.kms().as_ref(), belief_id, stored.as_deref()).as_deref()
                     != Some(context)
                 {
                     return Err(crate::belief_store::context_change_requires_correction());
@@ -143,8 +148,8 @@ impl PostgresStore {
         let context_cipher: Option<String> = row.get(4);
         let created_at: String = row.get(5);
         let context_as_of: Option<String> = row.get(6);
-        let proposition = open_proposition(self.kms().as_ref(), &cipher)?;
-        let context = open_belief_context(self.kms().as_ref(), context_cipher.as_deref());
+        let proposition = open_proposition(self.kms().as_ref(), &id, &cipher)?;
+        let context = open_belief_context(self.kms().as_ref(), &id, context_cipher.as_deref());
         let history = self.belief_history_impl(&bank_id, &id, None)?;
         let updated_at = history
             .last()
