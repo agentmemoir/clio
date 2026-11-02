@@ -11,8 +11,8 @@
 //! - `disable` and `prefer` reaching a server that offers no TLS
 //! - `verify-full` and `encrypt-no-verify` being refused by such a server, and
 //!   not retried
-//! - The probe's version and `vector` report, including a database without the
-//!   extension
+//! - The probe's version, `vector`, and transport report, including a database
+//!   without the extension
 //! - The failures that must not be retried, and the error text one produces
 //!
 //! The shared server uses trust authentication and has no password, so no test
@@ -175,6 +175,18 @@ fn the_probe_reports_the_version_and_the_extension() {
         .unwrap_or_else(|| panic!("unreadable version {:?}", report.server_version));
     assert!(major >= 14, "unexpected server version {major}");
     assert!(report.has_vector, "the compose database installs pgvector");
+    // The version and cipher are present exactly when the connection is
+    // encrypted, so a report cannot claim one half of the TLS answer.
+    assert_eq!(
+        report.tls_version.is_some(),
+        report.tls,
+        "the TLS version is reported exactly when the connection is encrypted"
+    );
+    assert_eq!(
+        report.tls_cipher.is_some(),
+        report.tls,
+        "the cipher is reported exactly when the connection is encrypted"
+    );
 }
 
 /// A database created for one test, dropped when the test ends — including when

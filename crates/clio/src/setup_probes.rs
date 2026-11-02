@@ -65,8 +65,19 @@ pub(crate) fn database_detail(report: &DatabaseReport) -> Result<String, String>
                 .to_owned(),
         );
     }
+    let transport = match (
+        report.tls,
+        report.tls_version.as_deref(),
+        report.tls_cipher.as_deref(),
+    ) {
+        (true, Some(version), Some(cipher)) => {
+            format!("connection encrypted with {version} using {cipher}")
+        }
+        (true, _, _) => "connection encrypted".to_owned(),
+        (false, _, _) => "connection not encrypted".to_owned(),
+    };
     Ok(format!(
-        "connected, PostgreSQL {}, vector extension present",
+        "connected, PostgreSQL {}, vector extension present, {transport}",
         report.server_version
     ))
 }

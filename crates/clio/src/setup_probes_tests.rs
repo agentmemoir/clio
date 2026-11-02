@@ -34,6 +34,9 @@ fn report(version: &str, has_vector: bool) -> DatabaseReport {
     DatabaseReport {
         server_version: version.to_owned(),
         has_vector,
+        tls: false,
+        tls_version: None,
+        tls_cipher: None,
     }
 }
 
@@ -42,7 +45,24 @@ fn a_vector_enabled_database_reports_the_transcript_detail() {
     let detail = database_detail(&report("16.4", true)).expect("a vector-enabled database passes");
     assert_eq!(
         detail,
-        "connected, PostgreSQL 16.4, vector extension present"
+        "connected, PostgreSQL 16.4, vector extension present, connection not encrypted"
+    );
+}
+
+#[test]
+fn an_encrypted_connection_reports_the_negotiated_version_and_cipher() {
+    let detail = database_detail(&DatabaseReport {
+        server_version: "16.4".to_owned(),
+        has_vector: true,
+        tls: true,
+        tls_version: Some("TLSv1.3".to_owned()),
+        tls_cipher: Some("TLS_AES_256_GCM_SHA384".to_owned()),
+    })
+    .expect("a vector-enabled database passes");
+    assert_eq!(
+        detail,
+        "connected, PostgreSQL 16.4, vector extension present, connection encrypted with TLSv1.3 \
+         using TLS_AES_256_GCM_SHA384"
     );
 }
 
