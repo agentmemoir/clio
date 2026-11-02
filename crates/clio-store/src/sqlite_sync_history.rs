@@ -260,3 +260,7 @@ pub(crate) fn failure_by_attempt_sqlite(
     })?;
     raw.map(|f| store.failure_from_raw(f)).transpose()
 }
+
+#[cfg(test)]
+#[path = "sqlite_sync_history_tests.rs"]
+mod sqlite_sync_history_tests;

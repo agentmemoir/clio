@@ -360,3 +360,7 @@ impl HistoryStore for SqliteStore {
         self.triple_history_at_impl(bank_id, subject, predicate, as_of, axis, limit)
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_history_read_tests.rs"]
+mod sqlite_history_read_tests;

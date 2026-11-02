@@ -365,3 +365,7 @@ impl PostgresStore {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "postgres_memory_tests.rs"]
+mod postgres_memory_tests;

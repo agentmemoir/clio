@@ -371,3 +371,7 @@ impl PostgresStore {
         Ok(stored)
     }
 }
+
+#[cfg(test)]
+#[path = "postgres_history_write_tests.rs"]
+mod postgres_history_write_tests;

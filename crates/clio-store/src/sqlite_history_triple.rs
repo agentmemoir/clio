@@ -204,3 +204,7 @@ fn triple_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TripleRowValues> {
         r.get(16)?,
     ))
 }
+
+#[cfg(test)]
+#[path = "sqlite_history_triple_tests.rs"]
+mod sqlite_history_triple_tests;

@@ -330,3 +330,7 @@ fn in_clause(n: usize) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+#[path = "sqlite_audit_tests.rs"]
+mod sqlite_audit_tests;

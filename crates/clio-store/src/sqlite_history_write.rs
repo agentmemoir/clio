@@ -353,3 +353,7 @@ impl SqliteStore {
         Ok(stored)
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_history_write_tests.rs"]
+mod sqlite_history_write_tests;

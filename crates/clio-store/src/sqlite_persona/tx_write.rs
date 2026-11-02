@@ -340,3 +340,7 @@ pub(crate) fn put_preference_state_tx_audited(
         &detail,
     )
 }
+
+#[cfg(test)]
+#[path = "tx_write_tests.rs"]
+mod tx_write_tests;

@@ -385,3 +385,7 @@ impl SqliteStore {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_memory_tests.rs"]
+mod sqlite_memory_tests;

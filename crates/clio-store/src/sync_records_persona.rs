@@ -351,3 +351,7 @@ pub(crate) fn feed_beliefs_sqlite(
         Ok(out)
     })
 }
+
+#[cfg(test)]
+#[path = "sync_records_persona_tests.rs"]
+mod sync_records_persona_tests;

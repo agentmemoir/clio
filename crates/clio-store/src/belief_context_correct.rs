@@ -189,3 +189,7 @@ impl PostgresStore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "belief_context_correct_tests.rs"]
+mod belief_context_correct_tests;

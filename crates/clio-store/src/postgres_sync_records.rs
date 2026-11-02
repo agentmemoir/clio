@@ -410,3 +410,7 @@ pub(crate) fn feed_beliefs_pg(
 #[cfg(test)]
 #[path = "postgres_sync_records_tests.rs"]
 mod postgres_sync_records_tests;
+
+#[cfg(test)]
+#[path = "postgres_sync_records_feed_tests.rs"]
+mod postgres_sync_records_feed_tests;

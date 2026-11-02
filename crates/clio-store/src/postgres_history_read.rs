@@ -424,3 +424,7 @@ impl HistoryStore for PostgresStore {
         self.triple_history_at_impl(bank_id, subject, predicate, as_of, axis, limit)
     }
 }
+
+#[cfg(test)]
+#[path = "postgres_history_read_tests.rs"]
+mod postgres_history_read_tests;
