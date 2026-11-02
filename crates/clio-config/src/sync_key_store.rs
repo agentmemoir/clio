@@ -131,14 +131,17 @@ pub fn generate_with(
             let key = generate_bytes();
             store.set(key.as_slice())?;
             // Not every platform keeps this attribute: macOS reports the write as
-            // unsupported, and Windows keeps only its own three names. So the
-            // value is written and then read back, and an absent attribute is an
-            // unavailable creation time rather than an error. A refused write is
-            // left alone for the same reason a refused key write would be: failing
-            // here would report a generation that succeeded and withhold the key,
-            // which is how a key becomes unrecoverable. The refusal still informs
-            // the operator, because `report_with` reads the same attribute back
-            // and reports what the store actually holds.
+            // unsupported, and the Windows Credential Manager keeps only its own
+            // four names — `target_name`, which is read-only, plus `target_alias`,
+            // `username`, and `comment` — and answers an unknown name as invalid
+            // rather than as unsupported. So the value is written and then read
+            // back, and an absent attribute is an unavailable creation time rather
+            // than an error. A refused write is left alone for the same reason a
+            // refused key write would be: failing here would report a generation
+            // that succeeded and withhold the key, which is how a key becomes
+            // unrecoverable. The refusal still informs the operator, because
+            // `report_with` reads the same attribute back and reports what the
+            // store actually holds.
             let _ = store.set_attribute(CREATED_ATTRIBUTE, &now_utc());
             Ok(LoadedSyncKey::new(key, SyncKeyLocation::Keystore))
         }

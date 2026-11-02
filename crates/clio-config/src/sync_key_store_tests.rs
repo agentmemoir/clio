@@ -33,15 +33,28 @@ use base64::Engine as _;
 use super::*;
 use crate::secret_key::KEY_LEN;
 use crate::secret_key_store::{KeyringStore, NoKeystore, SYNC_ACCOUNT, SYNC_KEY};
-use crate::secret_key_store_test_support::{FakeCredential, store_over_credential};
+use crate::secret_key_store_test_support::{
+    FakeCredential, PlainCredential, store_over_credential,
+};
 use crate::sync_key_rotation::{ARCHIVE_STORE_LABEL, ArchivedSyncKey, append_entry};
 use crate::sync_key_test_support::TempDir;
-use crate::sync_key_value::fingerprint_of_base64;
+use crate::sync_key_value::{CREATED_ATTRIBUTE, fingerprint_of_base64};
 
 /// A store the keystore rung reads through, wired to one credential so a test
 /// can watch what the lifecycle wrote.
 fn keystore_over(credential: &FakeCredential) -> KeyringStore {
     store_over_credential(SYNC_ACCOUNT, SYNC_KEY, credential.clone())
+}
+
+/// The same store over a credential that keeps no attributes: the macOS Keychain
+/// shape, where the key write lands and the attribute write is refused by
+/// `keyring-core`'s default.
+fn keystore_without_attributes(credential: &FakeCredential) -> KeyringStore {
+    store_over_credential(
+        SYNC_ACCOUNT,
+        SYNC_KEY,
+        PlainCredential::without_attributes_over(credential),
+    )
 }
 
 /// One valid archived key: 32 real bytes in standard base64, so the report's
@@ -162,6 +175,40 @@ fn a_generated_keystore_key_reaches_the_injected_entry() {
     assert_eq!(
         credential.secret().expect("stored bytes"),
         key.expose().to_vec()
+    );
+}
+
+#[test]
+fn a_generated_key_survives_a_store_that_refuses_the_creation_attribute() {
+    // The macOS Keychain shape: `keyring-core`'s default `update_attributes`
+    // answers `NotSupportedByStore`, and the sync key discards that refusal on
+    // purpose. Generation must still succeed, because the key is already in the
+    // store and only its creation time is missing.
+    let credential = FakeCredential::empty();
+    let store = keystore_without_attributes(&credential);
+
+    assert!(
+        store
+            .set_attribute(CREATED_ATTRIBUTE, "2026-10-01T00:00:00Z")
+            .is_err(),
+        "the fake must refuse the attribute, or this test proves nothing"
+    );
+
+    let key = generate_with(&store, KeySource::Keystore, None).expect("generate");
+
+    assert_eq!(
+        credential.secret().expect("the key reached the store"),
+        key.expose().to_vec()
+    );
+    let report = report_with(&store, KeySource::Keystore, None).expect("report");
+
+    assert_eq!(
+        report.fingerprint.as_deref(),
+        Some(key.fingerprint().as_str())
+    );
+    assert_eq!(
+        report.created_at, None,
+        "a refused attribute is an unavailable creation time, not an error"
     );
 }
 

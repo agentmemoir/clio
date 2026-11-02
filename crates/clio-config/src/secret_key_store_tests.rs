@@ -29,7 +29,9 @@
 
 use super::*;
 use crate::secret_key::KEY_LEN;
-use crate::secret_key_store_test_support::{FakeCredential, entry_over, err_of, store_over};
+use crate::secret_key_store_test_support::{
+    FakeCredential, entry_over, err_of, hex_of, store_over,
+};
 use clio_types::ErrorCode;
 use keyring_core::api::CredentialApi;
 use std::sync::Arc;
@@ -196,11 +198,15 @@ fn a_store_that_refuses_deletion_says_so() {
 #[test]
 fn no_keystore_failure_message_carries_the_stored_bytes() {
     let wanted = rand::random::<[u8; KEY_LEN]>();
-    // `BadEncoding` holds the stored bytes and `Ambiguous` formats whole
-    // credentials with `Debug`. Those are the two variants that would leak, so
-    // they are the two that must be rendered here.
+    // `BadEncoding` and `BadDataFormat` hold the stored bytes and `Ambiguous`
+    // formats whole credentials with `Debug`. Those are the three variants that
+    // would leak, so they are the three that must be rendered here.
     let leaks = [
         keyring_core::Error::BadEncoding(wanted.to_vec()),
+        keyring_core::Error::BadDataFormat(
+            wanted.to_vec(),
+            Box::new(std::io::Error::other("not a sealed blob")),
+        ),
         keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential(wanted))]),
     ];
 
@@ -228,11 +234,21 @@ fn the_production_store_can_be_built_without_reaching_the_keychain() {
 
 #[test]
 fn every_failure_gets_its_own_wording() {
+    // Every variant `keyring-core` 1.0.1 names, the two data-carrying ones
+    // included, so a variant added in the fourth major cannot land on the
+    // wildcard without a test noticing.
     let shapes = [
         keyring_core::Error::NoEntry,
         keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
         keyring_core::Error::PlatformFailure(Box::new(std::io::Error::other("bus down"))),
         keyring_core::Error::BadEncoding(vec![0xAB; 4]),
+        keyring_core::Error::BadDataFormat(
+            vec![0xAB; 4],
+            Box::new(std::io::Error::other("not a sealed blob")),
+        ),
+        keyring_core::Error::BadStoreFormat(
+            "the store header is not one this build reads".to_owned(),
+        ),
         keyring_core::Error::TooLong("service".to_owned(), 900),
         keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
         keyring_core::Error::NoDefaultStore,
@@ -245,20 +261,15 @@ fn every_failure_gets_its_own_wording() {
     summaries.dedup();
 
     assert_eq!(
+        count, 10,
+        "the test covers every variant the error type names"
+    );
+    assert_eq!(
         summaries.len(),
         count,
         "each failure reads differently, so none is mistaken for another"
     );
     assert!(summaries.contains(&"there is no entry"));
-}
-
-/// Lower-case hex, the encoding a message would most plausibly leak a key in.
-fn hex_of(key: &[u8; KEY_LEN]) -> String {
-    use std::fmt::Write as _;
-    key.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
 }
 
 /// A platform credential whose `Debug` prints its secret, the way a real

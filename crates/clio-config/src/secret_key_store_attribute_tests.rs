@@ -8,6 +8,8 @@
 //!
 //! ## Owns
 //! - The attribute read/write tests, including the store that ignores them
+//! - The three platform shapes: a store that keeps any name, one that keeps none
+//!   (macOS), and one that keeps four and refuses the rest (Windows)
 //! - The test that each key role opens its own account
 //!
 //! ## Does not own
@@ -19,14 +21,16 @@
 //!
 //! These tests run over an in-memory credential, so no test here reaches a real
 //! OS store. The plain credential is the macOS Keychain shape: it answers with no
-//! attributes and reports an attribute write as unsupported.
+//! attributes and reports an attribute write as unsupported. The Windows
+//! credential is the other shape: it keeps four names and answers any other with
+//! an invalid parameter.
 //!
 //! Keep this module focused on attributes and account names.
 
 use super::*;
 use crate::secret_key::KEY_LEN;
 use crate::secret_key_store_test_support::{
-    FakeCredential, PlainCredential, entry_over, err_of, store_over,
+    FakeCredential, PlainCredential, WindowsCredential, entry_over, err_of, hex_of, store_over,
 };
 use std::sync::{Arc, Mutex};
 
@@ -162,5 +166,89 @@ fn reading_attributes_of_a_missing_entry_is_empty_rather_than_a_failure() {
     assert!(
         attributes.is_empty(),
         "an empty credential carries no attributes"
+    );
+}
+
+// ------------------------------------------------------- the Windows shape
+
+#[test]
+fn a_windows_shaped_store_refuses_an_unknown_attribute_name_as_invalid() {
+    // The Windows Credential Manager keeps four names and answers any other with
+    // `Invalid`, not `NotSupportedByStore`. That refusal has to read as an
+    // invalid attribute, and neither the platform error's parameters nor the
+    // stored secret may reach the message.
+    let wanted = rand::random::<[u8; KEY_LEN]>();
+    let store = crate::secret_key_store_test_support::store_over_credential(
+        ACCOUNT,
+        ENCRYPTION_KEY,
+        WindowsCredential::holding(&wanted),
+    );
+
+    let err = err_of(store.set_attribute("created_at", "2026-10-01T00:00:00Z"));
+
+    assert_eq!(err.code, ErrorCode::Internal);
+    assert!(
+        err.message.contains("write an attribute of"),
+        "{}",
+        err.message
+    );
+    assert!(
+        err.message.contains("an entry attribute is invalid"),
+        "an unknown name is an invalid parameter, not an unsupported operation: {}",
+        err.message
+    );
+    let hex = hex_of(&wanted);
+
+    assert!(
+        !err.message.contains(&hex),
+        "the refusal leaked the stored secret: {}",
+        err.message
+    );
+    assert_eq!(
+        store.attributes().expect("read back").get("created_at"),
+        None,
+        "a refused name is not recorded, so the creation time reads back absent"
+    );
+}
+
+#[test]
+fn a_windows_shaped_store_keeps_the_names_it_owns_and_refuses_the_target_name() {
+    let store = crate::secret_key_store_test_support::store_over_credential(
+        ACCOUNT,
+        ENCRYPTION_KEY,
+        WindowsCredential::holding(&[7_u8; KEY_LEN]),
+    );
+
+    store
+        .set_attribute("comment", "written by a test")
+        .expect("the store keeps its three writeable names");
+
+    let attributes = store.attributes().expect("read back");
+
+    assert_eq!(
+        attributes.get("comment").map(String::as_str),
+        Some("written by a test")
+    );
+    assert_eq!(
+        attributes.get("target_name").map(String::as_str),
+        Some("clio.sync-key"),
+        "the target name is readable"
+    );
+
+    let err = err_of(store.set_attribute("target_name", "renamed"));
+
+    assert!(
+        err.message.contains("an entry attribute is invalid"),
+        "the target name is read-only: {}",
+        err.message
+    );
+    assert_eq!(
+        store
+            .attributes()
+            .expect("read back")
+            .get("target_name")
+            .map(String::as_str),
+        Some("clio.sync-key"),
+        "a refused write leaves the target name alone"
     );
 }

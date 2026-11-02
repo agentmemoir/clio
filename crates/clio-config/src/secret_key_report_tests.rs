@@ -19,9 +19,10 @@
 //!
 //! ## Boundary
 //!
-//! The keystore messages here are built from `keyring` error values without an
-//! entry, so no test reaches a real store. The point is the text: a rendered
-//! `keyring` error can carry store contents, and this is where that is proved.
+//! The keystore messages here are built from `keyring_core` error values without
+//! an entry, so no test reaches a real store. The point is the text: a rendered
+//! `keyring_core` error can carry store contents, and this is where that is
+//! proved.
 //!
 //! Keep this module focused on reporting, never on holding the key.
 
@@ -29,22 +30,13 @@ use super::support_tests::*;
 use super::*;
 use crate::secret_key_source::{self, KeySource, write};
 use crate::secret_key_store::{ENCRYPTION_KEY, classify, store_error};
-use crate::secret_key_store_test_support::entry_over;
+use crate::secret_key_store_test_support::{entry_over, hex_of};
 use base64::Engine;
 use keyring_core::api::CredentialApi;
 use std::sync::Arc;
 
 fn loc_err(result: Result<Option<KeyLocation>, AmError>) -> AmError {
     result.expect_err("expected a refusal")
-}
-
-/// Lower-case hex, the encoding a message would most plausibly leak the key in.
-fn hex_of(key: &[u8; KEY_LEN]) -> String {
-    use std::fmt::Write as _;
-    key.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
 }
 
 // -------------------------------------------------------------- key_file_path
@@ -194,15 +186,23 @@ fn no_rendered_output_contains_key_material() {
 #[test]
 fn every_keystore_failure_summary_is_reachable_and_says_something() {
     // The wildcard arm of `classify` is the one arm that cannot be built from
-    // outside the `keyring` crate, so it is the one arm no test reaches. Every
-    // other arm is checked here, which is what keeps the wildcard from quietly
-    // becoming the arm that renders an error object.
+    // outside the `keyring-core` crate, so it is the one arm no test reaches.
+    // Every other arm is checked here, the two data-carrying variants included,
+    // which is what keeps the wildcard from quietly becoming the arm that renders
+    // an error object.
     let wanted = random_key();
     let failures = [
         keyring_core::Error::NoEntry,
         keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
         keyring_core::Error::PlatformFailure(Box::new(std::io::Error::other("bus down"))),
         keyring_core::Error::BadEncoding(wanted.to_vec()),
+        keyring_core::Error::BadDataFormat(
+            wanted.to_vec(),
+            Box::new(std::io::Error::other("not a sealed blob")),
+        ),
+        keyring_core::Error::BadStoreFormat(
+            "the store header is not one this build reads".to_owned(),
+        ),
         keyring_core::Error::TooLong("service".to_owned(), 900),
         keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
         keyring_core::Error::NoDefaultStore,
@@ -223,6 +223,7 @@ fn every_keystore_failure_summary_is_reachable_and_says_something() {
 
     summaries.sort_unstable();
     summaries.dedup();
+    assert_eq!(failures.len(), 10, "every variant the error type names");
     assert_eq!(
         summaries.len(),
         failures.len(),
@@ -331,36 +332,36 @@ fn rendered_output(keys: &[[u8; KEY_LEN]; 2]) -> Vec<String> {
     .expect("fallback");
     out.push(format!("{fell_back:?}"));
 
-    // The keystore's own messages, built without an entry so no store is
-    // reached. `BadEncoding` and `Ambiguous` are the two upstream variants that
-    // carry store contents, so both are rendered here.
-    out.push(store_error("read from", ENCRYPTION_KEY, &keyring_core::Error::NoEntry).message);
-    out.push(
-        store_error(
-            "read from",
-            ENCRYPTION_KEY,
-            &keyring_core::Error::BadEncoding(keystore_key.to_vec()),
-        )
-        .message,
-    );
-    out.push(
-        store_error(
-            "read from",
-            ENCRYPTION_KEY,
-            &keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential(keys[0]))]),
-        )
-        .message,
-    );
-    out.push(
-        store_error(
-            "read from",
-            ENCRYPTION_KEY,
-            &keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
-        )
-        .message,
-    );
+    out.extend(keystore_failure_messages(keystore_key));
 
     out
+}
+
+/// The keystore's own messages, built from error values alone so no store is
+/// reached.
+///
+/// `BadEncoding`, `BadDataFormat`, and `Ambiguous` are the three upstream
+/// variants that carry store contents, so all three are rendered here: this is
+/// the list `no_rendered_output_contains_key_material` scans.
+fn keystore_failure_messages(keystore_key: &[u8; KEY_LEN]) -> Vec<String> {
+    let failures = [
+        keyring_core::Error::NoEntry,
+        keyring_core::Error::BadEncoding(keystore_key.to_vec()),
+        keyring_core::Error::BadDataFormat(
+            keystore_key.to_vec(),
+            Box::new(std::io::Error::other("not a sealed blob")),
+        ),
+        keyring_core::Error::BadStoreFormat(
+            "the store header is not one this build reads".to_owned(),
+        ),
+        keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential(*keystore_key))]),
+        keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
+    ];
+
+    failures
+        .iter()
+        .map(|err| store_error("read from", ENCRYPTION_KEY, err).message)
+        .collect()
 }
 
 fn err_of(result: Result<LoadedKey, AmError>) -> AmError {

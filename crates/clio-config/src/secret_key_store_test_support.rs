@@ -4,13 +4,15 @@
 //! # Responsibility
 //!
 //! This module is responsible for the shared keystore test scaffolding: an
-//! in-memory `keyring` credential with configurable failures and attribute
+//! in-memory `keyring_core` credential with configurable failures and attribute
 //! support, and the wrappers that drive the production [`KeyringStore`] through
 //! it.
 //!
 //! ## Owns
 //! - [`FakeCredential`], an in-memory credential with attribute support
 //! - [`PlainCredential`], a credential whose store keeps no attributes
+//! - [`WindowsCredential`], a credential shaped like the Windows Credential
+//!   Manager's four attribute names
 //! - The factory wiring that keeps every test off the real OS store
 //!
 //! ## Does not own
@@ -79,8 +81,9 @@ impl Failure {
 /// the store wrote.
 ///
 /// This fake keeps named attributes (as the Linux Secret Service does). The
-/// separate [`PlainCredential`] has no attribute support, which is how the
-/// macOS path is exercised.
+/// separate [`PlainCredential`] has no attribute support, which is how the macOS
+/// path is exercised, and [`WindowsCredential`] keeps a fixed set of names, which
+/// is how the Windows path is.
 #[derive(Clone, Default)]
 pub(crate) struct FakeCredential {
     state: Arc<Mutex<FakeState>>,
@@ -281,6 +284,89 @@ impl CredentialApi for PlainCredential {
     }
 }
 
+/// The attribute name the Windows store derives from the entry's specifier, so a
+/// caller may read it but not change it.
+const WINDOWS_TARGET_NAME: &str = "target_name";
+
+/// The three attribute names the Windows Credential Manager accepts writes for.
+const WINDOWS_WRITEABLE: [&str; 3] = ["target_alias", "username", "comment"];
+
+/// A credential shaped like the Windows Credential Manager store.
+///
+/// `windows-native-keyring-store` 1.1.0 keeps four names — `target_name`, which identifies the credential and is read-only, plus `target_alias`, `username`, and `comment` — and refuses any other name with `Error::Invalid(name, reason)`.
+/// That is an invalid parameter rather than an unsupported operation, so it is the third platform shape here beside [`FakeCredential`] (Linux, keeps any name) and [`PlainCredential`] (macOS, keeps none), and it is the shape the sync key's creation time meets on Windows.
+#[derive(Clone)]
+pub(crate) struct WindowsCredential {
+    inner: FakeCredential,
+    target_name: String,
+}
+
+impl WindowsCredential {
+    /// A credential holding `bytes`, with the target name the store would have
+    /// derived for the entry.
+    pub(crate) fn holding(bytes: &[u8]) -> Self {
+        Self {
+            inner: FakeCredential::holding(bytes),
+            target_name: "clio.sync-key".to_owned(),
+        }
+    }
+}
+
+/// The refusal the Windows store gives a name it does not keep.
+///
+/// Only the attribute name reaches the message: the reason is fixed wording, so
+/// nothing the store holds can escape through it.
+fn invalid_attribute(name: &str) -> keyring_core::Error {
+    let reason = if name == WINDOWS_TARGET_NAME {
+        "the target name identifies the credential and cannot be changed"
+    } else {
+        "the Windows Credential Manager keeps no attribute with that name"
+    };
+    keyring_core::Error::Invalid(name.to_owned(), reason.to_owned())
+}
+
+impl CredentialApi for WindowsCredential {
+    fn set_secret(&self, secret: &[u8]) -> keyring_core::Result<()> {
+        self.inner.set_secret(secret)
+    }
+
+    fn get_secret(&self) -> keyring_core::Result<Vec<u8>> {
+        self.inner.get_secret()
+    }
+
+    fn delete_credential(&self) -> keyring_core::Result<()> {
+        self.inner.delete_credential()
+    }
+
+    fn get_attributes(&self) -> keyring_core::Result<HashMap<String, String>> {
+        let mut attributes = self.inner.get_attributes()?;
+        attributes.insert(WINDOWS_TARGET_NAME.to_owned(), self.target_name.clone());
+        Ok(attributes)
+    }
+
+    fn update_attributes(&self, attributes: &HashMap<&str, &str>) -> keyring_core::Result<()> {
+        if let Some(unknown) = attributes
+            .keys()
+            .find(|name| !WINDOWS_WRITEABLE.contains(name))
+        {
+            return Err(invalid_attribute(unknown));
+        }
+        self.inner.update_attributes(attributes)
+    }
+
+    fn get_credential(&self) -> keyring_core::Result<Option<Arc<keyring_core::Credential>>> {
+        Ok(None)
+    }
+
+    fn get_specifiers(&self) -> Option<(String, String)> {
+        None
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 /// The production wrapper, wired to `credential` exactly as it is wired to the OS
 /// store in production: through a `keyring_core` entry.
 pub(crate) fn store_over(credential: &FakeCredential) -> KeyringStore {
@@ -309,4 +395,17 @@ where
 /// Unwrap the refusal from a result that was expected to fail.
 pub(crate) fn err_of(result: Result<impl std::fmt::Debug, AmError>) -> AmError {
     result.expect_err("expected a refusal")
+}
+
+/// Lower-case hex, the encoding a message would most plausibly leak a key in.
+///
+/// Shared because three test modules compare a rendered message against the
+/// bytes the store holds, and one encoding is enough to prove the point.
+pub(crate) fn hex_of(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }

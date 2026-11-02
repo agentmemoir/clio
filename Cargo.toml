@@ -67,6 +67,11 @@ libc = "0.2"
 # and the Linux build needs no system packages. The full client API lives on
 # `keyring-core`, which `clio-config` depends on directly.
 keyring = { version = "4.2", default-features = false, features = ["v1"] }
+# The facade only re-exports a thin `Entry`, so anything that needs the credential
+# trait, the attribute API, or the error type depends on `keyring-core` directly.
+# Pinned to the major the facade is built on, so one copy resolves for every
+# target.
+keyring-core = "1"
 # `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations
 # rusqlite 0.41 moved behind that feature, so `belief_tx`'s `COUNT(*)` read
 # needs no code change.

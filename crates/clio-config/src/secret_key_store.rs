@@ -37,9 +37,13 @@
 // entry in this module is a `keyring_core::Entry`.
 //
 // The Linux store reaches the session bus over pure-Rust `zbus`, so the build
-// links no `libdbus` and runs no `pkg-config`. A headless machine with no Secret
-// Service daemon still gets an error from `get` and takes the key-file path
-// instead.
+// links no `libdbus` and runs no `pkg-config`. That store connects inside
+// `Store::new()`, which the facade runs on the first `Entry::new`, so a headless
+// machine with no Secret Service daemon fails there: no store is installed, and
+// `Entry::new` answers `NoDefaultStore` rather than `get` failing later. The
+// keystore path still refuses — it never redirects the key into a file the
+// operator did not choose — and a machine that never chose the keystore reads
+// the key file instead, because an absent marker means the file store.
 
 use clio_types::{AmError, ErrorCode};
 use std::collections::HashMap;
@@ -100,9 +104,8 @@ pub trait SecretStore {
 
     /// Set one non-secret named attribute on the entry.
     ///
-    /// A store that ignores unsupported attribute names returns `Ok(())` without
-    /// storing anything, because that is what the `keyring-core` defaults do. The
-    /// caller reads the attribute back before believing it was kept.
+    /// The default implementation refuses the write, because `keyring-core`'s default `update_attributes` answers `Error::NotSupportedByStore`: a store with no attribute support cannot record the value, and saying so is the honest answer.
+    /// A caller that tolerates that refusal discards the result on purpose with `let _ =`, which is what the sync key's creation time does, and a store that does support attributes overrides this method.
     ///
     /// # Errors
     /// The store is unreachable, locked, or refused the write.
@@ -114,7 +117,7 @@ pub trait SecretStore {
     }
 }
 
-/// Builds the `keyring` entry every operation goes through.
+/// Builds the `keyring_core` entry every operation goes through.
 ///
 /// The account name is a parameter rather than a captured constant so one
 /// wrapper serves both key roles and a test can prove which account it reached.
@@ -153,12 +156,13 @@ impl SecretStore for NoKeystore {
     }
 }
 
-/// The production [`SecretStore`]: one `keyring` entry per machine.
+/// The production [`SecretStore`]: one `keyring_core` entry per machine.
 ///
 /// The entry is built through an injected factory rather than inline, which is
 /// the second half of the test seam. [`Self::os`] supplies the real OS store; a
 /// test supplies an entry over an in-memory credential and exercises this whole
-/// impl, including the `keyring` error mapping, without any store being touched.
+/// impl, including the `keyring_core` error mapping, without any store being
+/// touched.
 ///
 /// The account name is the only thing that separates the encryption key from the
 /// sync key in the store, so it is carried explicitly and passed to the factory.
@@ -178,8 +182,8 @@ impl KeyringStore {
         }
     }
 
-    /// A store over an arbitrary `keyring` entry, so the wrapper above can be
-    /// tested without an OS store behind it.
+    /// A store over an arbitrary `keyring_core` entry, so the wrapper above can
+    /// be tested without an OS store behind it.
     #[cfg(test)]
     pub(crate) fn over<F>(account: &'static str, what: &'static str, build: F) -> Self
     where
@@ -275,10 +279,13 @@ pub(crate) fn display_name() -> &'static str {
 
 /// A keystore failure as a Clio error, with nothing from the store in the text.
 ///
-/// The `keyring` error is classified rather than rendered. Two of its variants
-/// carry store contents — `BadEncoding` holds the raw bytes and `Ambiguous`
-/// formats whole credentials, secret included — so printing it would put key
-/// material into a message that ends up in logs and on a terminal.
+/// The `keyring_core` error is classified rather than rendered. Three of its
+/// variants can carry store contents — `BadEncoding` and `BadDataFormat` hold the
+/// raw bytes and `Ambiguous` formats whole credentials, secret included — so
+/// printing it would put key material into a message that ends up in logs and on
+/// a terminal. `BadStoreFormat` holds a description of the store rather than the
+/// key, and it is summarised for the same reason: the only text allowed out of
+/// this function is [`classify`]'s fixed wording.
 pub(crate) fn store_error(action: &str, what: &str, err: &keyring_core::Error) -> AmError {
     AmError::new(
         ErrorCode::Internal,
@@ -290,19 +297,22 @@ pub(crate) fn store_error(action: &str, what: &str, err: &keyring_core::Error) -
     )
 }
 
-/// Secret-free summary of a `keyring` failure.
+/// Secret-free summary of a `keyring_core` failure.
 ///
-/// The wildcard arm is required because the upstream enum is
-/// `#[non_exhaustive]`, and it is the one arm no test can reach: an unknown
-/// variant cannot be constructed from outside the crate. It is also the arm that
-/// keeps an unrecognised failure from falling through to a rendered error, so it
-/// is the arm that must never grow a `{err}`.
+/// The wildcard arm is required because the upstream enum is `#[non_exhaustive]`, and it is the one arm no test can reach: an unknown variant cannot be constructed from outside the crate.
+/// Every variant `keyring-core` 1.0.1 does name is enumerated above, including the two that carry data — `BadDataFormat` and `BadStoreFormat` — so neither can fall through to the wildcard by omission.
+/// The wildcard is also the arm that keeps an unrecognised failure from falling through to a rendered error, so it is the arm that must never grow a `{err}`.
 pub(crate) fn classify(err: &keyring_core::Error) -> &'static str {
     match err {
         keyring_core::Error::NoEntry => "there is no entry",
         keyring_core::Error::NoStorageAccess(_) => "the store is locked or refused access",
         keyring_core::Error::PlatformFailure(_) => "the platform store failed",
         keyring_core::Error::BadEncoding(_) => "the stored value is not readable",
+        // The bytes this arm refuses to render are the stored secret blob, and
+        // the platform error beside them can carry the same bytes, so neither is
+        // formatted here.
+        keyring_core::Error::BadDataFormat(_, _) => "the stored entry is in an unexpected format",
+        keyring_core::Error::BadStoreFormat(_) => "the store itself is in an unexpected format",
         keyring_core::Error::TooLong(_, _) => "an entry attribute is too long",
         keyring_core::Error::Invalid(_, _) => "an entry attribute is invalid",
         keyring_core::Error::NoDefaultStore => {

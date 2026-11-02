@@ -26,7 +26,7 @@ keyring = { workspace = true }
 # The entry type and the credential trait this crate implements and injects:
 # keyring 4's facade only re-exports a thin `Entry`, so the full client API and
 # the error type come from here.
-keyring-core = "1"
+keyring-core = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
