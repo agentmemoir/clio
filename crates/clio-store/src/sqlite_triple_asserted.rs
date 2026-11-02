@@ -41,18 +41,18 @@ impl SqliteStore {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT object_ciphertext FROM triples
+                    "SELECT id, object_ciphertext FROM triples
                      WHERE bank_id = ?1 AND subject = ?2 AND predicate = ?3",
                 )
                 .am("triple asserted prepare")?;
             let rows = stmt
                 .query_map(params![bank_id, subject, predicate], |row| {
-                    row.get::<_, Option<String>>(0)
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                 })
                 .am("triple asserted query")?;
             for row in rows {
-                let cipher = row.am("triple asserted row")?;
-                if object_matches(self.kms().as_ref(), cipher.as_deref(), object)? {
+                let (id, cipher) = row.am("triple asserted row")?;
+                if object_matches(self.kms().as_ref(), &id, cipher.as_deref(), object)? {
                     return Ok(true);
                 }
             }

@@ -234,10 +234,10 @@ impl DekProvider for FailEncryptKms {
     fn ensure_dek(&self, subject_id: &str) -> Result<String, AmError> {
         Ok(format!("local:{subject_id}:v1"))
     }
-    fn encrypt(&self, _: &str, _: &[u8]) -> Result<CiphertextEnvelope, AmError> {
+    fn encrypt(&self, _: &str, _: &str, _: &str, _: &[u8]) -> Result<CiphertextEnvelope, AmError> {
         Err(AmError::new(ErrorCode::Internal, "inject encrypt failure"))
     }
-    fn decrypt(&self, _: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(&self, _: &str, _: &str, _: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
         Err(AmError::new(ErrorCode::Forbidden, "no"))
     }
     fn blind_index_key(&self) -> Result<[u8; 32], AmError> {

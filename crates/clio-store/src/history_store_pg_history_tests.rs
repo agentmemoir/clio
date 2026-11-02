@@ -395,7 +395,7 @@ fn postgres_history_erased_subject_fails_closed_and_hides_context() {
         .expect("sealed body still present");
     // Context extraction tolerates the unreadable body: no error, no value.
     assert_eq!(
-        crate::item_persist::open_context(kms.as_ref(), Some(&raw)),
+        crate::item_persist::open_context(kms.as_ref(), "row", Some(&raw)),
         None
     );
     // The record's own sealed columns still fail closed, exactly as before.

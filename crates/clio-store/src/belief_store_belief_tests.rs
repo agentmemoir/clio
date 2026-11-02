@@ -327,7 +327,7 @@ mod tests {
         let bank = unique("bank-utf8");
         let id = unique("bel-utf8");
         let cipher = kms
-            .encrypt("subj-utf8", &[0xff, 0xfe, 0xfd])
+            .encrypt("belief.proposition", &id, "subj-utf8", &[0xff, 0xfe, 0xfd])
             .unwrap()
             .to_storage_string();
         store

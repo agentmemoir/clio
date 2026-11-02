@@ -1,0 +1,1 @@
+Updated the `chacha20poly1305` dependency to 0.11, which moves the AEAD layer to `aead` 0.6 while keeping stored ciphertext and envelope formats unchanged. [Issue #348](https://github.com/agentmemoir/clio/issues/348)

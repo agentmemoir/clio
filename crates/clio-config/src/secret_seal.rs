@@ -164,7 +164,7 @@ pub fn seal_with_key(plain: &str, key: &[u8; KEY_LEN]) -> Result<String, AmError
     let cipher = ChaCha20Poly1305::new(key.into());
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce),
+            &Nonce::from(nonce),
             Payload {
                 msg: plain.as_bytes(),
                 aad: AAD,
@@ -195,10 +195,12 @@ pub fn open_with_key(stored: &str, key: &[u8; KEY_LEN]) -> Result<String, AmErro
         return Err(cipher_failure("open a value whose envelope is truncated"));
     }
     let (nonce, ciphertext) = sealed.split_at(NONCE_LEN);
+    let nonce = Nonce::try_from(nonce)
+        .map_err(|_| cipher_failure("open a value whose envelope is truncated"))?;
     let cipher = ChaCha20Poly1305::new(key.into());
     let plain = cipher
         .decrypt(
-            Nonce::from_slice(nonce),
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad: AAD,

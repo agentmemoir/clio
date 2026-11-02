@@ -45,7 +45,7 @@ const MAX_BELIEF_TRAJECTORY: i64 = 1000;
 /// `(bank, attr_key)` whose change stamp moved past a watermark. The change
 /// stamp is `COALESCE(updated_at, created_at)`.
 const FEED_PERSONA_STABLE_SQL: &str = "SELECT p.attr_key, p.value_cipher, p.context_cipher, \
-  p.confidence, p.source, p.source_ref, p.admission_score, p.valid_from, \
+  p.confidence, p.source, p.source_ref, p.admission_score, p.valid_from, p.id, \
   COALESCE(p.updated_at, p.created_at) FROM persona_stable_entries p \
   WHERE p.bank_id = ?1 AND p.valid_until IS NULL \
   AND (?2 = '1970-01-01T00:00:00Z' OR COALESCE(p.updated_at, p.created_at) > ?2 \
@@ -103,6 +103,7 @@ pub(crate) fn feed_persona_stable_sqlite(
                         r.get::<_, f64>(6)?,
                         r.get::<_, String>(7)?,
                         r.get::<_, String>(8)?,
+                        r.get::<_, String>(9)?,
                     ))
                 },
             )
@@ -118,19 +119,22 @@ pub(crate) fn feed_persona_stable_sqlite(
                 source_ref,
                 admission_score,
                 as_of,
+                id,
                 stamp,
             ) = row.am("sync feed persona stable row")?;
             out.push((
                 stamp,
                 PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value: crate::persona_store::open_persona_value(
                         store.kms().as_ref(),
+                        &crate::persona_store::stable_row_id(bank_id, &key, &as_of, &id),
                         &value_cipher,
                     )?,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        &crate::persona_store::stable_row_id(bank_id, &key, &as_of, &id),
                         context_cipher.as_deref(),
                     ),
                     confidence,
@@ -195,7 +199,7 @@ pub(crate) fn feed_persona_prefs_sqlite(
                 stamp,
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value,
                     trend,
                     confidence,
@@ -203,6 +207,7 @@ pub(crate) fn feed_persona_prefs_sqlite(
                     source_ref,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        &crate::persona_store::preference_row_id(bank_id, &key),
                         context_cipher.as_deref(),
                     ),
                     admission_score,
@@ -317,8 +322,11 @@ pub(crate) fn feed_beliefs_sqlite(
                 })
                 .collect::<Result<Vec<_>, AmError>>()
                 .am("sync feed belief entries parse")?;
-            let proposition =
-                crate::belief_store::open_proposition(store.kms().as_ref(), &proposition_cipher)?;
+            let proposition = crate::belief_store::open_proposition(
+                store.kms().as_ref(),
+                &id,
+                &proposition_cipher,
+            )?;
             let updated_at = history
                 .last()
                 .map(|entry| entry.as_of.clone())
@@ -326,12 +334,13 @@ pub(crate) fn feed_beliefs_sqlite(
             out.push((
                 stamp,
                 BeliefObject {
-                    id,
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     subject_id,
                     proposition,
                     context: crate::belief_store::open_belief_context(
                         store.kms().as_ref(),
+                        &id,
                         context_cipher.as_deref(),
                     ),
                     context_as_of,
@@ -344,3 +353,7 @@ pub(crate) fn feed_beliefs_sqlite(
         Ok(out)
     })
 }
+
+#[cfg(test)]
+#[path = "sync_records_persona_tests.rs"]
+mod sync_records_persona_tests;

@@ -30,10 +30,13 @@
 //! (exact-KNN scale ceiling is accepted for this store generation).
 
 use crate::embed::Embedder;
-use crate::report::{EmbedStatus, IndexStatus, ProcessReport, RebuildReport, RebuildTargets};
+use crate::rebuild::{Fetched, fetch_indexable_item};
+use crate::report::{
+    EmbedStatus, IndexStatus, ProcessReport, RebuildReport, RebuildTargets, RowLoss,
+};
 use crate::worker_observe::ObservingEmbedder;
 use clio_store::{IndexJob, IndexStore, Store, VectorSlot};
-use clio_types::{AmError, ErrorCode, MemoryItem};
+use clio_types::{AmError, ErrorCode};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -63,8 +66,12 @@ enum JobOutcome {
     Applied,
     /// Lexical doc written; no embedder configured for the dense leg.
     LexicalOnly,
-    /// Nothing to index (item gone or a legacy opaque envelope).
+    /// Nothing to index (item gone, or a readable row with no indexable text).
     Skipped,
+    /// The row exists but its content cannot be opened; counted and finished.
+    Unreadable,
+    /// The subject was crypto-shredded; the loss is expected and finished.
+    Erased,
 }
 
 /// Drains the index outbox and rebuilds derived indexes for one backend.
@@ -245,6 +252,14 @@ impl IndexCoordinator {
                     self.index.finish_index_job(&job.bank_id, &job.item_id)?;
                     report.skipped += 1;
                 }
+                Ok(JobOutcome::Unreadable) => {
+                    self.index.finish_index_job(&job.bank_id, &job.item_id)?;
+                    report.unreadable += 1;
+                }
+                Ok(JobOutcome::Erased) => {
+                    self.index.finish_index_job(&job.bank_id, &job.item_id)?;
+                    report.erased += 1;
+                }
                 Err(err) => {
                     self.index
                         .fail_index_job(&job.bank_id, &job.item_id, &err.to_string())?;
@@ -322,11 +337,15 @@ impl IndexCoordinator {
     /// is failed for retry with its lexical row already durable.
     ///
     /// `JobOutcome::Skipped` = nothing to index: item deleted while queued, or
-    /// the row is a legacy-format row restored through the opaque
-    /// ciphertext_backup route with no dual content.
+    /// a readable row with no indexable text. A row whose content cannot be
+    /// opened is now reported as unreadable (or erased) instead of skipped, and
+    /// it is finished the same way, never retried.
     fn process_one(&self, job: &IndexJob) -> Result<JobOutcome, AmError> {
-        let Some(item) = self.fetch_indexable_item(&job.bank_id, &job.item_id)? else {
-            return Ok(JobOutcome::Skipped);
+        let item = match fetch_indexable_item(&*self.store, &job.bank_id, &job.item_id)? {
+            Fetched::Item(item) => item,
+            Fetched::Gone => return Ok(JobOutcome::Skipped),
+            Fetched::Lost(RowLoss::Unreadable) => return Ok(JobOutcome::Unreadable),
+            Fetched::Lost(RowLoss::Erased) => return Ok(JobOutcome::Erased),
         };
         let Some(text) = crate::embed::embed_text(&item) else {
             return Ok(JobOutcome::Skipped);
@@ -351,19 +370,6 @@ impl IndexCoordinator {
             embedding: vector,
         })?;
         Ok(JobOutcome::Applied)
-    }
-
-    /// Fetch one item for indexing: `None` when it is gone, invalidated to a
-    /// deleted state, or unreadable (nothing to derive from).
-    ///
-    /// Same skip rule as `rebuild::fetch_indexable_item`: an unreadable row is
-    /// dropped, a broken backend errors.
-    fn fetch_indexable_item(&self, bank: &str, id: &str) -> Result<Option<MemoryItem>, AmError> {
-        match self.store.get_memory_item(bank, id) {
-            Ok(item) => Ok(item),
-            Err(e) if clio_store::is_unreadable_content(&e) => Ok(None),
-            Err(e) => Err(e),
-        }
     }
 
     fn embed_and_observe(

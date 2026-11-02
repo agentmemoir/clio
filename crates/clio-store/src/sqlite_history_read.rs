@@ -108,11 +108,11 @@ fn map_failure_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<FailureRaw> {
 impl SqliteStore {
     pub(crate) fn task_from_raw(&self, t: TaskRaw) -> Result<TaskRecord, AmError> {
         Ok(TaskRecord {
-            definition: open_history_text(self.kms().as_ref(), &t.7)?,
-            steps: open_steps(self.kms().as_ref(), &t.8)?,
+            definition: open_history_text(self.kms().as_ref(), "task.definition", &t.0, &t.7)?,
+            steps: open_steps(self.kms().as_ref(), "task.steps", &t.0, &t.8)?,
             id: t.0,
             bank_id: t.1,
-            item_id: t.2,
+            item_id: t.2.clone(),
             task_id: t.3,
             subject_id: t.4,
             version: t.5,
@@ -120,26 +120,26 @@ impl SqliteStore {
             evidence_ref: t.9,
             admission_score: t.10,
             created_at: t.11,
-            context: open_context(self.kms().as_ref(), t.12.as_deref()),
+            context: open_context(self.kms().as_ref(), &t.2, t.12.as_deref()),
         })
     }
 
     pub(crate) fn failure_from_raw(&self, f: FailureRaw) -> Result<FailureRecord, AmError> {
         Ok(FailureRecord {
-            id: f.0,
+            id: f.0.clone(),
             bank_id: f.1,
-            item_id: f.2,
+            item_id: f.2.clone(),
             task_id: f.3,
             subject_id: f.4,
             attempt_n: f.5,
-            what_failed: open_history_text(self.kms().as_ref(), &f.6)?,
-            lesson: open_history_text(self.kms().as_ref(), &f.7)?,
+            what_failed: open_history_text(self.kms().as_ref(), "failure.what_failed", &f.0, &f.6)?,
+            lesson: open_history_text(self.kms().as_ref(), "failure.lesson", &f.0, &f.7)?,
             lesson_tokens: f.8,
             evidence_ref: f.9,
             admission_score: f.10,
             epistemic_kind: clio_types::EpistemicKind::parse(&f.11)?,
             created_at: f.12,
-            context: open_context(self.kms().as_ref(), f.13.as_deref()),
+            context: open_context(self.kms().as_ref(), &f.2, f.13.as_deref()),
         })
     }
 
@@ -360,3 +360,7 @@ impl HistoryStore for SqliteStore {
         self.triple_history_at_impl(bank_id, subject, predicate, as_of, axis, limit)
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_history_read_tests.rs"]
+mod sqlite_history_read_tests;

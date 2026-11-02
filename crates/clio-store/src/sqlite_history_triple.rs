@@ -48,8 +48,9 @@ impl SqliteStore {
                     .am("triple history carrier context")
                 })?
                 .flatten();
+            let item_id = record.item_id.clone();
             record.context =
-                crate::item_persist::open_context(self.kms().as_ref(), cipher.as_deref());
+                crate::item_persist::open_context(self.kms().as_ref(), &item_id, cipher.as_deref());
         }
         Ok(())
     }
@@ -59,12 +60,12 @@ impl SqliteStore {
     /// stay plaintext, so only the value needs the DEK.
     fn record_from_row(&self, t: TripleRowValues) -> Result<TripleRecord, AmError> {
         map_triple_row(
-            t.0,
+            t.0.clone(),
             t.1,
-            t.2,
+            t.2.clone(),
             t.3,
             t.4,
-            crate::triple_cipher::open_optional_object(self.kms().as_ref(), t.5.as_deref())?,
+            crate::triple_cipher::open_optional_object(self.kms().as_ref(), &t.0, t.5.as_deref())?,
             t.6,
             t.7,
             t.8,
@@ -203,3 +204,7 @@ fn triple_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TripleRowValues> {
         r.get(16)?,
     ))
 }
+
+#[cfg(test)]
+#[path = "sqlite_history_triple_tests.rs"]
+mod sqlite_history_triple_tests;

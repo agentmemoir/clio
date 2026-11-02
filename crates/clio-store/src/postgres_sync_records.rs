@@ -209,7 +209,7 @@ pub(crate) fn feed_persona_stable_pg(
         let rows = client
             .query(
                 "SELECT p.attr_key, p.value_cipher, p.context_cipher, p.confidence::float8, \
-                 p.source, p.source_ref, p.admission_score::float8, p.valid_from, \
+                 p.source, p.source_ref, p.admission_score::float8, p.valid_from, p.id, \
                  COALESCE(p.updated_at, p.created_at) FROM persona_stable_entries p \
                  WHERE p.bank_id = $1 AND p.valid_until IS NULL \
                  AND ($2 = '1970-01-01T00:00:00Z' OR COALESCE(p.updated_at, p.created_at) > $2 \
@@ -228,24 +228,29 @@ pub(crate) fn feed_persona_stable_pg(
             let key: String = row.get(0);
             let value_cipher: String = row.get(1);
             let context_cipher: Option<String> = row.get(2);
+            let as_of: String = row.get(7);
+            let id: String = row.get(8);
+            let row_id = crate::persona_store::stable_row_id(bank_id, &key, &as_of, &id);
             out.push((
-                row.get(8),
+                row.get(9),
                 PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value: crate::persona_store::open_persona_value(
                         store.kms().as_ref(),
+                        &row_id,
                         &value_cipher,
                     )?,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        &row_id,
                         context_cipher.as_deref(),
                     ),
                     confidence: row.get(3),
                     source: row.get(4),
                     source_ref: row.get(5),
                     admission_score: row.get(6),
-                    as_of: row.get(7),
+                    as_of,
                     valid_until: None,
                 },
             ));
@@ -283,7 +288,7 @@ pub(crate) fn feed_persona_prefs_pg(
                 row.get(9),
                 PersonaPreference {
                     bank_id: bank_id.to_owned(),
-                    key,
+                    key: key.clone(),
                     value: row.get(1),
                     trend: row.get(2),
                     confidence: row.get(4),
@@ -291,6 +296,7 @@ pub(crate) fn feed_persona_prefs_pg(
                     source_ref: row.get(6),
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
+                        &crate::persona_store::preference_row_id(bank_id, &key),
                         context_cipher.as_deref(),
                     ),
                     admission_score: row.get(7),
@@ -367,6 +373,7 @@ pub(crate) fn feed_beliefs_pg(
             let created_at: String = row.get(6);
             let proposition = crate::belief_store::open_proposition(
                 store.kms().as_ref(),
+                &id,
                 &row.get::<_, String>(3),
             )?;
             let history: Vec<ConfidenceEntry> = entries
@@ -381,12 +388,13 @@ pub(crate) fn feed_beliefs_pg(
             out.push((
                 row.get::<_, String>(7),
                 BeliefObject {
-                    id,
+                    id: id.clone(),
                     bank_id: bank_id.to_owned(),
                     subject_id: row.get(2),
                     proposition,
                     context: crate::belief_store::open_belief_context(
                         store.kms().as_ref(),
+                        &id,
                         context_cipher.as_deref(),
                     ),
                     context_as_of,
@@ -403,3 +411,7 @@ pub(crate) fn feed_beliefs_pg(
 #[cfg(test)]
 #[path = "postgres_sync_records_tests.rs"]
 mod postgres_sync_records_tests;
+
+#[cfg(test)]
+#[path = "postgres_sync_records_feed_tests.rs"]
+mod postgres_sync_records_feed_tests;

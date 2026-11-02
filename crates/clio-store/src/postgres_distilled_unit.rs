@@ -273,13 +273,14 @@ pub(crate) fn reproject_snapshot_tx(
     // workspace predicate covering a malformed envelope, a shredded subject,
     // and a missing or mismatched key. Any other failure — a backend that is
     // down, say — still propagates and rolls the discard back.
-    let dual = match open_dual(kms, &cipher) {
+    let dual = match open_dual(kms, &item_id, &cipher) {
         Ok(dual) => dual,
         Err(err) if crate::content_read_errors::is_unreadable_content(&err) => return Ok(false),
         Err(err) => return Err(err),
     };
     let sealed = seal_dual_content(
         kms,
+        &item_id,
         &subject,
         Some(snapshot_projection(record)),
         dual.gist,
@@ -307,7 +308,7 @@ impl PostgresStore {
         record.validate_for_item(item)?;
         require_actor(actor)?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         self.with_client(|client| {
             let mut tx = client.transaction().am("distilled unit commit begin pg")?;
             crate::postgres_memory::create_memory_item_tx(&mut tx, item, &cipher, &dek_ref, actor)?;
@@ -350,7 +351,12 @@ impl PostgresStore {
         validate_revision(record, new_item)?;
         require_actor(actor)?;
         let dek_ref = self.kms().ensure_dek(&new_item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &new_item.subject_id, new_item)?;
+        let cipher = seal_dual(
+            self.kms().as_ref(),
+            &new_item.id,
+            &new_item.subject_id,
+            new_item,
+        )?;
         let ts = record.distilled_at.clone();
         let prior_id = revision_prior_id(record)?;
         self.with_client(|client| {

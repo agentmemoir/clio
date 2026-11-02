@@ -83,8 +83,12 @@ pub struct ProcessReport {
     pub applied: u32,
     /// Jobs whose lexical doc was written with no embedder configured.
     pub lexical_only: u32,
-    /// Jobs skipped without error (item gone, legacy format).
+    /// Jobs skipped without error (item gone, or nothing indexable).
     pub skipped: u32,
+    /// Jobs whose stored content could not be opened (damaged or old envelope).
+    pub unreadable: u32,
+    /// Jobs whose subject was crypto-shredded, so the content is gone on purpose.
+    pub erased: u32,
     /// Jobs that failed and stay pending with backoff.
     pub failed: u32,
 }
@@ -108,4 +112,36 @@ pub struct RebuildReport {
     pub lexical_applied: u64,
     /// Derived rows for vanished items removed (0 on dry-run).
     pub orphans_removed: u64,
+    /// Items whose stored content could not be opened (damaged or old envelope).
+    pub unreadable: u64,
+    /// Items whose subject was crypto-shredded, so the content is gone on purpose.
+    pub erased: u64,
 }
+
+/// One kind of content loss behind a row the index can no longer derive from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowLoss {
+    /// The row exists but its content cannot be opened: damage or an old format.
+    Unreadable,
+    /// The subject's DEK was destroyed by erasure; the loss is expected.
+    Erased,
+}
+
+/// Classify a content read failure as one kind of row loss.
+///
+/// `None` means the failure is not a per-row content loss (a backend failure
+/// stays fatal), so the caller must not count it and must keep the error.
+pub(crate) fn classify_row_loss(error: &AmError) -> Option<RowLoss> {
+    if !clio_store::is_unreadable_content(error) {
+        return None;
+    }
+    Some(if error.code == ErrorCode::ErasedSubject {
+        RowLoss::Erased
+    } else {
+        RowLoss::Unreadable
+    })
+}
+
+#[cfg(test)]
+#[path = "report_tests.rs"]
+mod report_tests;

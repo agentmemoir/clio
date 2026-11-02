@@ -59,7 +59,11 @@ impl SqliteStore {
         let Some((cipher, context_as_of, row_as_of)) = row else {
             return Ok(None);
         };
-        let Some(text) = open_persona_context(self.kms().as_ref(), cipher.as_deref()) else {
+        let Some(text) = open_persona_context(
+            self.kms().as_ref(),
+            &crate::persona_store::preference_row_id(bank_id, attr_key),
+            cipher.as_deref(),
+        ) else {
             return Ok(None);
         };
         Ok(Some((text, context_as_of.unwrap_or(row_as_of))))

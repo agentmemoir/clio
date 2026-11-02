@@ -70,6 +70,10 @@ pub struct ReindexReport {
     pub lexical_applied: u64,
     /// Derived rows for vanished items removed (0 on dry-run).
     pub orphans_removed: u64,
+    /// Items whose stored content could not be opened (damaged or old envelope).
+    pub unreadable: u64,
+    /// Items whose subject was crypto-shredded, so the content is gone on purpose.
+    pub erased: u64,
 }
 
 /// Report scope/cost (`dry_run=true`) or rebuild derived indexes (confirmed).
@@ -108,6 +112,8 @@ pub fn reindex(args: &ReindexArgs<'_>) -> Result<ReindexReport, AmError> {
         dense_applied: report.dense_applied,
         lexical_applied: report.lexical_applied,
         orphans_removed: report.orphans_removed,
+        unreadable: report.unreadable,
+        erased: report.erased,
     })
 }
 

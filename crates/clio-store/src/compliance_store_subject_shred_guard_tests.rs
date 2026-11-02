@@ -96,7 +96,13 @@ impl DekProvider for FailOpenKms {
         Ok(format!("local:{subject_id}:v{version}"))
     }
 
-    fn encrypt(&self, subject_id: &str, plaintext: &[u8]) -> Result<CiphertextEnvelope, AmError> {
+    fn encrypt(
+        &self,
+        _field: &str,
+        _row_id: &str,
+        subject_id: &str,
+        plaintext: &[u8],
+    ) -> Result<CiphertextEnvelope, AmError> {
         let (version, key) = self.key(subject_id);
         let cipher: Vec<u8> = plaintext
             .iter()
@@ -111,7 +117,12 @@ impl DekProvider for FailOpenKms {
         })
     }
 
-    fn decrypt(&self, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(
+        &self,
+        _field: &str,
+        _row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
         {
             let keys = self.keys.lock().expect("fail-open kms keys");
             if matches!(keys.get(&envelope.subject_id), Some(KeyState::Destroyed)) {
