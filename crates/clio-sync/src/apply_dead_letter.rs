@@ -149,17 +149,31 @@ pub(crate) fn quarantine_stale(
         ),
     };
     let outcome = quarantine(engine, bank_id, m, envelope_json, reason_code, &detail)?;
-    record_refusal(engine.sync, bank_id, m, &at, reason_code)?;
+    record_refusal(
+        engine.sync,
+        bank_id,
+        &m.sync_mutation_id,
+        &m.transaction_time,
+        &at,
+        reason_code,
+    )?;
     Ok(outcome)
 }
 
 /// Bump the bank's refusal count and write the last-refusal line. The count is
 /// read-add-write through the existing cursor slot, so it only ever grows and
 /// an unrelated cursor write leaves it alone.
-fn record_refusal(
+///
+/// The record names the refused row by `mutation_id` and `transaction_time`
+/// rather than by a mutation value, because a push-side packaging refusal
+/// happens before any mutation reaches the wire: it holds the row's own kind
+/// and reports the value here, so the refusal is visible to an operator instead
+/// of only in a returned error.
+pub(crate) fn record_refusal(
     sync: &dyn SyncStore,
     bank_id: &str,
-    m: &SyncMutation,
+    mutation_id: &str,
+    transaction_time: &str,
     at: &str,
     reason_code: &str,
 ) -> Result<(), AmError> {
@@ -169,8 +183,8 @@ fn record_refusal(
         STATUS_SLOT,
         LAST_STALE_REFUSAL_KEY,
         &format!(
-            "{at} {reason_code}: refused mutation {} carrying writer stamp {}",
-            m.sync_mutation_id, m.transaction_time
+            "{at} {reason_code}: refused mutation {mutation_id} carrying writer stamp \
+             {transaction_time}"
         ),
     )
 }

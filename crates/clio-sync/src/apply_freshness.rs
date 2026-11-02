@@ -157,11 +157,38 @@ pub(crate) fn canonical_writer_stamp(raw: &str) -> Result<String, AmError> {
     }
     match writer_stamp_epoch(raw) {
         Some(secs) => Ok(format_utc(secs)),
-        None => Err(AmError::new(
-            ErrorCode::InvalidArgument,
-            format!("transaction_time `{raw}` is not a timestamp this build can place"),
-        )),
+        None => Err(refused_stamp(raw)),
     }
+}
+
+/// The frame around the value in [`refused_stamp`]'s sentence, in one place so
+/// the writer and the reader beside it cannot drift apart.
+const REFUSAL_BEFORE: &str = "transaction_time `";
+const REFUSAL_AFTER: &str = "` is not a timestamp this build can place";
+
+/// The refusal [`canonical_writer_stamp`] raises for a stamp no clock reading
+/// can place: `InvalidArgument` naming the field and the value.
+fn refused_stamp(raw: &str) -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        format!("{REFUSAL_BEFORE}{raw}{REFUSAL_AFTER}"),
+    )
+}
+
+/// The value named by [`canonical_writer_stamp`]'s refusal, or `None` when
+/// `err` is any other failure.
+///
+/// A packaging caller must contain that one refusal — hold the row's own kind
+/// and report it — without containing a storage or seal failure, and a seal
+/// failure also reports `InvalidArgument`. Recognising the sentence this module
+/// alone writes is what separates the two, so the reader sits beside the writer.
+pub(crate) fn unplaceable_stamp_value(err: &AmError) -> Option<&str> {
+    if err.code != ErrorCode::InvalidArgument {
+        return None;
+    }
+    err.message
+        .strip_prefix(REFUSAL_BEFORE)?
+        .strip_suffix(REFUSAL_AFTER)
 }
 
 /// Is the mutation's writer stamp outside the bounds this engine allows?

@@ -56,12 +56,16 @@
 //! its current cursor and peer-side dedupe absorbs the re-sends until the
 //! carrier arrives, without blocking the other kinds.
 
-use crate::apply::apply_freshness::writer_stamp_order;
+use crate::apply::{apply_freshness::unplaceable_stamp_value, record_refusal};
 use crate::client::SyncClientConfig;
+use crate::clock::now_utc;
 use crate::http::post_json;
-use crate::protocol::{BankSyncStatus, PushAck, SyncMutation, SyncPayload, join_watermark_body};
-use clio_store::{DeadLetterStatus, SyncFeedRow};
-use clio_types::{AmError, MemoryItem};
+use crate::protocol::{
+    BankSyncStatus, PushAck, REASON_MALFORMED_STAMP as MALFORMED, SyncMutation, SyncPayload,
+    join_watermark_body,
+};
+use clio_store::DeadLetterStatus;
+use clio_types::AmError;
 
 #[path = "client_feed_package.rs"]
 pub(crate) mod package;
@@ -69,109 +73,63 @@ pub(crate) mod package;
 #[path = "client_feed_cursor_conversion.rs"]
 pub(crate) mod cursor_conversion;
 
-pub(crate) use cursor_conversion::{kind_watermark, kind_watermark_set};
+pub(crate) use cursor_conversion::{
+    KindBatch, PUSH_KINDS, fold_item_position, item_row_stamps, kind_watermark, kind_watermark_set,
+    record_kind_batch,
+};
 
 use package::{
     assoc_mutation, belief_mutation, failure_mutation, item_mutation, persona_pref_mutation,
     persona_stable_mutation, task_mutation, triple_mutation,
 };
 
-/// The eight push feed kinds in their stable packaging order.
-pub(crate) const PUSH_KINDS: [&str; 8] = [
-    "item",
-    "assoc_edge",
-    "triple",
-    "persona_stable",
-    "persona_preference",
-    "belief",
-    "task",
-    "failure",
-];
-
-/// One feed kind's packaging result for a push: the compound `(stamp, entity)`
-/// the kind advances to on ack, in the store's own stamp text, and the
-/// half-open `mutations` range this kind contributed.
-struct KindBatch {
-    kind: &'static str,
-    last: Option<(String, String)>,
-    skipped: bool,
-    base: usize,
-    end: usize,
+/// The bank one push packages: the refusal record a packaging refusal writes
+/// needs the config and the bank, not the row.
+struct BankCtx<'a> {
+    cfg: &'a SyncClientConfig,
+    bank: &'a str,
 }
 
-impl KindBatch {
-    /// True when the server rejected one of this kind's own mutations, so its
-    /// watermark must hold: advancing would skip a row the peer never stored.
-    fn has_rejection(&self, mutations: &[SyncMutation], rejected: &[String]) -> bool {
-        mutations[self.base..self.end]
-            .iter()
-            .any(|m| rejected.contains(&m.sync_mutation_id))
-    }
-}
-
-/// Every store-local stamp the item feed's predicate compares for one returned
-/// row: the ordering stamp the feed returned, the transaction-time bounds, and
-/// the creation stamp. The close stamp can sit above `updated_at` (the store
-/// places it one second past `tx_from` when a correction is not later), so the
-/// ordering stamp alone does not bound the row; a discard writes `discarded_at`
-/// and `updated_at` from one stamp, which the ordering stamp covers.
-fn item_row_stamps<'a>(row: &'a SyncFeedRow, item: &'a MemoryItem) -> [&'a str; 5] {
-    [
-        row.transaction_time.as_str(),
-        item.tx_from.as_str(),
-        item.tx_until.as_deref().unwrap_or(""),
-        item.updated_at.as_str(),
-        item.created_at.as_str(),
-    ]
-}
-
-/// Fold one item row's compared stamps into `best`: the greatest stamp by the
-/// instant it names, with the greatest entity id carrying that stamp as the
-/// compound tiebreak. The winner keeps the text it was read as.
-fn fold_item_position(best: &mut Option<(String, String)>, entity_id: &str, stamps: &[&str]) {
-    for stamp in stamps {
-        if stamp.is_empty() {
-            continue;
-        }
-        match best
-            .as_ref()
-            .map(|(held, _)| writer_stamp_order(stamp, held))
-        {
-            None | Some(std::cmp::Ordering::Greater) => {
-                *best = Some(((*stamp).to_owned(), entity_id.to_owned()));
+impl BankCtx<'_> {
+    /// Package one row into `mutations`, holding its own kind instead of failing
+    /// the bank push when the row's writer stamp cannot be placed.
+    ///
+    /// Only that one refusal is contained; a storage or seal failure still fails
+    /// the push. It is reported once through `record_refusal`, so the kind holds
+    /// with an operator-visible record rather than the row disappearing.
+    fn pack(
+        &self,
+        entity_id: &str,
+        mutations: &mut Vec<SyncMutation>,
+        skipped: &mut bool,
+        result: Result<Option<SyncMutation>, AmError>,
+    ) -> Result<(), AmError> {
+        let stamp = match result {
+            Ok(Some(mutation)) => {
+                mutations.push(mutation);
+                return Ok(());
             }
-            Some(std::cmp::Ordering::Equal) => {
-                let keep = best
-                    .as_ref()
-                    .is_none_or(|(_, held_entity)| held_entity.as_str() > entity_id);
-                if !keep && let Some(slot) = best.as_mut() {
-                    entity_id.clone_into(&mut slot.1);
-                }
-            }
-            Some(std::cmp::Ordering::Less) => {}
+            Ok(None) => None,
+            Err(err) => Some(
+                unplaceable_stamp_value(&err)
+                    .map(str::to_owned)
+                    .ok_or(err)?,
+            ),
+        };
+        *skipped = true;
+        if let Some(stamp) = &stamp {
+            let cfg = self.cfg;
+            record_refusal(
+                cfg.sync.as_ref(),
+                self.bank,
+                entity_id,
+                stamp,
+                &now_utc(),
+                MALFORMED,
+            )?;
         }
+        Ok(())
     }
-}
-
-/// Record one packaged feed page's bookkeeping (last row position, skipped
-/// rows) for the post-ack advance.
-fn record_kind_batch(
-    kind: &'static str,
-    rows: &[SyncFeedRow],
-    base: usize,
-    mutations: &[SyncMutation],
-    skipped: bool,
-    batches: &mut Vec<KindBatch>,
-) {
-    batches.push(KindBatch {
-        kind,
-        last: rows
-            .last()
-            .map(|r| (r.transaction_time.clone(), r.entity_id.clone())),
-        skipped,
-        base,
-        end: mutations.len(),
-    });
 }
 
 /// Push one bank's outgoing feed and advance each kind's watermark on ack.
@@ -184,6 +142,7 @@ pub(crate) fn push_bank(
     bank: &str,
 ) -> Result<BankSyncStatus, AmError> {
     let page = crate::PULL_PAGE_LIMIT;
+    let ctx = BankCtx { cfg, bank };
     let mut mutations = Vec::new();
     let mut batches = Vec::new();
 
@@ -202,7 +161,8 @@ pub(crate) fn push_bank(
             continue;
         };
         fold_item_position(&mut reach, &row.entity_id, &item_row_stamps(row, &item));
-        mutations.push(item_mutation(cfg, &item, row.op.as_str())?);
+        let packed = item_mutation(cfg, &item, row.op.as_str()).map(Some);
+        ctx.pack(&row.entity_id, &mut mutations, &mut skipped, packed)?;
     }
     record_kind_batch("item", &rows, base, &mutations, skipped, &mut batches);
     // A page that is not full has seen every row the predicate selects, so the
@@ -224,7 +184,8 @@ pub(crate) fn push_bank(
             skipped = true;
             continue;
         };
-        mutations.push(assoc_mutation(cfg, bank, &edge)?);
+        let packed = assoc_mutation(cfg, bank, &edge).map(Some);
+        ctx.pack(&row.entity_id, &mut mutations, &mut skipped, packed)?;
     }
     record_kind_batch("assoc_edge", &rows, base, &mutations, skipped, &mut batches);
 
@@ -234,11 +195,8 @@ pub(crate) fn push_bank(
     let base = mutations.len();
     let mut skipped = false;
     for row in &rows {
-        if let Some(m) = triple_mutation(cfg, bank, &row.entity_id)? {
-            mutations.push(m);
-        } else {
-            skipped = true;
-        }
+        let packed = triple_mutation(cfg, bank, &row.entity_id);
+        ctx.pack(&row.entity_id, &mut mutations, &mut skipped, packed)?;
     }
     record_kind_batch("triple", &rows, base, &mutations, skipped, &mut batches);
 
@@ -307,18 +265,21 @@ fn package_record_kinds(
     mutations: &mut Vec<SyncMutation>,
 ) -> Result<Vec<KindBatch>, AmError> {
     let page = crate::PULL_PAGE_LIMIT;
+    let ctx = BankCtx { cfg, bank };
     let mut batches = Vec::new();
 
     let since = kind_watermark(cfg, bank, "persona_stable")?;
     let rows = cfg.sync.feed_persona_stable(bank, &since, page)?;
     let base = mutations.len();
+    let mut skipped = false;
     for (stamp, entry) in &rows {
-        mutations.push(persona_stable_mutation(cfg, bank, stamp.as_str(), entry)?);
+        let packed = persona_stable_mutation(cfg, bank, stamp.as_str(), entry).map(Some);
+        ctx.pack(&entry.key, mutations, &mut skipped, packed)?;
     }
     batches.push(KindBatch {
         kind: "persona_stable",
         last: rows.last().map(|(s, e)| (s.clone(), e.key.clone())),
-        skipped: false,
+        skipped,
         base,
         end: mutations.len(),
     });
@@ -326,13 +287,15 @@ fn package_record_kinds(
     let since = kind_watermark(cfg, bank, "persona_preference")?;
     let rows = cfg.sync.feed_persona_preferences(bank, &since, page)?;
     let base = mutations.len();
+    let mut skipped = false;
     for (stamp, pref) in &rows {
-        mutations.push(persona_pref_mutation(cfg, bank, stamp.as_str(), pref)?);
+        let packed = persona_pref_mutation(cfg, bank, stamp.as_str(), pref).map(Some);
+        ctx.pack(&pref.key, mutations, &mut skipped, packed)?;
     }
     batches.push(KindBatch {
         kind: "persona_preference",
         last: rows.last().map(|(s, p)| (s.clone(), p.key.clone())),
-        skipped: false,
+        skipped,
         base,
         end: mutations.len(),
     });
@@ -340,13 +303,15 @@ fn package_record_kinds(
     let since = kind_watermark(cfg, bank, "belief")?;
     let rows = cfg.sync.feed_beliefs(bank, &since, page)?;
     let base = mutations.len();
+    let mut skipped = false;
     for (stamp, belief) in &rows {
-        mutations.push(belief_mutation(cfg, bank, stamp.as_str(), belief)?);
+        let packed = belief_mutation(cfg, bank, stamp.as_str(), belief).map(Some);
+        ctx.pack(&belief.id, mutations, &mut skipped, packed)?;
     }
     batches.push(KindBatch {
         kind: "belief",
         last: rows.last().map(|(s, b)| (s.clone(), b.id.clone())),
-        skipped: false,
+        skipped,
         base,
         end: mutations.len(),
     });
@@ -360,7 +325,8 @@ fn package_record_kinds(
             skipped = true;
             continue;
         };
-        mutations.push(task_mutation(cfg, bank, stamp.as_str(), task, &item)?);
+        let packed = task_mutation(cfg, bank, stamp.as_str(), task, &item).map(Some);
+        ctx.pack(&task.id, mutations, &mut skipped, packed)?;
     }
     batches.push(KindBatch {
         // The tiebreak entity id is the version record id (`task.id`), not the
@@ -382,7 +348,8 @@ fn package_record_kinds(
             skipped = true;
             continue;
         };
-        mutations.push(failure_mutation(cfg, bank, stamp.as_str(), failure, &item)?);
+        let packed = failure_mutation(cfg, bank, stamp.as_str(), failure, &item).map(Some);
+        ctx.pack(&failure.id, mutations, &mut skipped, packed)?;
     }
     batches.push(KindBatch {
         kind: "failure",
@@ -434,6 +401,9 @@ pub(crate) fn feed_kind_count(
 #[cfg(test)]
 #[path = "client_feed_documentation_tests.rs"]
 mod client_feed_documentation_tests;
+#[cfg(test)]
+#[path = "client_feed_stamp_hold_tests.rs"]
+mod client_feed_stamp_hold_tests;
 #[cfg(test)]
 #[path = "client_feed_tests.rs"]
 mod client_feed_tests;
