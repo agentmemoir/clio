@@ -82,7 +82,8 @@ impl PostgresStore {
         require_actor(actor)?;
         persona_require_nonempty(&entry.bank_id, "bank_id")?;
         let dek_ref = self.kms().ensure_dek(&entry.bank_id)?;
-        let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of);
+        let id = unique_persona_id("pse", &entry.bank_id, &entry.key);
+        let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of, &id);
         let cipher =
             seal_persona_value(self.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
         let context_cipher = seal_persona_context(
@@ -99,6 +100,7 @@ impl PostgresStore {
                 &mut tx,
                 self.kms().as_ref(),
                 entry,
+                &id,
                 &cipher,
                 &dek_ref,
                 context_cipher.as_deref(),
@@ -202,7 +204,7 @@ impl PostgresStore {
             client
                 .query(
                     "SELECT value_cipher, context_cipher, confidence::float8, source, source_ref,
-                            admission_score::float8, valid_from, valid_until
+                            admission_score::float8, valid_from, valid_until, id
                      FROM persona_stable_entries
                      WHERE bank_id = $1 AND attr_key = $2
                      ORDER BY valid_from, id",
@@ -215,7 +217,8 @@ impl PostgresStore {
                 let cipher: String = r.get(0);
                 let context_cipher: Option<String> = r.get(1);
                 let valid_from: String = r.get(6);
-                let row_id = stable_row_id(bank_id, key, &valid_from);
+                let id: String = r.get(8);
+                let row_id = stable_row_id(bank_id, key, &valid_from, &id);
                 Ok(PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
                     key: key.to_owned(),
@@ -259,7 +262,7 @@ impl PostgresStore {
             client
                 .query(
                     "SELECT attr_key, value_cipher, context_cipher, confidence::float8, source,
-                            source_ref, admission_score::float8, valid_from
+                            source_ref, admission_score::float8, valid_from, id
                      FROM persona_stable_entries
                      WHERE bank_id = $1 AND valid_until IS NULL
                      ORDER BY attr_key",
@@ -273,7 +276,8 @@ impl PostgresStore {
                 let context_cipher: Option<String> = r.get(2);
                 let key: String = r.get(0);
                 let as_of: String = r.get(7);
-                let row_id = stable_row_id(bank_id, &key, &as_of);
+                let id: String = r.get(8);
+                let row_id = stable_row_id(bank_id, &key, &as_of, &id);
                 Ok(PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
                     key: key.clone(),

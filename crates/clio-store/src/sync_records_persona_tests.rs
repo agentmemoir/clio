@@ -97,6 +97,41 @@ fn persona_and_belief_feeds_open_their_rows() {
 }
 
 #[test]
+fn an_older_version_cipher_does_not_open_in_the_open_row() {
+    let store = store();
+    let bank = unique("sync-feed-version-binding");
+    // Same as_of on purpose: the stored row id, not the version time, keeps
+    // the two ciphertext identities apart.
+    store
+        .put_stable_entry(&stable(&bank, "tone", "warm", 0.9, "2026-06-01"), "agent")
+        .unwrap();
+    store
+        .put_stable_entry(&stable(&bank, "tone", "cool", 0.7, "2026-06-01"), "agent")
+        .unwrap();
+    let closed: String = store
+        .with_conn(|conn| {
+            conn.query_row(
+                "SELECT value_cipher FROM persona_stable_entries \
+                 WHERE bank_id = ?1 AND attr_key = 'tone' AND valid_until IS NOT NULL",
+                rusqlite::params![bank],
+                |r| r.get(0),
+            )
+            .am("test read")
+        })
+        .unwrap();
+    store
+        .test_execute(&format!(
+            "UPDATE persona_stable_entries SET value_cipher = '{closed}' \
+             WHERE bank_id = '{bank}' AND attr_key = 'tone' AND valid_until IS NULL"
+        ))
+        .unwrap();
+    assert_eq!(
+        store.stable_history(&bank, "tone").unwrap_err().code,
+        ErrorCode::Forbidden
+    );
+}
+
+#[test]
 fn feeds_fail_closed_on_a_swapped_cipher() {
     let store = store();
     let bank = unique("sync-feed-binding");

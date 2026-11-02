@@ -80,7 +80,8 @@ impl PersonaStore for SqliteStore {
         require_actor(actor)?;
         persona_require_nonempty(&entry.bank_id, "bank_id")?;
         let dek_ref = self.kms().ensure_dek(&entry.bank_id)?;
-        let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of);
+        let id = unique_persona_id("pse", &entry.bank_id, &entry.key);
+        let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of, &id);
         let cipher =
             seal_persona_value(self.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
         let context_cipher = seal_persona_context(
@@ -97,6 +98,7 @@ impl PersonaStore for SqliteStore {
                 &tx,
                 self.kms().as_ref(),
                 entry,
+                &id,
                 &cipher,
                 &dek_ref,
                 context_cipher.as_deref(),
@@ -134,13 +136,14 @@ impl PersonaStore for SqliteStore {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn get_persona_document(&self, bank_id: &str) -> Result<PersonaDocument, AmError> {
         persona_require_nonempty(bank_id, "bank_id")?;
         let stable_rows = self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT attr_key, value_cipher, context_cipher, confidence, source,
-                            source_ref, admission_score, valid_from
+                            source_ref, admission_score, valid_from, id
                      FROM persona_stable_entries
                      WHERE bank_id = ?1 AND valid_until IS NULL
                      ORDER BY attr_key",
@@ -157,6 +160,7 @@ impl PersonaStore for SqliteStore {
                         r.get::<_, Option<String>>(5)?,
                         r.get::<_, f64>(6)?,
                         r.get::<_, String>(7)?,
+                        r.get::<_, String>(8)?,
                     ))
                 })
                 .am("persona stable read")?;
@@ -175,19 +179,20 @@ impl PersonaStore for SqliteStore {
                     source_ref,
                     admission_score,
                     as_of,
+                    id,
                 )| {
                     Ok(PersonaStableEntry {
                         bank_id: bank_id.to_owned(),
                         key: key.clone(),
                         value: {
-                            let row = stable_row_id(bank_id, &key, &as_of);
+                            let row = stable_row_id(bank_id, &key, &as_of, &id);
                             open_persona_value(self.kms().as_ref(), &row, &cipher)?
                         },
                         confidence,
                         source,
                         source_ref,
                         context: {
-                            let row = stable_row_id(bank_id, &key, &as_of);
+                            let row = stable_row_id(bank_id, &key, &as_of, &id);
                             open_persona_context(
                                 self.kms().as_ref(),
                                 &row,
@@ -279,7 +284,7 @@ impl PersonaStore for SqliteStore {
             let mut stmt = conn
                 .prepare(
                     "SELECT value_cipher, context_cipher, confidence, source, source_ref,
-                            admission_score, valid_from, valid_until
+                            admission_score, valid_from, valid_until, id
                      FROM persona_stable_entries
                      WHERE bank_id = ?1 AND attr_key = ?2
                      ORDER BY valid_from, id",
@@ -296,6 +301,7 @@ impl PersonaStore for SqliteStore {
                         r.get::<_, f64>(5)?,
                         r.get::<_, String>(6)?,
                         r.get::<_, Option<String>>(7)?,
+                        r.get::<_, String>(8)?,
                     ))
                 })
                 .am("persona history query")?;
@@ -313,19 +319,20 @@ impl PersonaStore for SqliteStore {
                     admission_score,
                     valid_from,
                     valid_until,
+                    id,
                 )| {
                     Ok(PersonaStableEntry {
                         bank_id: bank_id.to_owned(),
                         key: key.to_owned(),
                         value: {
-                            let row = stable_row_id(bank_id, key, &valid_from);
+                            let row = stable_row_id(bank_id, key, &valid_from, &id);
                             open_persona_value(self.kms().as_ref(), &row, &cipher)?
                         },
                         confidence,
                         source,
                         source_ref,
                         context: {
-                            let row = stable_row_id(bank_id, key, &valid_from);
+                            let row = stable_row_id(bank_id, key, &valid_from, &id);
                             open_persona_context(
                                 self.kms().as_ref(),
                                 &row,

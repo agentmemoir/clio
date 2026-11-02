@@ -127,9 +127,12 @@ pub(crate) fn unique_persona_id(prefix: &str, bank_id: &str, key: &str) -> Strin
     format!("{prefix}-{bank_id}-{key}-{nanos}-{seq}")
 }
 
-/// Row identity for one version of a stable persona entry.
-pub(crate) fn stable_row_id(bank_id: &str, key: &str, as_of: &str) -> String {
-    crate::dek::composite_row_id(&["pse", bank_id, key, as_of])
+/// Row identity for one stored version of a stable persona entry.
+///
+/// The stored row id is part of the identity: `valid_from` alone is not unique
+/// when two writes share one `as_of`, so it cannot separate their ciphertexts.
+pub(crate) fn stable_row_id(bank_id: &str, key: &str, as_of: &str, id: &str) -> String {
+    crate::dek::composite_row_id(&["pse", bank_id, key, as_of, id])
 }
 
 /// Row identity for one preference row.
@@ -352,7 +355,7 @@ mod tests {
         );
         // DEK seal/open roundtrip, plus the non-UTF-8 plaintext boundary.
         let kms = crate::dek::LocalDevKms::new();
-        let row = stable_row_id("bank", "key", "2026-01-01");
+        let row = stable_row_id("bank", "key", "2026-01-01", "row-a");
         let cipher = seal_persona_value(&kms, &row, "bank", "plain-value").expect("seal");
         assert_eq!(
             open_persona_value(&kms, &row, &cipher).expect("open"),
@@ -395,10 +398,17 @@ mod tests {
         assert_eq!(err.code, ErrorCode::OutOfRange);
         // Version and table identity: an older version's value and a stable
         // context do not open as a newer version or as a preference context.
-        let next = stable_row_id("bank", "key", "2027-01-01");
+        let next = stable_row_id("bank", "key", "2027-01-01", "row-b");
         let value = seal_persona_value(&kms, &row, "bank", "v1").expect("seal value");
         assert_eq!(
             open_persona_value(&kms, &next, &value).unwrap_err().code,
+            ErrorCode::Forbidden
+        );
+        // Two stored rows may share one `as_of`; their ids keep the AAD apart.
+        let twin = stable_row_id("bank", "key", "2026-01-01", "row-b");
+        assert_ne!(row, twin);
+        assert_eq!(
+            open_persona_value(&kms, &twin, &value).unwrap_err().code,
             ErrorCode::Forbidden
         );
         assert_eq!(

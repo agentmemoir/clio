@@ -31,7 +31,7 @@ use crate::item_update::update_memory_item_sqlite_tx;
 use crate::migrate::IntoAmError;
 use crate::opaque_item_persist::put_opaque_item_sqlite_tx;
 use crate::persona_store::{
-    preference_row_id, seal_persona_context, seal_persona_value, stable_row_id,
+    preference_row_id, seal_persona_context, seal_persona_value, stable_row_id, unique_persona_id,
 };
 use crate::sqlite::SqliteStore;
 use crate::sqlite_assoc::{put_assoc_edge_tx, record_audit_event_tx};
@@ -234,7 +234,8 @@ fn apply_one(
             entry.validate()?;
             require_actor(actor)?;
             let dek_ref = store.kms().ensure_dek(&entry.bank_id)?;
-            let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of);
+            let id = unique_persona_id("pse", &entry.bank_id, &entry.key);
+            let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of, &id);
             let cipher =
                 seal_persona_value(store.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
             let context_cipher = seal_persona_context(
@@ -247,6 +248,7 @@ fn apply_one(
                 tx,
                 store.kms().as_ref(),
                 entry,
+                &id,
                 &cipher,
                 &dek_ref,
                 context_cipher.as_deref(),

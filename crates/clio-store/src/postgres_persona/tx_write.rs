@@ -88,11 +88,11 @@ fn lock_persona_write_slot(
     Ok(())
 }
 
-/// Prior open version's sealed `context_cipher` and `valid_from` for one
-/// `(bank, key)`: `None` when the key has no open version or that version was
-/// written without a context. Read BEFORE the close-open (the lookup matches
-/// open rows only). The version time is the identity the ciphertext was sealed
-/// under, so a preserved context can be re-sealed for the new version.
+/// Prior open version's sealed `context_cipher`, stored row id, and
+/// `valid_from` for one `(bank, key)`: `None` when the key has no open version
+/// or that version was written without a context. The row id and version time
+/// are part of the ciphertext identity, so a preserved context can be re-sealed
+/// for the new version.
 ///
 /// `FOR UPDATE` locks the open row this transaction is about to close; a
 /// missing row locks nothing, which is why the `persona-write` advisory lock
@@ -101,17 +101,17 @@ pub(crate) fn prior_open_stable_context(
     tx: &mut Transaction<'_>,
     bank_id: &str,
     key: &str,
-) -> Result<Option<(String, String)>, AmError> {
-    let row: Option<(Option<String>, String)> = tx
+) -> Result<Option<(String, String, String)>, AmError> {
+    let row: Option<(Option<String>, String, String)> = tx
         .query_opt(
-            "SELECT context_cipher, valid_from FROM persona_stable_entries
+            "SELECT context_cipher, id, valid_from FROM persona_stable_entries
              WHERE bank_id = $1 AND attr_key = $2 AND valid_until IS NULL
              FOR UPDATE",
             &[&bank_id, &key],
         )
         .am("persona prior context")?
-        .map(|r| (r.get(0), r.get(1)));
-    Ok(row.and_then(|(cipher, valid_from)| cipher.map(|c| (c, valid_from))))
+        .map(|r| (r.get(0), r.get(1), r.get(2)));
+    Ok(row.and_then(|(cipher, id, valid_from)| cipher.map(|c| (c, id, valid_from))))
 }
 
 /// Existing preference row's sealed `context_cipher` (None when the row is
@@ -164,11 +164,11 @@ fn close_open_stable(
 pub(crate) fn put_stable_entry_tx(
     tx: &mut Transaction<'_>,
     entry: &PersonaStableEntry,
+    id: &str,
     cipher: &str,
     dek_ref: &str,
     context_cipher: Option<&str>,
 ) -> Result<(), AmError> {
-    let id = unique_persona_id("pse", &entry.bank_id, &entry.key);
     let ts = now_iso();
     let sk_rows = tx
         .execute(
@@ -276,10 +276,12 @@ pub(crate) fn put_preference_state_postgres_tx(
 /// advisory lock plus tombstone probe (fail closed with `ErasedSubject`,
 /// Then the `persona-write` slot lock so a concurrent first write to
 /// the same `(bank, key)` serializes before the locked predecessor read.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn put_stable_entry_tx_audited(
     tx: &mut Transaction<'_>,
     kms: &dyn DekProvider,
     entry: &PersonaStableEntry,
+    id: &str,
     cipher: &str,
     dek_ref: &str,
     context_cipher: Option<&str>,
@@ -291,13 +293,15 @@ pub(crate) fn put_stable_entry_tx_audited(
     // it feeds the audit stats, and the closed prior version row retains its
     // own ciphertext (the prior stays reconstructable through stable_history).
     let prior_row = prior_open_stable_context(tx, &entry.bank_id, &entry.key)?;
-    let prior_context = prior_row.as_ref().and_then(|(cipher, valid_from)| {
-        open_persona_context(
-            kms,
-            &stable_row_id(&entry.bank_id, &entry.key, valid_from),
-            Some(cipher),
-        )
-    });
+    let prior_context = prior_row
+        .as_ref()
+        .and_then(|(cipher, prior_id, prior_as_of)| {
+            open_persona_context(
+                kms,
+                &stable_row_id(&entry.bank_id, &entry.key, prior_as_of, prior_id),
+                Some(cipher),
+            )
+        });
     let context_cipher = match context_cipher {
         Some(_) => context_cipher.map(str::to_owned),
         None => prior_context
@@ -305,7 +309,7 @@ pub(crate) fn put_stable_entry_tx_audited(
             .map(|text| {
                 seal_persona_context(
                     kms,
-                    &stable_row_id(&entry.bank_id, &entry.key, &entry.as_of),
+                    &stable_row_id(&entry.bank_id, &entry.key, &entry.as_of, id),
                     &entry.bank_id,
                     Some(text),
                 )
@@ -313,7 +317,7 @@ pub(crate) fn put_stable_entry_tx_audited(
             .transpose()?
             .flatten(),
     };
-    put_stable_entry_tx(tx, entry, cipher, dek_ref, context_cipher.as_deref())?;
+    put_stable_entry_tx(tx, entry, id, cipher, dek_ref, context_cipher.as_deref())?;
     let detail = persona_audit_detail(
         "stable",
         &entry.key,

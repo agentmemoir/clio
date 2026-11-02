@@ -209,7 +209,7 @@ pub(crate) fn feed_persona_stable_pg(
         let rows = client
             .query(
                 "SELECT p.attr_key, p.value_cipher, p.context_cipher, p.confidence::float8, \
-                 p.source, p.source_ref, p.admission_score::float8, p.valid_from, \
+                 p.source, p.source_ref, p.admission_score::float8, p.valid_from, p.id, \
                  COALESCE(p.updated_at, p.created_at) FROM persona_stable_entries p \
                  WHERE p.bank_id = $1 AND p.valid_until IS NULL \
                  AND ($2 = '1970-01-01T00:00:00Z' OR COALESCE(p.updated_at, p.created_at) > $2 \
@@ -229,9 +229,10 @@ pub(crate) fn feed_persona_stable_pg(
             let value_cipher: String = row.get(1);
             let context_cipher: Option<String> = row.get(2);
             let as_of: String = row.get(7);
-            let row_id = crate::persona_store::stable_row_id(bank_id, &key, &as_of);
+            let id: String = row.get(8);
+            let row_id = crate::persona_store::stable_row_id(bank_id, &key, &as_of, &id);
             out.push((
-                row.get(8),
+                row.get(9),
                 PersonaStableEntry {
                     bank_id: bank_id.to_owned(),
                     key: key.clone(),
