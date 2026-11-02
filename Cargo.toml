@@ -23,7 +23,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.99"
 license = "Apache-2.0"
 publish = false
 
@@ -114,9 +114,6 @@ rustls = { version = "0.23", default-features = false, features = [
     "std",
     "tls12",
 ] }
-# Reads the PEM root a caller supplies through `sslrootcert`. The canonical
-# parser for rustls; it turns PEM into the DER certificates `rustls` trusts.
-rustls-pemfile = "2"
 webpki-roots = "1"
 # Single approved TLS-capable JSON transport (rustls + gzip defaults, blocking).
 ureq = "3"

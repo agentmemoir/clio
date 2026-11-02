@@ -41,6 +41,7 @@ use crate::pg_tls::Failure;
 use postgres_rustls::MakeTlsConnector;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::ring::default_provider;
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use std::sync::Arc;
@@ -137,8 +138,7 @@ fn read_pem(path: &str) -> Result<Vec<CertificateDer<'static>>, Failure> {
             "the root certificate at `{path}` could not be opened: {e}"
         ))
     })?;
-    let mut reader = std::io::BufReader::new(file);
-    rustls_pemfile::certs(&mut reader)
+    CertificateDer::pem_reader_iter(file)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             Failure::settled(format!(
