@@ -1,0 +1,1 @@
+The published MCP tool surface gained a script that explains a change to it: a pull request that touches the tool definitions now publishes the added, removed, and changed tools as a step summary, and the self-test runs on every change.

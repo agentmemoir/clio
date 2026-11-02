@@ -355,6 +355,11 @@ jobs:
         if: always()
         run: make scripts-check-git-hygiene
 
+      # Whether the summary of an MCP tool surface change names the tools and the parameters that moved. The summary workflow is a job of its own, gated by a path filter, so this step is the only place its rules run on every change; the fixtures cover the added, removed, and changed rows, the description cut, and every failure exit. Runs no build.
+      - name: Prompt surface diff summary
+        if: always()
+        run: make scripts-check-prompt-surface
+
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
       # It needs the `nextest` tool, which is a cargo subcommand, and the step

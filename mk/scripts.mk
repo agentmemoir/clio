@@ -15,7 +15,8 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-ci-parity scripts-check-compose-model \
 	scripts-check-changelog scripts-check-prose \
 	scripts-check-env-mutation scripts-check-exec-tempdir \
-	scripts-check-lockfile-diff scripts-check-git-hygiene
+	scripts-check-lockfile-diff scripts-check-git-hygiene \
+	scripts-check-prompt-surface
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -114,3 +115,7 @@ scripts-check-lockfile-diff:
 # Whether git holds a case-only path collision, a binary over 500 KiB, or a branch with no common ancestor with its base. macOS checks out a case-insensitive volume by default, so two tracked paths that differ only by case silently lose one of them; the binary is copied into every clone and every release archive; and the branch collapses `git blame` when it merges. The self-test creates its own repositories, so no host's filesystem decides the answer. Runs no build.
 scripts-check-git-hygiene:
 	python3 scripts/git_hygiene_check.py --self-test
+
+# Whether the summary of an MCP tool surface change names the tools and the parameters that moved. The snapshot the Rust test holds honest is read at two revisions with `git show`, because a diff of a committed schema pack is a wall of JSON and says nothing about which tool gained a parameter; the summary workflow is a job of its own, gated by a path filter, so this step is the only place its rules run on every change. The fixtures cover the added, removed, and changed rows, the description cut, and every failure exit. Runs no build.
+scripts-check-prompt-surface:
+	python3 scripts/prompt_surface_diff.py --self-test
