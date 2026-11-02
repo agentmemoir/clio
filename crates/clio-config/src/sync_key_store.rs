@@ -130,15 +130,15 @@ pub fn generate_with(
         KeySource::Keystore => {
             let key = generate_bytes();
             store.set(key.as_slice())?;
-            // The platform may ignore the attribute without error (macOS and
-            // Windows), so the value is written and then read back; an absent
-            // attribute is an unavailable creation time, never an error. A store
-            // that *refuses* the write is left alone for the same reason the key
-            // itself is: failing here would report a generation that succeeded
-            // and withhold the key, which is how a key becomes unrecoverable.
-            // The refusal is not lost, because `report_with` reads the same
-            // attribute back and propagates the store's error, so the operator
-            // sees "the store refused" rather than "this platform keeps none".
+            // Not every platform keeps this attribute: macOS reports the write as
+            // unsupported, and Windows keeps only its own three names. So the
+            // value is written and then read back, and an absent attribute is an
+            // unavailable creation time rather than an error. A refused write is
+            // left alone for the same reason a refused key write would be: failing
+            // here would report a generation that succeeded and withhold the key,
+            // which is how a key becomes unrecoverable. The refusal still informs
+            // the operator, because `report_with` reads the same attribute back
+            // and reports what the store actually holds.
             let _ = store.set_attribute(CREATED_ATTRIBUTE, &now_utc());
             Ok(LoadedSyncKey::new(key, SyncKeyLocation::Keystore))
         }

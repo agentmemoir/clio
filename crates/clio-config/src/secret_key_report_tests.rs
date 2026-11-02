@@ -29,7 +29,10 @@ use super::support_tests::*;
 use super::*;
 use crate::secret_key_source::{self, KeySource, write};
 use crate::secret_key_store::{ENCRYPTION_KEY, classify, store_error};
+use crate::secret_key_store_test_support::entry_over;
 use base64::Engine;
+use keyring_core::api::CredentialApi;
+use std::sync::Arc;
 
 fn loc_err(result: Result<Option<KeyLocation>, AmError>) -> AmError {
     result.expect_err("expected a refusal")
@@ -196,12 +199,14 @@ fn every_keystore_failure_summary_is_reachable_and_says_something() {
     // becoming the arm that renders an error object.
     let wanted = random_key();
     let failures = [
-        keyring::Error::NoEntry,
-        keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
-        keyring::Error::PlatformFailure(Box::new(std::io::Error::other("bus down"))),
-        keyring::Error::BadEncoding(wanted.to_vec()),
-        keyring::Error::TooLong("service".to_owned(), 900),
-        keyring::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::NoEntry,
+        keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
+        keyring_core::Error::PlatformFailure(Box::new(std::io::Error::other("bus down"))),
+        keyring_core::Error::BadEncoding(wanted.to_vec()),
+        keyring_core::Error::TooLong("service".to_owned(), 900),
+        keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::NoDefaultStore,
+        keyring_core::Error::NotSupportedByStore("attributes".to_owned()),
     ];
 
     let mut summaries = Vec::new();
@@ -329,12 +334,12 @@ fn rendered_output(keys: &[[u8; KEY_LEN]; 2]) -> Vec<String> {
     // The keystore's own messages, built without an entry so no store is
     // reached. `BadEncoding` and `Ambiguous` are the two upstream variants that
     // carry store contents, so both are rendered here.
-    out.push(store_error("read from", ENCRYPTION_KEY, &keyring::Error::NoEntry).message);
+    out.push(store_error("read from", ENCRYPTION_KEY, &keyring_core::Error::NoEntry).message);
     out.push(
         store_error(
             "read from",
             ENCRYPTION_KEY,
-            &keyring::Error::BadEncoding(keystore_key.to_vec()),
+            &keyring_core::Error::BadEncoding(keystore_key.to_vec()),
         )
         .message,
     );
@@ -342,7 +347,7 @@ fn rendered_output(keys: &[[u8; KEY_LEN]; 2]) -> Vec<String> {
         store_error(
             "read from",
             ENCRYPTION_KEY,
-            &keyring::Error::Ambiguous(vec![Box::new(SecretCredential(keys[0]))]),
+            &keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential(keys[0]))]),
         )
         .message,
     );
@@ -350,7 +355,7 @@ fn rendered_output(keys: &[[u8; KEY_LEN]; 2]) -> Vec<String> {
         store_error(
             "read from",
             ENCRYPTION_KEY,
-            &keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
+            &keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
         )
         .message,
     );
@@ -374,17 +379,25 @@ impl std::fmt::Debug for SecretCredential {
     }
 }
 
-impl keyring::credential::CredentialApi for SecretCredential {
-    fn set_secret(&self, _: &[u8]) -> keyring::Result<()> {
+impl CredentialApi for SecretCredential {
+    fn set_secret(&self, _: &[u8]) -> keyring_core::Result<()> {
         Ok(())
     }
 
-    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+    fn get_secret(&self) -> keyring_core::Result<Vec<u8>> {
         Ok(self.0.to_vec())
     }
 
-    fn delete_credential(&self) -> keyring::Result<()> {
+    fn delete_credential(&self) -> keyring_core::Result<()> {
         Ok(())
+    }
+
+    fn get_credential(&self) -> keyring_core::Result<Option<Arc<keyring_core::Credential>>> {
+        Ok(None)
+    }
+
+    fn get_specifiers(&self) -> Option<(String, String)> {
+        None
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

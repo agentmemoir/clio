@@ -18,14 +18,16 @@
 //! ## Boundary
 //!
 //! These tests run over an in-memory credential, so no test here reaches a real
-//! OS store. The plain credential is the macOS and Windows shape: the write
-//! reports success and stores nothing.
+//! OS store. The plain credential is the macOS Keychain shape: it answers with no
+//! attributes and reports an attribute write as unsupported.
 //!
 //! Keep this module focused on attributes and account names.
 
 use super::*;
 use crate::secret_key::KEY_LEN;
-use crate::secret_key_store_test_support::{FakeCredential, PlainCredential, err_of, store_over};
+use crate::secret_key_store_test_support::{
+    FakeCredential, PlainCredential, entry_over, err_of, store_over,
+};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -34,9 +36,7 @@ fn each_key_role_opens_its_own_account() {
     let recorder = Arc::clone(&seen);
     let store = KeyringStore::over(SYNC_ACCOUNT, SYNC_KEY, move |account| {
         recorder.lock().expect("seen").push(account.to_owned());
-        Ok(keyring::Entry::new_with_credential(Box::new(
-            FakeCredential::empty(),
-        )))
+        Ok(entry_over(FakeCredential::empty()))
     });
 
     store.get().expect("read");
@@ -69,7 +69,7 @@ fn an_attribute_a_store_keeps_round_trips_through_the_entry() {
 }
 
 #[test]
-fn an_attribute_a_store_ignores_reads_back_absent_rather_than_failing() {
+fn an_attribute_a_store_cannot_keep_is_refused_and_reads_back_absent() {
     let credential = FakeCredential::holding(&[7_u8; KEY_LEN]);
     let store = crate::secret_key_store_test_support::store_over_credential(
         ACCOUNT,
@@ -77,15 +77,26 @@ fn an_attribute_a_store_ignores_reads_back_absent_rather_than_failing() {
         PlainCredential::without_attributes_over(&credential),
     );
 
-    // The no-op write reports success, which is why the caller must read back.
-    store
-        .set_attribute("created_at", "2026-10-01T00:00:00Z")
-        .expect("a store without attribute support still reports success");
+    // A store with no attribute support refuses the write rather than pretending
+    // it landed, which is why the caller reads back instead of trusting the
+    // write's answer.
+    let err = err_of(store.set_attribute("created_at", "2026-10-01T00:00:00Z"));
+
+    assert!(
+        err.message.contains("write an attribute of"),
+        "{}",
+        err.message
+    );
+    assert!(
+        err.message.contains("does not support this operation"),
+        "{}",
+        err.message
+    );
     let attributes = store.attributes().expect("read back");
 
     assert!(
         attributes.is_empty(),
-        "an ignored attribute is absent, not an error and not a value"
+        "an unsupported attribute is absent, and absence is not an error"
     );
 }
 

@@ -60,19 +60,13 @@ rand = "0.9"
 # The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
 # so a closed stdout ends the process quietly rather than panicking.
 libc = "0.2"
-# OS secret store for the Clio encryption key. The three features are the
-# native backend for each supported platform; keyring gates the backing crate
-# per target itself, so one unconditional entry resolves to Keychain on macOS,
-# Credential Manager on Windows, and the persistent Secret Service on Linux.
-# `vendored` builds libdbus from C source on Linux instead of linking the system
-# one, so the Linux build needs no pkg-config and no libdbus-1-dev. CI installs
-# no system packages, so without it the Linux build fails before it compiles.
-keyring = { version = "3", features = [
-    "apple-native",
-    "windows-native",
-    "linux-native-sync-persistent",
-    "vendored",
-] }
+# OS secret store for the Clio encryption key. keyring 4 is a facade over
+# `keyring-core` that installs one platform store on first use: Keychain on
+# macOS, Credential Manager on Windows, Secret Service on Linux. The Unix store
+# is pure Rust over `zbus`, so no `libdbus` and no `openssl` build step remains
+# and the Linux build needs no system packages. The full client API lives on
+# `keyring-core`, which `clio-config` depends on directly.
+keyring = { version = "4.2", default-features = false, features = ["v1"] }
 # `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations
 # rusqlite 0.41 moved behind that feature, so `belief_tx`'s `COUNT(*)` read
 # needs no code change.

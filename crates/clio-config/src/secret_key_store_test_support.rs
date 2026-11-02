@@ -30,12 +30,24 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use clio_types::AmError;
+use keyring_core::api::CredentialApi;
 
 use crate::secret_key_store::{ACCOUNT, ENCRYPTION_KEY, KeyringStore};
 
+/// One `keyring_core` entry over an in-memory credential.
+///
+/// The wrapper the tests drive is built on `keyring_core::Entry`, so the
+/// factory hands back that type rather than the facade's thin wrapper.
+pub(crate) fn entry_over<C>(credential: C) -> keyring_core::Entry
+where
+    C: CredentialApi + Send + Sync + 'static,
+{
+    keyring_core::Entry::new_with_credential(Arc::new(credential))
+}
+
 /// How a [`FakeCredential`] should fail, as a shape rather than a value.
 ///
-/// `keyring::Error` is neither `Clone` nor `Copy`, so the fake records which
+/// `keyring_core::Error` is neither `Clone` nor `Copy`, so the fake records which
 /// failure to raise and builds a fresh one per call.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Failure {
@@ -49,26 +61,26 @@ pub(crate) enum Failure {
 }
 
 impl Failure {
-    fn to_error(self) -> keyring::Error {
+    fn to_error(self) -> keyring_core::Error {
         match self {
-            Self::None => keyring::Error::NoEntry,
-            Self::Locked => keyring::Error::NoStorageAccess(Box::new(std::io::Error::other(
+            Self::None => keyring_core::Error::NoEntry,
+            Self::Locked => keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other(
                 "the store is locked",
             ))),
-            Self::Platform => keyring::Error::PlatformFailure(Box::new(std::io::Error::other(
-                "the session bus is down",
-            ))),
+            Self::Platform => keyring_core::Error::PlatformFailure(Box::new(
+                std::io::Error::other("the session bus is down"),
+            )),
         }
     }
 }
 
-/// An in-memory `keyring` credential, so the wrapper can be tested without an OS
-/// store. Cloned handles share one secret, which is how a test watches what the
-/// store wrote.
+/// An in-memory `keyring_core` credential, so the wrapper can be tested without
+/// an OS store. Cloned handles share one secret, which is how a test watches what
+/// the store wrote.
 ///
 /// This fake keeps named attributes (as the Linux Secret Service does). The
 /// separate [`PlainCredential`] has no attribute support, which is how the
-/// macOS and Windows no-op path is exercised.
+/// macOS path is exercised.
 #[derive(Clone, Default)]
 pub(crate) struct FakeCredential {
     state: Arc<Mutex<FakeState>>,
@@ -149,8 +161,8 @@ impl FakeCredential {
     }
 }
 
-impl keyring::credential::CredentialApi for FakeCredential {
-    fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+impl CredentialApi for FakeCredential {
+    fn set_secret(&self, secret: &[u8]) -> keyring_core::Result<()> {
         let mut state = self.lock();
         if state.write != Failure::None {
             return Err(state.write.to_error());
@@ -159,15 +171,15 @@ impl keyring::credential::CredentialApi for FakeCredential {
         Ok(())
     }
 
-    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+    fn get_secret(&self) -> keyring_core::Result<Vec<u8>> {
         let state = self.lock();
         if state.read != Failure::None {
             return Err(state.read.to_error());
         }
-        state.secret.clone().ok_or(keyring::Error::NoEntry)
+        state.secret.clone().ok_or(keyring_core::Error::NoEntry)
     }
 
-    fn delete_credential(&self) -> keyring::Result<()> {
+    fn delete_credential(&self) -> keyring_core::Result<()> {
         let mut state = self.lock();
         if state.delete != Failure::None {
             return Err(state.delete.to_error());
@@ -176,7 +188,7 @@ impl keyring::credential::CredentialApi for FakeCredential {
         Ok(())
     }
 
-    fn get_attributes(&self) -> keyring::Result<HashMap<String, String>> {
+    fn get_attributes(&self) -> keyring_core::Result<HashMap<String, String>> {
         let state = self.lock();
         if let Some(failure) = state.attributes_failure {
             return Err(failure.to_error());
@@ -185,12 +197,12 @@ impl keyring::credential::CredentialApi for FakeCredential {
             return Err(state.read.to_error());
         }
         if state.secret.is_none() {
-            return Err(keyring::Error::NoEntry);
+            return Err(keyring_core::Error::NoEntry);
         }
         Ok(state.attributes.clone())
     }
 
-    fn update_attributes(&self, attributes: &HashMap<&str, &str>) -> keyring::Result<()> {
+    fn update_attributes(&self, attributes: &HashMap<&str, &str>) -> keyring_core::Result<()> {
         let mut state = self.lock();
         if let Some(failure) = state.attributes_failure {
             return Err(failure.to_error());
@@ -199,7 +211,7 @@ impl keyring::credential::CredentialApi for FakeCredential {
             return Err(state.read.to_error());
         }
         if state.secret.is_none() {
-            return Err(keyring::Error::NoEntry);
+            return Err(keyring_core::Error::NoEntry);
         }
         for (name, value) in attributes {
             state
@@ -209,6 +221,14 @@ impl keyring::credential::CredentialApi for FakeCredential {
         Ok(())
     }
 
+    fn get_credential(&self) -> keyring_core::Result<Option<Arc<keyring_core::Credential>>> {
+        Ok(None)
+    }
+
+    fn get_specifiers(&self) -> Option<(String, String)> {
+        None
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -216,10 +236,10 @@ impl keyring::credential::CredentialApi for FakeCredential {
 
 /// A credential with no attribute support at all.
 ///
-/// Its `get_attributes` / `update_attributes` are `keyring`'s defaults: the
-/// write reports success while storing nothing, exactly as the macOS and
-/// Windows backends do. That is the behaviour the sync key's creation time has
-/// to survive.
+/// Its `get_attributes` / `update_attributes` are `keyring_core`'s defaults: the
+/// read answers from the secret and reports no attributes, and the write is
+/// refused as unsupported. That is the shape the macOS Keychain store has, and
+/// the one the sync key's creation time has to survive.
 #[derive(Clone)]
 pub(crate) struct PlainCredential(FakeCredential);
 
@@ -235,17 +255,25 @@ impl PlainCredential {
     }
 }
 
-impl keyring::credential::CredentialApi for PlainCredential {
-    fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+impl CredentialApi for PlainCredential {
+    fn set_secret(&self, secret: &[u8]) -> keyring_core::Result<()> {
         self.0.set_secret(secret)
     }
 
-    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+    fn get_secret(&self) -> keyring_core::Result<Vec<u8>> {
         self.0.get_secret()
     }
 
-    fn delete_credential(&self) -> keyring::Result<()> {
+    fn delete_credential(&self) -> keyring_core::Result<()> {
         self.0.delete_credential()
+    }
+
+    fn get_credential(&self) -> keyring_core::Result<Option<Arc<keyring_core::Credential>>> {
+        Ok(None)
+    }
+
+    fn get_specifiers(&self) -> Option<(String, String)> {
+        None
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -254,7 +282,7 @@ impl keyring::credential::CredentialApi for PlainCredential {
 }
 
 /// The production wrapper, wired to `credential` exactly as it is wired to the OS
-/// store in production: through keyring's own `Entry`.
+/// store in production: through a `keyring_core` entry.
 pub(crate) fn store_over(credential: &FakeCredential) -> KeyringStore {
     let held = credential.clone();
     KeyringStore::over(ACCOUNT, ENCRYPTION_KEY, move |account| {
@@ -262,7 +290,7 @@ pub(crate) fn store_over(credential: &FakeCredential) -> KeyringStore {
             account, ACCOUNT,
             "the data key opens the data key's account"
         );
-        Ok(keyring::Entry::new_with_credential(Box::new(held.clone())))
+        Ok(entry_over(held.clone()))
     })
 }
 
@@ -273,13 +301,9 @@ pub(crate) fn store_over_credential<C>(
     credential: C,
 ) -> KeyringStore
 where
-    C: keyring::credential::CredentialApi + Clone + Send + Sync + 'static,
+    C: CredentialApi + Clone + Send + Sync + 'static,
 {
-    KeyringStore::over(account, what, move |_| {
-        Ok(keyring::Entry::new_with_credential(Box::new(
-            credential.clone(),
-        )))
-    })
+    KeyringStore::over(account, what, move |_| Ok(entry_over(credential.clone())))
 }
 
 /// Unwrap the refusal from a result that was expected to fail.

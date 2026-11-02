@@ -1,0 +1,1 @@
+Clio now reads and writes the OS secret store through keyring 4.2, which drops the OpenSSL and libdbus build dependencies on Linux; the keystore keeps the same entries, the same messages, and the same fallback to a key file.

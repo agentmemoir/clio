@@ -38,9 +38,10 @@ use crate::secret_key_source::KeySource;
 
 /// The keystore attribute that holds the sync key's creation time.
 ///
-/// A non-secret name the `keyring` backends either store (Linux) or ignore
-/// without error (macOS and Windows). The caller always reads it back before
-/// reporting it.
+/// A non-secret name the `keyring` backends either store (Linux) or report as
+/// unsupported (macOS and Windows). The caller always reads it back before
+/// reporting it, so a store that keeps none reports an unavailable time instead
+/// of inventing one.
 pub(crate) const CREATED_ATTRIBUTE: &str = "created_at";
 
 /// Domain label for the fingerprint, distinct from every other derivation.
