@@ -345,6 +345,16 @@ jobs:
         if: always()
         run: make scripts-check-env-mutation
 
+      # Whether git holds a case-only path collision, a binary over 500 KiB, or a
+      # branch with no common ancestor with its base. macOS checks out a
+      # case-insensitive volume, so the first silently loses a file there; the
+      # second is copied into every clone and every release archive; and the
+      # third collapses `git blame` when it merges. The live check runs in the
+      # First Defence workflow, where the base branch is known.
+      - name: Git hygiene check
+        if: always()
+        run: make scripts-check-git-hygiene
+
       # The test lookup against the runner's real list. It builds the test
       # binaries itself, so it runs here directly, outside the suite targets.
       # It needs the `nextest` tool, which is a cargo subcommand, and the step
