@@ -6,9 +6,9 @@
 # install command. Four build lines and one release job are the whole thing.
 #
 # Every target builds on a runner of its own architecture, so nothing is
-# cross-compiled: a cross build of this dependency tree needs a C cross
-# toolchain for OpenSSL, D-Bus, and SQLite, and a native runner is both
-# simpler and a truer test of the artifact.
+# cross-compiled: a cross build of this dependency tree still needs a C cross
+# toolchain for SQLite (sqlite-vec and libsqlite3-sys) and for ring's assembly,
+# and a native runner is both simpler and a truer test of the artifact.
 #
 # Re-running a failed release is the Actions "re-run failed jobs" button, not
 # a manual trigger. A manual trigger would let a tag be published from whatever
@@ -125,9 +125,9 @@ jobs:
 
       # musl-tools provides musl-gcc, which is the C compiler the build scripts
       # reach for when the target is *-unknown-linux-musl. Without it the build
-      # fails in openssl-sys before it reaches any Rust code. Perl and make are
-      # what the vendored OpenSSL build needs; they are already on the macOS
-      # runners, so this step is Linux-only for that reason too.
+      # fails in cc-rs before it reaches any Rust code. Perl and make are tools
+      # that a C dependency's build script may run; the macOS runners
+      # already have them, so this step is Linux-only for that reason too.
       - name: Install the musl C toolchain
         if: runner.os == 'Linux'
         run: |
@@ -152,8 +152,9 @@ jobs:
               echo "CC_aarch64_unknown_linux_musl=$PWD/scripts/musl-cc.sh" >> "$GITHUB_ENV"
               # GCC defaults to outline atomics on aarch64, which turns an
               # atomic increment into a call to __aarch64_ldadd4_sync. glibc
-              # provides that helper and musl does not, so the vendored libdbus
-              # fails to link. This flag is aarch64-only; x86_64 rejects it.
+              # provides that helper and musl does not, so a C or assembly
+              # object built for aarch64 musl can fail to link without this
+              # flag. This flag is aarch64-only; x86_64 rejects it.
               echo "MUSL_EXTRA_CFLAGS=-mno-outline-atomics" >> "$GITHUB_ENV"
               ;;
           esac
