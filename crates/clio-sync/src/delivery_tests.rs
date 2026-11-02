@@ -66,6 +66,7 @@ fn serve_denied() -> (
             deadline_secs: None,
             device_id: "srv-1".into(),
             sync_key: None,
+            policy: crate::freshness::FreshnessPolicy::default(),
         },
         Arc::clone(&denial) as Arc<dyn ErasureDenial>,
     )
@@ -83,6 +84,7 @@ fn client(remote: &str, token: &str) -> SyncClientConfig {
         remote: Some(remote.to_owned()),
         token: Some(token.to_owned()),
         cipher: Vec::new(),
+        policy: crate::freshness::FreshnessPolicy::default(),
     }
 }
 
@@ -129,6 +131,7 @@ fn a_delivery_without_a_remote_endpoint_is_input_refused() {
         remote: None,
         token: None,
         cipher: Vec::new(),
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let err = deliver_denial(&cfg, &target("fp-1")).expect_err("no remote is the caller's input");
     assert_eq!(err.code, ErrorCode::InvalidArgument);

@@ -181,6 +181,7 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
         remote: None,
         token: None,
         cipher: Vec::new(),
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let page = crate::PULL_PAGE_LIMIT;
     let since = |kind: &str| kind_watermark(&cfg, bank, kind).expect("watermark");

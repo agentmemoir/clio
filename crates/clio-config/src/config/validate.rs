@@ -49,6 +49,8 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "credentials.api_key",
     "sync.omit",
     "sync.allow_public_bind",
+    "sync.freshness_max_age_secs",
+    "sync.freshness_max_future_secs",
     "store.database_url",
     "store.sqlite_path",
     "extract.provider",
@@ -169,7 +171,9 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
         | "history.similarity_threshold"
         | "extract.temperature"
         | "embed.dims"
-        | "rerank.max_batch" => validate_numeric_value(path, value)?,
+        | "rerank.max_batch"
+        | "sync.freshness_max_age_secs"
+        | "sync.freshness_max_future_secs" => validate_numeric_value(path, value)?,
         "log.level" => {
             let Some(s) = value.as_str() else {
                 return Err(AmError::new(

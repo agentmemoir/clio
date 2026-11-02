@@ -54,6 +54,7 @@ use crate::clock::now_utc;
 use crate::conn_pool::{ConnectionPool, MAX_CONNECTIONS};
 use crate::credential::{AuthOutcome, CredentialStore};
 use crate::crypto::SyncCipherKey;
+use crate::freshness::FreshnessPolicy;
 use crate::protocol::{
     PullRequest, PullResponse, SyncContent, SyncMutation, decode_cursor, encode_cursor,
 };
@@ -109,6 +110,9 @@ pub struct SyncServerOptions {
     /// with this key before the apply path writes anything; `None` serves sealed
     /// rows exactly as it did before the sealed subject guard existed.
     pub sync_key: Option<Arc<SyncCipherKey>>,
+    /// Age bounds applied to every pushed envelope's stamp. [`Default`] disables
+    /// both sides, which is what a deployment that never sets the keys gets.
+    pub policy: FreshnessPolicy,
 }
 
 /// Per-connection serving options shared with `server_conn` (deadline, auth
@@ -129,6 +133,8 @@ pub(crate) struct ServeOptions {
     /// The sync key this peer serves with, when it holds one: the only way a
     /// sealed mutation's subject can be resolved before it is applied.
     pub(crate) sync_key: Option<Arc<SyncCipherKey>>,
+    /// Age bounds applied to every pushed envelope's stamp.
+    pub(crate) policy: FreshnessPolicy,
     /// One lock per authorized bank. The server runs a worker per accepted
     /// connection, so pushes for the same bank can otherwise interleave inside
     /// the apply path, which is a check-then-act sequence over the item, the
@@ -247,6 +253,7 @@ fn serve(
             device_id: options.device_id,
             denial,
             sync_key: options.sync_key,
+            policy: options.policy,
             bank_locks: BankLocks::default(),
         }),
         ttl_secs: options.ttl_secs.unwrap_or(crate::SERVE_TTL_DEFAULT_SECS),

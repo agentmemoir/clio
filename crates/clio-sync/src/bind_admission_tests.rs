@@ -95,6 +95,7 @@ fn serve_refuses_a_public_bind_when_the_setting_is_off() {
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     })
     .err()
     .expect("a public bind is refused with the setting off");

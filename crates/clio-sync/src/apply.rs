@@ -179,7 +179,26 @@ pub fn apply_mutation_guarded(
     m: &SyncMutation,
     envelope_json: &str,
 ) -> Result<ApplyResult, AmError> {
-    guarded(engine, denial, m, envelope_json, m)
+    guarded(engine, denial, m, envelope_json, m, &now_utc())
+}
+
+/// [`apply_mutation_guarded`] with the local clock supplied by the caller.
+///
+/// The envelope-order guard needs one `now`. A caller that must not read the
+/// host clock passes its own stamp, so the clock is a parameter of the decision
+/// rather than an input the caller cannot see.
+///
+/// # Errors
+/// Storage failures (retryable; never advance cursors past them).
+#[cfg(test)]
+pub(crate) fn apply_mutation_guarded_at(
+    engine: &ApplyEngine<'_>,
+    denial: Option<&dyn ErasureDenial>,
+    m: &SyncMutation,
+    envelope_json: &str,
+    now: &str,
+) -> Result<ApplyResult, AmError> {
+    guarded(engine, denial, m, envelope_json, m, now)
 }
 
 /// [`apply_mutation_guarded`] for a row this node opened: the effects run on
@@ -197,7 +216,7 @@ pub fn apply_mutation_guarded_relaying(
     envelope_json: &str,
     journal_as: &SyncMutation,
 ) -> Result<ApplyResult, AmError> {
-    guarded(engine, denial, m, envelope_json, journal_as)
+    guarded(engine, denial, m, envelope_json, journal_as, &now_utc())
 }
 
 fn guarded(
@@ -206,6 +225,7 @@ fn guarded(
     m: &SyncMutation,
     envelope_json: &str,
     journal_as: &SyncMutation,
+    now: &str,
 ) -> Result<ApplyResult, AmError> {
     if let Err(err) = m.validate() {
         return dead_letter(engine, m, envelope_json, &err).map(ApplyResult::plain);
@@ -245,8 +265,7 @@ fn guarded(
     // Envelope order, after every existing duplicate answer so a replayed id
     // still reports `Duplicate`, and before the op matrix so a refused
     // envelope writes no durable effect. One clock read serves both halves.
-    let now = now_utc();
-    if let Some(refused) = apply_freshness::guard(engine, m, envelope_json, &now)? {
+    if let Some(refused) = apply_freshness::guard(engine, m, envelope_json, now)? {
         return Ok(refused);
     }
     // The subject a payload carries, consulted before any upsert or mint path

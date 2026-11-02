@@ -115,7 +115,44 @@ pub(crate) fn validate_numeric_value(path: &str, value: &Value) -> Result<(), Am
             }
         }
         "rerank.max_batch" => validate_rerank_max_batch(value)?,
+        "sync.freshness_max_age_secs" | "sync.freshness_max_future_secs" => {
+            validate_freshness_bound(path, value)?;
+        }
         _ => {}
+    }
+    Ok(())
+}
+
+/// Highest accepted envelope age bound, in seconds: one hundred years.
+///
+/// A larger bound cannot refuse anything a real deployment could produce — a
+/// stamp a century away is already nonsense — so accepting one only advertises
+/// a window the guard can never enforce.
+pub(crate) const MAX_FRESHNESS_BOUND_SECS: u64 = 100 * 365 * 86_400;
+
+/// Reject a wall-clock envelope bound that is negative or meaningless.
+///
+/// `0` is accepted and is the shipped default: each side disables only itself,
+/// so a deployment can bound one direction and leave the other alone.
+/// `max_age_secs` ships at `0` because a legitimate sync backlog can be
+/// arbitrarily old, so an absolute age bound at apply time refuses real traffic.
+///
+/// # Errors
+/// A non-integer, a negative value, or a value above the hundred-year ceiling.
+fn validate_freshness_bound(path: &str, value: &Value) -> Result<(), AmError> {
+    let Some(n) = value.as_u64() else {
+        return Err(AmError::new(
+            ErrorCode::InvalidType,
+            format!("{path} must be a non-negative integer"),
+        ));
+    };
+    if n > MAX_FRESHNESS_BOUND_SECS {
+        return Err(AmError::new(
+            ErrorCode::OutOfRange,
+            format!(
+                "{path} must be in 0..={MAX_FRESHNESS_BOUND_SECS} (seconds, 0 disables the bound)"
+            ),
+        ));
     }
     Ok(())
 }

@@ -57,6 +57,9 @@ pub struct SyncClientConfig {
     /// node sealed with the newest key and the server stores opaque bytes.
     /// An empty list means encryption off.
     pub cipher: Vec<crate::crypto::SyncCipherKey>,
+    /// Age bounds applied to every pulled envelope's stamp. [`Default`] disables
+    /// both sides, which is what a deployment that never sets the keys gets.
+    pub policy: crate::freshness::FreshnessPolicy,
 }
 
 /// One sync operation mode.
@@ -241,7 +244,7 @@ fn pull_bank(
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
-        policy: crate::freshness::FreshnessPolicy::default(),
+        policy: cfg.policy,
     };
     loop {
         let request = PullRequest {

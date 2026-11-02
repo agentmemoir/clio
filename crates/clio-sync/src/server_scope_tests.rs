@@ -51,6 +51,7 @@ fn options(banks: &[&str], store_path: &Path, dev: bool) -> (SyncServerOptions, 
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     (options, store)
 }

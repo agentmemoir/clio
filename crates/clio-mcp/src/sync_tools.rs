@@ -49,6 +49,7 @@
 use crate::runtime::{McpState, now_utc};
 use crate::write_tools::{opt_bool, opt_str};
 use clio_compliance::JournalDenialProbe;
+use clio_sync::freshness::FreshnessPolicy;
 use clio_sync::prelude::{
     SyncCipherKey, SyncClientConfig, SyncServerOptions, SyncStatusReport, sync_serve_with_denial,
     sync_status,
@@ -56,7 +57,7 @@ use clio_sync::prelude::{
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Value, json};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 #[path = "sync_transfer.rs"]
 mod sync_transfer;
@@ -256,6 +257,7 @@ pub fn sync_serve_with(
             deadline_secs: None,
             device_id: state.device_id.clone(),
             sync_key: None,
+            policy: freshness_policy(state),
         },
         denial,
     )?;
@@ -283,6 +285,19 @@ pub(crate) fn client_cfg(
         remote: remote.map(str::to_owned),
         token: token.map(str::to_owned),
         cipher: Vec::new(),
+        policy: freshness_policy(state),
+    }
+}
+
+/// Envelope age bounds from `/sync/freshness_*`; 0 disables one side.
+#[must_use]
+pub fn freshness_policy(state: &McpState) -> FreshnessPolicy {
+    let rt = state.config.lock().unwrap_or_else(PoisonError::into_inner);
+    let doc = rt.effective_raw();
+    let at = |k: &str| doc.pointer(&format!("/sync/{k}")).and_then(Value::as_i64);
+    FreshnessPolicy {
+        max_age_secs: at("freshness_max_age_secs").unwrap_or(0),
+        max_future_secs: at("freshness_max_future_secs").unwrap_or(0),
     }
 }
 

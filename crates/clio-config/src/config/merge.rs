@@ -72,7 +72,9 @@ where
         "credentials": {},
         "sync": {
             "omit": true,
-            "allow_public_bind": false
+            "allow_public_bind": false,
+            "freshness_max_age_secs": 0,
+            "freshness_max_future_secs": 0
         },
         "mcp": {
             "revision": "2025-11-25",
@@ -256,5 +258,22 @@ mod tests {
             "a public sync bind must be off unless the operator turns it on"
         );
         assert_eq!(defaults.pointer("/sync/omit").cloned(), Some(json!(true)));
+    }
+
+    /// Both envelope bounds are readable at the pointers the apply path and the
+    /// `config_get` view consult, so a deployment can set them without a source
+    /// edit. `0` is the shipped value and disables that side only.
+    #[test]
+    fn the_envelope_age_bounds_default_to_zero_and_are_readable() {
+        let defaults = system_defaults(&|_key: &str| None);
+        assert_eq!(
+            defaults.pointer("/sync/freshness_max_age_secs").cloned(),
+            Some(json!(0)),
+            "an age bound would refuse a legitimate backlog, so it ships off"
+        );
+        assert_eq!(
+            defaults.pointer("/sync/freshness_max_future_secs").cloned(),
+            Some(json!(0))
+        );
     }
 }

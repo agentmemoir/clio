@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on numeric value validation behavior.
 
-use super::{MAX_EMBED_DIMS, MAX_RERANK_BATCH, validate_numeric_value};
+use super::{MAX_EMBED_DIMS, MAX_FRESHNESS_BOUND_SECS, MAX_RERANK_BATCH, validate_numeric_value};
 use crate::error::ErrorCode;
 use serde_json::json;
 
@@ -157,4 +157,46 @@ fn a_non_integer_rerank_cap_is_rejected() {
 fn a_path_this_module_does_not_own_is_left_alone() {
     validate_numeric_value("log.level", &json!(1)).unwrap();
     validate_numeric_value("backend", &json!(0)).unwrap();
+}
+
+/// `0` is a legitimate value for both envelope bounds: each side disables only
+/// itself, so a deployment can bound one direction and leave the other off.
+#[test]
+fn an_envelope_bound_accepts_zero_and_the_ceiling() {
+    for path in [
+        "sync.freshness_max_age_secs",
+        "sync.freshness_max_future_secs",
+    ] {
+        validate_numeric_value(path, &json!(0)).unwrap();
+        validate_numeric_value(path, &json!(900)).unwrap();
+        validate_numeric_value(path, &json!(MAX_FRESHNESS_BOUND_SECS)).unwrap();
+    }
+}
+
+/// A negative or fractional bound is not a window, and a bound above the
+/// hundred-year ceiling is a window the guard could never enforce.
+#[test]
+fn an_envelope_bound_rejects_negative_fractional_and_absurd_values() {
+    for path in [
+        "sync.freshness_max_age_secs",
+        "sync.freshness_max_future_secs",
+    ] {
+        for rejected in [json!(-1), json!(1.5), json!("60"), json!(null)] {
+            let err =
+                validate_numeric_value(path, &rejected).expect_err("not a whole count of seconds");
+            assert_eq!(err.code, ErrorCode::InvalidType, "accepted {rejected}");
+            assert_eq!(
+                err.message,
+                format!("{path} must be a non-negative integer")
+            );
+        }
+        let err = validate_numeric_value(path, &json!(MAX_FRESHNESS_BOUND_SECS + 1))
+            .expect_err("a century is already beyond any real stamp");
+        assert_eq!(err.code, ErrorCode::OutOfRange);
+        assert!(
+            err.message.contains("0..="),
+            "the message names the accepted range: {}",
+            err.message
+        );
+    }
 }

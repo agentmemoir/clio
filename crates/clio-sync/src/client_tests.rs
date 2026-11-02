@@ -61,6 +61,7 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     })
     .expect("serve");
     (server, store, kms)
@@ -79,6 +80,7 @@ pub(crate) fn cfg(
         remote: Some(addr.to_owned()),
         token: Some(TOKEN.to_owned()),
         cipher,
+        policy: crate::freshness::FreshnessPolicy::default(),
     }
 }
 

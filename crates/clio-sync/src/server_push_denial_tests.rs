@@ -74,6 +74,7 @@ fn serve_scoped() -> (
             deadline_secs: None,
             device_id: "srv-1".into(),
             sync_key: None,
+            policy: crate::freshness::FreshnessPolicy::default(),
         },
         Arc::clone(&denial) as Arc<dyn ErasureDenial>,
     )

@@ -75,6 +75,7 @@ fn serve_with_kms(
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     })
     .expect("serve");
     (server, store, kms)
@@ -116,6 +117,7 @@ fn bind_failure_returns_an_error() {
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     })
     .err()
     .expect("bad bind address");

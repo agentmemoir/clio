@@ -83,6 +83,7 @@ pub(crate) fn start_serve(
         deadline_secs: None,
         device_id: state.device_id.clone(),
         sync_key: serve_sync_key(env)?,
+        policy: clio_mcp::sync_tools::freshness_policy(state),
     };
     let server = sync_serve_with_denial(options, denial_probe(env)?)
         .map_err(|error| CliError::from_am_error(&error))?;

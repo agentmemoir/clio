@@ -68,6 +68,7 @@ pub(crate) fn serve(
         deadline_secs,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     })
     .expect("serve");
     drop(scratch);
@@ -231,6 +232,7 @@ fn t24_04_refuses_anonymous_bind_outside_dev_mode() {
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     });
     assert!(err.is_err());
 }

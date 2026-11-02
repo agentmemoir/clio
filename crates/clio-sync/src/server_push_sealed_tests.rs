@@ -69,6 +69,7 @@ fn serve_sealed() -> (
             deadline_secs: None,
             device_id: "srv-1".into(),
             sync_key: Some(Arc::new(paired_key())),
+            policy: crate::freshness::FreshnessPolicy::default(),
         },
         Arc::clone(&denial) as Arc<dyn ErasureDenial>,
     )
@@ -241,6 +242,7 @@ fn a_mutation_for_an_unauthorized_bank_is_refused_under_the_envelope_bank() {
         deadline_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     })
     .expect("serve");
     let addr = server.addr().to_owned();
