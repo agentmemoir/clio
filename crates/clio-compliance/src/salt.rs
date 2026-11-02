@@ -8,6 +8,7 @@
 //! ## Owns
 //! - The `CLIO_COMPLIANCE_SALT` override
 //! - First-use generation and owner-only persistence of the deployment salt beside the erasure journal
+//! - The owner-only read rule for an existing sidecar
 //! - The non-reversible salt fingerprint
 //!
 //! ## Does not own
@@ -22,7 +23,11 @@
 //! Keep this module focused on the deployment salt.
 //!
 //! The salt is write-once: re-minting it would invalidate every hash recorded
-//! under the old one, so an existing sidecar is read and never replaced.
+//! under the old one, so an existing sidecar is read and never replaced. The
+//! sidecar is read under the owner-only rule the journal applies to itself: a
+//! link, another kind of file, or a mode that grants any group or other access
+//! is refused, because a readable sidecar lets a local reader confirm a guessed
+//! subject exactly as a published salt would.
 
 use clio_store::sha256_hex;
 use clio_types::{AmError, ErrorCode};
@@ -31,6 +36,7 @@ use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
+use crate::erasure_journal_file::owner_only;
 use crate::export_custody::export_custody_files::{fsync_dir, io_error, open_owner_only};
 
 /// The environment override an operator sets to supply the salt directly.
@@ -45,25 +51,6 @@ const SALT_SUFFIX: &str = ".salt";
 /// Domain string keyed by the deployment salt so a fingerprint reveals nothing
 /// about the salt itself.
 const SALT_FINGERPRINT_DOMAIN: &str = "clio-compliance-salt-fingerprint-v1";
-
-/// The deployment tombstone salt this process resolves.
-///
-/// # Errors
-/// The journal path does not resolve from the process environment, or the same
-/// failures [`tombstone_salt_at`] reports.
-pub fn tombstone_salt() -> Result<Vec<u8>, AmError> {
-    let journal_path = clio_config::resolve_journal_path(&|key: &str| std::env::var(key).ok())?;
-    tombstone_salt_at(&journal_path)
-}
-
-/// A non-reversible fingerprint of the deployment salt this process resolves.
-///
-/// # Errors
-/// The same failures [`tombstone_salt`] reports.
-pub fn tombstone_salt_fingerprint() -> Result<String, AmError> {
-    let journal_path = clio_config::resolve_journal_path(&|key: &str| std::env::var(key).ok())?;
-    tombstone_salt_fingerprint_at(&journal_path)
-}
 
 /// The deployment tombstone salt for the journal at `journal_path`.
 ///
@@ -137,13 +124,67 @@ fn persisted_salt(journal_path: &Path) -> Result<Vec<u8>, AmError> {
 }
 
 /// The sidecar salt, or `None` when no sidecar exists.
+///
+/// An existing sidecar is read under the owner-only rule the erasure journal
+/// applies to itself, and it is never regenerated here: replacing it would
+/// invalidate every identifier already hashed under the salt it holds.
 fn read_salt(path: &Path) -> Result<Option<Vec<u8>>, AmError> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
+    // The path is observed without following links, so a link planted at the
+    // sidecar name is refused rather than read through.
+    let observed = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
         Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(io_error("read", path, &err)),
+        Err(err) => return Err(io_error("inspect", path, &err)),
     };
+    if let Some(refusal) = untrusted(path, &observed) {
+        return Err(refusal);
+    }
+    let bytes = fs::read(path).map_err(|err| io_error("read", path, &err))?;
     Ok(Some(exact_salt(&bytes, path)?))
+}
+
+/// The refusal for a sidecar this build will not read, naming what was found.
+///
+/// A symbolic link, any non-regular file, and a mode that grants any group or
+/// other access are all refused: a salt any local reader can open lets that
+/// reader confirm a guessed subject, which is what a per-deployment salt exists
+/// to prevent. `None` when the observation is one regular, owner-only file.
+fn untrusted(path: &Path, meta: &fs::Metadata) -> Option<AmError> {
+    let found = if meta.file_type().is_symlink() {
+        "is a symbolic link, and a link is never followed".to_owned()
+    } else if !meta.is_file() {
+        "is not a regular file".to_owned()
+    } else if owner_only(meta) {
+        return None;
+    } else {
+        format!(
+            "is mode {}, which grants group or other access",
+            mode_bits(meta)
+        )
+    };
+    Some(AmError::new(
+        ErrorCode::ConfigCorrupt,
+        format!(
+            "the deployment salt file {} {found}; it must be one regular file that grants nothing \
+             to group or other. The file is not regenerated here, because replacing it would \
+             invalidate every identifier already hashed under the salt it holds",
+            path.display()
+        ),
+    ))
+}
+
+/// The permission bits of `meta` as four octal digits.
+#[cfg(unix)]
+fn mode_bits(meta: &fs::Metadata) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    format!("{:04o}", meta.permissions().mode() & 0o777)
+}
+
+/// Non-Unix platforms have no mode bits, so [`owner_only`] never refuses one and
+/// this arm is unreachable.
+#[cfg(not(unix))]
+fn mode_bits(_meta: &fs::Metadata) -> String {
+    "unrestricted".to_owned()
 }
 
 /// `bytes` as a salt, or a refusal when they are not exactly [`SALT_LEN`] once

@@ -132,10 +132,7 @@ pub use restore_guard::{
     RestoreGuardRefusal, RestoreRequest, begin_restore, check_copy_custody, check_restore_at_plan,
     copy_digest_of, custody_refusal_parts, reconcile_restore_actions,
 };
-pub use salt::{
-    tombstone_salt, tombstone_salt_at, tombstone_salt_fingerprint, tombstone_salt_fingerprint_at,
-    tombstone_salt_fingerprint_of,
-};
+pub use salt::{tombstone_salt_at, tombstone_salt_fingerprint_at, tombstone_salt_fingerprint_of};
 pub use scratchpad::{MAX_KEYS, MAX_TOTAL_BYTES, Scratchpad, TTL};
 pub use stats::{PressureCounts, StatsInputs, StatsReport, stats};
 pub use subject_peer::{

@@ -194,8 +194,11 @@ fn same_file(_observed: &fs::Metadata, _opened: &fs::Metadata) -> bool {
 }
 
 /// Whether the file mode grants nothing to group or other.
+///
+/// The same rule the deployment salt sidecar is read under, so one definition
+/// serves both owner-only files.
 #[cfg(unix)]
-fn owner_only(meta: &fs::Metadata) -> bool {
+pub(crate) fn owner_only(meta: &fs::Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
     meta.permissions().mode().trailing_zeros() >= 6
 }

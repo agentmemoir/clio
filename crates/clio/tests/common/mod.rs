@@ -108,6 +108,10 @@ const SALT_SUFFIX: &str = ".salt";
 /// resolver's own, so a second command against the same journal reads what the
 /// first one seeded.
 ///
+/// The file is created owner-only because that is the rule the resolver reads a
+/// sidecar under: a group- or other-readable copy is refused, so a fixture that
+/// wrote one would make every case below refuse for the wrong reason.
+///
 /// A host that set `CLIO_COMPLIANCE_SALT` has already given every process the
 /// same text, so nothing is written: [`share_salt`] hands that override on and
 /// the sidecar is never consulted.
@@ -123,6 +127,11 @@ pub fn seed_salt(journal: &Path, salt: &[u8]) {
     }
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
     match options.open(&sidecar) {
         Ok(mut file) => file.write_all(salt).expect("seed the deployment salt"),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}

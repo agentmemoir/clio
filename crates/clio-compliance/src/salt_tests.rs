@@ -5,7 +5,7 @@
 //!
 //! This module is responsible for the deployment salt tests: the override, the
 //! first-use generation beside the journal, the persisted file's length and
-//! mode, and the fingerprint derived from it.
+//! mode, the owner-only read rule, and the fingerprint derived from it.
 //!
 //! ## Owns
 //! - The resolution assertions for every salt source
@@ -23,7 +23,9 @@
 //!
 //! Keep this module focused on the deployment salt.
 
-use super::{resolve_salt, tombstone_salt_fingerprint_at, tombstone_salt_fingerprint_of};
+use super::{
+    create_salt, resolve_salt, tombstone_salt_fingerprint_at, tombstone_salt_fingerprint_of,
+};
 use crate::test_unique::unique;
 use clio_types::ErrorCode;
 use std::path::{Path, PathBuf};
@@ -203,7 +205,7 @@ fn a_trailing_newline_on_a_full_length_salt_is_tolerated() {
 
 /// A sidecar the read cannot open is a refusal rather than a regeneration:
 /// regenerating would have to replace whatever is there, which is exactly what
-/// the length rule exists to prevent.
+/// the owner-only rule exists to prevent.
 #[test]
 fn a_sidecar_that_cannot_be_read_is_refused() {
     let scratch = Scratch::new();
@@ -211,10 +213,10 @@ fn a_sidecar_that_cannot_be_read_is_refused() {
     let path = sidecar(&journal);
     std::fs::create_dir(&path).expect("a directory stands where the salt file belongs");
     let err = resolve_salt(None, &journal).expect_err("an unreadable sidecar is refused");
-    assert_eq!(err.code, ErrorCode::Internal, "{}", err.message);
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
     assert!(
-        err.message.contains("failed to read"),
-        "the refusal names the operation that failed: {}",
+        err.message.contains("not a regular file"),
+        "the refusal names what it found: {}",
         err.message
     );
     assert!(
@@ -223,30 +225,124 @@ fn a_sidecar_that_cannot_be_read_is_refused() {
     );
 }
 
-/// `create_new` is one `O_CREAT|O_EXCL`, so a path that already exists is never
-/// written through: here a planted link with no target stands where the sidecar
-/// belongs. The would-be winner's file cannot be read back, so this call
-/// refuses rather than writing through the link or minting a second salt.
+/// An owner-only sidecar of the exact length is what the deployment salt is,
+/// so it is read as written.
+#[test]
+fn an_owner_only_sidecar_is_read() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let seeded = [b'k'; 32];
+    seed_owner_only(&sidecar(&journal), &seeded);
+    let salt = resolve_salt(None, &journal).expect("an owner-only sidecar is read");
+    assert_eq!(salt, seeded.to_vec(), "the salt is read as written");
+}
+
+/// A sidecar that grants any group or other access is refused: any local reader
+/// could open it and confirm a guessed subject, which is what a per-deployment
+/// salt exists to prevent. The refusal names the mode found and never includes
+/// the salt bytes, and the file is left as it was.
 #[cfg(unix)]
 #[test]
-fn a_provisioned_but_unreadable_sidecar_is_refused() {
+fn a_widened_sidecar_is_refused() {
     let scratch = Scratch::new();
     let journal = scratch.journal();
     let path = sidecar(&journal);
-    let target = scratch.root.join("planted-target");
-    std::os::unix::fs::symlink(&target, &path).expect("plant a link at the salt path");
-    let err =
-        resolve_salt(None, &journal).expect_err("a provisioned but unreadable sidecar is refused");
-    assert_eq!(err.code, ErrorCode::Internal, "{}", err.message);
+    seed_owner_only(&path, &[b'a'; 32]);
+    set_mode(&path, 0o644);
+    let err = resolve_salt(None, &journal).expect_err("a widened sidecar is refused");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
     assert!(
-        err.message.contains("provisioned concurrently"),
-        "the refusal names the race it lost: {}",
+        err.message.contains("0644"),
+        "the refusal names the mode found: {}",
         err.message
     );
     assert!(
-        !target.exists(),
-        "nothing is written through the planted link at {}",
-        path.display()
+        !err.message.contains(&"a".repeat(32)),
+        "the refusal carries no salt bytes: {}",
+        err.message
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read back"),
+        vec![b'a'; 32],
+        "the refused sidecar is neither replaced nor regenerated"
+    );
+}
+
+/// A link at the sidecar name is refused rather than followed, even when it
+/// points at a file this build would otherwise read: a link is not the
+/// owner-only file the rule is about, and following one would read a salt from
+/// outside the path the deployment controls.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_sidecar_is_refused() {
+    let scratch = Scratch::new();
+    let journal = scratch.journal();
+    let path = sidecar(&journal);
+    let target = scratch.root.join("elsewhere.salt");
+    seed_owner_only(&target, &[b'a'; 32]);
+    std::os::unix::fs::symlink(&target, &path).expect("plant a link at the salt path");
+    let err = resolve_salt(None, &journal).expect_err("a link is never followed");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    assert!(
+        err.message.contains("symbolic link"),
+        "the refusal names what it found: {}",
+        err.message
+    );
+    assert!(
+        !err.message.contains(&"a".repeat(32)),
+        "the refusal carries no salt bytes: {}",
+        err.message
+    );
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .expect("inspect the planted link")
+            .file_type()
+            .is_symlink(),
+        "the link is left exactly as it was found"
+    );
+    assert_eq!(
+        std::fs::read(&target).expect("read the file the link named"),
+        vec![b'a'; 32],
+        "the file the link named is never written through"
+    );
+}
+
+/// The create is one `O_CREAT|O_EXCL`, so the loser of a first-use race re-reads
+/// the winner's file under the same owner-only and length rules instead of
+/// writing through it. The seeded file is exactly the state the loser observes
+/// when it loses, so the re-read path is covered without a race.
+#[test]
+fn a_lost_create_race_reads_the_winners_sidecar() {
+    let scratch = Scratch::new();
+    let path = sidecar(&scratch.journal());
+    let winner = [b'w'; 32];
+    seed_owner_only(&path, &winner);
+    let salt = create_salt(&path).expect("the loser reads the winner's salt");
+    assert_eq!(
+        salt,
+        winner.to_vec(),
+        "the winner's salt is the deployment salt"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read back"),
+        winner.to_vec(),
+        "the winner's file is not written through"
+    );
+}
+
+/// A winner whose file is not a readable salt is a refusal of its own: the
+/// loser reports it rather than minting a second salt beside it.
+#[test]
+fn a_lost_create_race_refuses_a_winner_file_that_is_not_a_salt() {
+    let scratch = Scratch::new();
+    let path = sidecar(&scratch.journal());
+    seed_owner_only(&path, &[b'w'; 16]);
+    let err = create_salt(&path).expect_err("a winner file that is not a salt is refused");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    assert_eq!(
+        std::fs::read(&path).expect("read back"),
+        vec![b'w'; 16],
+        "the file the race found is left as it was"
     );
 }
 
