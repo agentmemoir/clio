@@ -200,7 +200,7 @@ fn a_persona_row_stamped_in_millis_carries_a_matching_id() {
     assert_eq!(
         m.sync_mutation_id,
         clio_store::sha256_hex(
-            b"am-sync-mut",
+            crate::keyed_roles::published_mutation_id_salt(),
             &format!("{ATTR_NAME}|{MILLIS_STAMP_ISO}|upsert")
         ),
         "the id is the hash of the identifier beside the wire's own stamp"
@@ -227,7 +227,10 @@ fn a_belief_row_stamped_with_a_bare_date_carries_a_matching_id() {
     );
     assert_eq!(
         m.sync_mutation_id,
-        clio_store::sha256_hex(b"am-sync-mut", "b-1|2026-03-04T00:00:00Z|upsert"),
+        clio_store::sha256_hex(
+            crate::keyed_roles::published_mutation_id_salt(),
+            "b-1|2026-03-04T00:00:00Z|upsert"
+        ),
         "the id names the belief id beside the canonical wire stamp"
     );
     assert_eq!(
