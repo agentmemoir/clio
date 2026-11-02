@@ -93,6 +93,7 @@ pub mod stdio;
 pub mod store_write;
 pub mod subject_request_tools;
 mod summarize_tools;
+mod sync_device_identity;
 pub mod sync_tools;
 pub mod write_tools;
 mod write_tools_handlers;

@@ -175,8 +175,9 @@ pub struct McpState {
     /// Local DEK provider shared with the store; sync serve seals journaled
     /// content with the same keys the local apply path uses.
     pub kms: Arc<dyn DekProvider>,
-    /// This node's sync device id. Default: `device-{pid}` (per-process
-    /// identity; `McpOpenOptions` carries no device field).
+    /// This node's sync device id: the `CLIO_SYNC_DEVICE_ID` override, else the
+    /// `sync_device_id` row this store persists, else one id minted at open. An
+    /// in-memory store keeps the per-process `device-{pid}` form.
     pub device_id: String,
     /// Bank-scoped retention profiles (verbosity and duplicate-tolerance policy).
     ///

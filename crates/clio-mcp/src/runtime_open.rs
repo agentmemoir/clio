@@ -240,6 +240,13 @@ impl McpState {
             env.clone(),
             AssocPolicy::from_coactivation(&env.coactivation),
         ));
+        // One device id for this open: an explicit override, else the stored
+        // row, else a minted id written here. Persisting it keeps the durable
+        // per-device ordering mark keyed on the same value after a restart.
+        let device_id = crate::sync_device_identity::resolve_from_env(
+            &*ops_store,
+            options.database_url == "sqlite::memory:",
+        )?;
         let state = Arc::new(Self {
             persona,
             belief,
@@ -290,7 +297,7 @@ impl McpState {
             join_consolidate_wave,
             sync,
             kms,
-            device_id: format!("device-{}", std::process::id()),
+            device_id,
             retention: Arc::new(std::sync::Mutex::new(load_retention_store())),
             retention_path: clio_config::retention_store::resolve_retention_path(None),
             journal_path,

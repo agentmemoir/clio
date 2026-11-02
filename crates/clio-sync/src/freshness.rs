@@ -153,7 +153,9 @@ pub enum Freshness {
 /// cursor.
 ///
 /// The per-device ordering mark, not either wall-clock bound, is the defence
-/// against a replay.
+/// against a replay. The mark is durable only while the device id that keys it
+/// stays the same, so a host whose id changes per process start keeps no mark
+/// across a restart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreshnessPolicy {
     /// How old a stamp may be, in seconds. 0 or less disables this side.
