@@ -25,11 +25,13 @@
 
 use super::{journal_seq_probe, lock_journal_append};
 use crate::db_url::postgres_url_from_env;
+use crate::migrate::IntoAmError;
 use crate::pg_lock::lock_pg_test;
 use crate::sync_store::{SyncJournalRow, SyncStore};
 use crate::test_unique::unique;
 use crate::{DekProvider, LocalDevKms, PostgresStore};
-use std::sync::Arc;
+use clio_types::ErrorCode;
+use std::sync::{Arc, mpsc};
 
 fn open_pg() -> PostgresStore {
     let url = postgres_url_from_env();
@@ -112,5 +114,58 @@ fn pg_journal_append_lock_and_probe_report_the_appended_seq() {
         probed,
         Some(stored),
         "the probe reports the seq the append committed"
+    );
+}
+
+/// An append whose bank key another session holds fails retryably instead of
+/// waiting forever.
+///
+/// Two independent stores, so neither append shares the other's client mutex.
+/// The holder takes the bank key in its own transaction and stays in it until
+/// the test releases it; the second store's ordinary `journal_append` of the same
+/// bank then waits on that key and is answered by the append's own lock timeout
+/// as `StorageBusy` — the retryable code, not `Internal` and not a success. The
+/// only time bound involved is that production timeout; nothing here asserts
+/// elapsed time or sleeps.
+#[test]
+fn pg_journal_append_whose_bank_lock_is_held_returns_storage_busy() {
+    let _guard = lock_pg_test();
+    let holder_store = open_pg();
+    let appender_store = open_pg();
+    let bank = unique("pg-journal-held-lock");
+    let mutation = unique("mut-held-lock");
+
+    let (held_tx, held_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let holder_bank = bank.clone();
+    let holder = std::thread::spawn(move || {
+        holder_store
+            .with_client(|client| {
+                let mut tx = client.transaction().am("journal lock holder transaction")?;
+                lock_journal_append(&mut tx, &holder_bank)?;
+                held_tx.send(()).expect("signal the held bank lock");
+                release_rx.recv().expect("wait for the test to release");
+                // Dropping the transaction rolls it back, which releases the
+                // transaction-scoped advisory lock.
+                Ok(())
+            })
+            .expect("journal lock holder session");
+    });
+
+    held_rx.recv().expect("the holder takes the bank lock");
+
+    let result = appender_store.journal_append(&journal_row(&bank, &mutation));
+
+    // Released before asserting, so a failed assertion cannot leave the holder
+    // hanging and the joins below always run.
+    release_tx.send(()).expect("release the holder");
+    holder.join().expect("join the journal lock holder");
+
+    let err =
+        result.expect_err("an append must not succeed while another session holds the bank key");
+    assert_eq!(
+        err.code,
+        ErrorCode::StorageBusy,
+        "a lock wait that outlives its timeout is retryable, not internal: {err:?}"
     );
 }

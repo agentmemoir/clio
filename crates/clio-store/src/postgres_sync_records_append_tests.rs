@@ -56,12 +56,27 @@ fn journal_row(bank_id: &str, sync_mutation_id: &str) -> SyncJournalRow {
     }
 }
 
+/// The text of a panic payload, so a failure in a joined thread can be reported.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-text panic payload".to_owned())
+}
+
 /// Append one mutation per thread from an independently opened store, all
 /// released from one barrier, and collect the outcomes in submission order.
 ///
 /// The shared-Postgres test lock is held by the caller, so the only writer to
 /// this bank is this helper; the stores are opened before the threads start so
 /// only the appends are concurrent.
+///
+/// Every handle is joined before anything is raised. Re-raising the first
+/// failure inside the loop would drop the remaining handles mid-append, and
+/// those detached appends would then outlive the caller's shared-database
+/// guard and the bank's lock key — a secondary failure in an unrelated test.
+/// The first failure is kept and raised once every thread has been joined.
 fn append_concurrently(bank_id: &str, mutations: &[String]) -> Vec<JournalAppendOutcome> {
     let barrier = Arc::new(Barrier::new(mutations.len()));
     // Every append thread is spawned before any is joined, so nothing but the
@@ -78,10 +93,25 @@ fn append_concurrently(bank_id: &str, mutations: &[String]) -> Vec<JournalAppend
             super::journal_append_pg(&store, &row)
         }));
     }
-    handles
-        .into_iter()
-        .map(|handle| handle.join().expect("append thread").expect("append ok"))
-        .collect()
+    let mut failure: Option<String> = None;
+    let mut outcomes = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(outcome)) => outcomes.push(outcome),
+            Ok(Err(err)) => {
+                failure.get_or_insert_with(|| format!("append failed: {err:?}"));
+            }
+            Err(payload) => {
+                failure.get_or_insert_with(|| {
+                    format!("append thread panicked: {}", panic_message(&payload))
+                });
+            }
+        }
+    }
+    if let Some(failure) = failure {
+        panic!("{failure}");
+    }
+    outcomes
 }
 
 /// The same mutation appended concurrently from independent stores: every
