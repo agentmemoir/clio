@@ -143,6 +143,7 @@ fn seed(client: &McpState, m: &SyncMutation) {
         sync: client.sync.as_ref(),
         device_id: "dev-seed".into(),
         kms: None,
+        policy: clio_sync::freshness::FreshnessPolicy::default(),
     };
     let outcome = apply_mutation(&engine, m, &envelope).expect("the seed mutation applies");
     assert_eq!(

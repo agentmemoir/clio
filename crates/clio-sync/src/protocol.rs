@@ -76,6 +76,8 @@ pub const REASON_UNAUTHORIZED_BANK: &str = "unauthorized_bank";
 pub const REASON_ERASED_SUBJECT: &str = "erased_subject";
 /// Dead-letter reason: op not supported by this release.
 pub const REASON_UNSUPPORTED_OP: &str = "unsupported_op";
+/// Dead-letter reason: envelope stamp is a replay or sits ahead of the clock.
+pub const REASON_STALE_ENVELOPE: &str = "stale_envelope";
 
 /// Content as it travels: decrypted JSON, or client-encrypted opaque bytes.
 ///

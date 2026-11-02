@@ -84,6 +84,7 @@ fn plant_plain(relay: &Arc<SqliteStore>, m: &SyncMutation) {
         sync: relay.as_ref(),
         device_id: "srv-1".into(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let row = crate::journal_row::journal_row(&engine, m).expect("journal row");
     assert!(

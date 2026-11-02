@@ -39,20 +39,24 @@
 use crate::apply_records;
 use crate::clock::now_utc;
 use crate::denial::DenialProof;
+use crate::freshness::FreshnessPolicy;
 use crate::journal_row::journal_row as build_journal_row;
 use crate::protocol::{
     ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA,
     ENTITY_KIND_TASK, ENTITY_KIND_TRIPLE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE, OP_REINFORCE,
     OP_UPSERT, SyncContent, SyncMutation,
 };
-use clio_store::{
-    AssocEdgeRecord, DeadLetterStatus, DekProvider, ErasureDenial, Store, SyncConflictRow,
-    SyncStore,
-};
+use clio_store::{AssocEdgeRecord, DeadLetterStatus, DekProvider, ErasureDenial, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
 
 #[path = "apply_dead_letter.rs"]
 mod apply_dead_letter;
+
+#[path = "apply_freshness.rs"]
+mod apply_freshness;
+
+#[path = "apply_lww.rs"]
+mod apply_lww;
 
 #[path = "apply_items.rs"]
 mod apply_items;
@@ -62,6 +66,8 @@ use apply_items::{apply_item_discard, apply_item_invalidate, apply_item_upsert};
 pub use apply_dead_letter::quarantine;
 
 pub(crate) use apply_dead_letter::dead_letter;
+
+pub(crate) use apply_lww::{admission_score, lww_loser};
 
 /// Outcome of applying one sync mutation (transitions).
 #[derive(Debug, Clone, PartialEq)]
@@ -133,6 +139,9 @@ pub struct ApplyEngine<'a> {
     /// Local DEK provider used to seal journaled content at rest (server role).
     /// `None` marks a pure client applied-log, which journals ids/hashes only.
     pub kms: Option<&'a dyn DekProvider>,
+    /// Age bounds for an incoming envelope stamp. The past side is disabled by
+    /// default, so only a far-future stamp can be refused by age.
+    pub policy: FreshnessPolicy,
 }
 
 /// Apply one remote mutation under the trust matrix.
@@ -233,6 +242,13 @@ fn guarded(
     )? {
         return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
+    // Envelope order, after every existing duplicate answer so a replayed id
+    // still reports `Duplicate`, and before the op matrix so a refused
+    // envelope writes no durable effect. One clock read serves both halves.
+    let now = now_utc();
+    if let Some(refused) = apply_freshness::guard(engine, m, envelope_json, &now)? {
+        return Ok(refused);
+    }
     // The subject a payload carries, consulted before any upsert or mint path
     // can run: a denied subject never becomes readable again, and an
     // unreadable authority refuses the mutation instead of clearing it.
@@ -292,6 +308,7 @@ fn guarded(
         if !appended.inserted {
             return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
         }
+        apply_freshness::record(engine, m)?;
     }
     Ok(ApplyResult::plain(outcome))
 }
@@ -387,53 +404,6 @@ fn apply_triple_invalidate(
         return Ok(ApplyOutcome::Duplicate);
     }
     Ok(ApplyOutcome::Applied)
-}
-
-/// The admission score one origin receipt carries, read tolerantly: a missing
-/// or non-numeric `score` yields `None`, which `lww_compare` maps to `0.0`.
-/// Shared by the conflict comparison and the pull-side receipt restoration, so
-/// both read the same key the same way and a malformed value degrades to the
-/// documented fallback rather than to an error.
-pub(crate) fn admission_score(receipt: &serde_json::Value) -> Option<f64> {
-    receipt.get("score").and_then(serde_json::Value::as_f64)
-}
-
-pub(crate) fn lww_loser(
-    engine: &ApplyEngine<'_>,
-    m: &SyncMutation,
-    existing_time: &str,
-    existing_score: Option<f64>,
-) -> Result<bool, AmError> {
-    let incoming_score = m.admission_receipt.as_ref().and_then(admission_score);
-    // The stored row does not carry its origin device id, so the local node's
-    // device id stands in as the existing side of the tie-break. That removes
-    // the old empty-string asymmetry where any remote device always won a
-    // full tie. Locally held rows are the common case; a peer-origin row is
-    // resolved from this node's perspective consistently.
-    let incoming_wins = crate::protocol::lww_compare(
-        &m.transaction_time,
-        incoming_score,
-        &m.device_id,
-        existing_time,
-        existing_score,
-        &engine.device_id,
-    ) == std::cmp::Ordering::Greater;
-    if incoming_wins {
-        return Ok(false);
-    }
-    engine.sync.conflict_insert(&SyncConflictRow {
-        bank_id: m.bank.clone(),
-        entity_kind: m.entity_kind.clone(),
-        entity_id: m.entity_id.clone(),
-        winner_mutation_id: format!("local:{}", m.entity_id),
-        loser_mutation_id: m.sync_mutation_id.clone(),
-        winner_transaction_time: existing_time.to_owned(),
-        loser_transaction_time: m.transaction_time.clone(),
-        winner_device_id: engine.device_id.clone(),
-        loser_device_id: m.device_id.clone(),
-        created_at: now_utc(),
-    })?;
-    Ok(true)
 }
 
 #[cfg(test)]

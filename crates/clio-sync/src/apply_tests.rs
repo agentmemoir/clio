@@ -173,6 +173,7 @@ pub(crate) fn apply_result(
         sync: store,
         device_id: "node-1".into(),
         kms,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     apply_mutation(&engine, m, &envelope)

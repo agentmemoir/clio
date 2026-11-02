@@ -364,6 +364,7 @@ fn t24_08_crash_between_page_and_cursor_is_idempotent() {
         sync: b.as_ref(),
         device_id: "dev-b".into(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     assert_eq!(
         apply_mutation(&engine, &m, &envelope).expect("apply page"),

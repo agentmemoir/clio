@@ -243,6 +243,7 @@ fn pull_bank(
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     loop {
         let request = PullRequest {
@@ -323,6 +324,7 @@ fn decrypt_for_apply(
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     // One refusal shape for every row this node cannot trust: quarantine it
     // under the row's own bank and stop, so the cursor freezes at the prior id

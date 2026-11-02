@@ -44,6 +44,7 @@ fn apply_guarded(
         sync: store,
         device_id: "srv-1".into(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     apply_mutation_guarded(&engine, denial, m, &envelope)

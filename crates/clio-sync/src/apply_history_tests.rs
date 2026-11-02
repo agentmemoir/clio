@@ -159,14 +159,17 @@ fn task_records_apply_versioned_lww_and_duplicate() {
         store.get_task("b-hist", "task-1").unwrap().unwrap().version,
         2
     );
-    // A stale version loses and is journaled.
-    let v0 = mut_for(
+    // A stale version loses and is journaled. It arrives from a different
+    // device, so its older stamp is an ordering fact rather than a replay on
+    // the same device's high-water mark.
+    let mut v0 = mut_for(
         "m-t0",
         "task",
         "task-1",
         "2026-01-01T00:00:00Z",
         task_payload("b-hist", "car-t0", "task-1", 1),
     );
+    v0.device_id = "dev-behind".into();
     assert_eq!(apply(&store, None, &v0), ApplyOutcome::ConflictLoser);
     assert_eq!(store.conflict_count("b-hist").unwrap(), 1);
     // Envelope identity binding: entity_id must be the task id.

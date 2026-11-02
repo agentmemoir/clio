@@ -68,6 +68,36 @@ pub fn quarantine(
     })
 }
 
+/// Dead-letter one mutation under an explicit reason code.
+///
+/// Use this when the refusal is not an [`AmError`] shape, so the mapped path
+/// would answer `malformed` and mislabel the row.
+///
+/// # Errors
+/// Storage failures.
+pub(crate) fn dead_letter_with_reason(
+    engine: &ApplyEngine<'_>,
+    m: &SyncMutation,
+    envelope_json: &str,
+    reason_code: &str,
+    detail: &str,
+) -> Result<ApplyOutcome, AmError> {
+    engine.sync.dead_letter_open(&SyncDeadLetterRow {
+        sync_mutation_id: m.sync_mutation_id.clone(),
+        bank_id: m.bank.clone(),
+        reason_code: reason_code.to_owned(),
+        detail: detail.to_owned(),
+        envelope_json: envelope_json.to_owned(),
+        status: DeadLetterStatus::Open,
+        first_seen: now_utc(),
+        last_error: None,
+        updated_at: None,
+    })?;
+    Ok(ApplyOutcome::DeadLettered {
+        reason_code: reason_code.to_owned(),
+    })
+}
+
 /// Dead-letter one mutation with the mapped reason code (shared with the
 /// domain-record apply effects in `apply_records`).
 pub(crate) fn dead_letter(

@@ -227,6 +227,7 @@ pub(crate) fn handle_push(
         sync: options.sync.as_ref(),
         device_id: options.device_id.clone(),
         kms: Some(options.kms.as_ref()),
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();

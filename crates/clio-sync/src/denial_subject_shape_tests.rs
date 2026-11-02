@@ -114,6 +114,7 @@ fn assert_refused(store: &SqliteStore, denial: &FakeDenial, m: &SyncMutation) {
         sync: store,
         device_id: "srv-1".into(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     let result = apply_mutation_guarded(&engine, Some(denial), m, &envelope).expect("apply runs");
@@ -204,6 +205,7 @@ fn a_clear_subject_passes_the_guard_for_every_subject_keyed_shape() {
         sync: store.as_ref(),
         device_id: "srv-1".into(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let cases = [
         (

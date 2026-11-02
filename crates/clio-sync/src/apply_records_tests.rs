@@ -155,14 +155,17 @@ fn persona_stable_older_version_conflicts_and_absent_context_preserves() {
         payload("stable", &e)
     });
     assert_eq!(apply(&store, None, &first), ApplyOutcome::Applied);
-    // An older as_of loses deterministically.
-    let older = mut_for(
+    // An older as_of loses deterministically. It arrives from a different
+    // device, so its older stamp is an ordering fact and not a replay on the
+    // same device's high-water mark.
+    let mut older = mut_for(
         "m-p0",
         "persona",
         "style",
         "2026-01-01T00:00:00Z",
         payload("stable", &stable("style", "brief", "2026-01-01", 0.5)),
     );
+    older.device_id = "dev-behind".into();
     assert_eq!(apply(&store, None, &older), ApplyOutcome::ConflictLoser);
     // A newer version without a `context` key preserves the stored one.
     let newer = mut_for(

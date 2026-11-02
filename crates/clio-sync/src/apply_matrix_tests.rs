@@ -272,7 +272,7 @@ fn triple_invalidate_closes_local_edge_and_reclose_is_noop() {
         "e-t1",
         OP_INVALIDATE,
         "2026-01-01T00:00:00Z",
-        "dev-a",
+        "dev-behind",
         json!({ "subject": "", "predicate": "" }),
     );
     assert_eq!(
@@ -351,6 +351,7 @@ fn quarantine_helper_opens_an_open_dead_letter_row() {
         sync: store.as_ref(),
         device_id: "node-1".into(),
         kms: None,
+        policy: crate::freshness::FreshnessPolicy::default(),
     };
     let envelope = serde_json::to_string(&m).expect("envelope");
     let out =

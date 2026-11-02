@@ -167,20 +167,17 @@ fn persona_preference_duplicate_older_and_tie_outcomes() {
     assert_eq!(apply(&store, None, &dup), ApplyOutcome::Applied);
     let mut older = seed.clone();
     older.as_of = "2026-01-01".into();
-    assert_eq!(
-        apply(
-            &store,
-            None,
-            &mut_for(
-                "m-po",
-                "persona",
-                "brevity",
-                "2026-01-01T00:00:00Z",
-                payload("preference", &older)
-            )
-        ),
-        ApplyOutcome::ConflictLoser
+    // The older row arrives from a different device, so its older stamp is an
+    // ordering fact and not a replay on the same device's high-water mark.
+    let mut older_m = mut_for(
+        "m-po",
+        "persona",
+        "brevity",
+        "2026-01-01T00:00:00Z",
+        payload("preference", &older),
     );
+    older_m.device_id = "dev-behind".into();
+    assert_eq!(apply(&store, None, &older_m), ApplyOutcome::ConflictLoser);
     let mut tied = seed;
     tied.value = 0.5;
     let tie_payload = payload("preference", &tied);
