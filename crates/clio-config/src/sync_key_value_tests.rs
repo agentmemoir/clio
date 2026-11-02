@@ -90,6 +90,87 @@ fn the_base64_form_is_standard_base64_of_the_key_bytes() {
     );
 }
 
+#[test]
+fn a_location_names_the_file_path_or_the_os_secret_store() {
+    let file = SyncKeyLocation::File("/keys/sync.key".into());
+
+    assert_eq!(format!("{file}"), "key file /keys/sync.key");
+    assert_eq!(SyncKeyLocation::Keystore.to_string(), "the OS secret store");
+}
+
+#[test]
+fn a_key_of_the_wrong_length_is_refused_and_names_where_it_came_from() {
+    let raw = Zeroizing::new(vec![7_u8; KEY_LEN - 1]);
+
+    let err = key_from_bytes(&raw, &SyncKeyLocation::Keystore).expect_err("a short key is refused");
+
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        err.message.contains("the OS secret store"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("is 31 bytes"), "{}", err.message);
+    assert!(err.message.contains("expected 32"), "{}", err.message);
+}
+
+#[test]
+fn a_file_key_of_the_wrong_length_names_the_file_it_was_read_from() {
+    let raw = Zeroizing::new(vec![7_u8; KEY_LEN + 1]);
+
+    let err = key_from_bytes(&raw, &SyncKeyLocation::File("/keys/sync.key".into()))
+        .expect_err("an over-long key is refused");
+
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        err.message
+            .contains("the sync key in key file /keys/sync.key"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("is 33 bytes"), "{}", err.message);
+}
+
+#[test]
+fn an_archived_key_that_is_not_base64_is_refused_rather_than_guessed_at() {
+    let err = fingerprint_of_base64("not a key!!!").expect_err("garbage is refused");
+
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        err.message.contains("is 12 base64 characters"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("will not guess"), "{}", err.message);
+}
+
+#[test]
+fn an_archived_key_that_is_not_a_full_key_is_refused() {
+    let short = base64::engine::general_purpose::STANDARD.encode([9_u8; KEY_LEN - 4]);
+
+    let err = fingerprint_of_base64(&short).expect_err("a half key is refused");
+
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        err.message
+            .contains(&format!("is {} base64 characters", short.len())),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn an_archived_key_is_fingerprinted_from_the_bytes_it_decodes_to() {
+    let key = rand::random::<[u8; KEY_LEN]>();
+    let archived = base64::engine::general_purpose::STANDARD.encode(key);
+    let loaded = LoadedSyncKey::new(Zeroizing::new(key), SyncKeyLocation::File("a".into()));
+
+    assert_eq!(
+        fingerprint_of_base64(&archived).expect("a well-formed key"),
+        loaded.fingerprint()
+    );
+}
+
 /// Lower-case hex, the encoding a rendered value would most plausibly leak in.
 fn hex_of(key: &[u8; KEY_LEN]) -> String {
     use std::fmt::Write as _;
