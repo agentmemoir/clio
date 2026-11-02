@@ -35,6 +35,7 @@ use base64::Engine;
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
 
+use crate::apply::apply_freshness::writer_stamp_order;
 use crate::crypto::SyncCipher;
 
 /// Entity kind: typed memory item.
@@ -108,7 +109,8 @@ pub struct SyncMutation {
     pub entity_id: String,
     /// Operation (`upsert` | `invalidate` | `discard` | `archive` | `reinforce` | `prune`).
     pub op: String,
-    /// Writer's transaction-time stamp (LWW key, ISO-8601 UTC text).
+    /// Writer's transaction-time stamp (LWW key: canonical UTC text at
+    /// whole-second precision, e.g. `2026-01-01T00:00:00Z`).
     pub transaction_time: String,
     /// Origin device id.
     pub device_id: String,
@@ -268,8 +270,8 @@ fn checksum(bank: &str, seq: i64) -> String {
     digest[..12].to_owned()
 }
 
-/// Deterministic LWW comparison: later `transaction_time` wins;
-/// ties compare origin admission scores; still-tied compares `device_id`.
+/// Deterministic LWW comparison: the later writer-stamp instant wins, whichever
+/// encoding carries it; ties compare origin admission scores, then `device_id`.
 #[must_use]
 pub fn lww_compare(
     a_time: &str,
@@ -279,7 +281,7 @@ pub fn lww_compare(
     b_score: Option<f64>,
     b_device: &str,
 ) -> std::cmp::Ordering {
-    match a_time.cmp(b_time) {
+    match writer_stamp_order(a_time, b_time) {
         std::cmp::Ordering::Equal => {}
         other => return other,
     }

@@ -16,6 +16,7 @@
 //! - The keyed content digest, and its plaintext-mode fallback
 //! - The opaque identifier handle, its width, and its preimage
 //! - The keyed mutation idempotency key, and its plaintext-mode fallback
+//! - The one stamp text that key hashes, which is the canonical wire form
 //! - Which record kinds carry a handle
 //!
 //! ## Does not own
@@ -32,6 +33,7 @@
 //! Keep this module focused on derived key roles and the values they
 //! produce.
 
+use crate::apply::apply_freshness::canonical_writer_stamp;
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
     ENTITY_KIND_ASSOC, ENTITY_KIND_FAILURE, ENTITY_KIND_PERSONA, ENTITY_KIND_TASK,
@@ -161,6 +163,13 @@ pub fn identifier_handle(
 /// cannot make two records that must stay separate share one key, and the
 /// unkeyed form is never published next to an encrypted row where a relay
 /// could hash a guessed identifier against it and confirm the guess.
+///
+/// The stamp enters the preimage in the one encoding the wire carries, so the
+/// key and the envelope's `transaction_time` are two renderings of a single
+/// text and either can be recomputed from the other. A stamp this build cannot
+/// place is hashed as it was given: the packaging choke point refuses it
+/// anyway, and a caller that hands over a non-clock value (a task version row
+/// id) must keep the key it always had.
 #[must_use]
 pub fn mutation_id(
     cfg_key: Option<&SyncCipherKey>,
@@ -168,6 +177,7 @@ pub fn mutation_id(
     stamp: &str,
     op: &str,
 ) -> String {
+    let stamp = canonical_writer_stamp(stamp).unwrap_or_else(|_| stamp.to_owned());
     let preimage = format!("{real_id}|{stamp}|{op}");
     let Some(key) = cfg_key else {
         return clio_store::sha256_hex(PLAINTEXT_MUTATION_ID_SALT, &preimage);

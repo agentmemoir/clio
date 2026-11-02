@@ -13,6 +13,8 @@
 //! - The disabled window (`0` tolerance checks nothing)
 //! - The refusal of a stamp the reader cannot place, and the documented legacy
 //!   stamp forms this reader places instead of refusing
+//! - The instant-aware order of two writer stamps carried in different
+//!   encodings
 //!
 //! ## Does not own
 //! - Clock reads and the strict wire-form parse (see `clock`)
@@ -27,9 +29,10 @@
 //! Keep this module focused on the freshness decision.
 
 use crate::apply::ApplyEngine;
-use crate::clock::parse_utc_epoch;
+use crate::clock::{format_utc, parse_utc_epoch};
 #[cfg(test)]
 use clio_store::{DekProvider, Store, SyncStore};
+use clio_types::{AmError, ErrorCode};
 
 /// How far ahead of this node's clock a writer stamp may sit, in seconds.
 ///
@@ -49,8 +52,9 @@ pub(crate) const ENVELOPE_FUTURE_ALLOWANCE_SECS: u64 = 3_600;
 /// rows as epoch milliseconds and as `YYYY-MM-DD[THH:MM:SS[.fff]][Z]`, and an
 /// item's stored stamp travels unchanged as a mutation's `transaction_time`, so
 /// those documented forms are placed here too instead of being refused as old.
-/// A fraction is dropped (the comparison works in whole seconds). An offset
-/// zone, a spelled month, or junk stays `None`, and the caller records it as a
+/// A fraction is dropped here, because the age bound works in whole seconds;
+/// the stamp order keeps it (see [`writer_stamp_millis`]). An offset zone, a
+/// spelled month, or junk stays `None`, and the caller records it as a
 /// malformed stamp rather than calling it stale.
 pub(crate) fn writer_stamp_epoch(stamp: &str) -> Option<i64> {
     let stamp = stamp.trim();
@@ -85,6 +89,106 @@ pub(crate) fn writer_stamp_epoch(stamp: &str) -> Option<i64> {
         _ => return None,
     };
     parse_utc_epoch(&normalized)
+}
+
+/// Order two writer stamps by the instant each names, not by its text.
+///
+/// One field carries stamps in more than one encoding, so text order can put a
+/// later instant below an earlier one: `1793597865118` (epoch millis) sorts
+/// before `2026-01-01T00:00:00Z` although it names the later time. When both
+/// sides place, the instants decide, at the finest precision either side
+/// carries (see [`writer_stamp_millis`]), so two writes inside one second still
+/// order by the instant each names instead of tying. A pair with a side this
+/// reader cannot place has no two instants to compare, so it falls back to text
+/// and keeps the order every caller had before.
+pub(crate) fn writer_stamp_order(a: &str, b: &str) -> std::cmp::Ordering {
+    match (writer_stamp_millis(a), writer_stamp_millis(b)) {
+        (Some(a_instant), Some(b_instant)) => a_instant.cmp(&b_instant),
+        _ => a.cmp(b),
+    }
+}
+
+/// Epoch milliseconds for a writer stamp, at the finest precision the stamp
+/// carries, or `None` when the stamp names no instant this build can place.
+///
+/// A stamp with no fraction names a whole second, so its fraction is zero; an
+/// epoch-millis stamp is already milliseconds and is taken as written. The
+/// fraction is truncated, not rounded, to three digits.
+pub(crate) fn writer_stamp_millis(stamp: &str) -> Option<i64> {
+    let stamp = stamp.trim();
+    let digits = stamp.strip_prefix('-').unwrap_or(stamp);
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        return stamp.parse::<i64>().ok();
+    }
+    let secs = writer_stamp_epoch(stamp)?;
+    let whole = stamp.strip_suffix('Z').unwrap_or(stamp);
+    let Some((_, fraction)) = whole.split_once('.') else {
+        return secs.checked_mul(1_000);
+    };
+    if fraction.is_empty() || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut millis = 0i64;
+    for byte in fraction.bytes().take(3) {
+        millis = millis * 10 + i64::from(byte - b'0');
+    }
+    for _ in fraction.len().min(3)..3 {
+        millis *= 10;
+    }
+    secs.checked_mul(1_000)?.checked_add(millis)
+}
+
+/// The one encoding a writer stamp leaves this node in: canonical ISO-8601 UTC
+/// at whole seconds, or the refusal of a stamp no clock reading can place.
+///
+/// The store stamps rows in more than one legend (epoch millis from `now_iso`,
+/// bare dates, ISO with a fraction or an offset zone), and a row's stored stamp
+/// travels unchanged as a mutation's `transaction_time`. Every writer puts the
+/// same second on the wire so a peer never compares two legends. Placement is
+/// the store's own canonicaliser first, because it is what every write path
+/// already stores, and then the legacy forms this module places for freshness.
+///
+/// # Errors
+/// [`ErrorCode::InvalidArgument`] naming the value that cannot be placed: a
+/// stamp that names no instant must be refused, never copied to the wire.
+pub(crate) fn canonical_writer_stamp(raw: &str) -> Result<String, AmError> {
+    if let Some(canonical) = clio_store::canonical_stamp(raw) {
+        return Ok(canonical);
+    }
+    match writer_stamp_epoch(raw) {
+        Some(secs) => Ok(format_utc(secs)),
+        None => Err(refused_stamp(raw)),
+    }
+}
+
+/// The frame around the value in [`refused_stamp`]'s sentence, in one place so
+/// the writer and the reader beside it cannot drift apart.
+const REFUSAL_BEFORE: &str = "transaction_time `";
+const REFUSAL_AFTER: &str = "` is not a timestamp this build can place";
+
+/// The refusal [`canonical_writer_stamp`] raises for a stamp no clock reading
+/// can place: `InvalidArgument` naming the field and the value.
+fn refused_stamp(raw: &str) -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        format!("{REFUSAL_BEFORE}{raw}{REFUSAL_AFTER}"),
+    )
+}
+
+/// The value named by [`canonical_writer_stamp`]'s refusal, or `None` when
+/// `err` is any other failure.
+///
+/// A packaging caller must contain that one refusal — hold the row's own kind
+/// and report it — without containing a storage or seal failure, and a seal
+/// failure also reports `InvalidArgument`. Recognising the sentence this module
+/// alone writes is what separates the two, so the reader sits beside the writer.
+pub(crate) fn unplaceable_stamp_value(err: &AmError) -> Option<&str> {
+    if err.code != ErrorCode::InvalidArgument {
+        return None;
+    }
+    err.message
+        .strip_prefix(REFUSAL_BEFORE)?
+        .strip_suffix(REFUSAL_AFTER)
 }
 
 /// Is the mutation's writer stamp outside the bounds this engine allows?

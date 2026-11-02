@@ -44,6 +44,12 @@ pub(crate) const FAILURE_ID: &str = "synthetic-failure-record-7";
 pub(crate) const RELATIONSHIP: &str = "synthetic_relationship_label";
 /// One stamp, so no fixture reads the clock.
 pub(crate) const STAMP: &str = "2026-01-01T00:00:00Z";
+/// The form the store's own `now_iso` writes: epoch milliseconds as text. Every
+/// other fixture here is ISO, which hides the encoding production actually
+/// stamps an association edge with.
+pub(crate) const MILLIS_STAMP: &str = "1793597865118";
+/// What [`MILLIS_STAMP`] names on the canonical clock.
+pub(crate) const MILLIS_STAMP_ISO: &str = "2026-11-02T05:37:45Z";
 
 /// A client config holding one cipher key built from `secret`, pointed at an
 /// address nothing listens on: packaging never opens a socket.
@@ -144,6 +150,15 @@ pub(crate) fn edge(id: &str, rel: &str) -> AssocEdgeRecord {
         relationship: Some(rel.into()),
         weight: 0.5,
         last_updated_at: "2026-01-01T02:00:00Z".into(),
+    }
+}
+
+/// An association edge whose store column carries [`MILLIS_STAMP`], the form
+/// the store stamps on a write; [`edge`] carries ISO instead.
+pub(crate) fn millis_edge(id: &str) -> AssocEdgeRecord {
+    AssocEdgeRecord {
+        last_updated_at: MILLIS_STAMP.into(),
+        ..edge(id, RELATIONSHIP)
     }
 }
 

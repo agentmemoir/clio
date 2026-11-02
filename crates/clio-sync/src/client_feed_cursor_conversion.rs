@@ -16,6 +16,10 @@
 //! - The guarded conversion write (`kind_watermark_convert_write`) that never
 //!   resets a concurrently advanced cursor
 //! - `kind_watermark_set`, the durable write of one kind's compound body
+//! - The page-complete position of one item row: the greatest store stamp it
+//!   was selected by, ordered by the instant it names (`fold_item_position`)
+//! - `KindBatch`, the per-kind record of the position to advance to and of the
+//!   reasons to hold (`skipped`, `has_rejection`), and `record_kind_batch`
 //!
 //! ## Does not own
 //! - The push run that decides when each cursor advances (`client_feed`)
@@ -31,9 +35,12 @@
 //!
 //! Keep this module focused on the per-kind push watermark cursors.
 
+use crate::apply::apply_freshness::writer_stamp_order;
 use crate::client::SyncClientConfig;
+use crate::protocol::SyncMutation;
 use crate::protocol::{canonical_watermark_body, decode_watermark, encode_watermark};
-use clio_types::AmError;
+use clio_store::SyncFeedRow;
+use clio_types::{AmError, MemoryItem};
 
 /// Cursor label of the retired shared push watermark that all kinds advanced
 /// together before the per-kind cursors. It is read only as the one-shot
@@ -88,6 +95,108 @@ pub(crate) fn kind_watermark_convert_write(
         eprintln!("sync watermark conversion write failed for {bank}/{kind}: {err}");
     }
 }
+
+/// Every store-local stamp the item feed's predicate compares for one returned
+/// row: the ordering stamp the feed returned, the transaction-time bounds, and
+/// the creation stamp. The close stamp can sit above `updated_at` (the store
+/// places it one second past `tx_from` when a correction is not later), so the
+/// ordering stamp alone does not bound the row; a discard writes `discarded_at`
+/// and `updated_at` from one stamp, which the ordering stamp covers.
+pub(crate) fn item_row_stamps<'a>(row: &'a SyncFeedRow, item: &'a MemoryItem) -> [&'a str; 5] {
+    [
+        row.transaction_time.as_str(),
+        item.tx_from.as_str(),
+        item.tx_until.as_deref().unwrap_or(""),
+        item.updated_at.as_str(),
+        item.created_at.as_str(),
+    ]
+}
+
+/// Fold one item row's compared stamps into `best`: the greatest stamp by the
+/// instant it names, with the greatest entity id carrying that stamp as the
+/// compound tiebreak. The winner keeps the text it was read as.
+pub(crate) fn fold_item_position(
+    best: &mut Option<(String, String)>,
+    entity_id: &str,
+    stamps: &[&str],
+) {
+    for stamp in stamps {
+        if stamp.is_empty() {
+            continue;
+        }
+        match best
+            .as_ref()
+            .map(|(held, _)| writer_stamp_order(stamp, held))
+        {
+            None | Some(std::cmp::Ordering::Greater) => {
+                *best = Some(((*stamp).to_owned(), entity_id.to_owned()));
+            }
+            Some(std::cmp::Ordering::Equal) => {
+                let keep = best
+                    .as_ref()
+                    .is_none_or(|(_, held_entity)| held_entity.as_str() > entity_id);
+                if !keep && let Some(slot) = best.as_mut() {
+                    entity_id.clone_into(&mut slot.1);
+                }
+            }
+            Some(std::cmp::Ordering::Less) => {}
+        }
+    }
+}
+
+/// One feed kind's packaging result for a push: the compound `(stamp, entity)`
+/// the kind advances to on ack, in the store's own stamp text, and the
+/// half-open `mutations` range this kind contributed.
+pub(crate) struct KindBatch {
+    pub(crate) kind: &'static str,
+    pub(crate) last: Option<(String, String)>,
+    pub(crate) skipped: bool,
+    pub(crate) base: usize,
+    pub(crate) end: usize,
+}
+
+impl KindBatch {
+    /// True when the server rejected one of this kind's own mutations, so its
+    /// watermark must hold: advancing would skip a row the peer never stored.
+    pub(crate) fn has_rejection(&self, mutations: &[SyncMutation], rejected: &[String]) -> bool {
+        mutations[self.base..self.end]
+            .iter()
+            .any(|m| rejected.contains(&m.sync_mutation_id))
+    }
+}
+
+/// Record one packaged feed page's bookkeeping (last row position, skipped
+/// rows) for the post-ack advance.
+pub(crate) fn record_kind_batch(
+    kind: &'static str,
+    rows: &[SyncFeedRow],
+    base: usize,
+    mutations: &[SyncMutation],
+    skipped: bool,
+    batches: &mut Vec<KindBatch>,
+) {
+    batches.push(KindBatch {
+        kind,
+        last: rows
+            .last()
+            .map(|r| (r.transaction_time.clone(), r.entity_id.clone())),
+        skipped,
+        base,
+        end: mutations.len(),
+    });
+}
+
+/// The eight push feed kinds in their stable packaging order.
+pub(crate) const PUSH_KINDS: [&str; 8] = [
+    "item",
+    "assoc_edge",
+    "triple",
+    "persona_stable",
+    "persona_preference",
+    "belief",
+    "task",
+    "failure",
+];
 
 /// Persist one kind's compound watermark body after a successful push ack.
 pub(crate) fn kind_watermark_set(

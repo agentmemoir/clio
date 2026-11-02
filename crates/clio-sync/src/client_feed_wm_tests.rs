@@ -24,7 +24,7 @@
 //!
 //! Keep this module focused on the push watermark contract tests.
 
-use crate::client::client_tests::{TOKEN, cfg, item, paired_cfg, paired_key, serve, sqlite};
+use crate::client::client_tests::{TOKEN, cfg, edge, item, paired_cfg, paired_key, serve, sqlite};
 use crate::client::{SyncClientConfig, push, sync_status};
 use crate::protocol::encode_watermark;
 use clio_store::{HistoryStore, SqliteStore, Store, SyncStore};
@@ -246,6 +246,84 @@ fn compound_cursor_resumes_strictly_after_the_tiebreak_entity() {
     );
 }
 
+/// A kind whose store column carries epoch millis keeps its cursor in that
+/// same text, while the wire carries canonical ISO-8601 at whole seconds.
+///
+/// The feed predicates compare the stored column to the cursor as text, and
+/// `'1793597865118' > '2026-11-02T05:37:45Z'` is false: an ISO cursor over
+/// millis rows selects nothing, the kind reports an empty backlog, and no row
+/// ever ships. The second push proves the millis cursor still selects rows.
+#[test]
+fn a_millisecond_stamped_kind_keeps_a_store_text_watermark() {
+    let (server, srv, _kms) = serve(&["bms"]);
+    let addr = server.addr().to_owned();
+    let a = sqlite();
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    // The store's own stamp form: epoch millis as text.
+    a.put_assoc_edge(&edge("bms", "e-ms-1", "i-1", "i-2", "1793597865118"))
+        .expect("seed the millis edge");
+
+    push(&cfg_a, &["bms".to_owned()]).expect("push page 1");
+    let rows = srv.journal_list_since("bms", 0, 50).unwrap();
+    assert_eq!(rows.len(), 1, "the millis-stamped edge reached the relay");
+    assert_eq!(
+        rows[0].transaction_time, "2026-11-02T05:37:45Z",
+        "the wire carries canonical ISO seconds, not the store's millis text"
+    );
+    let cursor = crate::client_feed::kind_watermark(&cfg_a, "bms", "assoc_edge").expect("cursor");
+    assert!(
+        cursor.starts_with("1793597865118"),
+        "the persisted cursor stays in the store's own stamp text: {cursor}"
+    );
+
+    // A later row is still selected by the millis cursor, so the next page
+    // ships it and the kind drains.
+    a.put_assoc_edge(&edge("bms", "e-ms-2", "i-1", "i-3", "1793597925118"))
+        .expect("seed a later millis edge");
+    assert_eq!(
+        sync_status(&cfg_a, &["bms".to_owned()]).unwrap().banks[0].pending_push,
+        1,
+        "the millis cursor selects the later millis row"
+    );
+    push(&cfg_a, &["bms".to_owned()]).expect("push page 2");
+    let rows = srv.journal_list_since("bms", 0, 50).unwrap();
+    assert_eq!(rows.len(), 2, "the later row shipped exactly once");
+    assert_eq!(
+        sync_status(&cfg_a, &["bms".to_owned()]).unwrap().banks[0].pending_push,
+        0,
+        "the kind drained instead of reporting a silent empty backlog"
+    );
+    server.stop();
+}
+
+/// The page maximum still advances the cursor: after a page the cursor sits at
+/// the last returned row's own store stamp, which is the maximum in the store's
+/// text, and never at a wire stamp.
+#[test]
+fn a_page_maximum_in_store_text_still_advances_the_cursor() {
+    let (server, _srv, _kms) = serve(&["bmax2"]);
+    let addr = server.addr().to_owned();
+    let a = sqlite();
+    let cfg_a = paired_cfg("dev-a", &a, &addr);
+    a.put_assoc_edge(&edge("bmax2", "e-1", "i-1", "i-2", "1793597865118"))
+        .expect("seed the first edge");
+    a.put_assoc_edge(&edge("bmax2", "e-2", "i-1", "i-3", "1793597925118"))
+        .expect("seed the second edge");
+
+    push(&cfg_a, &["bmax2".to_owned()]).expect("push the page");
+    let cursor = crate::client_feed::kind_watermark(&cfg_a, "bmax2", "assoc_edge").expect("cursor");
+    assert!(
+        cursor.starts_with("1793597925118"),
+        "the cursor advances to the page maximum in store text: {cursor}"
+    );
+    assert_eq!(
+        sync_status(&cfg_a, &["bmax2".to_owned()]).unwrap().banks[0].pending_push,
+        0,
+        "the page drained"
+    );
+    server.stop();
+}
+
 /// A kind's watermark holds only when one of *its own* mutations was
 /// rejected. Before the fix every per-kind advance sat inside the
 /// `response.rejected.is_empty()` guard, so a single dead-lettered mutation in
@@ -273,9 +351,7 @@ fn a_kind_holds_only_for_its_own_rejected_mutations() {
     let batch = |kind, base, end| KindBatch {
         kind,
         last: Some(("2026-01-01T00:00:00Z".to_owned(), "e".to_owned())),
-        page_rows: 1,
         skipped: false,
-        max_mutation_stamp: None,
         base,
         end,
     };

@@ -121,16 +121,21 @@ fn the_content_digest_with_a_cipher_is_keyed_and_peer_stable() {
     );
 }
 
-/// With no cipher the idempotency key is the unkeyed hash of the same preimage,
-/// byte for byte what a plaintext deployment has always stored, so every
-/// existing redelivery check against a stored row still matches.
+/// With no cipher the idempotency key is the unkeyed hash over the same
+/// preimage, byte for byte what a plaintext deployment has always stored for a
+/// stamp that was already canonical, and hashed over the canonical form for one
+/// that was not, so the key always names the text the wire carries.
 #[test]
 fn the_mutation_id_without_a_cipher_is_the_plain_hash() {
-    let plain = mutation_id(None, "task-42", "2026-01-01", "upsert");
+    let plain = mutation_id(None, "task-42", "2026-01-01T00:00:00Z", "upsert");
     assert_eq!(
-        plain,
-        clio_store::sha256_hex(b"am-sync-mut", "task-42|2026-01-01|upsert"),
+        plain, "87dad84721ca5382d75016f4c3d96693332407085ebb265d966af7ddb1a8109e",
         "plaintext mode keeps the pre-keyed value byte for byte"
+    );
+    assert_eq!(
+        mutation_id(None, "task-42", "2026-01-01", "upsert"),
+        plain,
+        "a bare date hashes the canonical text, so the key and the wire stamp agree"
     );
     assert_eq!(plain.len(), 64, "an unkeyed SHA-256 is 64 hex characters");
 }
@@ -160,7 +165,7 @@ fn the_mutation_id_with_a_cipher_is_keyed_and_peer_stable() {
         mine,
         clio_store::sha256_hex(
             crate::keyed_roles::published_mutation_id_salt(),
-            "task-42|2026-01-01|upsert",
+            "task-42|2026-01-01T00:00:00Z|upsert",
         ),
         "a guessed identifier must not confirm against the stored key"
     );

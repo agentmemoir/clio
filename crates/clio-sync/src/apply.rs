@@ -68,7 +68,7 @@ use apply_items::{apply_item_discard, apply_item_invalidate, apply_item_upsert};
 pub use apply_dead_letter::quarantine;
 
 pub(crate) use apply_dead_letter::{
-    dead_letter, last_stale_refusal, quarantine_stale, stale_refused,
+    dead_letter, last_stale_refusal, quarantine_stale, record_refusal, stale_refused,
 };
 
 /// Outcome of applying one sync mutation (transitions).

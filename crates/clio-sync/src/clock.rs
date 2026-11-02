@@ -34,7 +34,10 @@ pub fn now_utc() -> String {
 }
 
 /// Epoch seconds → the `YYYY-MM-DDTHH:MM:SSZ` text the writer stamps.
-fn format_utc(secs: i64) -> String {
+///
+/// This is the one canonical wire encoding, so the packaging path formats a
+/// normalised writer stamp through it rather than through a second formatter.
+pub(crate) fn format_utc(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
     let rem = secs.rem_euclid(86_400);

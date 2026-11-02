@@ -32,12 +32,12 @@
 //!
 //! Keep this module focused on push-side mutation packaging.
 
-use crate::client::SyncClientConfig;
 use crate::protocol::{
     ENTITY_KIND_ASSOC, ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM,
     ENTITY_KIND_PERSONA, ENTITY_KIND_TASK, ENTITY_KIND_TRIPLE, OP_INVALIDATE, OP_UPSERT,
     SyncContent, SyncMutation,
 };
+use crate::{apply::apply_freshness::canonical_writer_stamp, client::SyncClientConfig};
 use clio_store::AssocEdgeRecord;
 use clio_types::{
     AmError, BeliefObject, ErrorCode, FailureRecord, MemoryItem, PersonaPreference,
@@ -386,14 +386,15 @@ fn wire_receipt(cfg: &SyncClientConfig, receipt: Option<&Value>) -> Option<Value
     }
 }
 
-/// Seal the content for `m` under its own execution envelope, which is final
-/// in every other field by the time this runs, so the content is set last.
+/// Canonicalise `m`'s writer stamp and seal its content: the stamp is the one
+/// encoding the wire carries, and every other envelope field is already final.
 fn finish_mutation(
     cfg: &SyncClientConfig,
     mut m: SyncMutation,
     plain: &Value,
     receipt: Option<Value>,
 ) -> Result<SyncMutation, AmError> {
+    m.transaction_time = canonical_writer_stamp(&m.transaction_time)?;
     let (content, wire) = content_and_receipt(cfg, plain, receipt, &m.execution_view().aad())?;
     debug_assert_eq!(
         wire, m.admission_receipt,
