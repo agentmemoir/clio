@@ -79,12 +79,15 @@ fn parse_rejects_non_digits_and_out_of_range_fields() {
 }
 
 #[test]
-fn classify_is_fresh_at_the_old_boundary() {
-    let policy = FreshnessPolicy::default();
+fn classify_is_fresh_at_a_configured_old_boundary() {
+    let policy = FreshnessPolicy {
+        max_age_secs: 900,
+        max_future_secs: 60,
+    };
     let now = 1_800_000_000;
-    let age = DEFAULT_FRESHNESS_MAX_AGE_SECS;
-    assert_eq!(policy.classify(now - age, now), Freshness::Fresh);
-    assert_eq!(policy.classify(now - age - 1, now), Freshness::Stale);
+    assert_eq!(policy.classify(now - 900, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now - 899, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now - 901, now), Freshness::Stale);
 }
 
 #[test]
@@ -156,22 +159,34 @@ fn disabled_policy_accepts_old_and_far_future_stamps() {
 }
 
 #[test]
-fn default_policy_uses_the_two_product_bounds() {
+fn default_policy_disables_the_past_side_and_keeps_the_future_side() {
     let policy = FreshnessPolicy::default();
-    assert_eq!(policy.max_age_secs, 900);
+    assert_eq!(policy.max_age_secs, 0);
     assert_eq!(policy.max_future_secs, 60);
-    assert_eq!(DEFAULT_FRESHNESS_MAX_AGE_SECS, 900);
+    assert_eq!(DEFAULT_FRESHNESS_MAX_AGE_SECS, 0);
     assert_eq!(DEFAULT_FRESHNESS_MAX_FUTURE_SECS, 60);
 }
 
 #[test]
-fn default_policy_rejects_just_outside_each_bound() {
+fn default_policy_accepts_old_stamps_and_rejects_far_future_only() {
     let policy = FreshnessPolicy::default();
     let now = 1_800_000_000;
-    assert_eq!(policy.classify(now - 901, now), Freshness::Stale);
+    assert_eq!(policy.classify(now - 901, now), Freshness::Fresh);
     assert_eq!(policy.classify(now - 899, now), Freshness::Fresh);
     assert_eq!(policy.classify(now + 61, now), Freshness::Future);
     assert_eq!(policy.classify(now + 59, now), Freshness::Fresh);
+}
+
+#[test]
+fn default_policy_keeps_a_year_old_backlog_stamp_fresh() {
+    // A device that was offline for a year, or a new device reading the whole
+    // journal, delivers stamps this old. The default must not reject them,
+    // because a rejection dead-letters the row and freezes the pull cursor.
+    let policy = FreshnessPolicy::default();
+    let now = 1_800_000_000;
+    let one_year: i64 = 365 * 86_400;
+    assert_eq!(policy.classify(now - one_year, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now - 901, now), Freshness::Fresh);
 }
 
 #[test]
@@ -185,8 +200,11 @@ fn classify_text_is_fresh_for_garbage() {
 
 #[test]
 fn classify_text_reads_a_stamp_at_each_boundary() {
-    let policy = FreshnessPolicy::default();
-    let age = DEFAULT_FRESHNESS_MAX_AGE_SECS;
+    let policy = FreshnessPolicy {
+        max_age_secs: 900,
+        max_future_secs: 60,
+    };
+    let age = 900;
     let ahead = DEFAULT_FRESHNESS_MAX_FUTURE_SECS;
     // The known stamp is the epoch second KNOWN_SECS, so now is derived from it.
     assert_eq!(
@@ -229,13 +247,21 @@ fn classify_text_keeps_garbage_fresh_when_one_side_is_off() {
 
 #[test]
 fn extreme_values_do_not_panic() {
-    let policy = FreshnessPolicy::default();
+    let policy = FreshnessPolicy {
+        max_age_secs: 900,
+        max_future_secs: 60,
+    };
     assert_eq!(policy.classify(i64::MAX, i64::MIN), Freshness::Future);
     assert_eq!(policy.classify(i64::MIN, i64::MAX), Freshness::Stale);
     assert_eq!(policy.classify(0, i64::MAX), Freshness::Stale);
     assert_eq!(policy.classify(0, i64::MIN), Freshness::Future);
     assert_eq!(policy.classify(i64::MAX, i64::MAX), Freshness::Fresh);
     assert_eq!(policy.classify(i64::MIN, i64::MIN), Freshness::Fresh);
+    assert_eq!(
+        FreshnessPolicy::default().classify(i64::MIN, i64::MAX),
+        Freshness::Fresh,
+        "the disabled past side cannot answer Stale"
+    );
 }
 
 #[test]

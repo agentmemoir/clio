@@ -30,21 +30,28 @@
 
 use clio_types::{days_from_civil, days_in_month};
 
-/// Default allowance for an old stamp: 900 seconds, fifteen minutes.
+/// Default allowance for an old stamp: 0 seconds, so the past side is off.
 ///
-/// This is a product choice, not a protocol constant. The basis is AWS S3 REST
-/// authentication, which rejects a request whose timestamp is more than 15
-/// minutes from its own clock; 15 minutes is the loosest figure any consulted
-/// source states. It covers a relay that holds a batch during a short outage
-/// while still refusing a stamp old enough that the row would be a guess.
-pub const DEFAULT_FRESHNESS_MAX_AGE_SECS: i64 = 900;
+/// Absolute age is not a usable bound in this protocol. `transaction_time` is
+/// the origin device's own write stamp, and it travels unchanged through push,
+/// the journal, and pull. Push resumes from a durable per-kind cursor, and pull
+/// serves the whole journal from an empty cursor, so a device that was offline
+/// for weeks, or a brand-new device, delivers a backlog whose stamps are
+/// arbitrarily old. Nothing bounds that backlog and nothing deletes journal
+/// rows, so an age bound would stall sync on legitimate traffic: a rejection
+/// dead-letters the row and freezes the pull cursor for the bank.
+///
+/// The field stays, so a deployment that does bound its backlog can still set
+/// its own age limit. Only the default is off.
+pub const DEFAULT_FRESHNESS_MAX_AGE_SECS: i64 = 0;
 
 /// Default allowance for a future-dated stamp: 60 seconds, one minute.
 ///
-/// This is a product choice, not a protocol constant. A future stamp can only
-/// come from clock skew, and a client can pre-generate a stamp arbitrarily far
-/// ahead, so this side is sized to cover skew and nothing more. It is much
-/// smaller than the age side on purpose.
+/// A writer's clock can sit ahead of this one, so a short lead is expected.
+/// A far-future stamp is a different thing: it is an attack signal, not clock
+/// error, because a writer can choose the value freely. This side is sized for
+/// clock error and nothing more, and it cannot reject a backlog, since backlog
+/// stamps are old rather than ahead.
 pub const DEFAULT_FRESHNESS_MAX_FUTURE_SECS: i64 = 60;
 
 /// Length of the one accepted stamp shape, `YYYY-MM-DDTHH:MM:SSZ`.
@@ -124,15 +131,23 @@ pub enum Freshness {
 
 /// The age bounds applied to an incoming `transaction_time`.
 ///
-/// The test has two sides and they are not equal. An old stamp is rejected
-/// generously, because a relay may hold a batch for a while. A future-dated
-/// stamp is rejected tightly, because only clock skew explains one, and a
-/// writer can choose a far-future stamp on purpose.
+/// The two sides exist for different reasons, and they do not carry equal
+/// weight. The past side ships disabled by default: a legitimate backlog is
+/// arbitrarily old here, because push resumes from a durable cursor and pull
+/// replays the whole journal, so an absolute age limit would reject real
+/// traffic and freeze the bank's cursor. The future side stays at a minute,
+/// because a writer's clock can be slightly ahead while a far-future stamp is
+/// an attack signal.
+///
+/// The past side remains settable for a deployment that bounds its own
+/// backlog. A bound of 0 or less disables that side and leaves the other one
+/// working.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreshnessPolicy {
-    /// How old a stamp may be, in seconds.
+    /// How old a stamp may be, in seconds. 0 or less disables this side.
     pub max_age_secs: i64,
-    /// How far ahead of now a stamp may sit, in seconds.
+    /// How far ahead of now a stamp may sit, in seconds. 0 or less disables
+    /// this side.
     pub max_future_secs: i64,
 }
 
@@ -164,7 +179,9 @@ impl FreshnessPolicy {
     ///
     /// Bounds are inclusive on both ends, so `now - max_age` and `now +
     /// max_future` are `Fresh`. A bound of zero or less disables only its own
-    /// side. Arithmetic saturates, so extreme inputs cannot overflow.
+    /// side: a disabled past side never returns `Stale`, and a disabled future
+    /// side never returns `Future`. Arithmetic saturates, so extreme inputs
+    /// cannot overflow.
     #[must_use]
     pub fn classify(&self, incoming_secs: i64, now_secs: i64) -> Freshness {
         if self.max_age_secs > 0 && incoming_secs < now_secs.saturating_sub(self.max_age_secs) {
