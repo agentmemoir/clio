@@ -56,11 +56,12 @@
 //! its current cursor and peer-side dedupe absorbs the re-sends until the
 //! carrier arrives, without blocking the other kinds.
 
+use crate::apply::apply_freshness::writer_stamp_order;
 use crate::client::SyncClientConfig;
 use crate::http::post_json;
 use crate::protocol::{BankSyncStatus, PushAck, SyncMutation, SyncPayload, join_watermark_body};
-use clio_store::DeadLetterStatus;
-use clio_types::AmError;
+use clio_store::{DeadLetterStatus, SyncFeedRow};
+use clio_types::{AmError, MemoryItem};
 
 #[path = "client_feed_package.rs"]
 pub(crate) mod package;
@@ -88,8 +89,8 @@ pub(crate) const PUSH_KINDS: [&str; 8] = [
 ];
 
 /// One feed kind's packaging result for a push: the compound `(stamp, entity)`
-/// of the last returned row, in the store's own stamp text, and the half-open
-/// `mutations` range this kind contributed.
+/// the kind advances to on ack, in the store's own stamp text, and the
+/// half-open `mutations` range this kind contributed.
 struct KindBatch {
     kind: &'static str,
     last: Option<(String, String)>,
@@ -108,11 +109,55 @@ impl KindBatch {
     }
 }
 
+/// Every store-local stamp the item feed's predicate compares for one returned
+/// row: the ordering stamp the feed returned, the transaction-time bounds, and
+/// the creation stamp. The close stamp can sit above `updated_at` (the store
+/// places it one second past `tx_from` when a correction is not later), so the
+/// ordering stamp alone does not bound the row; a discard writes `discarded_at`
+/// and `updated_at` from one stamp, which the ordering stamp covers.
+fn item_row_stamps<'a>(row: &'a SyncFeedRow, item: &'a MemoryItem) -> [&'a str; 5] {
+    [
+        row.transaction_time.as_str(),
+        item.tx_from.as_str(),
+        item.tx_until.as_deref().unwrap_or(""),
+        item.updated_at.as_str(),
+        item.created_at.as_str(),
+    ]
+}
+
+/// Fold one item row's compared stamps into `best`: the greatest stamp by the
+/// instant it names, with the greatest entity id carrying that stamp as the
+/// compound tiebreak. The winner keeps the text it was read as.
+fn fold_item_position(best: &mut Option<(String, String)>, entity_id: &str, stamps: &[&str]) {
+    for stamp in stamps {
+        if stamp.is_empty() {
+            continue;
+        }
+        match best
+            .as_ref()
+            .map(|(held, _)| writer_stamp_order(stamp, held))
+        {
+            None | Some(std::cmp::Ordering::Greater) => {
+                *best = Some(((*stamp).to_owned(), entity_id.to_owned()));
+            }
+            Some(std::cmp::Ordering::Equal) => {
+                let keep = best
+                    .as_ref()
+                    .is_none_or(|(_, held_entity)| held_entity.as_str() > entity_id);
+                if !keep && let Some(slot) = best.as_mut() {
+                    entity_id.clone_into(&mut slot.1);
+                }
+            }
+            Some(std::cmp::Ordering::Less) => {}
+        }
+    }
+}
+
 /// Record one packaged feed page's bookkeeping (last row position, skipped
-/// rows) for the post-ack cursor advance.
+/// rows) for the post-ack advance.
 fn record_kind_batch(
     kind: &'static str,
-    rows: &[clio_store::SyncFeedRow],
+    rows: &[SyncFeedRow],
     base: usize,
     mutations: &[SyncMutation],
     skipped: bool,
@@ -143,19 +188,31 @@ pub(crate) fn push_bank(
     let mut batches = Vec::new();
 
     // Item feed: a missing local item is skipped, holding the item cursor
-    // (never jumped over; peer-side dedupe absorbs the re-send).
+    // (never jumped over; peer-side dedupe absorbs the re-send). A page that is
+    // not full advances past every close stamp it returned, not just the last
+    // row's ordering stamp; otherwise a post-dated close re-sends forever.
     let since = kind_watermark(cfg, bank, "item")?;
     let rows = cfg.sync.feed_items(bank, &since, page)?;
     let base = mutations.len();
     let mut skipped = false;
+    let mut reach: Option<(String, String)> = None;
     for row in &rows {
         let Some(item) = cfg.store.get_memory_item(bank, &row.entity_id)? else {
             skipped = true;
             continue;
         };
+        fold_item_position(&mut reach, &row.entity_id, &item_row_stamps(row, &item));
         mutations.push(item_mutation(cfg, &item, row.op.as_str())?);
     }
     record_kind_batch("item", &rows, base, &mutations, skipped, &mut batches);
+    // A page that is not full has seen every row the predicate selects, so the
+    // kind advances past every stamp it compared, not just the last row's
+    // ordering stamp: a post-dated close would otherwise re-select its row.
+    if rows.len() < page
+        && let Some(batch) = batches.last_mut()
+    {
+        batch.last = reach;
+    }
 
     // Association-edge feed.
     let since = kind_watermark(cfg, bank, "assoc_edge")?;
@@ -380,6 +437,9 @@ mod client_feed_documentation_tests;
 #[cfg(test)]
 #[path = "client_feed_tests.rs"]
 mod client_feed_tests;
+#[cfg(test)]
+#[path = "client_feed_wm_page_tests.rs"]
+mod client_feed_wm_page_tests;
 #[cfg(test)]
 #[path = "client_feed_wm_tests.rs"]
 mod client_feed_wm_tests;

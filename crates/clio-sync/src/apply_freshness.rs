@@ -52,8 +52,9 @@ pub(crate) const ENVELOPE_FUTURE_ALLOWANCE_SECS: u64 = 3_600;
 /// rows as epoch milliseconds and as `YYYY-MM-DD[THH:MM:SS[.fff]][Z]`, and an
 /// item's stored stamp travels unchanged as a mutation's `transaction_time`, so
 /// those documented forms are placed here too instead of being refused as old.
-/// A fraction is dropped (the comparison works in whole seconds). An offset
-/// zone, a spelled month, or junk stays `None`, and the caller records it as a
+/// A fraction is dropped here, because the age bound works in whole seconds;
+/// the stamp order keeps it (see [`writer_stamp_millis`]). An offset zone, a
+/// spelled month, or junk stays `None`, and the caller records it as a
 /// malformed stamp rather than calling it stale.
 pub(crate) fn writer_stamp_epoch(stamp: &str) -> Option<i64> {
     let stamp = stamp.trim();
@@ -95,14 +96,46 @@ pub(crate) fn writer_stamp_epoch(stamp: &str) -> Option<i64> {
 /// One field carries stamps in more than one encoding, so text order can put a
 /// later instant below an earlier one: `1793597865118` (epoch millis) sorts
 /// before `2026-01-01T00:00:00Z` although it names the later time. When both
-/// sides place, the instants decide. A pair with a side this reader cannot
-/// place has no two instants to compare, so it falls back to text and keeps the
-/// order every caller had before.
+/// sides place, the instants decide, at the finest precision either side
+/// carries (see [`writer_stamp_millis`]), so two writes inside one second still
+/// order by the instant each names instead of tying. A pair with a side this
+/// reader cannot place has no two instants to compare, so it falls back to text
+/// and keeps the order every caller had before.
 pub(crate) fn writer_stamp_order(a: &str, b: &str) -> std::cmp::Ordering {
-    match (writer_stamp_epoch(a), writer_stamp_epoch(b)) {
+    match (writer_stamp_millis(a), writer_stamp_millis(b)) {
         (Some(a_instant), Some(b_instant)) => a_instant.cmp(&b_instant),
         _ => a.cmp(b),
     }
+}
+
+/// Epoch milliseconds for a writer stamp, at the finest precision the stamp
+/// carries, or `None` when the stamp names no instant this build can place.
+///
+/// A stamp with no fraction names a whole second, so its fraction is zero; an
+/// epoch-millis stamp is already milliseconds and is taken as written. The
+/// fraction is truncated, not rounded, to three digits.
+pub(crate) fn writer_stamp_millis(stamp: &str) -> Option<i64> {
+    let stamp = stamp.trim();
+    let digits = stamp.strip_prefix('-').unwrap_or(stamp);
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        return stamp.parse::<i64>().ok();
+    }
+    let secs = writer_stamp_epoch(stamp)?;
+    let whole = stamp.strip_suffix('Z').unwrap_or(stamp);
+    let Some((_, fraction)) = whole.split_once('.') else {
+        return secs.checked_mul(1_000);
+    };
+    if fraction.is_empty() || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut millis = 0i64;
+    for byte in fraction.bytes().take(3) {
+        millis = millis * 10 + i64::from(byte - b'0');
+    }
+    for _ in fraction.len().min(3)..3 {
+        millis *= 10;
+    }
+    secs.checked_mul(1_000)?.checked_add(millis)
 }
 
 /// The one encoding a writer stamp leaves this node in: canonical ISO-8601 UTC

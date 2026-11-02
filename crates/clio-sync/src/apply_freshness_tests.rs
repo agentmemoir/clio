@@ -279,6 +279,41 @@ fn stamps_are_ordered_by_instant_and_unplaceable_pairs_by_text() {
     );
 }
 
+/// Two writes inside one second order by the instant each names, not by the
+/// device id the seconds comparison leaves to decide the tie.
+#[test]
+fn two_writes_inside_one_second_order_by_their_fraction() {
+    // 2026-01-01T00:00:00Z is 1767225600000 ms; both stamps name that second.
+    assert_eq!(
+        writer_stamp_order("2026-01-01T00:00:00.750Z", "2026-01-01T00:00:00.250Z"),
+        std::cmp::Ordering::Greater
+    );
+    assert_eq!(
+        writer_stamp_order("2026-01-01T00:00:00.250Z", "2026-01-01T00:00:00.750Z"),
+        std::cmp::Ordering::Less
+    );
+    assert_eq!(
+        writer_stamp_order("1767225600750", "1767225600250"),
+        std::cmp::Ordering::Greater,
+        "epoch millis already carries the sub-second part"
+    );
+    // The same instant in both precisions is a tie, and stays one.
+    assert_eq!(
+        writer_stamp_order("1767225600500", "2026-01-01T00:00:00.500Z"),
+        std::cmp::Ordering::Equal
+    );
+    // A whole second is that second's zero fraction, so it is below any
+    // fraction inside it and above the second before.
+    assert_eq!(
+        writer_stamp_order("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.001Z"),
+        std::cmp::Ordering::Less
+    );
+    assert_eq!(
+        writer_stamp_order("2026-01-01T00:00:00Z", "2025-12-31T23:59:59.999Z"),
+        std::cmp::Ordering::Greater
+    );
+}
+
 /// The id pre-check runs first: a journaled id answers `Duplicate` even when
 /// the same envelope would be stale against the clock.
 #[test]
