@@ -160,7 +160,7 @@ services:
   extract:
     profiles: ["local-rft"]
     # Multi-arch image; platform pin comes from compose.amd64.yml / compose.arm64.yml
-    image: ${CLIO_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    image: ${CLIO_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-b12033}
     restart: unless-stopped
     ports:
       - "${CLIO_EXTRACT_PORT:-34313}:8080"
