@@ -56,9 +56,12 @@ pub(crate) fn sealed_cfg(secret: &str) -> SyncClientConfig {
     )
 }
 
-/// A client config with no cipher, which is plaintext mode.
+/// A client config with no cipher in the explicit local-development plaintext
+/// mode, which is the only way packaging still puts content on the wire unsealed.
 pub(crate) fn plain_cfg() -> SyncClientConfig {
-    cfg("dev-a", &sqlite(), "127.0.0.1:1", Vec::new())
+    let mut config = cfg("dev-a", &sqlite(), "127.0.0.1:1", Vec::new());
+    config.allow_plaintext = true;
+    config
 }
 
 pub(crate) fn item(id: &str) -> MemoryItem {

@@ -173,14 +173,17 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
             .expect("failure");
     }
 
-    // Package each kind's page exactly as `push_bank` packages it.
+    // Package each kind's page exactly as `push_bank` packages it, sealed under
+    // the shared sync key: every production push carries ciphertext, so the
+    // bound is measured on the body the transport really receives.
     let cfg = SyncClientConfig {
         device_id: "dev-a".into(),
         store: store.clone(),
         sync: store.clone(),
         remote: None,
         token: None,
-        cipher: Vec::new(),
+        cipher: vec![crate::client::client_tests::paired_key()],
+        allow_plaintext: false,
     };
     let page = crate::PULL_PAGE_LIMIT;
     let since = |kind: &str| kind_watermark(&cfg, bank, kind).expect("watermark");

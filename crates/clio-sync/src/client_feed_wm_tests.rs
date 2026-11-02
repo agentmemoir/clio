@@ -154,6 +154,7 @@ fn missing_carrier_holds_task_cursor_but_not_other_kinds() {
         remote: Some(addr),
         token: Some(TOKEN.to_owned()),
         cipher: vec![paired_key()],
+        allow_plaintext: false,
     };
 
     push(&cfg, &["bhold".to_owned()]).expect("push with missing carrier");

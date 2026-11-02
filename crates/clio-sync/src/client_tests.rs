@@ -79,6 +79,7 @@ pub(crate) fn cfg(
         remote: Some(addr.to_owned()),
         token: Some(TOKEN.to_owned()),
         cipher,
+        allow_plaintext: false,
     }
 }
 
@@ -432,4 +433,17 @@ fn p_dlq_blocks_pull_cursor_until_key_or_ack_context() {
     // The skipped content was never resurrected.
     assert!(b.get_memory_item("b1", "i-1").unwrap().is_none());
     server.stop();
+}
+
+/// The library entry point itself refuses a keyless export: `127.0.0.1:1` has
+/// no listener, so a call that reached the transport would fail differently.
+#[test]
+fn keyless_push_is_refused_before_any_connection() {
+    let a = sqlite();
+    create_item(&a, "bk", "i-1", "never leaves in the clear");
+    let cfg = cfg("dev-keyless", &a, "127.0.0.1:1", Vec::new());
+    let err = push(&cfg, &["bk".to_owned()]).expect_err("a keyless export is refused");
+    assert_eq!(err.code, clio_types::ErrorCode::ConfigCorrupt, "{err:?}");
+    assert!(err.message.contains("no sync key"), "{err}");
+    assert!(err.message.contains("clio sync keygen"), "{err}");
 }

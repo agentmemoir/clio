@@ -83,6 +83,7 @@ fn client(remote: &str, token: &str) -> SyncClientConfig {
         remote: Some(remote.to_owned()),
         token: Some(token.to_owned()),
         cipher: Vec::new(),
+        allow_plaintext: false,
     }
 }
 
@@ -129,6 +130,7 @@ fn a_delivery_without_a_remote_endpoint_is_input_refused() {
         remote: None,
         token: None,
         cipher: Vec::new(),
+        allow_plaintext: false,
     };
     let err = deliver_denial(&cfg, &target("fp-1")).expect_err("no remote is the caller's input");
     assert_eq!(err.code, ErrorCode::InvalidArgument);

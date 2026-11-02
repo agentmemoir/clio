@@ -189,6 +189,9 @@ fn sync_status_returns_masked_report_shape() {
     // Masked report shape: auth/encryption state, no secret-shaped fields.
     assert_eq!(result["auth"], "none");
     assert_eq!(result["encryption"], Value::Bool(false));
+    // The production client config the tools build never opts into plaintext.
+    let cfg = super::client_cfg(&st, None, None);
+    assert!(!cfg.allow_plaintext, "MCP never permits plaintext");
     assert!(result.get("token").is_none());
     assert!(result.get("dek").is_none() && result.get("sync_key").is_none());
     // Read-side routing via dispatch_read as well.

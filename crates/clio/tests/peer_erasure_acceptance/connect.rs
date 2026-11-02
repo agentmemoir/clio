@@ -202,6 +202,7 @@ fn client<T: AcceptanceStore + 'static>(
         remote: Some(remote.to_owned()),
         token: token.map(str::to_owned),
         cipher: sync_cipher(),
+        allow_plaintext: false,
     }
 }
 
