@@ -34,8 +34,9 @@
 //! Keep this module focused on the operating-system secret store's entry.
 
 // `keyring-core` owns the entry type, the credential trait, and the error. The
-// store behind it is chosen per target and installed once, in
-// `secret_key_store_platform`; this module never names a platform store crate.
+// store behind it is chosen per target and installed once per process, lazily on
+// the first entry, in `secret_key_store_platform`; this module never names a
+// platform store crate.
 //
 // The keystore path refuses when no store could be installed: it never redirects
 // the key into a file the operator did not choose, and a machine that never
@@ -315,7 +316,7 @@ pub(crate) fn store_error(action: &str, what: &str, err: &keyring_core::Error) -
 /// Secret-free summary of a `keyring_core` failure.
 ///
 /// The wildcard arm is required because the upstream enum is `#[non_exhaustive]`, and it is the one arm no test can reach: an unknown variant cannot be constructed from outside the crate.
-/// Every variant `keyring-core` 1.0.1 does name is enumerated above, including the two that carry data — `BadDataFormat` and `BadStoreFormat` — so neither can fall through to the wildcard by omission.
+/// Every variant `keyring-core` 1.0.1 names has an arm of its own above, so none of them falls through to the wildcard by omission — the three that carry store contents (`BadEncoding`, `BadDataFormat`, and `Ambiguous`) among them.
 /// The wildcard is also the arm that keeps an unrecognised failure from falling through to a rendered error, so it is the arm that must never grow a `{err}`.
 pub(crate) fn classify(err: &keyring_core::Error) -> &'static str {
     match err {
@@ -330,6 +331,10 @@ pub(crate) fn classify(err: &keyring_core::Error) -> &'static str {
         keyring_core::Error::BadStoreFormat(_) => "the store itself is in an unexpected format",
         keyring_core::Error::TooLong(_, _) => "an entry attribute is too long",
         keyring_core::Error::Invalid(_, _) => "an entry attribute is invalid",
+        // The vector this arm refuses to render holds whole credentials, and
+        // their `Debug` prints the stored secret, so neither the entries nor
+        // their count is formatted here.
+        keyring_core::Error::Ambiguous(_) => "the entry matched more than one stored credential",
         keyring_core::Error::NoDefaultStore => {
             "no store was installed for this platform, so nothing could be reached"
         }

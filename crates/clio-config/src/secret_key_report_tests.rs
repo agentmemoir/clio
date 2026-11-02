@@ -187,9 +187,9 @@ fn no_rendered_output_contains_key_material() {
 fn every_keystore_failure_summary_is_reachable_and_says_something() {
     // The wildcard arm of `classify` is the one arm that cannot be built from
     // outside the `keyring-core` crate, so it is the one arm no test reaches.
-    // Every other arm is checked here, the two data-carrying variants included,
-    // which is what keeps the wildcard from quietly becoming the arm that renders
-    // an error object.
+    // Every other arm is checked here, the three data-carrying variants
+    // included, which is what keeps the wildcard from quietly becoming the arm
+    // that renders an error object.
     let wanted = random_key();
     let failures = [
         keyring_core::Error::NoEntry,
@@ -205,6 +205,7 @@ fn every_keystore_failure_summary_is_reachable_and_says_something() {
         ),
         keyring_core::Error::TooLong("service".to_owned(), 900),
         keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential(wanted))]),
         keyring_core::Error::NoDefaultStore,
         keyring_core::Error::NotSupportedByStore("attributes".to_owned()),
     ];
@@ -223,7 +224,7 @@ fn every_keystore_failure_summary_is_reachable_and_says_something() {
 
     summaries.sort_unstable();
     summaries.dedup();
-    assert_eq!(failures.len(), 10, "every variant the error type names");
+    assert_eq!(failures.len(), 11, "every variant the error type names");
     assert_eq!(
         summaries.len(),
         failures.len(),

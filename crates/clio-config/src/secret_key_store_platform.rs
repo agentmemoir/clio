@@ -4,8 +4,9 @@
 //! # Responsibility
 //!
 //! This module is responsible for which secret store this build installs into
-//! `keyring_core`, for installing it once per process, and for opening the one
-//! production entry over it.
+//! `keyring_core`, for installing it once per process — lazily, on the first
+//! `Entry::new`, not at process start — and for opening the one production entry
+//! over it.
 //!
 //! ## Owns
 //! - Choosing the store: the Keychain, the Credential Manager, the Secret
@@ -201,3 +202,8 @@ fn install_error(err: &keyring_core::Error) -> String {
 #[cfg(test)]
 #[path = "secret_key_store_platform_tests.rs"]
 mod tests;
+
+/// The one test that needs a real Secret Service daemon, so it is off unless the `linux-secret-service-test` feature asks for it (see the module doc for why it cannot run everywhere).
+#[cfg(all(test, target_os = "linux", feature = "linux-secret-service-test"))]
+#[path = "secret_key_store_live_tests.rs"]
+mod live_tests;

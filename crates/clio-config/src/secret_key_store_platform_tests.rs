@@ -164,8 +164,10 @@ fn a_connect_failure_is_summarised_before_the_platform_error() {
 
 /// Whether `reason` opens with one of the summaries `classify` gives.
 ///
-/// Every variant the upstream type names is asked for its summary, so this holds
-/// for whatever failure a store's `new()` reports without naming one here.
+/// All eleven variants the upstream type names are asked for their summary, so
+/// this holds for whatever failure a store's `new()` reports without naming one
+/// here. `Ambiguous` is built over an empty vector because `classify` reads no
+/// entry out of it, only its fixed wording.
 #[cfg(all(unix, not(target_os = "macos")))]
 fn classified(reason: &str) -> bool {
     let shapes = [
@@ -180,6 +182,7 @@ fn classified(reason: &str) -> bool {
         keyring_core::Error::BadStoreFormat("header".to_owned()),
         keyring_core::Error::TooLong("service".to_owned(), 900),
         keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::Ambiguous(vec![]),
         keyring_core::Error::NoDefaultStore,
         keyring_core::Error::NotSupportedByStore("attributes".to_owned()),
     ];

@@ -523,3 +523,90 @@ jobs:
       - name: Gate installer on the runner (macOS)
         run: sh scripts/gate_install_runner_check.sh
 
+  # The Linux Secret Service store is the one platform arm whose backend is a
+  # service, and no other job provides one. On a bare runner `Store::new()`
+  # finds no session bus, every Linux-gated test takes its accept-the-failure
+  # path, and a green run says nothing about whether the store works. This job
+  # is the only place the store this build ships installs, writes, reads, and
+  # deletes against a real `org.freedesktop.secrets`.
+  #
+  # It runs one test. The round trip is behind the `linux-secret-service-test`
+  # feature, and the test is named on the command line so no sibling test's
+  # store can answer in the real one's place. This is not the only job that
+  # compiles the file: the `check` job runs
+  # `cargo clippy --workspace --all-targets --all-features` on ubuntu-latest
+  # under `-D warnings`, which also compiles this file. That is desirable —
+  # the file gets linted and type-checked even if this job is skipped — and it
+  # does not run the test, so nothing points a live store at a bare runner.
+  #
+  # The packages: `dbus-daemon` owns `dbus-run-session`, `dbus-bin` owns
+  # `dbus-send` for the readiness wait below, and `dbus-session-bus-common`
+  # carries the session bus configuration and service files the private bus
+  # reads. `gnome-keyring` owns `gnome-keyring-daemon` and the
+  # `org.freedesktop.secrets` service file. `dbus-x11` is not needed, because
+  # the bus comes from `dbus-run-session` rather than `dbus-launch`.
+  linux-secret-service:
+    name: secret service round trip (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install a session bus and a Secret Service
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin dbus-session-bus-common gnome-keyring
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      # `dbus-run-session` starts a private session bus, exports
+      # `DBUS_SESSION_BUS_ADDRESS` to the command it runs, and takes the bus
+      # down when that command exits, so the daemon and the test share one bus
+      # and no address is carried between steps.
+      #
+      # `gnome-keyring-daemon --unlock` reads a password from stdin and unlocks
+      # the login keyring, creating it when it does not exist, so an empty
+      # password is the whole setup: the collection this store's default target
+      # names ends up present and unlocked. `--components=secrets` starts only
+      # the Secret Service component, and `--daemonize` returns the step's shell
+      # instead of holding it open for the daemon's lifetime.
+      #
+      # The readiness wait is bounded and it fails the step. The test itself
+      # neither polls nor sleeps: its only bound is the receive timeout on the
+      # round trip, and it fails rather than skips when no store answers.
+      - name: Secret Service round trip
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "\n" | setsid gnome-keyring-daemon --unlock --components=secrets --daemonize >/dev/null 2>&1
+            ready=0
+            for _ in $(seq 150); do
+              if dbus-send --session --print-reply --dest=org.freedesktop.DBus \
+                /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
+                string:org.freedesktop.secrets 2>/dev/null | grep -q "boolean true"; then
+                alias_reply=$(dbus-send --session --print-reply --dest=org.freedesktop.secrets /org/freedesktop/secrets org.freedesktop.Secret.Service.ReadAlias string:default 2>/dev/null || true)
+                printf "%s" "$alias_reply" | grep -q "object path \"/org/" || continue
+                ready=1
+                break
+              fi
+              sleep 0.2
+            done
+            if [ "$ready" -ne 1 ]; then
+              echo "::error::org.freedesktop.secrets never appeared on the session bus with a default collection, so gnome-keyring-daemon did not start"
+              exit 1
+            fi
+            cargo test -p clio-config --locked --features linux-secret-service-test --lib -- \
+              secret_key_store_platform::live_tests::a_secret_round_trips_through_the_secret_service_store --exact
+          '
+
+      - name: Out-of-memory check
+        if: failure()
+        run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
+

@@ -11,7 +11,7 @@
 //! ## Owns
 //! - The [`KeyringStore`] read, write, and delete tests
 //! - The [`NoKeystore`] answers, which are the other store this module defines
-//! - The message tests, including the two upstream variants that carry bytes
+//! - The message tests, including the three upstream variants that carry bytes
 //!
 //! ## Does not own
 //! - The injected credential and factory (see `secret_key_store_test_support`)
@@ -234,9 +234,9 @@ fn the_production_store_can_be_built_without_reaching_the_keychain() {
 
 #[test]
 fn every_failure_gets_its_own_wording() {
-    // Every variant `keyring-core` 1.0.1 names, the two data-carrying ones
-    // included, so a variant added in the fourth major cannot land on the
-    // wildcard without a test noticing.
+    // Every variant `keyring-core` 1.0.1 names, the three data-carrying ones
+    // included, so a variant added in a later release cannot land on the
+    // wildcard without this count noticing.
     let shapes = [
         keyring_core::Error::NoEntry,
         keyring_core::Error::NoStorageAccess(Box::new(std::io::Error::other("locked"))),
@@ -251,6 +251,7 @@ fn every_failure_gets_its_own_wording() {
         ),
         keyring_core::Error::TooLong("service".to_owned(), 900),
         keyring_core::Error::Invalid("service".to_owned(), "empty".to_owned()),
+        keyring_core::Error::Ambiguous(vec![entry_over(SecretCredential([0xAB; KEY_LEN]))]),
         keyring_core::Error::NoDefaultStore,
         keyring_core::Error::NotSupportedByStore("attributes".to_owned()),
     ];
@@ -261,7 +262,7 @@ fn every_failure_gets_its_own_wording() {
     summaries.dedup();
 
     assert_eq!(
-        count, 10,
+        count, 11,
         "the test covers every variant the error type names"
     );
     assert_eq!(

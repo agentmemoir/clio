@@ -12,6 +12,11 @@ description = "Config loading, profiles, ranking env, and secret masking for Age
 # dev-dependency turns it on, so nothing in a shipped binary can make a running
 # Clio seal a value under a key its operator did not create.
 test-key-injection = []
+# Runs the Linux round trip against a real Secret Service daemon, which needs a
+# session bus the ordinary suite cannot assume. Off by default so the suite stays
+# host-independent; the `linux-secret-service` CI job turns it on inside
+# `dbus-run-session`.
+linux-secret-service-test = []
 
 [dependencies]
 clio-types = { workspace = true }
@@ -23,8 +28,8 @@ base64 = { workspace = true }
 # are all sealed with it, so there is no second algorithm to argue about.
 chacha20poly1305 = { workspace = true }
 # The entry type, the credential trait, and the error type every store below is
-# reached through. The platform store itself is installed once at startup by
-# `secret_key_store`, from whichever target-scoped crate applies.
+# reached through. The platform store is installed once per process, lazily on
+# the first entry, by `secret_key_store`, from the target-scoped crate below.
 keyring-core = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
