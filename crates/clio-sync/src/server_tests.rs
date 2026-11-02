@@ -66,7 +66,7 @@ pub(crate) fn serve(
         allow_public_bind: false,
         ttl_secs: ttl,
         deadline_secs,
-        max_envelope_skew_secs: Some(0),
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     })
@@ -230,7 +230,7 @@ fn t24_04_refuses_anonymous_bind_outside_dev_mode() {
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
-        max_envelope_skew_secs: Some(0),
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     });

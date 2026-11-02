@@ -60,7 +60,7 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
-        max_envelope_skew_secs: Some(0),
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     })
@@ -82,7 +82,7 @@ pub(crate) fn cfg(
         token: Some(TOKEN.to_owned()),
         cipher,
         allow_plaintext: false,
-        max_envelope_skew_secs: 0,
+        max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
     }
 }
 

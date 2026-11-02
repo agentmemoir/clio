@@ -4,18 +4,20 @@
 //! # Responsibility
 //!
 //! This module is responsible for the pull-path coverage of the envelope
-//! freshness window: a relay-delivered row written outside the window is
-//! refused with no effect and no cursor freeze, while a row written inside the
-//! window applies through the same path.
+//! freshness bounds: a relay-delivered row older than a positive age bound is
+//! refused with no effect and no cursor freeze, a row inside the bound applies
+//! through the same path, and the shipped default (no bound) applies an old
+//! backlog row.
 //!
 //! ## Owns
 //! - End-to-end coverage of `ApplyOutcome::Stale` through `client::pull`
 //! - The cursor advance past a stale row, and the absence of a store row,
 //!   journal row, or dead letter for it
-//! - The fresh control that proves the window is not refusing everything
+//! - The fresh control that proves the bound is not refusing everything
+//! - The default-off control that keeps a backlog from being dropped
 //!
 //! ## Does not own
-//! - The window rule itself (`apply_freshness_tests`)
+//! - The bound rule itself (`apply_freshness_tests`)
 //! - Stamp parsing (`clock_tests`)
 //! - The sealed-envelope refusals (`client_envelope_tests`)
 //!
@@ -27,7 +29,8 @@
 //! Test-only. Never compiled into production builds.
 
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
-use crate::apply::apply_freshness::{is_stale, test_engine};
+use crate::apply::ApplyEngine;
+use crate::apply::apply_freshness::{is_stale, pinned};
 use crate::client::client_envelope_tests::{BANK, Receiver, hand_push, held_key, receiver};
 use crate::client::client_tests::item;
 use crate::client::pull;
@@ -41,23 +44,32 @@ use clio_store::{DeadLetterStatus, Store, SyncStore};
 /// never depends on the day it runs.
 const PINNED_CLOCK: &str = "2026-06-01T00:00:00Z";
 
+/// The positive age bound the windowed cases set: the value an always-online
+/// fleet would choose. It is explicit because the shipped default is `0`.
+const WINDOW: u64 = 300;
+
 /// A writer stamp months behind [`PINNED_CLOCK`], so far outside a 300 second
-/// window that no rounding can bring it back inside.
+/// bound that no rounding can bring it back inside.
 const STALE_STAMP: &str = "2026-01-01T00:00:00Z";
+
+/// A writer stamp ten minutes behind [`PINNED_CLOCK`]: an ordinary backlog row,
+/// the one the shipped default must keep.
+const BACKLOG_STAMP: &str = "2026-05-31T23:50:00Z";
 
 const STALE_ID: &str = "stale-a";
 const FRESH_ID: &str = "fresh-a";
+const BACKLOG_ID: &str = "backlog-a";
 
 /// Pin the clock for the whole case; the guard unpins it when the test ends.
 fn pinned_clock() -> test_pin::Pinned {
     test_pin::pin(parse_utc_epoch(PINNED_CLOCK).expect("the pinned stamp parses"))
 }
 
-/// A receiver whose pull applies under the shipped window, not the disabled one
-/// the shared fixture uses.
+/// A receiver whose pull applies under an explicit positive age bound, not the
+/// disabled one the shipped default holds.
 fn windowed_receiver(key: &SyncCipherKey) -> Receiver {
     let mut r = receiver(&[BANK], key);
-    r.cfg.max_envelope_skew_secs = ENVELOPE_SKEW_DEFAULT_SECS;
+    r.cfg.max_envelope_skew_secs = WINDOW;
     r
 }
 
@@ -96,20 +108,21 @@ fn sealed_at(bank: &str, id: &str, stamp: &str, key: &SyncCipherKey) -> SyncMuta
 
 /// The predicate the pull path itself calls, over the same pinned clock, so a
 /// refusal this module observes is the freshness one and not another guard.
-fn stale_per_the_pinned_clock(r: &Receiver, row: &SyncMutation) -> bool {
-    let engine = test_engine(
-        r.store.as_ref(),
-        r.store.as_ref(),
-        &r.cfg.device_id,
-        None,
-        PINNED_CLOCK,
-    );
+fn stale_per_the_pinned_clock(r: &Receiver, row: &SyncMutation, window: u64) -> bool {
+    let engine = ApplyEngine {
+        store: r.store.as_ref(),
+        sync: r.store.as_ref(),
+        device_id: r.cfg.device_id.clone(),
+        kms: None,
+        clock: pinned(parse_utc_epoch(PINNED_CLOCK).expect("the pinned stamp parses")),
+        max_envelope_skew_secs: window,
+    };
     is_stale(&engine, &row.transaction_time)
 }
 
-/// The issue's expected behaviour: a relay delivers a validly sealed row whose
-/// authenticated writer stamp sits outside the window, and the pull refuses it
-/// with no effect while the cursor still moves past it.
+/// The issue's expected behaviour at a positive bound: a relay delivers a
+/// validly sealed row whose authenticated writer stamp sits outside the bound,
+/// and the pull refuses it with no effect while the cursor still moves past it.
 #[test]
 fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
     let _clock = pinned_clock();
@@ -117,8 +130,8 @@ fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
     let r = windowed_receiver(&key);
     let row = sealed_at(BANK, STALE_ID, STALE_STAMP, &key);
     assert!(
-        stale_per_the_pinned_clock(&r, &row),
-        "the row is outside the window, so pull must answer Stale"
+        stale_per_the_pinned_clock(&r, &row, WINDOW),
+        "the row is outside the bound, so pull must answer Stale"
     );
     hand_push(&r.addr, BANK, row);
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
@@ -185,8 +198,8 @@ fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
     r.server.stop();
 }
 
-/// The positive control: the same pull path, the same window, and a row written
-/// inside the window, so the guard is not simply refusing every envelope.
+/// The positive control: the same pull path, the same bound, and a row written
+/// inside it, so the guard is not simply refusing every envelope.
 #[test]
 fn a_pull_applies_a_fresh_envelope_under_the_same_window() {
     let _clock = pinned_clock();
@@ -194,8 +207,8 @@ fn a_pull_applies_a_fresh_envelope_under_the_same_window() {
     let r = windowed_receiver(&key);
     let row = sealed_at(BANK, FRESH_ID, PINNED_CLOCK, &key);
     assert!(
-        !stale_per_the_pinned_clock(&r, &row),
-        "the row is inside the window, so pull must apply it"
+        !stale_per_the_pinned_clock(&r, &row, WINDOW),
+        "the row is inside the bound, so pull must apply it"
     );
     hand_push(&r.addr, BANK, row);
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
@@ -220,6 +233,40 @@ fn a_pull_applies_a_fresh_envelope_under_the_same_window() {
     assert!(
         r.store.cursor_get(BANK, "pull").expect("cursor").is_some(),
         "the cursor advanced past the applied row"
+    );
+    r.server.stop();
+}
+
+/// The shipped default is no age bound, so a row a peer wrote ten minutes
+/// before this node's clock applies through the real pull path. A positive
+/// default would have dropped it and advanced the cursor past it, which is the
+/// backlog regression this pins.
+#[test]
+fn a_pull_applies_a_ten_minute_old_row_under_the_shipped_default() {
+    let _clock = pinned_clock();
+    let key = held_key("client-freshness-backlog-key");
+    let r = receiver(&[BANK], &key);
+    assert_eq!(
+        r.cfg.max_envelope_skew_secs, ENVELOPE_SKEW_DEFAULT_SECS,
+        "this case must run the shipped default, not a fixture override"
+    );
+    let row = sealed_at(BANK, BACKLOG_ID, BACKLOG_STAMP, &key);
+    assert!(
+        !stale_per_the_pinned_clock(&r, &row, ENVELOPE_SKEW_DEFAULT_SECS),
+        "ten minutes of age must not be refused under the shipped default"
+    );
+    hand_push(&r.addr, BANK, row);
+    pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
+    let got = r
+        .store
+        .get_memory_item(BANK, BACKLOG_ID)
+        .expect("get")
+        .expect("a ten-minute-old row applies when no age bound is set");
+    assert_eq!(got.gist.as_deref(), Some("gist"));
+    assert_eq!(
+        r.store.journal_max_seq(BANK).expect("max seq"),
+        1,
+        "the backlog row journaled once instead of being dropped"
     );
     r.server.stop();
 }

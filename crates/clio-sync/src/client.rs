@@ -60,9 +60,9 @@ pub struct SyncClientConfig {
     pub cipher: Vec<crate::crypto::SyncCipherKey>,
     /// Local development and tests only: without it a node with no key refuses export.
     pub allow_plaintext: bool,
-    /// How far a pulled envelope's writer stamp may sit from this node's clock,
-    /// in seconds, in either direction. `0` disables the freshness window, which
-    /// makes every pulled envelope eligible to apply.
+    /// How far in the past a pulled envelope's writer stamp may sit from this
+    /// node's clock, in seconds. `0` is the shipped default and disables the age
+    /// bound, so an old backlog still applies.
     pub max_envelope_skew_secs: u64,
 }
 
@@ -192,6 +192,7 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
             pending_push: pending,
             dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
             conflicts,
+            stale_refused: crate::apply::stale_refused(cfg.sync.as_ref(), bank)?,
             conflict_sample: sample,
         });
     }
@@ -209,6 +210,7 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
             },
         ),
         last_error: cfg.sync.cursor_get("__status", "last_error")?,
+        last_stale_refusal: crate::apply::last_stale_refusal(cfg.sync.as_ref())?,
     })
 }
 
@@ -288,6 +290,7 @@ fn pull_bank(
         pending_push: crate::client_feed::pending_push(cfg, bank)?,
         dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
         conflicts: cfg.sync.conflict_count(bank)?,
+        stale_refused: crate::apply::stale_refused(cfg.sync.as_ref(), bank)?,
         conflict_sample: Vec::new(),
     })
 }

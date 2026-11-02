@@ -201,7 +201,7 @@ impl Peer {
         command
             .env(
                 "CLIO_DEPLOYMENT_CONFIG",
-                crate::common::no_skew_deployment(&self.dir),
+                self.dir.join("no-such-deployment.json"),
             )
             .args(["sync", "serve", "--bind", "127.0.0.1:0", "--token-file"])
             .arg(&credentials)
@@ -398,7 +398,7 @@ fn client<T: Store + SyncStore + 'static>(
         token: Some(PEER_TOKEN.to_owned()),
         cipher: crate::sync_wire_support::sync_cipher(),
         allow_plaintext: false,
-        max_envelope_skew_secs: 0,
+        max_envelope_skew_secs: clio_sync::ENVELOPE_SKEW_DEFAULT_SECS,
     }
 }
 

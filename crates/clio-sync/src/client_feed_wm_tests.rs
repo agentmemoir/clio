@@ -155,7 +155,7 @@ fn missing_carrier_holds_task_cursor_but_not_other_kinds() {
         token: Some(TOKEN.to_owned()),
         cipher: vec![paired_key()],
         allow_plaintext: false,
-        max_envelope_skew_secs: 0,
+        max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
     };
 
     push(&cfg, &["bhold".to_owned()]).expect("push with missing carrier");

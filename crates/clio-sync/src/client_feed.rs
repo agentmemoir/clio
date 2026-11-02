@@ -249,6 +249,7 @@ pub(crate) fn push_bank(
         pending_push: pending_push(cfg, bank)?,
         dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
         conflicts: cfg.sync.conflict_count(bank)?,
+        stale_refused: crate::apply::stale_refused(cfg.sync.as_ref(), bank)?,
         conflict_sample: Vec::new(),
     })
 }

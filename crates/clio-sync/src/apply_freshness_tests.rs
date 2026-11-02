@@ -4,8 +4,8 @@
 //! # Responsibility
 //!
 //! This module is responsible for testing the envelope freshness guard: the
-//! symmetric window around the injected clock, the disabled window, the
-//! unreadable stamp, and the guard's place in the apply order.
+//! age bound in the past, the separate future allowance, the disabled bound,
+//! the unreadable stamp, and the guard's place in the apply order.
 //!
 //! ## Owns
 //! - Behavior coverage for `apply_freshness` and `ApplyOutcome::Stale`
@@ -13,7 +13,7 @@
 //! ## Does not own
 //! - Stamp parsing (`clock_tests` covers the reader)
 //! - The apply matrix and its other outcomes (`apply_tests`)
-//! - Cursor persistence on a stale page (`client_tests`)
+//! - Cursor persistence on a stale page (`client_freshness_tests`)
 //!
 //! ## Boundary
 //!
@@ -24,6 +24,7 @@
 
 use super::pinned;
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
+use crate::apply::apply_freshness::ENVELOPE_FUTURE_ALLOWANCE_SECS;
 use crate::apply::apply_tests::{fixture, upsert};
 use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
 use crate::clock::parse_utc_epoch;
@@ -33,6 +34,10 @@ use std::sync::Arc;
 
 /// The fixed writer stamp every case in the table starts from.
 const STAMP: &str = "2026-01-01T00:00:00Z";
+
+/// The positive age bound the table runs at: the value an always-online fleet
+/// would set, so the rule is exercised at a real setting, not only at `0`.
+const WINDOW: u64 = 300;
 
 /// A stamp the strict reader refuses: it names no instant at all.
 const UNREADABLE: &str = "2026-01-01 00:00:00";
@@ -52,8 +57,8 @@ fn apply_at(store: &Arc<SqliteStore>, m: &SyncMutation, now: i64, skew: u64) -> 
     apply_mutation(&engine, m, &envelope).expect("apply runs")
 }
 
-/// One table case: the writer stamp, the clock, the window, and the outcome the
-/// guard must produce.
+/// One table case: the writer stamp, the clock, the age bound, and the outcome
+/// the guard must produce.
 struct Case {
     label: &'static str,
     stamp: &'static str,
@@ -65,46 +70,54 @@ struct Case {
 /// Every freshness outcome, from one table, so a rule that flips direction is
 /// visible in one place.
 #[test]
-fn the_window_decides_every_stamp_by_distance_only() {
+fn the_bounds_decide_every_stamp_by_direction_and_distance() {
     let written = parse_utc_epoch(STAMP).expect("the fixture stamp parses");
+    let ahead = i64::try_from(ENVELOPE_FUTURE_ALLOWANCE_SECS).expect("the allowance fits an i64");
     let cases = [
         Case {
-            label: "a stamp inside the window applies",
+            label: "a stamp ten seconds old applies",
             stamp: STAMP,
             now: written + 10,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
+            skew: WINDOW,
             expected: ApplyOutcome::Applied,
         },
         Case {
-            label: "a stamp older than the window is stale",
-            stamp: STAMP,
-            now: written - 301,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
-            expected: ApplyOutcome::Stale,
-        },
-        Case {
-            label: "a future stamp beyond the window is stale",
+            label: "a stamp older than the age bound is stale",
             stamp: STAMP,
             now: written + 301,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
+            skew: WINDOW,
             expected: ApplyOutcome::Stale,
         },
         Case {
-            label: "a stamp exactly at the past bound applies",
-            stamp: STAMP,
-            now: written - 300,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
-            expected: ApplyOutcome::Applied,
-        },
-        Case {
-            label: "a stamp exactly at the future bound applies",
+            label: "a stamp exactly at the age bound applies",
             stamp: STAMP,
             now: written + 300,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
+            skew: WINDOW,
             expected: ApplyOutcome::Applied,
         },
         Case {
-            label: "a zero window disables the check",
+            label: "a stamp exactly at the future allowance applies",
+            stamp: STAMP,
+            now: written - ahead,
+            skew: WINDOW,
+            expected: ApplyOutcome::Applied,
+        },
+        Case {
+            label: "a stamp beyond the future allowance is stale",
+            stamp: STAMP,
+            now: written - ahead - 1,
+            skew: WINDOW,
+            expected: ApplyOutcome::Stale,
+        },
+        Case {
+            label: "a zero age bound accepts an old stamp",
+            stamp: STAMP,
+            now: written + 10_000_000,
+            skew: 0,
+            expected: ApplyOutcome::Applied,
+        },
+        Case {
+            label: "a zero age bound accepts a far-future stamp",
             stamp: STAMP,
             now: written - 10_000_000,
             skew: 0,
@@ -114,11 +127,11 @@ fn the_window_decides_every_stamp_by_distance_only() {
             label: "an unreadable stamp is stale",
             stamp: UNREADABLE,
             now: written,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
+            skew: WINDOW,
             expected: ApplyOutcome::Stale,
         },
         Case {
-            label: "a zero window also disables the unreadable-stamp refusal",
+            label: "a zero age bound also disables the unreadable-stamp refusal",
             stamp: UNREADABLE,
             now: written,
             skew: 0,
@@ -128,14 +141,14 @@ fn the_window_decides_every_stamp_by_distance_only() {
             label: "an extreme clock reading does not panic",
             stamp: STAMP,
             now: i64::MAX,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
+            skew: WINDOW,
             expected: ApplyOutcome::Stale,
         },
         Case {
             label: "a clock before the epoch does not panic",
             stamp: STAMP,
             now: i64::MIN,
-            skew: ENVELOPE_SKEW_DEFAULT_SECS,
+            skew: WINDOW,
             expected: ApplyOutcome::Stale,
         },
     ];
@@ -156,23 +169,43 @@ fn the_window_decides_every_stamp_by_distance_only() {
     }
 }
 
+/// The shipped default is no age bound, so an ordinary backlog applies. A
+/// positive default would drop every row an offline node stored, so this pins
+/// the value as well as the behaviour it buys.
+#[test]
+fn the_shipped_default_accepts_a_ten_minute_old_row() {
+    assert_eq!(
+        ENVELOPE_SKEW_DEFAULT_SECS, 0,
+        "the shipped age bound must stay off: a backlog older than any window is legitimate"
+    );
+    let (store, _kms) = fixture();
+    let m = upsert("m-backlog", "b-backlog", STAMP, "dev-a", "gist");
+    let written = parse_utc_epoch(STAMP).expect("the fixture stamp parses");
+    assert_eq!(
+        apply_at(&store, &m, written + 600, ENVELOPE_SKEW_DEFAULT_SECS),
+        ApplyOutcome::Applied,
+        "a ten-minute-old row must apply under the shipped default"
+    );
+}
+
 /// A stale envelope journals nothing, so the next delivery of the same id is
 /// stale again instead of reporting a duplicate of an apply that never ran.
 #[test]
 fn a_stale_envelope_writes_no_journal_row() {
     let (store, _kms) = fixture();
     let m = upsert("m-stale", "b-stale", STAMP, "dev-a", "gist");
-    let now = parse_utc_epoch(STAMP).expect("stamp parses") - 3_600;
+    let now = parse_utc_epoch(STAMP).expect("stamp parses") + 3_600;
     assert_eq!(
-        apply_at(&store, &m, now, ENVELOPE_SKEW_DEFAULT_SECS),
-        ApplyOutcome::Stale
+        apply_at(&store, &m, now, WINDOW),
+        ApplyOutcome::Stale,
+        "an hour-old row is stale at a 300 second bound"
     );
     assert!(
         store.journal_get("b-stale", "m-stale").unwrap().is_none(),
         "a stale envelope must not be journaled"
     );
     assert_eq!(
-        apply_at(&store, &m, now, ENVELOPE_SKEW_DEFAULT_SECS),
+        apply_at(&store, &m, now, WINDOW),
         ApplyOutcome::Stale,
         "no journal row means the second delivery is stale, not a duplicate"
     );
@@ -181,21 +214,18 @@ fn a_stale_envelope_writes_no_journal_row() {
 /// The id pre-check runs first: a journaled id answers `Duplicate` even when
 /// the same envelope would be stale against the clock.
 #[test]
-fn a_journaled_id_still_answers_duplicate_before_the_window() {
+fn a_journaled_id_still_answers_duplicate_before_the_age_bound() {
     let (store, _kms) = fixture();
     let m = upsert("m-dup", "b-dup", STAMP, "dev-a", "gist");
     let written = parse_utc_epoch(STAMP).expect("stamp parses");
-    assert_eq!(
-        apply_at(&store, &m, written, ENVELOPE_SKEW_DEFAULT_SECS),
-        ApplyOutcome::Applied
-    );
+    assert_eq!(apply_at(&store, &m, written, WINDOW), ApplyOutcome::Applied);
     assert!(
         store.journal_get("b-dup", "m-dup").unwrap().is_some(),
         "the applied envelope is journaled"
     );
     assert_eq!(
-        apply_at(&store, &m, written - 86_400, ENVELOPE_SKEW_DEFAULT_SECS),
+        apply_at(&store, &m, written + 86_400, WINDOW),
         ApplyOutcome::Duplicate,
-        "the journal wins over the freshness window"
+        "the journal wins over the age bound"
     );
 }

@@ -286,7 +286,7 @@ fn an_unreadable_envelope_skew_leaves_the_path_alone() {
         crate::config::merge::system_defaults(&|_key: &str| None)
             .pointer("/sync/max_envelope_skew_secs")
             .cloned(),
-        Some(json!(300)),
+        Some(json!(0)),
         "the default the dropped value falls back to moved"
     );
 }

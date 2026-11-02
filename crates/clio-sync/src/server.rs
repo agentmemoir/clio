@@ -102,7 +102,7 @@ pub struct SyncServerOptions {
     /// push whose apply overruns is still answered normally; the response write
     /// is bounded per call by the write slice, not by this deadline.
     pub deadline_secs: Option<u64>,
-    /// Freshness window in seconds either side of the local clock; `None` = default, `0` = off.
+    /// Age bound in seconds on a past push stamp; `None` = default (`0`, off).
     pub max_envelope_skew_secs: Option<u64>,
     /// This server's device id (LWW tie-breaker participant).
     pub device_id: String,
@@ -124,7 +124,7 @@ pub(crate) struct ServeOptions {
     pub(crate) credentials: Option<CredentialStore>,
     pub(crate) dev_mode: bool,
     pub(crate) deadline_secs: u64,
-    /// Freshness window for an applied push, in seconds; `0` disables it.
+    /// Age bound for an applied push, in seconds; `0` disables it.
     pub(crate) max_envelope_skew_secs: u64,
     pub(crate) device_id: String,
     /// The deployment's erasure-denial authority, when one is wired. `None`

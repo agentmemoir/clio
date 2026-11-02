@@ -17,8 +17,6 @@
 //! - `seed_salt` and `share_salt`, the deployment salt one test binary resolved
 //!   written beside the journal a child process reads, so both hash subject
 //!   identities under the same bytes
-//! - `no_skew_deployment`, the deployment overlay that pins the envelope
-//!   freshness window for a harness that pushes fixed transaction stamps
 //!
 //! ## Does not own
 //! - Any scenario, database, or key-store behaviour (each harness owns its own)
@@ -27,9 +25,9 @@
 //!
 //! ## Boundary
 //!
-//! Keep this module to the key-file seed, the deployment-salt hand-off, the
-//! deployment-config pin, and the two shared harness helpers. If a harness needs
-//! more environment than this, it should set it itself rather than widen this.
+//! Keep this module to the key-file seed, the deployment-salt hand-off, and the
+//! two shared harness helpers. If a harness needs more environment than this, it
+//! should set it itself rather than widen this.
 //!
 //! # Why every harness needs this
 //!
@@ -153,22 +151,6 @@ pub fn share_salt(cmd: &mut Command, journal: &Path, salt: &[u8]) {
         return;
     }
     seed_salt(journal, salt);
-}
-
-/// Write the deployment overlay every child in this harness reads, and return
-/// its path.
-///
-/// The envelope freshness window is off in this overlay. A harness that pushes
-/// fixed transaction stamps — the erasure suites write `2026-01-0x` and assert
-/// what the peer does with the resulting row — would otherwise be judged stale
-/// against the day the suite runs, and would prove the clock instead of the
-/// claim it names. The window itself stays enforced in production and in the
-/// suites that test freshness: this pins one harness value, not the default.
-pub fn no_skew_deployment(dir: &Path) -> PathBuf {
-    let path = dir.join("deployment-overlay.json");
-    std::fs::write(&path, r#"{"sync":{"max_envelope_skew_secs":0}}"#)
-        .expect("write the harness deployment overlay");
-    path
 }
 
 /// A per-test scratch directory, removed when the guard drops.

@@ -203,7 +203,7 @@ fn client<T: AcceptanceStore + 'static>(
         token: token.map(str::to_owned),
         cipher: sync_cipher(),
         allow_plaintext: false,
-        max_envelope_skew_secs: 0,
+        max_envelope_skew_secs: clio_sync::ENVELOPE_SKEW_DEFAULT_SECS,
     }
 }
 

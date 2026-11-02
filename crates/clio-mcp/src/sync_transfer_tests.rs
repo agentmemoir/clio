@@ -41,14 +41,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// A serving peer whose effective config disables the freshness window: the
-/// rows this fixture seeds carry fixed dates, so a live window would refuse
-/// them as stale before the transfer under test begins.
-fn state_with_window_off() -> Arc<McpState> {
-    let mut runtime = clio_config::Runtime::with_env(&|_| None);
-    runtime
-        .load_file_json(&json!({"sync": {"max_envelope_skew_secs": 0}}).to_string())
-        .expect("config");
+/// A serving peer on the deployment defaults: the rows this fixture seeds carry
+/// fixed dates, and the shipped age bound is off, so no row is refused as stale
+/// before the transfer under test begins.
+fn state_on_defaults() -> Arc<McpState> {
+    let runtime = clio_config::Runtime::with_env(&|_| None);
     McpState::open_with_runtime(
         &crate::runtime::McpOpenOptions {
             backend: "sqlite".into(),
@@ -166,8 +163,8 @@ fn seed(client: &McpState, m: &SyncMutation) {
         device_id: "dev-seed".into(),
         kms: None,
         clock: &clio_sync::clock::now_epoch,
-        // The seed rows carry fixed fixture dates, so the window stays off here.
-        max_envelope_skew_secs: 0,
+        // The seed rows carry fixed fixture dates; the shipped age bound is off.
+        max_envelope_skew_secs: clio_sync::ENVELOPE_SKEW_DEFAULT_SECS,
     };
     let outcome = apply_mutation(&engine, m, &envelope).expect("the seed mutation applies");
     assert_eq!(
@@ -188,7 +185,7 @@ fn seed(client: &McpState, m: &SyncMutation) {
 fn seeded_peer() -> (Arc<McpState>, String, ScratchJournal, TempDir) {
     let keys = sync_key("mcp-transfer-peer");
     let journal = ScratchJournal::new("pull-denial");
-    let peer = state_with_window_off();
+    let peer = state_on_defaults();
     let addr = {
         let get = |name: &str| {
             (name == clio_config::ERASURE_JOURNAL_FILE_ENV)
@@ -205,7 +202,7 @@ fn seeded_peer() -> (Arc<McpState>, String, ScratchJournal, TempDir) {
             .expect("the bound address")
             .to_owned()
     };
-    let seeder = state_with_window_off();
+    let seeder = state_on_defaults();
     for (mid, bank, id, subject, stamp) in [
         (
             "m-held",
@@ -292,7 +289,7 @@ fn a_pulled_denied_subject_is_dead_lettered_while_an_unrelated_bank_applies() {
         .record_denial("s-held", &["b-held".to_owned()])
         .expect("record the subject denial");
 
-    let client = state_with_window_off();
+    let client = state_on_defaults();
     let out = transfer_with(
         &client,
         &json!({ "remote": addr, "mode": "pull", "banks": ["b-held", "b-open"] }),
@@ -325,7 +322,7 @@ fn a_bidirectional_transfer_dead_letters_a_pulled_denied_subject_too() {
         .record_denial("s-held", &["b-held".to_owned()])
         .expect("record the subject denial");
 
-    let client = state_with_window_off();
+    let client = state_on_defaults();
     transfer_with(
         &client,
         &json!({ "remote": addr, "mode": "bidirectional", "banks": ["b-held", "b-open"] }),
@@ -402,7 +399,7 @@ fn a_resolved_journal_path_with_no_file_keeps_the_pull_clear() {
         "the premise: no journal file exists yet"
     );
 
-    let client = state_with_window_off();
+    let client = state_on_defaults();
     transfer_with(
         &client,
         &json!({ "remote": addr, "mode": "pull", "banks": ["b-held"] }),

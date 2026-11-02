@@ -73,7 +73,7 @@ fn serve_with_kms(
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
-        max_envelope_skew_secs: Some(0),
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     })
@@ -115,7 +115,7 @@ fn bind_failure_returns_an_error() {
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
-        max_envelope_skew_secs: Some(0),
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     })

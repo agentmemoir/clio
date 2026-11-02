@@ -130,9 +130,11 @@ fn refuse(
 /// A row sealed under this peer's key is opened here, so the subject guard and
 /// the apply effects see the payload the writer sealed, while the journal keeps
 /// relaying that same sealed row to every reader downstream.
+#[allow(clippy::too_many_arguments)]
 fn apply_and_record(
     engine: &ApplyEngine<'_>,
     options: &ServeOptions,
+    bank: &str,
     m: &SyncMutation,
     envelope: &str,
     accepted: &mut Vec<String>,
@@ -163,9 +165,18 @@ fn apply_and_record(
             proof,
         });
     }
-    match result.outcome {
+    // Every outcome is matched by name: a stale row was never applied, so it
+    // must never be acknowledged as accepted, or the sender's watermark moves
+    // past a row this node dropped and the row is lost for the whole mesh.
+    match &result.outcome {
+        ApplyOutcome::Applied | ApplyOutcome::Duplicate | ApplyOutcome::ConflictLoser => {
+            accepted.push(m.sync_mutation_id.clone());
+        }
+        ApplyOutcome::Stale => {
+            crate::apply::quarantine_stale(engine, bank, m, envelope)?;
+            rejected.push(m.sync_mutation_id.clone());
+        }
         ApplyOutcome::DeadLettered { .. } => rejected.push(m.sync_mutation_id.clone()),
-        _ => accepted.push(m.sync_mutation_id.clone()),
     }
     Ok(())
 }
@@ -305,6 +316,7 @@ pub(crate) fn handle_push(
         if let Err(err) = apply_and_record(
             &engine,
             options,
+            &bank,
             &m,
             &envelope,
             &mut accepted,
@@ -334,3 +346,7 @@ pub(crate) fn handle_push(
 #[cfg(test)]
 #[path = "server_push_denial_tests.rs"]
 mod server_push_denial_tests;
+
+#[cfg(test)]
+#[path = "server_push_stale_tests.rs"]
+mod server_push_stale_tests;

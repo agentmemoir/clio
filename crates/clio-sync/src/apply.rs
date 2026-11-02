@@ -67,7 +67,9 @@ use apply_items::{apply_item_discard, apply_item_invalidate, apply_item_upsert};
 
 pub use apply_dead_letter::quarantine;
 
-pub(crate) use apply_dead_letter::dead_letter;
+pub(crate) use apply_dead_letter::{
+    dead_letter, last_stale_refusal, quarantine_stale, stale_refused,
+};
 
 /// Outcome of applying one sync mutation (transitions).
 #[derive(Debug, Clone, PartialEq)]
@@ -87,10 +89,11 @@ pub enum ApplyOutcome {
     /// LWW resolved against a more recent local row: incoming mutation is the
     /// documented loser, recorded in the conflict journal, never deleted.
     ConflictLoser,
-    /// The writer stamp is outside the freshness window around this node's
-    /// clock: nothing is applied and nothing is journaled, so the caller's
-    /// cursor advances rather than freezes. Not a dead letter: a stale envelope
-    /// is a documented loser, not poison an operator must ack-skip.
+    /// The writer stamp is outside the freshness bounds: older than the
+    /// operator's age bound, or implausibly far in the future. Nothing is
+    /// applied and nothing is journaled, so the caller's cursor advances rather
+    /// than freezes. Not a dead letter: a stale envelope is a documented loser,
+    /// not poison an operator must ack-skip.
     Stale,
     /// Permanent apply failure: quarantined in `sync_dead_letter`; cursors
     /// must not advance past this id until operator ack-skip.
@@ -147,8 +150,10 @@ pub struct ApplyEngine<'a> {
     /// The clock this engine reads, in epoch seconds. A seam: production passes
     /// the local clock, a test pins it, and the freshness guard reads only this.
     pub clock: &'a dyn Fn() -> i64,
-    /// How far a writer stamp may sit from this engine's clock, in seconds, in
-    /// either direction. `0` disables the freshness window.
+    /// How far in the past a writer stamp may sit from this engine's clock, in
+    /// seconds: the age bound on an applied envelope. `0` disables it, which is
+    /// the shipped default, because a store-and-forward backlog is legitimately
+    /// old.
     pub max_envelope_skew_secs: u64,
 }
 

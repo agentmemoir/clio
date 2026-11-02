@@ -184,7 +184,7 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
         token: None,
         cipher: vec![crate::client::client_tests::paired_key()],
         allow_plaintext: false,
-        max_envelope_skew_secs: 0,
+        max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
     };
     let page = crate::PULL_PAGE_LIMIT;
     let since = |kind: &str| kind_watermark(&cfg, bank, kind).expect("watermark");

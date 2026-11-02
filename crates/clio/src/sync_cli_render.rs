@@ -57,6 +57,9 @@ fn render_status(payload: &Value) -> String {
     let mut lines = vec![format!(
         "sync status (device {device}, remote {remote}, auth {auth}, encryption {encryption})"
     )];
+    if let Some(last) = payload.get("last_stale_refusal").and_then(Value::as_str) {
+        lines.push(format!("  last stale refusal: {last}"));
+    }
     if let Some(banks) = payload.get("banks").and_then(Value::as_array) {
         for bank in banks {
             let bank_id = bank.get("bank_id").and_then(Value::as_str).unwrap_or("?");
@@ -71,8 +74,12 @@ fn render_status(payload: &Value) -> String {
                 .get("dead_letter_open")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
+            let stale = bank
+                .get("stale_refused")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
             lines.push(format!(
-                "  {bank_id}: push={push} pull={pull} pending={pending} conflicts={conflicts} dead_letters={dead}"
+                "  {bank_id}: push={push} pull={pull} pending={pending} conflicts={conflicts} dead_letters={dead} stale_refused={stale}"
             ));
         }
     }

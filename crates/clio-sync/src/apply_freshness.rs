@@ -4,11 +4,12 @@
 //! # Responsibility
 //!
 //! This module is responsible for the envelope freshness guard: it decides
-//! whether the writer stamp a mutation carries sits too far from this node's
-//! clock to be applied, in either direction.
+//! whether the writer stamp a mutation carries is too old to apply here, and
+//! whether it sits implausibly far in the future.
 //!
 //! ## Owns
-//! - The symmetric skew rule over `transaction_time` and one clock reading
+//! - The past-directed age bound over `transaction_time` and one clock reading
+//! - The separate, larger future allowance that protects LWW integrity
 //! - The disabled window (`0` tolerance checks nothing)
 //! - The refusal of a stamp the reader cannot place
 //!
@@ -29,15 +30,28 @@ use crate::clock::parse_utc_epoch;
 #[cfg(test)]
 use clio_store::{DekProvider, Store, SyncStore};
 
-/// Is the mutation's writer stamp outside the window around the engine's clock?
+/// How far ahead of this node's clock a writer stamp may sit, in seconds.
 ///
-/// The rule is symmetric: a stamp from long ago and a stamp from far in the
-/// future are both stale, because either one means this node cannot place the
-/// write against its own clock. A tolerance of `0` disables the window, so the
-/// check answers `false` for every stamp.
+/// This is not a replay bound. A relay can only replay a row that already
+/// exists, so a replay's stamp is always in the past, and the past bound is the
+/// only rule that answers replay. The future direction protects LWW integrity
+/// instead: a stamp ahead of real time wins every comparison against the writes
+/// that follow it until real time catches up. The allowance is larger than any
+/// sensible past bound so a peer whose clock runs fast keeps its data, and an
+/// hour bounds the damage a badly set clock can do to the merge order.
+pub(crate) const ENVELOPE_FUTURE_ALLOWANCE_SECS: u64 = 3_600;
+
+/// Is the mutation's writer stamp outside the bounds this engine allows?
+///
+/// Two bounds apply, and they answer different questions. A stamp too far in
+/// the past is refused as an age bound: `max_envelope_skew_secs` seconds, which
+/// is the operator setting. A stamp too far in the future is refused by
+/// [`ENVELOPE_FUTURE_ALLOWANCE_SECS`], which keeps a fast clock from reordering
+/// the merge. A past bound of `0` disables both, so the check answers `false`
+/// for every stamp.
 pub(crate) fn is_stale(engine: &ApplyEngine<'_>, transaction_time: &str) -> bool {
-    let tolerance = engine.max_envelope_skew_secs;
-    if tolerance == 0 {
+    let max_age = engine.max_envelope_skew_secs;
+    if max_age == 0 {
         return false;
     }
     let Some(written) = parse_utc_epoch(transaction_time) else {
@@ -45,7 +59,12 @@ pub(crate) fn is_stale(engine: &ApplyEngine<'_>, transaction_time: &str) -> bool
         // envelope is refused instead of trusted.
         return true;
     };
-    (engine.clock)().abs_diff(written) > tolerance
+    let now = (engine.clock)();
+    let max_age = i64::try_from(max_age).unwrap_or(i64::MAX);
+    let max_ahead = i64::try_from(ENVELOPE_FUTURE_ALLOWANCE_SECS).unwrap_or(i64::MAX);
+    // `saturating_sub` keeps an extreme clock reading from overflowing: either
+    // difference is then far larger than any bound and the stamp is refused.
+    now.saturating_sub(written) > max_age || written.saturating_sub(now) > max_ahead
 }
 
 /// A clock seam pinned to one epoch second, for tests.
@@ -67,7 +86,8 @@ pub(crate) fn pinned_at(stamp: &str) -> &'static dyn Fn() -> i64 {
 /// An apply engine for tests whose clock reads `stamp`.
 ///
 /// Fixing the clock to the fixture's own stamp keeps every fixed-date fixture
-/// inside the window: the case decides the outcome, never the day it runs.
+/// at zero age, so the case decides the outcome, never the day it runs. The age
+/// bound is the shipped default, which bounds nothing.
 #[cfg(test)]
 pub(crate) fn test_engine<'a>(
     store: &'a dyn Store,
