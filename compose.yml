@@ -82,7 +82,7 @@ services:
   embed:
     profiles: ["local-retrieval", "local-rft"]
     # Default amd64; override with -f compose.arm64.yml (or set CLIO_TEI_IMAGE).
-    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}
     restart: unless-stopped
     ports:
       - "${CLIO_EMBED_PORT:-34311}:80"
@@ -115,7 +115,7 @@ services:
 
   rerank:
     profiles: ["local-retrieval", "local-rft"]
-    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}
     restart: unless-stopped
     ports:
       - "${CLIO_RERANK_PORT:-34312}:80"
