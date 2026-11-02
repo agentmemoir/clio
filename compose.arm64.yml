@@ -7,11 +7,11 @@ services:
 
   embed:
     platform: linux/arm64
-    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9}
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4}
 
   rerank:
     platform: linux/arm64
-    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9}
+    image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4}
 
   extract:
     platform: linux/arm64
