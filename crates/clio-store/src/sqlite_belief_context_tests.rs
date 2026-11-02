@@ -183,7 +183,11 @@ fn context_seal_open_and_stats_are_pii_safe() {
     let sealed = seal_belief_context(&kms, "bel-1", "subj", Some("oat milk")).unwrap();
     assert!(sealed.is_some());
     assert!(!sealed.clone().unwrap().contains("oat milk"));
-    assert!(seal_belief_context(&kms, "bel-1", "subj", None).unwrap().is_none());
+    assert!(
+        seal_belief_context(&kms, "bel-1", "subj", None)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         open_belief_context(&kms, "bel-1", sealed.as_deref()).as_deref(),
         Some("oat milk")

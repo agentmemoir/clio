@@ -65,11 +65,7 @@ impl SqliteStore {
             t.2.clone(),
             t.3,
             t.4,
-            crate::triple_cipher::open_optional_object(
-                self.kms().as_ref(),
-                &t.0,
-                t.5.as_deref(),
-            )?,
+            crate::triple_cipher::open_optional_object(self.kms().as_ref(), &t.0, t.5.as_deref())?,
             t.6,
             t.7,
             t.8,

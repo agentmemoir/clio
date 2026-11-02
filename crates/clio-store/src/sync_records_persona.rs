@@ -323,8 +323,11 @@ pub(crate) fn feed_beliefs_sqlite(
                 })
                 .collect::<Result<Vec<_>, AmError>>()
                 .am("sync feed belief entries parse")?;
-            let proposition =
-                crate::belief_store::open_proposition(store.kms().as_ref(), &id, &proposition_cipher)?;
+            let proposition = crate::belief_store::open_proposition(
+                store.kms().as_ref(),
+                &id,
+                &proposition_cipher,
+            )?;
             let updated_at = history
                 .last()
                 .map(|entry| entry.as_of.clone())

@@ -176,7 +176,9 @@ mod tests {
             ErrorCode::UnreadableContent
         );
         assert_eq!(
-            open_object(&kms, "edge-1", "not-an-envelope").unwrap_err().code,
+            open_object(&kms, "edge-1", "not-an-envelope")
+                .unwrap_err()
+                .code,
             ErrorCode::UnreadableContent
         );
         let non_utf8 = kms

@@ -38,8 +38,7 @@ impl SqliteStore {
     ) -> Result<(), AmError> {
         crate::belief_tx::validate_belief_create(belief, actor)?;
         let dek_ref = self.kms().ensure_dek(&belief.subject_id)?;
-        let cipher =
-            seal_proposition(
+        let cipher = seal_proposition(
             self.kms().as_ref(),
             &belief.id,
             &belief.subject_id,

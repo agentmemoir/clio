@@ -108,7 +108,10 @@ fn composite_row_ids_keep_field_boundaries() {
         composite_row_id(&["ab", "c"]),
         composite_row_id(&["a", "bc"])
     );
-    assert_eq!(composite_row_id(&["bank", "key"]), "00000004bank00000003key");
+    assert_eq!(
+        composite_row_id(&["bank", "key"]),
+        "00000004bank00000003key"
+    );
 }
 
 #[test]
@@ -189,11 +192,8 @@ fn bad_envelope_fields_fail_decrypt() {
         "a legacy 12-byte nonce must be skippable"
     );
     let mut env = kms.encrypt("row", "sub-3", b"x").unwrap();
-    let mut nonce = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        &env.nonce_b64,
-    )
-    .unwrap();
+    let mut nonce =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &env.nonce_b64).unwrap();
     nonce[23] ^= 0xff;
     env.nonce_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, nonce);
     assert_eq!(
@@ -209,12 +209,15 @@ fn bad_envelope_fields_fail_decrypt() {
         "an undecodable ciphertext must be skippable"
     );
     assert_eq!(
-        kms.decrypt("row", &CiphertextEnvelope {
-            subject_id: "nope".into(),
-            key_version: 1,
-            nonce_b64: String::new(),
-            ciphertext_b64: String::new(),
-        })
+        kms.decrypt(
+            "row",
+            &CiphertextEnvelope {
+                subject_id: "nope".into(),
+                key_version: 1,
+                nonce_b64: String::new(),
+                ciphertext_b64: String::new(),
+            }
+        )
         .unwrap_err()
         .code,
         ErrorCode::Forbidden,
@@ -228,7 +231,10 @@ fn bad_envelope_fields_fail_decrypt() {
     .unwrap();
     raw[0] ^= 0xff;
     env.ciphertext_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, raw);
-    assert_eq!(kms.decrypt("row", &env).unwrap_err().code, ErrorCode::Forbidden);
+    assert_eq!(
+        kms.decrypt("row", &env).unwrap_err().code,
+        ErrorCode::Forbidden
+    );
 }
 
 /// An envelope sealed under the older 12-byte nonce layout cannot be opened by
@@ -363,7 +369,8 @@ fn concurrent_kms_instances_keep_every_key() {
                 let kms = LocalDevKms::open_persistent(&path).unwrap();
                 barrier.wait();
                 for item in 0..per_writer {
-                    kms.encrypt("row", &format!("sub-{writer}-{item}"), b"x").unwrap();
+                    kms.encrypt("row", &format!("sub-{writer}-{item}"), b"x")
+                        .unwrap();
                 }
             })
         })

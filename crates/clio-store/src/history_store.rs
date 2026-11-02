@@ -214,7 +214,8 @@ pub(crate) fn seal_history_text(
     subject_id: &str,
     value: &str,
 ) -> Result<String, AmError> {
-    Ok(kms.encrypt(row_id, subject_id, value.as_bytes())?.to_storage_string())
+    let sealed = kms.encrypt(row_id, subject_id, value.as_bytes())?;
+    Ok(sealed.to_storage_string())
 }
 
 /// Open one history text field back into plaintext.
@@ -327,14 +328,14 @@ mod tests {
         );
         let kms = crate::dek::LocalDevKms::new();
         let cipher = seal_history_text(&kms, "rec-1", "s", "hello").expect("seal");
-        assert_eq!(open_history_text(&kms, "rec-1", &cipher).expect("open"), "hello");
-        assert_eq!(
-            open_history_text(&kms, "rec-1", "not-json").unwrap_err().code,
-            ErrorCode::UnreadableContent
-        );
+        let opened = open_history_text(&kms, "rec-1", &cipher).expect("open");
+        assert_eq!(opened, "hello");
+        let err = open_history_text(&kms, "rec-1", "not-json").unwrap_err();
+        assert_eq!(err.code, ErrorCode::UnreadableContent);
         let steps = vec!["a".to_owned(), "b".to_owned()];
         let sealed = seal_steps(&kms, "rec-1", "s", &steps).expect("seal steps");
-        assert_eq!(open_steps(&kms, "rec-1", &sealed).expect("open steps"), steps);
+        let opened_steps = open_steps(&kms, "rec-1", &sealed).expect("open steps");
+        assert_eq!(opened_steps, steps);
         let bad = seal_history_text(&kms, "rec-1", "s", "not json").expect("seal bad");
         assert_eq!(
             open_steps(&kms, "rec-1", &bad).unwrap_err().code,
@@ -347,10 +348,8 @@ mod tests {
         let raw = crate::dek::DekProvider::encrypt(&kms, "rec-1", "s", &[0xFF_u8, 0xFE])
             .expect("encrypt raw")
             .to_storage_string();
-        assert_eq!(
-            open_history_text(&kms, "rec-1", &raw).unwrap_err().code,
-            ErrorCode::Internal
-        );
+        let raw_err = open_history_text(&kms, "rec-1", &raw).unwrap_err();
+        assert_eq!(raw_err.code, ErrorCode::Internal);
     }
 
     fn item(id: &str, bank: &str, episodic: EpisodicType) -> MemoryItem {

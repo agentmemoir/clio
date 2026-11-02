@@ -351,7 +351,12 @@ impl PostgresStore {
         validate_revision(record, new_item)?;
         require_actor(actor)?;
         let dek_ref = self.kms().ensure_dek(&new_item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &new_item.id, &new_item.subject_id, new_item)?;
+        let cipher = seal_dual(
+            self.kms().as_ref(),
+            &new_item.id,
+            &new_item.subject_id,
+            new_item,
+        )?;
         let ts = record.distilled_at.clone();
         let prior_id = revision_prior_id(record)?;
         self.with_client(|client| {

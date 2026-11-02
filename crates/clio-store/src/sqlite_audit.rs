@@ -119,8 +119,11 @@ impl SqliteStore {
                     .optional()
                     .am("audit trail revision read")?;
                 if let Some((mut revision, cipher)) = row {
-                    revision.context =
-                        crate::item_persist::open_context(self.kms().as_ref(), id, cipher.as_deref());
+                    revision.context = crate::item_persist::open_context(
+                        self.kms().as_ref(),
+                        id,
+                        cipher.as_deref(),
+                    );
                     trail.revisions.push(revision);
                 }
             }

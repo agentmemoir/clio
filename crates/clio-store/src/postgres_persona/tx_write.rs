@@ -293,7 +293,8 @@ pub(crate) fn put_stable_entry_tx_audited(
     // it feeds the audit stats, and the closed prior version row retains its
     // own ciphertext (the prior stays reconstructable through stable_history).
     let prior_cipher = prior_open_stable_context(tx, &entry.bank_id, &entry.key)?;
-    let prior_context = open_persona_context(kms, &entry.bank_id, &entry.key, prior_cipher.as_deref());
+    let prior_context =
+        open_persona_context(kms, &entry.bank_id, &entry.key, prior_cipher.as_deref());
     put_stable_entry_tx(tx, entry, cipher, dek_ref, context_cipher)?;
     let detail = persona_audit_detail(
         "stable",
@@ -332,7 +333,8 @@ pub(crate) fn put_preference_state_tx_audited(
     // copied into the audit detail: audit_events is append-only, so a sealed
     // copy there would outlive subject erasure.
     let prior_cipher = stored_preference_context(tx, &pref.bank_id, &pref.key)?;
-    let prior_context = open_persona_context(kms, &pref.bank_id, &pref.key, prior_cipher.as_deref());
+    let prior_context =
+        open_persona_context(kms, &pref.bank_id, &pref.key, prior_cipher.as_deref());
     put_preference_state_postgres_tx(tx, pref, context_cipher)?;
     let supplied = pref.context.is_some();
     let detail = persona_audit_detail(

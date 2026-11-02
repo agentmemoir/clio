@@ -294,7 +294,10 @@ mod tests {
         );
         let kms = crate::dek::LocalDevKms::new();
         assert!(open_dual(&kms, "row", "").is_err());
-        let sealed = kms.encrypt("row", "s", b"not-json").unwrap().to_storage_string();
+        let sealed = kms
+            .encrypt("row", "s", b"not-json")
+            .unwrap()
+            .to_storage_string();
         assert_eq!(
             open_dual(&kms, "row", &sealed).unwrap_err().message,
             content_format_mismatch().message
@@ -304,12 +307,18 @@ mod tests {
             .encrypt("row", "s", &dual.to_bytes())
             .unwrap()
             .to_storage_string();
-        assert_eq!(open_dual(&kms, "row", &ok).unwrap().gist.as_deref(), Some("g"));
+        assert_eq!(
+            open_dual(&kms, "row", &ok).unwrap().gist.as_deref(),
+            Some("g")
+        );
         // A content version this build cannot read is skippable for the same
         // reason a legacy row is: the bytes are the row's, and the backend is
         // fine. It used to keep its own message, which meant the index workers
         // — which matched on that text — aborted the whole drain on it.
-        let bad_ver = kms.encrypt("row", "s", br#"{"v":9}"#).unwrap().to_storage_string();
+        let bad_ver = kms
+            .encrypt("row", "s", br#"{"v":9}"#)
+            .unwrap()
+            .to_storage_string();
         let err = open_dual(&kms, "row", &bad_ver).unwrap_err();
         assert_eq!(err.code, ErrorCode::UnreadableContent);
         assert_eq!(err.message, content_format_mismatch().message);

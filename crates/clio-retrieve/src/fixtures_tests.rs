@@ -69,7 +69,11 @@ impl clio_store::DekProvider for FaultyKms {
         self.inner.encrypt(row_id, subject_id, plaintext)
     }
 
-    fn decrypt(&self, row_id: &str, envelope: &clio_store::CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(
+        &self,
+        row_id: &str,
+        envelope: &clio_store::CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
         if envelope.subject_id == self.subject_id {
             return Err(AmError::new(self.code, "fixture fault"));
         }

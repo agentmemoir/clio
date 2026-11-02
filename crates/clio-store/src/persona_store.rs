@@ -354,22 +354,33 @@ mod tests {
             "plain-value"
         );
         let bad = kms
-            .encrypt(&crate::dek::composite_row_id(&["bank", "key"]), "bank", &[0xFF_u8, 0xFE])
+            .encrypt(
+                &crate::dek::composite_row_id(&["bank", "key"]),
+                "bank",
+                &[0xFF_u8, 0xFE],
+            )
             .expect("encrypt raw bytes")
             .to_storage_string();
         // Non-UTF-8 sealed bytes keep persona's own mapping; only the envelope
         // decode is classified as unreadable content.
         assert_eq!(
-            open_persona_value(&kms, "bank", "key", &bad).unwrap_err().code,
+            open_persona_value(&kms, "bank", "key", &bad)
+                .unwrap_err()
+                .code,
             ErrorCode::Internal
         );
         assert_eq!(
-            open_persona_value(&kms, "bank", "key", "not-json").unwrap_err().code,
+            open_persona_value(&kms, "bank", "key", "not-json")
+                .unwrap_err()
+                .code,
             ErrorCode::UnreadableContent
         );
         // Optional context seal/open: None stays None, valid round-trips,
         // invalid fails closed, and unreadable ciphertext opens to None.
-        assert_eq!(seal_persona_context(&kms, "bank", "key", None).unwrap(), None);
+        assert_eq!(
+            seal_persona_context(&kms, "bank", "key", None).unwrap(),
+            None
+        );
         let sealed = seal_persona_context(&kms, "bank", "key", Some("why recorded"))
             .expect("seal context")
             .expect("some cipher");
@@ -380,7 +391,10 @@ mod tests {
         );
         assert_eq!(open_persona_context(&kms, "bank", "key", None), None);
         assert_eq!(open_persona_context(&kms, "bank", "key", Some("")), None);
-        assert_eq!(open_persona_context(&kms, "bank", "key", Some("not-json")), None);
+        assert_eq!(
+            open_persona_context(&kms, "bank", "key", Some("not-json")),
+            None
+        );
         let err = seal_persona_context(&kms, "bank", "key", Some("")).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidArgument);
         let err = seal_persona_context(&kms, "bank", "key", Some(&"a".repeat(4097))).unwrap_err();

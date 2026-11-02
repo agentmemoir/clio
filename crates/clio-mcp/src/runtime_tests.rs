@@ -437,6 +437,9 @@ fn file_backed_kms_persists_across_state_opens() {
         .expect("encrypt");
     drop(first);
     let second = McpState::open_with_effective(&opts, &serde_json::json!({})).expect("second open");
-    assert_eq!(second.kms.decrypt("row", &envelope).expect("decrypt"), b"persist");
+    assert_eq!(
+        second.kms.decrypt("row", &envelope).expect("decrypt"),
+        b"persist"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

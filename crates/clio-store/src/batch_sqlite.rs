@@ -170,9 +170,18 @@ fn apply_one(
             actor,
         } => {
             let (cipher, dek_ref) = store.seal_item(item)?;
-            let definition =
-                seal_history_text(store.kms().as_ref(), &record.id, &item.subject_id, &record.definition)?;
-            let steps = seal_steps(store.kms().as_ref(), &record.id, &item.subject_id, &record.steps)?;
+            let definition = seal_history_text(
+                store.kms().as_ref(),
+                &record.id,
+                &item.subject_id,
+                &record.definition,
+            )?;
+            let steps = seal_steps(
+                store.kms().as_ref(),
+                &record.id,
+                &item.subject_id,
+                &record.steps,
+            )?;
             commit_task_upsert_tx(
                 tx,
                 item,
@@ -191,9 +200,18 @@ fn apply_one(
             actor,
         } => {
             let (cipher, dek_ref) = store.seal_item(item)?;
-            let what_failed =
-                seal_history_text(store.kms().as_ref(), &record.id, &item.subject_id, &record.what_failed)?;
-            let lesson = seal_history_text(store.kms().as_ref(), &record.id, &item.subject_id, &record.lesson)?;
+            let what_failed = seal_history_text(
+                store.kms().as_ref(),
+                &record.id,
+                &item.subject_id,
+                &record.what_failed,
+            )?;
+            let lesson = seal_history_text(
+                store.kms().as_ref(),
+                &record.id,
+                &item.subject_id,
+                &record.lesson,
+            )?;
             commit_failure_record_tx(
                 tx,
                 item,
