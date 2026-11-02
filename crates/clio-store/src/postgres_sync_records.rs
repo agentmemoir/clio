@@ -67,47 +67,31 @@ pub(crate) fn journal_append_pg(
             .am("sync journal next seq")?
             .get(0);
         let encrypted = i32::from(row.client_encrypted);
-        let inserted = tx
-            .execute(
-                "INSERT INTO sync_mutations (bank_id, seq, sync_mutation_id, entity_kind, \
-                 entity_id, op, transaction_time, device_id, content_hash, content_sealed, \
-                 encrypted, admission_receipt, created_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
-                 ON CONFLICT (bank_id, sync_mutation_id) DO NOTHING",
-                &[
-                    &row.bank_id,
-                    &seq,
-                    &row.sync_mutation_id,
-                    &row.entity_kind,
-                    &row.entity_id,
-                    &row.op,
-                    &row.transaction_time,
-                    &row.device_id,
-                    &row.content_hash,
-                    &row.content_sealed,
-                    &encrypted,
-                    &row.admission_receipt,
-                    &row.created_at,
-                ],
-            )
-            .am("sync journal insert")?;
-        if inserted == 0 {
-            // The conflict target is the mutation id alone, so zero rows means
-            // a concurrent append journalled this mutation first: report its
-            // seq exactly as the fast-path probe would.
-            let existing = journal_seq_probe(&mut tx, &row.bank_id, &row.sync_mutation_id)?
-                .ok_or_else(|| {
-                    AmError::new(
-                        clio_types::ErrorCode::Internal,
-                        "sync journal re-probe found no row",
-                    )
-                })?;
-            tx.commit().am("sync journal commit (no-op)")?;
-            return Ok(JournalAppendOutcome {
-                seq: i64::from(existing),
-                inserted: false,
-            });
-        }
+        // The bank's lock is still held, and it serializes both the probe above
+        // and this seq allocation, so no other append can insert this mutation
+        // first and the insert below cannot conflict.
+        tx.execute(
+            "INSERT INTO sync_mutations (bank_id, seq, sync_mutation_id, entity_kind, \
+             entity_id, op, transaction_time, device_id, content_hash, content_sealed, \
+             encrypted, admission_receipt, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            &[
+                &row.bank_id,
+                &seq,
+                &row.sync_mutation_id,
+                &row.entity_kind,
+                &row.entity_id,
+                &row.op,
+                &row.transaction_time,
+                &row.device_id,
+                &row.content_hash,
+                &row.content_sealed,
+                &encrypted,
+                &row.admission_receipt,
+                &row.created_at,
+            ],
+        )
+        .am("sync journal insert")?;
         tx.commit().am("sync journal commit")?;
         Ok(JournalAppendOutcome {
             seq: i64::from(seq),
