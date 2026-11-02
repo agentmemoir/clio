@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      tls:
+        patterns:
+          - "postgres_rustls"
+          - "rustls"
+          - "tokio-rustls"
+          - "webpki-roots"
+      sqlite:
+        patterns:
+          - "rusqlite"
+          - "sqlite-vec"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

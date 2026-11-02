@@ -110,7 +110,7 @@ jobs:
       # Same pin as CI. A release should be built by the compiler the tree was
       # linted and tested with, not by whatever `stable` happens to be that day.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
