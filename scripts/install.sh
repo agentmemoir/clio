@@ -48,7 +48,7 @@ detect_target() {
         Darwin)
             case "$machine" in
                 arm64) printf 'aarch64-apple-darwin' ;;
-                x86_64) printf 'x86_64-apple-darwin' ;;
+                x86_64) die "macOS on x86_64 is no longer supported. Apple Silicon (arm64) is required." ;;
                 *) die "unsupported macOS architecture: $machine" ;;
             esac
             ;;

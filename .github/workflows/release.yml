@@ -1,9 +1,9 @@
-# Release: build the four shipped targets, checksum them, attach them to a
+# Release: build the three shipped targets, checksum them, attach them to a
 # GitHub release, and publish the installer beside them.
 #
 # Deliberately not `cargo dist`. That tool would also generate a Homebrew
 # formula and an npm package, and the decision for this project is a single
-# install command. Four build lines and one release job are the whole thing.
+# install command. Three build lines and one release job are the whole thing.
 #
 # Every target builds on a runner of its own architecture, so nothing is
 # cross-compiled: a cross build of this dependency tree still needs a C cross
@@ -76,7 +76,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
-      # One failure should not cancel the other three: a partial set of assets
+      # One failure should not cancel the other two: a partial set of assets
       # is still worth having on hand when diagnosing a platform-specific
       # build break, and the release job refuses to publish an incomplete set.
       fail-fast: false
@@ -85,9 +85,6 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-15
             asset: clio-aarch64-apple-darwin
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-            asset: clio-x86_64-apple-darwin
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             asset: clio-x86_64-unknown-linux-musl
@@ -261,7 +258,6 @@ jobs:
         run: |
           for asset in \
             clio-aarch64-apple-darwin \
-            clio-x86_64-apple-darwin \
             clio-x86_64-unknown-linux-musl \
             clio-aarch64-unknown-linux-musl
           do
