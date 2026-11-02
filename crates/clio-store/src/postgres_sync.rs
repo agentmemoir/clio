@@ -326,6 +326,9 @@ impl SyncStore for PostgresStore {
 }
 
 #[cfg(test)]
+#[path = "postgres_sync_delegation_tests.rs"]
+mod postgres_sync_delegation_tests;
+#[cfg(test)]
 #[path = "postgres_sync_high_water_tests.rs"]
 mod postgres_sync_high_water_tests;
 #[cfg(test)]

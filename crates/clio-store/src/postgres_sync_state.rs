@@ -400,3 +400,7 @@ pub(crate) fn persona_context_erased_pg(
         Ok(row.is_some())
     })
 }
+
+#[cfg(test)]
+#[path = "postgres_sync_state_tests.rs"]
+mod postgres_sync_state_tests;

@@ -330,3 +330,7 @@ impl SyncStore for SqliteStore {
         self.correct_belief_context(bank_id, belief_id, new_context, reason, actor)
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_sync_tests.rs"]
+mod sqlite_sync_tests;

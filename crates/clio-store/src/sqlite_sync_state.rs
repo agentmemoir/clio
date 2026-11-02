@@ -412,3 +412,7 @@ pub(crate) fn persona_context_erased_sqlite(
         Ok(hit.is_some())
     })
 }
+
+#[cfg(test)]
+#[path = "sqlite_sync_state_tests.rs"]
+mod sqlite_sync_state_tests;
