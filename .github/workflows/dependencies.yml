@@ -1,0 +1,65 @@
+name: Dependency policy
+
+on:
+  pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'deny.toml'
+      - '.github/workflows/dependencies.yml'
+  push:
+    branches: [master]
+    paths:
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'deny.toml'
+      - '.github/workflows/dependencies.yml'
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Dependency policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.0
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.1
+      # Enable DEPENDENCY_POLICY_ENFORCE after the first report cycle and after
+      # resolving its findings. Only the scan steps are report-only; setup errors fail.
+      - name: Check advisories, licenses, bans and sources
+        id: deny
+        continue-on-error: ${{ vars.DEPENDENCY_POLICY_ENFORCE != 'true' }}
+        run: cargo deny --locked check advisories licenses bans sources
+      - name: Audit the lockfile against RustSec
+        id: audit
+        if: ${{ !cancelled() }}
+        continue-on-error: ${{ vars.DEPENDENCY_POLICY_ENFORCE != 'true' }}
+        run: cargo audit --file Cargo.lock
+      - name: Report scan results
+        if: ${{ !cancelled() }}
+        env:
+          DENY_OUTCOME: ${{ steps.deny.outcome }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          ENFORCE: ${{ vars.DEPENDENCY_POLICY_ENFORCE }}
+        run: |
+          {
+            echo '## Dependency policy'
+            echo "Enforcement enabled: ${ENFORCE:-false}"
+            echo "cargo-deny: $DENY_OUTCOME"
+            echo "cargo-audit: $AUDIT_OUTCOME"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DENY_OUTCOME" = failure ] || [ "$AUDIT_OUTCOME" = failure ]; then
+            echo '::warning::Dependency scan failed. Read the scan logs for findings or scan errors.'
+          fi
