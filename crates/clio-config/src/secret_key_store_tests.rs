@@ -21,9 +21,9 @@
 //! ## Boundary
 //!
 //! These tests drive the production [`KeyringStore`] through a `keyring_core`
-//! entry over an in-memory credential, so no OS store is reached. The functions
-//! with no test are `os_entry` and `install_platform_store`, and they are the
-//! only code that names the real Keychain.
+//! entry over an in-memory credential, so no OS store is reached. The one entry
+//! that does reach an OS store is the production one, and it is tested in
+//! `secret_key_store_platform_tests` beside the install it depends on.
 //!
 //! Keep this module focused on the wrapper's entry lifecycle.
 

@@ -13,18 +13,21 @@
 //! - [`PlainCredential`], a credential whose store keeps no attributes
 //! - [`WindowsCredential`], a credential shaped like the Windows Credential
 //!   Manager's four attribute names
+//! - [`FakeStore`], a `keyring_core` store with no backend behind it
 //! - The factory wiring that keeps every test off the real OS store
 //!
 //! ## Does not own
-//! - Any test (see `secret_key_store_tests` and
-//!   `secret_key_store_attribute_tests`)
+//! - Any test (see `secret_key_store_tests`,
+//!   `secret_key_store_attribute_tests`, and `secret_key_store_platform_tests`)
 //! - The production store (see `secret_key_store`)
 //!
 //! ## Boundary
 //!
 //! There is no constructor here that produces a production store. A test that
 //! drives [`KeyringStore`] does it through one of these credentials, so no test
-//! can reach the machine's real Keychain or Secret Service.
+//! can reach the machine's real Keychain or Secret Service. [`FakeStore`] is
+//! installed as the process default but answers with an in-memory credential, so
+//! it reaches no OS store either.
 //!
 //! Keep this module focused on test scaffolding, with no tests of its own.
 
@@ -32,7 +35,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use clio_types::AmError;
-use keyring_core::api::CredentialApi;
+use keyring_core::api::{CredentialApi, CredentialStoreApi};
 
 use crate::secret_key_store::{ACCOUNT, ENCRYPTION_KEY, KeyringStore};
 
@@ -408,4 +411,39 @@ pub(crate) fn hex_of(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
         out
     })
+}
+
+/// A `keyring_core` store with no backend behind it.
+///
+/// Installing publishes a store and reads nothing from it, so a store that is not
+/// a store is enough to drive that one step, and it is how a host whose own OS
+/// store does not answer reaches the platform install's success lines.
+pub(crate) struct FakeStore;
+
+impl CredentialStoreApi for FakeStore {
+    fn vendor(&self) -> String {
+        "clio test support".to_owned()
+    }
+
+    fn id(&self) -> String {
+        "clio test support: a store with no backend".to_owned()
+    }
+
+    fn build(
+        &self,
+        _service: &str,
+        _user: &str,
+        modifiers: Option<&HashMap<&str, &str>>,
+    ) -> keyring_core::Result<keyring_core::Entry> {
+        // Production asks for an entry by service and account, with no modifiers.
+        assert!(
+            modifiers.is_none(),
+            "an entry is asked for by service and account, with no modifiers"
+        );
+        Ok(entry_over(FakeCredential::empty()))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

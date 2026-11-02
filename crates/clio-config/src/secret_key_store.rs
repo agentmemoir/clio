@@ -10,13 +10,14 @@
 //! ## Owns
 //! - The [`SecretStore`] seam every keystore read and write goes through
 //! - [`KeyringStore`], the production `keyring_core` wrapper and its entry seam
-//! - Installing this platform's store into `keyring_core`, once per process
 //! - [`NoKeystore`], the store that does not exist, for a key file that is the
 //!   only key
 //! - The platform name of the store used in operator-facing messages
 //! - Keeping store contents out of error text
 //!
 //! ## Does not own
+//! - Which platform store is installed, and when (see
+//!   `secret_key_store_platform`)
 //! - Which store wins when both hold a key (see `secret_key`)
 //! - The key file, its permissions, and its length check (see `secret_key`)
 //! - Deciding whether the keystore is consulted at all (see `secret_key`)
@@ -24,40 +25,32 @@
 //!
 //! ## Boundary
 //!
-//! Changes to the OS secret store, its entry name, or the platform store crate
-//! this build installs should normally require changes here. Changes to key
-//! precedence or to the key file should not require changes here.
+//! Changes to the entry this key is filed under, or to how a `keyring_core`
+//! failure is described, should normally require changes here. Changes to which
+//! platform store crate this build installs should require changes in
+//! `secret_key_store_platform`; changes to key precedence or to the key file
+//! should require changes in neither.
 //!
-//! Keep this module focused on the operating-system secret store.
+//! Keep this module focused on the operating-system secret store's entry.
 
 // `keyring-core` owns the entry type, the credential trait, and the error. The
-// store behind it is chosen per target by this module — the Keychain on macOS,
-// the Credential Manager on Windows, the Secret Service on Unix — and installed
-// once by `install_platform_store`. There is deliberately no `keyring` facade in
-// between: its `v1` feature selects a `zbus` Secret Service store, and RustSec
-// reports `zbus`, `zbus_names`, and `zvariant` unmaintained with no patched
-// version, which `deny.toml` refuses.
+// store behind it is chosen per target and installed once, in
+// `secret_key_store_platform`; this module never names a platform store crate.
 //
-// The installed store is cached in `STORE_INIT` rather than re-installed on
-// every entry: `keyring-core` keeps one default store per process, and a failure
-// is the same failure every time it is asked. Each store connects to its backend
-// inside `Store::new()`, so a headless machine with no Secret Service daemon
-// fails there. That failure is reported rather than swallowed: no store is
-// installed, and the keystore path answers with the platform error instead of
-// `get` failing later. The keystore path still refuses — it never redirects the
-// key into a file the operator did not choose — and a machine that never chose
-// the keystore reads the key file instead, because an absent marker means the
-// file store.
-//
-// On Unix the Secret Service is reached over D-Bus through the C libdbus this
-// crate compiles in (`vendored`), and the session is sealed with RustCrypto
-// AES/CBC (`crypto-rust`). So the Linux build links no OpenSSL and probes no
-// `pkg-config` for either library; it does need a C compiler for the bundled
-// libdbus, which is what master already builds today.
+// The keystore path refuses when no store could be installed: it never redirects
+// the key into a file the operator did not choose, and a machine that never
+// chose the keystore reads the key file instead, because an absent marker means
+// the file store.
 
 use clio_types::{AmError, ErrorCode};
 use std::collections::HashMap;
-use std::sync::OnceLock;
+
+/// The platform store this build installs, and the production entry over it.
+#[path = "secret_key_store_platform.rs"]
+mod secret_key_store_platform;
+
+/// The platform store's entry seam, used by [`KeyringStore::os`].
+use secret_key_store_platform::os_entry;
 
 /// Service the keys are filed under in the OS secret store.
 pub(crate) const SERVICE: &str = "clio";
@@ -270,93 +263,25 @@ impl KeyringStore {
     }
 }
 
-/// The result of installing this platform's store, cached for the process.
+/// Operator-facing name of the store this build installs.
 ///
-/// `keyring-core` keeps the default store in one global, so installing is a
-/// once-per-process act and a second install would only replace it. Caching the
-/// outcome means a machine that cannot reach its store reports the same reason
-/// every time rather than retrying a connect that will keep failing.
-static STORE_INIT: OnceLock<Result<(), String>> = OnceLock::new();
-
-/// The one entry this build uses in production: the OS secret store.
-///
-/// The platform store is installed before the entry is built, because
-/// `keyring_core::Entry::new` reaches whichever store was installed and answers
-/// `NoDefaultStore` when none was. Installation happens here rather than in
-/// [`KeyringStore::entry`] so a test entry built through
-/// [`KeyringStore::over`] never touches the machine's real store.
-fn os_entry(account: &str) -> Result<keyring_core::Entry, AmError> {
-    install_store().map_err(|reason| {
-        AmError::new(
-            ErrorCode::Internal,
-            format!("cannot open an entry in {}: {reason}", display_name()),
-        )
-    })?;
-    keyring_core::Entry::new(SERVICE, account).map_err(|err| store_error("open", "an entry", &err))
-}
-
-/// Install the platform store, once per process, reporting the cached outcome.
-fn install_store() -> Result<(), String> {
-    STORE_INIT.get_or_init(install_platform_store).clone()
-}
-
-/// macOS: the Keychain, at the user domain. `default-features = false` plus the
-/// `keychain` feature leaves this the only backend the crate compiles in.
+/// One constant per target rather than a chain of `cfg!` tests, so the name is
+/// the store the build actually installs and no branch survives compilation to
+/// describe a store this build cannot reach.
 #[cfg(target_os = "macos")]
-fn install_platform_store() -> Result<(), String> {
-    let store =
-        apple_native_keyring_store::keychain::Store::new().map_err(|err| install_error(&err))?;
-    keyring_core::set_default_store(store);
-    Ok(())
-}
+const STORE_NAME: &str = "macOS Keychain";
 
-/// Windows: the Credential Manager, through the Win32 credential API.
+/// Operator-facing name of the store this build installs.
 #[cfg(target_os = "windows")]
-fn install_platform_store() -> Result<(), String> {
-    let store = windows_native_keyring_store::Store::new().map_err(|err| install_error(&err))?;
-    keyring_core::set_default_store(store);
-    Ok(())
-}
+const STORE_NAME: &str = "Windows Credential Manager";
 
-/// Unix: the Secret Service, over the vendored libdbus.
-///
-/// This store opens its session-bus connection inside `Store::new()`, so a
-/// machine with no Secret Service daemon fails here rather than on the first
-/// read, and the reason is the message the operator gets.
-#[cfg(all(unix, not(target_os = "macos")))]
-fn install_platform_store() -> Result<(), String> {
-    let store =
-        dbus_secret_service_keyring_store::Store::new().map_err(|err| install_error(&err))?;
-    keyring_core::set_default_store(store);
-    Ok(())
-}
+/// Operator-facing name of the store this build installs.
+#[cfg(target_os = "linux")]
+const STORE_NAME: &str = "Linux Secret Service";
 
-/// Refuse a platform this build has no store for, in words rather than with a
-/// `NoDefaultStore` that says nothing about the cause.
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "windows",
-    all(unix, not(target_os = "macos"))
-)))]
-fn install_platform_store() -> Result<(), String> {
-    Err(format!(
-        "this platform ({}) has no Clio key store: this build has the macOS Keychain, the \
-         Windows Credential Manager, and the Unix Secret Service, and none of them applies here",
-        std::env::consts::OS
-    ))
-}
-
-/// The reason a store could not be installed, as operator-facing text.
-///
-/// This is the one place a platform error is rendered instead of classified.
-/// `Store::new()` runs before any entry exists, so no stored value is in scope
-/// and none of the `keyring_core` variants that carry one can occur; what the
-/// text holds is the connect failure — no session bus, a refused socket, no
-/// login keychain — which is what the operator has to fix. [`classify`] still
-/// prefixes it, so the message opens with the store's own summary.
-fn install_error(err: &keyring_core::Error) -> String {
-    format!("{}: {err}", classify(err))
-}
+/// Operator-facing name of the store this build installs.
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+const STORE_NAME: &str = "the OS secret store";
 
 /// Operator-facing name of the OS secret store on this platform.
 ///
@@ -364,15 +289,7 @@ fn install_error(err: &keyring_core::Error) -> String {
 /// operator has to go and look at.
 #[must_use]
 pub(crate) fn display_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macOS Keychain"
-    } else if cfg!(target_os = "windows") {
-        "Windows Credential Manager"
-    } else if cfg!(target_os = "linux") {
-        "Linux Secret Service"
-    } else {
-        "the OS secret store"
-    }
+    STORE_NAME
 }
 
 /// A keystore failure as a Clio error, with nothing from the store in the text.
