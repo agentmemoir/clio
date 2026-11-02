@@ -146,9 +146,14 @@ fn triple_end_expires_and_retains_history() {
     let queried = call(
         &s,
         "triple_query",
-        json!({"bank": "demo", "subject": "demo", "predicate": "runs"}),
+        json!({"bank": "demo", "subject": "demo", "predicate": "runs", "as_of": TS}),
     );
     assert_eq!(queried["ok"], json!(true), "{queried}");
+    assert_eq!(
+        queried["triples"].as_array().map_or(0, Vec::len),
+        1,
+        "{queried}"
+    );
 }
 
 #[test]
