@@ -32,6 +32,7 @@ use crate::secret_key::KEY_LEN;
 use crate::secret_key_store_test_support::{
     FakeCredential, PlainCredential, WindowsCredential, entry_over, err_of, hex_of, store_over,
 };
+use keyring_core::api::CredentialApi;
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -251,4 +252,30 @@ fn a_windows_shaped_store_keeps_the_names_it_owns_and_refuses_the_target_name() 
         Some("clio.sync-key"),
         "a refused write leaves the target name alone"
     );
+}
+
+#[test]
+fn platform_credential_fakes_keep_secret_lifecycle_and_identity() {
+    let credentials: Vec<Box<dyn CredentialApi>> = vec![
+        Box::new(FakeCredential::empty()),
+        Box::new(PlainCredential::without_attributes()),
+        Box::new(WindowsCredential::holding(&[1])),
+    ];
+
+    for credential in credentials {
+        credential.set_secret(&[2, 3]).expect("write the secret");
+        assert_eq!(credential.get_secret().expect("read the secret"), [2, 3]);
+        assert!(credential.get_credential().expect("credential").is_none());
+        assert!(credential.get_specifiers().is_none());
+        assert!(
+            credential.as_any().is::<FakeCredential>()
+                || credential.as_any().is::<PlainCredential>()
+                || credential.as_any().is::<WindowsCredential>()
+        );
+        credential.delete_credential().expect("delete the secret");
+        assert!(matches!(
+            credential.get_secret(),
+            Err(keyring_core::Error::NoEntry)
+        ));
+    }
 }
