@@ -311,7 +311,7 @@ pub fn remove_record(
 /// characters, URL-safe, no `=`).
 #[must_use]
 pub fn generate_secret() -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
