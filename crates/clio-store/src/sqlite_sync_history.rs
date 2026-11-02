@@ -117,11 +117,13 @@ pub(crate) fn feed_tasks_sqlite(
                     version,
                     definition: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        "task.definition",
                         &id,
                         &definition_cipher,
                     )?,
                     steps: crate::history_store::open_steps(
                         store.kms().as_ref(),
+                        "task.steps",
                         &id,
                         &steps_cipher,
                     )?,
@@ -199,11 +201,13 @@ pub(crate) fn feed_failures_sqlite(
                     attempt_n,
                     what_failed: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        "failure.what_failed",
                         &id,
                         &what_failed_cipher,
                     )?,
                     lesson: crate::history_store::open_history_text(
                         store.kms().as_ref(),
+                        "failure.lesson",
                         &id,
                         &lesson_cipher,
                     )?,

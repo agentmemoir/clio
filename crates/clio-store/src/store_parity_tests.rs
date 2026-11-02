@@ -131,10 +131,10 @@ pub fn run_parity_suite(store: &dyn Store, kms: &dyn DekProvider) {
     assert!(after_delete.is_empty(), "{after_delete:?}");
     assert!(store.knn(&bank_a, &emb_a[..10], 1).is_err());
 
-    let env = kms.encrypt("row", &subject, b"x").unwrap();
+    let env = kms.encrypt("test.field", "row", &subject, b"x").unwrap();
     kms.destroy_dek(&subject).unwrap();
     assert_eq!(
-        kms.decrypt("row", &env).unwrap_err().code,
+        kms.decrypt("test.field", "row", &env).unwrap_err().code,
         ErrorCode::ErasedSubject
     );
     store

@@ -290,12 +290,14 @@ impl PostgresStore {
         let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         let definition = seal_history_text(
             self.kms().as_ref(),
+            "task.definition",
             &draft.id,
             &item.subject_id,
             &draft.definition,
         )?;
         let steps = seal_steps(
             self.kms().as_ref(),
+            "task.steps",
             &draft.id,
             &item.subject_id,
             &draft.steps,
@@ -336,12 +338,14 @@ impl PostgresStore {
         let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         let what_failed = seal_history_text(
             self.kms().as_ref(),
+            "failure.what_failed",
             &draft.id,
             &item.subject_id,
             &draft.what_failed,
         )?;
         let lesson = seal_history_text(
             self.kms().as_ref(),
+            "failure.lesson",
             &draft.id,
             &item.subject_id,
             &draft.lesson,

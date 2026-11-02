@@ -49,7 +49,7 @@ pub(crate) fn restore_legacy_format_row(
     subject: &str,
 ) {
     let cipher = kms
-        .encrypt(id, subject, b"legacy-opaque")
+        .encrypt("item.content", id, subject, b"legacy-opaque")
         .expect("legacy envelope")
         .to_storage_string();
     store

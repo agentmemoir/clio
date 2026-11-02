@@ -364,6 +364,7 @@ impl DekProvider for CountingKms {
 
     fn encrypt(
         &self,
+        field: &str,
         row_id: &str,
         subject_id: &str,
         plaintext: &[u8],
@@ -372,11 +373,16 @@ impl DekProvider for CountingKms {
             .lock()
             .expect("counting kms")
             .insert(subject_id.to_owned());
-        self.inner.encrypt(row_id, subject_id, plaintext)
+        self.inner.encrypt(field, row_id, subject_id, plaintext)
     }
 
-    fn decrypt(&self, row_id: &str, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
-        self.inner.decrypt(row_id, envelope)
+    fn decrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
+        self.inner.decrypt(field, row_id, envelope)
     }
 
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError> {

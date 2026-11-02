@@ -108,8 +108,8 @@ fn map_failure_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<FailureRaw> {
 impl SqliteStore {
     pub(crate) fn task_from_raw(&self, t: TaskRaw) -> Result<TaskRecord, AmError> {
         Ok(TaskRecord {
-            definition: open_history_text(self.kms().as_ref(), &t.0, &t.7)?,
-            steps: open_steps(self.kms().as_ref(), &t.0, &t.8)?,
+            definition: open_history_text(self.kms().as_ref(), "task.definition", &t.0, &t.7)?,
+            steps: open_steps(self.kms().as_ref(), "task.steps", &t.0, &t.8)?,
             id: t.0,
             bank_id: t.1,
             item_id: t.2.clone(),
@@ -132,8 +132,8 @@ impl SqliteStore {
             task_id: f.3,
             subject_id: f.4,
             attempt_n: f.5,
-            what_failed: open_history_text(self.kms().as_ref(), &f.0, &f.6)?,
-            lesson: open_history_text(self.kms().as_ref(), &f.0, &f.7)?,
+            what_failed: open_history_text(self.kms().as_ref(), "failure.what_failed", &f.0, &f.6)?,
+            lesson: open_history_text(self.kms().as_ref(), "failure.lesson", &f.0, &f.7)?,
             lesson_tokens: f.8,
             evidence_ref: f.9,
             admission_score: f.10,

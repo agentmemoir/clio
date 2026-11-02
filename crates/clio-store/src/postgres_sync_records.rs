@@ -228,6 +228,8 @@ pub(crate) fn feed_persona_stable_pg(
             let key: String = row.get(0);
             let value_cipher: String = row.get(1);
             let context_cipher: Option<String> = row.get(2);
+            let as_of: String = row.get(7);
+            let row_id = crate::persona_store::stable_row_id(bank_id, &key, &as_of);
             out.push((
                 row.get(8),
                 PersonaStableEntry {
@@ -235,21 +237,19 @@ pub(crate) fn feed_persona_stable_pg(
                     key: key.clone(),
                     value: crate::persona_store::open_persona_value(
                         store.kms().as_ref(),
-                        bank_id,
-                        &key,
+                        &row_id,
                         &value_cipher,
                     )?,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
-                        bank_id,
-                        &key,
+                        &row_id,
                         context_cipher.as_deref(),
                     ),
                     confidence: row.get(3),
                     source: row.get(4),
                     source_ref: row.get(5),
                     admission_score: row.get(6),
-                    as_of: row.get(7),
+                    as_of,
                     valid_until: None,
                 },
             ));
@@ -295,8 +295,7 @@ pub(crate) fn feed_persona_prefs_pg(
                     source_ref: row.get(6),
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
-                        bank_id,
-                        &key,
+                        &crate::persona_store::preference_row_id(bank_id, &key),
                         context_cipher.as_deref(),
                     ),
                     admission_score: row.get(7),

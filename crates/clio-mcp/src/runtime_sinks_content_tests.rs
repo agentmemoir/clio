@@ -50,11 +50,12 @@ impl DekProvider for FaultyKms {
 
     fn encrypt(
         &self,
+        field: &str,
         row_id: &str,
         subject_id: &str,
         plaintext: &[u8],
     ) -> Result<CiphertextEnvelope, AmError> {
-        let mut envelope = self.inner.encrypt(row_id, subject_id, plaintext)?;
+        let mut envelope = self.inner.encrypt(field, row_id, subject_id, plaintext)?;
         if subject_id == CORRUPT_SUBJECT {
             // Valid envelope JSON, undecodable ciphertext: the row is stored
             // normally and only fails when a reader tries to open it.
@@ -63,7 +64,12 @@ impl DekProvider for FaultyKms {
         Ok(envelope)
     }
 
-    fn decrypt(&self, row_id: &str, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
         if envelope.subject_id == BROKEN_SUBJECT {
             // What a real key-store failure looks like: `Internal`, which the
             // skip predicate must not treat as unreadable content.
@@ -72,7 +78,7 @@ impl DekProvider for FaultyKms {
                 "read DEK slot: database is locked",
             ));
         }
-        self.inner.decrypt(row_id, envelope)
+        self.inner.decrypt(field, row_id, envelope)
     }
 
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError> {

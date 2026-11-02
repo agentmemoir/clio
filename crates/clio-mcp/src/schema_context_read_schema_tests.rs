@@ -129,7 +129,12 @@ fn inspect_survives_an_unreadable_legacy_row() {
     // local DEK but is not DualContent v1.
     let cipher = s
         .kms
-        .encrypt("itm-legacy-opaque", "subj-readable", b"legacy opaque bytes")
+        .encrypt(
+            "item.content",
+            "itm-legacy-opaque",
+            "subj-readable",
+            b"legacy opaque bytes",
+        )
         .expect("legacy envelope")
         .to_storage_string();
     clio_store::BatchStore::apply_batch(
@@ -220,7 +225,12 @@ fn inspect_survives_undecryptable_ciphertext_rows() {
         McpState::open_with_effective(&second_opts, &serde_json::json!({})).expect("second state");
     second
         .kms
-        .encrypt("itm-tampered", "subj-tampered", b"mint a new DEK")
+        .encrypt(
+            "item.content",
+            "itm-tampered",
+            "subj-tampered",
+            b"mint a new DEK",
+        )
         .expect("mint dek");
 
     let out = call(&second, "inspect", json!({"bank": "bank-a"}));

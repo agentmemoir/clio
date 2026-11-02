@@ -62,7 +62,6 @@ use crate::server_conn::{
 };
 use clio_store::{DekProvider, ErasureDenial, Store, SyncJournalRow, SyncStore};
 use clio_types::{AmError, ErrorCode};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -366,17 +365,11 @@ fn journal_row_to_mutation(
     // A journal row sealed by a KMS-less writer stores no content. Serve empty
     // logical content with its routing metadata rather than failing the whole
     // pull page on an unsealed row.
-    let content =
-        if sealed.is_empty() {
-            SyncContent::Plain(serde_json::json!({}))
-        } else {
-            let envelope: clio_store::CiphertextEnvelope = serde_json::from_str(sealed)
-                .map_err(|e| AmError::new(ErrorCode::Internal, format!("bad sealed row: {e}")))?;
-            let bytes = kms.decrypt(&row.entity_id, &envelope)?;
-            SyncContent::Plain(serde_json::from_slice::<Value>(&bytes).map_err(|e| {
-                AmError::new(ErrorCode::Internal, format!("bad journal content: {e}"))
-            })?)
-        };
+    let content = if sealed.is_empty() {
+        SyncContent::Plain(serde_json::json!({}))
+    } else {
+        SyncContent::Plain(crate::journal_row::open_journal_content(row, sealed, kms)?)
+    };
     Ok(SyncMutation {
         sync_mutation_id: row.sync_mutation_id.clone(),
         bank: row.bank_id.clone(),

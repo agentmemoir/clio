@@ -49,7 +49,7 @@ pub(crate) fn seal_object(
     subject_id: &str,
     object: &str,
 ) -> Result<String, AmError> {
-    let envelope = kms.encrypt(row_id, subject_id, object.as_bytes())?;
+    let envelope = kms.encrypt("triple.object", row_id, subject_id, object.as_bytes())?;
     Ok(envelope.to_storage_string())
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn open_object(
         return Err(missing_object());
     }
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(row_id, &envelope)?;
+    let bytes = kms.decrypt("triple.object", row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| unreadable_object("triple value is not valid UTF-8"))
 }
 
@@ -182,7 +182,7 @@ mod tests {
             ErrorCode::UnreadableContent
         );
         let non_utf8 = kms
-            .encrypt("edge-1", "alice", &[0xff, 0xfe])
+            .encrypt("triple.object", "edge-1", "alice", &[0xff, 0xfe])
             .unwrap()
             .to_storage_string();
         assert_eq!(

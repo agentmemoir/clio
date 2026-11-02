@@ -24,7 +24,9 @@ use clio_types::{Actor, Bank, ErrorCode, OpContext};
 
 use crate::bundle::{BUNDLE_FORMAT, BUNDLE_FORMAT_VERSION, ExportContentMode};
 use crate::import::import;
-use crate::import_fixture::{Harness, TempBundle, count_items, unique, write_bundle};
+use crate::import_fixture::{
+    Harness, TempBundle, count_items, unique, write_bundle, write_bundle_for_bank,
+};
 
 fn full_bundle(h: &Harness) -> TempBundle {
     write_bundle(&h.full_entities(), ExportContentMode::DsarPlaintext)
@@ -301,7 +303,7 @@ fn force_overwrites_differing_items_and_keeps_triples() {
 fn ciphertext_backup_import_restores_opaque_rows() {
     let h = Harness::new();
     let entities = h.opaque_entities();
-    let bundle = write_bundle(&entities, ExportContentMode::CiphertextBackup);
+    let bundle = write_bundle_for_bank(&entities, ExportContentMode::CiphertextBackup, &h.bank);
     let text = bundle.text();
     assert!(text.contains("content_cipher"));
     assert!(!text.contains("\"snapshot\""));
@@ -314,7 +316,7 @@ fn ciphertext_backup_import_restores_opaque_rows() {
     // The exporting node's ciphertext is stored verbatim (no re-encryption).
     assert_eq!(
         h.store
-            .inspect_content_ciphertext(&h.bank, &format!("{}#{}", opaque.id, h.bank))
+            .inspect_content_ciphertext(&h.bank, &opaque.id)
             .unwrap()
             .as_deref(),
         Some(opaque.content_cipher.as_str())
@@ -326,7 +328,7 @@ fn ciphertext_backup_import_restores_opaque_rows() {
         .unwrap();
     let row = rows
         .iter()
-        .find(|r| r.item_id == format!("{}#{}", opaque.id, h.bank))
+        .find(|r| r.item_id == opaque.id)
         .expect("restored opaque row is listed");
     assert_eq!(row.kind, "semantic");
     assert_eq!(row.category.as_deref(), Some("schema"));

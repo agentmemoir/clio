@@ -27,7 +27,7 @@ use crate::attribute_map::{
 use crate::dek::DekProvider;
 use crate::item_persist::require_actor;
 use crate::migrate::IntoAmError;
-use crate::persona_store::open_persona_context;
+use crate::persona_store::{open_persona_context, preference_row_id};
 use crate::postgres::PostgresStore;
 use clio_types::{
     AmError, AttributeSchema, ContinuousPoint, ContinuousState, ErrorCode, UpdateRule,
@@ -363,11 +363,7 @@ impl PostgresStore {
     }
 }
 
-/// Open the stored persona-preference context for one key, tolerantly: no row,
-/// no sealed value, or an unreadable body all yield `None` so the series read
-/// keeps working after erasure (same policy as persona reads). Returns the
-/// opened text plus its effective time (`context_as_of`, or the row's `as_of`
-/// for a legacy row without the column).
+/// Open the stored persona-preference context for one key, or `None`.
 fn stored_preference_context(
     client: &mut postgres::Client,
     kms: &dyn DekProvider,
@@ -385,10 +381,14 @@ fn stored_preference_context(
     let Some((cipher, context_as_of, row_as_of)) = row else {
         return Ok(None);
     };
-    let Some(text) = open_persona_context(kms, bank_id, attr_key, cipher.as_deref()) else {
-        return Ok(None);
-    };
-    Ok(Some((text, context_as_of.unwrap_or(row_as_of))))
+    match open_persona_context(
+        kms,
+        &preference_row_id(bank_id, attr_key),
+        cipher.as_deref(),
+    ) {
+        Some(text) => Ok(Some((text, context_as_of.unwrap_or(row_as_of)))),
+        None => Ok(None),
+    }
 }
 
 /// Store-trait wiring for the continuous-attribute surface (Postgres).

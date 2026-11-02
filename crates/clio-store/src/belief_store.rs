@@ -149,7 +149,12 @@ pub(crate) fn seal_proposition(
     proposition: &str,
 ) -> Result<String, AmError> {
     Ok(kms
-        .encrypt(row_id, subject_id, proposition.as_bytes())?
+        .encrypt(
+            "belief.proposition",
+            row_id,
+            subject_id,
+            proposition.as_bytes(),
+        )?
         .to_storage_string())
 }
 
@@ -160,7 +165,7 @@ pub(crate) fn open_proposition(
     cipher: &str,
 ) -> Result<String, AmError> {
     let envelope = CiphertextEnvelope::from_storage_string(cipher)?;
-    let bytes = kms.decrypt(row_id, &envelope)?;
+    let bytes = kms.decrypt("belief.proposition", row_id, &envelope)?;
     String::from_utf8(bytes).map_err(|_| {
         AmError::new(
             ErrorCode::Internal,
@@ -179,7 +184,7 @@ pub(crate) fn seal_belief_context(
 ) -> Result<Option<String>, AmError> {
     match context {
         Some(context) => Ok(Some(
-            kms.encrypt(row_id, subject_id, context.as_bytes())?
+            kms.encrypt("belief.context", row_id, subject_id, context.as_bytes())?
                 .to_storage_string(),
         )),
         None => Ok(None),
@@ -199,7 +204,7 @@ pub(crate) fn open_belief_context(
 ) -> Option<String> {
     let cipher = cipher.filter(|s| !s.is_empty())?;
     let envelope = CiphertextEnvelope::from_storage_string(cipher).ok()?;
-    let bytes = kms.decrypt(row_id, &envelope).ok()?;
+    let bytes = kms.decrypt("belief.context", row_id, &envelope).ok()?;
     String::from_utf8(bytes).ok()
 }
 

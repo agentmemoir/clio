@@ -53,19 +53,30 @@ fn ciphertext_backup_bundle_with_domain_records_still_imports() {
     );
 
     let h = Harness::new();
-    let report = import(&h.args(&h.ctx(), h.policy(), f.path.as_str(), false, false, None))
-        .expect("a content-free backup bundle must still import");
+    let restore_ctx = clio_types::OpContext::new(
+        clio_types::Bank::new(f.bank.clone()),
+        clio_types::Actor::Agent,
+    );
+    let report = import(&h.args(
+        &restore_ctx,
+        h.policy(),
+        f.path.as_str(),
+        false,
+        false,
+        None,
+    ))
+    .expect("a content-free backup bundle must still import");
     assert!(report.applied);
     assert_eq!(report.would_overwrite, 0);
     assert!(
         h.store
-            .get_preference(&h.bank, "brevity_affinity")
+            .get_preference(&f.bank, "brevity_affinity")
             .unwrap()
             .is_some()
     );
     let history = h
         .store
-        .stable_history(&h.bank, "communication_style")
+        .stable_history(&f.bank, "communication_style")
         .unwrap();
     assert!(!history.is_empty(), "{history:?}");
 }

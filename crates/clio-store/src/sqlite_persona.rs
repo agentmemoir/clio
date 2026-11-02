@@ -30,7 +30,7 @@ use crate::item_persist::require_actor;
 use crate::migrate::{IntoAmError, now_iso};
 use crate::persona_store::{
     PersonaStore, open_persona_context, open_persona_value, persona_require_nonempty,
-    seal_persona_context, seal_persona_value, unique_persona_id,
+    preference_row_id, seal_persona_context, seal_persona_value, stable_row_id, unique_persona_id,
 };
 use crate::sqlite::SqliteStore;
 pub(crate) use crate::sqlite_persona::tx_write::{
@@ -80,16 +80,13 @@ impl PersonaStore for SqliteStore {
         require_actor(actor)?;
         persona_require_nonempty(&entry.bank_id, "bank_id")?;
         let dek_ref = self.kms().ensure_dek(&entry.bank_id)?;
-        let cipher = seal_persona_value(
-            self.kms().as_ref(),
-            &entry.bank_id,
-            &entry.key,
-            &entry.value,
-        )?;
+        let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of);
+        let cipher =
+            seal_persona_value(self.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
         let context_cipher = seal_persona_context(
             self.kms().as_ref(),
+            &row_id,
             &entry.bank_id,
-            &entry.key,
             entry.context.as_deref(),
         )?;
         self.with_conn(|conn| {
@@ -115,8 +112,8 @@ impl PersonaStore for SqliteStore {
         require_actor(actor)?;
         let context_cipher = seal_persona_context(
             self.kms().as_ref(),
+            &preference_row_id(&pref.bank_id, &pref.key),
             &pref.bank_id,
-            &pref.key,
             pref.context.as_deref(),
         )?;
         self.with_conn(|conn| {
@@ -182,16 +179,21 @@ impl PersonaStore for SqliteStore {
                     Ok(PersonaStableEntry {
                         bank_id: bank_id.to_owned(),
                         key: key.clone(),
-                        value: open_persona_value(self.kms().as_ref(), bank_id, &key, &cipher)?,
+                        value: {
+                            let row = stable_row_id(bank_id, &key, &as_of);
+                            open_persona_value(self.kms().as_ref(), &row, &cipher)?
+                        },
                         confidence,
                         source,
                         source_ref,
-                        context: open_persona_context(
-                            self.kms().as_ref(),
-                            bank_id,
-                            &key,
-                            context_cipher.as_deref(),
-                        ),
+                        context: {
+                            let row = stable_row_id(bank_id, &key, &as_of);
+                            open_persona_context(
+                                self.kms().as_ref(),
+                                &row,
+                                context_cipher.as_deref(),
+                            )
+                        },
                         admission_score,
                         as_of,
                         valid_until: None,
@@ -315,16 +317,21 @@ impl PersonaStore for SqliteStore {
                     Ok(PersonaStableEntry {
                         bank_id: bank_id.to_owned(),
                         key: key.to_owned(),
-                        value: open_persona_value(self.kms().as_ref(), bank_id, key, &cipher)?,
+                        value: {
+                            let row = stable_row_id(bank_id, key, &valid_from);
+                            open_persona_value(self.kms().as_ref(), &row, &cipher)?
+                        },
                         confidence,
                         source,
                         source_ref,
-                        context: open_persona_context(
-                            self.kms().as_ref(),
-                            bank_id,
-                            key,
-                            context_cipher.as_deref(),
-                        ),
+                        context: {
+                            let row = stable_row_id(bank_id, key, &valid_from);
+                            open_persona_context(
+                                self.kms().as_ref(),
+                                &row,
+                                context_cipher.as_deref(),
+                            )
+                        },
                         admission_score,
                         as_of: valid_from,
                         valid_until,
@@ -388,7 +395,11 @@ fn pref_rows_to_preferences(
                     confidence,
                     source,
                     source_ref,
-                    context: open_persona_context(kms, bank_id, &key, context_cipher.as_deref()),
+                    context: open_persona_context(
+                        kms,
+                        &preference_row_id(bank_id, &key),
+                        context_cipher.as_deref(),
+                    ),
                     admission_score,
                     as_of,
                 }

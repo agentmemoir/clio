@@ -98,6 +98,7 @@ impl DekProvider for FailOpenKms {
 
     fn encrypt(
         &self,
+        _field: &str,
         _row_id: &str,
         subject_id: &str,
         plaintext: &[u8],
@@ -116,7 +117,12 @@ impl DekProvider for FailOpenKms {
         })
     }
 
-    fn decrypt(&self, _row_id: &str, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(
+        &self,
+        _field: &str,
+        _row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
         {
             let keys = self.keys.lock().expect("fail-open kms keys");
             if matches!(keys.get(&envelope.subject_id), Some(KeyState::Destroyed)) {

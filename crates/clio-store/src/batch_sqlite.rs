@@ -30,7 +30,9 @@ use crate::item_persist::{require_actor, seal_dual};
 use crate::item_update::update_memory_item_sqlite_tx;
 use crate::migrate::IntoAmError;
 use crate::opaque_item_persist::put_opaque_item_sqlite_tx;
-use crate::persona_store::{seal_persona_context, seal_persona_value};
+use crate::persona_store::{
+    preference_row_id, seal_persona_context, seal_persona_value, stable_row_id,
+};
 use crate::sqlite::SqliteStore;
 use crate::sqlite_assoc::{put_assoc_edge_tx, record_audit_event_tx};
 use crate::sqlite_history_write::{commit_failure_record_tx, commit_task_upsert_tx};
@@ -172,12 +174,14 @@ fn apply_one(
             let (cipher, dek_ref) = store.seal_item(item)?;
             let definition = seal_history_text(
                 store.kms().as_ref(),
+                "task.definition",
                 &record.id,
                 &item.subject_id,
                 &record.definition,
             )?;
             let steps = seal_steps(
                 store.kms().as_ref(),
+                "task.steps",
                 &record.id,
                 &item.subject_id,
                 &record.steps,
@@ -202,12 +206,14 @@ fn apply_one(
             let (cipher, dek_ref) = store.seal_item(item)?;
             let what_failed = seal_history_text(
                 store.kms().as_ref(),
+                "failure.what_failed",
                 &record.id,
                 &item.subject_id,
                 &record.what_failed,
             )?;
             let lesson = seal_history_text(
                 store.kms().as_ref(),
+                "failure.lesson",
                 &record.id,
                 &item.subject_id,
                 &record.lesson,
@@ -228,16 +234,13 @@ fn apply_one(
             entry.validate()?;
             require_actor(actor)?;
             let dek_ref = store.kms().ensure_dek(&entry.bank_id)?;
-            let cipher = seal_persona_value(
-                store.kms().as_ref(),
-                &entry.bank_id,
-                &entry.key,
-                &entry.value,
-            )?;
+            let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of);
+            let cipher =
+                seal_persona_value(store.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
             let context_cipher = seal_persona_context(
                 store.kms().as_ref(),
+                &row_id,
                 &entry.bank_id,
-                &entry.key,
                 entry.context.as_deref(),
             )?;
             put_stable_entry_tx_audited(
@@ -275,8 +278,8 @@ fn apply_one(
             require_actor(actor)?;
             let context_cipher = seal_persona_context(
                 store.kms().as_ref(),
+                &preference_row_id(&preference.bank_id, &preference.key),
                 &preference.bank_id,
-                &preference.key,
                 preference.context.as_deref(),
             )?;
             put_preference_state_tx_audited(

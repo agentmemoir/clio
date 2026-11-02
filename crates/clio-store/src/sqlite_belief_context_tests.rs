@@ -112,7 +112,7 @@ fn sqlite_unreadable_context_reads_none_and_succeeds() {
     // Re-seal the context under a second subject, then destroy its DEK.
     let shred = unique("subj-shred-ctx");
     let ghost = kms
-        .encrypt(&id, &shred, b"ghost context")
+        .encrypt("belief.context", &id, &shred, b"ghost context")
         .unwrap()
         .to_storage_string();
     store

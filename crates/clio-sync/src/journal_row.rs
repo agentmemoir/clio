@@ -25,17 +25,23 @@
 use crate::apply::ApplyEngine;
 use crate::clock::now_utc;
 use crate::protocol::{SyncContent, SyncMutation};
-use clio_store::SyncJournalRow;
-use clio_types::AmError;
+use clio_store::{CiphertextEnvelope, DekProvider, SyncJournalRow};
+use clio_types::{AmError, ErrorCode};
 
 pub fn journal_row(engine: &ApplyEngine<'_>, m: &SyncMutation) -> Result<SyncJournalRow, AmError> {
     let content_sealed = match (&m.content, engine.kms) {
         (SyncContent::Plain(v), Some(kms)) => {
             let subject_id = item_subject_id(v);
             let bytes = serde_json::to_vec(v).expect("serialize journal content");
+            let row_id = clio_store::composite_row_id(&[&m.bank, &m.sync_mutation_id]);
             Some(
-                serde_json::to_string(&kms.encrypt(&m.entity_id, &subject_id, &bytes)?)
-                    .expect("serialize envelope"),
+                serde_json::to_string(&kms.encrypt(
+                    "journal.content",
+                    &row_id,
+                    &subject_id,
+                    &bytes,
+                )?)
+                .expect("serialize envelope"),
             )
         }
         (SyncContent::Plain(_), None) => None,
@@ -70,3 +76,24 @@ pub fn item_subject_id(content: &serde_json::Value) -> String {
         .unwrap_or("sync-journal")
         .to_owned()
 }
+
+/// Open one server-sealed journal row back into logical content.
+///
+/// The sealed identity is `(bank_id, sync_mutation_id)`, so a row of another
+/// mutation or bank fails authentication.
+pub(crate) fn open_journal_content(
+    row: &SyncJournalRow,
+    sealed: &str,
+    kms: &dyn DekProvider,
+) -> Result<serde_json::Value, AmError> {
+    let envelope: CiphertextEnvelope = serde_json::from_str(sealed)
+        .map_err(|e| AmError::new(ErrorCode::Internal, format!("bad sealed row: {e}")))?;
+    let row_id = clio_store::composite_row_id(&[&row.bank_id, &row.sync_mutation_id]);
+    let bytes = kms.decrypt("journal.content", &row_id, &envelope)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| AmError::new(ErrorCode::Internal, format!("bad journal content: {e}")))
+}
+
+#[cfg(test)]
+#[path = "journal_row_tests.rs"]
+mod journal_row_tests;

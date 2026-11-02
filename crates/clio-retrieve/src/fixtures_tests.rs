@@ -3,14 +3,12 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for shared test doubles and fixtures used by the
-//! `clio-retrieve` test modules: an in-memory SQLite store, deterministic
-//! embedders/rerankers/expanders, and a one-shot fake HTTP server.
+//! This module is responsible for shared test doubles: an in-memory store,
+//! deterministic components, and a one-shot fake HTTP server.
 //!
 //! ## Owns
-//! - Store/item/retriever fixtures and fake sidecar components
-//! - `snapshot_of_bytes`, the one exact-byte-count snapshot fixture shared by
-//!   the cap-boundary and hit-assembly tests
+//! - Store/item/retriever fixtures, fake sidecar components, and
+//!   `snapshot_of_bytes`
 //!
 //! ## Does not own
 //! - Production gate/retrieval/compose behavior or its assertions
@@ -62,22 +60,24 @@ impl clio_store::DekProvider for FaultyKms {
 
     fn encrypt(
         &self,
+        field: &str,
         row_id: &str,
         subject_id: &str,
         plaintext: &[u8],
     ) -> Result<clio_store::CiphertextEnvelope, AmError> {
-        self.inner.encrypt(row_id, subject_id, plaintext)
+        self.inner.encrypt(field, row_id, subject_id, plaintext)
     }
 
     fn decrypt(
         &self,
+        field: &str,
         row_id: &str,
         envelope: &clio_store::CiphertextEnvelope,
     ) -> Result<Vec<u8>, AmError> {
         if envelope.subject_id == self.subject_id {
             return Err(AmError::new(self.code, "fixture fault"));
         }
-        self.inner.decrypt(row_id, envelope)
+        self.inner.decrypt(field, row_id, envelope)
     }
 
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError> {

@@ -127,14 +127,12 @@ pub(crate) fn feed_persona_stable_sqlite(
                     key: key.clone(),
                     value: crate::persona_store::open_persona_value(
                         store.kms().as_ref(),
-                        bank_id,
-                        &key,
+                        &crate::persona_store::stable_row_id(bank_id, &key, &as_of),
                         &value_cipher,
                     )?,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
-                        bank_id,
-                        &key,
+                        &crate::persona_store::stable_row_id(bank_id, &key, &as_of),
                         context_cipher.as_deref(),
                     ),
                     confidence,
@@ -207,8 +205,7 @@ pub(crate) fn feed_persona_prefs_sqlite(
                     source_ref,
                     context: crate::persona_store::open_persona_context(
                         store.kms().as_ref(),
-                        bank_id,
-                        &key,
+                        &crate::persona_store::preference_row_id(bank_id, &key),
                         context_cipher.as_deref(),
                     ),
                     admission_score,

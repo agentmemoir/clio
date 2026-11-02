@@ -105,11 +105,13 @@ impl PostgresStore {
             status: t.get(6),
             definition: open_history_text(
                 self.kms().as_ref(),
+                "task.definition",
                 &t.get::<_, String>(0),
                 &t.get::<_, String>(7),
             )?,
             steps: open_steps(
                 self.kms().as_ref(),
+                "task.steps",
                 &t.get::<_, String>(0),
                 &t.get::<_, String>(8),
             )?,
@@ -134,11 +136,13 @@ impl PostgresStore {
             attempt_n: i64::from(f.get::<_, i32>(5)),
             what_failed: open_history_text(
                 self.kms().as_ref(),
+                "failure.what_failed",
                 &f.get::<_, String>(0),
                 &f.get::<_, String>(6),
             )?,
             lesson: open_history_text(
                 self.kms().as_ref(),
+                "failure.lesson",
                 &f.get::<_, String>(0),
                 &f.get::<_, String>(7),
             )?,

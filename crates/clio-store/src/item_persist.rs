@@ -54,7 +54,7 @@ pub(crate) fn seal_dual_content(
 ) -> Result<String, AmError> {
     let dual = DualContent::new(snapshot, gist, context);
     let bytes = dual.to_bytes();
-    let envelope = kms.encrypt(row_id, subject_id, &bytes)?;
+    let envelope = kms.encrypt("item.content", row_id, subject_id, &bytes)?;
     Ok(envelope.to_storage_string())
 }
 
@@ -94,7 +94,7 @@ pub(crate) fn open_dual(
         return Err(missing_ciphertext());
     }
     let envelope = crate::dek::CiphertextEnvelope::from_storage_string(cipher_text)?;
-    let bytes = kms.decrypt(row_id, &envelope)?;
+    let bytes = kms.decrypt("item.content", row_id, &envelope)?;
     // The row decrypted, so a failure here is the row's own bytes, never the
     // backend. `from_bytes` documents that its only error is
     // `UnreadableContent`, so this mapping is total: no caller has to match on
@@ -295,7 +295,7 @@ mod tests {
         let kms = crate::dek::LocalDevKms::new();
         assert!(open_dual(&kms, "row", "").is_err());
         let sealed = kms
-            .encrypt("row", "s", b"not-json")
+            .encrypt("item.content", "row", "s", b"not-json")
             .unwrap()
             .to_storage_string();
         assert_eq!(
@@ -304,7 +304,7 @@ mod tests {
         );
         let dual = DualContent::new(None, Some("g".into()), None);
         let ok = kms
-            .encrypt("row", "s", &dual.to_bytes())
+            .encrypt("item.content", "row", "s", &dual.to_bytes())
             .unwrap()
             .to_storage_string();
         assert_eq!(
@@ -316,7 +316,7 @@ mod tests {
         // fine. It used to keep its own message, which meant the index workers
         // — which matched on that text — aborted the whole drain on it.
         let bad_ver = kms
-            .encrypt("row", "s", br#"{"v":9}"#)
+            .encrypt("item.content", "row", "s", br#"{"v":9}"#)
             .unwrap()
             .to_storage_string();
         let err = open_dual(&kms, "row", &bad_ver).unwrap_err();

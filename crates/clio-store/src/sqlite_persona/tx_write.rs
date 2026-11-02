@@ -32,7 +32,7 @@ use crate::dek::DekProvider;
 use crate::migrate::{IntoAmError, now_iso};
 use crate::persona_store::{
     map_persona_insert, open_persona_context, persona_audit_detail, persona_context_action,
-    unique_persona_id,
+    preference_row_id, seal_persona_context, stable_row_id, unique_persona_id,
 };
 use clio_types::{AmError, ErrorCode, PersonaPreference, PersonaStableEntry};
 use rusqlite::OptionalExtension;
@@ -65,23 +65,25 @@ fn check_persona_erase_tombstone(
     Ok(())
 }
 
-/// Prior open version's sealed `context_cipher` for one `(bank, key)`: `None`
-/// when the key has no open version or that version was written without a
-/// context. Read BEFORE the close-open (the lookup matches open rows only).
+/// Prior open version's sealed `context_cipher` and `valid_from` for one
+/// `(bank, key)`: `None` when the key has no open version or that version was
+/// written without a context. Read BEFORE the close-open (the lookup matches
+/// open rows only). The version time is the identity the ciphertext was sealed
+/// under, so a preserved context can be re-sealed for the new version.
 pub(crate) fn prior_open_stable_context(
     tx: &rusqlite::Transaction<'_>,
     bank_id: &str,
     key: &str,
-) -> Result<Option<String>, AmError> {
+) -> Result<Option<(String, String)>, AmError> {
     tx.query_row(
-        "SELECT context_cipher FROM persona_stable_entries
+        "SELECT context_cipher, valid_from FROM persona_stable_entries
          WHERE bank_id = ?1 AND attr_key = ?2 AND valid_until IS NULL",
         rusqlite::params![bank_id, key],
-        |r| r.get(0),
+        |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?)),
     )
     .optional()
     .map_err(|e| crate::migrate::map_db_err("persona prior context", e))
-    .map(|row: Option<Option<String>>| row.flatten())
+    .map(|row| row.and_then(|(cipher, valid_from)| cipher.map(|c| (c, valid_from))))
 }
 
 /// Existing preference row's sealed `context_cipher` (None when the row is
@@ -123,11 +125,9 @@ fn close_open_stable(
 /// Transaction-scoped stable-entry write: subject_keys upsert + close-open +
 /// encrypted row insert. Shared by the single-op path and the batch executor.
 ///
-/// `context_cipher` is the caller-sealed optional context (batch callers seal
-/// via `seal_persona_context`). Ordinary updates preserve context: when
-/// the caller omits one (`None`), the prior open version's sealed context is
-/// carried into the new version; a fresh key with no prior version stays
-/// without a context. A supplied context is the explicit replacement act.
+/// `context_cipher` is the final sealed optional context for the new version.
+/// The audited caller re-seals a preserved prior context under this version's
+/// identity; a fresh key with no prior version stays without a context.
 pub(crate) fn put_stable_entry_tx(
     tx: &rusqlite::Transaction<'_>,
     entry: &PersonaStableEntry,
@@ -151,8 +151,6 @@ pub(crate) fn put_stable_entry_tx(
         )
         .am("subject_keys upsert")?;
     crate::item_persist::check_subject_reactivation(sk_rows as u64, &entry.bank_id)?;
-    let prior = prior_open_stable_context(tx, &entry.bank_id, &entry.key)?;
-    let context_cipher = context_cipher.or(prior.as_deref());
     close_open_stable(tx, &entry.bank_id, &entry.key, &entry.as_of, &ts)?;
     map_persona_insert(
         tx.execute(
@@ -258,10 +256,31 @@ pub(crate) fn put_stable_entry_tx_audited(
     // Prior open version's context, read before the write helper closes it:
     // it feeds the audit stats, and the closed prior version row retains its
     // own ciphertext (the prior stays reconstructable through stable_history).
-    let prior_cipher = prior_open_stable_context(tx, &entry.bank_id, &entry.key)?;
-    let prior_context =
-        open_persona_context(kms, &entry.bank_id, &entry.key, prior_cipher.as_deref());
-    put_stable_entry_tx(tx, entry, cipher, dek_ref, context_cipher)?;
+    // A preserved context is re-sealed under the new version's identity.
+    let prior_row = prior_open_stable_context(tx, &entry.bank_id, &entry.key)?;
+    let prior_context = prior_row.as_ref().and_then(|(cipher, valid_from)| {
+        open_persona_context(
+            kms,
+            &stable_row_id(&entry.bank_id, &entry.key, valid_from),
+            Some(cipher),
+        )
+    });
+    let context_cipher = match context_cipher {
+        Some(_) => context_cipher.map(str::to_owned),
+        None => prior_context
+            .as_deref()
+            .map(|text| {
+                seal_persona_context(
+                    kms,
+                    &stable_row_id(&entry.bank_id, &entry.key, &entry.as_of),
+                    &entry.bank_id,
+                    Some(text),
+                )
+            })
+            .transpose()?
+            .flatten(),
+    };
+    put_stable_entry_tx(tx, entry, cipher, dek_ref, context_cipher.as_deref())?;
     let detail = persona_audit_detail(
         "stable",
         &entry.key,
@@ -297,8 +316,11 @@ pub(crate) fn put_preference_state_tx_audited(
     // copied into the audit detail: audit_events is append-only, so a sealed
     // copy there would outlive subject erasure.
     let prior_cipher = stored_preference_context(tx, &pref.bank_id, &pref.key)?;
-    let prior_context =
-        open_persona_context(kms, &pref.bank_id, &pref.key, prior_cipher.as_deref());
+    let prior_context = open_persona_context(
+        kms,
+        &preference_row_id(&pref.bank_id, &pref.key),
+        prior_cipher.as_deref(),
+    );
     put_preference_state_tx(tx, pref, context_cipher)?;
     let supplied = pref.context.is_some();
     let detail = persona_audit_detail(

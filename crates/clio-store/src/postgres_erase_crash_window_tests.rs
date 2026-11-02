@@ -121,15 +121,21 @@ impl DekProvider for DestroyWindow {
 
     fn encrypt(
         &self,
+        field: &str,
         row_id: &str,
         subject_id: &str,
         plaintext: &[u8],
     ) -> Result<CiphertextEnvelope, AmError> {
-        self.inner.encrypt(row_id, subject_id, plaintext)
+        self.inner.encrypt(field, row_id, subject_id, plaintext)
     }
 
-    fn decrypt(&self, row_id: &str, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
-        self.inner.decrypt(row_id, envelope)
+    fn decrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
+        self.inner.decrypt(field, row_id, envelope)
     }
 
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError> {
