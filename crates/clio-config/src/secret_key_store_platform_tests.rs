@@ -34,6 +34,7 @@ use super::*;
 use crate::secret_key_store::ACCOUNT;
 use crate::secret_key_store_test_support::FakeStore;
 use clio_types::ErrorCode;
+use keyring_core::api::CredentialStoreApi;
 
 // ------------------------------------------------- the store this build installs
 
@@ -115,6 +116,23 @@ fn installing_a_store_reaches_the_process_default() {
         keyring_core::get_default_store().is_some(),
         "an install that reports success leaves a store installed"
     );
+}
+
+#[test]
+fn fake_store_builds_an_isolated_in_memory_entry() {
+    let store = FakeStore;
+    assert_ne!(store.vendor(), "");
+    assert_ne!(store.id(), "");
+    assert!(store.as_any().is::<FakeStore>());
+
+    let first = store.build("service", "user", None).expect("first entry");
+    let second = store.build("service", "user", None).expect("second entry");
+    first.set_secret(b"test secret").expect("write");
+    assert_eq!(first.get_secret().expect("read"), b"test secret");
+    assert!(matches!(
+        second.get_secret(),
+        Err(keyring_core::Error::NoEntry)
+    ));
 }
 
 #[test]
