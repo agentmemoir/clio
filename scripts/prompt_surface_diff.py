@@ -7,7 +7,7 @@ Both revisions are read with `git show <rev>:<path>` rather than from the workin
 
 A tool is matched by its `name`. An added or a removed tool is listed with its description, because a new tool is the claim the reviewer has to judge. A tool in both revisions contributes one row per change: a changed `description`, a changed `required` list, a parameter added, a parameter removed, and per parameter kept in both, a changed `type` or a changed `description`. The count in the summary line is the number of changed rows, so it measures the work left rather than the number of tools touched.
 
-A description is quoted to 120 characters, with an ellipsis when it was cut, because one parameter description here is a paragraph. Each table stops at 50 rows and states how many it left out.
+A description is quoted to 120 characters, with an ellipsis when it was cut, because one parameter description here is a paragraph. Each table stops at 50 rows and states how many it left out. A snapshot that is new in this change is not a failure: when the file exists at the head revision and not at the base, there is nothing to compare, so the summary says so in one sentence and the exit is 0, because the pull request that introduces the snapshot is exactly the one with no base side.
 
 Usage:
   python3 scripts/prompt_surface_diff.py --base <rev> [--head <rev>] [--snapshot <path>] [--output FILE]
@@ -15,10 +15,12 @@ Usage:
 
 --head defaults to HEAD and --snapshot to crates/clio-mcp/tests/fixtures/schema_pack.json. The markdown goes to --output when it is given and to stdout otherwise; the one-line `prompt-surface: N tool(s), A added, R removed, C changed` status is printed last, on stderr when a file was written and on stdout when the markdown went there.
 
+A snapshot that is new in this change is not a failure. When the file exists at the head revision and not at the base, there is nothing to compare: the summary says so in one sentence and the exit is 0, because the pull request that introduces the snapshot is exactly the one that has no base side.
+
 Exit codes:
-  0  a summary was produced, whether or not the surface changed
+  0  a summary was produced, whether or not the surface changed, including when the snapshot exists only at the head revision
   2  usage error
-  3  a revision or the snapshot could not be read or is not valid JSON, so no summary describes it
+  3  a revision is unknown, or the snapshot is missing at the head revision or is not valid JSON, so no summary describes it
 """
 
 from __future__ import annotations
@@ -201,10 +203,23 @@ def render(
     return "\n".join(lines) + "\n", status
 
 
+def in_tree(rev: str, path: str) -> bool:
+    """Whether the snapshot is in one revision's tree, which a new file is not."""
+    try:
+        git("cat-file", "-e", f"{rev}:{path}")
+    except Unreadable:
+        return False
+    return True
+
+
 def summary(base: str, head: str, snapshot: str) -> tuple[str, str]:
     """The markdown and its status line for two revisions, or Unreadable."""
-    base_short = short_rev(base)
-    head_short = short_rev(head)
+    base_short, head_short = short_rev(base), short_rev(head)
+    if not in_tree(head, snapshot):
+        raise Unreadable(f"the snapshot does not exist at {head_short}")
+    if not in_tree(base, snapshot):
+        sentence = f"the snapshot does not exist at {base_short}; the tool surface is new in this change."
+        return f"{SUMMARY_TITLE}\n\nprompt-surface: {sentence}\n", sentence
     return render(base_short, head_short, parse(snapshot_text(base, snapshot)), parse(snapshot_text(head, snapshot)))
 
 
@@ -245,31 +260,23 @@ def self_test() -> int:
     text, status = diff(pack(recall), pack(recall))
     expect("no change status", status, "1 tool(s), 0 added, 0 removed, 0 changed")
     expect("no change title", text.splitlines()[0], SUMMARY_TITLE)
-    expect("no change counts line", "`aaaaaaa` to `bbbbbbb`: 1 tool(s), 0 added, 0 removed, 0 changed." in text, True)
-    expect("no change hash line", "catalog hash: `fnv1a64:aaaa` to `fnv1a64:aaaa`." in text, True)
-    expect("no change sentence", "No tool, description, or parameter change." in text, True)
-    expect("no change has no tables", "### Added tools" in text or "| tool |" in text, False)
-    expect("no change without hashes", "catalog hash" in diff('{"tools": []}', '{"tools": []}')[0], False)
+    for label, needle in (("no change counts line", "`aaaaaaa` to `bbbbbbb`: 1 tool(s), 0 added, 0 removed, 0 changed."), ("no change hash line", "catalog hash: `fnv1a64:aaaa` to `fnv1a64:aaaa`."), ("no change sentence", "No tool, description, or parameter change.")):
+        expect(label, needle in text, True)
+    expect("no change prints no table and no absent hash", ("### Added tools" in text or "| tool |" in text, "catalog hash" in diff('{"tools": []}', '{"tools": []}')[0]), (False, False))
 
     # One tool added, and nothing else.
     text, status = diff(pack(recall), pack(recall, store, catalog_hash="fnv1a64:bbbb"))
     expect("added status", status, "2 tool(s), 1 added, 0 removed, 0 changed")
-    expect("added row", "| store | Store a memory. |" in text, True)
     expect("added section", "| store | Store a memory. |" in section(text, "Added tools"), True)
-    expect("added hash pair", "catalog hash: `fnv1a64:aaaa` to `fnv1a64:bbbb`." in text, True)
-    expect("added is not also changed", "| store |" in section(text, "Changed tools"), False)
-    expect("added leaves removed empty", "| store |" in section(text, "Removed tools"), False)
+    for label, needle in (("added row", "| store | Store a memory. |"), ("added hash pair", "catalog hash: `fnv1a64:aaaa` to `fnv1a64:bbbb`.")):
+        expect(label, needle in text, True)
+    for title in ("Changed tools", "Removed tools"):
+        expect(f"added leaves {title} empty", "| store |" in section(text, title), False)
 
     # One tool removed: the base side is the one described.
     text, status = diff(pack(recall, store), pack(recall))
     expect("removed status", status, "1 tool(s), 0 added, 1 removed, 0 changed")
-    expect("removed section", "| store | Store a memory. |" in section(text, "Removed tools"), True)
-    expect("removed keeps only that tool", "| recall |" in section(text, "Removed tools"), False)
-
-    # A changed tool description.
-    text, status = diff(pack(tool("store")), pack(tool("store", "Store a memory, with a bank.")))
-    expect("description status", status, "1 tool(s), 0 added, 0 removed, 1 changed")
-    expect("description row", "| store | description changed |" in text, True)
+    expect("removed section holds that tool and only it", ("| store | Store a memory. |" in section(text, "Removed tools"), "| recall |" in section(text, "Removed tools")), (True, False))
 
     # A changed required list, in either direction and in a different order.
     text, status = diff(pack(tool("store", required=["bank"])), pack(tool("store", required=["bank", "text"])))
@@ -283,32 +290,25 @@ def self_test() -> int:
         pack(tool("store", properties={"bank": parameter(), "mission": parameter()})),
     )
     expect("parameter set status", status, "1 tool(s), 0 added, 0 removed, 2 changed")
-    expect("parameter added row", "| store | parameter `mission` added |" in text, True)
-    expect("parameter removed row", "| store | parameter `text` removed |" in text, True)
+    for label, needle in (("added", "| store | parameter `mission` added |"), ("removed", "| store | parameter `text` removed |")):
+        expect(f"parameter {label} row", needle in text, True)
 
-    # A parameter type change, and one description change.
-    text, status = diff(
-        pack(tool("store", properties={"bank": parameter("string", "The bank.")})),
-        pack(tool("store", properties={"bank": parameter("number", "The bank.")})),
-    )
-    expect("type status", status, "1 tool(s), 0 added, 0 removed, 1 changed")
-    expect("type row", "| store | parameter `bank` type changed |" in text, True)
-    text, status = diff(
-        pack(tool("store", properties={"bank": parameter("string", "The bank.")})),
-        pack(tool("store", properties={"bank": parameter("string", "The bank, or the connection default.")})),
-    )
-    expect("parameter description status", status, "1 tool(s), 0 added, 0 removed, 1 changed")
-    expect("parameter description row", "| store | parameter `bank` description changed |" in text, True)
+    # One changed field per case: the tool description, a parameter type, a parameter description.
+    for label, before_tool, after_tool, row in (
+        ("description", tool("store"), tool("store", "Store a memory, with a bank."), "| store | description changed |"),
+        ("type", tool("store", properties={"bank": parameter("string", "The bank.")}), tool("store", properties={"bank": parameter("number", "The bank.")}), "| store | parameter `bank` type changed |"),
+        ("parameter description", tool("store", properties={"bank": parameter("string", "The bank.")}), tool("store", properties={"bank": parameter("string", "The bank, or the connection default.")}), "| store | parameter `bank` description changed |"),
+    ):
+        text, status = diff(pack(before_tool), pack(after_tool))
+        expect(f"{label} status", status, "1 tool(s), 0 added, 0 removed, 1 changed")
+        expect(f"{label} row", row in text, True)
 
     # The 120-character cut, with the ellipsis that says it was cut.
     long_description = "x" * 130
-    expect("cut length", len(quote(long_description)), QUOTE)
-    expect("cut ends with an ellipsis", quote(long_description).endswith(ELLIPSIS), True)
-    expect("cut keeps the head", quote(long_description), "x" * (QUOTE - len(ELLIPSIS)) + ELLIPSIS)
+    expect("cut is QUOTE wide and ends with an ellipsis", (len(quote(long_description)), quote(long_description)), (QUOTE, "x" * (QUOTE - len(ELLIPSIS)) + ELLIPSIS))
     expect("short description untouched", quote("Store a memory."), "Store a memory.")
     text, _ = diff(pack(), pack(tool("store", long_description)))
-    expect("cut in the table", "x" * (QUOTE - len(ELLIPSIS)) + ELLIPSIS in text, True)
-    expect("full text absent from the table", long_description in text, False)
+    expect("the table holds the cut, not the full text", ("x" * (QUOTE - len(ELLIPSIS)) + ELLIPSIS in text, long_description in text), (True, False))
     expect("a pipe cannot end a cell", "| store | a \\| b |" in diff(pack(), pack(tool("store", "a | b")))[0], True)
 
     # The cap: 51 added tools print 50 rows and one `_and 1 more_`.
@@ -319,16 +319,12 @@ def self_test() -> int:
     expect("cap note", "_and 1 more_" in text, True)
 
     # A malformed snapshot is unreadable, not empty.
-    try:
-        parse('{"tools": [')
-        expect("malformed raises", "no exception", "Unreadable")
-    except Unreadable:
-        pass
-    try:
-        parse('{"format": "am_tool_schema_pack"}')
-        expect("no tools array raises", "no exception", "Unreadable")
-    except Unreadable:
-        pass
+    for label, malformed in (("malformed raises", '{"tools": ['), ("no tools array raises", '{"format": "am_tool_schema_pack"}')):
+        try:
+            parse(malformed)
+            expect(label, "no exception", "Unreadable")
+        except Unreadable:
+            pass
 
     def captured(*args: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -352,36 +348,42 @@ def self_test() -> int:
             run("git", "init", "-q")
             run("git", "config", "user.email", "t@example.invalid")
             run("git", "config", "user.name", "t")
-            target.write_text(pack(tool("retired", "Retired tool.", [], {"bank": parameter()})))
-            run("git", "add", str(snapshot))
-            run("git", "commit", "-q", "-m", "base")
-            base = git("rev-parse", "HEAD").strip()
-            target.write_text(pack(recall, store, catalog_hash="fnv1a64:cccc"))
-            run("git", "add", str(snapshot))
-            run("git", "commit", "-q", "-m", "head")
-            head = git("rev-parse", "HEAD").strip()
+
+            def commit(message: str, text: str | None = None) -> str:
+                if text is not None:
+                    target.write_text(text)
+                    run("git", "add", str(snapshot))
+                run("git", "commit", "-q", "--allow-empty", "-m", message)
+                return git("rev-parse", "HEAD").strip()
+
+            # The first commit carries no snapshot at all, which is the state a change that adds one starts from.
+            empty = commit("empty")
+            base = commit("base", pack(tool("retired", "Retired tool.", [], {"bank": parameter()})))
+            head = commit("head", pack(recall, store, catalog_hash="fnv1a64:cccc"))
 
             code, out, _ = captured("--base", base, "--head", head)
             expect("two revisions exit", code, EXIT_OK)
-            expect("two revisions counts", f"`{base[:SHORT]}` to `{head[:SHORT]}`: 2 tool(s), 2 added, 1 removed, 0 changed." in out, True)
-            expect("two revisions added row", "| recall | Recall memories. |" in out, True)
-            expect("two revisions removed row", "| retired | Retired tool. |" in out, True)
-            expect("two revisions status line", f"prompt-surface: 2 tool(s), 2 added, 1 removed, 0 changed" in out, True)
+            for needle in (f"`{base[:SHORT]}` to `{head[:SHORT]}`: 2 tool(s), 2 added, 1 removed, 0 changed.", "prompt-surface: 2 tool(s), 2 added, 1 removed, 0 changed", "| recall | Recall memories. |", "| retired | Retired tool. |"):
+                expect(f"two revisions prints {needle!r}", needle in out, True)
             expect("same revision is no change", captured("--base", head, "--head", head)[1].count("No tool, description"), 1)
+
+            # The snapshot is new in this change: nothing to compare, so the summary says that and the exit is 0.
+            code, out, _ = captured("--base", empty, "--head", head)
+            expect("new snapshot summary", (code, out.splitlines()[0]), (EXIT_OK, SUMMARY_TITLE))
+            expect("new snapshot sentence, once in the summary and once as the status line", out.count(f"prompt-surface: the snapshot does not exist at {empty[:SHORT]}; the tool surface is new in this change."), 2)
+            # Missing at the head revision is still unreadable, because there is no surface to describe.
+            code, _, err = captured("--base", empty, "--head", empty)
+            expect("missing at head exit", code, EXIT_UNREADABLE)
+            expect("missing at head says which", f"the snapshot does not exist at {empty[:SHORT]}" in err, True)
 
             out_file = repo / "summary.md"
             code, out, err = captured("--base", base, "--head", head, "--output", str(out_file))
-            expect("output exit", code, EXIT_OK)
-            expect("output writes the file", SUMMARY_TITLE in out_file.read_text(), True)
+            expect("output exit and file", (code, SUMMARY_TITLE in out_file.read_text()), (EXIT_OK, True))
             expect("output leaves stdout empty", out, "")
             expect("output states the status on stderr", err.strip(), "prompt-surface: 2 tool(s), 2 added, 1 removed, 0 changed")
 
             # A snapshot that is not valid JSON, read out of a commit.
-            target.write_text('{"tools": [')
-            run("git", "add", str(snapshot))
-            run("git", "commit", "-q", "-m", "broken")
-            broken = git("rev-parse", "HEAD").strip()
-            code, _, err = captured("--base", base, "--head", broken)
+            code, _, err = captured("--base", base, "--head", commit("broken", '{"tools": ['))
             expect("invalid JSON exit", code, EXIT_UNREADABLE)
             expect("invalid JSON says so", "not valid JSON" in err, True)
             expect("invalid JSON prints no summary", "## MCP" in err, False)
@@ -393,9 +395,8 @@ def self_test() -> int:
         finally:
             globals()["ROOT"] = keep
 
-    expect("bad argument", captured("--nope")[0], EXIT_USAGE)
-    expect("missing base", captured()[0], EXIT_USAGE)
-    expect("head without a value", captured("--base", "HEAD", "--head")[0], EXIT_USAGE)
+    for args in (("--nope",), (), ("--base", "HEAD", "--head")):
+        expect(f"usage error for {args}", captured(*args)[0], EXIT_USAGE)
 
     print("prompt-surface self-test: failed" if failed else "prompt-surface self-test: all passed")
     return 1 if failed else 0
