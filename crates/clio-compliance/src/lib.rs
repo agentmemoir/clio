@@ -103,8 +103,8 @@ pub use erase::{
 };
 pub use erasure_journal::{
     ArchiveClaim, AuthorityRefusal, DenialRecord, ErasureJournal, JournalState, MemberFacts,
-    SCHEMA_VERSION, check_archive_authority, handoff, initialize_new_empty, load_journal,
-    record_denial,
+    SCHEMA_VERSION, check_archive_authority, check_recorded_salt, handoff, initialize_new_empty,
+    load_journal, record_denial,
 };
 pub use erasure_reconcile::{
     ErasureReconcileReport, ErasureResume, ErasureRetryEnv, reconcile_erasure_actions,
