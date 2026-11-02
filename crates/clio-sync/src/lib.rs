@@ -76,6 +76,7 @@ pub mod delivery;
 pub mod denial;
 pub(crate) mod denial_guard;
 mod envelope;
+pub mod freshness;
 mod handle_resolution;
 pub(crate) mod http;
 mod journal_row;
