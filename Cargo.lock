@@ -316,6 +316,7 @@ dependencies = [
  "clio-config",
  "clio-store",
  "clio-types",
+ "rand 0.9.5",
  "serde",
  "serde_json",
  "ureq",

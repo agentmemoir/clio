@@ -215,7 +215,8 @@ fn an_erased_subject_counts_as_erased_not_damage() {
     item.subject_id = subject.into();
     store.create_memory_item(&item, "actor").unwrap();
 
-    let salt = [7_u8; 16];
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
     store
         .erase_subject(&SubjectEraseSpec {
             bank_id: bank,
