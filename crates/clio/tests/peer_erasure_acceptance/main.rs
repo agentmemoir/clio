@@ -25,6 +25,9 @@
 #[path = "../sync_wire_support/mod.rs"]
 mod sync_wire_support;
 
+#[path = "../common/mod.rs"]
+mod common;
+
 mod connect;
 mod faults;
 mod nodes;

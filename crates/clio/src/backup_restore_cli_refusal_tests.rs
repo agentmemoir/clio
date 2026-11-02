@@ -28,8 +28,38 @@ use crate::backup_cli_fixtures::{
 };
 use crate::backup_cli_fixtures_handmade::{hand_built_archive, running_as_root};
 use clio_store::{DekProvider, LocalDevKms, SqliteStore, sqlite_content_digest};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// The override an operator sets to supply the deployment salt directly.
+const SALT_ENV: &str = "CLIO_COMPLIANCE_SALT";
+
+/// The suffix production appends to an erasure-journal path for its salt.
+const SALT_SUFFIX: &str = ".salt";
+
+/// The sidecar path production reads the deployment salt from for `journal`.
+fn salt_sidecar(journal: &Path) -> PathBuf {
+    let mut path = journal.as_os_str().to_os_string();
+    path.push(SALT_SUFFIX);
+    PathBuf::from(path)
+}
+
+/// Copy the erasure journal at `from` to `to`, carrying the deployment salt it
+/// was written under.
+///
+/// A deployment salt is thirty-two random bytes persisted in the sidecar
+/// production reads beside the journal, so a copy without that sidecar is a
+/// different deployment: it resolves a fresh salt, and a restore against it
+/// refuses the archive's subject-salt fingerprint as foreign. A host that set
+/// [`SALT_ENV`] has already given both paths the same text, so no sidecar is
+/// involved and none is written.
+fn copy_journal_carrying_salt(from: &Path, to: &Path) {
+    std::fs::copy(from, to).expect("copy the journal");
+    if std::env::var(SALT_ENV).is_ok() {
+        return;
+    }
+    std::fs::copy(salt_sidecar(from), salt_sidecar(to)).expect("copy the deployment salt");
+}
 
 /// The default target store inside `scratch`.
 fn store_path(scratch: &Scratch) -> PathBuf {
@@ -161,8 +191,7 @@ fn an_unwritable_target_directory_is_refused_before_any_snapshot() {
     let journal_dir = scratch.join("journal");
     std::fs::create_dir_all(&journal_dir).expect("create the journal directory");
     let journal_name = clio_config::ERASURE_JOURNAL_FILE_NAME;
-    std::fs::copy(scratch.join(journal_name), journal_dir.join(journal_name))
-        .expect("copy the journal");
+    copy_journal_carrying_salt(&scratch.join(journal_name), &journal_dir.join(journal_name));
     let archive = scratch
         .join("backups")
         .join(clio_backup::archive_file_name(&id));

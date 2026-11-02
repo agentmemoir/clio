@@ -23,7 +23,8 @@
 //! Keep this module focused on the refusals of `restore_authority`.
 
 use super::restore_authority_test_support::{
-    Scratch, authority, build_sqlite_archive, clean_payload, key_store_with_slot, sqlite_file,
+    Scratch, authority, build_sqlite_archive, clean_payload, deployment_salt, key_store_with_slot,
+    sqlite_file,
 };
 use super::{ClassifyRefusal, classify_archive};
 use clio_types::ErrorCode;
@@ -31,10 +32,12 @@ use clio_types::ErrorCode;
 #[test]
 fn an_archive_without_authority_is_refused() {
     let scratch = Scratch::new("no-authority");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
     let built = build_sqlite_archive(&scratch, &payload, None, None, None);
 
-    let refusal = classify_archive(&built.path, &built.manifest).expect_err("no authority refuses");
+    let refusal =
+        classify_archive(&salt, &built.path, &built.manifest).expect_err("no authority refuses");
 
     assert!(matches!(refusal, ClassifyRefusal::ArchiveMissingAuthority));
     assert_eq!(refusal.code(), ErrorCode::NotFound);
@@ -45,13 +48,14 @@ fn an_archive_without_authority_is_refused() {
 #[test]
 fn an_archive_with_a_foreign_salt_fingerprint_is_refused() {
     let scratch = Scratch::new("salt-mismatch");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
-    let mut authority = authority();
+    let mut authority = authority(&salt);
     authority.salt_fingerprint = Some("a-different-salt".to_owned());
     let built = build_sqlite_archive(&scratch, &payload, None, Some(authority), None);
 
     let refusal =
-        classify_archive(&built.path, &built.manifest).expect_err("a salt mismatch refuses");
+        classify_archive(&salt, &built.path, &built.manifest).expect_err("a salt mismatch refuses");
 
     assert!(matches!(refusal, ClassifyRefusal::SaltFingerprintMismatch));
     assert_eq!(refusal.code(), ErrorCode::Forbidden);
@@ -61,13 +65,14 @@ fn an_archive_with_a_foreign_salt_fingerprint_is_refused() {
 #[test]
 fn an_archive_with_an_absent_salt_fingerprint_is_refused() {
     let scratch = Scratch::new("salt-absent");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
-    let mut authority = authority();
+    let mut authority = authority(&salt);
     authority.salt_fingerprint = None;
     let built = build_sqlite_archive(&scratch, &payload, None, Some(authority), None);
 
-    let refusal =
-        classify_archive(&built.path, &built.manifest).expect_err("an absent fingerprint refuses");
+    let refusal = classify_archive(&salt, &built.path, &built.manifest)
+        .expect_err("an absent fingerprint refuses");
 
     assert!(matches!(refusal, ClassifyRefusal::SaltFingerprintMismatch));
 }
@@ -75,10 +80,11 @@ fn an_archive_with_an_absent_salt_fingerprint_is_refused() {
 #[test]
 fn a_key_member_that_changed_after_classification_is_refused() {
     let scratch = Scratch::new("key-member-changed");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
     let key = key_store_with_slot(&scratch, "keys.kms.db", "subject-1", "'AAAA'");
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
     assert!(
         classified.key_member_sha256.is_some(),
         "the classified key member carries a digest"
@@ -97,13 +103,14 @@ fn a_key_member_that_changed_after_classification_is_refused() {
     // A different key member of the same shape is refused, so a swapped archive
     // cannot be admitted on the strength of the first classification.
     let other_scratch = Scratch::new("key-member-other");
+    let other_salt = deployment_salt(&other_scratch);
     let other_payload = clean_payload(&other_scratch);
     let other_key = key_store_with_slot(&other_scratch, "keys.kms.db", "subject-1", "'BBBB'");
     let other = build_sqlite_archive(
         &other_scratch,
         &other_payload,
         Some(&other_key),
-        Some(authority()),
+        Some(authority(&other_salt)),
         None,
     );
     let other_dir = other_scratch.join("other");
@@ -122,14 +129,15 @@ fn a_key_member_that_changed_after_classification_is_refused() {
 #[test]
 fn an_unreadable_key_member_is_refused() {
     let scratch = Scratch::new("key-store-unreadable");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
     let key = scratch.join("keys.kms.db");
     // A SQLite file without the slot table cannot be shown to carry no usable
     // key, so it fails closed instead of yielding an empty live set.
     sqlite_file(&key, &["CREATE TABLE meta (key TEXT, value TEXT)"]);
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
 
-    let refusal = classify_archive(&built.path, &built.manifest)
+    let refusal = classify_archive(&salt, &built.path, &built.manifest)
         .expect_err("an unreadable key store refuses");
 
     assert!(matches!(refusal, ClassifyRefusal::KeyStoreUnreadable));

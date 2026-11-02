@@ -27,7 +27,7 @@ use super::{
     TOMBSTONE_TABLE, facts_from_hashes, io_error,
 };
 use clio_backup::ExtractedArchive;
-use clio_compliance::{MemberFacts, tombstone_salt};
+use clio_compliance::MemberFacts;
 use clio_store::sha256_hex;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -58,6 +58,7 @@ pub(super) fn table_named<'a>(
 /// column is absent cannot be classified, so the archive is refused rather than
 /// passing one whose membership is unknown.
 pub(super) fn classify_dump_table(
+    salt: &[u8],
     table: &clio_backup::dump_meta::DumpTable,
     extracted: &ExtractedArchive,
     live: &BTreeSet<String>,
@@ -82,11 +83,10 @@ pub(super) fn classify_dump_table(
         return Err(ClassifyRefusal::UnknownMember(table.member.clone()));
     };
     let file = member.file.open()?;
-    let salt = tombstone_salt();
     let mut hashes = BTreeSet::new();
     for value in super::restore_authority_copy::copy_column(std::io::BufReader::new(file), index)? {
         if hash_the_id {
-            hashes.insert(sha256_hex(&salt, &value));
+            hashes.insert(sha256_hex(salt, &value));
         } else {
             hashes.insert(value);
         }

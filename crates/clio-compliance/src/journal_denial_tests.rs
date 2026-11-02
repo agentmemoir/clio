@@ -5,7 +5,9 @@
 //!
 //! This module tests the production erasure-denial seam: a fresh deployment is
 //! clear, a recorded denial survives and keeps its generation, a damaged
-//! journal is unavailable and refuses a write, a journal this deployment cannot
+//! journal is unavailable and refuses a write, a journal recorded under another
+//! salt is unavailable for every subject rather than clear, a probe that
+//! resolved no deployment salt fails closed, a journal this deployment cannot
 //! name is refused rather than probed, and the seam is usable as a trait object.
 //!
 //! ## Owns
@@ -25,7 +27,7 @@ use clio_store::{DenialVerdict, ErasureDenial, sha256_hex};
 use clio_types::ErrorCode;
 
 use super::JournalDenialProbe;
-use crate::erase::tombstone_salt;
+use crate::salt::{tombstone_salt_at, tombstone_salt_fingerprint_of};
 use crate::test_unique::unique;
 
 /// A unique scratch directory removed on drop (the `erasure_journal_tests`
@@ -111,7 +113,8 @@ fn a_fresh_deployment_is_clear_and_a_recorded_denial_keeps_its_generation() {
 fn the_probe_reads_the_identity_the_erasure_path_writes() {
     let scratch = Scratch::new();
     let path = scratch.journal();
-    let hash = sha256_hex(&tombstone_salt(), "subject-x");
+    let salt = tombstone_salt_at(&path).expect("resolve the deployment salt");
+    let hash = sha256_hex(&salt, "subject-x");
     crate::erasure_journal::record_denial(&path, &hash, &["bank-a".to_owned()])
         .expect("record through the journal operation");
     let probe = JournalDenialProbe::new(path);
@@ -144,6 +147,159 @@ fn a_damaged_journal_is_unavailable_and_a_write_refuses() {
         std::fs::read(&path).expect("reread the damaged journal"),
         bytes,
         "the damaged journal was not overwritten"
+    );
+}
+
+/// `path` with production's salt suffix pushed on.
+fn salt_sidecar(path: &Path) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(".salt");
+    PathBuf::from(sidecar)
+}
+
+/// A journal body at generation 1 denying `subject_hash` under `fingerprint`.
+fn journal_body(fingerprint: &str, subject_hash: &str) -> Vec<u8> {
+    format!(
+        r#"{{"schema_version":1,"deployment_id":"seeded-deployment","generation":1,"salt_fingerprint":"{fingerprint}","denials":[{{"subject_hash":"{subject_hash}","banks":[]}}]}}"#
+    )
+    .into_bytes()
+}
+
+/// A journal recorded under the salt this deployment resolves answers as it
+/// always did: the subject it denies is denied, another subject is clear, and a
+/// new denial lands.
+#[test]
+fn a_journal_recorded_under_the_resolved_salt_answers_as_before() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    let deployment_salt: Vec<u8> = (0..32u8).map(|i| b'a'.wrapping_add(i)).collect();
+    write_raw(&salt_sidecar(&path), &deployment_salt);
+    let salt = tombstone_salt_at(&path).expect("resolve the deployment salt");
+    let body = journal_body(
+        &tombstone_salt_fingerprint_of(&salt),
+        &sha256_hex(&salt, "subject-a"),
+    );
+    write_raw(&path, &body);
+    let probe = JournalDenialProbe::new(path);
+    assert_eq!(probe.verdict("subject-a"), DenialVerdict::Denied);
+    assert_eq!(probe.verdict("subject-b"), DenialVerdict::Clear);
+    assert_eq!(
+        probe
+            .record_denial("subject-b", &["bank-a".to_owned()])
+            .expect("record the denial"),
+        2,
+        "the denial lands on the journal recorded under this salt"
+    );
+}
+
+/// A journal recorded under another salt makes the probe unavailable rather
+/// than clear: its denials were hashed under a salt this process does not hold,
+/// so no match here is evidence that a subject was never erased. A write
+/// refuses too, and the journal is left byte-identical.
+#[test]
+fn a_journal_recorded_under_another_salt_is_unavailable() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    // This deployment resolves salt A from the sidecar beside the journal.
+    let deployment_salt: Vec<u8> = (0..32u8).map(|i| b'a'.wrapping_add(i)).collect();
+    write_raw(&salt_sidecar(&path), &deployment_salt);
+    // The journal was written under salt B: it denies B's hash of a subject and
+    // records B's fingerprint.
+    let recorded: Vec<u8> = (0..32u8).map(|i| b'b'.wrapping_add(i)).collect();
+    let body = journal_body(
+        &tombstone_salt_fingerprint_of(&recorded),
+        &sha256_hex(&recorded, "subject-a"),
+    );
+    write_raw(&path, &body);
+    let probe = JournalDenialProbe::new(path.clone());
+
+    assert_eq!(
+        probe.verdict("subject-a"),
+        DenialVerdict::AuthorityUnavailable,
+        "a subject the other salt recorded as denied is neither denied nor clear here"
+    );
+    assert_eq!(
+        probe.verdict("subject-unrecorded"),
+        DenialVerdict::AuthorityUnavailable,
+        "a subject this salt cannot find in the journal is never reported clear"
+    );
+    let err = probe
+        .record_denial("subject-unrecorded", &["bank-a".to_owned()])
+        .expect_err("a journal under another salt refuses a denial");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt, "{}", err.message);
+    assert!(
+        err.message.contains("different deployment salt"),
+        "the refusal names the salt-fingerprint divergence: {}",
+        err.message
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read back"),
+        body,
+        "the journal recorded under the other salt is byte-identical"
+    );
+}
+
+/// A journal written before the fingerprint field existed records no salt to
+/// verify against, so the probe answers as unavailable rather than clear: an
+/// unverifiable journal is never read as one this deployment's salt answers
+/// for, even though its denials parse and its shape is current.
+#[test]
+fn a_journal_with_no_recorded_fingerprint_is_unavailable() {
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    let body = format!(
+        r#"{{"schema_version":1,"deployment_id":"legacy-deployment","generation":1,"denials":[{{"subject_hash":"{}","banks":[]}}]}}"#,
+        "0".repeat(64)
+    );
+    write_raw(&path, body.as_bytes());
+    let probe = JournalDenialProbe::new(path);
+    assert_eq!(
+        probe.verdict("subject-a"),
+        DenialVerdict::AuthorityUnavailable,
+        "a journal with no recorded fingerprint cannot answer for this salt"
+    );
+}
+
+/// A probe that resolved no deployment salt fails closed on every answer: no
+/// subject reads as clear, a write refuses with the code and the missing salt
+/// named, and the fingerprint is blank rather than fabricated, so a caller that
+/// refuses a blank fingerprint never records an acknowledgement.
+#[test]
+fn a_probe_with_no_resolved_salt_fails_closed() {
+    if std::env::var("CLIO_COMPLIANCE_SALT").is_ok() {
+        // The override supplies the salt as text, so resolution cannot fail
+        // here; the deployment in this test would resolve like any other.
+        return;
+    }
+    let scratch = Scratch::new();
+    let path = scratch.journal();
+    // A sidecar that is not exactly the required length is refused and never
+    // regenerated, so construction holds no salt.
+    write_raw(&salt_sidecar(&path), b"not-a-salt");
+    let probe = JournalDenialProbe::new(path.clone());
+
+    assert_eq!(
+        probe.verdict("subject-a"),
+        DenialVerdict::AuthorityUnavailable,
+        "no salt means no identity to answer about, never clear"
+    );
+    let err = probe
+        .record_denial("subject-a", &["bank-a".to_owned()])
+        .expect_err("a probe with no salt must refuse the write");
+    assert_eq!(err.code, ErrorCode::ConfigCorrupt);
+    assert!(
+        err.message.contains("deployment salt"),
+        "the refusal names the missing salt: {}",
+        err.message
+    );
+    assert_eq!(
+        probe.salt_fingerprint(),
+        String::new(),
+        "the fingerprint is blank rather than invented"
+    );
+    assert!(
+        !path.exists(),
+        "no journal was written by a probe that could not hash"
     );
 }
 

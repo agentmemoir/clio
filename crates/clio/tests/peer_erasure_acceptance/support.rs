@@ -112,11 +112,14 @@ impl EraseBankSet for PostgresStore {
 }
 
 /// The deployment fingerprint both the driver and its peer processes verify
-/// denials under, resolved from the driver's own environment so a host that
-/// overrides the deployment salt keeps both sides identical.
+/// denials under.
+///
+/// It is the fingerprint of the one salt this binary's harness hands every peer
+/// it spawns through `CLIO_COMPLIANCE_SALT`, so the driver and its peers always
+/// resolve the identical fingerprint.
 #[must_use]
 pub fn fingerprint() -> String {
-    clio_compliance::tombstone_salt_fingerprint()
+    clio_compliance::tombstone_salt_fingerprint_of(&crate::sync_wire_support::harness_salt())
 }
 
 /// A per-test temp directory, removed on drop.

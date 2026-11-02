@@ -34,7 +34,7 @@
 //! Keep this module focused on classifying one archive against its manifest.
 
 use clio_backup::{BackupManifest, ExtractedMember};
-use clio_compliance::{ArchiveClaim, MemberFacts, sha256_hex_bytes, tombstone_salt_fingerprint};
+use clio_compliance::{ArchiveClaim, MemberFacts, sha256_hex_bytes, tombstone_salt_fingerprint_of};
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -223,7 +223,12 @@ impl From<AmError> for ClassifyRefusal {
 /// the key member is not a readable key store ([`ClassifyRefusal::KeyStoreUnreadable`]),
 /// an expected member cannot be classified ([`ClassifyRefusal::UnknownMember`]),
 /// or the archive cannot be read ([`ClassifyRefusal::Io`]).
+///
+/// `salt` is the deployment salt the caller resolved once from the journal
+/// path it holds; it is never re-read here, so the fingerprint compared is the
+/// one this deployment's own hashes were made under.
 pub fn classify_archive(
+    salt: &[u8],
     archive: &Path,
     manifest: &BackupManifest,
 ) -> Result<ClassifiedArchive, ClassifyRefusal> {
@@ -234,7 +239,8 @@ pub fn classify_archive(
     // The archive's subject ids are re-hashed with the deploying salt below, so
     // an archive made under a different salt cannot be compared. An absent
     // fingerprint fails closed.
-    if authority.salt_fingerprint.as_deref() != Some(tombstone_salt_fingerprint().as_str()) {
+    let fingerprint = tombstone_salt_fingerprint_of(salt);
+    if authority.salt_fingerprint.as_deref() != Some(fingerprint.as_str()) {
         return Err(ClassifyRefusal::SaltFingerprintMismatch);
     }
     let claim = ArchiveClaim {
@@ -253,7 +259,7 @@ pub fn classify_archive(
     // The subjects whose key slot in the archive still holds a usable key. A
     // reference to one of them is not content-free: restoring the archive would
     // make it readable.
-    let live = live_key_hashes(extracted.key.as_ref())?;
+    let live = live_key_hashes(salt, extracted.key.as_ref())?;
     // An archive that carries no key member leaves the target's key store in
     // place, so this build cannot show that a reference is content-free: every
     // reference is treated as usable key material.
@@ -279,6 +285,7 @@ pub fn classify_archive(
                 members.push(MemberFacts::None);
             } else {
                 members.extend(classify_sqlite_payload(
+                    salt,
                     extracted.payload.file.path(),
                     &live,
                     keys_present,
@@ -287,9 +294,15 @@ pub fn classify_archive(
         } else if manifest.keys.carries_key_member()
             && manifest.keys.member.as_deref() == Some(name.as_str())
         {
-            members.extend(classify_key_store(extracted.key.as_ref(), &live)?);
+            members.extend(classify_key_store(salt, extracted.key.as_ref(), &live)?);
         } else if let Some(table) = meta.as_ref().and_then(|meta| table_named(meta, &name)) {
-            members.extend(classify_dump_table(table, &extracted, &live, keys_present)?);
+            members.extend(classify_dump_table(
+                salt,
+                table,
+                &extracted,
+                &live,
+                keys_present,
+            )?);
         } else {
             members.push(MemberFacts::Unknown);
         }

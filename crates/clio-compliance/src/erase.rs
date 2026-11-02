@@ -42,40 +42,6 @@ use std::sync::{Arc, Mutex};
 /// Default machine reason code recorded on every compliance tombstone.
 pub const DEFAULT_REASON_CODE: &str = "COMPLIANCE_CRYPTO_SHRED";
 
-/// Built-in deployment salt used when `CLIO_COMPLIANCE_SALT` is unset.
-const DEFAULT_SALT: &str = "clio-compliance-tombstone-v1";
-
-/// Resolve the tombstone salt from an explicit raw deployment value.
-///
-/// A configured value wins; otherwise the built-in default keeps single-host
-/// deployments working out of the box.
-#[must_use]
-pub fn tombstone_salt_from(raw: Option<String>) -> Vec<u8> {
-    raw.map_or_else(|| DEFAULT_SALT.as_bytes().to_vec(), String::into_bytes)
-}
-
-/// Deployment salt for one-way tombstone hashing (`CLIO_COMPLIANCE_SALT`).
-#[must_use]
-pub fn tombstone_salt() -> Vec<u8> {
-    tombstone_salt_from(std::env::var("CLIO_COMPLIANCE_SALT").ok())
-}
-
-/// Domain string keyed by the deployment salt so a fingerprint reveals nothing
-/// about the salt itself.
-const SALT_FINGERPRINT_DOMAIN: &str = "clio-compliance-salt-fingerprint-v1";
-
-/// A non-reversible fingerprint of the deployment tombstone salt.
-///
-/// The archive manifest and the erasure journal each record this value, so a
-/// restore can refuse an archive whose subject ids were hashed under a
-/// different salt than the live authority recorded. It is a one-way digest of
-/// a fixed domain string keyed by the salt, so it neither reveals the salt nor
-/// changes when the salt does not.
-#[must_use]
-pub fn tombstone_salt_fingerprint() -> String {
-    sha256_hex(&tombstone_salt(), SALT_FINGERPRINT_DOMAIN)
-}
-
 /// Inputs for the in-process `erase_request` tool.
 pub struct EraseArgs<'a> {
     /// Compliance persistence boundary.

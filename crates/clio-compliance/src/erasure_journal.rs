@@ -39,7 +39,9 @@
 //! non-Unix platforms, where no mode bits exist. The journal records the
 //! fingerprint of the deployment tombstone salt it was written under; the
 //! archive authority check refuses an archive whose fingerprint is absent or
-//! differs from it.
+//! differs from it, and a denial is refused under a salt the journal was not
+//! recorded under, because a hash written under another salt would not be
+//! comparable with the denials already held.
 
 use std::fs;
 use std::path::Path;
@@ -154,15 +156,15 @@ fn write_journal(
     write_body(path, expected, &bytes)
 }
 
-/// A fresh empty journal for a new empty deployment.
-fn empty_journal() -> ErasureJournal {
-    ErasureJournal {
+/// A fresh empty journal for a new empty deployment at `path`.
+fn empty_journal(path: &Path) -> Result<ErasureJournal, AmError> {
+    Ok(ErasureJournal {
         schema_version: SCHEMA_VERSION,
         deployment_id: clio_config::new_deployment_id(),
         generation: 0,
-        salt_fingerprint: Some(crate::erase::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(crate::salt::tombstone_salt_fingerprint_at(path)?),
         denials: Vec::new(),
-    }
+    })
 }
 
 /// The refusal for a journal this build will not trust at `path`.
@@ -173,6 +175,49 @@ fn damaged_journal(path: &Path, action: &str) -> AmError {
     )
 }
 
+/// The refusal for a journal recorded under a deployment salt other than the
+/// one this process resolves.
+fn divergent_salt(path: &Path, recorded: bool) -> AmError {
+    let recorded = if recorded {
+        "its recorded salt fingerprint"
+    } else {
+        "its absent salt fingerprint, which no salt can be verified against"
+    };
+    AmError::new(
+        ErrorCode::ConfigCorrupt,
+        format!(
+            "the erasure journal at {} was recorded under a different deployment salt: {recorded} \
+             does not match the fingerprint of the salt this deployment resolves, so a subject \
+             hashed here would not be comparable with the denials already recorded. Nothing was \
+             written. Set CLIO_COMPLIANCE_SALT to the salt this journal was recorded under, or \
+             accept that the denials it already holds cannot be verified",
+            path.display()
+        ),
+    )
+}
+
+/// Refuse when `journal` was not recorded under `live_fingerprint`, the
+/// fingerprint of the deployment salt this process resolves at `path`.
+///
+/// The caller passes the fingerprint it resolved rather than letting this
+/// resolve one, so the value compared against is exactly the value the caller
+/// hashes and records with. A journal whose recorded fingerprint is absent
+/// cannot be verified against any salt, so it is refused the same way.
+///
+/// # Errors
+/// [`ErrorCode::ConfigCorrupt`] naming the salt-fingerprint divergence when the
+/// recorded fingerprint is absent or differs.
+pub fn check_recorded_salt(
+    path: &Path,
+    journal: &ErasureJournal,
+    live_fingerprint: &str,
+) -> Result<(), AmError> {
+    if journal.salt_fingerprint.as_deref() == Some(live_fingerprint) {
+        return Ok(());
+    }
+    Err(divergent_salt(path, journal.salt_fingerprint.is_some()))
+}
+
 /// Record a durable denial of `subject_hash` before any key loss, returning
 /// the generation the journal carries after the call.
 ///
@@ -180,10 +225,15 @@ fn damaged_journal(path: &Path, action: &str) -> AmError {
 /// generation 0, then this denial, which makes generation 1. A damaged
 /// journal refuses; it is never overwritten, because that would drop recorded
 /// denials. A current journal that already denies the subject makes no change
-/// and returns the current generation, so a recorded scope is never widened.
+/// and returns the current generation, so a recorded scope is never widened. A
+/// current journal recorded under a different deployment salt than the one this
+/// process resolves refuses and writes nothing: a denial hashed under this salt
+/// would not be comparable with the denials the journal already holds.
 ///
 /// # Errors
-/// [`ErrorCode::ConfigCorrupt`] when the journal is damaged;
+/// [`ErrorCode::ConfigCorrupt`] when the journal is damaged, was recorded under
+/// a different deployment salt (or records no fingerprint to verify), or the
+/// deployment salt beside a missing journal cannot be resolved;
 /// [`ErrorCode::OutOfRange`] when the generation is exhausted;
 /// [`ErrorCode::Internal`] when the write fails or when the journal changed
 /// under the write, which is refused rather than clobbered. The write is
@@ -195,8 +245,12 @@ pub fn record_denial(path: &Path, subject_hash: &str, banks: &[String]) -> Resul
         _ => (ExpectedBody::Absent, None),
     };
     let mut journal = match parsed {
-        Some(journal) => journal,
-        None if matches!(loaded, ReadBody::Absent) => empty_journal(),
+        Some(journal) => {
+            let live = crate::salt::tombstone_salt_fingerprint_at(path)?;
+            check_recorded_salt(path, &journal, &live)?;
+            journal
+        }
+        None if matches!(loaded, ReadBody::Absent) => empty_journal(path)?,
         None => return Err(damaged_journal(path, "refusing")),
     };
     if journal.is_denied(subject_hash) {
@@ -230,8 +284,10 @@ pub fn record_denial(path: &Path, subject_hash: &str, banks: &[String]) -> Resul
 /// certifies no restore by itself.
 ///
 /// # Errors
-/// [`ErrorCode::Forbidden`] when the path is occupied; [`ErrorCode::Internal`]
-/// when the write fails or refuses a path that appeared under it.
+/// [`ErrorCode::Forbidden`] when the path is occupied;
+/// [`ErrorCode::ConfigCorrupt`] when the deployment salt beside the path cannot
+/// be resolved; [`ErrorCode::Internal`] when the write fails or refuses a path
+/// that appeared under it.
 pub fn initialize_new_empty(path: &Path) -> Result<ErasureJournal, AmError> {
     match fs::symlink_metadata(path) {
         Ok(_) => {
@@ -241,7 +297,7 @@ pub fn initialize_new_empty(path: &Path) -> Result<ErasureJournal, AmError> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(io_error("inspect", path, &err)),
     }
-    let journal = empty_journal();
+    let journal = empty_journal(path)?;
     write_journal(path, &ExpectedBody::Absent, &journal)?;
     Ok(journal)
 }

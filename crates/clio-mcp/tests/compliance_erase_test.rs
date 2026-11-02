@@ -11,7 +11,7 @@
 //! tool refuses fail-closed; the erasure a downstream surface needs is driven
 //! through the compliance handler directly, and one test pins the refusal.
 
-use clio_compliance::{EraseArgs, EraseVecSink, erase_request, tombstone_salt};
+use clio_compliance::{EraseArgs, EraseVecSink, erase_request, tombstone_salt_at};
 use clio_mcp::runtime::{McpOpenOptions, McpState};
 use clio_mcp::write_tools::dispatch;
 use clio_types::{Actor, Bank, EpistemicKind, ItemKind, MemoryItem, OpContext, SemanticCategory};
@@ -121,7 +121,7 @@ fn erase_args(actor: &str, confirm: bool, request: &str) -> Value {
 fn erase_directly(st: &McpState, journal: &Path, subject: &str, request: &str) {
     let sink = EraseVecSink::default();
     let ctx = OpContext::new(Bank::new(BANK), Actor::Harness);
-    let salt = tombstone_salt();
+    let salt = tombstone_salt_at(journal).expect("resolve the deployment salt beside the journal");
     let outcome = erase_request(&EraseArgs {
         store: &*st.compliance,
         journal_path: journal,

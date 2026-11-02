@@ -116,7 +116,10 @@ pub(crate) fn run(
     };
     // Record the deployment's current erasure authority; a missing or damaged
     // journal records none, and the create warns rather than failing silently.
-    let authority = current_authority(&journal_path);
+    let authority = match current_authority(&journal_path) {
+        Ok(authority) => authority,
+        Err(error) => return fail(io, mode, &CliError::from_am_error(&error)),
+    };
     let authority_recorded = authority.is_some();
     match take_snapshot(
         &target,
@@ -365,17 +368,29 @@ fn request(
 }
 
 /// The authority the journal records, or `None` for a missing or damaged one.
-pub(crate) fn current_authority(journal_path: &Path) -> Option<ManifestAuthority> {
+///
+/// # Errors
+/// The journal is current but the deployment salt beside it could not be
+/// resolved, or the journal was recorded under a different deployment salt.
+/// `None` means exactly "there is no current journal", so a salt failure is
+/// reported instead of being folded into `None`: an archive that claims no
+/// authority is refused at restore, and the run would fail silently. A journal
+/// recorded under another salt is refused rather than labelled with today's
+/// fingerprint, because the restore guard compares that fingerprint against the
+/// journal's own record and would refuse every archive this create wrote.
+pub(crate) fn current_authority(journal_path: &Path) -> Result<Option<ManifestAuthority>, AmError> {
     let JournalState::Current(journal) = load_journal(journal_path) else {
-        return None;
+        return Ok(None);
     };
-    Some(ManifestAuthority {
+    // Resolved once, so the fingerprint this archive records is the one the
+    // journal is checked against and the one a restore compares against.
+    let live = clio_compliance::tombstone_salt_fingerprint_at(journal_path)?;
+    clio_compliance::check_recorded_salt(journal_path, &journal, &live)?;
+    Ok(Some(ManifestAuthority {
         deployment_id: journal.deployment_id,
         generation: journal.generation,
-        // The fingerprint of the salt in effect now, which is the salt the
-        // archive's subject ids will be re-hashed under at restore.
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
-    })
+        salt_fingerprint: Some(live),
+    }))
 }
 
 /// The key member for this store, or `None` when there is no key-store file.
@@ -401,6 +416,12 @@ pub(crate) fn key_member(target: &ResolvedTarget) -> Result<Option<KeySource>, A
 #[cfg(test)]
 #[path = "backup_create_cli_tests.rs"]
 mod tests;
+
+/// The erasure authority the create records, and the journal it refuses to
+/// label when the deployment salt has moved.
+#[cfg(test)]
+#[path = "backup_create_cli_authority_tests.rs"]
+mod authority_tests;
 
 /// The key-store refusals and the honest keyless case, split out so this file
 /// stays readable.
