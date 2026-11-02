@@ -61,6 +61,18 @@ fn columns(client: &mut postgres::Client) -> Vec<String> {
     names
 }
 
+/// The columns a fresh database gets from the migrate batch, sorted.
+///
+/// The batch embeds the portable schema text, so this reads the declaration the
+/// convergence statement restates rather than a list copied into this file. A
+/// column added to one and not the other fails the comparison below instead of
+/// drifting unnoticed.
+fn fresh_columns(schema: &ScopedSchema) -> Vec<String> {
+    drop(schema.open());
+    let mut client = crate::pg_tls::connect(schema.url()).expect("connect");
+    columns(&mut client)
+}
+
 /// A schema with no table gains it, and a second pass adds nothing.
 #[test]
 fn postgres_creates_the_table_and_is_idempotent() {
@@ -68,6 +80,8 @@ fn postgres_creates_the_table_and_is_idempotent() {
     let Some(url) = shared_url() else {
         return;
     };
+    let fresh_schema = ScopedSchema::new(&url);
+    let fresh = fresh_columns(&fresh_schema);
     let schema = ScopedSchema::new(&url);
     let mut client = crate::pg_tls::connect(schema.url()).expect("connect");
     assert!(!table_exists(&mut client), "the table must start absent");
@@ -76,18 +90,13 @@ fn postgres_creates_the_table_and_is_idempotent() {
     assert!(table_exists(&mut client), "the step must create the table");
     assert_eq!(
         columns(&mut client),
-        vec![
-            "bank_id".to_owned(),
-            "device_id".to_owned(),
-            "entity_kind".to_owned(),
-            "transaction_time".to_owned(),
-            "updated_at".to_owned(),
-        ]
+        fresh,
+        "the converged shape must match the fresh declaration"
     );
 
     // A second pass must not error or change the shape.
     converge_pg(&mut client).expect("converge again");
-    assert_eq!(columns(&mut client).len(), 5);
+    assert_eq!(columns(&mut client).len(), fresh.len());
 }
 
 /// The reported failure: a database whose bootstrap stamp is already current
@@ -157,6 +166,8 @@ fn postgres_a_fresh_database_gets_the_table_from_both_paths() {
     let Some(url) = shared_url() else {
         return;
     };
+    let fresh_schema = ScopedSchema::new(&url);
+    let fresh = fresh_columns(&fresh_schema);
     let schema = ScopedSchema::new(&url);
     drop(schema.open());
     let mut client = crate::pg_tls::connect(schema.url()).expect("connect");
@@ -165,5 +176,9 @@ fn postgres_a_fresh_database_gets_the_table_from_both_paths() {
         "the migrate batch must create the table on a fresh database"
     );
     converge_pg(&mut client).expect("the step after the batch must be a no-op");
-    assert_eq!(columns(&mut client).len(), 5);
+    assert_eq!(
+        columns(&mut client),
+        fresh,
+        "the batch and the convergence step must declare the same shape"
+    );
 }

@@ -157,3 +157,11 @@ fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
 #[cfg(test)]
 #[path = "client_pull_row_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_receipt_tests.rs"]
+mod client_receipt_tests;
+
+#[cfg(test)]
+#[path = "client_resolve_tests.rs"]
+mod client_resolve_tests;

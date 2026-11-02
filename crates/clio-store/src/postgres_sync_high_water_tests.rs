@@ -18,71 +18,77 @@
 //!
 //! ## Boundary
 //!
-//! Tests here break when the Postgres high-water SQL changes; they never change
-//! it.
+//! Test-only. Never compiled into production builds. Every case runs inside a
+//! private schema, so it neither reads nor writes `public`.
 //!
-//! Keep this module focused on the Postgres high-water mark.
+//! Tests here break when the Postgres high-water SQL changes; they never change
+//! it. Keep this module focused on the Postgres high-water mark.
 
-use crate::db_url::postgres_url_from_env;
 use crate::pg_lock::lock_pg_test;
+use crate::pg_scoped_schema::ScopedSchema;
 use crate::sync_store::SyncStore;
-use crate::test_unique::unique;
-use crate::{DekProvider, LocalDevKms, PostgresStore};
-use std::sync::Arc;
 
-fn open_pg() -> PostgresStore {
-    let url = postgres_url_from_env();
-    let kms = Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>;
-    PostgresStore::open(&url, kms).expect("postgres")
+/// The shared Postgres URL, or `None` after the fail-closed skip line.
+fn shared_url() -> Option<String> {
+    let url = crate::db_url::postgres_url_from_env();
+    if let Err(err) = crate::pg_tls::connect(&url) {
+        crate::pg_skip::unreachable_pg_or_skip("postgres high-water parity tests", &err);
+        return None;
+    }
+    Some(url)
 }
 
 /// The mark starts empty, only ever rises, and is scoped to one bank, device,
 /// and entity kind.
 #[test]
 fn pg_high_water_never_moves_backwards() {
-    let _guard = lock_pg_test();
-    let bank = unique("hw-bank");
-    let other_bank = unique("hw-bank-other");
-    let s = open_pg();
+    let _shared = lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let schema = ScopedSchema::new(&url);
+    let s = schema.open();
+    let bank = "hw-bank";
+    let other_bank = "hw-bank-other";
 
     assert!(
-        s.device_high_water_get(&bank, "dev-pg", "item")
+        s.device_high_water_get(bank, "dev-pg", "item")
             .expect("get")
             .is_none()
     );
-    s.device_high_water_set(&bank, "dev-pg", "item", "2026-01-02T00:00:02Z")
+    s.device_high_water_set(bank, "dev-pg", "item", "2026-01-02T00:00:02Z")
         .expect("set");
     assert_eq!(
-        s.device_high_water_get(&bank, "dev-pg", "item")
+        s.device_high_water_get(bank, "dev-pg", "item")
             .expect("get"),
         Some("2026-01-02T00:00:02Z".into())
     );
     // A lower stamp leaves the stored mark alone.
-    s.device_high_water_set(&bank, "dev-pg", "item", "2026-01-02T00:00:01Z")
+    s.device_high_water_set(bank, "dev-pg", "item", "2026-01-02T00:00:01Z")
         .expect("set");
     assert_eq!(
-        s.device_high_water_get(&bank, "dev-pg", "item")
+        s.device_high_water_get(bank, "dev-pg", "item")
             .expect("get"),
         Some("2026-01-02T00:00:02Z".into()),
         "a lower stamp never lowers the mark"
     );
     // A higher stamp raises it.
-    s.device_high_water_set(&bank, "dev-pg", "item", "2026-01-02T00:00:03Z")
+    s.device_high_water_set(bank, "dev-pg", "item", "2026-01-02T00:00:03Z")
         .expect("set");
     assert_eq!(
-        s.device_high_water_get(&bank, "dev-pg", "item")
+        s.device_high_water_get(bank, "dev-pg", "item")
             .expect("get"),
         Some("2026-01-02T00:00:03Z".into())
     );
     // Each device and bank keeps its own mark.
     assert!(
-        s.device_high_water_get(&bank, "dev-other", "item")
+        s.device_high_water_get(bank, "dev-other", "item")
             .expect("get")
             .is_none(),
         "each device keeps its own mark"
     );
     assert!(
-        s.device_high_water_get(&other_bank, "dev-pg", "item")
+        s.device_high_water_get(other_bank, "dev-pg", "item")
             .expect("get")
             .is_none(),
         "each bank keeps its own mark"
@@ -95,31 +101,35 @@ fn pg_high_water_never_moves_backwards() {
 /// per kind. The same device and stamp under two kinds therefore stay separate.
 #[test]
 fn pg_high_water_is_independent_per_entity_kind() {
-    let _guard = lock_pg_test();
-    let bank = unique("hw-kind-bank");
-    let s = open_pg();
+    let _shared = lock_pg_test();
+    let Some(url) = shared_url() else {
+        return;
+    };
+    let schema = ScopedSchema::new(&url);
+    let s = schema.open();
+    let bank = "hw-kind-bank";
 
-    s.device_high_water_set(&bank, "dev-pg", "item", "2026-01-02T00:00:00Z")
+    s.device_high_water_set(bank, "dev-pg", "item", "2026-01-02T00:00:00Z")
         .expect("set the item mark");
     // A second kind under the same device and bank: a bare date, which sorts
     // before every ISO stamp as text.
-    s.device_high_water_set(&bank, "dev-pg", "triple", "2026-01-01")
+    s.device_high_water_set(bank, "dev-pg", "triple", "2026-01-01")
         .expect("set the triple mark");
 
     assert_eq!(
-        s.device_high_water_get(&bank, "dev-pg", "item")
+        s.device_high_water_get(bank, "dev-pg", "item")
             .expect("get item"),
         Some("2026-01-02T00:00:00Z".into()),
         "the item mark keeps its own encoding"
     );
     assert_eq!(
-        s.device_high_water_get(&bank, "dev-pg", "triple")
+        s.device_high_water_get(bank, "dev-pg", "triple")
             .expect("get triple"),
         Some("2026-01-01".into()),
         "the triple mark is not lowered by the later item stamp"
     );
     assert!(
-        s.device_high_water_get(&bank, "dev-pg", "belief")
+        s.device_high_water_get(bank, "dev-pg", "belief")
             .expect("get belief")
             .is_none(),
         "an unwritten kind has no mark"

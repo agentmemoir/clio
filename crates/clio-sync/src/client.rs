@@ -309,14 +309,8 @@ mod client_envelope_tests;
 #[path = "client_plain_policy_tests.rs"]
 mod client_plain_policy_tests;
 #[cfg(test)]
-#[path = "client_receipt_tests.rs"]
-mod client_receipt_tests;
-#[cfg(test)]
 #[path = "client_resolve_fault_tests.rs"]
 mod client_resolve_fault_tests;
-#[cfg(test)]
-#[path = "client_resolve_tests.rs"]
-mod client_resolve_tests;
 #[cfg(test)]
 #[path = "client_rotation_tests.rs"]
 mod client_rotation_tests;

@@ -10,7 +10,7 @@
 //! - The idempotent `sync_device_high_water` DDL an existing database runs
 //!
 //! ## Does not own
-//! - The fresh-database declaration (`sql/001_core.sql`)
+//! - The fresh-database declaration the migrate batch embeds
 //! - The `SyncStore` contract or its SQL (`sync_store`, `sync_state`)
 //! - Other slot-table convergence (`local_events_converge`,
 //!   `durable_requests_converge`, `copy_inventory_converge`,
@@ -38,14 +38,19 @@
 //! shape carried `PRIMARY KEY (bank_id, device_id)`, but only on this branch
 //! before it merged, so no shipped database holds it. A database that did get
 //! that shape keeps it, because `IF NOT EXISTS` leaves an existing table alone;
-//! dropping it once is a local development cleanup, not a migration step. The
-//! shared development database held exactly that shape after this branch's own
-//! earlier test runs, and it was dropped by hand before the final check.
+//! dropping it once is a local development cleanup, not a migration step.
 
 use crate::migrate::IntoAmError;
 use clio_types::AmError;
 
 /// The table, as a fresh database declares it.
+///
+/// This is deliberately a second statement of the table rather than a reference
+/// to the migrate batch: an already-bootstrapped database never runs that batch
+/// again, so the convergence step must carry the shape itself. It must stay
+/// identical to the fresh declaration the batch embeds; a column added there and
+/// not here leaves an existing database short, and the convergence tests on both
+/// backends compare the two.
 ///
 /// `PRIMARY KEY (bank_id, device_id, entity_kind)` is the only index the table
 /// needs: every read filters on all three columns, and every erasure filters on
