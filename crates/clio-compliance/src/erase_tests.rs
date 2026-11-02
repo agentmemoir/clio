@@ -9,13 +9,14 @@
 //! compiled into production builds.
 //!
 //! ## Owns
-//! - Behaviour assertions for `erase_request`, tombstone salts, and the
-//!   tombstone view they produce
+//! - Behaviour assertions for `erase_request` and the tombstone view it
+//!   produces
 //! - The durable-denial assertions a completed erasure leaves in the journal
 //! - Credential-label assertions on the erase event payload
 //!
 //! ## Does not own
 //! - The erasure workflow itself (`erase.rs`)
+//! - The deployment salt and its fingerprint (`salt_tests`)
 //! - Reviewer audit row coverage (`validate_principal_tests`)
 //!
 //! ## Boundary
@@ -24,10 +25,7 @@
 //!
 //! Keep this module focused on the compliance erasure workflow.
 
-use crate::erase::{
-    DEFAULT_REASON_CODE, EraseArgs, EraseVecSink, erase_request, tombstone_salt,
-    tombstone_salt_from,
-};
+use crate::erase::{DEFAULT_REASON_CODE, EraseArgs, EraseVecSink, erase_request};
 use crate::erasure_journal::{JournalState, load_journal};
 use crate::restore_guard::JournalHold;
 use clio_store::{ComplianceStore, DekProvider, LocalDevKms, SqliteStore, Store, sha256_hex};
@@ -230,22 +228,6 @@ fn missing_required_arguments_are_rejected() {
         erase_request(&a).unwrap_err().code,
         ErrorCode::InvalidArgument
     );
-}
-
-#[test]
-fn tombstone_salt_prefers_configured_value() {
-    assert_eq!(
-        tombstone_salt_from(None).as_slice(),
-        b"clio-compliance-tombstone-v1".as_slice()
-    );
-    assert_eq!(
-        tombstone_salt_from(Some("custom".into())).as_slice(),
-        b"custom".as_slice()
-    );
-    // The env wrapper falls back to the default when the variable is unset or
-    // empty; either way it returns a non-empty salt.
-    let salt = tombstone_salt();
-    assert!(!salt.is_empty(), "{salt:?}");
 }
 
 #[test]

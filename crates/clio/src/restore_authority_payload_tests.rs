@@ -25,14 +25,15 @@
 
 use super::classify_archive;
 use super::restore_authority_test_support::{
-    Scratch, authority, build_sqlite_archive, clean_payload, empty_key_store, key_store_with_slot,
-    sqlite_file,
+    Scratch, authority, build_sqlite_archive, clean_payload, deployment_salt, empty_key_store,
+    key_store_with_slot, sqlite_file,
 };
 use clio_compliance::MemberFacts;
 
 #[test]
 fn a_tombstone_hash_becomes_a_reference() {
     let scratch = Scratch::new("tombstone");
+    let salt = deployment_salt(&scratch);
     let hash = "a".repeat(64);
     let payload = scratch.join("store.db");
     sqlite_file(
@@ -43,9 +44,9 @@ fn a_tombstone_hash_becomes_a_reference() {
         ],
     );
     let key = empty_key_store(&scratch);
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified
@@ -58,7 +59,7 @@ fn a_tombstone_hash_becomes_a_reference() {
     assert_eq!(classified.claim.generation, 3);
     assert_eq!(
         classified.claim.salt_fingerprint,
-        Some(clio_compliance::tombstone_salt_fingerprint()),
+        Some(clio_compliance::tombstone_salt_fingerprint_of(&salt)),
         "the manifest authority's salt fingerprint reaches the claim"
     );
 }
@@ -66,6 +67,7 @@ fn a_tombstone_hash_becomes_a_reference() {
 #[test]
 fn an_archive_without_a_key_member_fails_closed() {
     let scratch = Scratch::new("no-key-member");
+    let salt = deployment_salt(&scratch);
     let hash = "c".repeat(64);
     let payload = scratch.join("store.db");
     sqlite_file(
@@ -77,9 +79,9 @@ fn an_archive_without_a_key_member_fails_closed() {
     );
     // Without a key member the restore leaves the target's key store in place,
     // so the tombstone cannot be proven unreadable and is an unproven key.
-    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority()), None);
+    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority(&salt)), None);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified
@@ -93,6 +95,7 @@ fn an_archive_without_a_key_member_fails_closed() {
 #[test]
 fn a_payload_subject_key_id_is_hashed_to_a_reference() {
     let scratch = Scratch::new("subject-key");
+    let salt = deployment_salt(&scratch);
     let id = "subject-0007";
     let payload = scratch.join("store.db");
     sqlite_file(
@@ -103,10 +106,10 @@ fn a_payload_subject_key_id_is_hashed_to_a_reference() {
         ],
     );
     let key = empty_key_store(&scratch);
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
-    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
+    let expected = clio_store::sha256_hex(&salt, id);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified.members.contains(&MemberFacts::Reference {
@@ -120,13 +123,14 @@ fn a_payload_subject_key_id_is_hashed_to_a_reference() {
 #[test]
 fn a_key_store_slot_with_a_usable_key_becomes_a_live_key() {
     let scratch = Scratch::new("key-slot");
+    let salt = deployment_salt(&scratch);
     let id = "subject-0042";
     let key = key_store_with_slot(&scratch, "keys.kms.db", id, "'AAAA'");
     let payload = clean_payload(&scratch);
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
-    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
+    let expected = clio_store::sha256_hex(&salt, id);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified.members.contains(&MemberFacts::LiveKey {
@@ -140,13 +144,14 @@ fn a_key_store_slot_with_a_usable_key_becomes_a_live_key() {
 #[test]
 fn a_destroyed_key_slot_is_a_content_free_reference() {
     let scratch = Scratch::new("destroyed-key-slot");
+    let salt = deployment_salt(&scratch);
     let id = "subject-0043";
     let key = key_store_with_slot(&scratch, "keys.kms.db", id, "NULL");
     let payload = clean_payload(&scratch);
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
-    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
+    let expected = clio_store::sha256_hex(&salt, id);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified.members.contains(&MemberFacts::Reference {
@@ -170,6 +175,7 @@ fn a_destroyed_key_slot_is_a_content_free_reference() {
 #[test]
 fn a_payload_subject_key_id_with_a_usable_slot_becomes_a_live_key() {
     let scratch = Scratch::new("payload-live-key");
+    let salt = deployment_salt(&scratch);
     let id = "subject-0044";
     let payload = scratch.join("store.db");
     sqlite_file(
@@ -180,10 +186,10 @@ fn a_payload_subject_key_id_with_a_usable_slot_becomes_a_live_key() {
         ],
     );
     let key = key_store_with_slot(&scratch, "keys.kms.db", id, "'AAAA'");
-    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority()), None);
-    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), id);
+    let built = build_sqlite_archive(&scratch, &payload, Some(&key), Some(authority(&salt)), None);
+    let expected = clio_store::sha256_hex(&salt, id);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified.members.contains(&MemberFacts::LiveKey {
@@ -197,16 +203,17 @@ fn a_payload_subject_key_id_with_a_usable_slot_becomes_a_live_key() {
 #[test]
 fn an_undeclared_member_stays_unknown() {
     let scratch = Scratch::new("extra-member");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
     let built = build_sqlite_archive(
         &scratch,
         &payload,
         None,
-        Some(authority()),
+        Some(authority(&salt)),
         Some(("extra.txt", b"not a declared member")),
     );
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified.members.contains(&MemberFacts::Unknown),
@@ -218,10 +225,11 @@ fn an_undeclared_member_stays_unknown() {
 #[test]
 fn a_clean_archive_has_no_reference() {
     let scratch = Scratch::new("clean");
+    let salt = deployment_salt(&scratch);
     let payload = clean_payload(&scratch);
-    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority()), None);
+    let built = build_sqlite_archive(&scratch, &payload, None, Some(authority(&salt)), None);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified

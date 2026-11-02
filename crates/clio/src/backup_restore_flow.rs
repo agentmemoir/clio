@@ -235,8 +235,14 @@ pub(crate) fn plan(
     // erasure denial consults.
     let journal_path = JournalHold::resolve_journal_path(None, env)
         .map_err(|error| CliError::refusal(error.code.as_str(), error.message))?;
-    let authority =
-        classify_archive(&archive, &manifest).map_err(|refusal| classify_refusal(&refusal))?;
+    // The salt is resolved once from the journal path this plan already holds,
+    // and every member hash below is made with those bytes, so the archive is
+    // compared against the salt this deployment's own records were made under.
+    let salt = clio_compliance::tombstone_salt_at(&journal_path)
+        .map_err(ClassifyRefusal::from)
+        .map_err(|refusal| classify_refusal(&refusal))?;
+    let authority = classify_archive(&salt, &archive, &manifest)
+        .map_err(|refusal| classify_refusal(&refusal))?;
     clio_compliance::check_restore_at_plan(
         &journal_path,
         None,
@@ -364,7 +370,8 @@ pub(crate) fn pre_restore_from(plan: &Plan, decided: PreRestore) -> Result<PreRe
 /// rather than leaving a safety copy no later restore can place.
 pub(crate) fn take_pre_restore(plan: &Plan) -> Result<PreRestore, CliError> {
     let label = format!("pre-restore snapshot of {}", plan.snapshot_id);
-    let authority = crate::backup_create_cli::current_authority(&plan.journal_path);
+    let authority = crate::backup_create_cli::current_authority(&plan.journal_path)
+        .map_err(|error| CliError::from_am_error(&error))?;
     let created = take_snapshot(
         &plan.target,
         &plan.backup_dir,

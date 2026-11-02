@@ -210,12 +210,10 @@ impl ServedPeer {
         // an erased subject would be stored unread instead of refused.
         command.env("CLIO_SYNC_KEY_FILE", shared_key_file(dir.path()));
         // The peer hashes subject identities under the same deployment salt the
-        // driver verifies its proofs with; the driver's own process value is
-        // passed through only when the host sets one, so both sides resolve the
-        // identical fingerprint.
-        if let Ok(salt) = std::env::var("CLIO_COMPLIANCE_SALT") {
-            command.env("CLIO_COMPLIANCE_SALT", salt);
-        }
+        // driver verifies its proofs with, so the harness's one salt is written
+        // beside the peer's own journal: both sides then resolve the identical
+        // fingerprint without either of them holding the bytes as text.
+        crate::common::share_salt(&mut command, journal, &super::harness_salt());
         let mut child = command.spawn().expect("spawn clio sync serve");
         let device_id = format!("device-{}", child.id());
         let addr = drain_stdout(&mut child, &stdout_log);

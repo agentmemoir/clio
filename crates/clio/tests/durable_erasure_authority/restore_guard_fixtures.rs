@@ -129,7 +129,12 @@ pub(crate) fn claim_of(journal: &Path) -> ArchiveClaim {
     ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        // The fingerprint of the salt beside this same journal, which is the one
+        // the journal and every hash made under it were written with.
+        salt_fingerprint: Some(
+            clio_compliance::tombstone_salt_fingerprint_at(journal)
+                .expect("resolve the live journal's deployment salt"),
+        ),
     }
 }
 

@@ -155,7 +155,10 @@ fn sqlite_content_free_membership_passes_while_usable_key_material_refuses() {
     let claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(
+            clio_compliance::tombstone_salt_fingerprint_at(&journal)
+                .expect("resolve the live journal's deployment salt"),
+        ),
     };
     let journal_before = file_sha256(&journal);
 

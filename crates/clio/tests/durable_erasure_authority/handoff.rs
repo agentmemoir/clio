@@ -170,7 +170,10 @@ fn new_empty_initialization_refuses_an_existing_deployment_and_a_known_old_copy_
     let claim = ArchiveClaim {
         deployment_id: current.deployment_id.clone(),
         generation: current.generation,
-        salt_fingerprint: Some(clio_compliance::tombstone_salt_fingerprint()),
+        salt_fingerprint: Some(
+            clio_compliance::tombstone_salt_fingerprint_at(&journal)
+                .expect("resolve the live journal's deployment salt"),
+        ),
     };
     let known_old = check_archive_authority(
         &current_state,

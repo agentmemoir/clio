@@ -34,6 +34,10 @@ use std::time::Duration;
 
 #[path = "sync_wire_support/mod.rs"]
 mod sync_wire_support;
+// The shared harness support the spawned server's support module points every
+// child it spawns at: the seeded Clio key file and the one deployment salt.
+#[path = "common/mod.rs"]
+mod common;
 use sync_wire_support::{NodeDir, clio, write_credential_store};
 
 /// The warning prefix the sync server writes to stderr on a public bind.

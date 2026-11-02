@@ -23,13 +23,14 @@
 
 use super::super::classify_archive;
 use super::super::restore_authority_test_support::{
-    Scratch, build_postgres_archive, empty_key_store,
+    Scratch, build_postgres_archive, deployment_salt, empty_key_store,
 };
 use clio_compliance::MemberFacts;
 
 #[test]
 fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
     let scratch = Scratch::new("postgres");
+    let salt = deployment_salt(&scratch);
     let hash = "b".repeat(64);
     let tombstone_copy = format!("{hash}\tCOMPLIANCE_CRYPTO_SHRED\n");
     let subject_id = "subject-0009";
@@ -52,10 +53,11 @@ fn a_postgres_subject_table_becomes_a_reference_and_content_does_not() {
             ("triples", &["id"], b"triple-1\n"),
         ],
         Some(&key),
+        &salt,
     );
-    let expected = clio_store::sha256_hex(&clio_compliance::tombstone_salt(), subject_id);
+    let expected = clio_store::sha256_hex(&salt, subject_id);
 
-    let classified = classify_archive(&built.path, &built.manifest).expect("classify");
+    let classified = classify_archive(&salt, &built.path, &built.manifest).expect("classify");
 
     assert!(
         classified
