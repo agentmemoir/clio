@@ -31,6 +31,11 @@ use crate::postgres_sync_rows::limit_i64;
 use crate::sync_store_rows::split_push_watermark;
 use clio_types::{AmError, BeliefObject, ConfidenceEntry, PersonaPreference, PersonaStableEntry};
 
+#[path = "postgres_sync_journal_locks.rs"]
+mod journal_locks;
+
+use journal_locks::{journal_seq_probe, lock_journal_append};
+
 /// Per-belief cap on the confidence entries a single feed page may load (see
 /// the SQLite mirror): oldest-first so a capped read stays a stored prefix.
 const MAX_BELIEF_TRAJECTORY: i64 = 1000;
@@ -43,14 +48,11 @@ pub(crate) fn journal_append_pg(
     use crate::sync_store::JournalAppendOutcome;
     store.with_client(|client| {
         let mut tx = client.transaction().am("sync journal begin")?;
-        if let Some(existing) = tx
-            .query_opt(
-                "SELECT seq FROM sync_mutations WHERE bank_id = $1 AND sync_mutation_id = $2",
-                &[&row.bank_id, &row.sync_mutation_id],
-            )
-            .am("sync journal dedupe probe")?
-        {
-            let seq: i32 = existing.get(0);
+        // Per-bank serialization before the probe: the seq allocation below
+        // reads the current maximum, so a concurrent append of the same bank
+        // must not compute it at the same time.
+        lock_journal_append(&mut tx, &row.bank_id)?;
+        if let Some(seq) = journal_seq_probe(&mut tx, &row.bank_id, &row.sync_mutation_id)? {
             tx.commit().am("sync journal commit (no-op)")?;
             return Ok(JournalAppendOutcome {
                 seq: i64::from(seq),
@@ -65,28 +67,47 @@ pub(crate) fn journal_append_pg(
             .am("sync journal next seq")?
             .get(0);
         let encrypted = i32::from(row.client_encrypted);
-        tx.execute(
-            "INSERT INTO sync_mutations (bank_id, seq, sync_mutation_id, entity_kind, \
-             entity_id, op, transaction_time, device_id, content_hash, content_sealed, \
-             encrypted, admission_receipt, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
-            &[
-                &row.bank_id,
-                &seq,
-                &row.sync_mutation_id,
-                &row.entity_kind,
-                &row.entity_id,
-                &row.op,
-                &row.transaction_time,
-                &row.device_id,
-                &row.content_hash,
-                &row.content_sealed,
-                &encrypted,
-                &row.admission_receipt,
-                &row.created_at,
-            ],
-        )
-        .am("sync journal insert")?;
+        let inserted = tx
+            .execute(
+                "INSERT INTO sync_mutations (bank_id, seq, sync_mutation_id, entity_kind, \
+                 entity_id, op, transaction_time, device_id, content_hash, content_sealed, \
+                 encrypted, admission_receipt, created_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+                 ON CONFLICT (bank_id, sync_mutation_id) DO NOTHING",
+                &[
+                    &row.bank_id,
+                    &seq,
+                    &row.sync_mutation_id,
+                    &row.entity_kind,
+                    &row.entity_id,
+                    &row.op,
+                    &row.transaction_time,
+                    &row.device_id,
+                    &row.content_hash,
+                    &row.content_sealed,
+                    &encrypted,
+                    &row.admission_receipt,
+                    &row.created_at,
+                ],
+            )
+            .am("sync journal insert")?;
+        if inserted == 0 {
+            // The conflict target is the mutation id alone, so zero rows means
+            // a concurrent append journalled this mutation first: report its
+            // seq exactly as the fast-path probe would.
+            let existing = journal_seq_probe(&mut tx, &row.bank_id, &row.sync_mutation_id)?
+                .ok_or_else(|| {
+                    AmError::new(
+                        clio_types::ErrorCode::Internal,
+                        "sync journal re-probe found no row",
+                    )
+                })?;
+            tx.commit().am("sync journal commit (no-op)")?;
+            return Ok(JournalAppendOutcome {
+                seq: i64::from(existing),
+                inserted: false,
+            });
+        }
         tx.commit().am("sync journal commit")?;
         Ok(JournalAppendOutcome {
             seq: i64::from(seq),
@@ -415,3 +436,7 @@ mod postgres_sync_records_tests;
 #[cfg(test)]
 #[path = "postgres_sync_records_feed_tests.rs"]
 mod postgres_sync_records_feed_tests;
+
+#[cfg(test)]
+#[path = "postgres_sync_records_append_tests.rs"]
+mod postgres_sync_records_append_tests;
