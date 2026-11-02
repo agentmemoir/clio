@@ -142,3 +142,7 @@ pub(crate) fn ask_ssl(ctx: &mut Ctx<'_>, host: &str) -> Result<SslChoice, Signal
     }
     Ok(mode)
 }
+
+#[cfg(test)]
+#[path = "setup_flows_db_fields_tests.rs"]
+mod tests;

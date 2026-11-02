@@ -44,8 +44,10 @@
     reason = "a shared harness is used by several suites, not all at once"
 )]
 
+use crate::cli_style::Palette;
 use crate::compose_docker::DockerStatus;
 use crate::setup_cli_flows::Ctx;
+use crate::setup_defaults::Defaults;
 use crate::setup_key_source::FLAG as KEY_STORE_FLAG;
 pub(crate) use crate::setup_preview_run::Run;
 use crate::setup_review::StoreState;
@@ -365,4 +367,40 @@ impl Harness {
             Err(signal) => signal.reason().to_owned(),
         }
     }
+}
+
+/// One context over a scripted reader and two buffers, with the flags,
+/// interactivity, and last-known defaults the test names.
+///
+/// `Ctx` borrows the reader, both writers, and the probes for its whole life,
+/// so a test cannot own them in a struct and hand out borrows. This function
+/// keeps all four on its own stack and passes the context to `body`, which is
+/// why the answer and everything the context printed come back as a pair.
+pub(crate) fn with_ctx<R>(
+    input: &str,
+    flags: HashMap<String, String>,
+    interactive: bool,
+    defaults: Defaults,
+    body: impl FnOnce(&mut Ctx<'_>) -> R,
+) -> (R, String) {
+    let mut reader = std::io::Cursor::new(input.as_bytes().to_vec());
+    let mut out: Vec<u8> = Vec::new();
+    let mut err: Vec<u8> = Vec::new();
+    let probes = Probes::ok();
+    let mut ctx = Ctx::new(
+        &flags,
+        &mut reader,
+        &mut out,
+        &mut err,
+        interactive,
+        Palette::new(false),
+        &probes,
+        defaults,
+        PathBuf::from("/nonexistent/clio-stage5/clio.db"),
+        DockerStatus::Available,
+        &crate::setup_preview_scripts::no_env,
+        false,
+    );
+    let answer = body(&mut ctx);
+    (answer, String::from_utf8(out).expect("utf8"))
 }
