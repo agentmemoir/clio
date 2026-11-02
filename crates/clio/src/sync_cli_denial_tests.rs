@@ -46,15 +46,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// the pid and a nanosecond stamp keep parallel tests apart.
 struct Scratch(PathBuf);
 
-struct Child(std::process::Child);
-
-impl Drop for Child {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 impl Scratch {
     fn new(name: &str) -> Self {
         let nanos = SystemTime::now()
@@ -380,43 +371,6 @@ fn the_bound_serve_tool_serves_under_the_journals_denial_authority() {
 /// would have gone to the wire instead.
 #[test]
 fn the_pull_verb_refuses_a_journal_the_deployment_does_not_resolve() {
-    const CHILD: &str = "CLIO_TEST_357_SYNC_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        let dir = crate::sync_key_cli_test_support::TempDir::new("pull-journal");
-        let key = dir.key().display().to_string();
-        let get = |name: &str| (name == clio_config::SYNC_KEY_FILE_ENV).then(|| key.clone());
-        clio_config::sync_key::generate(&get, Some(clio_config::KeySource::File))
-            .expect("generate sync key");
-        let log = dir.path().join("child.log");
-        let output = std::fs::File::create(&log).expect("create child log");
-        let mut child = Child(std::process::Command::new(std::env::current_exe().expect("test binary"))
-            .args(["sync_cli::tests::denial_tests::the_pull_verb_refuses_a_journal_the_deployment_does_not_resolve", "--exact", "--nocapture"])
-            .env(CHILD, "1")
-            .env(clio_config::SYNC_KEY_FILE_ENV, &key)
-            .env_remove(clio_config::ERASURE_JOURNAL_FILE_ENV)
-            .stdout(output.try_clone().expect("clone child log"))
-            .stderr(output)
-            .spawn()
-            .expect("start isolated test"));
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        let status = loop {
-            if let Some(status) = child.0.try_wait().expect("wait for child") {
-                break status;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "isolated test timed out"
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        let output = std::fs::read_to_string(log).expect("read child log");
-        assert!(status.success(), "isolated test failed: {output}");
-        assert!(
-            output.contains("1 passed"),
-            "child test did not run: {output}"
-        );
-        return;
-    }
     let journal = Scratch::new("pull-document");
     let s = McpState::open_with_effective(
         &McpOpenOptions::default(),
