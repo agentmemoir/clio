@@ -73,6 +73,9 @@ keyring = { version = "3", features = [
     "linux-native-sync-persistent",
     "vendored",
 ] }
+# `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations
+# rusqlite 0.41 moved behind that feature, so `belief_tx`'s `COUNT(*)` read
+# needs no code change.
 rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
 sha2 = "0.11"
 sqlite-vec = "0.1"
