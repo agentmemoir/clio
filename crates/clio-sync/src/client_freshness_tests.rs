@@ -28,9 +28,9 @@
 
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
 use crate::apply::apply_freshness::{is_stale, test_engine};
+use crate::client::client_envelope_tests::{BANK, Receiver, hand_push, held_key, receiver};
 use crate::client::client_tests::item;
 use crate::client::pull;
-use crate::client::client_envelope_tests::{BANK, Receiver, hand_push, held_key, receiver};
 use crate::clock::{parse_utc_epoch, test_pin};
 use crate::crypto::SyncCipherKey;
 use crate::envelope_fixtures::seal_content_for;
