@@ -185,9 +185,10 @@ impl Drop for NodeDir {
 /// it first. `CLIO_ERASURE_JOURNAL_FILE` names the node's own erasure journal:
 /// the cleared environment leaves no data directory for the fallback to
 /// resolve, and a serve start without a journal path refuses to bind.
-/// `CLIO_DEPLOYMENT_CONFIG` points at a path that does not exist, so the
-/// deployment config is defaulted instead of read from the machine's real one,
-/// which keeps the result a fact about this test rather than about this host.
+/// `CLIO_DEPLOYMENT_CONFIG` points at the overlay `common::no_skew_deployment`
+/// writes, so the deployment config is this test's own rather than the
+/// machine's real one or the compiled default, which keeps the result a fact
+/// about this test rather than about this host.
 #[must_use]
 pub fn clio(node: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_clio"));
@@ -200,7 +201,7 @@ pub fn clio(node: &Path) -> Command {
     cmd.env("CLIO_ERASURE_JOURNAL_FILE", &journal);
     cmd.env(
         "CLIO_DEPLOYMENT_CONFIG",
-        node.join("no-such-deployment-overlay.json"),
+        crate::common::no_skew_deployment(node),
     );
     // The one deployment salt this harness resolves: a child that resolved its
     // own would hash the journal's subject identities under a different salt

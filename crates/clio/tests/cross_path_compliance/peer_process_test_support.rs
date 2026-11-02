@@ -201,7 +201,7 @@ impl Peer {
         command
             .env(
                 "CLIO_DEPLOYMENT_CONFIG",
-                self.dir.join("no-such-deployment.json"),
+                crate::common::no_skew_deployment(&self.dir),
             )
             .args(["sync", "serve", "--bind", "127.0.0.1:0", "--token-file"])
             .arg(&credentials)
