@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on SQLite operator health SQL.
 
-use crate::migrate::IntoAmError;
+use crate::migrate::{IntoAmError, now_iso};
 use crate::ops_store::{IntegritySignals, OpsStore, StoreCounts};
 use crate::sqlite::SqliteStore;
 use clio_types::{AmError, ErrorCode};
@@ -227,4 +227,37 @@ impl OpsStore for SqliteStore {
             Ok(n as u64)
         })
     }
+
+    fn device_id(&self) -> Result<String, AmError> {
+        self.with_conn(|conn| {
+            let stored = conn
+                .query_row(
+                    "SELECT value FROM schema_settings WHERE key = 'device_id'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .am("device id read")?;
+            if let Some(id) = stored {
+                return Ok(id);
+            }
+            conn.execute(
+                "INSERT INTO schema_settings (key, value, created_at, updated_at)
+                 VALUES ('device_id', ?1, ?2, ?2)
+                 ON CONFLICT (key) DO NOTHING",
+                params![crate::ops_store::mint_device_id(), now_iso()],
+            )
+            .am("device id insert")?;
+            conn.query_row(
+                "SELECT value FROM schema_settings WHERE key = 'device_id'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .am("device id reread")
+        })
+    }
 }
+
+#[cfg(test)]
+#[path = "sqlite_ops_tests.rs"]
+mod sqlite_ops_tests;

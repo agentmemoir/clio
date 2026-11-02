@@ -290,7 +290,10 @@ impl McpState {
             join_consolidate_wave,
             sync,
             kms,
-            device_id: format!("device-{}", std::process::id()),
+            device_id: match clio_config::resolve_sync_device_id(&|key| std::env::var(key).ok()) {
+                Some(id) => id,
+                None => store.device_id()?,
+            },
             retention: Arc::new(std::sync::Mutex::new(load_retention_store())),
             retention_path: clio_config::retention_store::resolve_retention_path(None),
             journal_path,

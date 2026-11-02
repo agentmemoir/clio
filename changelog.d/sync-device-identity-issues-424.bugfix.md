@@ -1,0 +1,1 @@
+The sync device identity is now stored once per installation and stays the same across restarts, so sync conflict records and last-writer-wins tie-breaks keep naming a device that still exists. `CLIO_SYNC_DEVICE_ID` overrides the stored identity when a host must pick its own. [Issue #424](https://github.com/agentmemoir/clio/issues/424)
