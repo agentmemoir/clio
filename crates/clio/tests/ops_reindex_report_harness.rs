@@ -119,6 +119,8 @@ fn confirm_alone_runs_the_live_rebuild() {
     assert_eq!(report["dry_run"], Value::Bool(false), "{report}");
     assert_eq!(report["indexable_items"], serde_json::json!(2), "{report}");
     assert_eq!(report["lexical_applied"], serde_json::json!(2), "{report}");
+    assert_eq!(report["unreadable"], serde_json::json!(0), "{report}");
+    assert_eq!(report["erased"], serde_json::json!(0), "{report}");
 }
 
 /// A `--dry-run` is a report: nothing is applied, so it is not `ok` and the
@@ -136,6 +138,8 @@ fn dry_run_reports_not_ok_and_applies_nothing() {
         assert_eq!(report["dry_run"], Value::Bool(true), "{report}");
         assert_eq!(report["lexical_applied"], serde_json::json!(0), "{report}");
         assert_eq!(report["dense_applied"], serde_json::json!(0), "{report}");
+        assert_eq!(report["unreadable"], serde_json::json!(0), "{report}");
+        assert_eq!(report["erased"], serde_json::json!(0), "{report}");
     }
 }
 
