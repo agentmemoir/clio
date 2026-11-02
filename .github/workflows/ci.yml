@@ -328,6 +328,11 @@ jobs:
         if: always()
         run: make scripts-check-exec-tempdir
 
+      # Whether the lockfile summary a pull request publishes names the crates that actually moved. The summary workflow is a job of its own, gated by a path filter, so this step is the only place its rules run on every change; the fixtures cover the added, removed, and updated rows and both failure exits. Runs no build.
+      - name: Lockfile diff summary
+        if: always()
+        run: make scripts-check-lockfile-diff
+
       # Whether prose stays one paragraph per line. Runs no build.
       - name: Prose check
         if: always()

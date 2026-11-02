@@ -14,7 +14,8 @@ scripts-check: scripts-check-gate scripts-check-scoped-runner \
 	scripts-check-gate-install scripts-check-quick \
 	scripts-check-ci-parity scripts-check-compose-model \
 	scripts-check-changelog scripts-check-prose \
-	scripts-check-env-mutation scripts-check-exec-tempdir
+	scripts-check-env-mutation scripts-check-exec-tempdir \
+	scripts-check-lockfile-diff
 
 scripts-check-gate:
 	python3 scripts/gate.py --self-test
@@ -105,3 +106,7 @@ scripts-check-env-mutation:
 # collide (issue #323). The test lives beside the helper it checks.
 scripts-check-exec-tempdir:
 	python3 scripts/exec_tempdir_selftest.py
+
+# Whether the lockfile summary a pull request publishes names the crates that actually moved. The summary workflow reads two revisions with `git show` and compares them at the crate level, because a textual diff of a sorted, checksum-carrying file hides which crate went from which version to which. Its fixtures cover the added, removed, and updated rows, a name that holds two versions, a malformed lockfile, and a bad argument. Runs no build.
+scripts-check-lockfile-diff:
+	python3 scripts/lockfile_diff.py --self-test
