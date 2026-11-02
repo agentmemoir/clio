@@ -315,6 +315,8 @@ pub use clio_types::{
 
 #[cfg(test)]
 mod erase_test_support;
+#[cfg(test)]
+mod pg_fixtures;
 
 mod pg_advisory_keys;
 mod pg_lock;

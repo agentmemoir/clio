@@ -35,11 +35,11 @@
 //! one place to get it right and one place to change it, and it is why every call
 //! site — including the test helpers — goes through [`connect`].
 
+use crate::pg_url::driver_mode;
 use clio_types::{AmError, ErrorCode, is_loopback_host, url_scheme};
-use postgres::{Client, NoTls};
+use postgres::config::Host;
+use postgres::{Client, Config, NoTls};
 use std::str::FromStr;
-use tokio_postgres::Config;
-use tokio_postgres::config::Host;
 
 /// Port the driver falls back to when a connection string names none.
 const DEFAULT_PORT: u16 = 5432;
@@ -158,7 +158,8 @@ impl SslChoice {
 /// read here can change what that string connects to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connection {
-    /// Hosts in the order the string listed them; empty when it named none.
+    /// The addresses the driver will dial, in order: `hostaddr` when the string
+    /// named one, otherwise the hosts it listed. Empty when it named none.
     pub hosts: Vec<String>,
     /// Ports in the same order, with the driver's defaults filled in.
     pub ports: Vec<u16>,
@@ -171,22 +172,24 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Whether every host in the string is on this machine.
+    /// Build the fields setup shows from the driver's own parse.
+    pub(crate) fn from_config(config: &Config, ssl: SslChoice) -> Self {
+        Self {
+            hosts: effective_hosts(config),
+            ports: config.get_ports().to_vec(),
+            database: config.get_dbname().map(ToOwned::to_owned),
+            user: config.get_user().map(ToOwned::to_owned),
+            ssl,
+        }
+    }
+
+    /// Whether every address the driver will dial is on this machine.
     ///
-    /// A string that named no host is not local. The driver will refuse it, and
-    /// telling an operator their undialable address is "on this machine" is
-    /// worse than the opposite mistake.
+    /// An empty address list is local too: a string that names no host reaches
+    /// the local Unix socket, and the mode default treats it the same way.
     #[must_use]
     pub fn is_local(&self) -> bool {
-        // A Unix socket path is on this machine by definition — there is no
-        // network in it — so treating one as remote would put a "this connection
-        // is not encrypted" warning in front of an operator already as local as
-        // a connection can be.
-        !self.hosts.is_empty()
-            && self
-                .hosts
-                .iter()
-                .all(|host| is_loopback_host(host) || host.starts_with('/'))
+        hosts_are_local(&self.hosts)
     }
 
     /// The first host, or an empty string when the string named none.
@@ -221,6 +224,38 @@ fn host_name(host: &Host) -> String {
     }
 }
 
+/// The addresses the driver will dial, as text.
+///
+/// `hostaddr` wins over `host` for the TCP address, so a string that names both
+/// is described by the address it actually reaches. A string that names only
+/// hosts is described by those names.
+fn effective_hosts(config: &Config) -> Vec<String> {
+    let addrs = config.get_hostaddrs();
+    if !addrs.is_empty() {
+        return addrs.iter().map(ToString::to_string).collect();
+    }
+    config.get_hosts().iter().map(host_name).collect()
+}
+
+/// Whether every address in a list stays on this machine.
+fn hosts_are_local(hosts: &[String]) -> bool {
+    // A Unix socket path is on this machine by definition — there is no network
+    // in it — so treating one as remote would put a "this connection is not
+    // encrypted" warning in front of an operator already as local as a
+    // connection can be.
+    hosts
+        .iter()
+        .all(|host| is_loopback_host(host) || host.starts_with('/'))
+}
+
+/// The same local-or-remote answer for a configuration the driver just parsed.
+///
+/// The mode default reads this, so it cannot disagree with what
+/// [`Connection::is_local`] tells the operator about the same string.
+pub(crate) fn config_is_local(config: &Config) -> bool {
+    hosts_are_local(&effective_hosts(config))
+}
+
 /// Read a connection string with the driver's own parser.
 ///
 /// The scheme is checked first, because the driver's parser does not check it:
@@ -245,13 +280,7 @@ pub fn parse_connection(url: &str) -> Result<Connection, String> {
     let spec = crate::pg_url::spec(url)?;
     let config = Config::from_str(&spec.driver_url)
         .map_err(|e| format!("database url is not usable: {}", describe(&e)))?;
-    Ok(Connection {
-        hosts: config.get_hosts().iter().map(host_name).collect(),
-        ports: config.get_ports().to_vec(),
-        database: config.get_dbname().map(ToOwned::to_owned),
-        user: config.get_user().map(ToOwned::to_owned),
-        ssl: spec.ssl,
-    })
+    Ok(Connection::from_config(&config, spec.ssl))
 }
 
 /// Open one connection, choosing the connector from the string's SSL mode.
@@ -303,26 +332,20 @@ impl Failure {
 /// Open a connection, keeping the driver's own error so a caller can tell a
 /// refused socket from a refusal.
 pub(crate) fn open(url: &str) -> Result<Client, Failure> {
-    // Read the SSL options this store acts on first, then let the driver parse
-    // the rewritten URL. The URL the connection uses is the one the driver can
-    // accept, with `sslrootcert` taken out and `sslmode` mapped to a value it
-    // knows; the connector alone decides whether the certificate is checked.
+    // Read the two SSL options this store acts on, then let the driver parse
+    // the rest of the string exactly as written. The mode is set on the parsed
+    // configuration rather than appended to the string, so a `?`, `&`, or `://`
+    // in a password cannot move it into the wrong field.
     let spec = crate::pg_url::spec(url).map_err(Failure::settled)?;
-    if let Err(e) = Config::from_str(&spec.driver_url) {
-        return Err(Failure::settled(format!(
-            "postgres url is not usable: {}",
-            describe(&e)
-        )));
-    }
+    let mut config = Config::from_str(&spec.driver_url)
+        .map_err(|e| Failure::settled(format!("postgres url is not usable: {}", describe(&e))))?;
+    config.ssl_mode(driver_mode(spec.ssl));
     let attempt = match spec.ssl {
-        SslChoice::Disable => Client::connect(&spec.driver_url, NoTls),
-        SslChoice::Prefer | SslChoice::VerifyFull => Client::connect(
-            &spec.driver_url,
-            crate::tls_trust::verified_connector(spec.root.as_deref())?,
-        ),
-        SslChoice::EncryptNoVerify => {
-            Client::connect(&spec.driver_url, crate::tls_trust::unverified_connector()?)
+        SslChoice::Disable => config.connect(NoTls),
+        SslChoice::Prefer | SslChoice::VerifyFull => {
+            config.connect(crate::tls_trust::verified_connector(spec.root.as_deref())?)
         }
+        SslChoice::EncryptNoVerify => config.connect(crate::tls_trust::unverified_connector()?),
     };
     attempt.map_err(|e| Failure {
         message: format!("postgres connect: {}", describe(&e)),

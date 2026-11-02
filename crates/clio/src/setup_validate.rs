@@ -282,12 +282,22 @@ pub(crate) fn check_advanced(name: &str, value: &str) -> Result<(), String> {
 /// A remote host defaults to `verify-full` because that is what providers expect
 /// and because certificate checking is then not optional. This machine defaults
 /// to `prefer` so an unencrypted local server keeps working.
+///
+/// The address may name several hosts, so the mode is `prefer` only when every
+/// named host is on this machine and at least one was named. A list that mixes
+/// this machine with a remote host is remote, because the connection can reach
+/// the remote one.
 #[must_use]
 pub(crate) fn default_ssl_for(host: &str) -> SslChoice {
-    let host = host.split(',').map(str::trim).find(|part| !part.is_empty());
-    match host {
-        Some(host) if is_loopback(host) => SslChoice::Prefer,
-        _ => SslChoice::VerifyFull,
+    let mut hosts = host
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .peekable();
+    if hosts.peek().is_some() && hosts.all(is_loopback) {
+        SslChoice::Prefer
+    } else {
+        SslChoice::VerifyFull
     }
 }
 

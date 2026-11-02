@@ -9,8 +9,9 @@
 //!
 //! ## Owns
 //! - The retry window, and the rule for which failures fall inside it
-//! - The [`DatabaseReport`] a caller reads: server version, and whether
-//!   pgvector is installed
+//! - The [`DatabaseReport`] a caller reads: server version, whether pgvector is
+//!   installed, the TLS the server reports for its own leg, and the TLS policy
+//!   the connection string asked for on the client's leg
 //!
 //! ## Does not own
 //! - The connector or the SSL mode (`pg_tls` owns both)
@@ -26,7 +27,7 @@
 //!
 //! Keep this module focused on the probe and its report.
 
-use crate::pg_tls::{Failure, describe, open};
+use crate::pg_tls::{Failure, SslChoice, describe, open};
 use std::time::Duration;
 
 /// How many times [`probe`] opens a connection before it gives up.
@@ -39,9 +40,14 @@ pub(crate) const PROBE_ATTEMPTS: u32 = 30;
 /// Pause between [`probe`] attempts.
 pub(crate) const PROBE_RETRY_DELAY: Duration = Duration::from_millis(500);
 
-/// The one statement the probe runs: the server version and whether pgvector is
-/// installed, as two columns in the order [`DatabaseReport`] reads them.
-const REPORT_SQL: &str = "SELECT current_setting('server_version'), EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')";
+/// The one statement the probe runs: the server version, whether pgvector is
+/// installed, and the TLS state the server reports for this session's backend,
+/// as five columns in the order [`DatabaseReport`] reads them.
+const REPORT_SQL: &str = "SELECT current_setting('server_version'), \
+     EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector'), \
+     COALESCE(s.ssl, false), s.version, s.cipher \
+     FROM (SELECT pg_backend_pid() AS pid) AS me \
+     LEFT JOIN pg_stat_ssl AS s ON s.pid = me.pid";
 
 /// What a connection test found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +60,19 @@ pub struct DatabaseReport {
     /// without pgvector is the caller's decision, and setup is the caller that
     /// makes it.
     pub has_vector: bool,
+    /// Whether the server's own leg uses TLS, as `pg_stat_ssl` reports it.
+    ///
+    /// This describes the backend's peer, not the client's connection. Behind a
+    /// TLS-terminating pooler the two legs can differ, so this value alone does
+    /// not say whether the client leg is encrypted.
+    pub server_tls: bool,
+    /// The TLS version `pg_stat_ssl` reports for the server's leg.
+    pub server_tls_version: Option<String>,
+    /// The cipher `pg_stat_ssl` reports for the server's leg.
+    pub server_tls_cipher: Option<String>,
+    /// The TLS policy the connection string asked for, which is the client
+    /// leg's guarantee.
+    pub requested_tls: SslChoice,
 }
 
 /// Open a connection, retrying a refused socket, and report what is there.
@@ -146,20 +165,24 @@ where
 
 /// One attempt against the running server.
 pub(crate) fn probe_once(url: &str) -> Result<DatabaseReport, Failure> {
+    // The policy is the client leg's guarantee and comes from the string itself,
+    // so it is read before the connection opens. A mode this store does not
+    // offer is a failure no later attempt can fix.
+    let requested_tls = crate::pg_url::spec(url).map_err(Failure::settled)?.ssl;
     let mut client = open(url)?;
-    // One round trip for both answers. A second query would mean a second thing
-    // that can fail after the connection opened, and a half-answered report is
-    // worse for an operator than no report.
+    // One round trip for all five answers. A second query would mean a second
+    // thing that can fail after the connection opened, and a half-answered
+    // report is worse for an operator than no report.
     //
     // The error is a `match` arm rather than a `map_err` closure, and that is
     // deliberate: a closure is a function of its own to the coverage report, and
     // this one runs only when the server refuses the statement. No test can make
-    // it run — the statement reads only `current_setting` and `pg_extension`,
-    // which every role may always read, so there is no address, setting, or
-    // timeout that makes a healthy server refuse it. As a `match` arm the path
-    // belongs to the function that owns it, and the coverage report states
-    // plainly that it was not exercised rather than reporting a phantom function
-    // as dead code.
+    // it run — the statement reads only `current_setting`, `pg_extension`, and
+    // `pg_stat_ssl`, which every role may always read, so there is no address,
+    // setting, or timeout that makes a healthy server refuse it. As a `match` arm
+    // the path belongs to the function that owns it, and the coverage report
+    // states plainly that it was not exercised rather than reporting a phantom
+    // function as dead code.
     //
     // A failed query is not retried: the connection was open, so whatever the
     // server disliked will not change. The reason is the server's own, because
@@ -174,8 +197,38 @@ pub(crate) fn probe_once(url: &str) -> Result<DatabaseReport, Failure> {
             )));
         }
     };
-    Ok(DatabaseReport {
-        server_version: row.get(0),
-        has_vector: row.get(1),
-    })
+    Ok(report_from_values(
+        row.get(0),
+        row.get(1),
+        row.get(2),
+        row.get(3),
+        row.get(4),
+        requested_tls,
+    ))
 }
+
+/// The report a row becomes.
+///
+/// The query is kept out of this function so a test can prove that the server's
+/// TLS answers reach the report, without a TLS server to ask.
+fn report_from_values(
+    server_version: String,
+    has_vector: bool,
+    server_tls: bool,
+    server_tls_version: Option<String>,
+    server_tls_cipher: Option<String>,
+    requested_tls: SslChoice,
+) -> DatabaseReport {
+    DatabaseReport {
+        server_version,
+        has_vector,
+        server_tls,
+        server_tls_version,
+        server_tls_cipher,
+        requested_tls,
+    }
+}
+
+#[cfg(test)]
+#[path = "pg_probe_tests.rs"]
+mod pg_probe_tests;

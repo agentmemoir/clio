@@ -34,7 +34,7 @@
 //! discovery the connection test exists to move forward. One report, one
 //! decision, in the module that knows the wizard's rules.
 
-use clio_store::DatabaseReport;
+use clio_store::{DatabaseReport, SslChoice};
 
 use crate::setup_test_seam::Probes;
 
@@ -65,8 +65,28 @@ pub(crate) fn database_detail(report: &DatabaseReport) -> Result<String, String>
                 .to_owned(),
         );
     }
+    // Two legs, named separately. `pg_stat_ssl` describes the server's peer, so
+    // it cannot speak for the client's connection, and a pooler that terminates
+    // TLS makes the two disagree.
+    let client = match report.requested_tls {
+        SslChoice::Disable => "client uses no TLS",
+        SslChoice::Prefer => "client asks for TLS and allows cleartext",
+        SslChoice::VerifyFull => "client requires verified TLS",
+        SslChoice::EncryptNoVerify => "client requires TLS without verifying the certificate",
+    };
+    let server = match (
+        report.server_tls,
+        report.server_tls_version.as_deref(),
+        report.server_tls_cipher.as_deref(),
+    ) {
+        (true, Some(version), Some(cipher)) => {
+            format!("server reports TLS with {version} using {cipher}")
+        }
+        (true, _, _) => "server reports TLS".to_owned(),
+        (false, _, _) => "server reports no TLS".to_owned(),
+    };
     Ok(format!(
-        "connected, PostgreSQL {}, vector extension present",
+        "connected, PostgreSQL {}, vector extension present, {client}, {server}",
         report.server_version
     ))
 }
