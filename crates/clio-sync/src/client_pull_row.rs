@@ -153,3 +153,7 @@ fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
         opened.admission_receipt = Some(receipt.clone());
     }
 }
+
+#[cfg(test)]
+#[path = "client_pull_row_tests.rs"]
+mod tests;

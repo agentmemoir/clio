@@ -83,3 +83,7 @@ pub(crate) fn lww_loser(
     })?;
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "apply_lww_tests.rs"]
+mod tests;

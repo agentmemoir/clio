@@ -122,3 +122,7 @@ pub(crate) fn dead_letter(
         reason_code: reason.to_owned(),
     })
 }
+
+#[cfg(test)]
+#[path = "apply_dead_letter_tests.rs"]
+mod tests;

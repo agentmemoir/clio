@@ -331,3 +331,7 @@ pub(crate) fn handle_push(
 #[cfg(test)]
 #[path = "server_push_denial_tests.rs"]
 mod server_push_denial_tests;
+
+#[cfg(test)]
+#[path = "server_push_sealed_tests.rs"]
+mod server_push_sealed_tests;
