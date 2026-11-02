@@ -148,6 +148,50 @@ pub(crate) fn cursor_set_sqlite(
     })
 }
 
+/// SQLite body of `SyncStore::device_high_water_get`: the newest applied stamp
+/// from one device.
+pub(crate) fn device_high_water_get_sqlite(
+    store: &SqliteStore,
+    bank_id: &str,
+    device_id: &str,
+    entity_kind: &str,
+) -> Result<Option<String>, AmError> {
+    store.with_conn(|conn| {
+        conn.query_row(
+            "SELECT transaction_time FROM sync_device_high_water \
+             WHERE bank_id = ?1 AND device_id = ?2 AND entity_kind = ?3",
+            params![bank_id, device_id, entity_kind],
+            |r| r.get(0),
+        )
+        .optional()
+        .am("sync device high water get")
+    })
+}
+
+/// SQLite body of `SyncStore::device_high_water_set`: raise the mark, never
+/// lower it.
+pub(crate) fn device_high_water_set_sqlite(
+    store: &SqliteStore,
+    bank_id: &str,
+    device_id: &str,
+    entity_kind: &str,
+    transaction_time: &str,
+) -> Result<(), AmError> {
+    let now = now_iso8601();
+    store.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO sync_device_high_water (bank_id, device_id, entity_kind, transaction_time, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT (bank_id, device_id, entity_kind) DO UPDATE SET \
+             transaction_time = excluded.transaction_time, updated_at = excluded.updated_at \
+             WHERE sync_device_high_water.transaction_time < excluded.transaction_time",
+            params![bank_id, device_id, entity_kind, transaction_time, now],
+        )
+        .am("sync device high water set")?;
+        Ok(())
+    })
+}
+
 /// SQLite body of `SyncStore::conflict_insert`: append one LWW loser row.
 pub(crate) fn conflict_insert_sqlite(
     store: &SqliteStore,

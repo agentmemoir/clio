@@ -134,6 +134,11 @@ impl SqliteStore {
         // columns the custody store reads, and the slot DDL only declares a
         // fresh table.
         crate::destination_custody_converge::converge_sqlite(&conn)?;
+        // The sync-table convergence must run before portable DDL for the same
+        // reason: a database opened before `sync_device_high_water` existed has
+        // no table for the sync store to write, and the portable DDL only
+        // declares a fresh one.
+        crate::sync_schema_converge::converge_sqlite(&conn)?;
         let bootstrap = format!("PRAGMA foreign_keys = ON;\n{SQL_CORE}\n{SQL_COMPLIANCE_SLOTS}");
         conn.execute_batch(&bootstrap).am("migrate core")?;
         crate::schema_reshape::bump_schema_version_sqlite(&conn)?;

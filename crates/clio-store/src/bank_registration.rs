@@ -48,6 +48,7 @@ const BANK_SCOPED_TABLES: &[&str] = &[
     "sync_mutations",
     "sync_conflicts",
     "sync_dead_letter",
+    "sync_device_high_water",
     "persona_erase_tombstones",
     "distilled_units",
     "distill_intents",

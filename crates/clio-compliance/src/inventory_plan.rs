@@ -220,6 +220,7 @@ pub(crate) static ROW_PLAN: &[RowPlan] = &[
             "sync_mutations",
             "sync_conflicts",
             "sync_dead_letter",
+            "sync_device_high_water",
         ],
         source: RowSource::Tables,
         link: None,

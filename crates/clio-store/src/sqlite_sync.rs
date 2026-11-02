@@ -94,6 +94,25 @@ impl SyncStore for SqliteStore {
         state::cursor_set_sqlite(self, bank_id, peer_label, token)
     }
 
+    fn device_high_water_get(
+        &self,
+        bank_id: &str,
+        device_id: &str,
+        entity_kind: &str,
+    ) -> Result<Option<String>, AmError> {
+        state::device_high_water_get_sqlite(self, bank_id, device_id, entity_kind)
+    }
+
+    fn device_high_water_set(
+        &self,
+        bank_id: &str,
+        device_id: &str,
+        entity_kind: &str,
+        transaction_time: &str,
+    ) -> Result<(), AmError> {
+        state::device_high_water_set_sqlite(self, bank_id, device_id, entity_kind, transaction_time)
+    }
+
     fn conflict_insert(&self, row: &SyncConflictRow) -> Result<(), AmError> {
         state::conflict_insert_sqlite(self, row)
     }

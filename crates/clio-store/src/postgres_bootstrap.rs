@@ -64,6 +64,12 @@ pub(crate) fn bootstrap_schema(client: &mut Client) -> Result<(EmbeddingSpace, b
     // columns the custody store reads, and the slot DDL only declares a fresh
     // table.
     crate::destination_custody_converge::converge_pg(client)?;
+    // The sync-table convergence must run BEFORE the bootstrap guard: once both
+    // stamps are current the guard skips the migrate batch entirely, so this is
+    // the only step that creates `sync_device_high_water` on a database
+    // bootstrapped before the table existed. It names no column of another
+    // table, so it is safe before the batch on a genuinely fresh database too.
+    crate::sync_schema_converge::converge_pg(client)?;
     if bootstrap_is_current(client)?
         && let Some(space) = read_space(client)?
     {

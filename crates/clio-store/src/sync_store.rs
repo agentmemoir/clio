@@ -102,6 +102,32 @@ pub trait SyncStore: Send + Sync {
     /// Storage failures.
     fn cursor_set(&self, bank_id: &str, peer_label: &str, token: &str) -> Result<(), AmError>;
 
+    /// Read the newest `transaction_time` this bank already applied from
+    /// `device_id` for `entity_kind`.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn device_high_water_get(
+        &self,
+        bank_id: &str,
+        device_id: &str,
+        entity_kind: &str,
+    ) -> Result<Option<String>, AmError>;
+
+    /// Raise the stored high-water mark for `(bank, device_id, entity_kind)` to
+    /// `transaction_time`. The mark never moves backwards: a lower stamp
+    /// leaves the stored value unchanged.
+    ///
+    /// # Errors
+    /// Storage failures.
+    fn device_high_water_set(
+        &self,
+        bank_id: &str,
+        device_id: &str,
+        entity_kind: &str,
+        transaction_time: &str,
+    ) -> Result<(), AmError>;
+
     /// Record one LWW conflict resolution (loser retained for history).
     ///
     /// # Errors

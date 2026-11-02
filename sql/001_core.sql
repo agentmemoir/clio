@@ -657,6 +657,26 @@ CREATE TABLE IF NOT EXISTS sync_cursors
 );
 
 -- ---------------------------------------------------------------------------
+-- Per-device high-water mark (additive). The newest `transaction_time` this
+-- bank already applied from one device for one entity kind. The key is per
+-- kind because a device does not stamp one encoding per device: different
+-- entity kinds write ISO-8601 seconds, a bare date, or epoch millis, and text
+-- ordering between those shapes is wrong. Within one kind the encoding is
+-- consistent, so the comparison is sound. A replayed envelope below the mark
+-- is refused by ordering alone, so the guard survives any later pruning of the
+-- `sync_mutations` journal. The set never moves the mark backwards.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sync_device_high_water
+(
+  bank_id                                                                                      text NOT NULL,
+  device_id                                                                                    text NOT NULL,
+  entity_kind                                                                                  text NOT NULL,
+  transaction_time                                                                             text NOT NULL,
+  updated_at                                                                                   text NOT NULL,
+  PRIMARY KEY (bank_id, device_id, entity_kind)
+);
+
+-- ---------------------------------------------------------------------------
 -- Sync protocol (additive) — harmless on single-host.
 -- sync_cursors above stores per-(bank, peer/direction) opaque cursor tokens;
 -- sync_mutations is the durable per-bank journal (seq = commit-ordered
@@ -822,6 +842,7 @@ FROM (
   UNION SELECT bank_id FROM sync_mutations
   UNION SELECT bank_id FROM sync_conflicts
   UNION SELECT bank_id FROM sync_dead_letter
+  UNION SELECT bank_id FROM sync_device_high_water
   UNION SELECT bank_id FROM persona_erase_tombstones
   UNION SELECT bank_id FROM distilled_units
   UNION SELECT bank_id FROM distill_intents

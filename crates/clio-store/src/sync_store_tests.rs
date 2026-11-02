@@ -128,6 +128,78 @@ fn cursors_roundtrip_per_bank_and_peer() {
 }
 
 #[test]
+fn device_high_water_never_moves_backwards() {
+    let s = store();
+    assert!(
+        s.device_high_water_get("b1", "dev-a", "item")
+            .expect("get")
+            .is_none()
+    );
+    s.device_high_water_set("b1", "dev-a", "item", "2026-01-01T00:00:02Z")
+        .expect("set");
+    assert_eq!(
+        s.device_high_water_get("b1", "dev-a", "item").expect("get"),
+        Some("2026-01-01T00:00:02Z".into())
+    );
+    // A lower stamp leaves the stored mark alone.
+    s.device_high_water_set("b1", "dev-a", "item", "2026-01-01T00:00:01Z")
+        .expect("set");
+    assert_eq!(
+        s.device_high_water_get("b1", "dev-a", "item").expect("get"),
+        Some("2026-01-01T00:00:02Z".into())
+    );
+    // A higher stamp raises it.
+    s.device_high_water_set("b1", "dev-a", "item", "2026-01-01T00:00:03Z")
+        .expect("set");
+    assert_eq!(
+        s.device_high_water_get("b1", "dev-a", "item").expect("get"),
+        Some("2026-01-01T00:00:03Z".into())
+    );
+    // Each device keeps its own mark.
+    assert!(
+        s.device_high_water_get("b1", "dev-b", "item")
+            .expect("get")
+            .is_none()
+    );
+    assert!(
+        s.device_high_water_get("b2", "dev-a", "item")
+            .expect("get")
+            .is_none()
+    );
+}
+
+/// One device stamps different encodings per entity kind: ISO-8601 seconds for
+/// one kind, a bare date or epoch millis for another. A per-device mark would
+/// compare those shapes as text and dead-letter a legitimate row, so the mark is
+/// per kind. The same device and stamp under two kinds therefore stay separate.
+#[test]
+fn device_high_water_is_independent_per_entity_kind() {
+    let s = store();
+    s.device_high_water_set("b1", "dev-a", "item", "2026-01-02T00:00:00Z")
+        .expect("set the item mark");
+    // A bare date sorts before every ISO stamp as text.
+    s.device_high_water_set("b1", "dev-a", "triple", "2026-01-01")
+        .expect("set the triple mark");
+    assert_eq!(
+        s.device_high_water_get("b1", "dev-a", "item").expect("get"),
+        Some("2026-01-02T00:00:00Z".into()),
+        "the item mark keeps its own encoding"
+    );
+    assert_eq!(
+        s.device_high_water_get("b1", "dev-a", "triple")
+            .expect("get"),
+        Some("2026-01-01".into()),
+        "the triple mark is not lowered by the later item stamp"
+    );
+    assert!(
+        s.device_high_water_get("b1", "dev-a", "belief")
+            .expect("get")
+            .is_none(),
+        "an unwritten kind has no mark"
+    );
+}
+
+#[test]
 fn conflicts_record_once_and_count() {
     let s = store();
     let row = SyncConflictRow {

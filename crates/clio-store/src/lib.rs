@@ -198,6 +198,7 @@ mod store;
 mod store_lock;
 mod store_lock_pids;
 mod sync_records;
+mod sync_schema_converge;
 mod sync_store;
 #[path = "sync_store_rows.rs"]
 mod sync_store_rows;
