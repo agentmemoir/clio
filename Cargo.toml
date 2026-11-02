@@ -23,7 +23,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.99"
 license = "Apache-2.0"
 publish = false
 
@@ -47,7 +47,7 @@ clio-sync = { path = "crates/clio-sync" }
 clio-backup = { path = "crates/clio-backup" }
 clio-mcp = { path = "crates/clio-mcp" }
 # deny (not forbid): sqlite-vec registration requires a one-site allow(unsafe_code).
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
 unicode-normalization = "0.1"
 chacha20poly1305 = "0.11"
@@ -56,7 +56,7 @@ chacha20poly1305 = "0.11"
 argon2 = "0.6"
 pgvector = { version = "0.4", features = ["postgres"] }
 postgres = "0.19"
-rand = "0.9"
+rand = "0.10"
 # The one signal the CLI sets itself: restoring the default `SIGPIPE` disposition
 # so a closed stdout ends the process quietly rather than panicking.
 libc = "0.2"
@@ -114,9 +114,6 @@ rustls = { version = "0.23", default-features = false, features = [
     "std",
     "tls12",
 ] }
-# Reads the PEM root a caller supplies through `sslrootcert`. The canonical
-# parser for rustls; it turns PEM into the DER certificates `rustls` trusts.
-rustls-pemfile = "2"
 webpki-roots = "1"
 # Single approved TLS-capable JSON transport (rustls + gzip defaults, blocking).
 ureq = "3"

@@ -160,10 +160,7 @@ fn server_config() -> Arc<ServerConfig> {
     let certs = read_pem(&fixture("server.pem")).expect("the fixture leaf reads");
     let key = {
         let file = std::fs::File::open(fixture("server.key.pem")).expect("the fixture key opens");
-        let mut reader = std::io::BufReader::new(file);
-        rustls_pemfile::private_key(&mut reader)
-            .expect("the fixture key reads")
-            .expect("the file holds one key")
+        rustls::pki_types::PrivateKeyDer::from_pem_reader(file).expect("the fixture key reads")
     };
     Arc::new(
         ServerConfig::builder_with_provider(Arc::new(default_provider()))
