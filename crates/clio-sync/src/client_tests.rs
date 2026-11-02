@@ -22,6 +22,7 @@
 //!
 //! Keep this module focused on sync client tests.
 
+use crate::apply::apply_freshness::test_engine;
 use crate::apply::{ApplyOutcome, apply_mutation};
 use crate::client::{SyncClientConfig, ack_skip, pull, push, sync_status};
 use crate::credential_fixtures::scoped_store;
@@ -59,6 +60,7 @@ pub(crate) fn serve(banks: &[&str]) -> (SyncServer, Arc<SqliteStore>, Arc<dyn De
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
+        max_envelope_skew_secs: Some(0),
         device_id: "srv-1".into(),
         sync_key: None,
     })
@@ -361,9 +363,7 @@ fn t24_08_crash_between_page_and_cursor_is_idempotent() {
     let m = super::decrypt_for_apply(&cfg_b, &relayed, &envelope)
         .expect("open the held row")
         .expect("the held key opens the row");
-    let engine = crate::apply::apply_freshness::test_engine(
-        b.as_ref(), b.as_ref(), "dev-b", None, &m.transaction_time,
-    );
+    let engine = test_engine(b.as_ref(), b.as_ref(), "dev-b", None, &m.transaction_time);
     assert_eq!(
         apply_mutation(&engine, &m, &envelope).expect("apply page"),
         ApplyOutcome::Applied

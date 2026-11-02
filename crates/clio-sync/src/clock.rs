@@ -54,6 +54,12 @@ fn format_utc(secs: i64) -> String {
 /// clock reaches it.
 #[must_use]
 pub fn now_epoch() -> i64 {
+    #[cfg(test)]
+    {
+        if let Some(pinned) = test_pin::current() {
+            return pinned;
+        }
+    }
     let elapsed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -103,6 +109,45 @@ pub(crate) fn parse_utc_epoch(stamp: &str) -> Option<i64> {
     days_from_civil(year, month, day)
         .checked_mul(86_400)?
         .checked_add(hour * 3600 + minute * 60 + second)
+}
+
+/// A test-only pin for the local clock read by [`now_epoch`].
+///
+/// The client pull path reads the clock through `now_epoch` itself, so a test
+/// that needs a fixed wall clock pins it here rather than reaching into the
+/// client. The pin is thread local, so it never moves the clock another
+/// concurrently running test reads, and its guard clears the pin when it drops,
+/// including while a failing assertion unwinds.
+#[cfg(test)]
+pub(crate) mod test_pin {
+    use std::cell::Cell;
+
+    thread_local! {
+        static PINNED_EPOCH: Cell<Option<i64>> = const { Cell::new(None) };
+    }
+
+    /// The epoch second this thread reads, when the clock is pinned.
+    pub(crate) fn current() -> Option<i64> {
+        PINNED_EPOCH.with(Cell::get)
+    }
+
+    /// Holds the clock at one epoch second until this value is dropped.
+    pub(crate) struct Pinned {
+        previous: Option<i64>,
+    }
+
+    impl Drop for Pinned {
+        fn drop(&mut self) {
+            PINNED_EPOCH.with(|cell| cell.set(self.previous));
+        }
+    }
+
+    /// Pin this thread's clock read to `epoch`, restoring the prior pin on drop.
+    pub(crate) fn pin(epoch: i64) -> Pinned {
+        let previous = current();
+        PINNED_EPOCH.with(|cell| cell.set(Some(epoch)));
+        Pinned { previous }
+    }
 }
 
 #[cfg(test)]

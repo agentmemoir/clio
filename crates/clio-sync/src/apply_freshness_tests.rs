@@ -22,10 +22,10 @@
 //!
 //! Test-only. Never compiled into production builds.
 
+use super::pinned;
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
 use crate::apply::apply_tests::{fixture, upsert};
 use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
-use super::pinned;
 use crate::clock::parse_utc_epoch;
 use crate::protocol::SyncMutation;
 use clio_store::{SqliteStore, Store, SyncStore};

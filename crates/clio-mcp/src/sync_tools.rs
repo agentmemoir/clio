@@ -18,8 +18,9 @@
 //!   whose principal is an agent or a user, so a harness or system credential
 //!   is required when a principal is present
 //! - The serve admission wiring: `sync_serve` hands the operator's
-//!   `sync.allow_public_bind` setting to `SyncServerOptions`, so the server
-//!   refuses a non-loopback bind the setting has not admitted
+//!   `sync.allow_public_bind` and `sync.max_envelope_skew_secs` settings to
+//!   `SyncServerOptions`, so the server refuses a non-loopback bind the setting
+//!   has not admitted and applies the configured freshness window
 //! - Client config assembly (`device_id`, store/sync handles, remote, token,
 //!   and encryption keys): the status path takes a `sync_key` override and
 //!   otherwise reads the recorded store, marker-authoritative, while the
@@ -254,6 +255,7 @@ pub fn sync_serve_with(
             allow_public_bind: state.sync_allow_public_bind(),
             ttl_secs,
             deadline_secs: None,
+            max_envelope_skew_secs: Some(state.sync_max_envelope_skew_secs()),
             device_id: state.device_id.clone(),
             sync_key: None,
         },
@@ -284,7 +286,7 @@ pub(crate) fn client_cfg(
         token: token.map(str::to_owned),
         cipher: Vec::new(),
         allow_plaintext: false,
-        max_envelope_skew_secs: 0,
+        max_envelope_skew_secs: state.sync_max_envelope_skew_secs(),
     }
 }
 
@@ -435,3 +437,7 @@ mod sync_tools_key_tests;
 #[cfg(test)]
 #[path = "sync_tools_grant_tests.rs"]
 mod sync_tools_grant_tests;
+
+#[cfg(test)]
+#[path = "sync_tools_skew_tests.rs"]
+mod sync_tools_skew_tests;

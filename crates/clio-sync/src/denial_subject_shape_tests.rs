@@ -109,8 +109,13 @@ fn shape_op(mid: &str, bank: &str, kind: &str, entity: &str, content: Value) -> 
 /// Apply `m` and assert the denied subject is dead-lettered with no journal
 /// entry, the shape-independent half of every refused-shape case.
 fn assert_refused(store: &SqliteStore, denial: &FakeDenial, m: &SyncMutation) {
-    let engine =
-        crate::apply::apply_freshness::test_engine(store, store, "srv-1", None, &m.transaction_time);
+    let engine = crate::apply::apply_freshness::test_engine(
+        store,
+        store,
+        "srv-1",
+        None,
+        &m.transaction_time,
+    );
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     let result = apply_mutation_guarded(&engine, Some(denial), m, &envelope).expect("apply runs");
     assert_eq!(

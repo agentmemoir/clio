@@ -115,6 +115,7 @@ fn denial_relay(banks: &[&str]) -> (SyncServer, Arc<FakeDenial>) {
             allow_public_bind: false,
             ttl_secs: None,
             deadline_secs: None,
+            max_envelope_skew_secs: Some(0),
             device_id: "srv-1".into(),
             sync_key: None,
         },

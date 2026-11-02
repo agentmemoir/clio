@@ -320,7 +320,8 @@ fn sync_allow_public_bind_is_a_settable_boolean() {
 fn sync_max_envelope_skew_secs_is_a_settable_count() {
     validate_set_path("sync.max_envelope_skew_secs").expect("allowlisted");
     validate_set_value("sync.max_envelope_skew_secs", &json!(300)).expect("seconds are a count");
-    validate_set_value("sync.max_envelope_skew_secs", &json!(0)).expect("zero turns the window off");
+    validate_set_value("sync.max_envelope_skew_secs", &json!(0))
+        .expect("zero turns the window off");
 }
 
 /// Text and a negative count give no window, so the set path refuses them rather than storing a value the freshness rule cannot read.
@@ -330,8 +331,7 @@ fn a_non_count_envelope_skew_is_rejected() {
         let err = validate_set_value("sync.max_envelope_skew_secs", &bad).expect_err("not a count");
         assert_eq!(err.code, ErrorCode::InvalidType, "for {bad}");
         assert_eq!(
-            err.message,
-            "sync.max_envelope_skew_secs must be a non-negative integer",
+            err.message, "sync.max_envelope_skew_secs must be a non-negative integer",
             "for {bad}"
         );
     }

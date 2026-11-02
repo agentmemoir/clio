@@ -39,8 +39,13 @@ fn apply_guarded(
     denial: Option<&dyn ErasureDenial>,
     m: &SyncMutation,
 ) -> Result<ApplyResult, AmError> {
-    let engine =
-        crate::apply::apply_freshness::test_engine(store, store, "srv-1", None, &m.transaction_time);
+    let engine = crate::apply::apply_freshness::test_engine(
+        store,
+        store,
+        "srv-1",
+        None,
+        &m.transaction_time,
+    );
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     apply_mutation_guarded(&engine, denial, m, &envelope)
 }

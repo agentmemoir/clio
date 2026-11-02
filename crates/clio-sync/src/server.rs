@@ -102,6 +102,8 @@ pub struct SyncServerOptions {
     /// push whose apply overruns is still answered normally; the response write
     /// is bounded per call by the write slice, not by this deadline.
     pub deadline_secs: Option<u64>,
+    /// Freshness window in seconds either side of the local clock; `None` = default, `0` = off.
+    pub max_envelope_skew_secs: Option<u64>,
     /// This server's device id (LWW tie-breaker participant).
     pub device_id: String,
     /// The sync key this peer serves with, when it holds one. A sealed mutation
@@ -122,6 +124,8 @@ pub(crate) struct ServeOptions {
     pub(crate) credentials: Option<CredentialStore>,
     pub(crate) dev_mode: bool,
     pub(crate) deadline_secs: u64,
+    /// Freshness window for an applied push, in seconds; `0` disables it.
+    pub(crate) max_envelope_skew_secs: u64,
     pub(crate) device_id: String,
     /// The deployment's erasure-denial authority, when one is wired. `None`
     /// keeps every route at its pre-denial behavior.
@@ -244,6 +248,9 @@ fn serve(
             deadline_secs: options
                 .deadline_secs
                 .unwrap_or(DEFAULT_REQUEST_DEADLINE_SECS),
+            max_envelope_skew_secs: options
+                .max_envelope_skew_secs
+                .unwrap_or(crate::ENVELOPE_SKEW_DEFAULT_SECS),
             device_id: options.device_id,
             denial,
             sync_key: options.sync_key,

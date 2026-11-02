@@ -81,6 +81,7 @@ pub(crate) fn start_serve(
         allow_public_bind: state.sync_allow_public_bind(),
         ttl_secs,
         deadline_secs: None,
+        max_envelope_skew_secs: Some(state.sync_max_envelope_skew_secs()),
         device_id: state.device_id.clone(),
         sync_key: serve_sync_key(env)?,
     };

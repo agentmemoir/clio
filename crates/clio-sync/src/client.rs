@@ -415,6 +415,9 @@ mod client_bank_guard_tests;
 #[path = "client_envelope_tests.rs"]
 mod client_envelope_tests;
 #[cfg(test)]
+#[path = "client_freshness_tests.rs"]
+mod client_freshness_tests;
+#[cfg(test)]
 #[path = "client_plain_policy_tests.rs"]
 mod client_plain_policy_tests;
 #[cfg(test)]
