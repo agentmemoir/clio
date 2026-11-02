@@ -66,12 +66,14 @@ fn assert_minted_shape(id: &str) {
     let body = id.strip_prefix(PREFIX).expect("a device- prefix");
     assert!(
         !body.is_empty(),
-        "the minted body must not be empty: {id:?}"
+        "the minted body must not be empty ({} chars)",
+        body.len()
     );
     assert!(
         body.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
-        "the minted body must be url-safe: {id:?}"
+        "the minted body must be url-safe ({} chars)",
+        body.len()
     );
 }
 

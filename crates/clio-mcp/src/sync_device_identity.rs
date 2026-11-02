@@ -81,12 +81,24 @@ pub(crate) fn resolve_from_env(ops: &dyn OpsStore, ephemeral: bool) -> Result<St
     resolve(ops, ephemeral, named.as_deref())
 }
 
-/// One fresh id: the prefix plus a URL-safe random secret.
+/// One fresh id: the prefix plus a URL-safe random body.
 ///
-/// The secret is the same generator the token store mints credentials with, so
-/// the alphabet is base64url and the id stays opaque everywhere else.
+/// The body is 32 bytes from the process CSPRNG, written as lowercase hex. An id
+/// is an opaque public identifier that keys a row, not a credential, so it is
+/// minted here rather than by the token store's credential generator; a
+/// credential-classified source would taint every diagnostic that prints a value
+/// derived from it. Hex is a subset of the base64url alphabet the id already
+/// used, so stored values and the shape tests read stay valid.
 fn mint() -> String {
-    format!("{PREFIX}{}", clio_config::auth_tokens::generate_secret())
+    use rand::RngCore as _;
+    use std::fmt::Write as _;
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    let mut body = String::with_capacity(bytes.len() * 2);
+    for byte in &bytes {
+        let _ = write!(body, "{byte:02x}");
+    }
+    format!("{PREFIX}{body}")
 }
 
 /// The per-process id an ephemeral store keeps, unchanged from before the
