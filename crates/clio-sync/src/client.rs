@@ -23,9 +23,8 @@
 //!
 //! ## Boundary
 //!
-//! Changes to client modes, cursor policy, or the status shape should normally
-//! require changes here. Changes to apply semantics should not require changes
-//! here.
+//! Changes to client modes, cursor policy, or the status shape normally require
+//! changes here; changes to apply semantics should not.
 //!
 //! Keep this module focused on the sync client.
 
@@ -56,9 +55,11 @@ pub struct SyncClientConfig {
     /// Bearer token for the remote (masked on status).
     pub token: Option<String>,
     /// Optional client-side encryption keys, newest first: content leaves the
-    /// node sealed with the newest key and the server stores opaque bytes.
-    /// An empty list means encryption off.
+    /// node sealed with the newest key and the server stores opaque bytes. An
+    /// empty list is not encryption off: export is refused (see the flag below).
     pub cipher: Vec<crate::crypto::SyncCipherKey>,
+    /// Local development and tests only: without it a node with no key refuses export.
+    pub allow_plaintext: bool,
 }
 
 /// One sync operation mode.
@@ -368,11 +369,10 @@ fn decrypt_for_apply(
              tool, passing its mutation id with confirm",
         );
     };
-    // A row stamped with an identifier none of the held keys produce was
-    // written by a key this node does not hold. Refusing before any open
-    // attempt is what makes the reason name the missing key instead of a
-    // generic open failure. Both the stamped and the held values are derived
-    // and non-reversible; neither is ever a key or a prefix of one.
+    // A row stamped with an identifier none of the held keys produce was written
+    // by a key this node does not hold. Refusing before any open attempt makes the
+    // reason name the missing key, not a generic open failure; both values are
+    // derived and non-reversible, and neither is ever a key or a prefix of one.
     let Some(key) = cfg.cipher.iter().find(|k| k.key_id() == *stamped) else {
         return refuse(&m.bank, &missing_key_reason(stamped, &held));
     };

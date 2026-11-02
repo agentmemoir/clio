@@ -40,8 +40,8 @@ use crate::protocol::{
 };
 use clio_store::AssocEdgeRecord;
 use clio_types::{
-    AmError, BeliefObject, FailureRecord, MemoryItem, PersonaPreference, PersonaStableEntry,
-    TaskRecord,
+    AmError, BeliefObject, ErrorCode, FailureRecord, MemoryItem, PersonaPreference,
+    PersonaStableEntry, TaskRecord,
 };
 use serde_json::Value;
 
@@ -147,8 +147,7 @@ pub(crate) fn triple_mutation(
 /// Package one task version as a `task` upsert: the carrier item plus the
 /// structured record. The real identifier is the task id and the idempotency
 /// key is `(task_id, record id, upsert)`, so every version is distinct and
-/// replays stably. The wire `entity_id` is that same task id in plaintext mode
-/// and an opaque handle of it when a cipher is configured.
+/// replays stably; the wire `entity_id` is that task id, else a handle of it.
 pub(crate) fn task_mutation(
     cfg: &SyncClientConfig,
     bank: &str,
@@ -265,11 +264,10 @@ pub(crate) fn belief_mutation(
 }
 
 /// Shared packaging for domain-record mutations: plaintext logical content,
-/// stable idempotency key on `(entity, change stamp, op)`, bank-scoped. The
-/// real identifier is the persona attr key (payload `entry.key`) or the belief
-/// id (payload `id`); the wire `entity_id` is a handle of it for the persona
-/// kinds and the identifier itself for `belief`, whose ids are machine
-/// generated.
+/// stable idempotency key on `(entity, change stamp, op)`, bank-scoped. The real
+/// identifier is the persona attr key (payload `entry.key`) or the belief id
+/// (payload `id`); the wire `entity_id` is a handle of it for the persona kinds
+/// and itself for `belief`, whose ids are machine generated.
 fn record_mutation(
     cfg: &SyncClientConfig,
     bank: &str,
@@ -326,33 +324,37 @@ fn content_for(
     content: &Value,
     aad: &[u8],
 ) -> Result<SyncContent, AmError> {
-    // The newest key is the first entry. An empty list means encryption off,
-    // which is what every existing deployment has today, so content goes out
-    // as `Plain` and `seal` is never called.
+    // The newest key is the first entry. An empty list means the node holds no
+    // key, and memory is never exported unencrypted, so export is refused below
+    // unless the explicit local-development flag is set.
     let Some(key) = cfg.cipher.first() else {
-        return Ok(SyncContent::Plain(content.clone()));
+        if cfg.allow_plaintext {
+            return Ok(SyncContent::Plain(content.clone()));
+        }
+        return Err(AmError::new(
+            ErrorCode::ConfigCorrupt,
+            "sync export is refused: this node holds no sync key, and memory is never \
+             exported without client-side encryption — run `clio sync keygen` to record \
+             one; `allow_plaintext` is for local development and tests only",
+        ));
     };
     // Serializing a `serde_json::Value` cannot fail.
     let bytes = serde_json::to_vec(content).expect("serialize sync content");
     Ok(SyncContent::Cipher(key.seal(&bytes, aad)?))
 }
 
-/// Key of the origin admission receipt inside a sealed content document.
-///
-/// The receipt rides inside the ciphertext when a cipher is configured, so a
-/// relay holding the journal never reads the score. The name is namespaced so
-/// it cannot collide with a field of the record sharing the document.
+/// Key of the origin admission receipt inside a sealed content document: the
+/// receipt rides inside the ciphertext when a cipher is configured, so a relay
+/// holding the journal never reads the score. The name is namespaced so it
+/// cannot collide with a field of the record sharing the document.
 pub(crate) const ADMISSION_RECEIPT_KEY: &str = "clio_admission_receipt";
 
-/// Package one record for the wire: the content to send and the receipt that
-/// travels beside it.
-///
-/// With a cipher configured the receipt is written into the sealed document
-/// under `ADMISSION_RECEIPT_KEY` and the wire receipt is `None`, so the relay
-/// learns no score. Without one the document is the record alone and the
-/// receipt stays on the wire, byte for byte what a plaintext deployment has
-/// always sent. The content digest is computed by the caller over the record
-/// and not over this envelope, so it is unchanged in both modes.
+/// Package one record for the wire: the content to send and the receipt beside
+/// it. With a cipher the receipt is written into the sealed document under
+/// `ADMISSION_RECEIPT_KEY` and the wire receipt is `None`, so the relay learns
+/// no score; a plaintext development document is the record alone, with the
+/// receipt on the wire. The content digest is computed by the caller over the
+/// record and not over this envelope, so it is unchanged in both modes.
 fn content_and_receipt(
     cfg: &SyncClientConfig,
     plain: &Value,
@@ -402,12 +404,10 @@ fn finish_mutation(
 }
 
 /// The wire identifier for one record: the opaque handle when a cipher is
-/// configured and the kind carries caller-chosen text, and the real identifier
-/// otherwise.
-///
-/// `real_id` is what the mutation id is derived from in every case, and it
-/// stays inside the sealed payload either way, so the receiving side can read
-/// it back after opening the content.
+/// configured and the kind carries caller-chosen text, the real identifier
+/// otherwise. `real_id` is what the mutation id is derived from in every case,
+/// and it stays inside the sealed payload either way, so the receiving side can
+/// read it back after opening the content.
 fn wire_entity_id(cfg: &SyncClientConfig, kind: &str, bank: &str, real_id: &str) -> String {
     if !crate::keyed_roles::kind_uses_handle(kind) {
         return real_id.to_owned();

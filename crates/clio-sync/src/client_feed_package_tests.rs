@@ -9,8 +9,9 @@
 //! sealed it.
 //!
 //! ## Owns
-//! - The tests for `content_for`: the empty-list (encryption off) case and
-//!   the sealed case naming the key that sealed
+//! - The tests for `content_for`: the keyless refusal, the explicit
+//!   local-development plaintext mode, and the sealed case naming the key that
+//!   sealed
 //!
 //! ## Does not own
 //! - Seal/open correctness and nonce behaviour (`crypto_tests`)
@@ -35,18 +36,58 @@ use crate::client::client_tests::{cfg, sqlite};
 use crate::client_feed::package::content_for;
 use crate::crypto::SyncCipherKey;
 use crate::protocol::SyncContent;
+use clio_types::ErrorCode;
 
-/// An empty key list means encryption off: the content leaves as `Plain`,
-/// byte-identical, and no cipher is sealed.
+/// A node that holds no sync key refuses the export instead of putting memory on
+/// the wire unsealed. The refusal is a configuration error that names the
+/// missing key, the remedy, and the flag that exists only for development.
 #[test]
-fn an_empty_list_leaves_content_plain() {
+fn a_node_with_no_key_refuses_the_export() {
     let store = sqlite();
-    let cfg = cfg("feed-plain", &store, "127.0.0.1:1", Vec::new());
+    let cfg = cfg("feed-keyless", &store, "127.0.0.1:1", Vec::new());
+    let content = json!({ "gist": "content that must not leave unsealed", "n": 1 });
+    let err = content_for(&cfg, &content, TEST_AAD).expect_err("a keyless export is refused");
+    assert_eq!(
+        err.code,
+        ErrorCode::ConfigCorrupt,
+        "the refusal is reported as a configuration error: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("no sync key"),
+        "the message names the missing key: {}",
+        err.message
+    );
+    assert!(
+        err.message
+            .contains("never exported without client-side encryption"),
+        "the message states memory is never sent unencrypted: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("clio sync keygen"),
+        "the message names the remedy: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("allow_plaintext"),
+        "the message names the development-only flag: {}",
+        err.message
+    );
+}
+
+/// The explicit local-development flag keeps the plaintext mode: the content
+/// leaves as `Plain`, byte-identical, and no cipher is sealed.
+#[test]
+fn the_development_flag_leaves_content_plain() {
+    let store = sqlite();
+    let mut cfg = cfg("feed-plain", &store, "127.0.0.1:1", Vec::new());
+    cfg.allow_plaintext = true;
     let content = json!({ "gist": "plain content", "n": 1 });
     let got = content_for(&cfg, &content, TEST_AAD).expect("package");
     match got {
         SyncContent::Plain(value) => assert_eq!(value, content, "plain content is carried as is"),
-        SyncContent::Cipher(_) => panic!("an empty key list must not seal"),
+        SyncContent::Cipher(_) => panic!("the development mode must not seal"),
     }
 }
 

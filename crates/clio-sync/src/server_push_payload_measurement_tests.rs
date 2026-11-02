@@ -173,7 +173,9 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
             .expect("failure");
     }
 
-    // Package each kind's page exactly as `push_bank` packages it.
+    // Package each kind's page exactly as `push_bank` packages it, in the
+    // explicit local-development plaintext mode: this measures the record
+    // payload, not the envelope.
     let cfg = SyncClientConfig {
         device_id: "dev-a".into(),
         store: store.clone(),
@@ -181,6 +183,7 @@ fn page_full_push_payload_fits_inside_the_body_cap() {
         remote: None,
         token: None,
         cipher: Vec::new(),
+        allow_plaintext: true,
     };
     let page = crate::PULL_PAGE_LIMIT;
     let since = |kind: &str| kind_watermark(&cfg, bank, kind).expect("watermark");

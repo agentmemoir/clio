@@ -79,6 +79,7 @@ pub(crate) fn cfg(
         remote: Some(addr.to_owned()),
         token: Some(TOKEN.to_owned()),
         cipher,
+        allow_plaintext: false,
     }
 }
 

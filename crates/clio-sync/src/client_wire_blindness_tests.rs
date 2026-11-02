@@ -260,36 +260,51 @@ fn a_guessed_identifier_confirms_nothing_against_the_stored_idempotency_key() {
     server.stop();
 }
 
-/// With no cipher configured the stored idempotency key is the unkeyed hash of
-/// the real identifier a plaintext deployment has always stored, so every
-/// existing redelivery check against a stored row still matches.
+/// A node in the explicit local-development plaintext mode derives the unkeyed
+/// idempotency key a plaintext deployment has always stored, so every existing
+/// redelivery check against a stored row still matches. The relay refuses
+/// plaintext content, so each such row reaches the relay's dead-letter journal
+/// instead of its sync journal, and the id recorded there is that unkeyed key.
 #[test]
 fn plaintext_mode_stores_the_plain_idempotency_key() {
     let (server, srv, _kms) = serve(&["bp"]);
     let addr = server.addr().to_owned();
     let a = sqlite();
-    let cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    let mut cfg_a = cfg("dev-a", &a, &addr, Vec::new());
+    cfg_a.allow_plaintext = true;
     seed_persona(&a, "bp");
     push(&cfg_a, &["bp".to_owned()]).expect("push");
 
-    let rows = srv.journal_list_since("bp", 0, 50).expect("server journal");
-    for row in rows.iter().filter(|r| r.entity_kind == "persona") {
-        let key_is_attr = row.sync_mutation_id
+    let refused = srv
+        .dead_letter_list("bp", clio_store::DeadLetterStatus::Open, 50)
+        .expect("relay dead letters");
+    let mut persona = 0;
+    for row in &refused {
+        let wire: SyncMutation = serde_json::from_str(&row.envelope_json).expect("envelope");
+        if wire.entity_kind != "persona" {
+            continue;
+        }
+        persona += 1;
+        let key_is_attr = wire.sync_mutation_id
             == clio_store::sha256_hex(
                 b"am-sync-mut",
-                &format!("{}|{}|upsert", row.entity_id, row.transaction_time),
+                &format!("{}|{}|upsert", wire.entity_id, wire.transaction_time),
             );
-        let key_is_pref = row.sync_mutation_id
+        let key_is_pref = wire.sync_mutation_id
             == clio_store::sha256_hex(
                 b"am-sync-mut",
-                &format!("{}|{}|upsert", PREF_NAME, row.transaction_time),
+                &format!("{}|{}|upsert", PREF_NAME, wire.transaction_time),
             );
         assert!(
             key_is_attr || key_is_pref,
-            "plaintext mode stores the unkeyed hash of the real identifier: {}",
-            row.sync_mutation_id
+            "plaintext mode records the unkeyed hash of the real identifier: {}",
+            wire.sync_mutation_id
         );
     }
+    assert_eq!(
+        persona, 2,
+        "both persona shapes reach the relay and are refused there"
+    );
     server.stop();
 }
 

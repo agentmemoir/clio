@@ -269,8 +269,8 @@ pub fn sync_serve_with(
 }
 
 /// Build the clio-sync client config from MCP state and the caller's endpoint
-/// and token, with no encryption keys: each caller sets `cipher` from its own
-/// source.
+/// and token, with no encryption keys and no plaintext export: each caller sets
+/// `cipher` from its own source.
 pub(crate) fn client_cfg(
     state: &McpState,
     remote: Option<&str>,
@@ -283,6 +283,7 @@ pub(crate) fn client_cfg(
         remote: remote.map(str::to_owned),
         token: token.map(str::to_owned),
         cipher: Vec::new(),
+        allow_plaintext: false,
     }
 }
 
