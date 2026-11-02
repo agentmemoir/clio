@@ -64,3 +64,7 @@ pub(crate) fn journal_seq_probe(
         .am("sync journal dedupe probe")?;
     Ok(found.map(|row| row.get(0)))
 }
+
+#[cfg(test)]
+#[path = "postgres_sync_journal_locks_tests.rs"]
+mod postgres_sync_journal_locks_tests;
