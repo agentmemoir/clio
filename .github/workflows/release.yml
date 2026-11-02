@@ -1,9 +1,9 @@
-# Release: build the four shipped targets, checksum them, attach them to a
+# Release: build the three shipped targets, checksum them, attach them to a
 # GitHub release, and publish the installer beside them.
 #
 # Deliberately not `cargo dist`. That tool would also generate a Homebrew
 # formula and an npm package, and the decision for this project is a single
-# install command. Four build lines and one release job are the whole thing.
+# install command. Three build lines and one release job are the whole thing.
 #
 # Every target builds on a runner of its own architecture, so nothing is
 # cross-compiled: a cross build of this dependency tree still needs a C cross
@@ -46,7 +46,7 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -76,7 +76,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
-      # One failure should not cancel the other three: a partial set of assets
+      # One failure should not cancel the other two: a partial set of assets
       # is still worth having on hand when diagnosing a platform-specific
       # build break, and the release job refuses to publish an incomplete set.
       fail-fast: false
@@ -85,9 +85,6 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-15
             asset: clio-aarch64-apple-darwin
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-            asset: clio-x86_64-apple-darwin
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             asset: clio-x86_64-unknown-linux-musl
@@ -103,14 +100,14 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # Same pin as CI. A release should be built by the compiler the tree was
       # linted and tested with, not by whatever `stable` happens to be that day.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
@@ -208,7 +205,7 @@ jobs:
           rm -rf dist/clio-${{ matrix.target }}
 
       - name: Upload the archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}.tar.gz
@@ -230,12 +227,12 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Download every archive
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           pattern: clio-*
@@ -261,7 +258,6 @@ jobs:
         run: |
           for asset in \
             clio-aarch64-apple-darwin \
-            clio-x86_64-apple-darwin \
             clio-x86_64-unknown-linux-musl \
             clio-aarch64-unknown-linux-musl
           do

@@ -107,7 +107,7 @@ jobs:
       # the runner treats the missing base as "measure everything", and the job
       # silently turns back into the full-workspace gate this file exists to
       # avoid. This is the one checkout setting the scoped gate depends on.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -143,7 +143,7 @@ jobs:
       # and a second project found the opposite. Setting both removes the
       # question. The step after this one fails the job if the two ever drift.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy, llvm-tools-preview
@@ -393,7 +393,7 @@ jobs:
           sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs /dev/shm
           echo "TMPDIR=/mnt/noexec" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -412,7 +412,7 @@ jobs:
       # The same pin the other jobs use. Two jobs on different compilers would
       # give two different answers about the same tree.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy, llvm-tools-preview
@@ -469,7 +469,7 @@ jobs:
           && steps.scoped_coverage.outcome != 'skipped'
           && (hashFiles('target/nextest/ci/junit.xml') != ''
           || hashFiles('target/coverage/coverage-scoped.json') != '')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nextest-junit
           path: target/nextest/ci/junit.xml
@@ -496,7 +496,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -550,7 +550,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -560,7 +560,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin dbus-session-bus-common gnome-keyring
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: 1.99.0
 

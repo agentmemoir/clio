@@ -1,0 +1,29 @@
+# Note: Python/uv package-ecosystem is intentionally omitted because clio scripts use only the Python standard library with no pyproject.toml, uv.lock, or requirements.txt.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      tls:
+        patterns:
+          - "postgres_rustls"
+          - "rustls"
+          - "tokio-rustls"
+          - "webpki-roots"
+      sqlite:
+        patterns:
+          - "rusqlite"
+          - "sqlite-vec"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
