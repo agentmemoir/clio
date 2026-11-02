@@ -3,8 +3,8 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for unit-testing the `keyring` wrapper: that a
-//! missing entry reads as "no key" rather than a failure, that a locked or
+//! This module is responsible for unit-testing the `keyring_core` wrapper: that
+//! a missing entry reads as "no key" rather than a failure, that a locked or
 //! broken store becomes a Clio error naming the store, and that nothing the
 //! store holds reaches a message.
 //!
@@ -20,10 +20,10 @@
 //!
 //! ## Boundary
 //!
-//! These tests drive the production [`KeyringStore`] through keyring's own
-//! `Entry`, over an in-memory credential, so no OS store is reached. The one
-//! function with no test is `os_entry`, and it is the only code that names the
-//! real Keychain.
+//! These tests drive the production [`KeyringStore`] through a `keyring_core`
+//! entry over an in-memory credential, so no OS store is reached. The functions
+//! with no test are `os_entry` and `install_platform_store`, and they are the
+//! only code that names the real Keychain.
 //!
 //! Keep this module focused on the wrapper's entry lifecycle.
 

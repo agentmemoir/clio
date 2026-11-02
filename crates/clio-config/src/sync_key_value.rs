@@ -38,7 +38,7 @@ use crate::secret_key_source::KeySource;
 
 /// The keystore attribute that holds the sync key's creation time.
 ///
-/// A non-secret name the `keyring` backends treat differently: the Linux Secret Service stores it, the macOS Keychain reports the write as unsupported, and the Windows Credential Manager keeps only its own four names — `target_name`, `target_alias`, `username`, and `comment` — and refuses any other as invalid.
+/// A non-secret name the platform stores treat differently: the Linux Secret Service stores it, the macOS Keychain reports the write as unsupported, and the Windows Credential Manager keeps only its own four names — `target_name`, `target_alias`, `username`, and `comment` — and refuses any other as invalid.
 /// The caller always reads it back before reporting it, so a store that keeps none reports an unavailable time instead of inventing one.
 pub(crate) const CREATED_ATTRIBUTE: &str = "created_at";
 

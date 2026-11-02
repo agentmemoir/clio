@@ -39,7 +39,7 @@ use crate::secret_key_store::{ACCOUNT, ENCRYPTION_KEY, KeyringStore};
 /// One `keyring_core` entry over an in-memory credential.
 ///
 /// The wrapper the tests drive is built on `keyring_core::Entry`, so the
-/// factory hands back that type rather than the facade's thin wrapper.
+/// factory hands back that type rather than a facade's thin wrapper.
 pub(crate) fn entry_over<C>(credential: C) -> keyring_core::Entry
 where
     C: CredentialApi + Send + Sync + 'static,

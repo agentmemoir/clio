@@ -22,10 +22,9 @@ base64 = { workspace = true }
 # The one AEAD this project uses: content, the secret envelope, and the key store
 # are all sealed with it, so there is no second algorithm to argue about.
 chacha20poly1305 = { workspace = true }
-keyring = { workspace = true }
-# The entry type and the credential trait this crate implements and injects:
-# keyring 4's facade only re-exports a thin `Entry`, so the full client API and
-# the error type come from here.
+# The entry type, the credential trait, and the error type every store below is
+# reached through. The platform store itself is installed once at startup by
+# `secret_key_store`, from whichever target-scoped crate applies.
 keyring-core = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
@@ -33,6 +32,17 @@ serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
+
+# One platform store per target, each gated to the target that has it, so no
+# build compiles a backend it cannot run.
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = { workspace = true }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+dbus-secret-service-keyring-store = { workspace = true }
 
 [lints]
 workspace = true

@@ -4,7 +4,7 @@
 //! # Responsibility
 //!
 //! This module is responsible for unit-testing the named attributes of the
-//! `keyring` wrapper and the account separation between the two key roles.
+//! `keyring_core` wrapper and the account separation between the two key roles.
 //!
 //! ## Owns
 //! - The attribute read/write tests, including the store that ignores them

@@ -1,1 +1,1 @@
-Clio now reads and writes the OS secret store through keyring 4.2, which drops the OpenSSL and libdbus build dependencies on Linux; the keystore keeps the same entries, the same messages, and the same fallback to a key file.
+Clio now reaches the OS secret store through the keyring 4.x store crates instead of the `keyring` facade: the macOS Keychain, the Windows Credential Manager, and on Linux the Secret Service over a vendored libdbus, so the Linux build links no OpenSSL; the keystore keeps the same entries, the same messages, and the same fallback to a key file.
