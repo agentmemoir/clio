@@ -214,7 +214,7 @@ pub(crate) const SHARED_RETRIEVE: CommandSpec = CommandSpec {
     section: Section::Read,
 };
 
-/// `clio shared discard`: preview without `--confirm`, remove with it.
+/// `clio shared discard`: refuses without `--confirm`, removes with it.
 pub(crate) const SHARED_DISCARD: CommandSpec = CommandSpec {
     name: "shared discard",
     aliases: &[],
@@ -223,7 +223,7 @@ pub(crate) const SHARED_DISCARD: CommandSpec = CommandSpec {
     positionals: &[DISCARD_ITEM_ID],
     documented: &[
         REASON_REQUIRED,
-        Flag::toggle("confirm", "`shared_discard` previews without it."),
+        Flag::toggle("confirm", "`shared_discard` refuses without it."),
         SHARED_ACTOR_REQUIRED,
         SHARED_BANK_REQUIRED,
         GLOBAL_OUTPUT,
@@ -235,7 +235,7 @@ pub(crate) const SHARED_DISCARD: CommandSpec = CommandSpec {
     examples: &[
         Example {
             command: "clio shared discard itm-sample-1 --reason stale --actor agent --shared-bank --db ./memory.db",
-            comment: Some("preview"),
+            comment: Some("refused without --confirm"),
         },
         Example {
             command: "clio shared discard itm-sample-1 --reason stale --confirm --actor agent --shared-bank",

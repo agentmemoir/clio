@@ -205,7 +205,7 @@ fn shared_store_requires_explicit_actor_attribution() {
 }
 
 #[test]
-fn shared_discard_previews_without_confirm_then_discards() {
+fn shared_discard_refuses_without_confirm_then_discards() {
     let s = shared_state();
     let (code, out, err) = run_write_state(
         "shared store",
@@ -224,7 +224,7 @@ fn shared_discard_previews_without_confirm_then_discards() {
     );
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     let id = json_of(&out)["id"].as_str().expect("stored id").to_owned();
-    // Preview: no writes, the item stays retrievable.
+    // No --confirm: the confirm gate refuses and writes nothing.
     let (code, out, err) = run_write_state(
         "shared discard",
         &[
@@ -238,14 +238,12 @@ fn shared_discard_previews_without_confirm_then_discards() {
         &s,
         true,
     );
-    assert_eq!(code, ExitCode::SUCCESS, "{err}");
-    assert!(
-        out.contains(&format!("preview: would discard {id} (pass --confirm)")),
-        "{out}"
-    );
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("destructive"), "{err}");
+    assert!(err.contains("--confirm"), "{err}");
     assert!(
         s.store.get_memory_item("shared", &id).unwrap().is_some(),
-        "preview must not remove the item"
+        "the refusal must not remove the item"
     );
     // Confirmed: the tool removes it from active use.
     let (code, out, err) = run_write_state(

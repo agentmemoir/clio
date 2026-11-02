@@ -139,8 +139,8 @@ fn shared_retrieve_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     })
 }
 
-/// `shared discard ITEM_ID --reason R [--confirm] --shared-bank` →
-/// `shared_discard`: without `--confirm` the tool previews with zero writes.
+/// `shared discard ITEM_ID --reason R --confirm --shared-bank` →
+/// `shared_discard`: the confirm gate refuses without `--confirm`/`--yes`.
 fn shared_discard_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     let item_id = one_positional(parsed, "shared discard", "ITEM_ID")?;
     let reason = parsed.value("reason").ok_or_else(|| {
@@ -149,12 +149,11 @@ fn shared_discard_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             "try `clio shared discard <ITEM_ID> --reason retired --confirm --actor agent --shared-bank`",
         )
     })?;
+    crate::cli_confirm::require_confirm("shared discard", parsed)?;
     let mut args = base_args(parsed);
     args.insert("item_id".into(), Value::from(item_id));
     args.insert("reason".into(), Value::from(reason));
-    if parsed.has("confirm") {
-        args.insert("confirm".into(), Value::Bool(true));
-    }
+    args.insert("confirm".into(), Value::Bool(true));
     Ok(WriteCall::Tool {
         tool: "shared_discard",
         args: Value::Object(args),
