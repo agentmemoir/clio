@@ -4,12 +4,13 @@
 //! # Responsibility
 //!
 //! This module is responsible for the pure age test over an envelope's
-//! authenticated `transaction_time`: the stamp reader and the freshness window
-//! that says whether a mutation is recent enough to apply.
+//! authenticated `transaction_time`: the stamp reader and the freshness bounds
+//! that say whether a mutation is recent enough to apply.
 //!
 //! ## Owns
 //! - `parse_utc_secs`: the fixed-shape `YYYY-MM-DDTHH:MM:SSZ` stamp reader
-//! - `FreshnessPolicy`: the window value, its default, and a disabled form
+//! - `FreshnessPolicy`: the two one-sided bounds, their defaults, and a
+//!   disabled form
 //! - `Freshness`: the three-way classification (`Fresh`, `Stale`, `Future`)
 //!
 //! ## Does not own
@@ -17,24 +18,34 @@
 //! - Applying or rejecting a mutation, and any durable effect of a rejection
 //!   (see `apply`)
 //! - Ordering between mutations (see `protocol` LWW)
-//! - Where the window value is configured (see the caller's config type)
+//! - Where the bounds are configured (see the caller's config type)
 //!
 //! ## Boundary
 //!
 //! Changes to what counts as a well-formed stamp, or to the meaning of the
-//! window, should normally require changes here. Changes to what a caller does
+//! bounds, should normally require changes here. Changes to what a caller does
 //! with a `Stale` or `Future` answer should not.
 //!
 //! Keep this module pure: no clock reads, no storage, no error type.
 
 use clio_types::{days_from_civil, days_in_month};
 
-/// Default freshness window: seven days, in seconds.
+/// Default allowance for an old stamp: 900 seconds, fifteen minutes.
 ///
-/// This is a product choice, not a protocol constant. Seven days tolerates a
-/// relay that holds a batch during an outage and a device that syncs weekly,
+/// This is a product choice, not a protocol constant. The basis is AWS S3 REST
+/// authentication, which rejects a request whose timestamp is more than 15
+/// minutes from its own clock; 15 minutes is the loosest figure any consulted
+/// source states. It covers a relay that holds a batch during a short outage
 /// while still refusing a stamp old enough that the row would be a guess.
-pub const DEFAULT_FRESHNESS_WINDOW_SECS: i64 = 604_800;
+pub const DEFAULT_FRESHNESS_MAX_AGE_SECS: i64 = 900;
+
+/// Default allowance for a future-dated stamp: 60 seconds, one minute.
+///
+/// This is a product choice, not a protocol constant. A future stamp can only
+/// come from clock skew, and a client can pre-generate a stamp arbitrarily far
+/// ahead, so this side is sized to cover skew and nothing more. It is much
+/// smaller than the age side on purpose.
+pub const DEFAULT_FRESHNESS_MAX_FUTURE_SECS: i64 = 60;
 
 /// Length of the one accepted stamp shape, `YYYY-MM-DDTHH:MM:SSZ`.
 const STAMP_LEN: usize = 20;
@@ -100,32 +111,36 @@ fn digits(bytes: &[u8], start: usize, count: usize) -> Option<u32> {
     Some(value)
 }
 
-/// How an incoming stamp sits against the local clock, given a window.
+/// How an incoming stamp sits against the local clock, given two bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Freshness {
-    /// Inside the window in both directions.
+    /// Inside both bounds.
     Fresh,
-    /// Older than `now - window`.
+    /// Older than `now - max_age`.
     Stale,
-    /// Newer than `now + window`.
+    /// Newer than `now + max_future`.
     Future,
 }
 
-/// The age window applied to an incoming `transaction_time`.
+/// The age bounds applied to an incoming `transaction_time`.
 ///
-/// The test is symmetric because both ends are real failures: an old stamp can
-/// be a replay the journal never saw, and a far-future stamp means the writer's
-/// clock is wrong enough that the stamp cannot order anything.
+/// The test has two sides and they are not equal. An old stamp is rejected
+/// generously, because a relay may hold a batch for a while. A future-dated
+/// stamp is rejected tightly, because only clock skew explains one, and a
+/// writer can choose a far-future stamp on purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreshnessPolicy {
-    /// Half-width of the accepted band, in seconds, on each side of now.
-    pub window_secs: i64,
+    /// How old a stamp may be, in seconds.
+    pub max_age_secs: i64,
+    /// How far ahead of now a stamp may sit, in seconds.
+    pub max_future_secs: i64,
 }
 
 impl Default for FreshnessPolicy {
     fn default() -> Self {
         Self {
-            window_secs: DEFAULT_FRESHNESS_WINDOW_SECS,
+            max_age_secs: DEFAULT_FRESHNESS_MAX_AGE_SECS,
+            max_future_secs: DEFAULT_FRESHNESS_MAX_FUTURE_SECS,
         }
     }
 }
@@ -134,28 +149,32 @@ impl FreshnessPolicy {
     /// A policy with no age check. It answers `Fresh` for every stamp.
     #[must_use]
     pub fn disabled() -> Self {
-        Self { window_secs: 0 }
+        Self {
+            max_age_secs: 0,
+            max_future_secs: 0,
+        }
+    }
+
+    /// True when neither side can reject anything.
+    fn is_disabled(&self) -> bool {
+        self.max_age_secs <= 0 && self.max_future_secs <= 0
     }
 
     /// Classify an incoming stamp in epoch seconds against a supplied `now`.
     ///
-    /// Bounds are inclusive on both ends, so `now - window` and `now + window`
-    /// are `Fresh`. A window of zero or less disables the check. Arithmetic
-    /// saturates, so extreme inputs cannot overflow.
+    /// Bounds are inclusive on both ends, so `now - max_age` and `now +
+    /// max_future` are `Fresh`. A bound of zero or less disables only its own
+    /// side. Arithmetic saturates, so extreme inputs cannot overflow.
     #[must_use]
     pub fn classify(&self, incoming_secs: i64, now_secs: i64) -> Freshness {
-        if self.window_secs <= 0 {
-            return Freshness::Fresh;
+        if self.max_age_secs > 0 && incoming_secs < now_secs.saturating_sub(self.max_age_secs) {
+            return Freshness::Stale;
         }
-        let oldest = now_secs.saturating_sub(self.window_secs);
-        let newest = now_secs.saturating_add(self.window_secs);
-        if incoming_secs < oldest {
-            Freshness::Stale
-        } else if incoming_secs > newest {
-            Freshness::Future
-        } else {
-            Freshness::Fresh
+        if self.max_future_secs > 0 && incoming_secs > now_secs.saturating_add(self.max_future_secs)
+        {
+            return Freshness::Future;
         }
+        Freshness::Fresh
     }
 
     /// Classify a wire stamp as text.
@@ -166,7 +185,7 @@ impl FreshnessPolicy {
     /// way.
     #[must_use]
     pub fn classify_text(&self, transaction_time: &str, now_secs: i64) -> Freshness {
-        if self.window_secs <= 0 {
+        if self.is_disabled() {
             return Freshness::Fresh;
         }
         match parse_utc_secs(transaction_time) {

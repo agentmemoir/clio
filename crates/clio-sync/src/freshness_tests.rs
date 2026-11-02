@@ -4,7 +4,10 @@
 //! Tests for the pure freshness module. Every case supplies its own `now`, so
 //! nothing here reads a clock or depends on the host.
 
-use super::{DEFAULT_FRESHNESS_WINDOW_SECS, Freshness, FreshnessPolicy, parse_utc_secs};
+use super::{
+    DEFAULT_FRESHNESS_MAX_AGE_SECS, DEFAULT_FRESHNESS_MAX_FUTURE_SECS, Freshness, FreshnessPolicy,
+    parse_utc_secs,
+};
 
 /// One known stamp and its epoch second, from an independent calendar source.
 const KNOWN_STAMP: &str = "2026-01-01T00:00:00Z";
@@ -79,18 +82,18 @@ fn parse_rejects_non_digits_and_out_of_range_fields() {
 fn classify_is_fresh_at_the_old_boundary() {
     let policy = FreshnessPolicy::default();
     let now = 1_800_000_000;
-    let window = DEFAULT_FRESHNESS_WINDOW_SECS;
-    assert_eq!(policy.classify(now - window, now), Freshness::Fresh);
-    assert_eq!(policy.classify(now - window - 1, now), Freshness::Stale);
+    let age = DEFAULT_FRESHNESS_MAX_AGE_SECS;
+    assert_eq!(policy.classify(now - age, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now - age - 1, now), Freshness::Stale);
 }
 
 #[test]
-fn classify_is_fresh_at_the_new_boundary() {
+fn classify_is_fresh_at_the_future_boundary() {
     let policy = FreshnessPolicy::default();
     let now = 1_800_000_000;
-    let window = DEFAULT_FRESHNESS_WINDOW_SECS;
-    assert_eq!(policy.classify(now + window, now), Freshness::Fresh);
-    assert_eq!(policy.classify(now + window + 1, now), Freshness::Future);
+    let ahead = DEFAULT_FRESHNESS_MAX_FUTURE_SECS;
+    assert_eq!(policy.classify(now + ahead, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now + ahead + 1, now), Freshness::Future);
 }
 
 #[test]
@@ -98,6 +101,34 @@ fn classify_is_fresh_for_the_same_second() {
     let policy = FreshnessPolicy::default();
     let now = 1_800_000_000;
     assert_eq!(policy.classify(now, now), Freshness::Fresh);
+}
+
+#[test]
+fn zero_age_bound_disables_only_the_past_side() {
+    let policy = FreshnessPolicy {
+        max_age_secs: 0,
+        max_future_secs: 60,
+    };
+    let now = 1_800_000_000;
+    assert_eq!(policy.classify(i64::MIN, now), Freshness::Fresh, "very old");
+    assert_eq!(policy.classify(now + 60, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now + 61, now), Freshness::Future);
+}
+
+#[test]
+fn zero_future_bound_disables_only_the_future_side() {
+    let policy = FreshnessPolicy {
+        max_age_secs: 900,
+        max_future_secs: 0,
+    };
+    let now = 1_800_000_000;
+    assert_eq!(
+        policy.classify(i64::MAX, now),
+        Freshness::Fresh,
+        "far ahead"
+    );
+    assert_eq!(policy.classify(now - 900, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now - 901, now), Freshness::Stale);
 }
 
 #[test]
@@ -114,9 +145,33 @@ fn disabled_policy_is_always_fresh() {
 }
 
 #[test]
-fn default_policy_uses_the_seven_day_window() {
-    assert_eq!(FreshnessPolicy::default().window_secs, 604_800);
-    assert_eq!(DEFAULT_FRESHNESS_WINDOW_SECS, 604_800);
+fn disabled_policy_accepts_old_and_far_future_stamps() {
+    let policy = FreshnessPolicy::disabled();
+    let now: i64 = 1_800_000_000;
+    let century: i64 = 100 * 365 * 86_400;
+    let ancient = now - century;
+    let distant = now + century;
+    assert_eq!(policy.classify(ancient, now), Freshness::Fresh);
+    assert_eq!(policy.classify(distant, now), Freshness::Fresh);
+}
+
+#[test]
+fn default_policy_uses_the_two_product_bounds() {
+    let policy = FreshnessPolicy::default();
+    assert_eq!(policy.max_age_secs, 900);
+    assert_eq!(policy.max_future_secs, 60);
+    assert_eq!(DEFAULT_FRESHNESS_MAX_AGE_SECS, 900);
+    assert_eq!(DEFAULT_FRESHNESS_MAX_FUTURE_SECS, 60);
+}
+
+#[test]
+fn default_policy_rejects_just_outside_each_bound() {
+    let policy = FreshnessPolicy::default();
+    let now = 1_800_000_000;
+    assert_eq!(policy.classify(now - 901, now), Freshness::Stale);
+    assert_eq!(policy.classify(now - 899, now), Freshness::Fresh);
+    assert_eq!(policy.classify(now + 61, now), Freshness::Future);
+    assert_eq!(policy.classify(now + 59, now), Freshness::Fresh);
 }
 
 #[test]
@@ -131,24 +186,44 @@ fn classify_text_is_fresh_for_garbage() {
 #[test]
 fn classify_text_reads_a_stamp_at_each_boundary() {
     let policy = FreshnessPolicy::default();
-    let window = DEFAULT_FRESHNESS_WINDOW_SECS;
+    let age = DEFAULT_FRESHNESS_MAX_AGE_SECS;
+    let ahead = DEFAULT_FRESHNESS_MAX_FUTURE_SECS;
     // The known stamp is the epoch second KNOWN_SECS, so now is derived from it.
     assert_eq!(
         policy.classify_text(KNOWN_STAMP, KNOWN_SECS),
         Freshness::Fresh
     );
     assert_eq!(
-        policy.classify_text(KNOWN_STAMP, KNOWN_SECS + window),
+        policy.classify_text(KNOWN_STAMP, KNOWN_SECS + age),
         Freshness::Fresh,
         "exactly the old boundary"
     );
     assert_eq!(
-        policy.classify_text(KNOWN_STAMP, KNOWN_SECS + window + 1),
+        policy.classify_text(KNOWN_STAMP, KNOWN_SECS + age + 1),
         Freshness::Stale
     );
     assert_eq!(
-        policy.classify_text(KNOWN_STAMP, KNOWN_SECS - window - 1),
+        policy.classify_text(KNOWN_STAMP, KNOWN_SECS - ahead),
+        Freshness::Fresh,
+        "exactly the future boundary"
+    );
+    assert_eq!(
+        policy.classify_text(KNOWN_STAMP, KNOWN_SECS - ahead - 1),
         Freshness::Future
+    );
+}
+
+#[test]
+fn classify_text_keeps_garbage_fresh_when_one_side_is_off() {
+    let policy = FreshnessPolicy {
+        max_age_secs: 900,
+        max_future_secs: 0,
+    };
+    let now = 1_800_000_000;
+    assert_eq!(policy.classify_text("garbage", now), Freshness::Fresh);
+    assert_eq!(
+        policy.classify_text(KNOWN_STAMP, KNOWN_SECS + 901),
+        Freshness::Stale
     );
 }
 
@@ -164,14 +239,19 @@ fn extreme_values_do_not_panic() {
 }
 
 #[test]
-fn extreme_policy_windows_do_not_panic() {
+fn extreme_policy_bounds_do_not_panic() {
     let wide = FreshnessPolicy {
-        window_secs: i64::MAX,
+        max_age_secs: i64::MAX,
+        max_future_secs: i64::MAX,
     };
     let now = 0;
     assert_eq!(wide.classify(0, now), Freshness::Fresh);
     assert_eq!(wide.classify(i64::MAX, now), Freshness::Fresh);
 
-    let negative = FreshnessPolicy { window_secs: -1 };
+    let negative = FreshnessPolicy {
+        max_age_secs: -1,
+        max_future_secs: -1,
+    };
     assert_eq!(negative.classify(i64::MIN, i64::MAX), Freshness::Fresh);
+    assert_eq!(negative.classify(i64::MAX, i64::MIN), Freshness::Fresh);
 }
