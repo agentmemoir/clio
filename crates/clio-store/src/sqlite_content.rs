@@ -65,11 +65,7 @@ pub fn sqlite_content_digest(path: &Path) -> Result<String, AmError> {
         let shape = table_shape(&conn, &table)?;
         let sql = select_rows_from(&table, &order_clause(&shape));
         let mut statement = conn.prepare(&sql).am("prepare the content digest query")?;
-        let names: Vec<String> = statement
-            .column_names()
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
+        let names: Vec<String> = statement.column_names().map(str::to_owned).collect();
         let mut rows = statement.query([]).am("read rows for the content digest")?;
         while let Some(row) = rows.next().am("step the content digest query")? {
             for (index, name) in names.iter().enumerate() {
