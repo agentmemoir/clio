@@ -193,3 +193,7 @@ pub(crate) fn probe_once(url: &str) -> Result<DatabaseReport, Failure> {
         tls_cipher: row.get(4),
     })
 }
+
+#[cfg(test)]
+#[path = "pg_probe_tests.rs"]
+mod pg_probe_tests;

@@ -4,15 +4,13 @@
 //! # Responsibility
 //!
 //! This module is responsible for testing the store's connector against a
-//! running Postgres: which modes connect, which are refused, and what the setup
-//! probe reports.
+//! running Postgres: which modes connect, and which are refused.
 //!
 //! ## Owns
 //! - `disable` and `prefer` reaching a server that offers no TLS
 //! - `verify-full` and `encrypt-no-verify` being refused by such a server, and
 //!   not retried
-//! - The probe's version, `vector`, and transport report, including a database
-//!   without the extension
+//! - A database without `vector` reporting a value rather than an error
 //! - The failures that must not be retried, and the error text one produces
 //!
 //! The shared server uses trust authentication and has no password, so no test
@@ -23,6 +21,7 @@
 //!
 //! ## Does not own
 //! - Reading a connection string (`pg_tls_tests` owns that)
+//! - The probe's report against a healthy server (`pg_probe_tests` owns that)
 //! - Store schema or query behavior
 //! - The shared test-database guard (`pg_lock` owns it)
 //!
@@ -31,27 +30,14 @@
 //! Changes to the connector decision or the probe should normally require
 //! changes here. Changes to the parse should not require changes here.
 
-use crate::db_url::{postgres_url_from_env, with_database};
+use crate::db_url::postgres_url_from_env;
+use crate::pg_fixtures::{ScratchDatabase, url_for_database, url_with_query};
 use crate::pg_lock::lock_pg_test;
 use crate::pg_probe::{
     PROBE_ATTEMPTS, PROBE_RETRY_DELAY, probe, probe_once, probe_within, retry_until_ready,
 };
 use crate::pg_tls::connect;
 use std::time::Duration;
-
-/// The shared URL's server, port, and credentials with `query` as the whole
-/// query string, so the database path is not doubled.
-fn url_with_query(query: &str) -> String {
-    let base = postgres_url_from_env();
-    let path = base.split_once('?').map_or(base.as_str(), |(p, _)| p);
-    let server = path.rsplit_once('/').map_or(path, |(s, _)| s);
-    format!("{server}?{query}")
-}
-
-/// The shared URL pointed at a different database on the same server.
-fn url_for_database(name: &str) -> String {
-    with_database(&postgres_url_from_env(), name)
-}
 
 #[test]
 fn disable_and_prefer_both_reach_a_plain_server() {
@@ -156,72 +142,6 @@ fn a_missing_host_is_a_configuration_failure_and_is_not_retried() {
     assert!(reason.contains("invalid configuration"), "{reason}");
     assert!(reason.contains("missing"), "{reason}");
     assert_eq!(report.made, 1, "a bad address must not be retried");
-}
-
-#[test]
-fn the_probe_reports_the_version_and_the_extension() {
-    let _guard = lock_pg_test();
-    let report = probe(&postgres_url_from_env()).expect("the shared database is up");
-    assert!(
-        !report.server_version.is_empty(),
-        "{:?}",
-        report.server_version
-    );
-    let major: u32 = report
-        .server_version
-        .split('.')
-        .next()
-        .and_then(|part| part.parse().ok())
-        .unwrap_or_else(|| panic!("unreadable version {:?}", report.server_version));
-    assert!(major >= 14, "unexpected server version {major}");
-    assert!(report.has_vector, "the compose database installs pgvector");
-    // The version and cipher are present exactly when the connection is
-    // encrypted, so a report cannot claim one half of the TLS answer.
-    assert_eq!(
-        report.tls_version.is_some(),
-        report.tls,
-        "the TLS version is reported exactly when the connection is encrypted"
-    );
-    assert_eq!(
-        report.tls_cipher.is_some(),
-        report.tls,
-        "the cipher is reported exactly when the connection is encrypted"
-    );
-}
-
-/// A database created for one test, dropped when the test ends — including when
-/// it ends in a panic.
-///
-/// A test that creates something and only removes it on the happy path leaves
-/// that thing behind for every later run, and the failure that does it is exactly
-/// the failure a developer most needs a clean machine to investigate.
-struct ScratchDatabase {
-    name: String,
-}
-
-impl ScratchDatabase {
-    /// Create a database named after this test run, after clearing any leftover
-    /// from a previous run that did not clean up.
-    fn create(admin: &mut postgres::Client, label: &str) -> Self {
-        let name = format!("clio_probe_{label}_{}", std::process::id());
-        admin
-            .batch_execute(&format!("DROP DATABASE IF EXISTS {name}"))
-            .expect("drop a leftover scratch database");
-        admin
-            .batch_execute(&format!("CREATE DATABASE {name}"))
-            .expect("create a scratch database");
-        Self { name }
-    }
-}
-
-impl Drop for ScratchDatabase {
-    fn drop(&mut self) {
-        // A fresh admin connection: the one the test used may be the very client
-        // still holding the scratch database open.
-        if let Ok(mut admin) = connect(&postgres_url_from_env()) {
-            let _ = admin.batch_execute(&format!("DROP DATABASE IF EXISTS {}", self.name));
-        }
-    }
 }
 
 #[test]
