@@ -110,11 +110,15 @@ pub(crate) fn ask_ssl(ctx: &mut Ctx<'_>, host: &str) -> Result<SslChoice, Signal
         // the host-derived one.
         SslChoice::parse(raw).map_err(Signal::usage)?
     } else {
+        let derived = crate::setup_validate::default_ssl_for(host);
         let default = match ctx.defaults().ssl.as_deref() {
-            Some(stored) if names.contains(&stored) => stored.to_owned(),
-            _ => crate::setup_validate::default_ssl_for(host)
-                .as_str()
-                .to_owned(),
+            // A stored mode is the last run's answer for its host. A remote host
+            // must not inherit a `prefer` chosen for this machine, because the
+            // address written now would allow plain text across the network.
+            Some(stored) if names.contains(&stored) && derived == SslChoice::Prefer => {
+                stored.to_owned()
+            }
+            _ => derived.as_str().to_owned(),
         };
         if ctx.interactive() {
             match ctx.ask_choice("SSL mode", &options, &default)? {

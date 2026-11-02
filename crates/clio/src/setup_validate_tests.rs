@@ -280,9 +280,21 @@ fn an_empty_host_is_treated_as_remote() {
 }
 
 #[test]
-fn a_host_list_takes_its_first_entry() {
+fn a_mixed_host_list_is_treated_as_remote() {
     assert_eq!(
         default_ssl_for("127.0.0.1,db.example.com"),
+        SslChoice::VerifyFull
+    );
+    assert_eq!(
+        default_ssl_for("db.example.com,127.0.0.1"),
+        SslChoice::VerifyFull
+    );
+}
+
+#[test]
+fn a_host_list_of_only_loopback_names_prefers() {
+    assert_eq!(
+        default_ssl_for("127.0.0.1,[::1],localhost"),
         SslChoice::Prefer
     );
 }

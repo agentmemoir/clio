@@ -53,6 +53,22 @@ fn a_remote_host_defaults_to_verify_full_and_this_machine_to_prefer() {
 }
 
 #[test]
+fn a_stored_prefer_does_not_override_a_remote_host() {
+    // A `prefer` written for a local server must not reach a remote host: the
+    // address written now would otherwise allow plain text across the network.
+    let run = Harness::fresh()
+        .with_effective(json!({
+            "store": { "database_url": "postgres://clio:pw@127.0.0.1:5432/clio?sslmode=prefer" }
+        }))
+        .with_secrets(&["pw"])
+        .typing(TYPED)
+        .typing(SERVICES)
+        .run();
+    let plan = &run.answers().database.as_ref().expect("a plan").plan;
+    assert_eq!(plan.ssl.as_str(), "verify-full", "{}", run.out);
+}
+
+#[test]
 fn choosing_encrypt_no_verify_warns_at_the_choice_and_is_recorded() {
     // Option 4 at the SSL question is the deliberate no-check mode. The run must
     // say, at the point of choice, what it does and does not protect against, and
