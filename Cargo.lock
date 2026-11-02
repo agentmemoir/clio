@@ -274,7 +274,7 @@ dependencies = [
 name = "clio-config"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chacha20poly1305",
  "clio-types",
  "keyring",
@@ -388,7 +388,7 @@ name = "clio-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chacha20poly1305",
  "clio-admission",
  "clio-config",
@@ -417,7 +417,7 @@ name = "clio-sync"
 version = "0.1.0"
 dependencies = [
  "argon2",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chacha20poly1305",
  "clio-config",
  "clio-store",

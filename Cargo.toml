@@ -47,7 +47,7 @@ clio-sync = { path = "crates/clio-sync" }
 clio-backup = { path = "crates/clio-backup" }
 clio-mcp = { path = "crates/clio-mcp" }
 # deny (not forbid): sqlite-vec registration requires a one-site allow(unsafe_code).
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
 unicode-normalization = "0.1"
 chacha20poly1305 = "0.11"
