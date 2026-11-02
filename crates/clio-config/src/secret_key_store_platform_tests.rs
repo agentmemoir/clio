@@ -121,8 +121,8 @@ fn installing_a_store_reaches_the_process_default() {
 #[test]
 fn fake_store_builds_an_isolated_in_memory_entry() {
     let store = FakeStore;
-    assert!(!store.vendor().is_empty());
-    assert!(!store.id().is_empty());
+    assert_ne!(store.vendor(), "");
+    assert_ne!(store.id(), "");
     assert!(store.as_any().is::<FakeStore>());
 
     let first = store.build("service", "user", None).expect("first entry");

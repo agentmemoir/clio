@@ -254,10 +254,7 @@ fn ports_and_db_userinfo_are_reported_redacted() {
     assert_eq!(report.database.backend, "postgres");
     assert_eq!(report.database.url, "postgres://***@db:5432/clio");
     assert!(!report.database.url.contains("topsecret"));
-    assert_eq!(
-        report.database.encryption,
-        "encrypted and verified, remote"
-    );
+    assert_eq!(report.database.encryption, "encrypted and verified, remote");
     let text = render_text(&report);
     assert!(
         text.contains("postgres://***@db:5432/clio (encrypted and verified, remote)"),

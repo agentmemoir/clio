@@ -403,9 +403,10 @@ fn the_pull_verb_refuses_a_journal_the_deployment_does_not_resolve() {
             if let Some(status) = child.0.try_wait().expect("wait for child") {
                 break status;
             }
-            if std::time::Instant::now() >= deadline {
-                panic!("isolated test timed out");
-            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "isolated test timed out"
+            );
             std::thread::sleep(Duration::from_millis(20));
         };
         let output = std::fs::read_to_string(log).expect("read child log");
