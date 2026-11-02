@@ -11,8 +11,8 @@
 //!
 //! ## Owns
 //! - End-to-end coverage of `ApplyOutcome::Stale` through `client::pull`
-//! - The cursor advance past a stale row, and the absence of a store row,
-//!   journal row, or dead letter for it
+//! - The cursor advance past a refused row, and the refusal record it leaves:
+//!   a counted dead letter, the `stale_refused` counter, the status line
 //! - The fresh control that proves the bound is not refusing everything
 //! - The default-off control that keeps a backlog from being dropped
 //!
@@ -30,7 +30,8 @@
 
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
 use crate::apply::ApplyEngine;
-use crate::apply::apply_freshness::{is_stale, pinned};
+use crate::apply::apply_freshness::{is_stale, pinned, writer_stamp_epoch};
+use crate::apply::{last_stale_refusal, stale_refused};
 use crate::client::client_envelope_tests::{BANK, Receiver, hand_push, held_key, receiver};
 use crate::client::client_tests::item;
 use crate::client::pull;
@@ -59,6 +60,11 @@ const BACKLOG_STAMP: &str = "2026-05-31T23:50:00Z";
 const STALE_ID: &str = "stale-a";
 const FRESH_ID: &str = "fresh-a";
 const BACKLOG_ID: &str = "backlog-a";
+const MALFORMED_ID: &str = "malformed-a";
+
+/// A stamp the strict reader and the documented legacy forms all refuse: it
+/// names no instant, so it is a malformed stamp rather than an old one.
+const MALFORMED_STAMP: &str = "not-a-stamp";
 
 /// Pin the clock for the whole case; the guard unpins it when the test ends.
 fn pinned_clock() -> test_pin::Pinned {
@@ -122,22 +128,23 @@ fn stale_per_the_pinned_clock(r: &Receiver, row: &SyncMutation, window: u64) -> 
 
 /// The issue's expected behaviour at a positive bound: a relay delivers a
 /// validly sealed row whose authenticated writer stamp sits outside the bound,
-/// and the pull refuses it with no effect while the cursor still moves past it.
+/// and the pull refuses it, records the refusal where an operator can see it,
+/// and still moves the cursor past it.
 #[test]
 fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
     let _clock = pinned_clock();
     let key = held_key("client-freshness-stale-key");
     let r = windowed_receiver(&key);
     let row = sealed_at(BANK, STALE_ID, STALE_STAMP, &key);
+    let refused_id = row.sync_mutation_id.clone();
     assert!(
         stale_per_the_pinned_clock(&r, &row, WINDOW),
         "the row is outside the bound, so pull must answer Stale"
     );
     hand_push(&r.addr, BANK, row);
     pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
-    // The four effects `Stale` leaves behind, and the ones it must not leave:
-    // nothing materialised, nothing journaled, and no dead letter, which is what
-    // separates it from a quarantine that would freeze the cursor.
+    // What a stale row leaves behind: nothing materialised, nothing journaled,
+    // and one refusal an operator can inspect and count.
     assert!(
         r.store
             .get_memory_item(BANK, STALE_ID)
@@ -157,13 +164,26 @@ fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
             .is_empty(),
         "a stale row left journal rows"
     );
+    let open = r
+        .store
+        .dead_letter_list(BANK, DeadLetterStatus::Open, 10)
+        .expect("dead letters");
+    assert_eq!(open.len(), 1, "the refused row must stay inspectable");
+    assert_eq!(open[0].sync_mutation_id, refused_id);
     assert_eq!(
-        r.store
-            .dead_letter_count(BANK, DeadLetterStatus::Open)
-            .expect("count"),
-        0,
-        "a stale row was quarantined instead of skipped"
+        open[0].reason_code, "stale_envelope",
+        "the refusal must carry the documented stale reason"
     );
+    assert_eq!(
+        stale_refused(r.store.as_ref(), BANK).expect("count"),
+        1,
+        "the refusal must be counted"
+    );
+    let last = last_stale_refusal(r.store.as_ref())
+        .expect("status read")
+        .expect("the refusal must be recorded in the status slot");
+    assert!(last.contains("stale_envelope"), "{last}");
+    assert!(last.contains(&refused_id), "{last}");
     let cursor = r
         .store
         .cursor_get(BANK, "pull")
@@ -176,12 +196,17 @@ fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
         "the cursor did not move past the refused row"
     );
     // A second pull from that cursor is not stuck on the same row: the cursor
-    // holds, and the row still applies nothing.
+    // holds, the counter does not grow, and the row still applies nothing.
     let again = pull(&r.cfg, &[BANK.to_owned()]).expect("second pull");
     assert_eq!(
         again[0].pull_cursor.as_deref(),
         Some(cursor.as_str()),
         "the next pull is stuck on the refused row"
+    );
+    assert_eq!(
+        stale_refused(r.store.as_ref(), BANK).expect("count"),
+        1,
+        "the refused row was counted twice"
     );
     assert!(
         r.store
@@ -198,8 +223,60 @@ fn a_pull_refuses_a_stale_envelope_and_advances_the_cursor_past_it() {
     r.server.stop();
 }
 
+/// A writer stamp this build cannot place is refused as `malformed_stamp`, not
+/// as age: the row is counted, counted once, and inspectable, and the cursor
+/// still advances. Silence here is what the finding names.
+#[test]
+fn a_pull_quarantines_an_unplaceable_stamp_as_malformed() {
+    let _clock = pinned_clock();
+    let key = held_key("client-freshness-malformed-key");
+    let r = windowed_receiver(&key);
+    let row = sealed_at(BANK, MALFORMED_ID, MALFORMED_STAMP, &key);
+    let refused_id = row.sync_mutation_id.clone();
+    assert_eq!(
+        writer_stamp_epoch(MALFORMED_STAMP),
+        None,
+        "the fixture stamp must not name an instant"
+    );
+    hand_push(&r.addr, BANK, row);
+    pull(&r.cfg, &[BANK.to_owned()]).expect("pull");
+    let open = r
+        .store
+        .dead_letter_list(BANK, DeadLetterStatus::Open, 10)
+        .expect("dead letters");
+    assert_eq!(open.len(), 1, "the refused row must stay inspectable");
+    assert_eq!(open[0].sync_mutation_id, refused_id);
+    assert_eq!(
+        open[0].reason_code, "malformed_stamp",
+        "an unplaceable stamp is not an age refusal"
+    );
+    assert_eq!(
+        stale_refused(r.store.as_ref(), BANK).expect("count"),
+        1,
+        "the malformed refusal must be counted"
+    );
+    let last = last_stale_refusal(r.store.as_ref())
+        .expect("status read")
+        .expect("the refusal must be recorded in the status slot");
+    assert!(last.contains("malformed_stamp"), "{last}");
+    assert!(
+        r.store.cursor_get(BANK, "pull").expect("cursor").is_some(),
+        "the cursor must advance past the malformed row"
+    );
+    // The loop is not wedged: the next pull moves no further and refuses nothing.
+    let again = pull(&r.cfg, &[BANK.to_owned()]).expect("second pull");
+    assert_eq!(
+        stale_refused(r.store.as_ref(), BANK).expect("count"),
+        1,
+        "the malformed row was counted twice"
+    );
+    assert!(again[0].pull_cursor.is_some());
+    r.server.stop();
+}
+
 /// The positive control: the same pull path, the same bound, and a row written
-/// inside it, so the guard is not simply refusing every envelope.
+/// inside it, so the guard is not simply refusing every envelope. A fresh row
+/// leaves the refusal counter and the status slot untouched.
 #[test]
 fn a_pull_applies_a_fresh_envelope_under_the_same_window() {
     let _clock = pinned_clock();
@@ -229,6 +306,16 @@ fn a_pull_applies_a_fresh_envelope_under_the_same_window() {
             .expect("count"),
         0,
         "the fresh row was not quarantined"
+    );
+    assert_eq!(
+        stale_refused(r.store.as_ref(), BANK).expect("count"),
+        0,
+        "a fresh row must not move the refusal counter"
+    );
+    assert_eq!(
+        last_stale_refusal(r.store.as_ref()).expect("status read"),
+        None,
+        "a fresh row must not write a refusal line"
     );
     assert!(
         r.store.cursor_get(BANK, "pull").expect("cursor").is_some(),

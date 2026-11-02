@@ -23,8 +23,8 @@
 //!
 //! Keep this module focused on the guarded apply entry.
 
-use crate::apply::apply_tests::{env, fixture, item_value};
 use crate::apply::{ApplyOutcome, ApplyResult, apply_mutation_guarded};
+use crate::apply_fixtures::{env, fixture, item_value};
 use crate::denial::{DenialCarrier, bank_verdict, denial_mutation, denied_bank_marker};
 use crate::denial_fixtures::{FakeDenial, store_with_counting_kms};
 use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation};

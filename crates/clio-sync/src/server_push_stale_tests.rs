@@ -24,7 +24,7 @@
 //!
 //! Keep this module focused on the stale push refusal.
 
-use crate::apply::apply_tests::{env, item_value};
+use crate::apply_fixtures::{env, item_value};
 use crate::client::client_tests::{TOKEN, cfg, create_item, paired_cfg, paired_key};
 use crate::client::{push as client_push, sync_status};
 use crate::credential_fixtures::scoped_store;

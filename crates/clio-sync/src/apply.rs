@@ -89,11 +89,12 @@ pub enum ApplyOutcome {
     /// LWW resolved against a more recent local row: incoming mutation is the
     /// documented loser, recorded in the conflict journal, never deleted.
     ConflictLoser,
-    /// The writer stamp is outside the freshness bounds: older than the
-    /// operator's age bound, or implausibly far in the future. Nothing is
-    /// applied and nothing is journaled, so the caller's cursor advances rather
-    /// than freezes. Not a dead letter: a stale envelope is a documented loser,
-    /// not poison an operator must ack-skip.
+    /// The writer stamp is outside the freshness bounds, or names no instant
+    /// this build can place. Nothing is applied and nothing is journaled, so
+    /// the caller's cursor advances rather than freezes. Apply itself writes no
+    /// row here; each transport records the refusal so an operator can see and
+    /// count it (`client` on pull, `server_push` on push), and no ack-skip is
+    /// needed to keep moving.
     Stale,
     /// Permanent apply failure: quarantined in `sync_dead_letter`; cursors
     /// must not advance past this id until operator ack-skip.

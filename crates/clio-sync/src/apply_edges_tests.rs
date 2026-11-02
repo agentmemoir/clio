@@ -22,7 +22,7 @@
 //! Keep this module focused on the edge and triple effects.
 
 use crate::apply::ApplyOutcome;
-use crate::apply::apply_tests::{apply, assoc, edge_value, env, fixture, item};
+use crate::apply_fixtures::{apply, assoc, edge_value, env, fixture, item};
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
     ENTITY_KIND_ASSOC, ENTITY_KIND_TRIPLE, OP_INVALIDATE, OP_PRUNE, OP_UPSERT, SyncContent,

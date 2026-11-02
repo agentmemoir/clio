@@ -22,11 +22,11 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::pinned;
+use super::{is_stale, pinned, writer_stamp_epoch};
 use crate::ENVELOPE_SKEW_DEFAULT_SECS;
 use crate::apply::apply_freshness::ENVELOPE_FUTURE_ALLOWANCE_SECS;
-use crate::apply::apply_tests::{fixture, upsert};
 use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
+use crate::apply_fixtures::{fixture, upsert};
 use crate::clock::parse_utc_epoch;
 use crate::protocol::SyncMutation;
 use clio_store::{SqliteStore, Store, SyncStore};
@@ -40,7 +40,7 @@ const STAMP: &str = "2026-01-01T00:00:00Z";
 const WINDOW: u64 = 300;
 
 /// A stamp the strict reader refuses: it names no instant at all.
-const UNREADABLE: &str = "2026-01-01 00:00:00";
+const UNREADABLE: &str = "not-a-stamp";
 
 /// Apply `m` against `store` with the clock pinned to `now` and the window set
 /// to `skew`.
@@ -124,14 +124,14 @@ fn the_bounds_decide_every_stamp_by_direction_and_distance() {
             expected: ApplyOutcome::Applied,
         },
         Case {
-            label: "an unreadable stamp is stale",
+            label: "an unplaceable stamp is refused",
             stamp: UNREADABLE,
             now: written,
             skew: WINDOW,
             expected: ApplyOutcome::Stale,
         },
         Case {
-            label: "a zero age bound also disables the unreadable-stamp refusal",
+            label: "a zero age bound also disables the unplaceable-stamp refusal",
             stamp: UNREADABLE,
             now: written,
             skew: 0,
@@ -209,6 +209,38 @@ fn a_stale_envelope_writes_no_journal_row() {
         ApplyOutcome::Stale,
         "no journal row means the second delivery is stale, not a duplicate"
     );
+}
+
+/// The store stamps item rows two ways, and an item's stamp travels unchanged
+/// as an envelope's `transaction_time`. A documented legacy form must be placed
+/// by its time, so an in-boundary row is never refused for its shape.
+#[test]
+fn a_documented_legacy_stamp_is_placed_instead_of_refused() {
+    let secs = parse_utc_epoch(STAMP).expect("the fixture stamp parses");
+    let millis = format!("{secs}000");
+    assert_eq!(writer_stamp_epoch(STAMP), Some(secs));
+    assert_eq!(writer_stamp_epoch("2026-01-01T00:00:00.750Z"), Some(secs));
+    assert_eq!(writer_stamp_epoch("2026-01-01 00:00:00"), Some(secs));
+    assert_eq!(writer_stamp_epoch("2026-01-01T00:00:00"), Some(secs));
+    assert_eq!(writer_stamp_epoch("2026-01-01"), Some(secs));
+    assert_eq!(writer_stamp_epoch(&millis), Some(secs));
+    assert_eq!(
+        writer_stamp_epoch("2026-01-01T00:00:00+02:00"),
+        None,
+        "an offset zone names no instant this reader places"
+    );
+    assert_eq!(writer_stamp_epoch("not-a-stamp"), None);
+    // The placed millis form is bounded by its time, not by its shape.
+    let (store, _kms) = fixture();
+    let engine = ApplyEngine {
+        store: store.as_ref(),
+        sync: store.as_ref(),
+        device_id: "node-1".into(),
+        kms: None,
+        clock: pinned(secs + 10),
+        max_envelope_skew_secs: WINDOW,
+    };
+    assert!(!is_stale(&engine, &millis), "ten seconds old is fresh");
 }
 
 /// The id pre-check runs first: a journaled id answers `Duplicate` even when

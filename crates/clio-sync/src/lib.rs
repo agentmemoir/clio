@@ -85,6 +85,8 @@ pub mod server;
 mod server_conn;
 
 #[cfg(test)]
+mod apply_fixtures;
+#[cfg(test)]
 mod client_feed_package_fixtures;
 #[cfg(test)]
 mod client_wire_fixtures;

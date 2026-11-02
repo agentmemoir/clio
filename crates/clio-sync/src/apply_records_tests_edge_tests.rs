@@ -24,7 +24,7 @@
 //! Keep this module focused on domain-record apply edge tests.
 
 use super::*;
-use crate::apply::apply_tests::{apply, fixture, receipt};
+use crate::apply_fixtures::{apply, fixture, receipt};
 use crate::crypto::SyncCipher;
 use crate::protocol::SyncContent;
 use clio_store::{ComplianceStore, SubjectEraseSpec, SyncStore};

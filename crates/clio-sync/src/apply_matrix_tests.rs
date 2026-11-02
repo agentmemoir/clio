@@ -20,8 +20,8 @@
 //!
 //! Keep this module focused on the apply-matrix tail tests.
 
-use crate::apply::apply_tests::{apply, assoc, edge_value, env, fixture, item, upsert};
 use crate::apply::{ApplyOutcome, quarantine};
+use crate::apply_fixtures::{apply, assoc, edge_value, env, fixture, item, upsert};
 use crate::crypto::SyncCipherKey;
 use crate::protocol::{
     ENTITY_KIND_ITEM, ENTITY_KIND_TRIPLE, OP_ARCHIVE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE,

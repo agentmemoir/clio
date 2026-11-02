@@ -24,7 +24,7 @@
 //! Keep this module focused on history-record apply edge tests.
 
 use crate::apply::ApplyOutcome;
-use crate::apply::apply_tests::{apply, fixture};
+use crate::apply_fixtures::{apply, fixture};
 use crate::crypto::SyncCipher;
 use crate::protocol::{SyncContent, SyncMutation};
 use clio_store::{HistoryStore, SyncStore};

@@ -24,8 +24,8 @@
 //!
 //! Keep this module focused on the subject-keyed payload shapes the guard reads.
 
-use crate::apply::apply_tests::{env, fixture};
 use crate::apply::{ApplyOutcome, apply_mutation_guarded};
+use crate::apply_fixtures::{env, fixture};
 use crate::client_feed_package_fixtures::{
     belief, failure_record, item as package_item, task_record,
 };

@@ -78,6 +78,9 @@ pub const REASON_ERASED_SUBJECT: &str = "erased_subject";
 pub const REASON_UNSUPPORTED_OP: &str = "unsupported_op";
 /// Dead-letter reason: writer stamp outside the receiver's freshness bounds.
 pub const REASON_STALE_ENVELOPE: &str = "stale_envelope";
+/// Dead-letter reason: writer stamp names no instant this build can place, so
+/// the freshness bounds cannot be applied to it.
+pub const REASON_MALFORMED_STAMP: &str = "malformed_stamp";
 
 /// Content as it travels: decrypted JSON, or client-encrypted opaque bytes.
 ///

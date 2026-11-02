@@ -25,7 +25,7 @@
 //! Keep this module focused on domain-record apply tests.
 
 use crate::apply::ApplyOutcome;
-use crate::apply::apply_tests::{apply, env, fixture, item, item_value};
+use crate::apply_fixtures::{apply, env, fixture, item, item_value};
 use crate::protocol::{SyncContent, SyncMutation};
 use clio_store::{BeliefStore, PersonaStore, Store};
 use clio_types::{ConfidenceEntry, SourceType};

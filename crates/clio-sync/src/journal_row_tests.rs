@@ -6,7 +6,7 @@
 //! runs, so a row identity that falls back to the entity id fails here. Never
 //! compiled into production builds.
 
-use crate::apply::apply_tests::{fixture, upsert};
+use crate::apply_fixtures::{fixture, upsert};
 use crate::journal_row::{journal_row, open_journal_content};
 use clio_types::ErrorCode;
 
