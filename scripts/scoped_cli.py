@@ -106,11 +106,6 @@ def main(argv: list[str]) -> int:
             # Function and region percentages are printed and compared against nothing.
             regions = "n/a" if row.regions_pct is None else f"{row.regions_pct:.2f}%"
             print(f"scoped-runner: {rel} lines {row.lines_pct:.2f}% functions {row.functions_pct:.2f}% regions {regions}")
-    if rows:
-        print("scoped-runner: other measured files (selected tests only; not judged):")
-        for rel, row in sorted(rows.items()):
-            if rel.startswith("crates/") and rel not in files:
-                print(f"scoped-runner: {rel} lines {row.lines_pct:.2f}% ({row.lines_covered}/{row.lines_count})")
     failures = verdicts(rows, files, LINE_FLOOR)
     for failure in failures:
         print(f"scoped-runner: FAIL {failure}", file=sys.stderr)
