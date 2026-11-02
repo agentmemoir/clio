@@ -4,17 +4,22 @@
 //! # Responsibility
 //!
 //! This module is responsible for the sync dead-letter quarantine helpers of
-//! the apply engine: operator-forced quarantine and reason-code mapped
-//! quarantine of permanently unapplicable mutations.
+//! the apply engine: operator-forced quarantine, reason-code mapped quarantine
+//! of permanently unapplicable mutations, and the operator-visible record of a
+//! stale-envelope refusal.
 //!
 //! ## Owns
 //! - `quarantine` (operator-facing permanent reject, e.g. unusable local key)
 //! - `dead_letter` (reason-code mapped quarantine for apply rejects)
+//! - `quarantine_stale`, the dead letter and status record of a freshness
+//!   refusal, under `stale_envelope` or `malformed_stamp`
+//! - The `stale_refused` counter and the `__status` last-refusal line
 //!
 //! ## Does not own
 //! - The apply matrix and LWW conflict resolution (`apply`)
 //! - Cursor advance policy (`client`) or dead-letter row persistence
 //!   (the `clio-store` sync backend)
+//! - The freshness decision itself (`apply_freshness`)
 //!
 //! ## Boundary
 //!
@@ -24,11 +29,24 @@
 //!
 //! Keep this module focused on sync dead-letter quarantine helpers.
 
+use crate::apply::apply_freshness::writer_stamp_epoch;
 use crate::apply::{ApplyEngine, ApplyOutcome};
 use crate::clock::now_utc;
-use crate::protocol::{SyncMutation, reason_code_for};
-use clio_store::{DeadLetterStatus, SyncDeadLetterRow};
+use crate::protocol::{
+    REASON_MALFORMED_STAMP, REASON_STALE_ENVELOPE, SyncMutation, reason_code_for,
+};
+use clio_store::{DeadLetterStatus, SyncDeadLetterRow, SyncStore};
 use clio_types::AmError;
+
+/// The per-bank cursor label that holds the monotonic stale-refusal count.
+pub(crate) const STALE_REFUSED_KEY: &str = "stale_refused";
+
+/// The `__status` slot key that holds the last stale refusal's line, beside the
+/// `last_error` line that slot already carries.
+pub(crate) const LAST_STALE_REFUSAL_KEY: &str = "last_stale_refusal";
+
+/// The bank id of the node-wide status slot.
+const STATUS_SLOT: &str = "__status";
 
 /// Quarantine one mutation as a permanent reject (operator-facing helper for
 /// transports that must freeze cursors on unusable rows, e.g. missing key).
@@ -92,3 +110,91 @@ pub(crate) fn dead_letter(
         reason_code: reason.to_owned(),
     })
 }
+
+/// Quarantine one freshness refusal and record it where an operator can see it:
+/// a dead-letter row, one increment of the bank's monotonic `stale_refused`
+/// count, and the last-refusal line in the node-wide status slot.
+///
+/// The reason code names which refusal this was. A stamp outside the bounds is
+/// [`REASON_STALE_ENVELOPE`]; a stamp this build cannot place is
+/// [`REASON_MALFORMED_STAMP`], so a legacy or corrupt stamp is never reported
+/// as age. A refused row writes no durable content, so without this record a
+/// sender's watermark could move past a row the receiver dropped and nothing
+/// would show it. The row lands in `bank_id`, the bank the apply was authorized
+/// for, so a refusal never writes into another bank.
+///
+/// # Errors
+/// Storage failures.
+pub(crate) fn quarantine_stale(
+    engine: &ApplyEngine<'_>,
+    bank_id: &str,
+    m: &SyncMutation,
+    envelope_json: &str,
+) -> Result<ApplyOutcome, AmError> {
+    let at = now_utc();
+    let (reason_code, detail) = match writer_stamp_epoch(&m.transaction_time) {
+        Some(_) => (
+            REASON_STALE_ENVELOPE,
+            format!(
+                "refused stale envelope: writer stamp {} is outside this node's freshness bounds at {at}",
+                m.transaction_time
+            ),
+        ),
+        None => (
+            REASON_MALFORMED_STAMP,
+            format!(
+                "refused malformed stamp: writer stamp {:?} names no instant this build can place, at {at}",
+                m.transaction_time
+            ),
+        ),
+    };
+    let outcome = quarantine(engine, bank_id, m, envelope_json, reason_code, &detail)?;
+    record_refusal(engine.sync, bank_id, m, &at, reason_code)?;
+    Ok(outcome)
+}
+
+/// Bump the bank's refusal count and write the last-refusal line. The count is
+/// read-add-write through the existing cursor slot, so it only ever grows and
+/// an unrelated cursor write leaves it alone.
+fn record_refusal(
+    sync: &dyn SyncStore,
+    bank_id: &str,
+    m: &SyncMutation,
+    at: &str,
+    reason_code: &str,
+) -> Result<(), AmError> {
+    let next = stale_refused(sync, bank_id)?.saturating_add(1);
+    sync.cursor_set(bank_id, STALE_REFUSED_KEY, &next.to_string())?;
+    sync.cursor_set(
+        STATUS_SLOT,
+        LAST_STALE_REFUSAL_KEY,
+        &format!(
+            "{at} {reason_code}: refused mutation {} carrying writer stamp {}",
+            m.sync_mutation_id, m.transaction_time
+        ),
+    )
+}
+
+/// How many stale envelopes this node has refused for `bank_id` (`0` when it
+/// has refused none).
+///
+/// # Errors
+/// Storage failures.
+pub(crate) fn stale_refused(sync: &dyn SyncStore, bank_id: &str) -> Result<i64, AmError> {
+    Ok(sync
+        .cursor_get(bank_id, STALE_REFUSED_KEY)?
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(0))
+}
+
+/// The last stale refusal this node recorded, if any.
+///
+/// # Errors
+/// Storage failures.
+pub(crate) fn last_stale_refusal(sync: &dyn SyncStore) -> Result<Option<String>, AmError> {
+    sync.cursor_get(STATUS_SLOT, LAST_STALE_REFUSAL_KEY)
+}
+
+#[cfg(test)]
+#[path = "apply_dead_letter_tests.rs"]
+mod apply_dead_letter_tests;

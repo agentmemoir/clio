@@ -38,12 +38,27 @@ fn the_status_view_renders_one_line_per_bank() {
         "remote": "h:1",
         "auth": "token",
         "encryption": true,
-        "banks": [{"bank_id": "demo", "push_cursor": "c1", "pending_push": 2, "conflicts": 1, "dead_letter_open": 3}]
+        "banks": [{"bank_id": "demo", "push_cursor": "c1", "pending_push": 2, "conflicts": 1, "dead_letter_open": 3, "stale_refused": 4}]
     });
 
     assert_eq!(
         render_status(&payload),
-        "sync status (device dev-1, remote h:1, auth token, encryption true)\n  demo: push=c1 pull=- pending=2 conflicts=1 dead_letters=3"
+        "sync status (device dev-1, remote h:1, auth token, encryption true)\n  demo: push=c1 pull=- pending=2 conflicts=1 dead_letters=3 stale_refused=4"
+    );
+}
+
+#[test]
+fn the_status_view_names_the_last_stale_refusal_and_defaults_it_away() {
+    let refused = render_status(&json!({
+        "last_stale_refusal": "2026-01-01T00:00:00Z stale_envelope: refused mutation m-1 carrying writer stamp 2025-12-01T00:00:00Z"
+    }));
+    assert!(
+        refused.contains("  last stale refusal: 2026-01-01T00:00:00Z stale_envelope:"),
+        "{refused}"
+    );
+    assert!(
+        !render_status(&json!({})).contains("last stale refusal"),
+        "a node that refused nothing prints no line"
     );
 }
 

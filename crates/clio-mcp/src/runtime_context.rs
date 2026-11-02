@@ -9,8 +9,8 @@
 //!
 //! ## Owns
 //! - `next_item_id` / `resolve_ctx` / `resolve_actor` / `resolve_timestamp` /
-//!   `require_bank_grant` / `require_sync_bank` / `sync_allow_public_bind` on
-//!   `McpState`
+//!   `require_bank_grant` / `require_sync_bank` / `sync_allow_public_bind` /
+//!   `sync_max_envelope_skew_secs` on `McpState`
 //! - `dispatch_maintenance` (off-path maintenance handoff)
 //! - `now_utc` (RFC 3339 UTC stamping; the calendar arithmetic is the shared
 //!   `clio_types::civil_from_days`)
@@ -279,6 +279,26 @@ impl McpState {
             .pointer("/sync/allow_public_bind")
             .and_then(Value::as_bool)
             .unwrap_or(false)
+    }
+
+    /// The freshness window, in seconds, that bounds an applied envelope.
+    ///
+    /// The answer is read from the effective config on every call, at the same
+    /// `/sync/max_envelope_skew_secs` pointer the `config_get` view reports, so
+    /// the serve and transfer paths apply the operator's setting rather than a
+    /// compiled default. A missing key, a non-integer value, or a poisoned
+    /// config lock is the default window; `0` is read back as `0`, which
+    /// disables the window and is a value the operator can choose.
+    #[must_use]
+    pub fn sync_max_envelope_skew_secs(&self) -> u64 {
+        let Ok(runtime) = self.config.lock() else {
+            return clio_sync::ENVELOPE_SKEW_DEFAULT_SECS;
+        };
+        runtime
+            .effective_raw()
+            .pointer("/sync/max_envelope_skew_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(clio_sync::ENVELOPE_SKEW_DEFAULT_SECS)
     }
 
     /// Resolve the effective timestamp: a non-empty `args.timestamp` wins over now.

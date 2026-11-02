@@ -28,19 +28,18 @@
 //!
 //! Keep this module focused on the sync client.
 
-use crate::apply::{
-    ApplyEngine, ApplyOutcome, admission_score, apply_mutation_guarded, quarantine,
-};
+use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation_guarded};
 use crate::client_feed::push_bank;
-use crate::client_refusal::{PLAINTEXT_REFUSED_REASON, missing_key_reason, open_failed_reason};
 use crate::http::post_json;
-use crate::protocol::{
-    BankSyncStatus, PullRequest, PullResponse, SyncContent, SyncMutation, SyncStatusReport,
-};
+use crate::protocol::{BankSyncStatus, PullRequest, PullResponse, SyncStatusReport};
 use clio_store::{DeadLetterStatus, ErasureDenial, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
-use serde_json::Value;
 use std::sync::Arc;
+
+#[path = "client_decrypt.rs"]
+mod client_decrypt;
+
+use client_decrypt::decrypt_for_apply;
 
 /// Client construction options.
 pub struct SyncClientConfig {
@@ -60,6 +59,10 @@ pub struct SyncClientConfig {
     pub cipher: Vec<crate::crypto::SyncCipherKey>,
     /// Local development and tests only: without it a node with no key refuses export.
     pub allow_plaintext: bool,
+    /// How far in the past a pulled envelope's writer stamp may sit from this
+    /// node's clock, in seconds. `0` is the shipped default and disables the age
+    /// bound, so an old backlog still applies.
+    pub max_envelope_skew_secs: u64,
 }
 
 /// One sync operation mode.
@@ -173,7 +176,7 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
     for bank in banks {
         let push_cursor = cfg.sync.cursor_get(bank, "push")?;
         let pull_cursor = cfg.sync.cursor_get(bank, "pull")?;
-        let pending = pending_push(cfg, bank)?;
+        let pending = crate::client_feed::pending_push(cfg, bank)?;
         let conflicts = cfg.sync.conflict_count(bank)?;
         let sample = cfg
             .sync
@@ -188,6 +191,7 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
             pending_push: pending,
             dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
             conflicts,
+            stale_refused: crate::apply::stale_refused(cfg.sync.as_ref(), bank)?,
             conflict_sample: sample,
         });
     }
@@ -205,22 +209,8 @@ pub fn sync_status(cfg: &SyncClientConfig, banks: &[String]) -> Result<SyncStatu
             },
         ),
         last_error: cfg.sync.cursor_get("__status", "last_error")?,
+        last_stale_refusal: crate::apply::last_stale_refusal(cfg.sync.as_ref())?,
     })
-}
-
-/// Outbound mutation count for `bank`: each feed kind's rows past that kind's
-/// own push watermark (item, assoc edge, triple, persona stable/preference,
-/// belief, task, failure; the retired shared `push_wm` converts once).
-/// `push_bank`, `pull_bank`, and `sync_status` report it, never a hard-coded
-/// zero. Bounded by `PULL_PAGE_LIMIT` per kind and approximate: it never
-/// subtracts rows a push would skip for a missing carrier.
-pub(crate) fn pending_push(cfg: &SyncClientConfig, bank: &str) -> Result<i64, AmError> {
-    let mut count = 0usize;
-    for kind in crate::client_feed::PUSH_KINDS {
-        let since = crate::client_feed::kind_watermark(cfg, bank, kind)?;
-        count += crate::client_feed::feed_kind_count(cfg, bank, kind, &since)?;
-    }
-    Ok(i64::try_from(count).unwrap_or(i64::MAX))
 }
 
 fn required_remote(cfg: &SyncClientConfig) -> Result<String, AmError> {
@@ -244,6 +234,8 @@ fn pull_bank(
         sync: cfg.sync.as_ref(),
         device_id: cfg.device_id.clone(),
         kms: None,
+        clock: &crate::clock::now_epoch,
+        max_envelope_skew_secs: cfg.max_envelope_skew_secs,
     };
     loop {
         let request = PullRequest {
@@ -276,9 +268,18 @@ fn pull_bank(
                 break;
             };
             let result = apply_mutation_guarded(&engine, denial, &m, &envelope)?;
-            if matches!(result.outcome, ApplyOutcome::DeadLettered { .. }) {
-                frozen = true;
-                break;
+            match result.outcome {
+                // A refused envelope is never applied and never journaled, but
+                // it is recorded where an operator can see it, then the cursor
+                // keeps moving: a refusal never wedges the loop.
+                ApplyOutcome::Stale => {
+                    crate::apply::quarantine_stale(&engine, bank, &m, &envelope)?;
+                }
+                ApplyOutcome::DeadLettered { .. } => {
+                    frozen = true;
+                    break;
+                }
+                ApplyOutcome::Applied | ApplyOutcome::Duplicate | ApplyOutcome::ConflictLoser => {}
             }
         }
         if frozen {
@@ -294,125 +295,12 @@ fn pull_bank(
         bank_id: bank.to_owned(),
         push_cursor: cfg.sync.cursor_get(bank, "push")?,
         pull_cursor: Some(cursor),
-        pending_push: pending_push(cfg, bank)?,
+        pending_push: crate::client_feed::pending_push(cfg, bank)?,
         dead_letter_open: cfg.sync.dead_letter_count(bank, DeadLetterStatus::Open)?,
         conflicts: cfg.sync.conflict_count(bank)?,
+        stale_refused: crate::apply::stale_refused(cfg.sync.as_ref(), bank)?,
         conflict_sample: Vec::new(),
     })
-}
-
-/// Decrypt a pulled cipher mutation with the local sync keys before apply,
-/// restore its origin admission receipt, and resolve its identifier handle back
-/// to the real identifier from the opened payload. Returns `None` when the row
-/// was quarantined (unusable content, plaintext content, or an identifier that
-/// cannot be resolved). Rows the operator already ack-skipped pass through
-/// unchanged so apply treats them as duplicates and the cursor may advance.
-fn decrypt_for_apply(
-    cfg: &SyncClientConfig,
-    m: &SyncMutation,
-    envelope_json: &str,
-) -> Result<Option<SyncMutation>, AmError> {
-    if cfg
-        .sync
-        .dead_letter_status(&m.sync_mutation_id)?
-        .is_some_and(|status| status == DeadLetterStatus::AckedSkip)
-    {
-        return Ok(Some(m.clone()));
-    }
-    let engine = ApplyEngine {
-        store: cfg.store.as_ref(),
-        sync: cfg.sync.as_ref(),
-        device_id: cfg.device_id.clone(),
-        kms: None,
-    };
-    // One refusal shape for every row this node cannot trust: quarantine it
-    // under the row's own bank and stop, so the cursor freezes at the prior id
-    // and the operator can discard the row deliberately with `ack_skip`.
-    let refuse = |bank: &str, reason: &str| -> Result<Option<SyncMutation>, AmError> {
-        quarantine(
-            &engine,
-            bank,
-            m,
-            envelope_json,
-            crate::protocol::REASON_MALFORMED,
-            reason,
-        )?;
-        Ok(None)
-    };
-    let SyncContent::Cipher(cipher) = &m.content else {
-        // A plaintext row carries no authenticated envelope, so a relay can
-        // fabricate it or downgrade a sealed row to it freely. Without a key
-        // this node cannot tell either apart, so it refuses the row too.
-        let reason = if cfg.cipher.is_empty() {
-            crate::client_refusal::PLAINTEXT_REFUSED_KEYLESS_REASON
-        } else {
-            PLAINTEXT_REFUSED_REASON
-        };
-        return refuse(&m.bank, reason);
-    };
-    if cfg.cipher.is_empty() {
-        return refuse(&m.bank, "no sync cipher key configured");
-    }
-    let held: Vec<String> = cfg
-        .cipher
-        .iter()
-        .map(crate::crypto::SyncCipherKey::key_id)
-        .collect();
-    // A row with no key identifier no longer opens: current writes always
-    // stamp one, and trial-opening every held key widens the wrong-key
-    // surface. The refusal is a stable quarantine the operator discards.
-    let Some(stamped) = &cipher.key_id else {
-        return refuse(
-            &m.bank,
-            "sync cipher carries no key identifier; this release opens only ciphertext stamped \
-             with a held key identifier. Discard the row deliberately with the `sync_ack_skip` MCP \
-             tool, passing its mutation id with confirm",
-        );
-    };
-    // A row stamped with an identifier none of the held keys produce was written
-    // by a key this node does not hold. Refusing before any open attempt makes the
-    // reason name the missing key, not a generic open failure; both values are
-    // derived and non-reversible, and neither is ever a key or a prefix of one.
-    let Some(key) = cfg.cipher.iter().find(|k| k.key_id() == *stamped) else {
-        return refuse(&m.bank, &missing_key_reason(stamped, &held));
-    };
-    // A ciphertext the stamped key cannot open (wrong key, tampering,
-    // corruption) is a permanent per-row failure: quarantine it so
-    // `pull_cursor` freezes at the prior id and the operator can `ack_skip`.
-    let Ok(bytes) = key.open(cipher, &m.execution_view().aad()) else {
-        return refuse(&m.bank, &open_failed_reason(stamped));
-    };
-    let Ok(plain) = serde_json::from_slice::<Value>(&bytes) else {
-        return refuse(&m.bank, "decrypted sync content was not JSON");
-    };
-    let mut opened = m.clone();
-    opened.content = SyncContent::Plain(plain.clone());
-    // The opaque identifier handle, if this row has one, is resolved here:
-    // the ciphertext is open, the real identifier is inside the payload, and
-    // `apply_mutation` has not run yet in this same loop iteration. A handled
-    // row whose payload carries no identifier is refused rather than applied
-    // with the handle still in place.
-    let kind = opened.entity_kind.clone();
-    let bank = opened.bank.clone();
-    if let Err(failure) = crate::handle_resolution::resolve_entity_id(&mut opened, &plain) {
-        return refuse(&bank, &failure.reason(&kind, &bank));
-    }
-    restore_admission_receipt(&mut opened, &plain);
-    Ok(Some(opened))
-}
-
-/// Lift the origin admission receipt out of an opened sealed payload and put it
-/// back on the mutation before apply, so the conflict comparison sees the same
-/// receipt a plaintext row carries on the wire. A payload with no usable
-/// receipt leaves the wire value, which is the documented absent-score fallback
-/// (`lww_compare` maps `None` to `0.0`) and not an error.
-fn restore_admission_receipt(opened: &mut SyncMutation, plain: &Value) {
-    let Some(receipt) = plain.get(crate::client_feed::package::ADMISSION_RECEIPT_KEY) else {
-        return;
-    };
-    if admission_score(receipt).is_some() {
-        opened.admission_receipt = Some(receipt.clone());
-    }
 }
 
 #[cfg(test)]
@@ -421,6 +309,9 @@ mod client_bank_guard_tests;
 #[cfg(test)]
 #[path = "client_envelope_tests.rs"]
 mod client_envelope_tests;
+#[cfg(test)]
+#[path = "client_freshness_tests.rs"]
+mod client_freshness_tests;
 #[cfg(test)]
 #[path = "client_plain_policy_tests.rs"]
 mod client_plain_policy_tests;

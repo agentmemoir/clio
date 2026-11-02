@@ -160,6 +160,11 @@ fn the_serve_description_names_the_admin_gate_the_grant_dev_mode_and_the_bind_ru
         "exercise/debug path",
         "non-loopback bind is refused",
         "sync.allow_public_bind",
+        "sync.max_envelope_skew_secs",
+        "`0` disables the window",
+        "It defaults to `0`",
+        "no age bound",
+        "backlog a peer stored while offline still applies",
     ] {
         assert!(
             description.contains(fact),

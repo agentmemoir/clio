@@ -19,10 +19,12 @@
 //!
 //! ## Does not own
 //! - Cursor advance policy (see `client` — cursors advance only after durable
-//!   apply or durable quarantine)
+//!   apply, quarantine, or a documented stale refusal)
 //! - Transport (`server` / `client`)
-//! - The item apply effects (`apply_items`), the record effects
-//!   (`apply_records`), and the history effects (`apply_history`)
+//! - The item apply effects (`apply_items`), the edge and triple effects
+//!   (`apply_edges`), the record effects (`apply_records`), and the history
+//!   effects (`apply_history`)
+//! - The freshness decision itself (`apply_freshness`)
 //! - Denial semantics: the wire carrier and the proof (`denial`), and the
 //!   guards that consult the authority (`denial_guard`)
 //! - Local admission scoring: trusted peer creates apply without θ re-scoring
@@ -43,25 +45,31 @@ use crate::journal_row::journal_row as build_journal_row;
 use crate::protocol::{
     ENTITY_KIND_BELIEF, ENTITY_KIND_FAILURE, ENTITY_KIND_ITEM, ENTITY_KIND_PERSONA,
     ENTITY_KIND_TASK, ENTITY_KIND_TRIPLE, OP_DISCARD, OP_INVALIDATE, OP_PRUNE, OP_REINFORCE,
-    OP_UPSERT, SyncContent, SyncMutation,
+    OP_UPSERT, SyncMutation,
 };
-use clio_store::{
-    AssocEdgeRecord, DeadLetterStatus, DekProvider, ErasureDenial, Store, SyncConflictRow,
-    SyncStore,
-};
-use clio_types::{AmError, ErrorCode};
+use clio_store::{DeadLetterStatus, DekProvider, ErasureDenial, Store, SyncConflictRow, SyncStore};
+use clio_types::AmError;
 
 #[path = "apply_dead_letter.rs"]
 mod apply_dead_letter;
 
+#[path = "apply_edges.rs"]
+mod apply_edges;
+
+#[path = "apply_freshness.rs"]
+pub(crate) mod apply_freshness;
+
 #[path = "apply_items.rs"]
 mod apply_items;
 
+use apply_edges::{apply_assoc, apply_triple_invalidate};
 use apply_items::{apply_item_discard, apply_item_invalidate, apply_item_upsert};
 
 pub use apply_dead_letter::quarantine;
 
-pub(crate) use apply_dead_letter::dead_letter;
+pub(crate) use apply_dead_letter::{
+    dead_letter, last_stale_refusal, quarantine_stale, stale_refused,
+};
 
 /// Outcome of applying one sync mutation (transitions).
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +89,13 @@ pub enum ApplyOutcome {
     /// LWW resolved against a more recent local row: incoming mutation is the
     /// documented loser, recorded in the conflict journal, never deleted.
     ConflictLoser,
+    /// The writer stamp is outside the freshness bounds, or names no instant
+    /// this build can place. Nothing is applied and nothing is journaled, so
+    /// the caller's cursor advances rather than freezes. Apply itself writes no
+    /// row here; each transport records the refusal so an operator can see and
+    /// count it (`client` on pull, `server_push` on push), and no ack-skip is
+    /// needed to keep moving.
+    Stale,
     /// Permanent apply failure: quarantined in `sync_dead_letter`; cursors
     /// must not advance past this id until operator ack-skip.
     DeadLettered {
@@ -133,6 +148,14 @@ pub struct ApplyEngine<'a> {
     /// Local DEK provider used to seal journaled content at rest (server role).
     /// `None` marks a pure client applied-log, which journals ids/hashes only.
     pub kms: Option<&'a dyn DekProvider>,
+    /// The clock this engine reads, in epoch seconds. A seam: production passes
+    /// the local clock, a test pins it, and the freshness guard reads only this.
+    pub clock: &'a dyn Fn() -> i64,
+    /// How far in the past a writer stamp may sit from this engine's clock, in
+    /// seconds: the age bound on an applied envelope. `0` disables it, which is
+    /// the shipped default, because a store-and-forward backlog is legitimately
+    /// old.
+    pub max_envelope_skew_secs: u64,
 }
 
 /// Apply one remote mutation under the trust matrix.
@@ -224,6 +247,13 @@ fn guarded(
     if engine.sync.dead_letter_status(&m.sync_mutation_id)? == Some(DeadLetterStatus::AckedSkip) {
         return Ok(ApplyResult::plain(ApplyOutcome::Duplicate));
     }
+    // Freshness sits after the id pre-checks and before the content-hash guard:
+    // an id still in the journal keeps answering `Duplicate`, and only a
+    // journal miss can be refused as stale. Nothing is written here, so the
+    // caller's cursor advances over the loser.
+    if apply_freshness::is_stale(engine, &m.transaction_time) {
+        return Ok(ApplyResult::plain(ApplyOutcome::Stale));
+    }
     if engine.sync.journal_apply_guard_hit(
         &m.bank,
         &m.entity_kind,
@@ -294,99 +324,6 @@ fn guarded(
         }
     }
     Ok(ApplyResult::plain(outcome))
-}
-
-fn apply_assoc(
-    engine: &ApplyEngine<'_>,
-    m: &SyncMutation,
-    envelope_json: &str,
-    prune: bool,
-) -> Result<ApplyOutcome, AmError> {
-    let SyncContent::Plain(v) = &m.content else {
-        return Ok(ApplyOutcome::Applied);
-    };
-    let edge: AssocEdgeRecord = match serde_json::from_value(v.clone()) {
-        Ok(edge) => edge,
-        Err(e) => {
-            return crate::apply_history::reject(engine, m, envelope_json, "bad assoc content", &e);
-        }
-    };
-    if edge.bank_id != m.bank {
-        return dead_letter(
-            engine,
-            m,
-            envelope_json,
-            &AmError::new(
-                ErrorCode::Forbidden,
-                "mutation bank does not match edge bank",
-            ),
-        );
-    }
-    // Referential targets: both endpoints must exist locally (matrix: validate
-    // referential targets). Erased endpoints regenerate via erase hooks.
-    for endpoint in [&edge.source_id, &edge.target_id] {
-        if engine.store.get_item_identity(&m.bank, endpoint)?.is_none() {
-            return dead_letter(
-                engine,
-                m,
-                envelope_json,
-                &AmError::new(ErrorCode::NotFound, "assoc endpoint missing locally"),
-            );
-        }
-    }
-    if prune {
-        engine.store.delete_assoc_edge(&m.bank, &m.entity_id)?;
-        return Ok(ApplyOutcome::Applied);
-    }
-    if let Some(existing) = engine.store.get_assoc_edge(&m.bank, &edge.id)?
-        && lww_loser(engine, m, &existing.last_updated_at, None)?
-    {
-        return Ok(ApplyOutcome::ConflictLoser);
-    }
-    engine.store.put_assoc_edge(&edge)?;
-    Ok(ApplyOutcome::Applied)
-}
-
-fn apply_triple_invalidate(
-    engine: &ApplyEngine<'_>,
-    m: &SyncMutation,
-    envelope_json: &str,
-) -> Result<ApplyOutcome, AmError> {
-    let SyncContent::Plain(v) = &m.content else {
-        return Ok(ApplyOutcome::Applied);
-    };
-    let subject = v
-        .get("subject")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let predicate = v
-        .get("predicate")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let object = v.get("object").and_then(serde_json::Value::as_str);
-    if subject.is_empty() || predicate.is_empty() {
-        return dead_letter(
-            engine,
-            m,
-            envelope_json,
-            &AmError::new(
-                ErrorCode::InvalidArgument,
-                "triple invalidate needs identity",
-            ),
-        );
-    }
-    let ended = engine.store.triple_end(
-        &m.bank,
-        subject,
-        predicate,
-        object,
-        &m.transaction_time,
-        &m.transaction_time,
-    )?;
-    if ended.closed_ids.is_empty() && !ended.already_ended {
-        return Ok(ApplyOutcome::Duplicate);
-    }
-    Ok(ApplyOutcome::Applied)
 }
 
 /// The admission score one origin receipt carries, read tolerantly: a missing

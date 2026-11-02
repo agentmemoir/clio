@@ -93,6 +93,7 @@ fn serve_refuses_a_public_bind_when_the_setting_is_off() {
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     })

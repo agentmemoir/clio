@@ -22,7 +22,7 @@
 //! Keep this module focused on history-record apply tests.
 
 use crate::apply::ApplyOutcome;
-use crate::apply::apply_tests::{apply, fixture};
+use crate::apply_fixtures::{apply, fixture};
 use crate::protocol::{SyncContent, SyncMutation};
 use clio_store::{HistoryStore, Store, SyncStore};
 use clio_types::{

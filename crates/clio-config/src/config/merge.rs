@@ -72,7 +72,8 @@ where
         "credentials": {},
         "sync": {
             "omit": true,
-            "allow_public_bind": false
+            "allow_public_bind": false,
+            "max_envelope_skew_secs": 0
         },
         "mcp": {
             "revision": "2025-11-25",
@@ -256,5 +257,18 @@ mod tests {
             "a public sync bind must be off unless the operator turns it on"
         );
         assert_eq!(defaults.pointer("/sync/omit").cloned(), Some(json!(true)));
+    }
+
+    /// The freshness age bound is off by default: `0` means no age bound, so a
+    /// backlog a peer stored while offline still applies. An always-online fleet
+    /// sets a positive value to refuse an older push as stale.
+    #[test]
+    fn sync_max_envelope_skew_defaults_to_off() {
+        let defaults = system_defaults(&|_key: &str| None);
+        assert_eq!(
+            defaults.pointer("/sync/max_envelope_skew_secs").cloned(),
+            Some(json!(0)),
+            "a positive default would drop every backlog row older than the bound"
+        );
     }
 }

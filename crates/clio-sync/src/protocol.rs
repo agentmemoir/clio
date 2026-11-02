@@ -76,6 +76,11 @@ pub const REASON_UNAUTHORIZED_BANK: &str = "unauthorized_bank";
 pub const REASON_ERASED_SUBJECT: &str = "erased_subject";
 /// Dead-letter reason: op not supported by this release.
 pub const REASON_UNSUPPORTED_OP: &str = "unsupported_op";
+/// Dead-letter reason: writer stamp outside the receiver's freshness bounds.
+pub const REASON_STALE_ENVELOPE: &str = "stale_envelope";
+/// Dead-letter reason: writer stamp names no instant this build can place, so
+/// the freshness bounds cannot be applied to it.
+pub const REASON_MALFORMED_STAMP: &str = "malformed_stamp";
 
 /// Content as it travels: decrypted JSON, or client-encrypted opaque bytes.
 ///
@@ -380,6 +385,10 @@ pub struct SyncStatusReport {
     pub encryption_summary: Option<EncryptionSummary>,
     /// Last error text (PII-safe), when any.
     pub last_error: Option<String>,
+    /// The last stale-envelope refusal this node recorded: when it happened,
+    /// which mutation, and the writer stamp that was refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_stale_refusal: Option<String>,
 }
 
 /// Key-count and newest-key facts for a node that holds sync keys.
@@ -414,6 +423,9 @@ pub struct BankSyncStatus {
     pub dead_letter_open: i64,
     /// Recorded LWW conflict count.
     pub conflicts: i64,
+    /// Monotonic count of stale-envelope refusals recorded for this bank.
+    #[serde(default)]
+    pub stale_refused: i64,
     /// Sample of recent conflict summaries (ids only).
     pub conflict_sample: Vec<String>,
 }

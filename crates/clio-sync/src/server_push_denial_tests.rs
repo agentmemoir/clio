@@ -27,7 +27,7 @@
 //!
 //! Keep this module focused on the routes' denial refusals.
 
-use crate::apply::apply_tests::{env, item_value};
+use crate::apply_fixtures::{env, item_value};
 use crate::client::client_tests::{TOKEN, paired_cfg, paired_key};
 use crate::client::pull_with_denial;
 use crate::credential_fixtures::{Scratch, record, secret};
@@ -72,6 +72,7 @@ fn serve_scoped() -> (
             allow_public_bind: false,
             ttl_secs: None,
             deadline_secs: None,
+            max_envelope_skew_secs: None,
             device_id: "srv-1".into(),
             sync_key: None,
         },

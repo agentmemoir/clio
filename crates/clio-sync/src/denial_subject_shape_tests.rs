@@ -24,8 +24,8 @@
 //!
 //! Keep this module focused on the subject-keyed payload shapes the guard reads.
 
-use crate::apply::apply_tests::{env, fixture};
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation_guarded};
+use crate::apply::{ApplyOutcome, apply_mutation_guarded};
+use crate::apply_fixtures::{env, fixture};
 use crate::client_feed_package_fixtures::{
     belief, failure_record, item as package_item, task_record,
 };
@@ -109,12 +109,13 @@ fn shape_op(mid: &str, bank: &str, kind: &str, entity: &str, content: Value) -> 
 /// Apply `m` and assert the denied subject is dead-lettered with no journal
 /// entry, the shape-independent half of every refused-shape case.
 fn assert_refused(store: &SqliteStore, denial: &FakeDenial, m: &SyncMutation) {
-    let engine = ApplyEngine {
+    let engine = crate::apply::apply_freshness::test_engine(
         store,
-        sync: store,
-        device_id: "srv-1".into(),
-        kms: None,
-    };
+        store,
+        "srv-1",
+        None,
+        &m.transaction_time,
+    );
     let envelope = serde_json::to_string(m).expect("serialize envelope");
     let result = apply_mutation_guarded(&engine, Some(denial), m, &envelope).expect("apply runs");
     assert_eq!(
@@ -199,12 +200,13 @@ fn a_clear_subject_passes_the_guard_for_every_subject_keyed_shape() {
     let (store, _kms) = fixture();
     let denial = FakeDenial::new("fp-1");
     denial.deny("s-held", &["b-shape"]);
-    let engine = ApplyEngine {
-        store: store.as_ref(),
-        sync: store.as_ref(),
-        device_id: "srv-1".into(),
-        kms: None,
-    };
+    let engine = crate::apply::apply_freshness::test_engine(
+        store.as_ref(),
+        store.as_ref(),
+        "srv-1",
+        None,
+        "2026-01-01T00:00:01Z",
+    );
     let cases = [
         (
             "m-clear-belief",

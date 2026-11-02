@@ -4,16 +4,17 @@
 //! # Responsibility
 //!
 //! This module is responsible for testing the admission receipt on the pull
-//! path: that an opened sealed document restores the score onto the mutation
-//! before apply, that a same-timestamp conflict is decided by that score rather
-//! than by the device-id fallback, that a writer whose row carries no receipt
-//! still applies, and that erasure still dead-letters under encryption.
+//! path end to end: that a same-timestamp conflict is decided by the sealed
+//! score rather than by the device-id fallback, that a writer whose row carries
+//! no receipt still applies, and that erasure still dead-letters under
+//! encryption.
 //!
 //! ## Owns
-//! - Pull-path receipt restoration, the discriminating tie-break tests (item
-//!   and persona), and the erasure check under encryption
+//! - The discriminating pull-path tie-break tests (item and persona) and the
+//!   erasure check under encryption
 //!
 //! ## Does not own
+//! - Opening the row and lifting the receipt out of it (`client_decrypt_tests`)
 //! - Packaging the receipt (`client_feed_package_receipt_tests`)
 //! - Handle resolution (`client_resolve_tests`)
 //! - The relay's journal-level wire assertions (`client_wire_blindness_tests`)
@@ -35,7 +36,7 @@ use crate::protocol::{
 };
 use clio_store::{DeadLetterStatus, Store, SyncStore};
 use clio_types::{MemoryItem, PersonaStableEntry};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// One bank for every test here, and one fixed stamp: no test reads the clock.
 const BANK: &str = "br";
@@ -86,104 +87,6 @@ fn sealed_without_receipt(
         admission_receipt: None,
     };
     crate::envelope_fixtures::seal_content_for(mutation, key, &document)
-}
-
-/// The wire mutation of one sealed item record carrying `receipt` in its
-/// document, the shape a current writer produces.
-fn sealed_with_receipt(
-    key: &SyncCipherKey,
-    bank: &str,
-    record: &MemoryItem,
-    device: &str,
-    receipt: Value,
-) -> SyncMutation {
-    let mut document = serde_json::to_value(record).expect("record");
-    document[crate::client_feed::package::ADMISSION_RECEIPT_KEY] = receipt;
-    let mutation = SyncMutation {
-        sync_mutation_id: format!("m-{}", record.id),
-        bank: bank.into(),
-        entity_kind: ENTITY_KIND_ITEM.into(),
-        entity_id: record.id.clone(),
-        op: OP_UPSERT.into(),
-        transaction_time: record.updated_at.clone(),
-        device_id: device.into(),
-        content: SyncContent::Plain(Value::Null),
-        content_hash: "unused-by-the-restoration".into(),
-        admission_receipt: None,
-    };
-    crate::envelope_fixtures::seal_content_for(mutation, key, &document)
-}
-
-/// The restoration runs when the content opens, before `apply_mutation` sees
-/// the row.
-#[test]
-fn an_opened_document_restores_the_receipt_before_apply() {
-    let store = sqlite();
-    let key =
-        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-restore-key"));
-    let cfg = cfg("dev-a", &store, "127.0.0.1:1", vec![key.clone()]);
-    let record = item(BANK, "i-1", "s1", STAMP, "restored");
-    let mutation = sealed_with_receipt(
-        &key,
-        BANK,
-        &record,
-        "dev-a",
-        json!({ "admitted": true, "score": 0.9 }),
-    );
-    let envelope = serde_json::to_string(&mutation).expect("envelope");
-    let opened = super::decrypt_for_apply(&cfg, &mutation, &envelope)
-        .expect("decrypt")
-        .expect("an item row resolves");
-    assert_eq!(
-        opened.admission_receipt,
-        Some(json!({ "admitted": true, "score": 0.9 })),
-        "the score is back on the mutation before apply_mutation runs"
-    );
-}
-
-/// A document with no score, or a malformed one, leaves the documented
-/// absent-score fallback and is not an error.
-#[test]
-fn an_absent_or_malformed_receipt_degrades_to_the_documented_fallback() {
-    let store = sqlite();
-    let key =
-        SyncCipherKey::from_secret(&crate::credential_fixtures::secret("receipt-fallback-key"));
-    let cfg = cfg("dev-a", &store, "127.0.0.1:1", vec![key.clone()]);
-    let record = item(BANK, "i-1", "s1", STAMP, "fallback");
-    let cases: [(&str, Value); 2] = [
-        ("no receipt key", Value::Null),
-        (
-            "malformed score",
-            json!({ "admitted": true, "score": "high" }),
-        ),
-    ];
-    for (label, receipt) in cases {
-        let mut document = serde_json::to_value(&record).expect("record");
-        if !receipt.is_null() {
-            document[crate::client_feed::package::ADMISSION_RECEIPT_KEY] = receipt;
-        }
-        let mutation = SyncMutation {
-            sync_mutation_id: format!("m-{label}"),
-            bank: BANK.into(),
-            entity_kind: ENTITY_KIND_ITEM.into(),
-            entity_id: record.id.clone(),
-            op: OP_UPSERT.into(),
-            transaction_time: STAMP.into(),
-            device_id: "dev-a".into(),
-            content: SyncContent::Plain(Value::Null),
-            content_hash: "unused-by-the-restoration".into(),
-            admission_receipt: None,
-        };
-        let mutation = crate::envelope_fixtures::seal_content_for(mutation, &key, &document);
-        let envelope = serde_json::to_string(&mutation).expect("envelope");
-        let opened = super::decrypt_for_apply(&cfg, &mutation, &envelope)
-            .expect("decrypt")
-            .expect("the row resolves");
-        assert!(
-            opened.admission_receipt.is_none(),
-            "{label}: the receipt stays absent, so lww_compare applies 0.0"
-        );
-    }
 }
 
 /// An encrypted same-timestamp conflict is decided by the restored score. The

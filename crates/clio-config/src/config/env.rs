@@ -127,6 +127,15 @@ impl Runtime {
             self.env_overlay
                 .insert("sync.allow_public_bind".into(), Value::Bool(allow));
         }
+        // A window of zero is the operator's off switch, so zero is a value and
+        // not a bad one; text where a count belongs is dropped here so the
+        // config default stands rather than a guessed number.
+        if let Some(secs) =
+            get("CLIO_SYNC_MAX_ENVELOPE_SKEW_SECS").and_then(|s| s.parse::<u64>().ok())
+        {
+            self.env_overlay
+                .insert("sync.max_envelope_skew_secs".into(), Value::from(secs));
+        }
         if let Some(root) = get("CLIO_REPO_ROOT") {
             self.repo_root = Some(root);
         }

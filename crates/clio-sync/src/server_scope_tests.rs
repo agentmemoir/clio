@@ -49,6 +49,7 @@ fn options(banks: &[&str], store_path: &Path, dev: bool) -> (SyncServerOptions, 
         allow_public_bind: false,
         ttl_secs: None,
         deadline_secs: None,
+        max_envelope_skew_secs: None,
         device_id: "srv-1".into(),
         sync_key: None,
     };

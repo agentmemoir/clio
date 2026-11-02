@@ -64,6 +64,7 @@ fn serve_denied() -> (
             allow_public_bind: false,
             ttl_secs: None,
             deadline_secs: None,
+            max_envelope_skew_secs: None,
             device_id: "srv-1".into(),
             sync_key: None,
         },
@@ -84,6 +85,7 @@ fn client(remote: &str, token: &str) -> SyncClientConfig {
         token: Some(token.to_owned()),
         cipher: Vec::new(),
         allow_plaintext: false,
+        max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
     }
 }
 
@@ -131,6 +133,7 @@ fn a_delivery_without_a_remote_endpoint_is_input_refused() {
         token: None,
         cipher: Vec::new(),
         allow_plaintext: false,
+        max_envelope_skew_secs: crate::ENVELOPE_SKEW_DEFAULT_SECS,
     };
     let err = deliver_denial(&cfg, &target("fp-1")).expect_err("no remote is the caller's input");
     assert_eq!(err.code, ErrorCode::InvalidArgument);

@@ -28,7 +28,6 @@
 //! journal write rather than pushed: the push route refuses plaintext content,
 //! so a relay that fabricates or downgrades a row is what a test can model.
 
-use crate::apply::ApplyEngine;
 use crate::client::client_envelope_tests::{BANK, Receiver, VICTIM, hand_push, held_key};
 use crate::client::client_tests::{TOKEN, cfg, create_item, serve, sqlite};
 use crate::client::{pull, pull_with_denial};
@@ -79,12 +78,13 @@ fn node(banks: &[&str], cipher: Vec<SyncCipherKey>) -> (Receiver, Arc<SqliteStor
 /// with no KMS, so the row stores no sealed content and a puller receives it as
 /// plaintext.
 fn plant_plain(relay: &Arc<SqliteStore>, m: &SyncMutation) {
-    let engine = ApplyEngine {
-        store: relay.as_ref(),
-        sync: relay.as_ref(),
-        device_id: "srv-1".into(),
-        kms: None,
-    };
+    let engine = crate::apply::apply_freshness::test_engine(
+        relay.as_ref(),
+        relay.as_ref(),
+        "srv-1",
+        None,
+        &m.transaction_time,
+    );
     let row = crate::journal_row::journal_row(&engine, m).expect("journal row");
     assert!(
         relay
@@ -115,6 +115,7 @@ fn denial_relay(banks: &[&str]) -> (SyncServer, Arc<FakeDenial>) {
             allow_public_bind: false,
             ttl_secs: None,
             deadline_secs: None,
+            max_envelope_skew_secs: None,
             device_id: "srv-1".into(),
             sync_key: None,
         },

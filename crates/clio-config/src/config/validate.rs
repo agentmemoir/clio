@@ -49,6 +49,7 @@ const ALLOWED_SET_PATHS: &[&str] = &[
     "credentials.api_key",
     "sync.omit",
     "sync.allow_public_bind",
+    "sync.max_envelope_skew_secs",
     "store.database_url",
     "store.sqlite_path",
     "extract.provider",
@@ -263,6 +264,16 @@ pub(crate) fn validate_set_value(path: &str, value: &Value) -> Result<(), AmErro
                 ));
             }
         },
+        // Zero is the switch that turns the freshness rule off, so it is a value
+        // and not a bad one; anything that is not a count gives no window.
+        "sync.max_envelope_skew_secs" => {
+            if value.as_u64().is_none() {
+                return Err(AmError::new(
+                    ErrorCode::InvalidType,
+                    "sync.max_envelope_skew_secs must be a non-negative integer",
+                ));
+            }
+        }
         "store.database_url" => {
             if !value.is_string() {
                 return Err(AmError::new(

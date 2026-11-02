@@ -22,168 +22,11 @@
 //!
 //! Keep this module focused on apply engine tests.
 
-use crate::apply::{ApplyEngine, ApplyOutcome, apply_mutation};
-use crate::protocol::{ENTITY_KIND_ASSOC, ENTITY_KIND_ITEM, OP_UPSERT, SyncContent, SyncMutation};
-use clio_store::{
-    AssocEdgeRecord, AssocKind, DeadLetterStatus, DekProvider, LocalDevKms, SqliteStore, Store,
-    SyncStore,
-};
-use clio_types::{EpistemicKind, ItemKind, MemoryItem, SemanticCategory};
-use serde_json::{Value, json};
-use std::sync::Arc;
-
-pub(crate) fn fixture() -> (Arc<SqliteStore>, Arc<dyn DekProvider>) {
-    let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
-    let store = Arc::new(SqliteStore::open_in_memory(Arc::clone(&kms)).expect("sqlite open"));
-    (store, kms)
-}
-
-pub(crate) fn item(bank: &str, id: &str, subject: &str, stamp: &str, gist: &str) -> MemoryItem {
-    MemoryItem {
-        id: id.into(),
-        bank_id: bank.into(),
-        subject_id: subject.into(),
-        kind: ItemKind::Semantic,
-        category: Some(SemanticCategory::ToolConfig),
-        episodic_type: None,
-        epistemic_kind: EpistemicKind::Fact,
-        source_type: None,
-        confidence: Some(0.6),
-        admission_score: Some(0.5),
-        source_ref: Some("ev".into()),
-        snapshot: Some(json!({ "k": id })),
-        gist: Some(gist.into()),
-        valid_from: stamp.into(),
-        valid_until: None,
-        tx_from: stamp.into(),
-        tx_until: None,
-        created_at: stamp.into(),
-        updated_at: stamp.into(),
-        context: None,
-    }
-}
-
-pub(crate) fn item_value(bank: &str, id: &str, subject: &str, stamp: &str, gist: &str) -> Value {
-    serde_json::to_value(item(bank, id, subject, stamp, gist)).expect("serialize item")
-}
-
-pub(crate) fn hash_of(content: &Value) -> String {
-    let text = serde_json::to_string(content).unwrap_or_default();
-    clio_store::sha256_hex(crate::keyed_roles::published_digest_salt(), &text)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn env(
-    mid: &str,
-    bank: &str,
-    kind: &str,
-    entity: &str,
-    op: &str,
-    stamp: &str,
-    dev: &str,
-    content: Value,
-) -> SyncMutation {
-    let content_hash = hash_of(&content);
-    SyncMutation {
-        sync_mutation_id: mid.into(),
-        bank: bank.into(),
-        entity_kind: kind.into(),
-        entity_id: entity.into(),
-        op: op.into(),
-        transaction_time: stamp.into(),
-        device_id: dev.into(),
-        content: SyncContent::Plain(content),
-        content_hash,
-        admission_receipt: None,
-    }
-}
-
-pub(crate) fn upsert(mid: &str, bank: &str, stamp: &str, dev: &str, gist: &str) -> SyncMutation {
-    env(
-        mid,
-        bank,
-        ENTITY_KIND_ITEM,
-        "i-1",
-        OP_UPSERT,
-        stamp,
-        dev,
-        item_value(bank, "i-1", "s1", stamp, gist),
-    )
-}
-
-pub(crate) fn edge(
-    bank: &str,
-    id: &str,
-    source: &str,
-    target: &str,
-    stamp: &str,
-) -> AssocEdgeRecord {
-    AssocEdgeRecord {
-        id: id.into(),
-        bank_id: bank.into(),
-        source_id: source.into(),
-        target_id: target.into(),
-        assoc_kind: AssocKind::Coactivation,
-        relationship: None,
-        weight: 0.5,
-        last_updated_at: stamp.into(),
-    }
-}
-
-pub(crate) fn edge_value(bank: &str, id: &str, source: &str, target: &str, stamp: &str) -> Value {
-    serde_json::to_value(edge(bank, id, source, target, stamp)).expect("serialize edge")
-}
-
-pub(crate) fn assoc(
-    mid: &str,
-    bank: &str,
-    entity: &str,
-    op: &str,
-    stamp: &str,
-    dev: &str,
-    content: Value,
-) -> SyncMutation {
-    env(
-        mid,
-        bank,
-        ENTITY_KIND_ASSOC,
-        entity,
-        op,
-        stamp,
-        dev,
-        content,
-    )
-}
-
-pub(crate) fn apply(
-    store: &SqliteStore,
-    kms: Option<&dyn DekProvider>,
-    m: &SyncMutation,
-) -> ApplyOutcome {
-    apply_result(store, kms, m).expect("apply succeeds")
-}
-
-pub(crate) fn apply_result(
-    store: &SqliteStore,
-    kms: Option<&dyn DekProvider>,
-    m: &SyncMutation,
-) -> Result<ApplyOutcome, clio_types::AmError> {
-    let engine = ApplyEngine {
-        store,
-        sync: store,
-        device_id: "node-1".into(),
-        kms,
-    };
-    let envelope = serde_json::to_string(m).expect("serialize envelope");
-    apply_mutation(&engine, m, &envelope)
-}
-
-pub(crate) fn receipt(m: &SyncMutation, score: f64) -> SyncMutation {
-    SyncMutation {
-        admission_receipt: Some(json!({ "admitted": true, "score": score })),
-        ..m.clone()
-    }
-}
+use crate::apply::ApplyOutcome;
+use crate::apply_fixtures::{apply, apply_at_epoch, env, fixture, item_value, receipt, upsert};
+use crate::protocol::{ENTITY_KIND_ITEM, OP_UPSERT};
+use clio_store::{DeadLetterStatus, SqliteStore, Store, SyncStore};
+use serde_json::json;
 
 #[test]
 fn t24_02_same_mutation_id_applies_once_then_duplicates() {
@@ -314,8 +157,10 @@ fn t24_09_malformed_envelope_dead_letters_then_ack_skip_once() {
     let (store, _kms) = fixture();
     let mut m = upsert("m-bad", "b-dlq", "2026-01-01T00:00:00Z", "dev-a", "g");
     m.transaction_time = String::new();
+    // The stamp names no instant, so the clock is pinned explicitly: the
+    // fixture-defect guard must stay loud for every ordinary case.
     assert_eq!(
-        apply(&store, None, &m),
+        apply_at_epoch(&store, None, &m, 0),
         ApplyOutcome::DeadLettered {
             reason_code: "malformed".into()
         }
