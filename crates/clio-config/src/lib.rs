@@ -66,6 +66,7 @@ pub mod secret_key_file;
 pub mod secret_key_source;
 pub mod secret_key_store;
 pub mod secret_seal;
+pub mod sync_device_id;
 pub mod sync_key;
 pub mod sync_key_file;
 pub mod sync_key_rotation;
@@ -131,6 +132,7 @@ pub use secret_key::{
 pub use secret_key_file::key_file_path;
 pub use secret_key_source::KeySource;
 pub use secret_seal::{SEALED_PREFIX, is_sealed, is_sealed_path, open, seal};
+pub use sync_device_id::{SYNC_DEVICE_ID_ENV, resolve_sync_device_id};
 pub use sync_key::{
     LoadedSyncKey, SYNC_KEY_FILE_ENV, SYNC_KEY_FILE_NAME, SyncKeyLocation, SyncKeyReport, delete,
     delete_with, generate, generate_with, key_file_path as sync_key_file_path, load, load_base64,

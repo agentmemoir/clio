@@ -38,7 +38,8 @@ mod zero_write;
 /// delegates. Modeled on the `forward_store!` macro in `store_double`.
 macro_rules! view_store {
     (reads { $($rname:ident($($rarg:ident: $rty:ty),* $(,)?) -> $rret:ty;)* }
-     writes { $($wname:ident($($warg:ident: $wty:ty),* $(,)?) -> $wret:ty;)* }) => {
+     writes { $($wname:ident($($warg:ident: $wty:ty),* $(,)?) -> $wret:ty;)* }
+     $(fixed { $($fname:ident() -> $fret:ty => $fexpr:expr;)* })?) => {
         $(fn $rname(&self $(, $rarg: $rty)*) -> $rret {
             self.inner.$rname($($rarg),*)
         })*
@@ -46,6 +47,9 @@ macro_rules! view_store {
             self.writes.fetch_add(1, Ordering::SeqCst);
             self.inner.$wname($($warg),*)
         })*
+        $($(fn $fname(&self) -> $fret {
+            $fexpr
+        })*)?
     };
 }
 
@@ -363,6 +367,7 @@ impl OpsStore for ViewDouble<dyn OpsStore> {
     view_store! {
         reads { counts() -> Result<StoreCounts, AmError>; ping() -> Result<(), AmError>; schema_version() -> Result<Option<String>, AmError>; embedding_space() -> Result<EmbeddingSpace, AmError>; bank_ids() -> Result<Vec<String>, AmError>; bank_exists(bank_id: &str) -> Result<bool, AmError>; integrity_signals(bank: Option<&str>) -> Result<IntegritySignals, AmError>; }
         writes { register_bank(bank_id: &str, created_at: &str) -> Result<(), AmError>; drop_orphan_assoc_edges(bank: &str) -> Result<u64, AmError>; }
+        fixed { device_id() -> Result<String, AmError> => Ok("device-fake".to_owned()); }
     }
 }
 

@@ -5,12 +5,13 @@
 //!
 //! This module is responsible for testing the Postgres `OpsStore` operator-health
 //! contract on the shared Compose database: reachability, recorded schema
-//! version, bank inventory, content-free integrity counts, and orphan edge
-//! cleanup.
+//! version, bank inventory, content-free integrity counts, orphan edge
+//! cleanup, and the stored device id.
 //!
 //! ## Owns
 //! - Postgres parity for the `OpsStore` contract, including planted-orphan
-//!   counts scoped to a unique bank prefix per test
+//!   counts scoped to a unique bank prefix per test, and the stored device id
+//!   read back in its documented shape
 //!
 //! ## Does not own
 //! - The contract definition (`ops_store`) or the SQL under test (`postgres_ops`)
@@ -23,6 +24,7 @@
 //! Keep this module focused on Postgres operator-health tests.
 
 use crate::db_url::postgres_url_from_env;
+use crate::migrate::IntoAmError;
 use crate::model::{AssocEdgeRecord, AssocKind};
 use crate::ops_store::{IntegritySignals, OpsStore};
 use crate::postgres::PostgresStore;
@@ -273,4 +275,42 @@ fn pg_drop_orphan_assoc_edges() {
     assert!(pg.get_assoc_edge(&bank, &orphan_id).unwrap().is_none());
 
     cleanup(&pg, &bank);
+}
+
+#[test]
+fn pg_device_id_is_minted_in_the_documented_shape() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    let id = pg.device_id().unwrap();
+    let suffix = id.strip_prefix("device-").expect("device- prefix");
+    assert_eq!(suffix.len(), 32, "{id}");
+    assert!(
+        suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{id}"
+    );
+    let stored = pg
+        .with_client(|client| {
+            Ok(client
+                .query_opt(
+                    "SELECT value FROM schema_settings WHERE key = 'device_id'",
+                    &[],
+                )
+                .am("read device id row")?
+                .map(|row| row.get::<_, String>(0)))
+        })
+        .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some(id.as_str()),
+        "the reported id must be the row the database stores"
+    );
+}
+
+#[test]
+fn pg_device_id_is_stable_across_calls() {
+    let _guard = crate::lock_pg_test();
+    let pg = pg();
+    assert_eq!(pg.device_id().unwrap(), pg.device_id().unwrap());
 }

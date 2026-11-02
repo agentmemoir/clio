@@ -119,6 +119,10 @@ impl OpsStore for AllSignalsOps {
     fn drop_orphan_assoc_edges(&self, _bank: &str) -> Result<u64, AmError> {
         Ok(0)
     }
+
+    fn device_id(&self) -> Result<String, AmError> {
+        Ok("device-fake".to_owned())
+    }
 }
 
 #[test]
