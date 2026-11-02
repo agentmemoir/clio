@@ -9,13 +9,14 @@
 //!
 //! ## Owns
 //! - Reading `sslmode` and `sslrootcert` out of a URL query
+//! - The mode a URL that names none defaults to, which depends on its hosts
 //! - Mapping a mode onto the value the driver's own parser knows
 //! - Percent-decoding a supplied root certificate path
 //!
 //! ## Does not own
 //! - What a mode means at connect time (see `pg_tls`, which picks the connector)
 //! - Loading or trusting a certificate (`tls_trust` owns that)
-//! - Hosts, ports, or credentials (the driver's parser owns those)
+//! - The host names themselves (the driver's parser is asked for them)
 //!
 //! ## Boundary
 //!
@@ -32,6 +33,10 @@
 //! original spelling is kept for the mode this store acts on.
 
 use crate::pg_tls::SslChoice;
+use clio_types::is_loopback_host;
+use std::str::FromStr;
+use tokio_postgres::Config;
+use tokio_postgres::config::Host;
 
 /// The query parameter that carries the SSL mode.
 const SSL_MODE_PARAM: &str = "sslmode";
@@ -57,16 +62,31 @@ pub(crate) struct TlsSpec {
 /// driver alone; only the URL form carries a root certificate. The mode is read
 /// from either form.
 ///
+/// A string that names no mode gets [`default_mode`]: `verify-full` for a host
+/// off this machine, `prefer` when every host is local. When that default is
+/// `verify-full` the driver URL is rewritten to force the negotiation, because
+/// otherwise the driver would open with its own weaker default.
+///
 /// # Errors
 /// The `sslmode` names a mode this store does not offer.
 pub(crate) fn spec(url: &str) -> Result<TlsSpec, String> {
     let Some((base, query)) = url.split_once('?') else {
-        let ssl = match mode_in_query_or_text(url) {
+        let requested = mode_in_query_or_text(url);
+        let ssl = match requested {
             Some(raw) => SslChoice::parse(raw)?,
-            None => SslChoice::Prefer,
+            None => default_mode(url),
         };
+        let mut driver_url = url.to_owned();
+        // A key/value string is separated by spaces, so the mode joins it the
+        // same way. The driver reads both forms.
+        if requested.is_none() && ssl == SslChoice::VerifyFull {
+            driver_url.push(if url.contains("://") { '?' } else { ' ' });
+            driver_url.push_str(SSL_MODE_PARAM);
+            driver_url.push('=');
+            driver_url.push_str(driver_mode(ssl));
+        }
         return Ok(TlsSpec {
-            driver_url: url.to_owned(),
+            driver_url,
             ssl,
             root: None,
         });
@@ -92,7 +112,7 @@ pub(crate) fn spec(url: &str) -> Result<TlsSpec, String> {
     }
     let ssl = match requested {
         Some(raw) => SslChoice::parse(raw)?,
-        None => SslChoice::Prefer,
+        None => default_mode(base),
     };
     // The driver needs one of its own three values, so the rewritten URL says
     // `require` for both verified and unverified TLS and the connector alone
@@ -123,6 +143,30 @@ fn driver_mode(ssl: SslChoice) -> &'static str {
         SslChoice::Disable => "disable",
         SslChoice::Prefer => "prefer",
         SslChoice::VerifyFull | SslChoice::EncryptNoVerify => "require",
+    }
+}
+
+/// The mode a string that names none defaults to.
+///
+/// A host off this machine gets `verify-full`: the operator did not ask for
+/// less, and a network the operator does not control is where checking the
+/// server matters. A Unix socket is on this machine by definition, and so is a
+/// loopback name, so those keep `prefer` and an unencrypted local server keeps
+/// working. An empty host list also keeps `prefer`, because the driver refuses
+/// such a string before TLS is reached; a string the driver cannot read at all
+/// keeps it for the same reason.
+fn default_mode(url: &str) -> SslChoice {
+    let Ok(config) = Config::from_str(url) else {
+        return SslChoice::Prefer;
+    };
+    let local = config.get_hosts().iter().all(|host| match host {
+        Host::Tcp(name) => is_loopback_host(name),
+        Host::Unix(_) => true,
+    });
+    if local {
+        SslChoice::Prefer
+    } else {
+        SslChoice::VerifyFull
     }
 }
 

@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - The mode-to-driver mapping for every mode
+//! - The mode a string with no `sslmode` defaults to, from its hosts
 //! - Keeping the other query parameters, and dropping `sslrootcert`
 //! - Percent-decoding a supplied root path
 //!
@@ -64,10 +65,60 @@ fn other_query_parameters_are_kept_and_the_mode_is_appended() {
 }
 
 #[test]
-fn a_url_with_no_mode_is_prefer() {
-    let spec = spec("postgres://u@h/db").expect("no mode is the driver's default");
-    assert_eq!(spec.ssl, SslChoice::Prefer);
-    assert_eq!(spec.driver_url, "postgres://u@h/db");
+fn a_url_with_no_mode_requires_tls_for_a_remote_host() {
+    let remote = spec("postgres://u@db.example.com/db").expect("no mode names a default");
+    assert_eq!(remote.ssl, SslChoice::VerifyFull);
+    assert_eq!(
+        remote.driver_url,
+        "postgres://u@db.example.com/db?sslmode=require"
+    );
+
+    // One remote host in a list is enough to require TLS for the whole string.
+    let mixed = spec("postgres://u@127.0.0.1,db.example.com/db").expect("a host list is valid");
+    assert_eq!(mixed.ssl, SslChoice::VerifyFull);
+}
+
+#[test]
+fn a_query_with_no_mode_still_requires_tls_for_a_remote_host() {
+    let spec = spec("postgres://u@db.example.com/db?application_name=clio")
+        .expect("no mode names a default");
+    assert_eq!(spec.ssl, SslChoice::VerifyFull);
+    assert_eq!(
+        spec.driver_url,
+        "postgres://u@db.example.com/db?application_name=clio&sslmode=require"
+    );
+}
+
+#[test]
+fn a_url_with_no_mode_keeps_prefer_for_a_local_host() {
+    for url in [
+        "postgres://u@localhost/db",
+        "postgres://u@127.0.0.1:5432/db",
+        "postgres://u@[::1]/db",
+        "postgres://u@%2Fvar%2Frun%2Fpostgresql/db",
+        "postgres:///db",
+    ] {
+        let spec = spec(url).expect("a local address needs no TLS");
+        assert_eq!(spec.ssl, SslChoice::Prefer, "{url}");
+        assert_eq!(spec.driver_url, url, "{url}");
+    }
+}
+
+#[test]
+fn an_explicit_mode_wins_over_the_host_default() {
+    let remote = spec("postgres://u@db.example.com/db?sslmode=prefer").expect("an explicit mode");
+    assert_eq!(remote.ssl, SslChoice::Prefer);
+    assert_eq!(
+        remote.driver_url,
+        "postgres://u@db.example.com/db?sslmode=prefer"
+    );
+
+    let local = spec("postgres://u@localhost/db?sslmode=verify-full").expect("an explicit mode");
+    assert_eq!(local.ssl, SslChoice::VerifyFull);
+    assert_eq!(
+        local.driver_url,
+        "postgres://u@localhost/db?sslmode=require"
+    );
 }
 
 #[test]
@@ -77,6 +128,20 @@ fn a_key_value_string_keeps_its_mode_and_has_no_root() {
     assert_eq!(spec.root, None);
     // The string is left for the driver, which is the only reader of this form.
     assert_eq!(spec.driver_url, "host=h user=u sslmode=prefer");
+}
+
+#[test]
+fn a_key_value_string_with_no_mode_follows_its_host() {
+    let remote = spec("host=db.example.com user=u").expect("no mode names a default");
+    assert_eq!(remote.ssl, SslChoice::VerifyFull);
+    assert_eq!(
+        remote.driver_url,
+        "host=db.example.com user=u sslmode=require"
+    );
+
+    let local = spec("host=127.0.0.1 user=u").expect("a local address needs no TLS");
+    assert_eq!(local.ssl, SslChoice::Prefer);
+    assert_eq!(local.driver_url, "host=127.0.0.1 user=u");
 }
 
 #[test]
