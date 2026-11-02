@@ -208,9 +208,11 @@ pub(crate) fn append_confidence_sqlite_tx(
         .query_row(
             "SELECT COUNT(*) FROM belief_confidence_entries WHERE belief_id = ?1",
             params![belief_id],
-            |r| r.get(0),
+            |r| r.get::<_, i64>(0),
         )
-        .am("belief entry count")?;
+        .am("belief entry count")?
+        .try_into()
+        .expect("trajectory length fits usize");
     tx.execute(
         "INSERT INTO audit_events (
             id, bank_id, operation, item_id, epistemic_kind, confidence,
