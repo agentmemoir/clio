@@ -1,0 +1,1 @@
+The gate install check no longer runs on macOS, because GitHub does not reliably provide a hosted macOS runner and the cancelled job blocked every pull request; the same suites still run in the `check` job.
