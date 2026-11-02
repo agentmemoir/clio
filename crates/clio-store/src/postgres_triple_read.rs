@@ -43,14 +43,17 @@ impl PostgresStore {
                 )
                 .am("triples get")?;
             row.map(|r| {
+                let edge_id: String = r.get(0);
+                let item_id: String = r.get(2);
                 let mut rec = map_triple_row(
-                    r.get(0),
+                    edge_id.clone(),
                     r.get(1),
-                    r.get(2),
+                    item_id.clone(),
                     r.get(3),
                     r.get(4),
                     crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &edge_id,
                         r.get::<_, Option<String>>(5).as_deref(),
                     )?,
                     r.get(6),
@@ -66,7 +69,7 @@ impl PostgresStore {
                     r.get(16),
                 )?;
                 let cipher: Option<String> = r.get(17);
-                rec.context = open_context(self.kms().as_ref(), cipher.as_deref());
+                rec.context = open_context(self.kms().as_ref(), &item_id, cipher.as_deref());
                 Ok(rec)
             })
             .transpose()
@@ -93,14 +96,17 @@ impl PostgresStore {
             let rows = client.query(sql.as_str(), &bind).am("triples query")?;
             let mut out = Vec::new();
             for r in rows {
+                let edge_id: String = r.get(0);
+                let item_id: String = r.get(2);
                 let mut rec = map_triple_row(
-                    r.get(0),
+                    edge_id.clone(),
                     r.get(1),
-                    r.get(2),
+                    item_id.clone(),
                     r.get(3),
                     r.get(4),
                     crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &edge_id,
                         r.get::<_, Option<String>>(5).as_deref(),
                     )?,
                     r.get(6),
@@ -116,7 +122,7 @@ impl PostgresStore {
                     r.get(16),
                 )?;
                 let cipher: Option<String> = r.get(17);
-                rec.context = open_context(self.kms().as_ref(), cipher.as_deref());
+                rec.context = open_context(self.kms().as_ref(), &item_id, cipher.as_deref());
                 out.push(rec);
             }
             Ok(out)
@@ -143,14 +149,17 @@ impl PostgresStore {
                 .am("triples list")?;
             let mut out = Vec::new();
             for r in rows {
+                let edge_id: String = r.get(0);
+                let item_id: String = r.get(2);
                 let mut rec = map_triple_row(
-                    r.get(0),
+                    edge_id.clone(),
                     r.get(1),
-                    r.get(2),
+                    item_id.clone(),
                     r.get(3),
                     r.get(4),
                     crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &edge_id,
                         r.get::<_, Option<String>>(5).as_deref(),
                     )?,
                     r.get(6),
@@ -166,7 +175,7 @@ impl PostgresStore {
                     r.get(16),
                 )?;
                 let cipher: Option<String> = r.get(17);
-                rec.context = open_context(self.kms().as_ref(), cipher.as_deref());
+                rec.context = open_context(self.kms().as_ref(), &item_id, cipher.as_deref());
                 out.push(rec);
             }
             Ok(out)
@@ -217,6 +226,7 @@ impl PostgresStore {
                 if let Some(wanted) = object
                     && crate::triple_cipher::open_optional_object(
                         self.kms().as_ref(),
+                        &id,
                         cipher.as_deref(),
                     )? != wanted
                 {

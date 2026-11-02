@@ -214,7 +214,7 @@ fn triple_refs_follow_bundle_items_into_the_second_bank() {
 /// `items` empty; assoc edges over those rows must still be re-keyed, or the
 /// target bank gets edges pointing at source-bank ids.
 #[test]
-fn ciphertext_backup_assoc_edges_point_at_rekeyed_opaque_rows() {
+fn ciphertext_backup_assoc_edges_point_at_same_bank_opaque_rows() {
     let h = Harness::new();
     let left = unique("opq");
     let right = unique("opq");
@@ -233,34 +233,29 @@ fn ciphertext_backup_assoc_edges_point_at_rekeyed_opaque_rows() {
         ..ExportEntities::default()
     };
     let bundle = write_bundle(&entities, ExportContentMode::CiphertextBackup);
-    let first = import_into(&h, &bundle, &source_ctx());
-    assert_eq!(first.would_create, 3);
-    let second = import_into(&h, &bundle, &h.ctx());
-    assert_eq!(second.would_create, 3, "2 opaque rows + 1 assoc edge");
+    let report = import_into(&h, &bundle, &source_ctx());
+    assert_eq!(report.would_create, 3, "2 opaque rows + 1 assoc edge");
 
-    let suffix = format!("#{}", h.bank);
-    let derived_left = format!("{left}{suffix}");
-    let derived_right = format!("{right}{suffix}");
-    let edges = h.store.list_assoc_edges(&h.bank, None).unwrap();
+    let edges = h.store.list_assoc_edges(SOURCE_BANK, None).unwrap();
     assert_eq!(edges.len(), 1);
-    assert_eq!(edges[0].source_id, derived_left);
-    assert_eq!(edges[0].target_id, derived_right);
-    for endpoint in [&derived_left, &derived_right] {
+    assert_eq!(edges[0].source_id, left);
+    assert_eq!(edges[0].target_id, right);
+    for endpoint in [&left, &right] {
         assert!(
             h.store
-                .get_item_identity(&h.bank, endpoint)
+                .get_item_identity(SOURCE_BANK, endpoint)
                 .unwrap()
                 .is_some(),
-            "assoc endpoint `{endpoint}` must exist in the target bank"
+            "assoc endpoint `{endpoint}` keeps its sealed id"
         );
     }
 }
 
 /// `OpaqueItem` has no bank provenance, so only a single-bank manifest naming
-/// the target bank is provably same-bank; a multi-bank or empty `bank_ids` must
-/// fail closed to the derived id. Otherwise the opaque upsert
-/// (`ON CONFLICT (id) DO UPDATE SET bank_id = EXCLUDED.bank_id`) moves the
-/// source bank's row into the target bank.
+/// the target bank is provably same-bank. Any other manifest must fail closed:
+/// the row holds at-rest bytes from its source bank, and import has no
+/// plaintext or DEK handle to re-seal them, so a rewritten id would be
+/// permanently unreadable.
 #[test]
 fn opaque_ids_fail_closed_outside_a_single_bank_manifest() {
     let h = Harness::new();
@@ -283,8 +278,6 @@ fn opaque_ids_fail_closed_outside_a_single_bank_manifest() {
         ExportContentMode::CiphertextBackup,
         vec![SOURCE_BANK.to_owned(), h.bank.clone()],
     );
-    assert_eq!(import_into(&h, &multi, &h.ctx()).would_create, 1);
-
     let empty = write_bundle_for_banks(
         &ExportEntities {
             opaque_items: vec![opaque_row(&h, &empty_id)],
@@ -293,7 +286,12 @@ fn opaque_ids_fail_closed_outside_a_single_bank_manifest() {
         ExportContentMode::CiphertextBackup,
         vec![],
     );
-    assert_eq!(import_into(&h, &empty, &h.ctx()).would_create, 1);
+    for bundle in [&multi, &empty] {
+        let err = import(&h.args(&h.ctx(), h.policy(), bundle.path(), false, false, None))
+            .expect_err("cross-bank opaque restore must fail closed");
+        assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument, "{err:?}");
+        assert!(err.message.contains("opaque item"), "{err:?}");
+    }
 
     let suffix = format!("#{}", h.bank);
     for id in [&multi_id, &empty_id] {
@@ -302,12 +300,12 @@ fn opaque_ids_fail_closed_outside_a_single_bank_manifest() {
             h.store
                 .get_item_identity(&h.bank, &derived)
                 .unwrap()
-                .is_some(),
-            "derived id `{derived}` is written in the target bank"
+                .is_none(),
+            "no derived id `{derived}` may be written"
         );
         assert!(
             h.store.get_item_identity(&h.bank, id).unwrap().is_none(),
-            "the unkeyed source id must not appear in the target bank"
+            "the source id must not appear in the target bank"
         );
         assert!(
             h.store
@@ -318,5 +316,5 @@ fn opaque_ids_fail_closed_outside_a_single_bank_manifest() {
         );
     }
     assert_eq!(count_in_bank(&h, SOURCE_BANK), 2);
-    assert_eq!(count_in_bank(&h, &h.bank), 2);
+    assert_eq!(count_in_bank(&h, &h.bank), 0);
 }

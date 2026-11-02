@@ -26,14 +26,46 @@
 //! Keep this module focused on the DEK provider and its crypto.
 
 use crate::dek_slots::{KeySlot, SlotStore};
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-const NONCE_LEN: usize = 12;
+const NONCE_LEN: usize = 24;
+
+/// Domain label at the head of every envelope AAD.
+const AAD_LABEL: &[u8] = b"clio-dek-envelope-v1";
+/// Envelope AAD format version, one byte after the label.
+const AAD_VERSION: u8 = 1;
+
+/// Build the associated data that binds one envelope to its field, row, and
+/// subject.
+///
+/// The encoding is the label, one version byte, the field role, the row id,
+/// and the subject id, each encoded into a length-prefixed field with a
+/// big-endian `u32`, then the key version as four bytes. Length prefixes keep
+/// two adjacent values from running into each other, so no pair of different
+/// `(field, row_id, subject_id)` inputs can produce the same bytes.
+fn envelope_aad(field: &str, row_id: &str, subject_id: &str, key_version: u32) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(64);
+    aad.extend_from_slice(AAD_LABEL);
+    aad.push(AAD_VERSION);
+    for value in [field, row_id, subject_id] {
+        aad.extend_from_slice(&(value.len() as u32).to_be_bytes());
+        aad.extend_from_slice(value.as_bytes());
+    }
+    aad.extend_from_slice(&key_version.to_be_bytes());
+    aad
+}
+
+/// Build an unambiguous composite row id from ordered text fields.
+///
+/// Each field is preceded by its length as eight lowercase hex digits. Persona
+/// and sync rows use it to bind one envelope to the values that identify the
+/// row when the stored row id is not known at seal time.
+pub use crate::dek_row::composite_row_id;
 
 /// Reserved key-store subject id for the store's lexical blind-index key.
 ///
@@ -49,7 +81,7 @@ pub struct CiphertextEnvelope {
     pub subject_id: String,
     /// DEK version used at seal time.
     pub key_version: u32,
-    /// Base64 nonce.
+    /// Base64 24-byte nonce.
     pub nonce_b64: String,
     /// Base64 ciphertext (includes Poly1305 tag).
     pub ciphertext_b64: String,
@@ -129,13 +161,30 @@ pub trait DekProvider: Send + Sync {
     /// Provider failures (an unreadable or unwritable key store, for example).
     fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError>;
 
-    /// Seal plaintext under the subject's active DEK.
+    /// Seal plaintext under the subject's active DEK, bound to one field of one
+    /// row.
+    ///
+    /// `field` names the sealed role (`persona.value`, `belief.context`), and
+    /// `row_id` names the row. Both are encoded into the AEAD associated data
+    /// with the subject id and the key version, so a ciphertext copied to
+    /// another row, or swapped with another field of the same row, no longer
+    /// authenticates.
     ///
     /// # Errors
     /// Missing/destroyed key or AEAD failure.
-    fn encrypt(&self, subject_id: &str, plaintext: &[u8]) -> Result<CiphertextEnvelope, AmError>;
+    fn encrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        subject_id: &str,
+        plaintext: &[u8],
+    ) -> Result<CiphertextEnvelope, AmError>;
 
-    /// Open a ciphertext envelope.
+    /// Open a ciphertext envelope bound to `field` and `row_id`.
+    ///
+    /// The subject id and key version come from the envelope; the associated
+    /// data is rebuilt from `field`, `row_id`, and those fields. An envelope
+    /// sealed for a different field or row fails authentication.
     ///
     /// # Errors
     /// Destroyed key, version mismatch, or AEAD failure.
@@ -151,7 +200,12 @@ pub trait DekProvider: Send + Sync {
     /// - **The key store is unavailable** — an unreadable, locked, or corrupt key
     ///   backend. Report [`clio_types::ErrorCode::Internal`], which that
     ///   predicate deliberately excludes.
-    fn decrypt(&self, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError>;
+    fn decrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError>;
 
     /// Destroy the subject's DEK (crypto-shred). Irreversible for that subject.
     ///
@@ -265,15 +319,28 @@ impl DekProvider for LocalDevKms {
         Ok(key)
     }
 
-    fn encrypt(&self, subject_id: &str, plaintext: &[u8]) -> Result<CiphertextEnvelope, AmError> {
+    fn encrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        subject_id: &str,
+        plaintext: &[u8],
+    ) -> Result<CiphertextEnvelope, AmError> {
         let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
         let (version, key_bytes) = store.ensure(subject_id)?;
-        let cipher = ChaCha20Poly1305::new((&key_bytes).into());
+        let cipher = XChaCha20Poly1305::new((&key_bytes).into());
         let nonce_bytes: [u8; NONCE_LEN] = rand::random();
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = XNonce::from(nonce_bytes);
+        let aad = envelope_aad(field, row_id, subject_id, version);
         let ciphertext = cipher
-            .encrypt(nonce, plaintext)
-            .expect("ChaCha20Poly1305 encrypt with valid key/nonce");
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: plaintext,
+                    aad: &aad,
+                },
+            )
+            .expect("XChaCha20Poly1305 encrypt with valid key/nonce");
         Ok(CiphertextEnvelope {
             subject_id: subject_id.to_owned(),
             key_version: version,
@@ -288,7 +355,12 @@ impl DekProvider for LocalDevKms {
         })
     }
 
-    fn decrypt(&self, envelope: &CiphertextEnvelope) -> Result<Vec<u8>, AmError> {
+    fn decrypt(
+        &self,
+        field: &str,
+        row_id: &str,
+        envelope: &CiphertextEnvelope,
+    ) -> Result<Vec<u8>, AmError> {
         let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
         let slot = store.lookup(&envelope.subject_id)?;
         let (key, version) = match slot {
@@ -331,10 +403,18 @@ impl DekProvider for LocalDevKms {
             &envelope.ciphertext_b64,
         )
         .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid ciphertext encoding"))?;
-        let cipher = ChaCha20Poly1305::new((&key.bytes).into());
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let cipher = XChaCha20Poly1305::new((&key.bytes).into());
+        let nonce = XNonce::try_from(nonce_bytes.as_slice())
+            .map_err(|_| AmError::new(ErrorCode::UnreadableContent, "invalid nonce length"))?;
+        let aad = envelope_aad(field, row_id, &envelope.subject_id, envelope.key_version);
         cipher
-            .decrypt(nonce, ct.as_ref())
+            .decrypt(
+                &nonce,
+                Payload {
+                    msg: ct.as_ref(),
+                    aad: &aad,
+                },
+            )
             .map_err(|_| AmError::new(ErrorCode::Forbidden, "content decryption failed"))
     }
 

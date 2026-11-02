@@ -34,7 +34,6 @@ use clio_store::BatchWrite;
 use clio_types::{AmError, MemoryItem, TaskRecord};
 use serde_json::json;
 
-use super::import_rows::opaque_record;
 use super::{ImportArgs, SkippedInvalid};
 use crate::bundle::BundleEnvelope;
 
@@ -47,6 +46,8 @@ mod persona;
 // reason; the row planners reach them through this re-export.
 #[path = "import_apply_keys.rs"]
 mod keys;
+#[path = "import_apply_opaque.rs"]
+mod opaque;
 
 pub(super) use keys::{import_id, kind_key, masked_item};
 
@@ -344,53 +345,6 @@ impl<'a> Planner<'a> {
                 ),
             );
             self.reject_reason(decision.rejection_reason.as_deref());
-        }
-        Ok(())
-    }
-
-    fn plan_opaque(&mut self) -> Result<(), AmError> {
-        let args = self.args;
-        let bank = args.ctx.bank.as_str();
-        let actor = args.ctx.actor.as_str();
-        // `OpaqueItem` carries no bank provenance, so "same bank?" is provable
-        // only when the manifest names exactly the target bank — what every
-        // exporter emits. A multi-bank or empty `bank_ids` fails closed to the
-        // derived id: an unkeyed id would hit the opaque upsert
-        // (`ON CONFLICT (id) DO UPDATE SET bank_id = EXCLUDED.bank_id`) and
-        // move the source bank's row into this bank.
-        let same_bank = {
-            let bank_ids = &self.envelope.manifest.bank_ids;
-            bank_ids.len() == 1 && bank_ids[0] == bank
-        };
-        if !self.envelope.entities.opaque_items.is_empty() {
-            self.note(
-                "ciphertext_backup items restore content opaque under the local KMS; \
-                 decrypted restore needs shared key custody (out of first release)"
-                    .to_owned(),
-            );
-        }
-        for opaque in &self.envelope.entities.opaque_items {
-            let mut record = opaque_record(opaque, bank);
-            record.id = import_id(bank, if same_bank { bank } else { "" }, &opaque.id).into_owned();
-            if args.store.get_item_identity(bank, &record.id)?.is_some() {
-                if args.force {
-                    self.overwrite += 1;
-                    let record_id = record.id.clone();
-                    self.staged.push(BatchWrite::PutOpaqueItem {
-                        item: record,
-                        actor: actor.to_owned(),
-                    });
-                    self.stage_force_audit(bank, &record_id, actor);
-                } else {
-                    self.skip += 1;
-                }
-            } else {
-                self.staged.push(BatchWrite::PutOpaqueItem {
-                    item: record,
-                    actor: actor.to_owned(),
-                });
-                self.create += 1;
-            }
         }
         Ok(())
     }

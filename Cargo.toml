@@ -50,7 +50,7 @@ clio-mcp = { path = "crates/clio-mcp" }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "std"] }
 unicode-normalization = "0.1"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 # Stretches the sync key out of its secret: a single fast SHA-256 pass lets a
 # low-entropy secret be brute-forced offline from stolen ciphertext.
 argon2 = "0.6"
@@ -73,7 +73,10 @@ keyring = { version = "3", features = [
     "linux-native-sync-persistent",
     "vendored",
 ] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+# `fallible_uint` restores the `usize`/`u64` `ToSql`/`FromSql` implementations
+# rusqlite 0.41 moved behind that feature, so `belief_tx`'s `COUNT(*)` read
+# needs no code change.
+rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
 sha2 = "0.11"
 sqlite-vec = "0.1"
 zeroize = { version = "1", features = ["derive"] }

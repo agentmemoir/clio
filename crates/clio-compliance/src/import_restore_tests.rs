@@ -28,7 +28,9 @@ use clio_types::{ErrorCode, OpContext};
 
 use crate::bundle::ExportContentMode;
 use crate::import::{ImportArgs, ImportReport, import};
-use crate::import_fixture::{Harness, count_items, entry, unique, write_bundle};
+use crate::import_fixture::{
+    Harness, count_items, entry, unique, write_bundle, write_bundle_for_bank,
+};
 use crate::import_fixture_signals::{AuditSpy, EmptySignals};
 
 #[test]
@@ -66,22 +68,19 @@ fn force_overwrites_differing_assoc_persona_rows() {
 fn force_overwrites_opaque_envelope() {
     let h = Harness::new();
     let entities = h.opaque_entities();
-    let first = write_bundle(&entities, ExportContentMode::CiphertextBackup);
+    let first = write_bundle_for_bank(&entities, ExportContentMode::CiphertextBackup, &h.bank);
     let ctx = h.ctx();
     import(&h.args(&ctx, h.policy(), first.path(), false, false, None)).unwrap();
 
     let mut modified = entities;
     modified.opaque_items[0].content_cipher = "rotated-ciphertext".into();
-    let bundle = write_bundle(&modified, ExportContentMode::CiphertextBackup);
+    let bundle = write_bundle_for_bank(&modified, ExportContentMode::CiphertextBackup, &h.bank);
     let report = import(&h.args(&ctx, h.policy(), bundle.path(), false, true, Some("ops")))
         .expect("force opaque import succeeds");
     assert_eq!(report.would_overwrite, 1);
     assert_eq!(
         h.store
-            .inspect_content_ciphertext(
-                &h.bank,
-                &format!("{}#{}", modified.opaque_items[0].id, h.bank)
-            )
+            .inspect_content_ciphertext(&h.bank, &modified.opaque_items[0].id)
             .unwrap()
             .as_deref(),
         Some("rotated-ciphertext")
@@ -227,11 +226,11 @@ fn differing_existing_rows_skip_without_force() {
     modified.persona_stable[0].value = "terse".into();
     modified.persona_preferences[0].value = 0.1;
     modified.opaque_items = h.opaque_entities().opaque_items;
-    let bundle = write_bundle(&modified, ExportContentMode::DsarPlaintext);
+    let bundle = write_bundle_for_bank(&modified, ExportContentMode::DsarPlaintext, &h.bank);
     let report = import(&h.args(&h.ctx(), h.policy(), bundle.path(), false, false, None))
         .expect("no-force re-import succeeds");
     assert_eq!(report.would_overwrite, 0);
-    let opaque_id = format!("{}#{}", modified.opaque_items[0].id, h.bank);
+    let opaque_id = modified.opaque_items[0].id.clone();
     assert_eq!(
         h.store
             .inspect_content_ciphertext(&h.bank, &opaque_id)

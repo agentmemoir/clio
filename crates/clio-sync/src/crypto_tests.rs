@@ -230,10 +230,11 @@ fn content_sealed_under_the_raw_sync_key_is_refused() {
     ));
     // Seal exactly the way the earlier build did: the sync key itself.
     let nonce: [u8; 24] = rand::random();
-    let aead = XChaCha20Poly1305::new(key.key_bytes().to_vec().as_slice().into());
+    let aead =
+        XChaCha20Poly1305::new_from_slice(key.key_bytes()).expect("the sync key is a 32-byte key");
     let sealed = aead
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: b"legacy payload",
                 aad: TEST_AAD,
@@ -253,14 +254,14 @@ fn content_sealed_under_the_raw_sync_key_is_refused() {
     // And a row this build seals does not open under the raw key alone, so
     // the retired fallback cannot be mistaken for the sealing path.
     let mine = key.seal(b"new payload", TEST_AAD).expect("seal");
+    let nonce = base64::engine::general_purpose::STANDARD
+        .decode(&mine.nonce_b64)
+        .expect("nonce");
     assert!(
-        XChaCha20Poly1305::new(key.key_bytes().to_vec().as_slice().into())
+        XChaCha20Poly1305::new_from_slice(key.key_bytes())
+            .expect("the sync key is a 32-byte key")
             .decrypt(
-                XNonce::from_slice(
-                    &base64::engine::general_purpose::STANDARD
-                        .decode(&mine.nonce_b64)
-                        .expect("nonce"),
-                ),
+                &XNonce::try_from(nonce.as_slice()).expect("nonce"),
                 Payload {
                     msg: &base64::engine::general_purpose::STANDARD
                         .decode(&mine.ciphertext_b64)

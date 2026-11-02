@@ -32,7 +32,9 @@ use crate::item_persist::{require_actor, seal_dual};
 use crate::item_update::update_memory_item_postgres_tx;
 use crate::migrate::IntoAmError;
 use crate::opaque_item_persist::put_opaque_item_postgres_tx;
-use crate::persona_store::{seal_persona_context, seal_persona_value};
+use crate::persona_store::{
+    preference_row_id, seal_persona_context, seal_persona_value, stable_row_id, unique_persona_id,
+};
 use crate::postgres::PostgresStore;
 use crate::postgres_assoc::{put_assoc_edge_tx, record_audit_event_tx};
 use crate::postgres_history_write::{commit_failure_record_tx, commit_task_upsert_tx};
@@ -49,7 +51,7 @@ impl PostgresStore {
     fn seal_item(&self, item: &MemoryItem) -> Result<(String, String), AmError> {
         item.validate()?;
         let dek_ref = self.kms().ensure_dek(&item.subject_id)?;
-        let cipher = seal_dual(self.kms().as_ref(), &item.subject_id, item)?;
+        let cipher = seal_dual(self.kms().as_ref(), &item.id, &item.subject_id, item)?;
         Ok((cipher, dek_ref))
     }
 }
@@ -155,6 +157,7 @@ fn apply_one(
             let (cipher, dek_ref) = store.seal_item(item)?;
             let object_cipher = crate::triple_cipher::seal_object(
                 store.kms().as_ref(),
+                &edge.id,
                 &item.subject_id,
                 &edge.object,
             )?;
@@ -191,9 +194,20 @@ fn apply_one(
             actor,
         } => {
             let (cipher, dek_ref) = store.seal_item(item)?;
-            let definition =
-                seal_history_text(store.kms().as_ref(), &item.subject_id, &record.definition)?;
-            let steps = seal_steps(store.kms().as_ref(), &item.subject_id, &record.steps)?;
+            let definition = seal_history_text(
+                store.kms().as_ref(),
+                "task.definition",
+                &record.id,
+                &item.subject_id,
+                &record.definition,
+            )?;
+            let steps = seal_steps(
+                store.kms().as_ref(),
+                "task.steps",
+                &record.id,
+                &item.subject_id,
+                &record.steps,
+            )?;
             commit_task_upsert_tx(
                 tx,
                 item,
@@ -212,9 +226,20 @@ fn apply_one(
             actor,
         } => {
             let (cipher, dek_ref) = store.seal_item(item)?;
-            let what_failed =
-                seal_history_text(store.kms().as_ref(), &item.subject_id, &record.what_failed)?;
-            let lesson = seal_history_text(store.kms().as_ref(), &item.subject_id, &record.lesson)?;
+            let what_failed = seal_history_text(
+                store.kms().as_ref(),
+                "failure.what_failed",
+                &record.id,
+                &item.subject_id,
+                &record.what_failed,
+            )?;
+            let lesson = seal_history_text(
+                store.kms().as_ref(),
+                "failure.lesson",
+                &record.id,
+                &item.subject_id,
+                &record.lesson,
+            )?;
             commit_failure_record_tx(
                 tx,
                 item,
@@ -231,9 +256,13 @@ fn apply_one(
             entry.validate()?;
             require_actor(actor)?;
             let dek_ref = store.kms().ensure_dek(&entry.bank_id)?;
-            let cipher = seal_persona_value(store.kms().as_ref(), &entry.bank_id, &entry.value)?;
+            let id = unique_persona_id("pse", &entry.bank_id, &entry.key);
+            let row_id = stable_row_id(&entry.bank_id, &entry.key, &entry.as_of, &id);
+            let cipher =
+                seal_persona_value(store.kms().as_ref(), &row_id, &entry.bank_id, &entry.value)?;
             let context_cipher = seal_persona_context(
                 store.kms().as_ref(),
+                &row_id,
                 &entry.bank_id,
                 entry.context.as_deref(),
             )?;
@@ -241,6 +270,7 @@ fn apply_one(
                 tx,
                 store.kms().as_ref(),
                 entry,
+                &id,
                 &cipher,
                 &dek_ref,
                 context_cipher.as_deref(),
@@ -272,6 +302,7 @@ fn apply_one(
             require_actor(actor)?;
             let context_cipher = seal_persona_context(
                 store.kms().as_ref(),
+                &preference_row_id(&preference.bank_id, &preference.key),
                 &preference.bank_id,
                 preference.context.as_deref(),
             )?;
@@ -288,11 +319,13 @@ fn apply_one(
             let dek_ref = store.kms().ensure_dek(&belief.subject_id)?;
             let cipher = seal_proposition(
                 store.kms().as_ref(),
+                &belief.id,
                 &belief.subject_id,
                 &belief.proposition,
             )?;
             let context_cipher = seal_belief_context(
                 store.kms().as_ref(),
+                &belief.id,
                 &belief.subject_id,
                 belief.context.as_deref(),
             )?;

@@ -187,12 +187,13 @@ impl SyncCipherKey {
         // prevents. `open` reads the nonce back from the wire, so nothing
         // else depends on where it came from.
         let nonce_bytes: [u8; 24] = rand::random();
-        let cipher = XChaCha20Poly1305::new(self.seal_key().as_slice().into());
+        let cipher = XChaCha20Poly1305::new_from_slice(self.seal_key().as_slice())
+            .expect("the sealing subkey is a 32-byte key");
         // XChaCha20-Poly1305 encryption cannot fail for a valid key and nonce;
         // the only documented failure is a plaintext over 256 GiB.
         let sealed = cipher
             .encrypt(
-                XNonce::from_slice(&nonce_bytes),
+                &XNonce::from(nonce_bytes),
                 Payload {
                     msg: plaintext,
                     aad,
@@ -226,9 +227,9 @@ impl SyncCipherKey {
                 "sync cipher nonce must be 24 bytes",
             ));
         };
-        let opener = XChaCha20Poly1305::new(key.into());
+        let opener = XChaCha20Poly1305::new_from_slice(key).expect("the sync key is a 32-byte key");
         let plaintext = opener
-            .decrypt(XNonce::from_slice(&nonce_arr), Payload { msg: &body, aad })
+            .decrypt(&XNonce::from(nonce_arr), Payload { msg: &body, aad })
             .map_err(|_| AmError::new(ErrorCode::Internal, "sync cipher open failed"))?;
         Ok(plaintext)
     }

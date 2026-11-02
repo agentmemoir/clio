@@ -23,14 +23,14 @@ use clio_types::ErrorCode;
 
 use crate::bundle::ExportContentMode;
 use crate::import::import;
-use crate::import_fixture::{Harness, write_bundle};
+use crate::import_fixture::{Harness, write_bundle_for_bank};
 
 #[test]
 fn ciphertext_backup_import_rejects_erased_subject() {
     let h = Harness::new();
     let entities = h.opaque_entities();
     let opaque_id = entities.opaque_items[0].id.clone();
-    let bundle = write_bundle(&entities, ExportContentMode::CiphertextBackup);
+    let bundle = write_bundle_for_bank(&entities, ExportContentMode::CiphertextBackup, &h.bank);
 
     let mut seed = h
         .full_entities()

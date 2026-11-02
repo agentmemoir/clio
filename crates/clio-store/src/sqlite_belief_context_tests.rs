@@ -112,7 +112,7 @@ fn sqlite_unreadable_context_reads_none_and_succeeds() {
     // Re-seal the context under a second subject, then destroy its DEK.
     let shred = unique("subj-shred-ctx");
     let ghost = kms
-        .encrypt(&shred, b"ghost context")
+        .encrypt("belief.context", &id, &shred, b"ghost context")
         .unwrap()
         .to_storage_string();
     store
@@ -180,17 +180,21 @@ fn helpers_validate_and_map() {
 #[test]
 fn context_seal_open_and_stats_are_pii_safe() {
     let kms = LocalDevKms::new();
-    let sealed = seal_belief_context(&kms, "subj", Some("oat milk")).unwrap();
+    let sealed = seal_belief_context(&kms, "bel-1", "subj", Some("oat milk")).unwrap();
     assert!(sealed.is_some());
     assert!(!sealed.clone().unwrap().contains("oat milk"));
-    assert!(seal_belief_context(&kms, "subj", None).unwrap().is_none());
+    assert!(
+        seal_belief_context(&kms, "bel-1", "subj", None)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
-        open_belief_context(&kms, sealed.as_deref()).as_deref(),
+        open_belief_context(&kms, "bel-1", sealed.as_deref()).as_deref(),
         Some("oat milk")
     );
-    assert!(open_belief_context(&kms, None).is_none());
-    assert!(open_belief_context(&kms, Some("")).is_none());
-    assert!(open_belief_context(&kms, Some("not-an-envelope")).is_none());
+    assert!(open_belief_context(&kms, "bel-1", None).is_none());
+    assert!(open_belief_context(&kms, "bel-1", Some("")).is_none());
+    assert!(open_belief_context(&kms, "bel-1", Some("not-an-envelope")).is_none());
 
     let stats = belief_context_stats(Some("oat milk"));
     assert!(!stats.to_string().contains("oat milk"));

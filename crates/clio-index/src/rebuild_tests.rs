@@ -22,7 +22,11 @@
 
 use crate::embed_test_support::{FakeEmbedder, coordinator, fake_vector, leaf, store};
 use crate::report::RebuildTargets;
-use clio_store::{EMBEDDING_DIMS, IndexStore, Store, VectorSlot};
+use clio_store::{
+    BatchStore, BatchWrite, ComplianceStore, EMBEDDING_DIMS, IndexStore, OpaqueItemRecord, Store,
+    SubjectEraseSpec, VectorSlot,
+};
+use clio_types::ErrorCode;
 use std::sync::Arc;
 
 /// Rebuild dry-run counts only; confirmed apply restores coverage after an
@@ -70,6 +74,9 @@ fn t06_t07_rebuild_dry_run_then_apply_restores_wiped_coverage() {
         .unwrap();
     assert_eq!(apply.dense_applied, 3);
     assert_eq!(apply.lexical_applied, 3);
+    // A clean sweep loses nothing.
+    assert_eq!(apply.unreadable, 0, "{apply:?}");
+    assert_eq!(apply.erased, 0, "{apply:?}");
     let cov = store.index_coverage(Some(bank)).unwrap();
     assert_eq!(cov.dense_rows, 3);
     assert_eq!(cov.lexical_rows, 3);
@@ -172,4 +179,102 @@ fn rebuild_scope_and_target_variants() {
     assert_eq!(all.dense_applied, 2);
     let cov = store.index_coverage(None).unwrap();
     assert_eq!(cov.dense_rows, 2);
+}
+
+/// A row whose content cannot be opened is counted, not dropped in silence.
+#[test]
+fn an_unreadable_row_is_counted() {
+    let store = store();
+    let coordinator = coordinator(&store, Arc::new(FakeEmbedder::new()));
+    let bank = "loss-damage";
+    // A well-formed envelope for a subject that never got a DEK: the row
+    // exists, so it is indexable, but its content cannot be opened.
+    put_opaque_envelope(&*store, bank, "itm-damaged", "subj-with-no-key");
+    let err = store
+        .get_memory_item(bank, "itm-damaged")
+        .expect_err("a row without a DEK must not open");
+    assert_eq!(err.code, ErrorCode::Forbidden, "{err}");
+
+    let report = coordinator
+        .rebuild_indexes(Some(bank), RebuildTargets::All, false, true)
+        .unwrap();
+    assert_eq!(report.unreadable, 1, "{report:?}");
+    assert_eq!(report.erased, 0, "{report:?}");
+    assert_eq!(report.dense_applied, 0, "{report:?}");
+    assert_eq!(report.lexical_applied, 0, "{report:?}");
+}
+
+/// A crypto-shredded subject is an expected loss, never counted as damage.
+#[test]
+fn an_erased_subject_counts_as_erased_not_damage() {
+    let store = store();
+    let coordinator = coordinator(&store, Arc::new(FakeEmbedder::new()));
+    let bank = "loss-erased";
+    let subject = "subj-erased";
+    let mut item = leaf("itm-erased", bank, "erased fixture");
+    item.subject_id = subject.into();
+    store.create_memory_item(&item, "actor").unwrap();
+
+    // A fresh salt per run: no test asserts the tombstone hash value.
+    let salt = rand::random::<[u8; 16]>();
+    store
+        .erase_subject(&SubjectEraseSpec {
+            bank_id: bank,
+            subject_id: subject,
+            request_id: "req-erased",
+            legal_basis: "GDPR_ART_17",
+            reason_code: "COMPLIANCE_CRYPTO_SHRED",
+            deleted_at: "2026-01-02T00:00:00Z",
+            salt: &salt,
+        })
+        .unwrap();
+    let err = store
+        .get_memory_item(bank, "itm-erased")
+        .expect_err("an erased subject must not open");
+    assert_eq!(err.code, ErrorCode::ErasedSubject, "{err}");
+
+    let report = coordinator
+        .rebuild_indexes(Some(bank), RebuildTargets::All, false, true)
+        .unwrap();
+    assert_eq!(report.erased, 1, "{report:?}");
+    assert_eq!(report.unreadable, 0, "{report:?}");
+    assert_eq!(report.dense_applied, 0, "{report:?}");
+    assert_eq!(report.lexical_applied, 0, "{report:?}");
+}
+
+/// Store one opaque item whose ciphertext is a well-formed envelope.
+fn put_opaque_envelope(store: &dyn BatchStore, bank: &str, id: &str, subject: &str) {
+    // 24 zero bytes as base64 (a valid nonce length) and 16 zero bytes of
+    // ciphertext. The envelope decodes; the missing DEK is what fails the read.
+    let envelope = clio_store::CiphertextEnvelope {
+        subject_id: subject.into(),
+        key_version: 1,
+        nonce_b64: "A".repeat(32),
+        ciphertext_b64: "A".repeat(24),
+    };
+    store
+        .apply_batch(&[BatchWrite::PutOpaqueItem {
+            item: OpaqueItemRecord {
+                id: id.into(),
+                bank_id: bank.into(),
+                subject_id: subject.into(),
+                kind: "episodic".into(),
+                category: None,
+                episodic_type: Some("temporal".into()),
+                epistemic_kind: "fact".into(),
+                source_type: None,
+                confidence: None,
+                admission_score: None,
+                source_ref: None,
+                valid_from: "2026-01-01T00:00:00Z".into(),
+                valid_until: None,
+                tx_from: "2026-01-01T00:00:00Z".into(),
+                tx_until: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                content_cipher: envelope.to_storage_string(),
+            },
+            actor: "import".into(),
+        }])
+        .expect("opaque item write");
 }

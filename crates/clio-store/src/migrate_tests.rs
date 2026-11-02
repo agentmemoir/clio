@@ -6,7 +6,7 @@
 //! This module tests schema assets and error adapters.
 //!
 //! ## Owns
-//! - SQL asset and error adapter assertions
+//! - SQL asset, engine version, and error adapter assertions
 //!
 //! ## Does not own
 //! - Production behavior
@@ -30,6 +30,19 @@ fn core_sql_category_check_matches_the_whitelist() {
     assert!(
         SQL_CORE.contains(&expected),
         "sql/001_core.sql (items category CHECK) is missing the whitelist list: {expected}"
+    );
+}
+
+#[test]
+fn bundled_sqlite_engine_reaches_3_54_1() {
+    // The bundled engine is what every SQLite statement in this crate runs on,
+    // and the schema assets above lean on behaviour that recent releases added.
+    // `version_number` reports the compiled library, so this pins the engine
+    // without opening a connection.
+    assert!(
+        rusqlite::version_number() >= 3_054_001,
+        "bundled SQLite engine is {}, expected at least 3.54.1",
+        rusqlite::version()
     );
 }
 

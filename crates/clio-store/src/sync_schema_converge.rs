@@ -34,10 +34,10 @@
 //! pass that runs on every open, before the batch, and is a no-op once the shape
 //! is current.
 //!
-//! A plain `CREATE TABLE IF NOT EXISTS` is enough for this table. An earlier
-//! shape carried `PRIMARY KEY (bank_id, device_id)`, but only on this branch
-//! before it merged, so no shipped database holds it. A database that did get
-//! that shape keeps it, because `IF NOT EXISTS` leaves an existing table alone;
+//! A probe before the DDL is what makes this safe on a read-only connection. An
+//! earlier shape carried `PRIMARY KEY (bank_id, device_id)`, but only on this
+//! branch before it merged, so no shipped database holds it. A database that did
+//! get that shape keeps it, because the step creates only a missing table;
 //! dropping it once is a local development cleanup, not a migration step.
 
 use crate::migrate::IntoAmError;
@@ -70,11 +70,23 @@ CREATE TABLE IF NOT EXISTS sync_device_high_water
 /// Create `sync_device_high_water` on an existing SQLite database.
 ///
 /// A fresh database is untouched: the portable DDL declares the table itself.
-/// The statement is `IF NOT EXISTS`, so a second open is a no-op.
+/// The table is probed first, so a current database issues no write at all:
+/// `CREATE TABLE IF NOT EXISTS` still opens a write transaction when the table
+/// exists, and a read-only connection refuses that.
 ///
 /// # Errors
 /// Storage failures.
 pub(crate) fn converge_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError> {
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sync_device_high_water'",
+            [],
+            |row| row.get(0),
+        )
+        .am("sync device high water table probe")?;
+    if exists > 0 {
+        return Ok(());
+    }
     conn.execute_batch(SYNC_DEVICE_HIGH_WATER_DDL)
         .am("sync device high water converge")
 }
@@ -85,9 +97,24 @@ pub(crate) fn converge_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError
 /// and this statement is a no-op by then. On a database whose bootstrap is
 /// already current this is the only statement that creates the table at all.
 ///
+/// The table is probed first, so a current database issues no write at all.
+/// Postgres refuses `CREATE TABLE` in a read-only transaction even with
+/// `IF NOT EXISTS`, so a read-only open would otherwise fail on a current schema.
+///
 /// # Errors
 /// Storage failures.
 pub(crate) fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> {
+    let row = client
+        .query_one(
+            "SELECT count(*) FROM information_schema.tables
+             WHERE table_schema = current_schema() AND table_name = 'sync_device_high_water'",
+            &[],
+        )
+        .am("sync device high water table probe")?;
+    let present: i64 = row.get(0);
+    if present > 0 {
+        return Ok(());
+    }
     client
         .batch_execute(SYNC_DEVICE_HIGH_WATER_DDL)
         .am("sync device high water converge")

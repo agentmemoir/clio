@@ -57,21 +57,29 @@ pub(crate) fn converge_sqlite(conn: &rusqlite::Connection) -> Result<(), AmError
 /// table.
 ///
 /// Fresh databases are untouched: the table is absent before the migrate batch
-/// has run, and the slot DDL declares the columns itself. The statements are
-/// idempotent, so a table that already holds a column can be converged again.
+/// has run, and the slot DDL declares the columns itself. A table that already
+/// holds both columns runs no DDL either, so a current schema can be opened
+/// through a read-only connection, where any `ALTER TABLE` would fail. The
+/// statements are idempotent, so a table that lacks either column can be
+/// converged again.
 ///
 /// # Errors
 /// Storage failures.
 pub(crate) fn converge_pg(client: &mut postgres::Client) -> Result<(), AmError> {
-    let exists: bool = client
+    let columns: Vec<&str> = CUSTODY_COLUMNS.iter().map(|(column, _)| *column).collect();
+    let row = client
         .query_one(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables
-             WHERE table_schema = current_schema() AND table_name = 'export_destinations')",
-            &[],
+            "SELECT
+                 count(*),
+                 count(*) FILTER (WHERE column_name = ANY($1))
+             FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'export_destinations'",
+            &[&columns],
         )
-        .am("export destination converge table probe")?
-        .get(0);
-    if !exists {
+        .am("export destination converge column probe")?;
+    let total: i64 = row.get(0);
+    let present: i64 = row.get(1);
+    if total == 0 || present == CUSTODY_COLUMNS.len() as i64 {
         return Ok(());
     }
     let mut statements: Vec<String> = Vec::new();

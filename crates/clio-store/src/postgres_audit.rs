@@ -120,6 +120,7 @@ impl PostgresStore {
                         let cipher: Option<String> = r.get(15);
                         revision.context = crate::item_persist::open_context(
                             self.kms().as_ref(),
+                            id,
                             cipher.as_deref(),
                         );
                         revision
