@@ -224,12 +224,7 @@ pub(crate) fn push_bank(
         let Some((stamp, entity)) = &batch.last else {
             continue;
         };
-        kind_watermark_set(
-            cfg,
-            bank,
-            batch.kind,
-            &join_watermark_body(stamp, entity),
-        )?;
+        kind_watermark_set(cfg, bank, batch.kind, &join_watermark_body(stamp, entity))?;
     }
     Ok(BankSyncStatus {
         bank_id: bank.to_owned(),

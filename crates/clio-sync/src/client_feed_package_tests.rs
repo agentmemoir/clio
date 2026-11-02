@@ -45,12 +45,13 @@ use clio_types::ErrorCode;
 #[test]
 fn a_millisecond_store_stamp_carries_iso_seconds_on_the_wire() {
     use crate::client_feed::package::assoc_mutation;
-    use crate::client_feed_package_fixtures::{
-        BANK, MILLIS_STAMP, MILLIS_STAMP_ISO, millis_edge,
-    };
+    use crate::client_feed_package_fixtures::{BANK, MILLIS_STAMP, MILLIS_STAMP_ISO, millis_edge};
     let cfg = crate::client_feed_package_fixtures::plain_cfg();
     let edge = millis_edge("e-millis");
-    assert_eq!(edge.last_updated_at, MILLIS_STAMP, "the fixture column is millis");
+    assert_eq!(
+        edge.last_updated_at, MILLIS_STAMP,
+        "the fixture column is millis"
+    );
     let m = assoc_mutation(&cfg, BANK, &edge).expect("package the millis edge");
     assert_eq!(
         m.transaction_time, MILLIS_STAMP_ISO,
@@ -169,8 +170,7 @@ fn no_idempotency_key_moves_when_the_stamp_is_canonicalised() {
         "the canonical-stamp edge keeps the id it always had"
     );
     assert_eq!(
-        millis.sync_mutation_id,
-        "277953b8fab6cce58c84b3c503b3201fda4d41002eb9c0395a66eb0e38672a1c",
+        millis.sync_mutation_id, "277953b8fab6cce58c84b3c503b3201fda4d41002eb9c0395a66eb0e38672a1c",
         "the millis-stamped edge keeps the id derived from its millis text"
     );
 }
