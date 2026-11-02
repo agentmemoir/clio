@@ -156,6 +156,48 @@ fn build_refuses_a_failed_measurement() {
 }
 
 #[test]
+fn two_opens_over_one_store_share_the_device_id() {
+    // The identity must survive a restart, so the second open reads what the
+    // first one minted into the store instead of deriving a per-process id.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "clio-mcp-runtime-open-device-{}-{nanos}.db",
+        std::process::id()
+    ));
+    let url = path.to_str().expect("a utf-8 temp path");
+    let open = || {
+        let kms: Arc<dyn DekProvider> = Arc::new(LocalDevKms::new());
+        let store = Arc::new(SqliteStore::open(&path, Arc::clone(&kms)).expect("file store"));
+        let belief_corrector: Arc<dyn clio_compliance::BeliefContextCorrector> = store.clone();
+        let store: Arc<dyn Repos> = store;
+        McpState::build(
+            &store,
+            belief_corrector,
+            &options("sqlite", url),
+            &json!({}),
+            kms,
+            clio_config::Runtime::with_env(&|_| None),
+            false,
+            None,
+        )
+        .expect("the file-backed store opens")
+    };
+    let first = open();
+    let second = open();
+    assert!(
+        !first.device_id.is_empty(),
+        "the first open must mint a device id"
+    );
+    assert_eq!(
+        first.device_id, second.device_id,
+        "two opens over one store must report one device id"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn extract_available_from_fails_closed() {
     assert!(
         !extract_available_from(&json!({})),
