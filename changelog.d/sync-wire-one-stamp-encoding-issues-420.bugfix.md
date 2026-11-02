@@ -1,0 +1,1 @@
+Sync now puts one encoding of a mutation's transaction time on the wire, canonical UTC text at whole seconds such as `2026-01-01T00:00:00Z`, whatever legend the stored column carried, and it compares two stamps by the instant they name rather than by their text, so a peer no longer meets the same moment spelled several ways and the later write wins the conflict as it should.

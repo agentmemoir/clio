@@ -109,7 +109,8 @@ pub struct SyncMutation {
     pub entity_id: String,
     /// Operation (`upsert` | `invalidate` | `discard` | `archive` | `reinforce` | `prune`).
     pub op: String,
-    /// Writer's transaction-time stamp (LWW key, ISO-8601 UTC text).
+    /// Writer's transaction-time stamp (LWW key: canonical UTC text at
+    /// whole-second precision, e.g. `2026-01-01T00:00:00Z`).
     pub transaction_time: String,
     /// Origin device id.
     pub device_id: String,
