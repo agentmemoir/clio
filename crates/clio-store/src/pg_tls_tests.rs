@@ -241,11 +241,33 @@ fn a_parsed_connection_knows_whether_it_is_local() {
             .is_local()
     );
 
-    // A string that named no host is not local: the driver refuses it, and
-    // claiming otherwise would put the wrong warning in front of the operator.
+    // A string that named no host reaches the local socket, and the mode
+    // default reads it the same way.
     let no_host = parse_connection("postgres:///clio").expect("a string with no host still parses");
     assert!(no_host.hosts.is_empty(), "{:?}", no_host.hosts);
-    assert!(!no_host.is_local());
+    assert!(no_host.is_local());
     assert_eq!(no_host.primary_host(), "");
     assert_eq!(no_host.primary_port(), 5432);
+}
+
+#[test]
+fn a_query_declared_host_or_address_is_what_the_connection_reports() {
+    let named = parse_connection("postgresql:///mydb?host=db.example.com").expect("a query host");
+    assert_eq!(named.hosts, vec!["db.example.com".to_owned()]);
+    assert!(!named.is_local());
+
+    // `hostaddr` is the address the driver dials, so it wins over the name.
+    let addressed = parse_connection("postgresql:///mydb?host=db.example.com&hostaddr=10.0.0.5")
+        .expect("a query address");
+    assert_eq!(addressed.hosts, vec!["10.0.0.5".to_owned()]);
+    assert!(!addressed.is_local());
+
+    let loopback = parse_connection("postgresql:///mydb?host=db.example.com&hostaddr=127.0.0.1")
+        .expect("a query address");
+    assert_eq!(loopback.hosts, vec!["127.0.0.1".to_owned()]);
+    assert!(loopback.is_local());
+
+    let socket = parse_connection("postgresql:///mydb?host=/var/run/postgresql").expect("a socket");
+    assert_eq!(socket.hosts, vec!["/var/run/postgresql".to_owned()]);
+    assert!(socket.is_local());
 }
