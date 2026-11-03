@@ -32,12 +32,18 @@ mod import_apply;
 #[path = "import_rows.rs"]
 mod import_rows;
 
+use std::io::Read;
+
 use clio_store::MAX_BATCH_OPS;
 use clio_types::{AmError, ErrorCode};
 use serde::{Deserialize, Serialize};
 
 use crate::bundle::{self, ParsedBundle};
 use import_apply::Planner;
+
+/// Largest bundle source this build reads. A bundle carried in an HTTP body
+/// meets the same cap, so the file and wire paths accept one payload size.
+const MAX_BUNDLE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Inputs for the JSON bundle import.
 pub struct ImportArgs<'a> {
@@ -133,12 +139,7 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
             "timestamp is required",
         ));
     }
-    let raw = std::fs::read_to_string(args.source).map_err(|e| {
-        AmError::new(
-            ErrorCode::InvalidArgument,
-            format!("bundle read failed: {e}"),
-        )
-    })?;
+    let raw = read_bundle_source(args.source, MAX_BUNDLE_BYTES)?;
     let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
         AmError::new(
             ErrorCode::InvalidArgument,
@@ -201,6 +202,56 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
         dry_run: args.dry_run,
         applied,
         notes: planner.notes,
+    })
+}
+
+/// The failure shape the bundle read has always reported for an I/O error.
+fn bundle_read_error(e: std::io::Error) -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        format!("bundle read failed: {e}"),
+    )
+}
+
+/// The refusal for a source that is not a regular file.
+fn not_a_regular_file() -> AmError {
+    AmError::new(
+        ErrorCode::InvalidArgument,
+        "bundle source is not a regular file",
+    )
+}
+
+/// Read one bundle source, refusing a non-regular file and any size over
+/// `max_bytes`.
+///
+/// Metadata is checked before the open because opening a FIFO with no writer
+/// blocks forever. The open is re-checked because the path can be replaced
+/// between the two calls. Bytes are read through `take(max_bytes + 1)`, so
+/// content over the cap is detected without loading the whole file, and the
+/// UTF-8 decode runs only after the cap passes.
+fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
+    let meta = std::fs::metadata(path).map_err(bundle_read_error)?;
+    if !meta.is_file() {
+        return Err(not_a_regular_file());
+    }
+    let file = std::fs::File::open(path).map_err(bundle_read_error)?;
+    if !file.metadata().map_err(bundle_read_error)?.is_file() {
+        return Err(not_a_regular_file());
+    }
+    let mut bytes = Vec::new();
+    let mut bounded = file.take(max_bytes + 1);
+    bounded.read_to_end(&mut bytes).map_err(bundle_read_error)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(AmError::new(
+            ErrorCode::OutOfRange,
+            format!("bundle source exceeds {max_bytes} byte limit"),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| {
+        AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("bundle source is invalid UTF-8: {e}"),
+        )
     })
 }
 
@@ -278,3 +329,7 @@ mod import_nothing_restored_tests;
 #[cfg(test)]
 #[path = "import_round_trip_tests.rs"]
 mod import_round_trip_tests;
+
+#[cfg(test)]
+#[path = "import_read_bound_tests.rs"]
+mod import_read_bound_tests;
