@@ -206,7 +206,7 @@ pub fn import(args: &ImportArgs<'_>) -> Result<ImportReport, AmError> {
 }
 
 /// The failure shape the bundle read has always reported for an I/O error.
-fn bundle_read_error(e: std::io::Error) -> AmError {
+fn bundle_read_error(e: &std::io::Error) -> AmError {
     AmError::new(
         ErrorCode::InvalidArgument,
         format!("bundle read failed: {e}"),
@@ -230,17 +230,23 @@ fn not_a_regular_file() -> AmError {
 /// content over the cap is detected without loading the whole file, and the
 /// UTF-8 decode runs only after the cap passes.
 fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
-    let meta = std::fs::metadata(path).map_err(bundle_read_error)?;
+    let meta = std::fs::metadata(path).map_err(|e| bundle_read_error(&e))?;
     if !meta.is_file() {
         return Err(not_a_regular_file());
     }
-    let file = std::fs::File::open(path).map_err(bundle_read_error)?;
-    if !file.metadata().map_err(bundle_read_error)?.is_file() {
+    let file = std::fs::File::open(path).map_err(|e| bundle_read_error(&e))?;
+    if !file
+        .metadata()
+        .map_err(|e| bundle_read_error(&e))?
+        .is_file()
+    {
         return Err(not_a_regular_file());
     }
     let mut bytes = Vec::new();
     let mut bounded = file.take(max_bytes + 1);
-    bounded.read_to_end(&mut bytes).map_err(bundle_read_error)?;
+    bounded
+        .read_to_end(&mut bytes)
+        .map_err(|e| bundle_read_error(&e))?;
     if bytes.len() as u64 > max_bytes {
         return Err(AmError::new(
             ErrorCode::OutOfRange,
