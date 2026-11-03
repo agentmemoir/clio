@@ -126,6 +126,38 @@ fn long_gist_truncates_in_preview() {
 }
 
 #[test]
+fn accept_events_keep_a_count_and_its_name() {
+    // An accepted item's preview is a masked view, but a count must survive it
+    // under its own name: the operator reads the same shape the tool returns.
+    let env = RankingEnv::system_defaults();
+    let policy = AdmissionPolicy::new(&env).with_force(true);
+    let sink = VecSink::default();
+    let ctx = ctx();
+    let mut item = gist_item("count-1", "plain note without markers");
+    item.epistemic_kind = EpistemicKind::Belief;
+    item.source_type = Some(SourceType::UserStated);
+    item.snapshot = Some(json!({"lesson_tokens": 5}));
+    let source = weak_source();
+    let req = gate_req(&item, &ctx, policy, &sink, "2026-09-17T00:00:00Z");
+    let decision = gated_create(
+        &req,
+        Candidate::Episodic(EpisodicType::Gist),
+        &source,
+        &mut |_| Ok(()),
+    )
+    .expect("admit");
+    assert!(decision.pass);
+    let events = sink.events();
+    let event = events.last().expect("accept event");
+    assert_eq!(event.operation, "admit_accept");
+    assert_eq!(
+        event.preview["snapshot"]["lesson_tokens"],
+        json!(5),
+        "{event:?}"
+    );
+}
+
+#[test]
 fn user_stated_source_lifts_confidence() {
     let env = RankingEnv::system_defaults();
     // `weak_source` mirrors the item, so novelty is 0 and the item is an exact

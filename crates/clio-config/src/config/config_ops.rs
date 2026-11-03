@@ -37,9 +37,10 @@ impl Runtime {
     }
 
     fn config_get_inner(&self, path: Option<&str>) -> Result<ConfigGetData, AmError> {
-        // Resolve the pointer on the unmasked tree: masking renames keys that
-        // themselves look secret, so a pointer such as `credentials.api_key`
-        // would otherwise stop at a name the masked view no longer has.
+        // Resolve the pointer on the unmasked tree and mask only the value it
+        // names: the masked tree holds rewritten values, not the stored ones, so
+        // a caller's pointer must be resolved against the real shape and the
+        // result masked on the way out.
         let raw = self.effective_raw();
         let value = match path {
             None | Some("") => masked_clone(&raw),

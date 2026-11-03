@@ -187,7 +187,8 @@ fn key_path(journal: &Path) -> PathBuf {
 /// never outlives the scenario that installed it.
 fn install_key(journal: &Path) -> ThreadKeyGuard {
     clio_config::secret_seal::test_key::use_key(KEY);
-    std::fs::write(key_path(journal), KEY).expect("write the scenario key file");
+    clio_config::secret_key_file::write_key_file(&key_path(journal), &KEY)
+        .expect("write the scenario key file");
     ThreadKeyGuard
 }
 

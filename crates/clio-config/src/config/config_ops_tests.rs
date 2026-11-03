@@ -65,6 +65,56 @@ fn config_get_returns_the_masked_tree_for_no_path() {
 }
 
 #[test]
+fn config_get_returns_count_numbers_and_keeps_field_names() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.load_file_json(
+        r#"{
+            "history": {"lesson_max_tokens": 32000},
+            "injection": {"budget_tokens": 2048},
+            "credentials": {"api_key": "sk-ABCDEFG1234"},
+            "author": "Ada"
+        }"#,
+    )
+    .expect("load");
+    // A pointer read of a count returns the number, not a mask.
+    let ToolResult::Ok { data, .. } = rt.config_get(Some("history.lesson_max_tokens")) else {
+        panic!("expected ok");
+    };
+    assert_eq!(data.value, json!(32000));
+
+    let ToolResult::Ok { data: full, .. } = rt.config_get(None) else {
+        panic!("expected whole tree");
+    };
+    let object = full.value.as_object().expect("masked view");
+    for name in ["credentials", "author"] {
+        assert!(object.contains_key(name), "{name} vanished: {full:?}");
+    }
+    assert!(
+        object["history"].get("lesson_max_tokens").is_some(),
+        "{full:?}"
+    );
+    assert!(
+        object["injection"].get("budget_tokens").is_some(),
+        "{full:?}"
+    );
+    assert_eq!(object["history"]["lesson_max_tokens"], json!(32000));
+    assert_eq!(object["injection"]["budget_tokens"], json!(2048));
+    assert_eq!(object["author"], json!("Ada"));
+    assert_eq!(object["credentials"]["api_key"], json!("****1234"));
+}
+
+#[test]
+fn config_get_masks_a_non_string_leaf_under_a_strong_secret_name() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.load_file_json(r#"{"credentials":{"api_key":99887766}}"#)
+        .expect("load");
+    let ToolResult::Ok { data, .. } = rt.config_get(Some("credentials.api_key")) else {
+        panic!("expected ok");
+    };
+    assert_eq!(data.value, json!("[REDACTED]"));
+}
+
+#[test]
 fn config_get_unknown_path_is_an_error() {
     let rt = Runtime::with_env(&|_| None);
     let ToolResult::Err { code, .. } = rt.config_get(Some("missing.path")) else {

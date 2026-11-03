@@ -103,8 +103,18 @@ fn a_group_readable_archive_is_refused() {
 
     let err = read_entries(Some(&dir.key())).expect_err("not owner-only");
 
+    // The archive is refused under the sync key file label; the path in the
+    // message is what names the archive.
+    let expected = format!(
+        "sync key file {}: refused because it is not owner-only; restrict it to the owner \
+         (0600) and run again",
+        dir.path().join(ARCHIVE_NAME).display()
+    );
     assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
-    assert!(err.message.contains("not owner-only"), "{}", err.message);
+    assert_eq!(
+        err.message, expected,
+        "the refusal names the path an operator has to restrict, in full"
+    );
 }
 
 #[test]
@@ -223,8 +233,18 @@ fn an_appended_key_refuses_an_archive_that_is_not_owner_only() {
     )
     .expect_err("not owner-only");
 
+    // The append path reports the same refusal as the read path, archive label
+    // and all, so the two cannot drift apart.
+    let expected = format!(
+        "sync key file {}: refused because it is not owner-only; restrict it to the owner \
+         (0600) and run again",
+        dir.path().join(ARCHIVE_NAME).display()
+    );
     assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
-    assert!(err.message.contains("not owner-only"), "{}", err.message);
+    assert_eq!(
+        err.message, expected,
+        "the refusal names the path an operator has to restrict, in full"
+    );
     let raw = std::fs::read_to_string(dir.path().join(ARCHIVE_NAME)).expect("read the archive");
     assert_eq!(
         raw.lines().filter(|line| !line.trim().is_empty()).count(),
