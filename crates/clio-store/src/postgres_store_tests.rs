@@ -3,28 +3,31 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for the Postgres store boundary around a sealed
-//! MemTree summary gist: sealing before the write, and opening after a read.
+//! This module is responsible for the Postgres store boundary around a sealed MemTree summary gist: sealing before the write, and opening after a read.
 //!
 //! ## Owns
-//! - Round-trip of a gist through `upsert_memtree_node`, `get_memtree_node`
-//!   and `query_memtree_nodes`
+//! - Round-trip of a gist through `upsert_memtree_node`, `get_memtree_node`, and `query_memtree_nodes`
 //! - The at-rest form of the column, which is an envelope and not the plaintext
-//! - The tolerant gist read after a bank's DEK is destroyed
+//! - The tolerated read that returns an absent gist when no usable key opens the stored body
 //!
 //! ## Does not own
-//! - The envelope shape and the seal/open pair (see `memtree_seal`)
-//! - MemTree SQL and row mapping (see `postgres_memtree`)
+//! - The envelope shape and the seal/open pair, which `memtree_seal` owns
+//! - MemTree SQL and row mapping, which `postgres_memtree` owns
+//! - Gist removal on subject erasure, which the erase purge owns
 //!
 //! ## Boundary
 //!
-//! Keep this module on the store boundary, not on the ciphertext itself.
+//! Changes to what the store seals and opens on a MemTree node should normally require changes here.
+//! Changes to the envelope shape or to the erase purge should not require changes here.
+//!
+//! Keep this module focused on the sealed-gist store boundary.
 
 use crate::dek::{CiphertextEnvelope, DekProvider, LocalDevKms};
 use crate::memtree_model::{MemTreeNodeRecord, MemTreeQuery};
 use crate::migrate::IntoAmError;
 use crate::postgres::PostgresStore;
 use crate::store::Store;
+use crate::test_unique::unique;
 use std::sync::Arc;
 
 const GIST: &str = "we discussed the move to Lisbon and the visa deadline";
@@ -56,16 +59,6 @@ fn open_store(kms: Arc<dyn DekProvider>) -> PostgresStore {
     PostgresStore::open(&url, kms).expect("the test database opens")
 }
 
-/// A bank id no other test uses, so rows from a parallel run never mix in.
-fn unique_bank() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("pg-gist-{nanos}")
-}
-
 /// Read the raw `summary_gist` column, without the store's open step.
 fn stored_gist(store: &PostgresStore, bank: &str, id: &str) -> Option<String> {
     store
@@ -92,7 +85,7 @@ fn unique_node(bank: &str) -> String {
 fn a_sealed_gist_round_trips_through_get_and_query() {
     let _guard = crate::lock_pg_test();
     let store = open_store(Arc::new(LocalDevKms::new()));
-    let bank = unique_bank();
+    let bank = unique("pg-gist");
     let id = unique_node(&bank);
     store
         .upsert_memtree_node(&node(&bank, &id))
@@ -119,7 +112,7 @@ fn a_sealed_gist_round_trips_through_get_and_query() {
 fn the_stored_gist_is_an_envelope_and_not_the_plaintext() {
     let _guard = crate::lock_pg_test();
     let store = open_store(Arc::new(LocalDevKms::new()));
-    let bank = unique_bank();
+    let bank = unique("pg-gist");
     let id = unique_node(&bank);
     store
         .upsert_memtree_node(&node(&bank, &id))
@@ -137,11 +130,11 @@ fn the_stored_gist_is_an_envelope_and_not_the_plaintext() {
 }
 
 #[test]
-fn a_destroyed_bank_dek_reads_the_gist_as_absent() {
+fn a_gist_with_no_usable_dek_reads_as_absent() {
     let _guard = crate::lock_pg_test();
     let kms = Arc::new(LocalDevKms::new());
     let store = open_store(kms.clone());
-    let bank = unique_bank();
+    let bank = unique("pg-gist");
     let id = unique_node(&bank);
     store
         .upsert_memtree_node(&node(&bank, &id))

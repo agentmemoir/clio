@@ -3,19 +3,21 @@
 //
 //! # Responsibility
 //!
-//! Calls every method `postgres_store` exposes in its `Store` and
-//! `TripleAssertion` impls, through the traits, on a real Postgres store.
+//! This module is responsible for exercising every method `postgres_store` exposes in its `Store` and `TripleAssertion` impls, through the traits, against a real Postgres store.
 //!
 //! ## Owns
 //! - One call and one assertion per method, grouped by cluster
 //!
 //! ## Does not own
-//! - The MemTree gist envelope (`postgres_store_tests`)
-//! - The SQL bodies the methods delegate to (the backend modules)
+//! - The sealed MemTree gist envelope, which `postgres_store_tests` owns
+//! - The SQL bodies the methods delegate to, which the backend modules own
 //!
 //! ## Boundary
 //!
-//! Test-only. A change to which methods `postgres_store` exposes belongs here.
+//! Changes to which methods `postgres_store` exposes should normally require changes here.
+//! Changes to the SQL a method delegates to should not require changes here.
+//!
+//! Keep this module focused on the trait surface of the Postgres store.
 
 use crate::HygieneStore;
 use crate::audit_model::CorrectionSpec;
