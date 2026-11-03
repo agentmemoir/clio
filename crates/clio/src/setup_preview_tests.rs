@@ -160,13 +160,13 @@ fn an_endpoint_line_says_whether_the_traffic_is_encrypted() {
 
 #[test]
 fn an_endpoint_line_never_shows_url_userinfo_credentials() {
-    let secret = display("embed.url", &json!("http://user:pw@127.0.0.1:18080"));
+    let shown = display("embed.url", &json!("http://user:pw@127.0.0.1:18080"));
     assert!(
-        secret.0.contains("http://***@127.0.0.1:18080"),
-        "{secret:?}"
+        shown.0.contains("http://***@127.0.0.1:18080"),
+        "url userinfo is not masked"
     );
-    assert!(!secret.0.contains("user"), "{secret:?}");
-    assert!(!secret.0.contains("pw"), "{secret:?}");
+    assert!(!shown.0.contains("user"), "url user name is shown");
+    assert!(!shown.0.contains("pw"), "url password is shown");
 
     let plain = display("embed.url", &json!("http://127.0.0.1:18080"));
     assert_eq!(plain.0, "http://127.0.0.1:18080 (this machine only)");

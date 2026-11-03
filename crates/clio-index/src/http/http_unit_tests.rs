@@ -144,7 +144,10 @@ fn endpoint_parse_hides_credentials_from_error() {
         let err = HttpEndpoint::parse(url).unwrap_err();
         let text = err.to_string();
         assert!(text.contains("invalid port"), "{url}: {text}");
-        assert!(!text.contains("pw") && !text.contains("user"), "{url}: {text}");
+        assert!(
+            !text.contains("pw") && !text.contains("user"),
+            "{url}: {text}"
+        );
     }
 }
 

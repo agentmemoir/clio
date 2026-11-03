@@ -101,10 +101,7 @@ impl HttpEndpoint {
             let tail = &after_open[close + 1..];
             let port = match tail.strip_prefix(':') {
                 Some(p) => p.parse::<u16>().map_err(|_| {
-                    AmError::new(
-                        ErrorCode::ConfigCorrupt,
-                        "sidecar url has invalid port",
-                    )
+                    AmError::new(ErrorCode::ConfigCorrupt, "sidecar url has invalid port")
                 })?,
                 None if tail.is_empty() => default_port,
                 None => {
@@ -120,10 +117,7 @@ impl HttpEndpoint {
                 Some((h, p)) => (
                     h.to_owned(),
                     p.parse::<u16>().map_err(|_| {
-                        AmError::new(
-                            ErrorCode::ConfigCorrupt,
-                            "sidecar url has invalid port",
-                        )
+                        AmError::new(ErrorCode::ConfigCorrupt, "sidecar url has invalid port")
                     })?,
                 ),
                 None => (authority.to_owned(), default_port),

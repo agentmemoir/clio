@@ -268,7 +268,9 @@ fn mask_member(child_path: &str, key: &str, child: &mut Value) {
     match child {
         Value::Object(_) | Value::Array(_) => mask_string_secrets(child_path, child),
         Value::String(text)
-            if key_is_secret_data(key) || value_is_secret(child_path, text) || path_is_secret(key) =>
+            if key_is_secret_data(key)
+                || value_is_secret(child_path, text)
+                || path_is_secret(key) =>
         {
             *text = mask_secret(text);
         }

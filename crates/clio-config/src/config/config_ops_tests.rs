@@ -260,8 +260,7 @@ fn config_set_deployment_scope_reports_a_save_failure() {
 fn config_set_masks_an_endpoint_url_that_carries_credentials() {
     let mut rt = Runtime::with_env(&|_| None);
     let raw = "https://user:pw@host/v1";
-    let ToolResult::Ok { data, .. } =
-        rt.config_set("embed.url", json!(raw), ConfigScope::Session)
+    let ToolResult::Ok { data, .. } = rt.config_set("embed.url", json!(raw), ConfigScope::Session)
     else {
         panic!("set embed.url");
     };
