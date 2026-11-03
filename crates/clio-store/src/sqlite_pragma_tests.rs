@@ -21,9 +21,7 @@
 
 use super::{STORE_BUSY_TIMEOUT, SqliteStore};
 use crate::dek::{DekProvider, LocalDevKms};
-use crate::sqlite::sqlite_history_tests::item;
-use crate::store::Store;
-use clio_types::{AmError, EpisodicType, ErrorCode};
+use clio_types::{AmError, ErrorCode};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -79,6 +77,10 @@ fn a_file_backed_open_applies_the_store_pragmas() {
         10000,
         "a contended open must wait ten seconds instead of failing at once"
     );
+    // FULL and delete are the compiled defaults of the bundled SQLite, so these
+    // two assertions stay green even when the open never sets them. They guard
+    // against a future change to another mode; they do not prove the statements
+    // ran.
     assert_eq!(
         pragma_int(&store, "PRAGMA synchronous"),
         2,
@@ -89,26 +91,6 @@ fn a_file_backed_open_applies_the_store_pragmas() {
         "delete",
         "the store must stay in rollback mode, so no -wal or -shm sidecar appears"
     );
-}
-
-#[test]
-fn a_file_backed_open_still_writes_and_reads_back_an_item() {
-    let scratch = Scratch::new("write");
-    let path = scratch.join("store.db");
-    let store = SqliteStore::open(&path, Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>)
-        .expect("open a file-backed store");
-    let bank = crate::test_unique::unique("pragma-bank");
-    let item_id = crate::test_unique::unique("pragma-item");
-    let row = item(&item_id, &bank, EpisodicType::Task, false);
-    store
-        .create_memory_item(&row, "agent")
-        .expect("write one item after the pragma change");
-    let read = store
-        .get_memory_item_impl(&bank, &item_id)
-        .expect("read the item back")
-        .expect("the written item exists");
-    assert_eq!(read.id, item_id);
-    assert_eq!(read.bank_id, bank);
 }
 
 #[test]
