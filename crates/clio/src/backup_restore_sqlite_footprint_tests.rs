@@ -5,11 +5,13 @@
 //!
 //! This module tests the SQLite restore's projected pre-restore snapshot
 //! footprint: the target file's bytes plus the key store the snapshot copies,
-//! and nothing at all when there is no target to snapshot.
+//! and nothing at all when there is no target to snapshot. It also tests the
+//! mode the durable restore event store is left at.
 //!
 //! ## Owns
 //! - `projected_snapshot_bytes`, the room estimate the pre-restore snapshot
 //!   makes
+//! - The permission bits of the event store `open_restore_events` creates
 //!
 //! ## Does not own
 //! - `plan_sqlite`, which calls it (see `backup_restore_sqlite`)
@@ -71,4 +73,27 @@ fn the_projection_reserves_nothing_when_there_is_no_target() {
     // No target file means no snapshot is taken, so nothing is reserved.
     assert_eq!(projected_snapshot_bytes(&state(false, 0), Some(&keys)), 0);
     assert_eq!(projected_snapshot_bytes(&state(false, 0), None), 0);
+}
+
+/// The durable event store beside the journal is owner-only, so another account
+/// cannot read the restore history. Permissions are process-scoped off Unix, so
+/// only the open itself is exercised there.
+#[cfg(unix)]
+#[test]
+fn opening_the_restore_events_leaves_the_file_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Scratch::new("restore-events-permissions");
+    let journal = dir.join(clio_config::ERASURE_JOURNAL_FILE_NAME);
+    let events = super::open_restore_events(&journal).expect("open the durable event store");
+    drop(events);
+    let path = journal.with_file_name(super::RESTORE_EVENTS_FILE);
+    let mode = std::fs::metadata(&path)
+        .expect("stat the durable event store")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "the durable event store must be owner-only, found {mode:o}"
+    );
 }

@@ -1,0 +1,1 @@
+Secret redaction now matches whole field-name segments and never renames a key, so values such as `history.lesson_max_tokens` stay readable by their real path and only string values under credential fields are masked.
