@@ -78,3 +78,25 @@ fn a_revision_stamps_the_unit_in_canonical_seconds() {
         "a revision inherits its hub's creation time"
     );
 }
+
+#[test]
+fn revisions_advance_the_stamp_with_a_frozen_clock() {
+    let (store, mut engine) = seeded();
+    first_wave(&mut engine);
+    let before = record_of(&store, UNIT);
+    for (source, expected) in [
+        ("n4", "1970-01-01T00:00:01Z"),
+        ("n5", "1970-01-01T00:00:02Z"),
+    ] {
+        add_source(&store, source);
+        let report = wave(&engine);
+        assert_eq!(report.revised, vec![HUB.to_owned()], "{report:?}");
+        let after = record_of(&store, UNIT);
+        assert_eq!(after.distilled_at, expected);
+        assert_eq!(after.evidence_history()[0], before.evidence_history()[0]);
+        assert_eq!(
+            after.evidence_history().last().unwrap().reconciled_at,
+            expected
+        );
+    }
+}
