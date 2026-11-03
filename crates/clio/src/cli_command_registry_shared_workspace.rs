@@ -120,6 +120,10 @@ const REASON_REQUIRED: Flag = Flag {
     ..Flag::text("reason", "R", "`shared_discard` forwards the reason.")
 };
 
+/// The `--dry-run` preview flag `shared discard` documents.
+const SHARED_DISCARD_DRY_RUN: Flag =
+    Flag::toggle("dry-run", "`cli_write_shared` previews instead.");
+
 /// `shared store` cannot run without an epistemic kind.
 const EPISTEMIC_KIND_REQUIRED: Flag = Flag {
     required: true,
@@ -138,6 +142,10 @@ const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a
 /// The `shared store` printed line: the parser's accepted set keeps the
 /// `category`-first order the dispatcher already merges, so the line is pinned.
 const SHARED_STORE_USAGE: &str = "clio shared store TEXT --epistemic-kind K [--category C] [--episodic-type T] [--source-type T] [--confidence N] [--evidence-ref E] --actor ACTOR --shared-bank [--output json|text]";
+
+/// The `shared discard` printed line: `--confirm` gates the live run and prints
+/// bare, and `--dry-run` previews the removal, so the line is pinned.
+const SHARED_DISCARD_USAGE: &str = "clio shared discard ITEM_ID --reason R --confirm [--dry-run] --actor ACTOR --shared-bank [--output json|text]";
 
 /// `compose-context` accepts `--query` without printing it and prints
 /// `--budget-tokens` as a mandated flag, so its line is pinned too.
@@ -224,13 +232,14 @@ pub(crate) const SHARED_DISCARD: CommandSpec = CommandSpec {
     documented: &[
         REASON_REQUIRED,
         Flag::toggle("confirm", "`shared_discard` refuses without it."),
+        SHARED_DISCARD_DRY_RUN,
         SHARED_ACTOR_REQUIRED,
         SHARED_BANK_REQUIRED,
         GLOBAL_OUTPUT,
     ],
     accepted_extra: IMPLICIT_GLOBALS_OUTSIDE_ACTOR,
     flag_aliases: &[],
-    usage_override: None,
+    usage_override: Some(SHARED_DISCARD_USAGE),
     usage_alternates: &[],
     examples: &[
         Example {

@@ -152,13 +152,13 @@ const ADMIT_FILE_ALTERNATE: &str = "clio admit --file ops.json [--bank BANK] [--
 const SOURCE_TYPE_PAIRING_NOTE: &str = "--epistemic-kind and --source-type are a pair: --source-type (user_stated|agent_inferred|third_party) is required with belief and must be omitted with fact";
 
 /// The `correct` printed line: `--confirm` gates the live run and prints bare,
-/// but the confirm gate owns the refusal (a run without it is a dry run), so
-/// the required set does not list it and the line is pinned.
+/// but the confirm gate owns the refusal (a run without it is refused with
+/// exit 2), so the required set does not list it and the line is pinned.
 const CORRECT_USAGE: &str = "clio correct ID VALUE --reason R [--context TEXT] --confirm [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]";
 
 /// The `discard` printed line: `--confirm` gates the live run and prints bare,
-/// but the confirm gate owns the refusal (a run without it is a dry run), so
-/// the required set does not list it and the line is pinned.
+/// but the confirm gate owns the refusal (a run without it is refused with
+/// exit 2), so the required set does not list it and the line is pinned.
 const DISCARD_USAGE: &str = "clio discard ID --reason R --confirm [--dry-run] [--bank BANK] [--actor ACTOR] [--output json|text]";
 
 /// `clio remember`: the flagship gated store, over the `store` tool.
@@ -417,11 +417,11 @@ pub(crate) const CORRECT: CommandSpec = CommandSpec {
     usage_alternates: &[],
     examples: &[
         Example::new(
-            "clio correct itm-sample-1 \"lives in Toronto\" --reason \"user correction\" --db ./memory.db",
+            "clio correct itm-sample-1 \"lives in Toronto\" --reason \"user correction\" --confirm --db ./memory.db",
             None,
         ),
         Example::new(
-            "clio correct itm-sample-1 \"lives in Toronto\" --reason \"user correction\" --context \"chat 42\"",
+            "clio correct itm-sample-1 \"lives in Toronto\" --reason \"user correction\" --context \"chat 42\" --confirm",
             Some("replaces the bounded context"),
         ),
     ],

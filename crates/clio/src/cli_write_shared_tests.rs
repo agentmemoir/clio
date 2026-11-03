@@ -265,6 +265,101 @@ fn shared_discard_refuses_without_confirm_then_discards() {
 }
 
 #[test]
+fn shared_discard_accepts_the_global_yes_alias() {
+    let s = shared_state();
+    let (code, out, err) = run_write_state(
+        "shared store",
+        &[
+            "shared convention: retire me",
+            "--epistemic-kind",
+            "fact",
+            "--category",
+            "tool_config",
+            "--actor",
+            "agent",
+            "--shared-bank",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let id = json_of(&out)["id"].as_str().expect("stored id").to_owned();
+    let (code, out, err) = run_write_state(
+        "shared discard",
+        &[
+            &id,
+            "--reason",
+            "retired",
+            "--yes",
+            "--actor",
+            "agent",
+            "--shared-bank",
+        ],
+        &s,
+        true,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert!(out.contains(&format!("discarded {id}")), "{out}");
+}
+
+#[test]
+fn shared_discard_dry_run_previews_and_writes_nothing() {
+    let s = shared_state();
+    let (code, out, err) = run_write_state(
+        "shared store",
+        &[
+            "shared convention: retire me",
+            "--epistemic-kind",
+            "fact",
+            "--category",
+            "tool_config",
+            "--actor",
+            "agent",
+            "--shared-bank",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    let id = json_of(&out)["id"].as_str().expect("stored id").to_owned();
+    let (code, out, err) = run_write_state(
+        "shared discard",
+        &[
+            &id,
+            "--reason",
+            "retired",
+            "--dry-run",
+            "--actor",
+            "agent",
+            "--shared-bank",
+        ],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{out}{err}");
+    let payload = json_of(&out);
+    assert_eq!(payload["dry_run"], json!(true), "{payload}");
+    assert_eq!(payload["operation"], json!("shared discard"), "{payload}");
+    assert_eq!(payload["target"], json!(id), "{payload}");
+    assert!(
+        s.store.get_memory_item("shared", &id).unwrap().is_some(),
+        "the preview must not remove the item"
+    );
+    let (code, out, err) = run_write_state(
+        "shared retrieve",
+        &["shared convention", "--actor", "agent", "--shared-bank"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::SUCCESS, "{err}");
+    assert_eq!(
+        json_of(&out)["hits"].as_array().map_or(0, Vec::len),
+        1,
+        "{out}"
+    );
+}
+
+#[test]
 fn shared_discard_requires_reason() {
     let s = shared_state();
     let (code, out, err) = run_write_state(

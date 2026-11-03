@@ -140,7 +140,8 @@ fn shared_retrieve_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
 }
 
 /// `shared discard ITEM_ID --reason R --confirm --shared-bank` →
-/// `shared_discard`: the confirm gate refuses without `--confirm`/`--yes`.
+/// `shared_discard`: the confirm gate refuses without `--confirm`/`--yes`,
+/// and `--dry-run` prints the zero-write preview.
 fn shared_discard_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     let item_id = one_positional(parsed, "shared discard", "ITEM_ID")?;
     let reason = parsed.value("reason").ok_or_else(|| {
@@ -149,6 +150,21 @@ fn shared_discard_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             "try `clio shared discard <ITEM_ID> --reason retired --confirm --actor agent --shared-bank`",
         )
     })?;
+    if parsed.has("dry-run") {
+        return Ok(WriteCall::Preview {
+            payload: json!({
+                "dry_run": true,
+                "operation": "shared discard",
+                "target": item_id,
+                "scope": "shared",
+                "would": "set discarded_at/discard_reason on the shared-bank item (logged operations removal)",
+                "irreversible": false,
+            }),
+            text: format!(
+                "dry-run: shared discard would remove {item_id} from the shared bank\n  would_discard: {item_id}\n  effect: sets discarded_at/discard_reason (logged removal from active use)\n  note: shared discard is not compliance erasure and does not destroy the item's key\n  pass --confirm to apply"
+            ),
+        });
+    }
     crate::cli_confirm::require_confirm("shared discard", parsed)?;
     let mut args = base_args(parsed);
     args.insert("item_id".into(), Value::from(item_id));

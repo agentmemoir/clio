@@ -10,7 +10,8 @@
 //! ## Owns
 //! - Flag decoding for these mutation verbs into MCP tool arguments (1:1 with the
 //!   published `inputSchema`)
-//! - The `discard` confirmation gate call and the blast-radius dry-run preview
+//! - The `discard` and `correct` confirmation gate calls and their dry-run
+//!   previews
 //! - Their human text views
 //!
 //! ## Does not own
@@ -212,10 +213,7 @@ fn correct_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     args.insert("item_id".into(), Value::from(item_id));
     args.insert("new_value".into(), Value::from(new_value));
     args.insert("reason".into(), Value::from(reason));
-    args.insert(
-        "confirm".into(),
-        Value::Bool(crate::cli_confirm::confirmed(parsed)),
-    );
+    args.insert("confirm".into(), Value::Bool(true));
     if let Some(context) = context {
         args.insert("context".into(), Value::from(context));
     }
@@ -329,6 +327,10 @@ fn render_correct(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_write_mutate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_mutate_confirm_tests.rs"]
+mod confirm_tests;
 
 #[cfg(test)]
 #[path = "cli_write_mutate_text_tests.rs"]

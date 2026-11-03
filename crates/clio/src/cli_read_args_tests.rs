@@ -57,6 +57,7 @@ fn every_checked_verb() -> Vec<&'static str> {
 const EXCUSED: &[(&str, &str)] = &[
     ("discard", "confirm"),
     ("correct", "confirm"),
+    ("shared discard", "confirm"),
     ("erase", "confirm"),
     ("compose-context", "budget-tokens"),
     ("backup restore", "latest"),
