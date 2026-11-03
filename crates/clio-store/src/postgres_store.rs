@@ -442,5 +442,8 @@ impl crate::triple_assertion::TripleAssertion for PostgresStore {
 }
 
 #[cfg(test)]
+#[path = "postgres_store_surface_tests.rs"]
+mod postgres_store_surface_tests;
+#[cfg(test)]
 #[path = "postgres_store_tests.rs"]
 mod postgres_store_tests;
