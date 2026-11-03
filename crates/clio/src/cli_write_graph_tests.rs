@@ -142,13 +142,30 @@ fn triple_end_expires_and_retains_history() {
         1,
         "{payload}"
     );
-    // History remains queryable as of before the end.
+    // History remains queryable as of before the end. The read names its
+    // instant instead of taking the wall clock, so the fixture's window is the
+    // only thing the assertion depends on.
     let queried = call(
         &s,
         "triple_query",
-        json!({"bank": "demo", "subject": "demo", "predicate": "runs"}),
+        json!({"bank": "demo", "subject": "demo", "predicate": "runs",
+               "as_of": "2024-06-01T00:00:00Z"}),
     );
     assert_eq!(queried["ok"], json!(true), "{queried}");
+    assert_eq!(
+        queried["triples"].as_array().map_or(0, Vec::len),
+        1,
+        "the edge is readable inside its window: {queried}"
+    );
+    // The end closed the window: the same read after it no longer sees the edge.
+    let expired = call(
+        &s,
+        "triple_query",
+        json!({"bank": "demo", "subject": "demo", "predicate": "runs",
+               "as_of": "2025-06-01T00:00:00Z"}),
+    );
+    assert_eq!(expired["ok"], json!(false), "{expired}");
+    assert_eq!(expired["code"], json!("not_found"), "{expired}");
 }
 
 #[test]

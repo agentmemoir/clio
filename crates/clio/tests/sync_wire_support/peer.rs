@@ -46,6 +46,20 @@ const ANNOUNCE_BOUND: Duration = Duration::from_secs(90);
 /// and the TTL keeps a child left behind by a crash from outliving the run.
 const SERVE_TTL_SECS: &str = "600";
 
+/// The device id the next spawned peer is told to serve under.
+///
+/// The peer's serving deployment resolves its own identity before it binds: an
+/// explicit `CLIO_SYNC_DEVICE_ID` wins over the store's minted `device-<hex>`,
+/// so the harness names the id up front instead of guessing it from the child's
+/// process id. The value is stable and unique per spawned peer (this process's
+/// id plus a counter), so two peers beside each other never share an identity
+/// and a rerun within one process cannot reuse one either.
+fn next_device_id() -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("peer-{}-{sequence}", std::process::id())
+}
+
 /// The 32 raw bytes of the one sync key this harness derives its key from,
 /// computed from the process's synthetic secret so no key material is fixed in
 /// the repository.
@@ -214,8 +228,15 @@ impl ServedPeer {
         // beside the peer's own journal: both sides then resolve the identical
         // fingerprint without either of them holding the bytes as text.
         crate::common::share_salt(&mut command, journal, &super::harness_salt());
+        // The identity is chosen before the child exists and handed over through
+        // the exact variable the peer's runtime reads it from, so the id this
+        // harness reports for the peer is the id the peer's own denial proofs
+        // bind. Deriving it from the child's process id instead named an id the
+        // serving deployment never used, so every proof it answered carried an
+        // identity the delivery target could not match.
+        let device_id = next_device_id();
+        command.env(clio_config::SYNC_DEVICE_ID_ENV, &device_id);
         let mut child = command.spawn().expect("spawn clio sync serve");
-        let device_id = format!("device-{}", child.id());
         let addr = drain_stdout(&mut child, &stdout_log);
         Self {
             child,
@@ -235,7 +256,9 @@ impl ServedPeer {
     }
 
     /// The peer deployment's device identity, the value its denial proofs
-    /// carry and the driver's delivery target must bind.
+    /// carry and the driver's delivery target must bind: the same id the
+    /// child was started under, so a proof's own `peer_id` and this reading
+    /// are one value rather than two guesses that happen to agree.
     #[must_use]
     pub fn device_id(&self) -> &str {
         &self.device_id

@@ -33,6 +33,7 @@
 
 use super::*;
 use crate::sync_cli::sync_cli_serve::start_serve;
+use crate::sync_key_cli_test_support::{TempDir, env_of, stored_key};
 use clio_compliance::JournalDenialProbe;
 use clio_store::ErasureDenial;
 use clio_sync::denial::denied_bank_marker;
@@ -364,13 +365,46 @@ fn the_bound_serve_tool_serves_under_the_journals_denial_authority() {
     assert_eq!(status, 200, "an unrelated bank still serves: {value}");
 }
 
+/// The env var that marks this test binary's child run as the pull's own body,
+/// and the child's exact name, used as the spawn filter.
+const PULL_CHILD_ENV: &str = "AM_SYNC_PULL_DENIAL_CHILD";
+const PULL_CHILD_TEST: &str = "sync_cli::tests::denial_tests::the_pull_verb_refuses_a_journal_the_deployment_does_not_resolve";
+
 /// The `sync pull` verb runs its in-process transfer under the journal its
 /// state names: a state built from an effective document naming a journal the
 /// deployment does not resolve refuses the verb before any transport work,
 /// naming the override that fixes it. A transfer that ignored the authority
 /// would have gone to the wire instead.
+///
+/// A transfer reads its sync key from the process environment, so the key is
+/// put where the verb looks: the body runs in a child of this test binary
+/// started with `CLIO_SYNC_KEY_FILE` naming a stored key. The key is real
+/// custody material, the preflight passes on it, and what the verb then refuses
+/// on is the journal — which is the refusal under test. This test never writes
+/// this process's own environment, so a parallel test cannot see the key.
 #[test]
 fn the_pull_verb_refuses_a_journal_the_deployment_does_not_resolve() {
+    if std::env::var(PULL_CHILD_ENV).is_err() {
+        let keys = TempDir::new("pull-document-key");
+        let key_env = env_of(vec![(
+            clio_config::SYNC_KEY_FILE_ENV,
+            keys.key().display().to_string(),
+        )]);
+        stored_key(&key_env);
+        let child = std::process::Command::new(std::env::current_exe().expect("this test binary"))
+            .args([PULL_CHILD_TEST, "--exact", "--nocapture"])
+            .env(PULL_CHILD_ENV, "1")
+            .env(clio_config::SYNC_KEY_FILE_ENV, keys.key())
+            .output()
+            .expect("spawn this test's child run");
+        assert!(
+            child.status.success(),
+            "the keyed child run must pass;\nstdout:{}\nstderr:{}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
+        return;
+    }
     let journal = Scratch::new("pull-document");
     let s = McpState::open_with_effective(
         &McpOpenOptions::default(),

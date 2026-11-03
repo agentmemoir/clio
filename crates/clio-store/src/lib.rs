@@ -99,6 +99,7 @@ mod local_kms_migrate;
 mod local_kms_schema;
 mod memtree_model;
 mod memtree_schema;
+mod memtree_seal;
 mod migrate;
 mod model;
 mod opaque_item_persist;
