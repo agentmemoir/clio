@@ -1,0 +1,1 @@
+The Postgres store now stores a MemTree node's summary gist as a sealed envelope, the same way the local SQLite store already does. Reads open the envelope back into the gist. Rows written before this change hold plaintext, and their gist reads back as absent until the node is written again. A gist whose key is gone also reads as absent and does not raise an error.
