@@ -29,8 +29,9 @@
 //! Keep this module focused on the revision stamp.
 
 use crate::hub_distill::hub_distill_reconcile_tests::{
-    BANK, HUB, UNIT, add_source, first_wave, record_of, seeded, wave,
+    BANK, HUB, REV2, UNIT, add_source, discard_item, first_wave, record_of, seeded, wave,
 };
+use crate::hub_distill::hub_distill_tests::engine as make_engine;
 use clio_store::Store;
 
 /// The canonical shape a revision stamp must have: UTC, second precision, no
@@ -99,4 +100,62 @@ fn revisions_advance_the_stamp_with_a_frozen_clock() {
             expected
         );
     }
+}
+
+#[test]
+fn a_refusal_stamps_staleness_without_advancing_reconciliation_time() {
+    let (store, mut engine) = seeded();
+    first_wave(&mut engine);
+    discard_item(&store, "n1");
+    let before = record_of(&store, UNIT);
+    let strict = make_engine(&store, 1.0, 2);
+
+    let report = wave(&strict);
+    assert_eq!(
+        report.reconcile_rejected,
+        vec![HUB.to_owned()],
+        "{report:?}"
+    );
+    let refused = record_of(&store, UNIT);
+    assert_eq!(refused.stale_at.as_deref(), Some("1970-01-01T00:00:01Z"));
+    assert_eq!(refused.stale_reason.as_deref(), Some("revision_rejected"));
+    assert_eq!(refused.distilled_at, before.distilled_at);
+    assert_eq!(refused.evidence_history(), before.evidence_history());
+    assert_eq!(refused.revision, before.revision);
+    assert!(store.get_memory_item(BANK, REV2).unwrap().is_none());
+    let audit = store.audit_trail(BANK, UNIT).unwrap();
+    let refused_events: Vec<_> = audit
+        .events
+        .iter()
+        .filter(|event| event.operation == "hub_distill_reconcile")
+        .map(|event| event.detail["admitted"].clone())
+        .collect();
+    assert_eq!(refused_events, vec![serde_json::json!(false)]);
+}
+
+#[test]
+fn a_below_limit_revision_advances_the_stamp_only_once() {
+    let (store, mut engine) = seeded();
+    first_wave(&mut engine);
+    for edge in store.list_assoc_edges(BANK, Some(HUB)).unwrap() {
+        store.delete_assoc_edge(BANK, &edge.id).unwrap();
+    }
+    assert!(engine.eligible_hubs(BANK).unwrap().is_empty());
+    discard_item(&store, "n1");
+
+    let report = wave(&engine);
+    assert_eq!(report.revised, vec![HUB.to_owned()], "{report:?}");
+    let revised = record_of(&store, UNIT);
+    assert_eq!(revised.distilled_at, "1970-01-01T00:00:01Z");
+    assert_eq!(revised.revision, 2);
+    assert_eq!(revised.stale_reason, None);
+    assert!(!revised.source_ids.contains(&"n1".to_owned()));
+
+    let report = wave(&engine);
+    assert_eq!(
+        report.reconcile_unchanged,
+        vec![HUB.to_owned()],
+        "{report:?}"
+    );
+    assert_eq!(record_of(&store, UNIT), revised);
 }
