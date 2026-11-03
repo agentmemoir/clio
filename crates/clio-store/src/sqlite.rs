@@ -34,7 +34,7 @@ use crate::embedding_space::{
     refused_switch,
 };
 use crate::migrate::{IntoAmError, SQL_COMPLIANCE_SLOTS, SQL_CORE, now_iso};
-use crate::sqlite_path::ensure_parent;
+use crate::sqlite_path::{ensure_owner_only, ensure_parent};
 use crate::vector_backend::{
     apply_space_ddl, apply_static_vectors, drop_vector_table, ensure_registered, verify_vec_version,
 };
@@ -77,8 +77,16 @@ impl SqliteStore {
         ensure_parent(path)?;
         // `:memory:` is a valid SQLite path that gives an in-memory database:
         // it has no file a restore could replace, so it takes no hold and
-        // leaves no lock file in the working directory.
-        let lock = if path.file_name() == Some(std::ffi::OsStr::new(":memory:")) {
+        // leaves no lock file in the working directory. It has no file to keep
+        // owner-only either.
+        let in_memory = path.file_name() == Some(std::ffi::OsStr::new(":memory:"));
+        if !in_memory {
+            // The file is created owner-only before the connection opens, so
+            // the umask's default mode never applies to it and an existing file
+            // is repaired on the way in.
+            ensure_owner_only(path)?;
+        }
+        let lock = if in_memory {
             None
         } else {
             // The shared hold is taken before the file opens, so a concurrent
@@ -309,6 +317,10 @@ mod sqlite_space_tests;
 #[cfg(test)]
 #[path = "sqlite_open_lock_tests.rs"]
 mod sqlite_open_lock_tests;
+
+#[cfg(test)]
+#[path = "sqlite_permissions_tests.rs"]
+mod sqlite_permissions_tests;
 
 #[cfg(test)]
 #[path = "sqlite_history_tests.rs"]
