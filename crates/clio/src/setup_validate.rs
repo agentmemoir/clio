@@ -36,6 +36,7 @@
 
 use crate::setup_db_fields::username_ok;
 use crate::setup_db_options::advanced;
+use clio_ops::redact_credentials;
 use clio_store::{SslChoice, is_loopback, parse_connection};
 
 /// Which field a failed connection test should send the operator back to.
@@ -124,8 +125,9 @@ pub(crate) fn check_connection(url: &str) -> Result<(), String> {
     parse_connection(url)?;
     if clio_types::net::parse_scheme_host(url).is_err() {
         return Err(format!(
-            "database address `{url}` names no host. Add the machine the server runs on, as in \
-             `postgres://user:password@db.example.com:5432/clio`"
+            "database address `{}` names no host. Add the machine the server runs on, as in \
+             `postgres://user:password@db.example.com:5432/clio`",
+            redact_credentials(url)
         ));
     }
     Ok(())
@@ -140,8 +142,9 @@ pub(crate) fn check_pasted_connection(url: &str) -> Result<(), String> {
     if !url.trim().starts_with("postgres://") && !url.trim().starts_with("postgresql://") {
         return Err(format!(
             "a pasted connection must be a complete address starting `postgres://` or \
-             `postgresql://`, got `{url}`. The provider's own connection string is what belongs \
-             here; a bare `host:port` is typed in field by field instead"
+             `postgresql://`, got `{}`. The provider's own connection string is what belongs \
+             here; a bare `host:port` is typed in field by field instead",
+            redact_credentials(url)
         ));
     }
     check_connection(url)
@@ -259,9 +262,10 @@ pub(crate) fn check_endpoint(url: &str) -> Result<(), String> {
     if target.scheme == "http" && !clio_types::net::is_loopback_host(&target.host) {
         let host = &target.host;
         return Err(format!(
-            "endpoint `{url}` must use https for a remote host: plain http would send the API key \
+            "endpoint `{}` must use https for a remote host: plain http would send the API key \
              and every text in the clear. Change the scheme to `https://{host}`, or point it at a \
-             service on this machine such as `http://127.0.0.1:<port>`"
+             service on this machine such as `http://127.0.0.1:<port>`",
+            redact_credentials(url)
         ));
     }
     Ok(())

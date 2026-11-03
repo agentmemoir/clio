@@ -29,6 +29,26 @@
 
 use std::net::IpAddr;
 
+/// `url` with a `user:password@` userinfo replaced by `***`, so a refusal can
+/// echo the address without echoing the password in it.
+///
+/// A userinfo carrying only a user name is left alone: that address holds no
+/// password, and marking it would put a redaction mark on a value that never
+/// had a secret. The colon is what separates the password from the user name.
+fn mask_userinfo(url: &str) -> String {
+    let Some((head, tail)) = url.split_once("://") else {
+        return url.to_owned();
+    };
+    let Some((userinfo, rest)) = tail.split_once('@') else {
+        return url.to_owned();
+    };
+    if userinfo.contains(':') {
+        format!("{head}://***@{rest}")
+    } else {
+        url.to_owned()
+    }
+}
+
 /// The lowercased scheme of `url`, or `None` when it carries no usable
 /// `scheme://` prefix.
 ///
@@ -62,11 +82,12 @@ pub fn url_scheme(url: &str) -> Option<String> {
 /// IPv6 literal, or an empty host.
 pub fn parse_scheme_host(url: &str) -> Result<(String, String), String> {
     let trimmed = url.trim();
+    let shown = mask_userinfo(trimmed);
     let scheme = url_scheme(trimmed)
-        .ok_or_else(|| format!("url `{trimmed}` has no usable `scheme://` prefix"))?;
+        .ok_or_else(|| format!("url `{shown}` has no usable `scheme://` prefix"))?;
     let (_, after_prefix) = trimmed
         .split_once("://")
-        .ok_or_else(|| format!("url `{trimmed}` has no usable `scheme://` prefix"))?;
+        .ok_or_else(|| format!("url `{shown}` has no usable `scheme://` prefix"))?;
     // The authority ends at the first delimiter a path, query, or fragment can
     // introduce; without this a `?` or `#` would become part of the host.
     let authority_end = after_prefix
@@ -83,9 +104,7 @@ pub fn parse_scheme_host(url: &str) -> Result<(String, String), String> {
         // Bracketed IPv6 literal: "[host]" then optionally ":port".
         Some(after_open) => {
             let Some(close) = after_open.find(']') else {
-                return Err(format!(
-                    "url `{trimmed}` has an unterminated bracketed host"
-                ));
+                return Err(format!("url `{shown}` has an unterminated bracketed host"));
             };
             &after_open[..close]
         }
@@ -96,7 +115,7 @@ pub fn parse_scheme_host(url: &str) -> Result<(String, String), String> {
         None => host_port.rsplit_once(':').map_or(host_port, |(h, _)| h),
     };
     if host.is_empty() {
-        return Err(format!("url `{trimmed}` has an empty host"));
+        return Err(format!("url `{shown}` has an empty host"));
     }
     Ok((scheme, host.to_ascii_lowercase()))
 }
@@ -161,7 +180,8 @@ pub fn http_target(url: &str) -> Result<HttpTarget, String> {
     let (scheme, host) = parse_scheme_host(url)?;
     if scheme != "http" && scheme != "https" {
         return Err(format!(
-            "url `{url}` must be http:// or https://, got `{scheme}://`"
+            "url `{}` must be http:// or https://, got `{scheme}://`",
+            mask_userinfo(url)
         ));
     }
     Ok(HttpTarget { scheme, host })

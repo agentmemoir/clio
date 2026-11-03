@@ -81,6 +81,12 @@ fn an_address_with_no_host_is_refused() {
 }
 
 #[test]
+fn a_refused_address_does_not_echo_the_password() {
+    let error = check_connection("postgres://u:topsecret@/db").expect_err("no host");
+    assert!(!error.contains("topsecret"), "{error}");
+}
+
+#[test]
 fn verify_full_in_an_address_is_accepted() {
     assert!(check_connection("postgres://u:p@h:5432/db?sslmode=verify-full").is_ok());
 }
@@ -120,6 +126,12 @@ fn a_pasted_address_must_be_a_complete_url() {
     let error = check_pasted_connection("db.example.com:5432/clio")
         .expect_err("a bare host and port is not a paste");
     assert!(error.contains("postgres://"), "{error}");
+}
+
+#[test]
+fn a_pasted_address_does_not_echo_the_password() {
+    let error = check_pasted_connection("mysql://u:topsecret@h").expect_err("not postgres");
+    assert!(!error.contains("topsecret"), "{error}");
 }
 
 #[test]
@@ -250,6 +262,12 @@ fn a_remote_plain_http_endpoint_is_refused() {
     let error = check_endpoint("http://api.example.com")
         .expect_err("the API key would cross the network in the clear");
     assert!(error.contains("https"), "{error}");
+}
+
+#[test]
+fn a_refused_endpoint_does_not_echo_the_password() {
+    let error = check_endpoint("http://u:topsecret@api.example.com").expect_err("plain http");
+    assert!(!error.contains("topsecret"), "{error}");
 }
 
 #[test]
