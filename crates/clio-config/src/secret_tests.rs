@@ -79,11 +79,58 @@ fn mask_arrays_and_non_string_secrets() {
         "token": null
     });
     mask_value("", &mut v);
-    // Only string leaves are rewritten; other types keep their exact value.
-    assert_eq!(v["items"][0]["password"], json!(123));
+    // A number under a strong secret name is masked as a whole literal.
+    assert_eq!(v["items"][0]["password"], json!("[REDACTED]"));
     assert_eq!(v["items"][1]["ok"], json!(true));
+    // `token` alone also names counts, so a null stays null.
     assert_eq!(v["token"], json!(null));
     let _ = masked_clone(&json!({"secret": "ab"}));
+}
+
+#[test]
+fn non_string_leaves_are_masked_under_strong_secret_names() {
+    let mut v = json!({
+        "password": 123_456,
+        "api_key": 99_887_766,
+        "auth_pin": 4821,
+        "password_set": true,
+        "lesson_max_tokens": 32000,
+        "budget_tokens": 2048,
+        "secret": 0.25
+    });
+    mask_value("", &mut v);
+    for name in ["password", "api_key", "auth_pin", "password_set"] {
+        assert_eq!(v[name], json!("[REDACTED]"), "{name} leaked: {v}");
+    }
+    // Count- and weight-shaped names keep their number.
+    assert_eq!(v["lesson_max_tokens"], json!(32000));
+    assert_eq!(v["budget_tokens"], json!(2048));
+    assert_eq!(v["secret"], json!(0.25));
+}
+
+#[test]
+fn masked_clone_masks_a_secret_shaped_key() {
+    // A secret stored in the key name must not survive the clone, while an
+    // ordinary sibling entry is untouched.
+    let rendered = masked_clone(&json!({"entity": "Ada", "sk-live-SECRETKEY99": "x"})).to_string();
+    assert!(!rendered.contains("sk-live-SECRETKEY99"), "{rendered}");
+    assert!(rendered.contains("\"entity\":\"Ada\""), "{rendered}");
+    assert!(rendered.contains("[REDACTED]"), "{rendered}");
+}
+
+#[test]
+fn masked_clone_keeps_every_entry_when_masked_keys_collide() {
+    // Two secret-shaped keys mask to the same name; neither entry is dropped.
+    let masked = masked_clone(&json!({
+        "sk-live-SECRETAAAA1": "a",
+        "sk-live-SECRETBBBB2": "b",
+        "entity": "Ada"
+    }));
+    let object = masked.as_object().expect("masked document");
+    assert_eq!(object.len(), 3, "{object:?}");
+    assert_eq!(object["[REDACTED]"], json!("[REDACTED]"));
+    assert_eq!(object["[REDACTED]#2"], json!("[REDACTED]"));
+    assert_eq!(object["entity"], json!("Ada"));
 }
 
 #[test]

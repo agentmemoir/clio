@@ -80,19 +80,20 @@ impl SqliteStore {
         // leaves no lock file in the working directory. It has no file to keep
         // owner-only either.
         let in_memory = path.file_name() == Some(std::ffi::OsStr::new(":memory:"));
-        if !in_memory {
-            // The file is created owner-only before the connection opens, so
-            // the umask's default mode never applies to it and an existing file
-            // is repaired on the way in.
-            ensure_owner_only(path)?;
-        }
         let lock = if in_memory {
             None
         } else {
-            // The shared hold is taken before the file opens, so a concurrent
-            // restore cannot swap the file under the open; a failure later in
-            // this function releases the hold through the local's drop.
-            Some(crate::store_lock::SharedHold::acquire(path)?)
+            // The shared hold is taken before the database file is created or
+            // opened, so a concurrent restore cannot swap the file under the
+            // open, and an open refused while the hold is busy leaves no stray
+            // file behind; a failure later in this function releases the hold
+            // through the local's drop.
+            let hold = crate::store_lock::SharedHold::acquire(path)?;
+            // The file is created owner-only after the hold and before the
+            // connection opens, so the umask's default mode never applies to it
+            // and an existing file is repaired on the way in.
+            ensure_owner_only(path)?;
+            Some(hold)
         };
         let conn = Connection::open(path).am("sqlite open")?;
         // The handle is registered before bootstrap so a failure inside it
