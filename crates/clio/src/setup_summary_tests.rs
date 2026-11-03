@@ -133,6 +133,42 @@ fn a_remote_encrypted_run_names_remote_and_encrypted() {
 }
 
 #[test]
+fn the_applied_service_line_never_shows_url_userinfo_credentials() {
+    let plan = managed(
+        "127.0.0.1",
+        "34310",
+        "clio",
+        "clio",
+        SslChoice::Prefer,
+        None,
+    )
+    .expect("a valid managed plan");
+    let mut service = Service::local("embed");
+    service.url = "http://user:pw@127.0.0.1:18080".to_owned();
+    let text = render(&answered(plan, Some(service), None), 5);
+    assert!(
+        text.contains("Embedding: http://***@127.0.0.1:18080 (this machine only)"),
+        "{text}"
+    );
+    assert!(!text.contains("pw"), "the password is shown: {text}");
+
+    let plan = managed(
+        "127.0.0.1",
+        "34310",
+        "clio",
+        "clio",
+        SslChoice::Prefer,
+        None,
+    )
+    .expect("a valid managed plan");
+    let unchanged = render(&answered(plan, Some(Service::local("embed")), None), 5);
+    assert!(
+        unchanged.contains("Embedding: http://127.0.0.1:34311 (this machine only)"),
+        "{unchanged}"
+    );
+}
+
+#[test]
 fn a_sqlite_run_prints_the_file_and_local_encryption() {
     let path = PathBuf::from("/tmp/clio-test/memories.db");
     let answers = answered(sqlite(path.clone(), None), None, None);

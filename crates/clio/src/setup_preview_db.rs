@@ -124,11 +124,11 @@ pub(crate) fn block(
         // A SQLite install puts the file in the same field a Postgres address
         // occupies, because the store reads one address for both backends. The
         // driver's parser refuses a path by design — it only speaks Postgres — so
-        // the file is shown as the address it is rather than as a redacted
-        // non-answer.
+        // the file is shown as the address it is. A refused Postgres address is
+        // shown with its userinfo redacted, keeping the host and path visible.
         Err(_) => changes.push(Change {
             path: report::display_name("store.database_url"),
-            value: address.clone(),
+            value: clio_ops::redact_credentials(&address),
             state,
             note: Some("a file on this machine".to_owned()),
         }),
@@ -246,3 +246,8 @@ fn dropped(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "setup_preview_db_tests.rs"]
+mod tests;
+
