@@ -99,7 +99,7 @@ pub(crate) fn read_entries(key_file: Option<&Path>) -> Result<Vec<ArchivedSyncKe
     if !path.exists() {
         return Ok(Vec::new());
     }
-    file_store::owner_only_refusal(&path)?;
+    file_store::owner_only_refusal(&path, "sync key file")?;
     let raw = std::fs::read_to_string(&path).map_err(|err| {
         AmError::new(
             ErrorCode::Internal,
@@ -163,7 +163,7 @@ pub(crate) fn append_entry(
         // append must refuse it too: the entry is raw key material, so writing
         // it next to whatever could already read the file discloses the key
         // before the next read could refuse.
-        file_store::owner_only_refusal(&path)?;
+        file_store::owner_only_refusal(&path, "sync key file")?;
         std::fs::OpenOptions::new()
             .append(true)
             .open(&path)

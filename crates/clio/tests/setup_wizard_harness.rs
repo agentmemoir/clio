@@ -75,7 +75,8 @@ fn temp_dir(tag: &str) -> PathBuf {
     // secret store to create a key — which on a developer machine would mean
     // writing a real entry into their login Keychain. This is also the path CI
     // takes, so the fallback is exercised rather than assumed.
-    std::fs::write(dir.join("clio.key"), [0x6b_u8; 32]).expect("seed the test key file");
+    clio_config::secret_key_file::write_key_file(&dir.join("clio.key"), &[0x6b_u8; 32])
+        .expect("seed the test key file");
     dir
 }
 

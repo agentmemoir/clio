@@ -71,7 +71,8 @@ fn key_file() -> &'static PathBuf {
             std::env::temp_dir().join(format!("clio-harness-key-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("harness key dir");
         let path = dir.join("clio.key");
-        std::fs::write(&path, TEST_KEY).expect("seed the harness key file");
+        clio_config::secret_key_file::write_key_file(&path, &TEST_KEY)
+            .expect("seed the harness key file");
         path
     })
 }
