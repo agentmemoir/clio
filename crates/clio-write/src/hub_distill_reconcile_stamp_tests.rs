@@ -140,7 +140,7 @@ fn a_below_limit_revision_advances_the_stamp_only_once() {
     for edge in store.list_assoc_edges(BANK, Some(HUB)).unwrap() {
         store.delete_assoc_edge(BANK, &edge.id).unwrap();
     }
-    assert!(engine.eligible_hubs(BANK).unwrap().is_empty());
+    assert_eq!(engine.eligible_hubs(BANK).unwrap().len(), 0);
     discard_item(&store, "n1");
 
     let report = wave(&engine);
