@@ -84,8 +84,12 @@ services:
     # Default amd64; override with -f compose.arm64.yml (or set CLIO_TEI_IMAGE).
     image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}
     restart: unless-stopped
+    # No authentication in any of these three sidecars, so their published ports
+    # are loopback-only for the same reason as the database above: the host bind
+    # keeps them off every other host interface. Docker Engine 28.0.0 or later
+    # is what also keeps a host on the same L2 segment from reaching them.
     ports:
-      - "${CLIO_EMBED_PORT:-34311}:80"
+      - "127.0.0.1:${CLIO_EMBED_PORT:-34311}:80"
     volumes:
       - tei_embed_cache:/data
     environment:
@@ -118,7 +122,7 @@ services:
     image: ${CLIO_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}
     restart: unless-stopped
     ports:
-      - "${CLIO_RERANK_PORT:-34312}:80"
+      - "127.0.0.1:${CLIO_RERANK_PORT:-34312}:80"
     volumes:
       - tei_rerank_cache:/data
     environment:
@@ -163,11 +167,12 @@ services:
     image: ${CLIO_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-b12033}
     restart: unless-stopped
     ports:
-      - "${CLIO_EXTRACT_PORT:-34313}:8080"
+      - "127.0.0.1:${CLIO_EXTRACT_PORT:-34313}:8080"
     volumes:
       - ./models:/models:ro
     environment:
       LLAMA_ARG_MODEL: /models/${CLIO_EXTRACT_GGUF:-numind.NuExtract-tiny-v1.5.Q4_K_M.gguf}
+      # The listener the published port DNATs to; the bind above limits reach.
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_PORT: "8080"
       # Default auto -np ≈ n_cpu (was 4 slots × 4096 KV). One agent → 1 slot.
