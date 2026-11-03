@@ -55,6 +55,10 @@ pub fn sqlite_content_digest(path: &Path) -> Result<String, AmError> {
     };
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .am("open the store for a content digest")?;
+    // A writer in another process holds the write lock while this reads, so
+    // the handle waits the store's bounded time instead of failing at once.
+    conn.busy_timeout(crate::sqlite::STORE_BUSY_TIMEOUT)
+        .am("digest busy timeout")?;
     // The digest can run on the live store, so the open-handle count must
     // observe its connection too, the same way the snapshot registers its own.
     let _handle = crate::open_handles::register(path);

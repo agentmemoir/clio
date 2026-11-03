@@ -291,7 +291,7 @@ pub use restore_state::{SqliteFileState, sqlite_file_state, sqlite_file_state_un
 pub use restore_swap::{KeyPlacement, SwapReport, SwapRequest, swap_sqlite_store};
 pub use snapshot_keys::{KeyMemberSource, key_member_source};
 pub use space_reconcile::{SpaceReconcile, configured_embedding_space, space_switch_confirmed};
-pub use sqlite::SqliteStore;
+pub use sqlite::{STORE_BUSY_TIMEOUT, SqliteStore};
 pub use sqlite_content::sqlite_content_digest;
 pub use sqlite_integrity::sqlite_integrity_ok;
 pub use sqlite_ops::sqlite_store_counts;

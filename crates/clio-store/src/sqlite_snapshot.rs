@@ -138,6 +138,10 @@ pub fn snapshot_sqlite_into(source: &Path, staged: &Path) -> Result<SnapshotFact
     crate::vector_backend::ensure_registered()?;
     let conn = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .am("open the store read-only for a snapshot")?;
+    // A writer in another process holds the write lock while this copies, so
+    // the handle waits the store's bounded time instead of failing at once.
+    conn.busy_timeout(crate::sqlite::STORE_BUSY_TIMEOUT)
+        .am("snapshot busy timeout")?;
     // The snapshot's own connection counts as an open store handle: the guard
     // holds the registration while the connection is live, so the swap's
     // open-handle count observes this connection too.

@@ -159,6 +159,10 @@ fn file_state(path: &Path, hold: bool) -> Result<SqliteFileState, AmError> {
     };
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .am("open the store read-only to measure it")?;
+    // A writer in another process holds the write lock while this measures, so
+    // the handle waits the store's bounded time instead of failing at once.
+    conn.busy_timeout(crate::sqlite::STORE_BUSY_TIMEOUT)
+        .am("measurement busy timeout")?;
     // The measurement's connection is a real open store handle, so it is
     // registered for the connection's lifetime: the swap's open-handle count
     // then observes every connection this measurement opens, and a

@@ -44,6 +44,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// How long a contended connection waits for a writer before failing.
+///
+/// Every connection that opens a store file uses this: the store's own
+/// connection, and the short-lived read-only connections a backup, a digest,
+/// a measurement, or a setup count takes. Without it those reads fail at once
+/// with `database is locked` while another process holds the write lock.
+pub const STORE_BUSY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// SQLite-backed store. Requires the vector backend (see `vector_backend`).
 pub struct SqliteStore {
     pub(crate) conn: Mutex<Connection>,
@@ -125,7 +133,7 @@ impl SqliteStore {
         // settings match the local key store, and they are set before the
         // converge passes so every transaction below and the bootstrap inherit
         // them.
-        conn.busy_timeout(Duration::from_secs(10))
+        conn.busy_timeout(STORE_BUSY_TIMEOUT)
             .am("sqlite busy timeout")?;
         conn.execute_batch("PRAGMA synchronous = FULL;")
             .am("sqlite synchronous")?;

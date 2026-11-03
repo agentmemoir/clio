@@ -19,7 +19,7 @@
 //!
 //! Keep this file focused on what an open sets on the connection.
 
-use super::SqliteStore;
+use super::{STORE_BUSY_TIMEOUT, SqliteStore};
 use crate::dek::{DekProvider, LocalDevKms};
 use crate::sqlite::sqlite_history_tests::item;
 use crate::store::Store;
@@ -109,4 +109,28 @@ fn a_file_backed_open_still_writes_and_reads_back_an_item() {
         .expect("the written item exists");
     assert_eq!(read.id, item_id);
     assert_eq!(read.bank_id, bank);
+}
+
+#[test]
+fn a_read_only_handle_opened_like_the_reads_waits_ten_seconds() {
+    let scratch = Scratch::new("read-only");
+    let path = scratch.join("store.db");
+    let store = SqliteStore::open(&path, Arc::new(LocalDevKms::new()) as Arc<dyn DekProvider>)
+        .expect("open a file-backed store");
+    // The digest, the snapshot, the restore measurement, and the setup count
+    // each open the live store this way: read-only, then the store's wait.
+    let reader =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("open the store read-only");
+    reader
+        .busy_timeout(STORE_BUSY_TIMEOUT)
+        .expect("apply the store wait to the read-only handle");
+    let waited: i64 = reader
+        .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+        .expect("read the busy timeout through the read-only handle");
+    assert_eq!(
+        waited, 10000,
+        "a read-only open must wait ten seconds instead of failing at once"
+    );
+    drop(store);
 }

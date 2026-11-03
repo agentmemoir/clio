@@ -29,7 +29,7 @@ use super::{
 };
 use clio_backup::ExtractedMember;
 use clio_compliance::MemberFacts;
-use clio_store::sha256_hex;
+use clio_store::{STORE_BUSY_TIMEOUT, sha256_hex};
 use clio_types::{AmError, ErrorCode};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -132,6 +132,9 @@ fn sqlite_column_where(
     let connection =
         rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
     connection
+        .busy_timeout(STORE_BUSY_TIMEOUT)
+        .map_err(|error| sqlite_error(path, table, &error))?;
+    connection
         .execute_batch("PRAGMA query_only = ON")
         .map_err(|error| sqlite_error(path, table, &error))?;
     if !column_exists(&connection, table, column)
@@ -163,6 +166,9 @@ fn sqlite_column_where(
 fn column_present(path: &Path, table: &str, column: &str) -> Result<bool, ClassifyRefusal> {
     let connection =
         rusqlite::Connection::open(path).map_err(|error| sqlite_error(path, table, &error))?;
+    connection
+        .busy_timeout(STORE_BUSY_TIMEOUT)
+        .map_err(|error| sqlite_error(path, table, &error))?;
     connection
         .execute_batch("PRAGMA query_only = ON")
         .map_err(|error| sqlite_error(path, table, &error))?;

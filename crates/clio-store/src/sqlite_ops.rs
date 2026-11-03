@@ -52,6 +52,10 @@ fn count(conn: &rusqlite::Connection, sql: &str, bank: Option<&str>) -> Result<u
 pub fn sqlite_store_counts(path: &Path) -> Result<StoreCounts, AmError> {
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| AmError::new(ErrorCode::Internal, format!("open read-only: {e}")))?;
+    // A writer in another process holds the write lock while this counts, so
+    // the handle waits the store's bounded time instead of failing at once.
+    conn.busy_timeout(crate::sqlite::STORE_BUSY_TIMEOUT)
+        .am("counts busy timeout")?;
     let memories: i64 = conn
         .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
         .am("counts memories")?;
