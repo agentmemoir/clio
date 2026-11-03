@@ -159,6 +159,20 @@ fn an_endpoint_line_says_whether_the_traffic_is_encrypted() {
 }
 
 #[test]
+fn an_endpoint_line_never_shows_url_userinfo_credentials() {
+    let secret = display("embed.url", &json!("http://user:pw@127.0.0.1:18080"));
+    assert!(
+        secret.0.contains("http://***@127.0.0.1:18080"),
+        "{secret:?}"
+    );
+    assert!(!secret.0.contains("user"), "{secret:?}");
+    assert!(!secret.0.contains("pw"), "{secret:?}");
+
+    let plain = display("embed.url", &json!("http://127.0.0.1:18080"));
+    assert_eq!(plain.0, "http://127.0.0.1:18080 (this machine only)");
+}
+
+#[test]
 fn the_database_line_says_its_encryption_and_where_it_goes() {
     let remote = Harness::fresh()
         .with_secrets(&["pw"])

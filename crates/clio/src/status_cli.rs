@@ -371,7 +371,7 @@ fn service_conf(rt: &clio_config::Runtime, name: &str) -> Option<ServiceConf> {
     };
     let conf = ServiceConf {
         provider: read("provider"),
-        url: read("url"),
+        url: redact_credentials(&read("url")),
         model: read("model"),
     };
     (conf != ServiceConf::default()).then_some(conf)

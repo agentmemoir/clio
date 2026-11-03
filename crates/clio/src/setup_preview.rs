@@ -311,7 +311,8 @@ pub(crate) fn display(path: &str, value: &Value) -> Displayed {
     match path {
         "embed.url" | "rerank.url" => {
             let url = value.as_str().unwrap_or_default();
-            (format!("{url} ({})", service_note(url)), None)
+            let shown = clio_ops::redact_credentials(url);
+            (format!("{shown} ({})", service_note(url)), None)
         }
         other => (plain_display(other, value), None),
     }
