@@ -135,3 +135,32 @@ fn missing_source_still_reports_bundle_read_failed() {
     assert_eq!(err.code, ErrorCode::InvalidArgument);
     assert!(err.message.contains("bundle read failed"), "{err:?}");
 }
+
+/// A source whose reported size is over the cap is refused from metadata, so
+/// neither the open nor the read runs: the file carries no read permission, and
+/// a refusal reached through the open reports `bundle read failed` instead.
+/// A process that could read it anyway still gets the same size-limit refusal
+/// from the post-read bound, so the test does not depend on the permission.
+#[cfg(unix)]
+#[test]
+fn oversize_reported_size_is_refused_before_the_read() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = std::env::temp_dir().join(unique("am-import-oversize-meta"));
+    // A sparse file: the reported size is over the cap, the disk cost is not.
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(MAX_BUNDLE_BYTES + 1).unwrap();
+    file.set_permissions(std::fs::Permissions::from_mode(0o000))
+        .unwrap();
+    drop(file);
+    let source = TempBundle(path);
+
+    let err = read_bundle_source(source.path(), MAX_BUNDLE_BYTES)
+        .expect_err("a reported size over the cap is refused");
+    assert_eq!(err.code, ErrorCode::OutOfRange);
+    assert!(err.message.contains("byte limit"), "{err:?}");
+    assert!(
+        !err.message.contains("bundle read failed"),
+        "the source is refused before the open and the read: {err:?}"
+    );
+}

@@ -221,18 +221,32 @@ fn not_a_regular_file() -> AmError {
     )
 }
 
+/// The refusal for a source over the byte cap.
+fn size_limit_exceeded(max_bytes: u64) -> AmError {
+    AmError::new(
+        ErrorCode::OutOfRange,
+        format!("bundle source exceeds {max_bytes} byte limit"),
+    )
+}
+
 /// Read one bundle source, refusing a non-regular file and any size over
 /// `max_bytes`.
 ///
 /// Metadata is checked before the open because opening a FIFO with no writer
-/// blocks forever. The open is re-checked because the path can be replaced
-/// between the two calls. Bytes are read through `take(max_bytes + 1)`, so
-/// content over the cap is detected without loading the whole file, and the
-/// UTF-8 decode runs only after the cap passes.
+/// blocks forever. The reported size is refused right after the type check, so
+/// the common oversize file costs no read and no buffer. Bytes are still read
+/// through `take(max_bytes + 1)` because the reported size can be stale or
+/// wrong: that bound is the real enforcement. Content over the cap is detected
+/// without loading the whole file, and the UTF-8 decode runs only after the cap
+/// passes. The open is re-checked because the path can be replaced between the
+/// two calls.
 fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
     let meta = std::fs::metadata(path).map_err(|e| bundle_read_error(&e))?;
     if !meta.is_file() {
         return Err(not_a_regular_file());
+    }
+    if meta.len() > max_bytes {
+        return Err(size_limit_exceeded(max_bytes));
     }
     let file = std::fs::File::open(path).map_err(|e| bundle_read_error(&e))?;
     if !file
@@ -248,10 +262,7 @@ fn read_bundle_source(path: &str, max_bytes: u64) -> Result<String, AmError> {
         .read_to_end(&mut bytes)
         .map_err(|e| bundle_read_error(&e))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(AmError::new(
-            ErrorCode::OutOfRange,
-            format!("bundle source exceeds {max_bytes} byte limit"),
-        ));
+        return Err(size_limit_exceeded(max_bytes));
     }
     String::from_utf8(bytes).map_err(|e| {
         AmError::new(
