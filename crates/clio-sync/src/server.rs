@@ -301,6 +301,7 @@ pub(crate) fn handle_pull(
     } else {
         decode_cursor(&request.cursor, &request.bank)?
     };
+    let limit = request.limit.clamp(1, crate::PULL_PAGE_LIMIT);
     // The bank guard: a bank a recorded denial covers is refused whole, and an
     // unreadable authority refuses the pull instead of serving it. A journal
     // row carries no readable subject, so a covered bank cannot be resolved
@@ -325,7 +326,7 @@ pub(crate) fn handle_pull(
         }
         let rows = options
             .sync
-            .journal_list_since(&request.bank, since, request.limit)?;
+            .journal_list_since(&request.bank, since, limit)?;
         if let Err(err) =
             crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
         {
@@ -337,15 +338,14 @@ pub(crate) fn handle_pull(
         .iter()
         .map(|row| journal_row_to_mutation(options.kms.as_ref(), row))
         .collect::<Result<Vec<_>, AmError>>()?;
-    let last_seq = rows.last().map_or(since, |r| r.seq);
-    let next_cursor = encode_cursor(&request.bank, last_seq);
+    let next_cursor = encode_cursor(&request.bank, rows.last().map_or(since, |r| r.seq));
     write_json(
         stream,
         200,
         &serde_json::to_value(PullResponse {
             mutations,
             next_cursor,
-            has_more: rows.len() >= request.limit,
+            has_more: rows.len() >= limit,
         })
         .expect("serialize pull response"),
     )

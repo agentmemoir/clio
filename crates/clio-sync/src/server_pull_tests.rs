@@ -78,6 +78,46 @@ fn pull_returns_commit_ordered_pages_and_decrypts_server_seal() {
 }
 
 #[test]
+fn pull_clamps_an_excessive_limit_to_one_bounded_page() {
+    let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
+    let addr = server.addr().to_owned();
+    for n in 0..=crate::PULL_PAGE_LIMIT {
+        store
+            .journal_append(&SyncJournalRow {
+                seq: 0,
+                sync_mutation_id: format!("m-{n}"),
+                bank_id: "b1".into(),
+                entity_kind: "item".into(),
+                entity_id: format!("i-{n}"),
+                op: "upsert".into(),
+                transaction_time: "2026-01-01T00:00:00Z".into(),
+                device_id: "dev-a".into(),
+                content_hash: format!("h{n}"),
+                content_sealed: None,
+                client_encrypted: false,
+                admission_receipt: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("append unsealed");
+    }
+    // An excessive request is served one bounded page, never the whole journal.
+    let req = json!({ "bank": "b1", "cursor": "", "limit": 1_000_000usize });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), crate::PULL_PAGE_LIMIT);
+    assert_eq!(page["has_more"], json!(true));
+    // A zero limit still advances one row instead of looping on an empty page.
+    let req = json!({ "bank": "b1", "cursor": "", "limit": 0 });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(page["has_more"], json!(true));
+    server.stop();
+}
+
+#[test]
 fn pull_survives_unsealed_journal_row_without_http_500() {
     let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();

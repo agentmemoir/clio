@@ -216,7 +216,7 @@ pub struct PullRequest {
     pub bank: String,
     /// Opaque cursor from a previous pull (empty = first pull).
     pub cursor: String,
-    /// Max rows per page.
+    /// Max rows per page; the server clamps it into `1..=PULL_PAGE_LIMIT`.
     pub limit: usize,
 }
 
