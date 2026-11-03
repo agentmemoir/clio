@@ -298,7 +298,7 @@ fn t22_07_import_provider_stub_unsupported_with_masked_credentials() {
     assert_eq!(out["ok"], Value::Bool(false), "{out}");
     assert_eq!(out["code"], "PROVIDER_IMPORT_UNSUPPORTED");
     assert_eq!(out["writes_performed"], 0);
-    let masked = out["credentials_masked"]["****_key"]
+    let masked = out["credentials_masked"]["api_key"]
         .as_str()
         .expect("masked credential echoed");
     assert!(masked.starts_with("****"));

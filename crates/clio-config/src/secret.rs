@@ -49,10 +49,52 @@ const INLINE_MARKERS: &[&str] = &[
 ];
 
 /// True when a config path or field name should be treated as secret material.
+///
+/// Matching is token-based, not substring-based: a name is secret only when its
+/// tokens contain a marker as a contiguous token sequence. `auth` matches
+/// `user_auth` and `authToken`, but not `author`; `token` matches `auth_token`,
+/// but not `tokens` or `lesson_max_tokens`.
 #[must_use]
 pub fn path_is_secret(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    SECRET_MARKERS.iter().any(|m| lower.contains(m))
+    let tokens = name_tokens(path);
+    SECRET_MARKERS
+        .iter()
+        .any(|marker| contains_tokens(&tokens, &name_tokens(marker)))
+}
+
+/// Split a config path or field name into lowercase tokens.
+///
+/// Path separators (`.` and `[`) start a new segment, and inside a segment every
+/// non-alphanumeric character and every camelCase boundary starts a new token.
+fn name_tokens(name: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut after_lower_or_digit = false;
+    for ch in name.chars() {
+        if !ch.is_ascii_alphanumeric() {
+            push_token(&mut tokens, &mut current);
+            after_lower_or_digit = false;
+            continue;
+        }
+        if ch.is_ascii_uppercase() && after_lower_or_digit {
+            push_token(&mut tokens, &mut current);
+        }
+        after_lower_or_digit = !ch.is_ascii_uppercase();
+        current.push(ch.to_ascii_lowercase());
+    }
+    push_token(&mut tokens, &mut current);
+    tokens
+}
+
+fn push_token(tokens: &mut Vec<String>, current: &mut String) {
+    if !current.is_empty() {
+        tokens.push(std::mem::take(current));
+    }
+}
+
+/// True when `needle` appears in `haystack` as a contiguous run of tokens.
+fn contains_tokens(haystack: &[String], needle: &[String]) -> bool {
+    !needle.is_empty() && haystack.windows(needle.len()).any(|run| run == needle)
 }
 
 /// Mask a secret string: empty or ≤4 chars → `[REDACTED]` (last-4 would reveal
@@ -73,70 +115,14 @@ pub fn mask_secret(raw: &str) -> String {
     format!("****{suffix}")
 }
 
-/// Recursively mask secret-looking keys in a JSON value (in place).
+/// Recursively mask secret-looking **string** leaves in a JSON value (in place).
 ///
-/// A key that itself looks secret is replaced by its masked form, so secret
-/// material stored in a key name cannot survive the walk. Values keep the
-/// rules they had: leaves under a secret path become masked strings, and
-/// containers are walked.
+/// Keys are never renamed: a path read after masking still finds the field it
+/// asked for. Only string leaves are rewritten, so a numeric, boolean or null
+/// leaf keeps its exact value even when its name is a marker (a token count
+/// under `lesson_max_tokens`, or `ranking.hygiene.secret` holding `0.25`).
 pub fn mask_value(path: &str, value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            let entries = std::mem::take(map);
-            for (key, mut child) in entries {
-                let child_path = if path.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{path}.{key}")
-                };
-                let secret = path_is_secret(&child_path) || path_is_secret(&key);
-                if child.is_object() || child.is_array() {
-                    mask_value(&child_path, &mut child);
-                } else if secret {
-                    child = Value::String(mask_leaf(&child));
-                }
-                let out_key = if path_is_secret(&key) {
-                    unique_key(mask_secret(&key), map)
-                } else {
-                    unique_key(key, map)
-                };
-                map.insert(out_key, child);
-            }
-        }
-        Value::Array(items) => {
-            for (i, item) in items.iter_mut().enumerate() {
-                mask_value(&format!("{path}[{i}]"), item);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// A key no earlier entry owns; suffixed when a masked form collides.
-///
-/// Two secret-looking siblings can mask to the same last-4 form (`embed_api_key`
-/// and `rerank_api_key` both become `****_key`). Dropping the later one would
-/// silently delete an entry, so it gets a numbered suffix instead.
-fn unique_key(candidate: String, taken: &serde_json::Map<String, Value>) -> String {
-    if !taken.contains_key(&candidate) {
-        return candidate;
-    }
-    let mut n = 2;
-    loop {
-        let attempt = format!("{candidate}#{n}");
-        if !taken.contains_key(&attempt) {
-            return attempt;
-        }
-        n += 1;
-    }
-}
-
-fn mask_leaf(value: &Value) -> String {
-    match value {
-        Value::String(s) => mask_secret(s),
-        Value::Null => "[REDACTED]".to_owned(),
-        other => mask_secret(&other.to_string()),
-    }
+    mask_string_secrets(path, value);
 }
 
 /// Return a masked deep clone of `value`.
@@ -151,29 +137,32 @@ pub fn masked_clone(value: &Value) -> Value {
 ///
 /// A path lookup can land on a scalar (for example `credentials.api_key`),
 /// which [`masked_clone`]'s object walk cannot reach; the path decides here
-/// whether that scalar is masked before it leaves as a read view.
+/// whether that scalar is masked before it leaves as a read view. A scalar that
+/// is not a string is returned unchanged.
 #[must_use]
 pub(crate) fn masked_at_path(path: &str, value: &Value) -> Value {
     let mut out = value.clone();
     if out.is_object() || out.is_array() {
         mask_value(path, &mut out);
-    } else if path_is_secret(path) {
-        out = Value::String(mask_leaf(value));
+    } else if let Value::String(text) = &out
+        && path_is_secret(path)
+    {
+        out = Value::String(mask_secret(text));
     }
     out
 }
 
 /// Recursively mask secret-looking **string** leaves in a JSON value (in place).
 ///
-/// This is [`mask_value`] restricted to string leaves. Callers that pass a
-/// domain payload through a read view (history, audit) must not change its
-/// types: such payloads carry non-secret numeric counters whose names merely
-/// contain a marker substring (for example `lesson_tokens`), and rewriting them
-/// to `"[REDACTED]"` would break the contract that the view returns the same
+/// This is the walk [`mask_value`] delegates to. Callers that pass a domain
+/// payload through a read view (history, audit) must not change its types: such
+/// payloads carry non-secret numeric counters (`lesson_tokens`, `budget_tokens`),
+/// and rewriting them would break the contract that the view returns the same
 /// structured result as the tool it wraps.
 ///
-/// A string leaf is masked when its key or full path looks secret. Use
-/// [`scrub_inline_secrets`] to remove secrets embedded in prose.
+/// A string leaf is masked when its key or full path looks secret; keys are
+/// never renamed. Use [`scrub_inline_secrets`] to remove secrets embedded in
+/// prose.
 pub fn mask_string_secrets(path: &str, value: &mut Value) {
     match value {
         Value::Object(map) => {
