@@ -75,7 +75,7 @@ impl HttpEndpoint {
         } else {
             return Err(AmError::new(
                 ErrorCode::ConfigCorrupt,
-                format!("sidecar url must be http:// or https://, got `{url}`"),
+                "sidecar url must be http:// or https://",
             ));
         };
         let default_port = if scheme == "https" { 443 } else { 80 };
@@ -88,14 +88,14 @@ impl HttpEndpoint {
             let Some(close) = after_open.find(']') else {
                 return Err(AmError::new(
                     ErrorCode::ConfigCorrupt,
-                    format!("sidecar url has malformed bracketed host `{authority}`"),
+                    "sidecar url has malformed bracketed host",
                 ));
             };
             let host = &after_open[..close];
             if host.parse::<std::net::Ipv6Addr>().is_err() {
                 return Err(AmError::new(
                     ErrorCode::ConfigCorrupt,
-                    format!("sidecar url has malformed bracketed host `{authority}`"),
+                    "sidecar url has malformed bracketed host",
                 ));
             }
             let tail = &after_open[close + 1..];
@@ -103,14 +103,14 @@ impl HttpEndpoint {
                 Some(p) => p.parse::<u16>().map_err(|_| {
                     AmError::new(
                         ErrorCode::ConfigCorrupt,
-                        format!("sidecar url has invalid port `{p}`"),
+                        "sidecar url has invalid port",
                     )
                 })?,
                 None if tail.is_empty() => default_port,
                 None => {
                     return Err(AmError::new(
                         ErrorCode::ConfigCorrupt,
-                        format!("sidecar url has malformed bracketed host `{authority}`"),
+                        "sidecar url has malformed bracketed host",
                     ));
                 }
             };
@@ -122,7 +122,7 @@ impl HttpEndpoint {
                     p.parse::<u16>().map_err(|_| {
                         AmError::new(
                             ErrorCode::ConfigCorrupt,
-                            format!("sidecar url has invalid port `{p}`"),
+                            "sidecar url has invalid port",
                         )
                     })?,
                 ),
@@ -170,13 +170,10 @@ fn require_encrypted_endpoint(url: &str, endpoint: &HttpEndpoint) -> Result<(), 
     }
     Err(AmError::new(
         ErrorCode::ConfigCorrupt,
-        format!(
-            "refusing to send to `{url}`: a remote endpoint must be https, because the API key \
-             and every text sent to it would cross the network unencrypted. Change the scheme to \
-             `https://{}`, or point it at a service on this machine with a loopback address such \
-             as `http://127.0.0.1:<port>`",
-            endpoint.host
-        ),
+        "refusing to send to a remote endpoint: a remote endpoint must be https, because the API \
+         key and every text sent to it would cross the network unencrypted. Change the scheme to \
+         `https`, or point it at a service on this machine with a loopback address such as \
+         `http://127.0.0.1:<port>`",
     ))
 }
 
