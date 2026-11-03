@@ -1,0 +1,1 @@
+The Postgres store now seals a MemTree node's summary gist under the bank's key before it writes the row, the same way the local SQLite store already does. A copy of the database no longer shows a plain summary of a bank's memories. Reading a gist still works, including for a bank whose key has been erased, where the gist reads as absent instead of raising an error.
