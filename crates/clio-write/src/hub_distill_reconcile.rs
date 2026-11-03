@@ -205,7 +205,15 @@ impl HubDistillEngine {
             // documents for this outcome.
             return Ok(no_neighbors_outcome(&record));
         }
-        let ts = self.now_canonical();
+        let ts = chrono::DateTime::parse_from_rfc3339(&record.distilled_at).map_or_else(
+            |_| self.now_canonical(),
+            |prior| {
+                clio_store::millis_to_rfc3339(
+                    self.now_millis()
+                        .max(prior.timestamp_millis().saturating_add(1000)),
+                )
+            },
+        );
         let mut updated = record.clone();
         updated.source_ids = claim_sources.iter().map(|i| i.id.clone()).collect();
         updated.distilled_at.clone_from(&ts);
