@@ -100,18 +100,30 @@ fn the_consolidate_catalog_line_advertises_bank_and_never_scope() {
     assert!(!block.contains("scope"), "{block}");
 }
 
-/// Every flag a command's help text names is one its parser accepts, and every
-/// flag the parser accepts is one the command's record names.
+/// The live `correct` run is gated by `--confirm`, so both surfaces a reader
+/// meets must show the flag bare: the record's usage line and the catalog block
+/// `clio help` prints. The catalog renderer wraps a long usage row, so the flag
+/// is matched as a whole whitespace-separated token, not with a trailing space:
+/// a bracketed `[--confirm]` would make the gate optional, and an absent flag
+/// would leave the run ungated.
 #[test]
 fn correct_usage_and_catalog_name_the_confirm_flag() {
     let usage = usage_for("correct").expect("correct has a usage line");
-    assert!(usage.contains("[--confirm]"), "{usage}");
+    assert!(
+        usage.split_whitespace().any(|token| token == "--confirm"),
+        "{usage}"
+    );
+    assert!(!usage.contains("[--confirm]"), "{usage}");
 
     let block = crate::help_flags_test_support::entry_block(
         &crate::command_catalog::catalog_text(),
         "correct",
     );
-    assert!(block.contains("[--confirm]"), "{block}");
+    assert!(
+        block.split_whitespace().any(|token| token == "--confirm"),
+        "{block}"
+    );
+    assert!(!block.contains("[--confirm]"), "{block}");
 }
 
 /// Every verb that takes `--epistemic-kind` and `--source-type` documents the

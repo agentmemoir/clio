@@ -264,6 +264,7 @@ fn correct_records_an_attributable_correction() {
             "corrected gist",
             "--reason",
             "typo fix",
+            "--confirm",
             "--bank",
             "demo",
         ],
@@ -330,6 +331,24 @@ fn correct_dry_run_writes_nothing() {
         "{payload}"
     );
     assert_eq!(stats(&s)["items_active"], json!(1), "no write on dry-run");
+}
+
+#[test]
+fn correct_without_confirm_refuses_and_writes_nothing() {
+    let s = seeded("demo", "itm-c5", "old gist");
+    let (code, out, err) = run_write_state(
+        "correct",
+        &["itm-c5", "new gist", "--reason", "typo", "--bank", "demo"],
+        &s,
+        false,
+    );
+    assert_eq!(code, ExitCode::from(2), "{out}{err}");
+    assert!(err.contains("--confirm"), "{err}");
+    let read = call(&s, "get", json!({"bank": "demo", "item_id": "itm-c5"}));
+    assert_eq!(read["gist"], json!("old gist"), "{read}");
+    let report = stats(&s);
+    assert_eq!(report["items_active"], json!(1), "{report}");
+    assert_eq!(report["items_total"], json!(1), "{report}");
 }
 
 #[test]

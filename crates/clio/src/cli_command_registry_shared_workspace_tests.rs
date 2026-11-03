@@ -167,7 +167,7 @@ fn shared_discard_matches_the_registered_usage_and_parser() {
     let spec = record("shared discard");
     assert_eq!(
         spec.full_usage(),
-        "usage: clio shared discard ITEM_ID --reason R [--confirm] --actor ACTOR --shared-bank [--output json|text]"
+        "usage: clio shared discard ITEM_ID --reason R --confirm [--dry-run] --actor ACTOR --shared-bank [--output json|text]"
     );
     assert_eq!(
         spec.parser_spec().value_flags(),
@@ -175,7 +175,7 @@ fn shared_discard_matches_the_registered_usage_and_parser() {
     );
     assert_eq!(
         spec.parser_spec().bool_flags(),
-        ["no-input", "yes", "confirm", "shared-bank"]
+        ["no-input", "yes", "confirm", "dry-run", "shared-bank"]
     );
     assert_eq!(spec.required_flags(), ["reason", "actor", "shared-bank"]);
     assert_eq!(spec.summary, "remove one item from a shared bank");
