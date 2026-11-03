@@ -60,6 +60,7 @@ use crate::secret_key_source::{self, KeySource};
 use crate::secret_key_store::{
     ACCOUNT, ENCRYPTION_KEY, KeyringStore, NoKeystore, SecretStore, display_name,
 };
+use crate::sync_key_file::owner_only_refusal;
 use clio_types::{AmError, ErrorCode};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -311,6 +312,12 @@ fn generate() -> Zeroizing<[u8; KEY_LEN]> {
 
 fn read_key_file(path: &Path) -> Result<Zeroizing<[u8; KEY_LEN]>, AmError> {
     let location = KeyLocation::File(path.to_path_buf());
+    // Only a path that resolves to a regular file is judged on its mode; anything
+    // else keeps the read error below, so a missing key file is never reported as
+    // a permissions problem.
+    if fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        owner_only_refusal(path, "encryption key file")?;
+    }
     let raw = Zeroizing::new(fs::read(path).map_err(|err| {
         AmError::new(
             ErrorCode::Internal,

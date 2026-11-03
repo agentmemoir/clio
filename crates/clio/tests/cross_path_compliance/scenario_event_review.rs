@@ -60,7 +60,7 @@ fn erasure_action_id(request: &str) -> String {
 fn install_key(scratch: &Path) -> (PathBuf, ThreadKeyGuard) {
     clio_config::secret_seal::test_key::use_key(KEY);
     let path = scratch.join("clio.key");
-    std::fs::write(&path, KEY).expect("write the scenario key file");
+    clio_config::secret_key_file::write_key_file(&path, &KEY).expect("write the scenario key file");
     (path, ThreadKeyGuard)
 }
 

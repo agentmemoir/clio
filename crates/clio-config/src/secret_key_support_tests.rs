@@ -189,7 +189,19 @@ pub(super) fn env(
 
 pub(super) fn write_key(path: &Path, bytes: &[u8]) {
     fs::write(path, bytes).expect("seed key file");
+    restrict_to_owner(path);
 }
+
+/// Give a seeded key file the mode production writes it with, so a test that
+/// means to exercise length or precedence is not stopped by the owner-only rule.
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).expect("chmod");
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) {}
 
 /// A key that is not the one already stored, for tests that need two.
 pub(super) fn random_key() -> [u8; KEY_LEN] {

@@ -148,6 +148,48 @@ fn the_key_file_is_created_owner_only() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn a_key_file_another_account_can_read_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let file = key_file("loose-mode");
+    let seeded = [3_u8; KEY_LEN];
+    write_key(&file, &seeded);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).expect("chmod");
+
+    let err = err_of(load_or_create_with(&absent_keystore(), Some(file.clone())));
+
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(
+        err.message.contains(&format!(
+            "encryption key file {}: refused because it is not owner-only",
+            file.display()
+        )),
+        "the refusal names the file an operator has to restrict: {}",
+        err.message
+    );
+    assert_eq!(
+        fs::read(&file).expect("read"),
+        seeded,
+        "the key is left exactly as found"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_owner_only_key_file_is_read() {
+    use std::os::unix::fs::PermissionsExt;
+    let file = key_file("tight-mode");
+    let seeded = [4_u8; KEY_LEN];
+    write_key(&file, &seeded);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).expect("chmod");
+
+    let loaded = load_or_create_with(&absent_keystore(), Some(file.clone())).expect("load");
+
+    assert_eq!(loaded.expose(), &seeded);
+    assert_eq!(loaded.location, KeyLocation::File(file));
+}
+
 #[test]
 fn the_key_file_is_thirty_two_raw_bytes() {
     let file = key_file("raw-bytes");

@@ -76,7 +76,7 @@ impl<T> CrossStore for T where
 /// never outlives the scenario that installed it.
 pub(crate) fn install_key(path: PathBuf) -> (PathBuf, ThreadKeyGuard) {
     clio_config::secret_seal::test_key::use_key(KEY);
-    std::fs::write(&path, KEY).expect("write the harness key file");
+    clio_config::secret_key_file::write_key_file(&path, &KEY).expect("write the harness key file");
     (path, ThreadKeyGuard)
 }
 
