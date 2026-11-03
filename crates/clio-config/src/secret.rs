@@ -76,6 +76,29 @@ pub fn path_is_secret(path: &str) -> bool {
         .any(|marker| contains_tokens(&tokens, &name_tokens(marker)))
 }
 
+/// True when a value is a URL whose userinfo carries a password.
+///
+/// A URL field is not secret by name: an endpoint with no credentials is an
+/// ordinary address. Only `scheme://user:password@host` puts a secret inside the
+/// value, so only that shape is masked.
+fn value_has_userinfo_credentials(value: &str) -> bool {
+    let Some((_, rest)) = value.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let Some((userinfo, _)) = authority.split_once('@') else {
+        return false;
+    };
+    userinfo.contains(':')
+}
+
+/// True when a value must be masked at `path`: the path names a secret, or the
+/// value itself carries URL userinfo credentials.
+#[must_use]
+pub(crate) fn value_is_secret(path: &str, value: &str) -> bool {
+    path_is_secret(path) || value_has_userinfo_credentials(value)
+}
+
 /// Split a config path or field name into lowercase tokens.
 ///
 /// Path separators (`.` and `[`) start a new segment, and inside a segment every
@@ -213,7 +236,8 @@ pub(crate) fn masked_at_path(path: &str, value: &Value) -> Value {
 /// names stay, counters stay numbers. Only a key that cannot be a field name —
 /// secret material stored as a key, `sk-live-SECRETKEY99` — is replaced.
 ///
-/// A string leaf is masked when its key or full path looks secret. A number or
+/// A string leaf is masked when its key or full path looks secret, or when the
+/// value itself carries URL userinfo credentials. A number or
 /// boolean is masked only under an unambiguous secret name (`password`,
 /// `api_key`, `auth_pin`), so counts such as `lesson_max_tokens` and the
 /// `ranking.hygiene.secret` weight keep their value. Use [`scrub_inline_secrets`]
@@ -244,7 +268,7 @@ fn mask_member(child_path: &str, key: &str, child: &mut Value) {
     match child {
         Value::Object(_) | Value::Array(_) => mask_string_secrets(child_path, child),
         Value::String(text)
-            if key_is_secret_data(key) || path_is_secret(child_path) || path_is_secret(key) =>
+            if key_is_secret_data(key) || value_is_secret(child_path, text) || path_is_secret(key) =>
         {
             *text = mask_secret(text);
         }

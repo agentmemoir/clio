@@ -257,6 +257,20 @@ fn config_set_deployment_scope_reports_a_save_failure() {
 }
 
 #[test]
+fn config_set_masks_an_endpoint_url_that_carries_credentials() {
+    let mut rt = Runtime::with_env(&|_| None);
+    let raw = "https://user:pw@example.test/v1";
+    let ToolResult::Ok { data, .. } =
+        rt.config_set("embed.url", json!(raw), ConfigScope::Session)
+    else {
+        panic!("set embed.url");
+    };
+    assert_eq!(data.value, json!("****t/v1"));
+    // The stored value keeps the credentials so the endpoint stays usable.
+    assert_eq!(rt.effective_raw()["embed"]["url"], json!(raw));
+}
+
+#[test]
 fn config_set_updates_the_bank_policy() {
     let mut rt = Runtime::with_env(&|_| None);
     let ToolResult::Ok { .. } = rt.config_set(
