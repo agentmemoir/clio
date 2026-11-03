@@ -169,8 +169,16 @@ fn a_group_readable_file_is_refused() {
 
     let err = read_key(&dir.key()).expect_err("not owner-only");
 
+    let expected = format!(
+        "sync key file {}: refused because it is not owner-only; restrict it to the owner \
+         (0600) and run again",
+        dir.key().display()
+    );
     assert_eq!(err.code, clio_types::ErrorCode::Forbidden);
-    assert!(err.message.contains("not owner-only"), "{}", err.message);
+    assert_eq!(
+        err.message, expected,
+        "the refusal names the file an operator has to restrict, in full"
+    );
 }
 
 // ---------------------------------------------------------------- sidecar

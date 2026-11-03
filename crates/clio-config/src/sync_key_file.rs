@@ -249,9 +249,8 @@ pub(crate) fn write_created(key_file: Option<&Path>, stamp: &str) -> Result<(), 
 
 /// Refuse a key file whose mode grants anything to group or other.
 ///
-/// `subject` names the file in the message, because this one rule covers the sync
-/// key file, its archive, and the encryption key file, and a refusal that named
-/// the wrong one would send an operator to the wrong file.
+/// `subject` is the label the message opens with, not the file's identity: the
+/// archive reuses the sync key file label, so the path is what names the file.
 ///
 /// # Errors
 /// [`ErrorCode::Forbidden`] naming the path; never the host's mode value.
