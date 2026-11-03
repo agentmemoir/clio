@@ -220,7 +220,7 @@ fn masked_at_path_masks_strings_and_passes_scalars_through() {
 #[test]
 fn masked_at_path_masks_a_url_that_carries_credentials() {
     // A URL is not secret by name; only the value that carries `user:pw@` is.
-    let raw = "https://user:pw@example.test/v1/embeddings";
+    let raw = "https://user:pw@host/v1/embeddings";
     assert!(!path_is_secret("embed.url"));
     let masked = masked_at_path("embed.url", &json!(raw));
     assert_eq!(masked, json!("****ings"), "{masked}");
@@ -231,7 +231,7 @@ fn masked_at_path_masks_a_url_that_carries_credentials() {
 
 #[test]
 fn masked_at_path_leaves_a_url_without_credentials_unchanged() {
-    let raw = "https://example.test/v1/embeddings";
+    let raw = "https://host/v1/embeddings";
     assert_eq!(masked_at_path("embed.url", &json!(raw)), json!(raw));
     let tree = masked_clone(&json!({"embed": {"url": raw}}));
     assert_eq!(tree["embed"]["url"], json!(raw), "{tree}");

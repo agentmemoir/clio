@@ -161,11 +161,11 @@ mod tests {
 
     #[test]
     fn log_fields_mask_a_url_that_carries_credentials() {
-        let masked = format_fields(&[("embed.url", "https://user:pw@example.test/v1")]);
+        let masked = format_fields(&[("embed.url", "https://user:pw@host/v1")]);
         assert!(!masked.contains("user:pw"), "{masked}");
         assert_eq!(masked, " embed.url=****t/v1");
-        let plain = format_fields(&[("embed.url", "https://example.test/v1")]);
-        assert_eq!(plain, " embed.url=https://example.test/v1");
+        let plain = format_fields(&[("embed.url", "https://host/v1")]);
+        assert_eq!(plain, " embed.url=https://host/v1");
     }
 
     #[test]
