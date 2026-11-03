@@ -60,6 +60,12 @@ fn clio(backup_dir: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_clio"));
     cmd.env_clear();
     cmd.env("CLIO_BACKUP_DIR", backup_dir);
+    // `env_clear` leaves no HOME to derive a data dir from, and `backup create`
+    // resolves its erasure journal under that dir.
+    cmd.env(
+        "CLIO_DATA_DIR",
+        backup_dir.parent().expect("backup dir has a parent"),
+    );
     // A sealed write must never reach the machine's real key store: the OS
     // keychain can prompt, and a machine holding both a keychain entry and a
     // key file makes the write fail with a two-key conflict. The scratch key

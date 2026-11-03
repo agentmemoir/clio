@@ -19,6 +19,7 @@
 
 use crate::distilled_unit::DistilledUnitRecord;
 use crate::embedding_space::EmbeddingSpace;
+use crate::memtree_seal::{open_gist, seal_gist};
 use crate::migrate::{IntoAmError, now_iso};
 use crate::model::{AssocEdgeRecord, KnnHit, VectorSlot};
 use crate::sqlite::SqliteStore;
@@ -211,7 +212,10 @@ impl Store for SqliteStore {
         &self,
         node: &crate::memtree_model::MemTreeNodeRecord,
     ) -> Result<(), AmError> {
-        self.with_conn(|conn| crate::sqlite_memtree::upsert(conn, node))
+        let kms = self.kms();
+        let mut node = node.clone();
+        node.summary_gist = seal_gist(kms.as_ref(), &node)?;
+        self.with_conn(|conn| crate::sqlite_memtree::upsert(conn, &node))
     }
 
     fn get_memtree_node(
@@ -219,14 +223,29 @@ impl Store for SqliteStore {
         bank_id: &str,
         node_id: &str,
     ) -> Result<Option<crate::memtree_model::MemTreeNodeRecord>, AmError> {
-        self.with_conn(|conn| crate::sqlite_memtree::get(conn, bank_id, node_id))
+        let node = self.with_conn(|conn| crate::sqlite_memtree::get(conn, bank_id, node_id))?;
+        let kms = self.kms();
+        Ok(node.map(|mut n| {
+            let stored = n.summary_gist.take();
+            n.summary_gist = open_gist(kms.as_ref(), &n.bank_id, &n.id, stored.as_deref());
+            n
+        }))
     }
 
     fn query_memtree_nodes(
         &self,
         query: &crate::memtree_model::MemTreeQuery,
     ) -> Result<Vec<crate::memtree_model::MemTreeNodeRecord>, AmError> {
-        self.with_conn(|conn| crate::sqlite_memtree::query(conn, query))
+        let nodes = self.with_conn(|conn| crate::sqlite_memtree::query(conn, query))?;
+        let kms = self.kms();
+        Ok(nodes
+            .into_iter()
+            .map(|mut n| {
+                let stored = n.summary_gist.take();
+                n.summary_gist = open_gist(kms.as_ref(), &n.bank_id, &n.id, stored.as_deref());
+                n
+            })
+            .collect())
     }
 
     fn commit_triple_add(

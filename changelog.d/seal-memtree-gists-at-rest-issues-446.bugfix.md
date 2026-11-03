@@ -1,0 +1,1 @@
+The local SQLite store now writes a MemTree node's summary gist sealed under the bank's DEK instead of as readable text, so a copy of the database no longer reveals a plain summary of a bank's memories. Reading a gist still works, including on a bank whose key has been erased, where the gist reads as absent rather than raising an error.
