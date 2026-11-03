@@ -190,6 +190,40 @@ fn existing_values_are_masked_and_only_file_set_fields_report() {
 }
 
 #[test]
+fn existing_values_mask_url_userinfo_and_keep_a_plain_url() {
+    let dir = temp_dir("endpoint-userinfo");
+    let path = dir.join("deployment.json");
+    let mut rt = Runtime::with_env(&env_at(&path));
+    for (key, value) in [
+        ("embed.url", "https://user:pw@host/v1"),
+        ("rerank.url", "https://host/v1"),
+    ] {
+        let clio_config::error::ToolResult::Ok { .. } =
+            rt.config_set(key, json!(value), clio_config::ConfigScope::Deployment)
+        else {
+            panic!("config_set {key}");
+        };
+    }
+
+    let found = existing_values(&rt);
+    let masked = found
+        .iter()
+        .find(|v| v.path == "embed.url")
+        .expect("embed.url reported");
+    assert!(
+        !masked.display.contains("pw"),
+        "the masked display leaked the password: {}",
+        masked.display
+    );
+    let plain = found
+        .iter()
+        .find(|v| v.path == "rerank.url")
+        .expect("rerank.url reported");
+    assert_eq!(plain.display, "https://host/v1");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn write_persists_once_and_backs_up_the_previous_config() {
     let dir = temp_dir("write");
     let path = dir.join("nested").join("deployment.json");

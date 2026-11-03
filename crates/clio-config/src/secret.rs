@@ -95,7 +95,7 @@ fn value_has_userinfo_credentials(value: &str) -> bool {
 /// True when a value must be masked at `path`: the path names a secret, or the
 /// value itself carries URL userinfo credentials.
 #[must_use]
-pub(crate) fn value_is_secret(path: &str, value: &str) -> bool {
+pub fn value_is_secret(path: &str, value: &str) -> bool {
     path_is_secret(path) || value_has_userinfo_credentials(value)
 }
 
