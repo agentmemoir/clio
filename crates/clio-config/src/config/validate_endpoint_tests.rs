@@ -46,6 +46,20 @@ fn a_remote_plain_http_endpoint_is_refused_on_every_endpoint_path() {
 }
 
 #[test]
+fn a_refused_endpoint_does_not_echo_its_userinfo_credentials() {
+    // The operator typed a password. The refusal may name the host so the
+    // mistake is fixable, but the credential must not come back in the message.
+    for path in ENDPOINT_PATHS {
+        let err = validate_set_value(path, &json!("http://user:pw@remote.host"))
+            .expect_err("a remote plain-http endpoint must be refused");
+        let text = err.to_string();
+        assert!(!text.contains("pw"), "{path}: {text}");
+        assert!(!text.contains("user:pw@remote.host"), "{path}: {text}");
+        assert!(text.contains("https://remote.host"), "{path}: {text}");
+    }
+}
+
+#[test]
 fn a_remote_https_endpoint_is_accepted() {
     for path in ENDPOINT_PATHS {
         validate_set_value(path, &json!("https://api.example.com")).unwrap();

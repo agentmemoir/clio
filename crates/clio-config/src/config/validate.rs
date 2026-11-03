@@ -390,8 +390,8 @@ fn validate_endpoint_value(path: &str, value: &str) -> Result<(), AmError> {
     Err(AmError::new(
         ErrorCode::InvalidArgument,
         format!(
-            "{path} must use https for a remote endpoint: `{trimmed}` is plain http, so the API key \
-             and every text sent to it would cross the network unencrypted. Change the scheme to \
+            "{path} must use https for a remote endpoint: the `http` scheme would send the API key \
+             and every text sent to it across the network unencrypted. Change the scheme to \
              `https://{host}`, or point it at a service on this machine with a loopback address \
              such as `http://127.0.0.1:<port>`"
         ),
