@@ -18,16 +18,14 @@
 //! ## Owns
 //! - `SyncServerOptions` / `SyncServer` / `sync_serve` /
 //!   `sync_serve_with_denial` (public server surface)
-//! - Route semantics for the pull and status routes, and the dispatch of the
-//!   push route (defined in `server_push`)
+//! - Route semantics for the status route, and the dispatch of the push and
+//!   pull routes (defined in `server_push` and `server_pull`)
 //! - Credential store and bank authorization checks
 //! - Server-side journal sealing via the local DEK provider (no peer DEKs)
-//! - The pull-side denial refusal: a bank a recorded denial covers, or an
-//!   unreadable denial authority, refuses the pull; the refusal and the row
-//!   read run under the bank's lock, and the refusal is re-checked after the
-//!   read
 //!
 //! ## Does not own
+//! - Pull page assembly, the pull-side denial refusal, and journal row to wire
+//!   mutation conversion (`server_pull`)
 //! - The push route's body, acknowledgement, and denial proof placement
 //!   (`server_push`)
 //! - Connection lifecycle: accept loop, pool slots, refusal mapping
@@ -54,13 +52,8 @@ use crate::clock::now_utc;
 use crate::conn_pool::{ConnectionPool, MAX_CONNECTIONS};
 use crate::credential::{AuthOutcome, CredentialStore};
 use crate::crypto::SyncCipherKey;
-use crate::protocol::{
-    PullRequest, PullResponse, SyncContent, SyncMutation, decode_cursor, encode_cursor,
-};
-use crate::server_conn::{
-    DEFAULT_REQUEST_DEADLINE_SECS, ServeContext, serve_loop, write_json, write_status_error,
-};
-use clio_store::{DekProvider, ErasureDenial, Store, SyncJournalRow, SyncStore};
+use crate::server_conn::{DEFAULT_REQUEST_DEADLINE_SECS, ServeContext, serve_loop, write_json};
+use clio_store::{DekProvider, ErasureDenial, Store, SyncStore};
 use clio_types::{AmError, ErrorCode};
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
@@ -69,9 +62,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[path = "server_pull.rs"]
+mod server_pull;
 #[path = "server_push.rs"]
 mod server_push;
 
+pub(crate) use server_pull::handle_pull;
 pub(crate) use server_push::handle_push;
 
 /// Server construction options.
@@ -271,129 +267,6 @@ pub(crate) fn bank_authorized(options: &ServeOptions, auth: &AuthOutcome, bank: 
     auth.allows(bank) && options.banks.iter().any(|b| b == bank)
 }
 
-/// The status a pull refusal answers with: a bank a recorded denial covers is a
-/// `403`; an unreadable authority is the server's own failure (`500`).
-fn pull_refusal_status(err: &AmError) -> u16 {
-    if err.code == ErrorCode::ErasedSubject {
-        403
-    } else {
-        500
-    }
-}
-
-pub(crate) fn handle_pull(
-    options: &ServeOptions,
-    stream: TcpStream,
-    body: &str,
-    auth: &AuthOutcome,
-) -> Result<(), AmError> {
-    let request: PullRequest = serde_json::from_str(body)
-        .map_err(|e| AmError::new(ErrorCode::InvalidArgument, format!("bad pull body: {e}")))?;
-    if !bank_authorized(options, auth, &request.bank) {
-        return write_status_error(
-            stream,
-            403,
-            &AmError::new(ErrorCode::Forbidden, "bank not authorized"),
-        );
-    }
-    let since = if request.cursor.is_empty() {
-        0
-    } else {
-        decode_cursor(&request.cursor, &request.bank)?
-    };
-    // The bank guard: a bank a recorded denial covers is refused whole, and an
-    // unreadable authority refuses the pull instead of serving it. A journal
-    // row carries no readable subject, so a covered bank cannot be resolved
-    // row by row; unrelated banks still serve normally.
-    //
-    // The check and the read happen under the same per-bank lock the push
-    // route holds, so a denial for this bank cannot be recorded between them
-    // and still answered with pre-denial rows: while the lock is held the
-    // denial is either already recorded (the check refuses) or lands after the
-    // read (the page is ordered before it). The read is re-checked under the
-    // same lock because a carrier pushed under another bank may cover this one
-    // and record its marker without ever taking this bank's lock.
-    let rows = {
-        let bank_lock = options.bank_locks.for_bank(&request.bank);
-        let _bank_guard = bank_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Err(err) =
-            crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
-        {
-            return write_status_error(stream, pull_refusal_status(&err), &err);
-        }
-        let rows = options
-            .sync
-            .journal_list_since(&request.bank, since, request.limit)?;
-        if let Err(err) =
-            crate::denial_guard::pull_refusal(options.denial.as_deref(), &request.bank)
-        {
-            return write_status_error(stream, pull_refusal_status(&err), &err);
-        }
-        rows
-    };
-    let mutations = rows
-        .iter()
-        .map(|row| journal_row_to_mutation(options.kms.as_ref(), row))
-        .collect::<Result<Vec<_>, AmError>>()?;
-    let last_seq = rows.last().map_or(since, |r| r.seq);
-    let next_cursor = encode_cursor(&request.bank, last_seq);
-    write_json(
-        stream,
-        200,
-        &serde_json::to_value(PullResponse {
-            mutations,
-            next_cursor,
-            has_more: rows.len() >= request.limit,
-        })
-        .expect("serialize pull response"),
-    )
-}
-
-fn journal_row_to_mutation(
-    kms: &dyn DekProvider,
-    row: &SyncJournalRow,
-) -> Result<SyncMutation, AmError> {
-    let sealed = row.content_sealed.as_deref().unwrap_or_default();
-    if row.client_encrypted {
-        if sealed.is_empty() {
-            return Err(AmError::new(
-                ErrorCode::Internal,
-                format!(
-                    "client-encrypted journal row {} has no ciphertext",
-                    row.sync_mutation_id
-                ),
-            ));
-        }
-        return serde_json::from_str(sealed)
-            .map_err(|e| AmError::new(ErrorCode::Internal, format!("bad cipher row: {e}")));
-    }
-    // A journal row sealed by a KMS-less writer stores no content. Serve empty
-    // logical content with its routing metadata rather than failing the whole
-    // pull page on an unsealed row.
-    let content = if sealed.is_empty() {
-        SyncContent::Plain(serde_json::json!({}))
-    } else {
-        SyncContent::Plain(crate::journal_row::open_journal_content(row, sealed, kms)?)
-    };
-    Ok(SyncMutation {
-        sync_mutation_id: row.sync_mutation_id.clone(),
-        bank: row.bank_id.clone(),
-        entity_kind: row.entity_kind.clone(),
-        entity_id: row.entity_id.clone(),
-        op: row.op.clone(),
-        transaction_time: row.transaction_time.clone(),
-        device_id: row.device_id.clone(),
-        content,
-        content_hash: row.content_hash.clone(),
-        admission_receipt: row
-            .admission_receipt
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok()),
-    })
-}
-
 pub(crate) fn handle_status(
     options: &ServeOptions,
     stream: TcpStream,
@@ -433,9 +306,6 @@ mod server_denial_tests;
 #[cfg(test)]
 #[path = "server_error_tests.rs"]
 mod server_error_tests;
-#[cfg(test)]
-#[path = "server_pull_tests.rs"]
-mod server_pull_tests;
 #[cfg(test)]
 #[path = "server_push_payload_measurement_tests.rs"]
 mod server_push_payload_measurement_tests;

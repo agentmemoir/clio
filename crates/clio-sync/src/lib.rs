@@ -123,8 +123,15 @@ pub mod prelude {
     pub use crate::server::{SyncServer, SyncServerOptions, sync_serve, sync_serve_with_denial};
 }
 
-/// Default page size for pull batches (never unbounded result sets).
+/// Default and maximum page size for pull batches (never unbounded result
+/// sets). The server clamps every pull request's `limit` into
+/// `1..=PULL_PAGE_LIMIT`.
 pub const PULL_PAGE_LIMIT: usize = 200;
+
+/// Byte budget for one pull page. The response is serialized whole, so the row
+/// cap alone cannot bound memory when a row carries a large payload: assembly
+/// stops before this many serialized row bytes and always keeps one row.
+pub const PULL_RESPONSE_BYTE_BUDGET: usize = 4 * 1024 * 1024;
 
 /// Default auto-stop TTL for interactive `sync_serve`.
 pub const SERVE_TTL_DEFAULT_SECS: u64 = 30 * 60;

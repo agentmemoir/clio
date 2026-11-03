@@ -4,11 +4,12 @@
 //! # Responsibility
 //!
 //! This module tests the sync server's pull route over real TCP: commit-ordered
-//! paging with the pusher's own seal, resume cursors, and a journal row that
-//! carries no sealed content.
+//! paging with the pusher's own seal, resume cursors, the row cap and the
+//! serialized byte budget, and a journal row that carries no sealed content.
 //!
 //! ## Owns
-//! - Behavior coverage for the pull route's paging, cursors, and served content
+//! - Behavior coverage for the pull route's paging, cursors, page bounds, and
+//!   served content
 //!
 //! ## Does not own
 //! - The pull-side denial refusal and the bank guards (`server_denial_tests`)
@@ -78,6 +79,63 @@ fn pull_returns_commit_ordered_pages_and_decrypts_server_seal() {
 }
 
 #[test]
+fn pull_clamps_an_excessive_limit_to_one_bounded_page() {
+    let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
+    let addr = server.addr().to_owned();
+    for n in 0..=crate::PULL_PAGE_LIMIT {
+        store
+            .journal_append(&SyncJournalRow {
+                seq: 0,
+                sync_mutation_id: format!("m-{n}"),
+                bank_id: "b1".into(),
+                entity_kind: "item".into(),
+                entity_id: format!("i-{n}"),
+                op: "upsert".into(),
+                transaction_time: "2026-01-01T00:00:00Z".into(),
+                device_id: "dev-a".into(),
+                content_hash: format!("h{n}"),
+                content_sealed: None,
+                client_encrypted: false,
+                admission_receipt: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("append unsealed");
+    }
+    // An excessive request is served one bounded page, never the whole journal.
+    let req = json!({ "bank": "b1", "cursor": "", "limit": 1_000_000usize });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), crate::PULL_PAGE_LIMIT);
+    assert_eq!(page["has_more"], json!(true));
+    // The returned cursor is the last returned sequence, and a client can page
+    // past the cap with it instead of repeating the same page.
+    let next = page["next_cursor"]
+        .as_str()
+        .expect("next cursor")
+        .to_owned();
+    assert_eq!(
+        decode_cursor(&next, "b1").expect("decode"),
+        i64::try_from(crate::PULL_PAGE_LIMIT).expect("page limit fits i64")
+    );
+    let req = json!({ "bank": "b1", "cursor": next, "limit": 1_000_000usize });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1, "one row past the cap: {rows:?}");
+    assert_eq!(rows[0]["sync_mutation_id"], "m-200");
+    assert_eq!(page["has_more"], json!(false));
+    // A zero limit still advances one row instead of looping on an empty page.
+    let req = json!({ "bank": "b1", "cursor": "", "limit": 0 });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(page["has_more"], json!(true));
+    server.stop();
+}
+
+#[test]
 fn pull_survives_unsealed_journal_row_without_http_500() {
     let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
     let addr = server.addr().to_owned();
@@ -107,5 +165,75 @@ fn pull_survives_unsealed_journal_row_without_http_500() {
     assert_eq!(rows[0]["sync_mutation_id"], "m-unsealed");
     assert_eq!(rows[0]["content"]["mode"], "plain");
     assert_eq!(rows[0]["content"]["data"], json!({}));
+    server.stop();
+}
+
+#[test]
+fn pull_holds_a_page_within_the_byte_budget_and_resumes_past_it() {
+    let (server, store) = serve(&["b1"], Some("t1"), false, None, None);
+    let addr = server.addr().to_owned();
+    // One client-encrypted row alone exceeds the page byte budget.
+    let big = mutation(
+        "m-big",
+        "b1",
+        "2026-01-01T00:00:00Z",
+        &"x".repeat(5 * 1024 * 1024),
+    );
+    store
+        .journal_append(&SyncJournalRow {
+            seq: 0,
+            sync_mutation_id: "m-big".into(),
+            bank_id: "b1".into(),
+            entity_kind: "item".into(),
+            entity_id: "i-big".into(),
+            op: "upsert".into(),
+            transaction_time: "2026-01-01T00:00:00Z".into(),
+            device_id: "dev-a".into(),
+            content_hash: "h-big".into(),
+            content_sealed: Some(serde_json::to_string(&big).expect("serialize big row")),
+            client_encrypted: true,
+            admission_receipt: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .expect("append big row");
+    for n in 0..3 {
+        store
+            .journal_append(&SyncJournalRow {
+                seq: 0,
+                sync_mutation_id: format!("m-small-{n}"),
+                bank_id: "b1".into(),
+                entity_kind: "item".into(),
+                entity_id: format!("i-small-{n}"),
+                op: "upsert".into(),
+                transaction_time: "2026-01-01T00:00:00Z".into(),
+                device_id: "dev-a".into(),
+                content_hash: format!("hs{n}"),
+                content_sealed: None,
+                client_encrypted: false,
+                admission_receipt: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("append small row");
+    }
+    // The large row is kept (a page must always advance) and the budget stops
+    // the page before the small rows, which the cursor still reaches.
+    let req = json!({ "bank": "b1", "cursor": "", "limit": 10 });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1, "byte budget must stop after the large row");
+    assert_eq!(rows[0]["sync_mutation_id"], "m-big");
+    assert_eq!(page["has_more"], json!(true));
+    let next = page["next_cursor"]
+        .as_str()
+        .expect("next cursor")
+        .to_owned();
+    assert_eq!(decode_cursor(&next, "b1").expect("decode"), 1);
+    let req = json!({ "bank": "b1", "cursor": next, "limit": 10 });
+    let (status, page) = http(&addr, "POST", "/sync/pull", Some("t1"), Some(&req));
+    assert_eq!(status, 200, "pull refused: {page}");
+    let rows = page["mutations"].as_array().expect("rows");
+    assert_eq!(rows.len(), 3, "small rows must not be dropped: {rows:?}");
+    assert_eq!(page["has_more"], json!(false));
     server.stop();
 }

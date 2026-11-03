@@ -33,6 +33,13 @@ use crate::sync_store::{DeadLetterStatus, SyncConflictRow, SyncDeadLetterRow, Sy
 use clio_types::AmError;
 use rusqlite::{OptionalExtension, params};
 
+/// A `usize` row limit as a SQLite `LIMIT` value. A plain cast wraps a value
+/// above `i64::MAX` to a negative number, and SQLite reads a negative `LIMIT`
+/// as no limit at all; saturate instead, as the Postgres path does.
+fn limit_i64(limit: usize) -> i64 {
+    i64::try_from(limit).unwrap_or(i64::MAX)
+}
+
 /// SQLite body of `SyncStore::journal_get`: one journal row by mutation id.
 pub(crate) fn journal_get_sqlite(
     store: &SqliteStore,
@@ -68,7 +75,10 @@ pub(crate) fn journal_list_since_sqlite(
             ))
             .am("sync journal list prepare")?;
         let mapped = stmt
-            .query_map(params![bank_id, since_seq, limit as i64], read_journal_row)
+            .query_map(
+                params![bank_id, since_seq, limit_i64(limit)],
+                read_journal_row,
+            )
             .am("sync journal list query")?
             .collect::<Result<Vec<_>, _>>()
             .am("sync journal list map")?;
@@ -191,7 +201,7 @@ pub(crate) fn conflict_list_sqlite(
             ))
             .am("sync conflict list prepare")?;
         let mapped = stmt
-            .query_map(params![bank_id, limit as i64], read_conflict_row)
+            .query_map(params![bank_id, limit_i64(limit)], read_conflict_row)
             .am("sync conflict list query")?
             .collect::<Result<Vec<_>, _>>()
             .am("sync conflict list map")?;
@@ -306,7 +316,7 @@ pub(crate) fn dead_letter_list_sqlite(
             .am("sync dlq list prepare")?;
         let mapped = stmt
             .query_map(
-                params![bank_id, status.as_str(), limit as i64],
+                params![bank_id, status.as_str(), limit_i64(limit)],
                 read_dlq_row,
             )
             .am("sync dlq list query")?
@@ -368,3 +378,7 @@ pub(crate) fn persona_context_erased_sqlite(
         Ok(hit.is_some())
     })
 }
+
+#[cfg(test)]
+#[path = "sqlite_sync_state_tests.rs"]
+mod sqlite_sync_state_tests;
