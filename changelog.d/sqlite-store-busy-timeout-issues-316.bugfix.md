@@ -1,0 +1,1 @@
+Two Clio commands that open the same SQLite store at the same time no longer fail at once with `database is locked`: an open now waits up to ten seconds for the writer to finish. The connection also states `synchronous = FULL` instead of relying on the default, matching the local key store, and it stays in rollback journal mode, so the store grows no `-wal` or `-shm` files.

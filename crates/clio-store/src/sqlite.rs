@@ -42,6 +42,15 @@ use clio_types::AmError;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// How long a contended connection waits for a writer before failing.
+///
+/// Every connection that opens a store file uses this: the store's own
+/// connection, and the short-lived read-only connections a backup, a digest,
+/// a measurement, or a setup count takes. Without it those reads fail at once
+/// with `database is locked` while another process holds the write lock.
+pub const STORE_BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// SQLite-backed store. Requires the vector backend (see `vector_backend`).
 pub struct SqliteStore {
@@ -119,6 +128,15 @@ impl SqliteStore {
     }
 
     fn from_connection(mut conn: Connection, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
+        // A contended open waits for the writer instead of failing at once with
+        // `SQLITE_BUSY`, and the sync mode is stated rather than implied. Both
+        // settings match the local key store, and they are set before the
+        // converge passes so every transaction below and the bootstrap inherit
+        // them.
+        conn.busy_timeout(STORE_BUSY_TIMEOUT)
+            .am("sqlite busy timeout")?;
+        conn.execute_batch("PRAGMA synchronous = FULL;")
+            .am("sqlite synchronous")?;
         // Validate the MemTree table shape BEFORE core DDL stamps schema_version:
         // a refused reshape must never leave version metadata ahead of the real schema.
         crate::memtree_schema::ensure_memtree_shape_sqlite(&conn)?;
@@ -318,6 +336,10 @@ mod sqlite_space_tests;
 #[cfg(test)]
 #[path = "sqlite_open_lock_tests.rs"]
 mod sqlite_open_lock_tests;
+
+#[cfg(test)]
+#[path = "sqlite_pragma_tests.rs"]
+mod sqlite_pragma_tests;
 
 #[cfg(test)]
 #[path = "sqlite_permissions_tests.rs"]
