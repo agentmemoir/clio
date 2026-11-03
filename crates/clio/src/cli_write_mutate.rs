@@ -10,7 +10,8 @@
 //! ## Owns
 //! - Flag decoding for these mutation verbs into MCP tool arguments (1:1 with the
 //!   published `inputSchema`)
-//! - The `discard` confirmation gate call and the blast-radius dry-run preview
+//! - The `discard` and `correct` confirmation gate calls and their dry-run
+//!   previews
 //! - Their human text views
 //!
 //! ## Does not own
@@ -170,11 +171,12 @@ fn discard_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     })
 }
 
-/// `correct ID VALUE --reason R [--context C]` → `correct`: an attributable
-/// correction that preserves history; `--context C` explicitly replaces the
-/// item's bounded source context. The CLI invocation is itself the operator
-/// confirmation, so it runs the confirmed path unless `--dry-run` asks for the
-/// zero-write preview.
+/// `correct ID VALUE --reason R [--context C] --confirm` → `correct`: an
+/// attributable correction that preserves history; `--context C` explicitly
+/// replaces the item's bounded source context.
+///
+/// The shared confirm gate refuses without `--confirm`/`--yes` (exit 2) and
+/// `--dry-run` prints the zero-write preview.
 fn correct_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
     let positionals = parsed.positionals();
     if positionals.len() != 2 {
@@ -206,6 +208,7 @@ fn correct_call(parsed: &ParsedArgs) -> Result<WriteCall, CliError> {
             ),
         });
     }
+    crate::cli_confirm::require_confirm("correct", parsed)?;
     let mut args = base_args(parsed);
     args.insert("item_id".into(), Value::from(item_id));
     args.insert("new_value".into(), Value::from(new_value));
@@ -324,6 +327,10 @@ fn render_correct(payload: &Value) -> String {
 #[cfg(test)]
 #[path = "cli_write_mutate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cli_write_mutate_confirm_tests.rs"]
+mod confirm_tests;
 
 #[cfg(test)]
 #[path = "cli_write_mutate_text_tests.rs"]

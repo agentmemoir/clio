@@ -189,6 +189,7 @@ fn correct_sends_context_in_the_tool_call() {
             "typo",
             "--context",
             "team chat",
+            "--confirm",
             "--bank",
             "demo",
         ],
@@ -203,7 +204,7 @@ fn correct_without_context_omits_the_key() {
     let (_, args) = tool_call(
         &MutationWriteGroup,
         "correct",
-        &["itm-1", "new value", "--reason", "typo"],
+        &["itm-1", "new value", "--reason", "typo", "--confirm"],
     );
     assert!(args.get("context").is_none(), "{args}");
 }

@@ -45,7 +45,7 @@ fn every_checked_verb() -> Vec<&'static str> {
 ///
 /// `--confirm` is written bare in every verb that has it because it is the gate
 /// on the live run and the reader must see it, but a verb that omits it still
-/// does its work: `clio discard --reason X` is a dry run, not a refusal.
+/// parses: the confirm gate refuses the run, the record's required set does not.
 ///
 /// `compose-context` prints `--budget-tokens N` bare so the reader sees a value
 /// the run must have, but the record marks it optional: the workspace group's
@@ -56,6 +56,8 @@ fn every_checked_verb() -> Vec<&'static str> {
 /// required. The test below fails if any of these flags stops being written bare.
 const EXCUSED: &[(&str, &str)] = &[
     ("discard", "confirm"),
+    ("correct", "confirm"),
+    ("shared discard", "confirm"),
     ("erase", "confirm"),
     ("compose-context", "budget-tokens"),
     ("backup restore", "latest"),

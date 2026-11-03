@@ -1,0 +1,1 @@
+`clio shared discard` and `clio correct` now refuse with exit 2 when they have neither `--confirm` nor `--yes`, instead of reporting a preview as success or superseding the stored item; `clio shared discard --dry-run` previews the removal without writing.
