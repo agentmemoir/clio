@@ -86,7 +86,8 @@ services:
     restart: unless-stopped
     # No authentication in any of these three sidecars, so their published ports
     # are loopback-only for the same reason as the database above: the host bind
-    # is the boundary that matters.
+    # keeps them off every other host interface. Docker Engine 28.0.0 or later
+    # is what also keeps a host on the same L2 segment from reaching them.
     ports:
       - "127.0.0.1:${CLIO_EMBED_PORT:-34311}:80"
     volumes:
