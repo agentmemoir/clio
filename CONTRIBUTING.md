@@ -30,7 +30,18 @@ Prefix the title with `feat:`, `fix:`, `chore:`, or `docs:`, following [Conventi
 
 ### The gate
 
-CI is the gate. It runs on a pull request that touches a path in the filters of `.github/workflows/ci.yml`, and that file is the list of what it runs: the format check, clippy, the script suites, the scoped coverage judgement (the only scoped test run; `make test-fast` is a developer target), and the MCP conformance job. Nothing about a change is verified until CI says so.
+CI is the gate. `.github/workflows/` holds one file per workflow, and each file is the list of what it runs. A pull request starts only the workflows whose `paths` filter matches a file it touches:
+
+- `ci.yml`: `crates/**`, `sql/**`, `Cargo.toml`, `Cargo.lock`, `Makefile`, `mk/**`, `scripts/**`, `hooks.d/**`, `rust-toolchain.toml`, `.config/nextest.toml`, `changelog.d/**`, `CHANGELOG.md`, and the workflow file itself. It runs the format check, clippy, the script suites, and the scoped coverage judgement (the only scoped test run; `make test-fast` is a developer target).
+- `mcp-conformance.yml`: `crates/clio-mcp/**`, `Cargo.toml`, `Cargo.lock`, and the workflow file itself. It runs the pinned MCP conformance suite.
+- `benchmarks.yml`: `benchmarks/**` and the workflow file itself.
+- `codeql.yml`: `crates/**`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, and the workflow file itself.
+- `dependencies.yml`: `**/Cargo.toml`, `Cargo.lock`, `deny.toml`, and the workflow file itself.
+- `dev-image.yml`: `dev/**` and the workflow file itself.
+- `lockfile-diff.yml`: `Cargo.lock`, `scripts/lockfile_diff.py`, and the workflow file itself.
+- `prompt-surface-diff.yml`: `crates/clio-mcp/**`, `crates/clio-types/src/mcp_tools.rs`, `scripts/prompt_surface_diff.py`, and the workflow file itself.
+
+`first-defence.yml`, `cla.yml`, `dco.yml`, and `external-contrib.yml` have no path filter, so they run on every pull request. Nothing about a change is verified until CI says so.
 
 What you run before you commit is the cheap half:
 
