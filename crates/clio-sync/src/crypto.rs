@@ -92,7 +92,9 @@ impl SyncCipherKey {
     /// Derive a sync key from a profile-provided secret (never transmitted).
     ///
     /// # Panics
-    /// Panics if `Argon2::hash_password_into` returns an error. The crate
+    /// Panics if `clio_store::sha256_hex` stops returning at least 32 lowercase
+    /// hex characters, because the first 32 are taken as the salt. It also
+    /// panics if `Argon2::hash_password_into` returns an error. The crate
     /// documents six errors: `PwdTooLong`, `SaltTooShort`, `SaltTooLong`,
     /// `OutputTooShort`, `OutputTooLong`, and `OutOfMemory`. The salt errors
     /// need a salt outside 8 bytes to 4 GiB - 1, and the output errors an
@@ -108,7 +110,11 @@ impl SyncCipherKey {
         // identifier from it alone, with no wire-format change. It stays
         // unique per secret, and Argon2id's cost applies to every guess.
         let salt_hex = clio_store::sha256_hex(secret.as_bytes(), Self::SALT_DOMAIN);
-        let salt = hex_to_bytes(&salt_hex[..32]);
+        let salt_slice = salt_hex
+            .get(..32)
+            .expect("sha256_hex returns 64 lowercase hex characters, so the first 32 exist");
+        let salt = hex_to_bytes(salt_slice)
+            .expect("sha256_hex returns 64 lowercase hex characters, so the first 32 are hex");
         let mut key = [0u8; 32];
         // `Argon2::hash_password_into` documents these errors: `PwdTooLong`
         // (password above 4 GiB - 1 bytes), `SaltTooShort` and `SaltTooLong`
@@ -250,11 +256,42 @@ fn truncated_hex_digest(domain: &[u8], sep: u8, chars: usize, key: &[u8]) -> Str
     out
 }
 
-fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0))
-        .collect()
+/// Decode a hex string into bytes. Both cases are accepted, an odd byte length
+/// and any non-hex byte are refused, and every byte is read on its own so a
+/// multi-byte UTF-8 sequence cannot split a character.
+fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, AmError> {
+    let bytes = hex.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("hex string has an odd byte length: {}", bytes.len()),
+        ));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for (index, pair) in bytes.as_chunks::<2>().0.iter().enumerate() {
+        let high = hex_digit_value(pair[0], index * 2)?;
+        let low = hex_digit_value(pair[1], index * 2 + 1)?;
+        out.push((high << 4) | low);
+    }
+    Ok(out)
+}
+
+/// Map one ASCII hex digit byte to its value and refuse every other byte. The
+/// error names the byte in hex and the offset it sits at, so a caller can find
+/// the bad input without guessing.
+fn hex_digit_value(byte: u8, offset: usize) -> Result<u8, AmError> {
+    let value = match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        b'A'..=b'F' => byte - b'A' + 10,
+        _ => {
+            return Err(AmError::new(
+                ErrorCode::InvalidArgument,
+                format!("hex string has a non-hex byte 0x{byte:02x} at offset {offset}"),
+            ));
+        }
+    };
+    Ok(value)
 }
 
 #[cfg(test)]

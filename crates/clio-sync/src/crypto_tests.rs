@@ -182,11 +182,46 @@ fn the_derived_key_differs_from_the_legacy_sha256_digest() {
     let secret = crate::credential_fixtures::secret("legacy-kdf-path");
     let key = crate::crypto::SyncCipherKey::from_secret(&secret);
     let legacy_hex = clio_store::sha256_hex(secret.as_bytes(), "am-sync-key");
-    let legacy_digest = super::hex_to_bytes(&legacy_hex);
+    let legacy_digest =
+        super::hex_to_bytes(&legacy_hex).expect("sha256_hex output is lowercase hex");
     assert_ne!(
         key.key_bytes(),
         legacy_digest.as_slice(),
         "the key is stretched, not the legacy single SHA-256 digest"
+    );
+}
+
+/// The derivation is pinned: the salt is the first 32 hex characters of the
+/// salted digest, and the key is what default Argon2 makes from that salt and
+/// the secret. The expected value is recomputed here by its own hex decode, so
+/// this test does not use the function it pins. It fails if anyone changes the
+/// `..32` slice width, the Argon2 defaults, or the salt domain label.
+#[test]
+fn from_secret_pins_the_salt_slice_and_argon2_parameters() {
+    let secret = crate::credential_fixtures::secret("pin-derivation");
+    let digest = clio_store::sha256_hex(secret.as_bytes(), super::SyncCipherKey::SALT_DOMAIN);
+    // Decode `digest[..32]` on our own: `hex_to_bytes` is the code under test,
+    // so calling it here would let a broken decoder agree with itself.
+    let mut salt = [0u8; 16];
+    for (index, pair) in digest.as_bytes()[..32]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        let high = char::from(pair[0]).to_digit(16).expect("digest is hex");
+        let low = char::from(pair[1]).to_digit(16).expect("digest is hex");
+        salt[index] = u8::try_from((high << 4) | low).expect("a hex pair is one byte");
+    }
+    let mut expected = [0u8; 32];
+    argon2::Argon2::default()
+        .hash_password_into(secret.as_bytes(), &salt, &mut expected)
+        .expect("argon2 key derivation with default parameters");
+    let key = super::SyncCipherKey::from_secret(&secret);
+    assert_eq!(
+        key.key_bytes(),
+        expected.as_slice(),
+        "the derived key is the first 32 digest hex characters as salt under default Argon2"
     );
 }
 
@@ -294,4 +329,84 @@ fn a_different_associated_data_fails_authentication() {
         key.open(&cipher, TEST_AAD).is_ok(),
         "the envelope it was sealed under still opens it"
     );
+}
+
+/// The legacy hex decoder is gone: an odd number of bytes is an error, not a
+/// panic and not a dropped trailing digit.
+#[test]
+fn odd_length_is_refused_without_panicking() {
+    for input in ["abc", "a"] {
+        let err = super::hex_to_bytes(input).expect_err("odd length must be refused");
+        assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+        assert!(
+            err.message.contains("odd"),
+            "the message names the odd length: {}",
+            err.message
+        );
+    }
+}
+
+/// Every byte that is not an ASCII hex digit is refused, including the leading
+/// `+` that `u8::from_str_radix` accepts, and the message names the offending
+/// byte so a reader can find it in the input.
+#[test]
+fn non_hex_characters_are_refused() {
+    for input in ["zz", "0g", "g0", "+1"] {
+        let err = super::hex_to_bytes(input).expect_err("non-hex input must be refused");
+        assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+    }
+    let err = super::hex_to_bytes("zz").expect_err("non-hex input must be refused");
+    assert!(
+        err.message.contains("0x7a"),
+        "the message names the offending byte: {}",
+        err.message
+    );
+}
+
+/// A multi-byte UTF-8 character spans more than one byte, so a byte-count slice
+/// used to panic on it. Decoding over the raw bytes refuses it without panic.
+#[test]
+fn multi_byte_utf8_is_refused_without_panicking() {
+    let err = super::hex_to_bytes("aéb").expect_err("multi-byte UTF-8 must be refused");
+    assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+}
+
+/// Both cases decode to the same bytes, mixed case is accepted, and exactly 32
+/// hex characters decode to exactly 16 bytes, which is the shape `from_secret`
+/// takes its salt from.
+#[test]
+fn hex_decoding_accepts_both_cases() {
+    let expected = vec![0x00, 0x0f, 0x10, 0xff];
+    assert_eq!(
+        super::hex_to_bytes("000f10ff").expect("lowercase hex"),
+        expected
+    );
+    assert_eq!(
+        super::hex_to_bytes("000F10FF").expect("uppercase hex"),
+        expected
+    );
+    assert_eq!(
+        super::hex_to_bytes("000f10FF").expect("mixed-case hex"),
+        expected
+    );
+    let thirty_two = "0123456789abcdef0123456789abcdef";
+    assert_eq!(
+        thirty_two.len(),
+        32,
+        "the fixture is exactly 32 hex characters"
+    );
+    assert_eq!(
+        super::hex_to_bytes(thirty_two)
+            .expect("32 hex characters")
+            .len(),
+        16,
+        "32 hex characters decode to 16 bytes, the salt width from_secret uses"
+    );
+}
+
+/// Empty input carries no bytes and is not an error.
+#[test]
+fn empty_hex_decodes_to_no_bytes() {
+    let bytes = super::hex_to_bytes("").expect("empty hex");
+    assert!(bytes.is_empty(), "empty input has no bytes: {bytes:?}");
 }

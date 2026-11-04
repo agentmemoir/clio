@@ -1,0 +1,1 @@
+The sync hex decoder now returns an error for an odd byte length and for a non-hex byte, where it used to panic on the slice or substitute a zero byte; valid lowercase hex decodes exactly as before, so existing keys are unchanged.
