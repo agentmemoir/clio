@@ -33,11 +33,16 @@ def hermetic_env() -> dict[str, str]:
     GATE_ACTIVE passes cargo through the gate wrapper unchanged, so a scoped run
     started from inside another gated command does not recurse into a cached
     verdict for itself.
+
+    CLIO_DATA_DIR points under the coverage directory, so the run reads a data directory it owns. Without it the run resolves one from HOME and reads the developer's real erasure journal, which fails an unrelated test when that journal was written under a different key salt; the path here is one the run created.
     """
     env = dict(os.environ)
     env["CLIO_DEPLOYMENT_CONFIG"] = str(COV_DIR / "no-deployment-overlay.json")
     env["GATE_ACTIVE"] = "1"
+    data_dir = COV_DIR / "data"
+    env["CLIO_DATA_DIR"] = str(data_dir)
     COV_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
     stale = COV_DIR / "no-deployment-overlay.json"
     if stale.exists():
         stale.unlink()

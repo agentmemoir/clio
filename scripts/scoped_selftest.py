@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Collection, Iterable, NamedTuple, Sequence
 
-from scoped_core import EXIT_OK, owned
+from scoped_core import COV_DIR, EXIT_OK, owned
 
 from scoped_selftest_select import run as run_select
 from scoped_selftest_refs import run as run_refs
 from scoped_selftest_steps import run as run_steps
 from scoped_selftest_objects import run as run_objects
 from scoped_selftest_modes import run as run_modes
+from scoped_run import hermetic_env
 
 
 def self_test() -> int:
@@ -31,6 +33,21 @@ def self_test() -> int:
     name, scratch, value = run_steps(check, raises)
     name, prune_packages, scratch, stale_map_ran = run_objects(check, raises)
     run_modes(check, name, prune_packages)
+
+    # A scoped run owns its data directory. Inheriting one from HOME read the
+    # developer's real erasure journal, which fails an unrelated test when that
+    # journal was written under a different key salt. The path is compared
+    # against the coverage directory, so the check does not depend on this host.
+    data_dir = Path(hermetic_env()["CLIO_DATA_DIR"])
+    check(
+        "a scoped run reads a data directory it creates, under the coverage directory",
+        (
+            data_dir.is_absolute(),
+            data_dir == COV_DIR / "data",
+            data_dir.is_dir(),
+        ),
+        (True, True, True),
+    )
 
 # The lookup's own check, anchored to the test runner's list rather than to
     # this script's assumptions. A lookup verified only against itself passes
