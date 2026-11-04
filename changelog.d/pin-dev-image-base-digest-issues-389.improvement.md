@@ -1,1 +1,1 @@
-The dev image now builds from a digest-pinned Ubuntu 24.04 base instead of the floating `ubuntu:24.04` tag, so a rebuild starts from the same base bytes.
+The dev image now builds from a digest-pinned Ubuntu 24.04 base rather than the floating `ubuntu:24.04` tag, and installs its Rust toolchain with a rustup-init binary fetched from a version-pinned URL and checked against a SHA-256 before it runs, rather than piping the remote `https://sh.rustup.rs` script into `sh`.
