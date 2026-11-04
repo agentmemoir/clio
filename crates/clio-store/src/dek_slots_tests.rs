@@ -99,6 +99,30 @@ fn in_memory_store_never_touches_a_file() {
 }
 
 #[test]
+fn require_stored_slot_rejects_none_and_keeps_some() {
+    let Err(missing) = require_stored_slot(None, "s") else {
+        panic!("a vanished slot must not be accepted");
+    };
+    assert_eq!(missing.code, ErrorCode::Internal);
+    assert!(
+        missing.message.contains("subject `s`") && missing.message.contains("vanished"),
+        "message must name the subject and the vanish: {}",
+        missing.message
+    );
+    let kept = require_stored_slot(
+        Some(KeySlot::Active {
+            version: 2,
+            key: DekMaterial {
+                bytes: [7u8; KEY_LEN],
+            },
+        }),
+        "s",
+    )
+    .unwrap();
+    assert!(matches!(kept, KeySlot::Active { version: 2, .. }));
+}
+
+#[test]
 fn another_instance_shred_is_visible_and_terminal() {
     let dir = temp_dir("shred");
     let path = dir.join("clio.kms.json");
