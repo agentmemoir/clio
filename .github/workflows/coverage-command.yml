@@ -1,12 +1,15 @@
 name: coverage-command
 
+# A comment is the only way to ask for a full run, so `issue_comment` is
+# required. Nothing from the comment reaches a shell: the gate job below reads
+# only the author association, and it refuses every commenter who is not an
+# owner, a member, or a collaborator.
 on:
-  issue_comment:
+  issue_comment: # zizmor: ignore[dangerous-triggers] the gate job admits trusted commenters only
     types: [created]
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   gate:
@@ -34,4 +37,9 @@ jobs:
     name: Full coverage
     needs: gate
     if: needs.gate.outputs.allowed == 'true'
-    uses: ./.github/workflows/coverage-full.yml
+    # The called workflow's report job writes an issue, and a called workflow
+    # may only use permissions that the calling job grants it.
+    permissions:
+      contents: read
+      issues: write
+    uses: $/.github/workflows/coverage-full.yml
