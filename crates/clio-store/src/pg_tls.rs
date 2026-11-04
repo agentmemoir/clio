@@ -401,3 +401,7 @@ mod pg_tls_tests;
 #[cfg(test)]
 #[path = "pg_tls_db_tests.rs"]
 mod pg_tls_db_tests;
+
+#[cfg(test)]
+#[path = "pg_tls_warning_emission_tests.rs"]
+mod pg_tls_warning_emission_tests;
