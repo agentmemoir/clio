@@ -1,1 +1,1 @@
-The local development database address now has one canonical passwordless spelling in `.env.example` and the `Makefile`, with a note telling you to use the password spelling for a pre-existing scram-authenticated volume until you delete it.
+The local development database address now has one spelling in .env.example and the Makefile, postgres://clio:clio@127.0.0.1:34310/clio, which works against both a fresh trust-authenticated stack and a pre-existing scram-authenticated volume.
