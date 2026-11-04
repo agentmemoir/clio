@@ -1,0 +1,1 @@
+A transient panic while the local key store held its lock no longer disables encryption for the rest of the process. Later calls now recover the guard and keep working, because rows live in SQLite with one statement per change and the only cached state is the connection, so an interrupted holder leaves at most a duplicate-insert no-op or a completed shred.

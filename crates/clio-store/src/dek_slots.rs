@@ -27,6 +27,7 @@ use crate::local_kms_db::{KEY_LEN, KmsDb, PersistedSlot, decode_key, encode_key}
 use clio_types::{AmError, ErrorCode};
 use rand::Rng;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Key bytes for one subject; zeroized when the slot is dropped.
@@ -128,6 +129,17 @@ impl SlotStore {
     pub(crate) fn destroy(&mut self, subject_id: &str) -> Result<(), AmError> {
         self.db.shred(subject_id)
     }
+}
+
+/// Lock a local KMS slot store, recovering the guard after a holder panicked.
+///
+/// Rows live in SQLite and each mutation is one statement. The connection is
+/// the only in-memory cache and is assigned only after a successful open, so an
+/// unwind leaves at most a duplicate-insert no-op or a completed shred; both
+/// are idempotent. A field adding mutable in-memory state across a fallible
+/// step must not rely on this recovery.
+pub(crate) fn lock_store(state: &Mutex<SlotStore>) -> MutexGuard<'_, SlotStore> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The active key of a live slot, or the shredded error.
