@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 from . import cli
-from .fetch import load_pins
+from .fetch import PinError, load_pins
 from .llm import ModelUnavailableError, frontier_key_present
 from .report import (
     blocked_gate_record,
@@ -208,6 +208,12 @@ def main(argv: list[str] | None = None) -> int:
     except ModelUnavailableError as exc:
         print(
             f"clio-bench baseline: judge unavailable, no baseline written: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    except PinError as exc:
+        print(
+            f"clio-bench baseline: judge pin invalid, no baseline written: {exc}",
             file=sys.stderr,
         )
         return 2

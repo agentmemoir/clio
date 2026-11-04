@@ -84,23 +84,34 @@ def _build_adapter(args, tokenizer):
     return builder(tokenizer, args)
 
 
-def _judge_settings(args, pins) -> tuple[str, str, str]:
-    """Resolve the tier, model id, and base URL of the selected judge."""
+def _judge_settings(args, pins) -> tuple[str, str, str, str]:
+    """Resolve the tier, model id, base URL, and served revision of the judge."""
     tier = "tier1" if args.judge == "local" else "tier2"
     settings = pins["judge"][tier]
+    revision = settings.get("revision")
+    if not revision:
+        raise PinError(
+            f"judge pin {tier!r} has no revision; pins.json must name the exact "
+            "served model id"
+        )
     model = getattr(args, "judge_model", None) or settings["model"]
     base_url = getattr(args, "judge_base_url", None) or settings["base_url"]
-    return tier, model, base_url
+    return tier, model, base_url, revision
 
 
 def _build_judge(args, pins):
     if args.judge == "stub":
-        return StubJudge(), {"tier": "stub", "model": "stub-exact-match", "base_url": ""}
-    tier, model, base_url = _judge_settings(args, pins)
+        return StubJudge(), {
+            "tier": "stub",
+            "model": "stub-exact-match",
+            "revision": "stub",
+            "base_url": "",
+        }
+    tier, model, base_url, revision = _judge_settings(args, pins)
     from .judges.llm_judge import LlmJudge
     from .llm import HttpChatClient
 
-    client = HttpChatClient(base_url, model)
+    client = HttpChatClient(base_url, model, revision=revision)
     client.preflight()
     return LlmJudge(
         client,
@@ -110,6 +121,7 @@ def _build_judge(args, pins):
     ), {
         "tier": tier,
         "model": model,
+        "revision": revision,
         "base_url": base_url,
     }
 
@@ -130,7 +142,7 @@ def _build_generator(args, pins):
     from .llm import HttpChatClient
 
     return AnswerGenerator(
-        HttpChatClient(base_url, model),
+        HttpChatClient(base_url, model, revision=settings["revision"]),
         model,
         max_tokens=args.generator_max_tokens,
     ), {
@@ -204,6 +216,12 @@ def main(argv: list[str] | None = None) -> int:
     except ModelUnavailableError as exc:
         print(
             f"clio-bench: judge unavailable, no score produced: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    except PinError as exc:
+        print(
+            f"clio-bench: judge pin invalid, no score produced: {exc}",
             file=sys.stderr,
         )
         return 2

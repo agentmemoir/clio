@@ -60,9 +60,11 @@ class HttpChatClient:
         *,
         api_key: str | None = None,
         timeout: int = 600,
+        revision: str,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.revision = revision
         self._api_key = api_key or os.environ.get("CLIO_BENCH_API_KEY") or os.environ.get(
             "OPENAI_API_KEY"
         )
@@ -88,13 +90,14 @@ class HttpChatClient:
             return response.status, response.read()
 
     def _unavailable(self, detail: str) -> ModelUnavailableError:
-        """Build the error that names the model and endpoint, never the key."""
+        """Build the error that names the revision and endpoint, never the key."""
         return ModelUnavailableError(
-            f"model {self.model!r} is not available at {self.base_url}: {detail}"
+            f"model revision {self.revision!r} is not available at "
+            f"{self.base_url}: {detail}"
         )
 
     def preflight(self) -> None:
-        """Fail unless the endpoint lists the configured model id."""
+        """Fail unless the endpoint serves the configured revision id."""
         try:
             status, raw = self._send(self._request("/models"))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -106,8 +109,10 @@ class HttpChatClient:
             model_ids = [entry["id"] for entry in payload["data"]]
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             raise self._unavailable("the model list was not OpenAI-compatible") from exc
-        if self.model not in model_ids:
-            raise self._unavailable("the model is not in the endpoint's model list")
+        if self.revision not in model_ids:
+            raise self._unavailable(
+                "the revision is not in the endpoint's model list"
+            )
 
     def complete(
         self,
@@ -151,8 +156,14 @@ class StubChatClient:
     the message list to a reply.
     """
 
-    def __init__(self, replies: list[str] | Callable[[list[dict]], str]) -> None:
+    def __init__(
+        self,
+        replies: list[str] | Callable[[list[dict]], str],
+        *,
+        revision: str | None = None,
+    ) -> None:
         self._replies = replies
+        self.revision = revision
         self.calls: list[list[dict]] = []
 
     def preflight(self) -> None:

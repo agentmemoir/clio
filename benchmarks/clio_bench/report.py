@@ -32,6 +32,22 @@ def _labelled(block: dict, tier: str, quotable: bool) -> dict:
     return block
 
 
+def _judge_stamp(judge: dict) -> dict:
+    """Return the judge block with its revision placed beside its model.
+
+    The revision names the exact served artifact that produced a score, so it
+    sits next to the model id rather than after the transport details. Every
+    other key keeps its original order.
+    """
+    stamp = {
+        "tier": judge["tier"],
+        "model": judge["model"],
+        "revision": judge["revision"],
+    }
+    stamp.update((key, value) for key, value in judge.items() if key not in stamp)
+    return stamp
+
+
 def build_report(
     *,
     pins: dict,
@@ -52,6 +68,8 @@ def build_report(
     stats = suite_stats or {}
     tier = run_meta["judge"]["tier"]
     quotable = tier == "tier2"
+    run = dict(run_meta)
+    run["judge"] = _judge_stamp(run_meta["judge"])
     return {
         "harness": {
             "name": "clio-bench",
@@ -60,7 +78,7 @@ def build_report(
             "tokenizer": tokenizer_name,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
-        "run": run_meta,
+        "run": run,
         "pins": {
             suite: {k: pin.get(k) for k in ("name", "commit", "sha256", "git_blob")}
             for suite, pin in pins["suites"].items()

@@ -50,7 +50,12 @@ class ReportTests(unittest.TestCase):
                 "max_probes": None,
                 "token_budget": 4096,
                 "adapter": "memory",
-                "judge": {"tier": "stub", "model": "stub-exact-match", "base_url": ""},
+                "judge": {
+                    "tier": "stub",
+                    "model": "stub-exact-match",
+                    "revision": "stub-revision-1",
+                    "base_url": "",
+                },
                 "generator": {"model": "stub-context-echo", "base_url": ""},
             },
             suite_results={"locomo": results},
@@ -64,6 +69,12 @@ class ReportTests(unittest.TestCase):
         self.assertIn("locomo", report["suites"])
         self.assertIn("locomo", report["pins"])
         self.assertEqual(len(report["suites"]["locomo"]["probes"]), 6)
+
+    def test_report_stamps_the_judge_revision_beside_the_model(self) -> None:
+        """A reader can name the artifact that produced the score."""
+        judge = self._report()["run"]["judge"]
+        self.assertEqual(judge["revision"], "stub-revision-1")
+        self.assertEqual(list(judge)[:3], ["tier", "model", "revision"])
 
     def test_report_carries_the_system_fingerprint(self) -> None:
         report = self._report()

@@ -334,5 +334,49 @@ class CliTests(unittest.TestCase):
             self.assertIn("judge unavailable", stderr.getvalue())
 
 
+    def test_a_judge_pin_without_a_revision_produces_no_report(self) -> None:
+        """A judge whose served artifact is unnamed cannot produce a score."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "should-not-exist.json"
+            md = Path(tmp) / "should-not-exist.md"
+            pins = load_pins(_DEFAULT_PINS)
+            del pins["judge"]["tier1"]["revision"]
+            pins_path = Path(tmp) / "pins.json"
+            pins_path.write_text(json.dumps(pins), encoding="utf-8")
+            stderr = io.StringIO()
+            with mock.patch(
+                "benchmarks.clio_bench.cli.load_suite"
+            ) as load, contextlib.redirect_stdout(
+                io.StringIO()
+            ), contextlib.redirect_stderr(stderr):
+                code = main(
+                    [
+                        "--suite",
+                        "locomo",
+                        "--adapter",
+                        "memory",
+                        "--judge",
+                        "local",
+                        "--generator",
+                        "stub",
+                        "--partition",
+                        "train",
+                        "--pins",
+                        str(pins_path),
+                        "--out",
+                        str(out),
+                        "--report-md",
+                        str(md),
+                        "--cache-dir",
+                        tmp,
+                    ]
+                )
+                load.assert_not_called()
+            self.assertEqual(code, 2)
+            self.assertFalse(out.exists())
+            self.assertFalse(md.exists())
+            self.assertIn("revision", stderr.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
