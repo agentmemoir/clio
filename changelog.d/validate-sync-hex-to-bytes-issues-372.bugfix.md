@@ -1,1 +1,1 @@
-Sync key derivation now refuses a hex salt with an odd byte count or a non-hex character instead of panicking or silently decoding it as zero bytes; the salt is always 64 lowercase hex characters, so every valid sync key derives the same key as before.
+The sync hex decoder now returns an error for an odd byte length and for a non-hex byte, where it used to panic on the slice or substitute a zero byte; valid lowercase hex decodes exactly as before, so existing keys are unchanged.
