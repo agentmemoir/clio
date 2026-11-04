@@ -20,6 +20,3 @@ unicode-normalization = { workspace = true }
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-clio-store = { workspace = true }
