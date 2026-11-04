@@ -256,7 +256,7 @@ fn import_provider_stub(state: &McpState, args: &Value) -> Result<Value, AmError
     }))
 }
 
-/// Last-4-masked view of any accepted credential parameters (never plaintext).
+/// Fully-redacted view of any accepted credential parameters (never plaintext).
 fn masked_credentials(args: &Value) -> serde_json::Value {
     clio_config::secret::masked_clone(args.get("credentials").unwrap_or(&serde_json::Value::Null))
 }
