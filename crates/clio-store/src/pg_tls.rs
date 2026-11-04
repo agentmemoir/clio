@@ -340,6 +340,7 @@ pub(crate) fn open(url: &str) -> Result<Client, Failure> {
     let mut config = Config::from_str(&spec.driver_url)
         .map_err(|e| Failure::settled(format!("postgres url is not usable: {}", describe(&e))))?;
     config.ssl_mode(driver_mode(spec.ssl));
+    crate::pg_tls_warning::warn_encrypt_no_verify(url);
     let attempt = match spec.ssl {
         SslChoice::Disable => config.connect(NoTls),
         SslChoice::Prefer | SslChoice::VerifyFull => {

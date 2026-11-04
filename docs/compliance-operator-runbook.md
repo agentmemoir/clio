@@ -37,7 +37,7 @@ A Postgres store connection string may name an `sslmode`, and the value is read 
 - `verify-full` requires TLS and checks the server certificate and the server name.
 - `encrypt-no-verify` requires TLS but does not check the server certificate.
 
-`encrypt-no-verify` keeps a passive observer from reading the traffic, but it does not prove who the server is, so any host that can intercept the path can impersonate the database. A store opened with it logs a startup warning on stderr, and that message says this and names `sslmode=verify-full` with `sslrootcert=PATH` as the safe alternative. Use that pair for a private certificate authority: a private CA needs a supplied root, not a skipped check.
+`encrypt-no-verify` keeps a passive observer from reading the traffic, but it does not prove who the server is, so any host that can intercept the path can impersonate the database. A startup warning is logged once per process when a connection with this mode opens, and that message says this and names `sslmode=verify-full` with `sslrootcert=PATH` as the safe alternative. Use that pair for a private certificate authority: a private CA needs a supplied root, not a skipped check.
 
 A string that names no `sslmode` gets `verify-full` when any host is off this machine, and `prefer` when every host is local. The names `require` and `verify-ca` are refused with a message that names the value to use instead.
 

@@ -6,13 +6,15 @@
 //! This module is responsible for testing the startup warning about an
 //! encrypted but unverified Postgres connection: that
 //! `sslmode=encrypt-no-verify` produces it, in either letter case, that every
-//! mode which checks the certificate produces none, and that a string naming no
-//! mode produces none whether its host is local or remote.
+//! mode which checks the certificate produces none, that a string naming no
+//! mode produces none whether its host is local or remote, and that the
+//! emission runs its one warning path and is silent thereafter.
 //!
 //! ## Owns
 //! - The warning raised for `encrypt-no-verify`
 //! - The silence for `disable`, `prefer`, and `verify-full`
 //! - The silence for a string naming no mode, and for one that does not parse
+//! - The emission, both its first call and its already-taken path
 //!
 //! ## Does not own
 //! - How `sslmode` is spelled or defaulted (`pg_url` owns that)
@@ -65,4 +67,17 @@ fn a_string_naming_no_mode_does_not_warn_for_a_local_or_remote_host() {
 #[test]
 fn a_string_that_does_not_parse_does_not_warn() {
     assert!(encrypt_no_verify_warning("this is not a connection string").is_none());
+}
+
+#[test]
+fn the_emission_warns_and_then_takes_the_already_warned_path() {
+    let url = "postgres://db.example.com/memories?sslmode=encrypt-no-verify";
+    warn_encrypt_no_verify(url);
+    warn_encrypt_no_verify(url);
+}
+
+#[test]
+fn the_emission_is_silent_for_a_checked_mode_and_for_a_string_naming_none() {
+    warn_encrypt_no_verify("postgres://db.example.com/memories?sslmode=verify-full");
+    warn_encrypt_no_verify("postgres://db.example.com/memories");
 }
