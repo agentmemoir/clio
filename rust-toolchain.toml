@@ -9,5 +9,5 @@
 # what the new version reports. The workflows install this same version, so the
 # pin is the single source of truth for both machines.
 [toolchain]
-channel = "1.99.0"
+channel = "1.99.1"
 components = ["rustfmt", "clippy", "llvm-tools-preview"]
