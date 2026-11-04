@@ -386,8 +386,11 @@ precommit-list:
 
 # --- coverage (requires: cargo install cargo-llvm-cov nextest; rustup component add llvm-tools-preview) ---
 
-# clio-store Postgres parity (Compose :34310 / CI service). Override with env if needed.
-export CLIO_DATABASE_URL ?= postgres://clio:clio@127.0.0.1:34310/clio
+# clio-store Postgres parity (Compose :34310 / CI service). The managed database
+# has no password (compose.yml sets trust auth), so the address carries none.
+# A pre-existing scram-authenticated volume needs the password spelling instead:
+#   make test CLIO_DATABASE_URL=postgres://clio:clio@127.0.0.1:34310/clio
+export CLIO_DATABASE_URL ?= postgres://clio@127.0.0.1:34310/clio
 
 # Stubs so `make compose up mac` is valid Make syntax (each word is a goal).
 compose up down:

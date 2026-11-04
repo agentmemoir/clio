@@ -1,0 +1,1 @@
+The local development database address now has one canonical passwordless spelling in `.env.example` and the `Makefile`, with a note telling you to use the password spelling for a pre-existing scram-authenticated volume until you delete it.
