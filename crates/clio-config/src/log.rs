@@ -4,7 +4,7 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for process log level and secret-safe log emission.
+//! This module is responsible for process log level and keyed-field log emission.
 //!
 //! ## Owns
 //! - `LogLevel` parsing and process-wide max level
@@ -13,13 +13,22 @@
 //! ## Does not own
 //! - Effective configuration resolution
 //! - Structured telemetry / audit event stores
+//! - Reading the text of `message` to find secret-shaped strings
 //!
 //! ## Boundary
 //!
-//! Changes to logging verbosity and log-line redaction should normally require changes here.
+//! Changes to logging verbosity and keyed-field masking should normally require changes here.
 //! Changes to config paths that set the level should not require changes here.
 //!
-//! Keep this module focused on log level and secret-safe log emission.
+//! ## Caller rule
+//!
+//! Masking covers only the `fields` slice, and only for an entry whose key matches the
+//! secret marker list that `secret::path_is_secret` tests. `message` is emitted verbatim,
+//! with no masking and no runtime guard: whatever a caller writes into it reaches stderr as
+//! written. A secret therefore belongs in a `fields` entry under a matching key, never in
+//! `message`, and a caller that ignores this rule gets an unmasked secret in the log line.
+//!
+//! Keep this module focused on log level and keyed-field masking.
 
 use crate::secret::value_is_secret;
 use std::fmt::{self, Write as _};
@@ -104,6 +113,9 @@ fn format_fields(fields: &[(&str, &str)]) -> String {
 }
 
 /// Emit a log line if `level` is enabled. Secret-looking field values are masked.
+///
+/// Only `fields` is masked. `message` is written verbatim, so pass a secret as a `fields`
+/// entry whose key matches the secret marker list rather than inside the message.
 pub fn log(level: LogLevel, message: &str, fields: &[(&str, &str)]) {
     if (level as u8) > MAX_LEVEL.load(Ordering::Relaxed) {
         return;

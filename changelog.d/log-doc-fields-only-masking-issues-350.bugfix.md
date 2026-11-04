@@ -1,0 +1,1 @@
+The `clio_config::log` module documentation now states the masking contract it actually implements: only keyed `fields` values are masked, and `message` is emitted verbatim, so a secret must be passed as a `fields` entry whose key matches the secret marker list rather than written into the message.
