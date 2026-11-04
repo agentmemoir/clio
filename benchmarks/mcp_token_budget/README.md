@@ -36,7 +36,11 @@ Each row carries `row` (a stable id), `value` (an integer), `unit` (`bytes` or `
 
 There are two rows today, always emitted in this order: `pack.bytes` — the length in bytes of the canonical pack, meaning sorted keys, no insignificant whitespace, UTF-8 — and `pack.tokens` — the cl100k_base token count of exactly those canonical bytes.
 
-Canonicalization matters: pretty-printing the same pack yields more bytes, so both rows are computed over the canonical form, which is byte-for-byte what `clio mcp schema-export` writes minus its trailing newline.
+The rows are never a copy of the input file: the command reads the pack (by default from `clio mcp schema-export`, or from `--pack PATH`), parses it, and re-serializes the whole pack to the shipped compact JSON form — sorted keys, `(",", ":")` separators, UTF-8, no trailing newline — before measuring.
+
+The bytes row measures that canonical form, which equals the CLI's stdout without its trailing newline: 105,771 bytes for the current pack.
+
+A saved pack in any other formatting (for example the pretty-printed test fixture `crates/clio-mcp/tests/fixtures/schema_pack.json`) produces the same rows for the same semantic pack, because the measurement is defined by the canonical form, not by the input formatting.
 
 Two runs of the command on one unchanged build are byte-identical: the document carries no timestamp, no date, no host name, no absolute path, and no ordering that depends on the environment.
 

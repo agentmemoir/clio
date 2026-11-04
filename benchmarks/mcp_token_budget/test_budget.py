@@ -110,6 +110,47 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(bytes_row["value"], len(expected))
         self.assertEqual(bytes_row["input_sha256"], hashlib.sha256(expected).hexdigest())
 
+    def test_pretty_and_compact_packs_produce_identical_output(self):
+        """Input formatting must not move a row: the canonical form defines the measurement.
+
+        The committed fixture is pretty-printed, so its on-disk bytes are not the
+        bytes that get measured. Feeding `measure.py` that fixture and feeding it
+        the same pack re-serialized compactly (plus the trailing newline the CLI
+        writes) must produce byte-identical stdout, because the script parses and
+        re-serializes the whole pack before measuring anything.
+        """
+        pretty_bytes = PACK.read_bytes()
+        pack_object = json.loads(pretty_bytes.decode("utf-8"))
+        compact_bytes = (
+            json.dumps(
+                pack_object,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+        self.assertNotEqual(
+            pretty_bytes, compact_bytes, "fixture is already canonical; test proves nothing"
+        )
+
+        pretty_exit, pretty_out, pretty_err = run_measure(PACK)
+        self.assertEqual(pretty_exit, 0, pretty_err)
+
+        handle, compact_name = tempfile.mkstemp(
+            prefix="clio-compact-pack-", suffix=".json"
+        )
+        compact_path = Path(compact_name)
+        try:
+            with os.fdopen(handle, "wb") as stream:
+                stream.write(compact_bytes)
+            compact_exit, compact_out, compact_err = run_measure(compact_path)
+        finally:
+            os.unlink(compact_path)
+        self.assertEqual(compact_exit, 0, compact_err)
+        self.assertFalse(compact_path.exists())
+        self.assertEqual(pretty_out, compact_out)
+
     def test_output_has_no_timestamps(self):
         code, out, err = run_measure(PACK)
         self.assertEqual(code, 0, err)
