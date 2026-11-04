@@ -367,7 +367,7 @@ pub(crate) fn canonical_watermark_body(body: &str) -> String {
 
 /// Masked sync status (device id, cursors, pending counts, endpoint, auth and
 /// encryption state, last error, conflicts, dead letters). Never returns sync
-/// auth secrets or DEK material: endpoint tokens are last-4 masked.
+/// auth secrets or DEK material: the endpoint is its configured URL and the token never appears.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncStatusReport {
     /// This node's device id.

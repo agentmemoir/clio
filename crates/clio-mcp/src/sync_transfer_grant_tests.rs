@@ -86,7 +86,7 @@ fn a_default_bank_outside_the_list_is_refused() {
 /// A scoped run succeeds when its list names only a granted bank: the default
 /// bank is not checked, because the run never touches it. The pre-gate resolver
 /// authorized the default and refused this run. The response names the
-/// credential and echoes the token's last four characters only.
+/// credential and redacts the token in full.
 #[test]
 fn a_scoped_list_runs_when_it_excludes_the_default_bank() {
     let st = bound(&["b-allowed"]);
