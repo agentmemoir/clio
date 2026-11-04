@@ -164,12 +164,12 @@ fn proxy_preview_masks_the_run() {
     );
     assert!(preview.contains("****"), "the masked run is starred out");
     assert!(
-        preview.contains(&run[..4]),
-        "first 4 chars of the run survive"
+        !preview.contains(&run[..4]),
+        "first 4 chars of the run are not disclosed"
     );
     assert!(
-        preview.contains(&run[run.len() - 4..]),
-        "last 4 chars of the run survive"
+        !preview.contains(&run[run.len() - 4..]),
+        "last 4 chars of the run are not disclosed"
     );
     // Masking a proxy never drops the labelled-key scrub: a key that is not
     // secret-class is still scrubbed before the preview is returned.
@@ -178,5 +178,22 @@ fn proxy_preview_masks_the_run() {
     assert!(
         !labelled.contains("sk-live-abcdefgh1234"),
         "a labelled key is scrubbed even when not secret-class"
+    );
+}
+
+#[test]
+fn non_secret_run_preview_discloses_no_edge_characters() {
+    let run = "Qw7-4Rt9_Zy2Lm8Np5Kj3Hd6Sf1Ga0Bv7Nc4Xm2K";
+    let text = format!("daily standup notes mention {run} for the deploy window");
+    let signals = detect_noise(&text);
+    assert!(!signals.secret_hit(), "the run is not secret-class");
+    let preview = masked_preview(&text, &signals).expect("preview");
+    assert!(
+        !preview.contains(&run[..4]) && !preview.contains(&run[run.len() - 4..]),
+        "the masked run discloses none of its edge characters"
+    );
+    assert!(
+        preview.contains("daily standup notes mention") && preview.contains("for the deploy window"),
+        "the prose around the run is still visible"
     );
 }

@@ -161,7 +161,7 @@ fn bearer_token_len(lower: &str) -> Option<usize> {
     (len >= TOKEN_RUN_MIN).then_some(len)
 }
 
-/// Mask every token-shaped run, keeping its first and last four characters.
+/// Mask every token-shaped run with the fixed `****` mask.
 fn mask_token_runs(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut run = String::new();
@@ -178,19 +178,16 @@ fn mask_token_runs(text: &str) -> String {
     out
 }
 
-/// Append `run` to `out`, replacing a token-shaped run's middle with `****`.
+/// Append `run` to `out`, replacing a whole token-shaped run with `****`.
 fn push_masked_run(run: &str, out: &mut String) {
     let shaped = run.len() >= TOKEN_RUN_MIN
         && run.chars().any(|c| c.is_ascii_digit())
         && run.chars().any(|c| c.is_ascii_alphabetic());
-    if !shaped {
+    if shaped {
+        out.push_str("****");
+    } else {
         out.push_str(run);
-        return;
     }
-    let chars: Vec<char> = run.chars().collect();
-    out.extend(chars[..4].iter());
-    out.push_str("****");
-    out.extend(chars[chars.len() - 4..].iter());
 }
 
 /// Longest token-shaped run: 24+ token chars mixing digits with letters.
