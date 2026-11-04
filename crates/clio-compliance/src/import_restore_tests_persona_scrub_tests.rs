@@ -33,7 +33,7 @@ use clio_types::{
 };
 
 const SECRET: &str = "api_key: sk-test-1234567890";
-const SECRET_MASKED: &str = "api_key: ****7890";
+const SECRET_MASKED: &str = "api_key: [REDACTED]";
 
 fn stable_row(bank: &str, context: Option<&str>) -> PersonaStableEntry {
     PersonaStableEntry {

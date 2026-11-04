@@ -223,7 +223,7 @@ fn audit_trail_masks_planted_secret() {
         &serde_json::json!({}),
         &mut numeric,
     );
-    assert_eq!(numeric["revisions"][0]["api_key"], json!("****cret"));
+    assert_eq!(numeric["revisions"][0]["api_key"], json!("[REDACTED]"));
     assert_eq!(numeric["revisions"][0]["token_count"], json!(3));
 
     assert_eq!(

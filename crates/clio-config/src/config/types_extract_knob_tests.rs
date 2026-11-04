@@ -58,7 +58,7 @@ fn extract_env_knobs_reach_effective_config_and_mask_key() {
         panic!("config_get extract key");
     };
     let view = serde_json::to_string(&data.value).unwrap();
-    assert!(view.contains("****") && !view.contains("sk-extract-token"));
+    assert!(view.contains("[REDACTED]") && !view.contains("sk-extract-token"));
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn extract_api_key_set_ack_is_masked() {
     ) else {
         panic!("extract api key set");
     };
-    assert!(data.value.as_str().unwrap_or("").contains("****"));
+    assert!(data.value.as_str().unwrap_or("").contains("[REDACTED]"));
     assert!(
         !data
             .value

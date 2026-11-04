@@ -49,18 +49,18 @@ fn config_get_masks_a_planted_secret_in_path_and_full_views() {
     let (code, out, err) = run(&["get", "credentials.api_key"], &mut rt, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert!(!out.contains(SECRET), "{out}");
-    assert!(out.contains("****6789"), "{out}");
+    assert!(out.contains("[REDACTED]"), "{out}");
 
     // The full effective view masks every secret too.
     let (code, full, err) = run(&["get"], &mut rt, false);
     assert_eq!(code, ExitCode::SUCCESS, "{err}");
     assert!(!full.contains(SECRET), "{full}");
-    assert!(full.contains("****6789"), "{full}");
+    assert!(full.contains("[REDACTED]"), "{full}");
 
     let (_, text, _) = run(&["get", "credentials.api_key"], &mut rt, true);
     assert!(!text.contains(SECRET), "{text}");
     assert!(
-        text.contains("config credentials.api_key = ****6789"),
+        text.contains("config credentials.api_key = [REDACTED]"),
         "{text}"
     );
 }

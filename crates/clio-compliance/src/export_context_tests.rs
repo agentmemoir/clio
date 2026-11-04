@@ -32,7 +32,7 @@ use clio_store::Store;
 use clio_types::{Actor, Bank, MemoryItem, OpContext, SemanticCategory};
 
 const SECRET: &str = "api_key: sk-test-1234567890";
-const SECRET_MASKED: &str = "api_key: ****7890";
+const SECRET_MASKED: &str = "api_key: [REDACTED]";
 
 /// The shared `item` fixture with one descriptive `context` value set.
 fn context_item(id: &str, bank: &str, subject: &str, context: &str) -> MemoryItem {
@@ -109,7 +109,7 @@ fn secret_shaped_context_is_scrubbed_in_the_bundle() {
         .iter()
         .find(|i| i.id == "ctx-secret-1")
         .expect("context item present in the bundle");
-    assert_eq!(stored.context.as_deref(), Some("api_key: ****7890"));
+    assert_eq!(stored.context.as_deref(), Some("api_key: [REDACTED]"));
 }
 
 #[test]

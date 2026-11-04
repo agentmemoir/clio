@@ -151,7 +151,7 @@ fn t34_10_source_is_scrubbed_before_egress() {
     let req = request("api_key: supersecret-12345\nAda met Grace", None);
     let msg = build_user_message(&req);
     assert!(!msg.contains("supersecret"));
-    assert!(msg.contains("****"));
+    assert!(msg.contains("[REDACTED]"));
     // Scrubbing is per-egress: the caller's request is untouched.
     assert!(req.source_text.contains("supersecret"));
 }

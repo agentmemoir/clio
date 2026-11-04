@@ -28,7 +28,7 @@ use serde_json::json;
 use super::{import_id, kind_key, masked_item};
 
 const SECRET: &str = "api_key: sk-test-1234567890";
-const SECRET_MASKED: &str = "api_key: ****7890";
+const SECRET_MASKED: &str = "api_key: [REDACTED]";
 
 fn item() -> MemoryItem {
     MemoryItem {

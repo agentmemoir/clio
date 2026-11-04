@@ -8,7 +8,7 @@
 //!
 //! ## Owns
 //! - Secret path/key detection heuristics
-//! - Last-4 / redacted string masking for scalars and JSON trees
+//! - Full redaction of string secrets for scalars and JSON trees
 //! - Char-boundary-safe inline `key: secret` scrubbing for prose telemetry
 //!
 //! ## Does not own
@@ -152,22 +152,13 @@ fn contains_marker(name: &str) -> bool {
     SECRET_MARKERS.iter().any(|marker| lowered.contains(marker))
 }
 
-/// Mask a secret string: empty or ≤4 chars → `[REDACTED]` (last-4 would reveal
-/// the whole secret); otherwise `****` + last up to 4 chars.
+/// Mask a secret string by replacing it with [`REDACTED`].
 ///
-/// [`REDACTED`] passes through unchanged: it is what the masker emits for a
-/// short value, and masking an already-masked document must not rewrite it.
+/// Every value gets the same literal, so no character of a secret survives.
+/// The result is a fixed point: masking [`REDACTED`] again returns it unchanged.
 #[must_use]
-pub fn mask_secret(raw: &str) -> String {
-    if raw == REDACTED {
-        return REDACTED.to_owned();
-    }
-    let chars: Vec<char> = raw.chars().collect();
-    if chars.len() <= 4 {
-        return "[REDACTED]".to_owned();
-    }
-    let suffix: String = chars[chars.len() - 4..].iter().collect();
-    format!("****{suffix}")
+pub fn mask_secret(_raw: &str) -> String {
+    REDACTED.to_owned()
 }
 
 /// Recursively mask secret-looking leaves in a JSON value (in place).
@@ -248,8 +239,8 @@ fn mask_member(child_path: &str, key: &str, child: &mut Value) {
         {
             *text = mask_secret(text);
         }
-        // A masked number is the whole literal: a last-4 form would publish the
-        // digits of a PIN. Counts never reach this arm, see `name_is_strong_secret`.
+        // A masked number is the whole literal, so no digit of a PIN survives.
+        // Counts never reach this arm, see `name_is_strong_secret`.
         Value::Number(_) | Value::Bool(_) if name_is_strong_secret(key) => {
             *child = Value::String(REDACTED.to_owned());
         }
@@ -299,13 +290,12 @@ fn unique_key(candidate: String, taken: &serde_json::Map<String, Value>) -> Stri
     }
 }
 
-/// The literal [`mask_secret`] emits for a value of four characters or fewer.
+/// The literal [`mask_secret`] emits for every value.
 ///
 /// Masking is a fixed point on this literal: [`mask_secret`] returns it
 /// unchanged, and [`scrub_inline_secrets`] short-circuits it. Without that, a
 /// second masking pass over an already-masked document would rewrite the
-/// ten-character `[REDACTED]` to `****TED]`. Longer masks already reproduce
-/// themselves, because `****` plus the last four characters is itself.
+/// ten-character literal and corrupt the mask.
 const REDACTED: &str = "[REDACTED]";
 
 /// Scrub every `key: secret` / `key=secret` pair in prose (all marker occurrences).

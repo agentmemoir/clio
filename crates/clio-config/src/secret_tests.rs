@@ -5,12 +5,29 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn mask_secret_keeps_last_four() {
-    assert_eq!(mask_secret("sk-abcdefgh"), "****efgh");
+fn mask_secret_redacts_every_value() {
+    assert_eq!(mask_secret("sk-abcdefgh"), "[REDACTED]");
     assert_eq!(mask_secret(""), "[REDACTED]");
     assert_eq!(mask_secret("ab"), "[REDACTED]");
     assert_eq!(mask_secret("1234"), "[REDACTED]");
-    assert_eq!(mask_secret("12345"), "****2345");
+    assert_eq!(mask_secret("12345"), "[REDACTED]");
+}
+
+#[test]
+fn mask_secret_hides_a_five_character_tail() {
+    let secret = "12345";
+    let masked = mask_secret(secret);
+    assert_eq!(masked, "[REDACTED]");
+    assert!(!masked.contains(&secret[secret.len() - 4..]), "{masked}");
+}
+
+#[test]
+fn mask_secret_hides_a_long_tail() {
+    let secret = "sk-live-0123456789abcdefghijklmn";
+    assert_eq!(secret.len(), 32);
+    let masked = mask_secret(secret);
+    assert_eq!(masked, "[REDACTED]");
+    assert!(!masked.contains(&secret[secret.len() - 4..]), "{masked}");
 }
 
 #[test]
@@ -67,7 +84,7 @@ fn mask_value_redacts_nested_api_key() {
     });
     mask_value("", &mut v);
     // The field name is kept so a path read still finds it.
-    assert_eq!(v["credentials"]["api_key"], json!("****EY99"));
+    assert_eq!(v["credentials"]["api_key"], json!("[REDACTED]"));
     assert_eq!(v["backend"], json!("sqlite"));
 }
 
@@ -185,12 +202,12 @@ fn masked_clone_keeps_config_field_names() {
         .as_str()
         .expect("masked api_key");
     assert_ne!(api_key, "sk-live-abcdef0123456789");
-    assert_eq!(api_key, "****6789");
+    assert_eq!(api_key, "[REDACTED]");
     let database_url = masked["store"]["database_url"]
         .as_str()
         .expect("masked database_url");
     assert_ne!(database_url, "postgres://user:pw@127.0.0.1/db");
-    assert_eq!(database_url, "****1/db");
+    assert_eq!(database_url, "[REDACTED]");
 }
 
 #[test]
@@ -208,12 +225,12 @@ fn masked_at_path_masks_strings_and_passes_scalars_through() {
         json!(0.25)
     );
     let masked = masked_at_path("credentials.api_key", &json!("sk-live-abcdef0123456789"));
-    assert_eq!(masked, json!("****6789"));
+    assert_eq!(masked, json!("[REDACTED]"));
     let nested = masked_at_path(
         "credentials",
         &json!({"api_key": "sk-live-abcdef0123456789", "region": "eu"}),
     );
-    assert_eq!(nested["api_key"], json!("****6789"));
+    assert_eq!(nested["api_key"], json!("[REDACTED]"));
     assert_eq!(nested["region"], json!("eu"));
 }
 
@@ -230,12 +247,12 @@ fn mask_string_secrets_masks_strings_and_keeps_non_strings() {
         "items": [{"secret": "sk-abcdefgh"}, {"ok": true}]
     });
     mask_string_secrets("", &mut v);
-    assert_eq!(v["api_key"], json!("****EY99"));
+    assert_eq!(v["api_key"], json!("[REDACTED]"));
     assert_eq!(v["lesson_tokens"], json!(3));
     assert_eq!(v["token"], json!(null));
-    assert_eq!(v["nested"]["password"], json!("****cret"));
+    assert_eq!(v["nested"]["password"], json!("[REDACTED]"));
     assert_eq!(v["nested"]["count"], json!(7));
-    assert_eq!(v["items"][0]["secret"], json!("****efgh"));
+    assert_eq!(v["items"][0]["secret"], json!("[REDACTED]"));
     assert_eq!(v["items"][1]["ok"], json!(true));
 }
 
@@ -265,7 +282,7 @@ fn scrub_masks_every_api_key_occurrence() {
     let scrubbed = scrub_inline_secrets(raw);
     assert!(!scrubbed.contains("sk-FIRSTKEY99"));
     assert!(!scrubbed.contains("sk-SECONDKEY88"));
-    assert!(scrubbed.contains("****"));
+    assert!(scrubbed.contains("[REDACTED]"));
 }
 
 #[test]
@@ -277,9 +294,9 @@ fn scrub_is_idempotent_over_an_already_masked_value() {
     assert_eq!(once, "token: [REDACTED]");
     let twice = scrub_inline_secrets(&once);
     assert_eq!(twice, once, "re-scrubbing corrupted an existing mask");
-    // A longer masked value was already a fixed point; it must stay put too.
+    // A longer secret masks to the same literal, and re-scrubbing keeps it.
     let long = scrub_inline_secrets("token: abcdefgh");
-    assert_eq!(long, "token: ****efgh");
+    assert_eq!(long, "token: [REDACTED]");
     assert_eq!(scrub_inline_secrets(&long), long);
 }
 

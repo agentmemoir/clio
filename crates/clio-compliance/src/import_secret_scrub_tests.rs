@@ -38,7 +38,7 @@ const SECRET: &str = "api_key: sk-test-1234567890";
 
 /// The value `scrub_inline_secrets` produces, spelled out independently so the
 /// test does not merely restate the helper it is checking.
-const SECRET_MASKED: &str = "api_key: ****7890";
+const SECRET_MASKED: &str = "api_key: [REDACTED]";
 
 /// A minimal admitted semantic item carrying `context`, built by hand so the
 /// raw secret reaches the importer without passing the exporter.

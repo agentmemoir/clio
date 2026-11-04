@@ -29,7 +29,7 @@ use clio_store::{AssocEdgeRecord, AssocKind, BeliefStore, Store};
 use clio_types::{Actor, EpisodicType};
 
 const SECRET: &str = "api_key: sk-test-1234567890";
-const SECRET_MASKED: &str = "api_key: ****7890";
+const SECRET_MASKED: &str = "api_key: [REDACTED]";
 
 /// Adds one belief with a distinct id/proposition and one triple with a
 /// distinct id/object (both with carrier items) to the shared fixture.

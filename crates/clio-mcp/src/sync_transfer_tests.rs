@@ -416,3 +416,15 @@ fn a_resolved_journal_path_with_no_file_keeps_the_pull_clear() {
         "no recorded denial covers the subject"
     );
 }
+
+/// The transfer response carries a bearer token as a full mask: the serialized
+/// response holds no four-character tail of it.
+#[test]
+fn a_long_token_is_fully_masked_in_the_response() {
+    let token = "tok-0123456789abcdef".to_owned();
+    let response = json!({ "token": super::mask_token(Some(&token)) });
+    assert_eq!(response["token"], "[REDACTED]");
+    let serialized = response.to_string();
+    let tail = &token[token.len() - 4..];
+    assert!(!serialized.contains(tail), "{serialized}");
+}

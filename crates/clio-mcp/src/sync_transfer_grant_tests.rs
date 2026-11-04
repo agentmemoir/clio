@@ -122,7 +122,7 @@ fn a_scoped_list_runs_when_it_excludes_the_default_bank() {
     .expect("a scoped push inside the credential's banks runs");
     assert_eq!(out["banks"][0]["bank_id"], "b-allowed");
     assert_eq!(out["principal"], "sync-runner");
-    assert_eq!(out["token"], "***ghij");
+    assert_eq!(out["token"], "[REDACTED]");
 }
 
 /// Naming `shared` in the list does not bypass the deployment gate: the shared

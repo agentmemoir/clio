@@ -1,5 +1,5 @@
 {
-  "catalog_hash": "fnv1a64:9b2323363daaf6c5",
+  "catalog_hash": "fnv1a64:c0fc6a61cedf1299",
   "format": "am_tool_schema_pack",
   "format_version": 1,
   "mcp_protocol_revision": "2025-11-25",
@@ -3512,7 +3512,7 @@
             "type": "string"
           },
           "token": {
-            "description": "Bearer token for the remote; echoed masked (last 4) in responses, never in the clear.",
+            "description": "Bearer token for the remote; fully redacted in responses, never returned in part or in the clear.",
             "type": "string"
           }
         },
@@ -3549,7 +3549,7 @@
             "type": "string"
           },
           "token": {
-            "description": "Bearer token for the remote; echoed masked (last 4) in responses, never in the clear.",
+            "description": "Bearer token for the remote; fully redacted in responses, never returned in part or in the clear.",
             "type": "string"
           }
         },

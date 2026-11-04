@@ -50,7 +50,7 @@ fn reject_events_mask_secrets() {
     let preview = events[0].preview.to_string();
     assert!(!preview.contains("SECRETKEY99"));
     assert!(!preview.contains("abc123"));
-    assert!(preview.contains("****"));
+    assert!(preview.contains("[REDACTED]"));
 }
 
 #[test]

@@ -301,7 +301,7 @@ fn t22_07_import_provider_stub_unsupported_with_masked_credentials() {
     let masked = out["credentials_masked"]["api_key"]
         .as_str()
         .expect("masked credential echoed");
-    assert!(masked.starts_with("****"));
+    assert_eq!(masked, "[REDACTED]");
     assert!(!out.to_string().contains("sk-test-1234567890"));
 }
 

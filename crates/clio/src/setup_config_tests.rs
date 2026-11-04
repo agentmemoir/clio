@@ -177,7 +177,7 @@ fn existing_values_are_masked_and_only_file_set_fields_report() {
         .iter()
         .find(|v| v.path == "credentials.embed_api_key")
         .expect("key reported");
-    assert!(key.display.contains("****"));
+    assert!(key.display.contains("[REDACTED]"));
     assert!(!key.display.contains("sk-secret"));
     let provider = found
         .iter()

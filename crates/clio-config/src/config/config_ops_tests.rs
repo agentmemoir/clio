@@ -42,7 +42,7 @@ fn config_get_masks_secrets_from_file() {
     let ToolResult::Ok { data, .. } = rt.config_get(Some("credentials.api_key")) else {
         panic!("expected ok");
     };
-    assert_eq!(data.value, json!("****1234"));
+    assert_eq!(data.value, json!("[REDACTED]"));
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn config_get_returns_count_numbers_and_keeps_field_names() {
     assert_eq!(object["history"]["lesson_max_tokens"], json!(32000));
     assert_eq!(object["injection"]["budget_tokens"], json!(2048));
     assert_eq!(object["author"], json!("Ada"));
-    assert_eq!(object["credentials"]["api_key"], json!("****1234"));
+    assert_eq!(object["credentials"]["api_key"], json!("[REDACTED]"));
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn config_set_session_scope_applies_and_masks_a_secret() {
     ) else {
         panic!("set secret");
     };
-    assert_eq!(data.value, json!("****1234"));
+    assert_eq!(data.value, json!("[REDACTED]"));
 }
 
 #[test]

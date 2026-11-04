@@ -82,14 +82,14 @@ fn embed_config_keys_defaults_allowlist_and_masking() {
         data.value
             .as_str()
             .expect("masked set ack")
-            .contains("****")
+            .contains("[REDACTED]")
     );
     let masked = rt_set.effective_masked();
     let key_view = masked["credentials"]["embed_api_key"]
         .as_str()
         .unwrap_or("");
     assert!(
-        key_view.contains("****") && !key_view.contains("sk-sidecar-token"),
+        key_view.contains("[REDACTED]") && !key_view.contains("sk-sidecar-token"),
         "{masked}"
     );
 }
@@ -213,13 +213,13 @@ fn rerank_api_key_masked_everywhere() {
     ) else {
         panic!("rerank api key set");
     };
-    assert!(data.value.as_str().unwrap_or("").contains("****"));
+    assert!(data.value.as_str().unwrap_or("").contains("[REDACTED]"));
     let ToolResult::Ok { data: get_data, .. } = rt.config_get(Some("credentials.rerank_api_key"))
     else {
         panic!("rerank api key get");
     };
     let get_str = serde_json::to_string(&get_data.value).unwrap();
-    assert!(get_str.contains("****") && !get_str.contains("sk-rerank-token"));
+    assert!(get_str.contains("[REDACTED]") && !get_str.contains("sk-rerank-token"));
     let masked = serde_json::to_string(&rt.effective_masked()).unwrap();
     assert!(!masked.contains("sk-rerank-token-9876543210"));
 }

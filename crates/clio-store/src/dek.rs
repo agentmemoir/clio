@@ -429,7 +429,7 @@ impl DekProvider for LocalDevKms {
             Ok(Some(KeySlot::Active { version, .. })) => {
                 format!(
                     "subject_id={subject_id} status=active dek_ref={}",
-                    clio_config::secret::mask_secret(&Self::dek_ref(subject_id, version))
+                    Self::dek_ref(subject_id, version)
                 )
             }
             Ok(Some(KeySlot::Destroyed { version })) => {

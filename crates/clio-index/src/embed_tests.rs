@@ -103,7 +103,7 @@ fn scrub_redacts_marker_adjacent_secrets() {
     let text = "config api_key=hunter2 in the deploy note";
     let scrubbed = scrub_embed_text(text);
     assert!(
-        scrubbed.contains("api_key=****"),
+        scrubbed.contains("api_key=[REDACTED]"),
         "marker-adjacent value must be masked"
     );
     assert_eq!(scrub_embed_text("nothing here"), "nothing here");
