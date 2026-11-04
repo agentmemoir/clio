@@ -78,7 +78,7 @@ fn verify_feedback_secrets_are_scrubbed_before_egress() {
     };
     let msg = build_user_message(&req);
     assert!(!msg.contains("othersecret"));
-    assert!(msg.contains("****"));
+    assert!(msg.contains("[REDACTED]"));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn tool_payload_secrets_are_masked_before_egress() {
     let msg = build_user_message(&req);
     assert!(!msg.contains("supersecret"));
     assert!(!msg.contains("othersecret"));
-    assert!(msg.contains("****"));
+    assert!(msg.contains("[REDACTED]"));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn source_context_secrets_are_scrubbed_before_egress() {
     let serialized = serde_json::to_string(&body).unwrap();
     assert!(serialized.contains("<source_context>"), "{serialized}");
     assert!(!serialized.contains("supersecret"), "{serialized}");
-    assert!(serialized.contains("****"), "{serialized}");
+    assert!(serialized.contains("[REDACTED]"), "{serialized}");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn provider_error_body_is_surfaced_bounded_and_scrubbed() {
     assert_eq!(err.code, ErrorCode::Internal);
     assert!(err.to_string().contains("provider error"), "{err}");
     assert!(!err.to_string().contains("sk-abcdef123456"), "{err}");
-    assert!(err.to_string().contains("****"), "{err}");
+    assert!(err.to_string().contains("[REDACTED]"), "{err}");
 
     // A very long provider message is bounded well below its original size.
     let long = "x".repeat(MAX_ERROR_TEXT_CHARS + 100);

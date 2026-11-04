@@ -79,8 +79,8 @@ fn sealed(id: &str, field: &str) -> String {
 ///
 /// A scrub result that is empty is treated as absent: record validators
 /// reject an empty `context` on import, so an emptied scrub must never be
-/// written as `Some("")`. A scrub can also EXPAND a value — a secret of four
-/// or fewer characters becomes `[REDACTED]` — so the scrubbed result is
+/// written as `Some("")`. A scrub can also EXPAND a value — every secret
+/// becomes the 10-character `[REDACTED]` — so the scrubbed result is
 /// re-checked against the published [`CONTEXT_MAX_BYTES`] maximum and dropped
 /// to absent when it exceeds it: a scrub must never push a value over the
 /// bound that import validators enforce.
@@ -237,8 +237,8 @@ pub(crate) fn mask_preference(pref: &mut PersonaPreference, mode: ExportContentM
 mod tests {
     use super::*;
 
-    /// A scrub can EXPAND a value (a secret of four or fewer characters
-    /// becomes `[REDACTED]`), so a value that fits the published maximum before
+    /// A scrub can EXPAND a value (every secret becomes the 10-character
+    /// `[REDACTED]`), so a value that fits the published maximum before
     /// the scrub must never be written as an over-long `context` afterwards.
     #[test]
     fn scrub_context_drops_a_value_the_scrub_pushed_over_the_maximum() {

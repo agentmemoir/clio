@@ -19,7 +19,7 @@
 //!   the run instead of applying it unguarded
 //! - The transfer key read: the explicit `CLIO_SYNC_KEY_FILE` first, else the
 //!   recorded store
-//! - Bearer-token masking on the transfer response (last-4 at most)
+//! - Full bearer-token masking on the transfer response
 //!
 //! ## Does not own
 //! - Push feed packaging, cursors, and conflict/DLQ semantics (`clio-sync`)
@@ -46,7 +46,7 @@ use serde_json::{Value, json};
 ///
 /// The tool name fixes the default mode; an explicit `mode` argument overrides
 /// it (`bidirectional` pulls then pushes in one operator action). The remote
-/// bearer token is echoed masked (last 4 at most), never in the clear.
+/// bearer token is echoed as a full mask, never in the clear.
 ///
 /// A bound credential authorizes the whole run: the actor and credential
 /// resolve first, then every bank the run touches — named or default-resolved —
@@ -146,16 +146,9 @@ fn denial_authority(
     JournalDenialProbe::resolved(state.journal_path.as_deref(), get)
 }
 
-/// Mask a bearer token: full mask for short tokens, last-4 tail otherwise.
+/// Mask a bearer token: every present token becomes the same full mask.
 fn mask_token(token: Option<&String>) -> Option<String> {
-    token.as_ref().map(|t| {
-        let chars: Vec<char> = t.chars().collect();
-        if chars.len() <= 8 {
-            return "***".to_owned();
-        }
-        let tail: String = chars[chars.len() - 4..].iter().collect();
-        format!("***{tail}")
-    })
+    token.map(|_| "[REDACTED]".to_owned())
 }
 
 #[cfg(test)]

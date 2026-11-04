@@ -59,8 +59,7 @@ fn t05_planted_credential_masked_in_all_output() {
     );
 
     let masked = out["credentials_masked"]["api_key"].as_str().unwrap();
-    assert!(masked.starts_with("****"), "expected **** prefix: {masked}");
-    assert!(masked.ends_with("4321"), "expected last 4: {masked}");
+    assert_eq!(masked, "[REDACTED]", "the credential is fully masked");
 }
 
 #[test]
@@ -414,7 +413,7 @@ fn mem0_env_lookup_and_credential_mask_types() {
         }
     };
     let masked = super::masked_credentials_with(&json!({}), &env_lookup);
-    assert_eq!(masked["api_key"], "****9876");
+    assert_eq!(masked["api_key"], "[REDACTED]");
 
     let extracted = super::extract_api_key_with(&json!({}), &env_lookup);
     assert_eq!(extracted.as_deref(), Some("env-secret-xyz9876"));
@@ -422,7 +421,7 @@ fn mem0_env_lookup_and_credential_mask_types() {
     let masked_str = super::masked_credentials(&json!({
         "credentials": "direct-secret-str-5432"
     }));
-    assert_eq!(masked_str, "****5432");
+    assert_eq!(masked_str, "[REDACTED]");
 
     let masked_null = super::masked_credentials(&json!({
         "credentials": null

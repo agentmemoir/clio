@@ -351,7 +351,7 @@ fn history_views_mask_planted_secrets() {
         assert_eq!(code, ExitCode::from(0), "{verb}");
         assert!(err.is_empty(), "{verb}: {err}");
         assert!(!out.contains("supersecret"), "{verb} leaked: {out}");
-        assert!(out.contains("****"), "{verb} did not mask: {out}");
+        assert!(out.contains("[REDACTED]"), "{verb} did not mask: {out}");
     }
 
     // A synthetic secret-keyed field proves the structural mask pass: any

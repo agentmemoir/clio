@@ -69,7 +69,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
                 (
                     "token",
                     s(
-                        "Bearer token for the remote; echoed masked (last 4) in responses, never in the clear.",
+                        "Bearer token for the remote; fully redacted in responses, never returned in part or in the clear.",
                     ),
                 ),
             ],
@@ -91,7 +91,7 @@ pub fn sync_defs() -> Vec<ToolDef> {
                 (
                     "token",
                     s(
-                        "Bearer token for the remote; echoed masked (last 4) in responses, never in the clear.",
+                        "Bearer token for the remote; fully redacted in responses, never returned in part or in the clear.",
                     ),
                 ),
             ],

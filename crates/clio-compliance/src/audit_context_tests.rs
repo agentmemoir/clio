@@ -65,7 +65,7 @@ fn secret_shaped_context_is_scrubbed_in_the_view() {
     let (store, bank, id) = seeded("api_key: sk-test-1234567890");
     let view = audit_trail(&store, &bank, &id).expect("trail");
     let revision = view.revisions.first().expect("revision");
-    assert_eq!(revision["context"], json!("api_key: ****7890"));
+    assert_eq!(revision["context"], json!("api_key: [REDACTED]"));
     let text = serde_json::to_string(&view).expect("view serializes");
     assert!(
         !text.contains("sk-test-1234567890"),
@@ -79,7 +79,7 @@ fn secret_shaped_context_is_scrubbed_in_the_view() {
         .expect("timeline revision");
     assert_eq!(
         timeline_revision["entry"]["context"],
-        json!("api_key: ****7890")
+        json!("api_key: [REDACTED]")
     );
     // Telemetry keeps presence/length/hash only: no raw context anywhere.
     let create = view

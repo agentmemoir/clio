@@ -119,7 +119,7 @@ fn sync_transfer_roundtrip_against_local_dev_serve() {
     assert_eq!(pushed["remote"], addr);
     assert_eq!(pushed["encryption"], Value::Bool(true));
     let token = pushed["token"].as_str().expect("masked token");
-    assert!(token.starts_with("***"), "{token}");
+    assert_eq!(token, "[REDACTED]", "{token}");
     assert!(!pushed.to_string().contains("averylongtoken123"));
     let rows = pushed["banks"].as_array().expect("bank rows");
     assert_eq!(rows[0]["bank_id"], "bank-mcp");
@@ -133,7 +133,7 @@ fn sync_transfer_roundtrip_against_local_dev_serve() {
         &get,
     )
     .expect("the pull runs");
-    assert_eq!(pulled["token"], "***");
+    assert_eq!(pulled["token"], "[REDACTED]");
     assert!(pulled["banks"][0]["pull_cursor"].as_str().is_some());
 
     // Bidirectional: pull then push in one action.

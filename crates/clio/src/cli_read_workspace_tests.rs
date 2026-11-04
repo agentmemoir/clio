@@ -202,10 +202,8 @@ fn audit_trail_masks_planted_secret() {
     );
     let masked = payload.to_string();
     assert!(!masked.contains("supersecret"), "{masked}");
-    assert!(
-        masked.contains("****") || masked.contains("[REDACTED]"),
-        "{masked}"
-    );
+    assert!(masked.contains("[REDACTED]"), "{masked}");
+    assert!(!masked.contains("****"), "{masked}");
 
     let (_, out, _) = run_state("audit trail", &["itm-secret", "--bank", "bank-a"], &s, true);
     assert!(!out.contains("supersecret"), "secret leaked: {out}");
@@ -223,7 +221,7 @@ fn audit_trail_masks_planted_secret() {
         &serde_json::json!({}),
         &mut numeric,
     );
-    assert_eq!(numeric["revisions"][0]["api_key"], json!("****cret"));
+    assert_eq!(numeric["revisions"][0]["api_key"], json!("[REDACTED]"));
     assert_eq!(numeric["revisions"][0]["token_count"], json!(3));
 
     assert_eq!(

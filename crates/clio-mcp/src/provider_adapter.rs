@@ -285,7 +285,7 @@ fn process_mem0_item(
     }
 }
 
-/// Last-4-masked view of accepted credentials (never plaintext).
+/// Fully-redacted view of accepted credentials (never plaintext).
 pub(crate) fn masked_credentials(args: &Value) -> Value {
     masked_credentials_with(args, &|k| std::env::var(k).ok())
 }

@@ -224,5 +224,5 @@ fn force_overwrite_scrubs_secret_shaped_context() {
         .get_memory_item(&h.bank, &format!("{id}#{}", h.bank))
         .expect("read restored item")
         .expect("restored item exists");
-    assert_eq!(restored.context.as_deref(), Some("api_key: ****7890"));
+    assert_eq!(restored.context.as_deref(), Some("api_key: [REDACTED]"));
 }

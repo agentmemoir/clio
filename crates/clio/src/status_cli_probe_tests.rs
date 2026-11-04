@@ -134,7 +134,7 @@ fn build_setup_masks_secret_and_reports_config() {
         .secrets
         .get("credentials.embed_api_key")
         .expect("masked");
-    assert_eq!(masked, "****2345");
+    assert_eq!(masked, "[REDACTED]");
     assert!(!masked.contains("verysecret"));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -169,7 +169,7 @@ fn build_setup_masks_secret_keys_outside_the_watched_allowlist() {
     let rt = clio_config::Runtime::with_deployment_file(&path);
     let view = build_setup(&rt, Some(&path));
     let masked = view.secrets.get("extract.token").expect("masked");
-    assert_eq!(masked, "****mnop");
+    assert_eq!(masked, "[REDACTED]");
     assert!(
         !view
             .secrets

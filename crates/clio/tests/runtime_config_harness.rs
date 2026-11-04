@@ -38,7 +38,7 @@ fn t02_config_get_after_overlays_masks_secrets() {
     let ToolResult::Ok { data, .. } = rt.config_get(Some("credentials.api_key")) else {
         panic!("get");
     };
-    assert_eq!(data.value, json!("****EY99"));
+    assert_eq!(data.value, json!("[REDACTED]"));
     let ToolResult::Ok { data, .. } = rt.config_get(Some("backend")) else {
         panic!("backend");
     };
