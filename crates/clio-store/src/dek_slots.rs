@@ -151,9 +151,12 @@ fn active_key(slot: KeySlot, subject_id: &str) -> Result<(u32, [u8; KEY_LEN]), A
 
 /// The slot an insert must have left behind; losing it is a storage defect.
 fn require_stored_slot(slot: Option<KeySlot>, subject_id: &str) -> Result<KeySlot, AmError> {
-    let message =
-        format!("DEK slot for subject `{subject_id}` vanished after the conflict-safe insert");
-    slot.ok_or_else(|| AmError::new(ErrorCode::Internal, message))
+    slot.ok_or_else(|| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("DEK slot for subject `{subject_id}` vanished after the conflict-safe insert"),
+        )
+    })
 }
 
 /// The shared crypto-shred error for a destroyed subject.

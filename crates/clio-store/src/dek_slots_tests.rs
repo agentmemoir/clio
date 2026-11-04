@@ -98,14 +98,23 @@ fn in_memory_store_never_touches_a_file() {
     ));
 }
 
+/// Covers the vanished-slot conversion only: `None` becomes an internal error.
+///
+/// `SlotStore::ensure` cannot reach the `None` branch in process, because
+/// nothing deletes a key-store row: the connection is cached and `shred` marks
+/// the row destroyed instead of removing it.
 #[test]
 fn require_stored_slot_rejects_none_and_keeps_some() {
-    let Err(missing) = require_stored_slot(None, "s") else {
+    let subject = "vanished-subject";
+    let Err(missing) = require_stored_slot(None, subject) else {
         panic!("a vanished slot must not be accepted");
     };
     assert_eq!(missing.code, ErrorCode::Internal);
     assert!(
-        missing.message.contains("subject `s`") && missing.message.contains("vanished"),
+        missing
+            .message
+            .contains(&format!("subject `{subject}`"))
+            && missing.message.contains("vanished"),
         "message must name the subject and the vanish: {}",
         missing.message
     );
