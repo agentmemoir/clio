@@ -264,7 +264,7 @@ fn config_set_masks_an_endpoint_url_that_carries_credentials() {
     else {
         panic!("set embed.url");
     };
-    assert_eq!(data.value, json!("****t/v1"));
+    assert_eq!(data.value, json!("[REDACTED]"));
     // The stored value keeps the credentials so the endpoint stays usable.
     assert_eq!(rt.effective_raw()["embed"]["url"], json!(raw));
 }
