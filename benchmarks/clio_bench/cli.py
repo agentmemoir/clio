@@ -15,7 +15,7 @@ from pathlib import Path
 from .doubles import StubGenerator, StubJudge
 from .fetch import MissingSnapshotError, PinError, load_pins
 from .fingerprint import FingerprintError
-from .llm import frontier_key_present
+from .llm import ModelUnavailableError, frontier_key_present
 from .report import (
     blocked_gate_record,
     build_report,
@@ -84,26 +84,39 @@ def _build_adapter(args, tokenizer):
     return builder(tokenizer, args)
 
 
+def _judge_settings(args, pins) -> tuple[str, str, str]:
+    """Resolve the tier, model id, and base URL of the selected judge."""
+    tier = "tier1" if args.judge == "local" else "tier2"
+    settings = pins["judge"][tier]
+    model = getattr(args, "judge_model", None) or settings["model"]
+    base_url = getattr(args, "judge_base_url", None) or settings["base_url"]
+    return tier, model, base_url
+
+
 def _build_judge(args, pins):
     if args.judge == "stub":
         return StubJudge(), {"tier": "stub", "model": "stub-exact-match", "base_url": ""}
-    tier = "tier1" if args.judge == "local" else "tier2"
-    settings = pins["judge"][tier]
-    model = args.judge_model or settings["model"]
-    base_url = args.judge_base_url or settings["base_url"]
+    tier, model, base_url = _judge_settings(args, pins)
     from .judges.llm_judge import LlmJudge
     from .llm import HttpChatClient
 
+    client = HttpChatClient(base_url, model)
+    client.preflight()
     return LlmJudge(
-        HttpChatClient(base_url, model),
+        client,
         model,
         tier=tier,
-        max_tokens=args.judge_max_tokens,
+        max_tokens=getattr(args, "judge_max_tokens", 200),
     ), {
         "tier": tier,
         "model": model,
         "base_url": base_url,
     }
+
+
+def preflight_judge(args, pins) -> None:
+    """Build the judge and fail fast when its model is unavailable."""
+    _build_judge(args, pins)
 
 
 def _build_generator(args, pins):
@@ -186,7 +199,14 @@ def main(argv: list[str] | None = None) -> int:
     tokenizer = get_tokenizer(pins["judge"]["tokenizer"])
     cache_dir = Path(args.cache_dir or "benchmarks/.cache/datasets")
     adapter = _build_adapter(args, tokenizer)
-    judge, judge_meta = _build_judge(args, pins)
+    try:
+        judge, judge_meta = _build_judge(args, pins)
+    except ModelUnavailableError as exc:
+        print(
+            f"clio-bench: judge unavailable, no score produced: {exc}",
+            file=sys.stderr,
+        )
+        return 2
     generator, generator_meta = _build_generator(args, pins)
 
     if not adapter.healthcheck():

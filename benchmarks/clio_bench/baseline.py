@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import cli
 from .fetch import load_pins
-from .llm import frontier_key_present
+from .llm import ModelUnavailableError, frontier_key_present
 from .report import (
     blocked_gate_record,
     render_settings_lines,
@@ -202,6 +202,15 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if (args.judge == "tier2" or args.generator == "tier2") and not frontier_key_present():
         return record_blocked_gate(args)
+
+    try:
+        cli.preflight_judge(args, load_pins(Path(args.pins)))
+    except ModelUnavailableError as exc:
+        print(
+            f"clio-bench baseline: judge unavailable, no baseline written: {exc}",
+            file=sys.stderr,
+        )
+        return 2
 
     out_path = Path(args.out) if args.out else None
     md_path = Path(args.report_md) if args.report_md else None

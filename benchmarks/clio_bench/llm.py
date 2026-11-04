@@ -19,6 +19,10 @@ class ChatClientError(RuntimeError):
     """Raised when the model endpoint is unreachable or returns an error."""
 
 
+class ModelUnavailableError(ChatClientError):
+    """Raised when the configured model is absent from its endpoint."""
+
+
 # The environment variables that can name the frontier key, in resolution
 # order. Only presence is ever reported; the value is never logged or stamped
 # into a report.
@@ -32,7 +36,7 @@ def frontier_key_present(environ: dict[str, str] | None = None) -> bool:
 
 
 class ChatClient(Protocol):
-    """The one method the judge and answer generator need."""
+    """The methods the judge and answer generator need."""
 
     def complete(
         self,
@@ -42,6 +46,8 @@ class ChatClient(Protocol):
         max_tokens: int = 512,
         json_schema: dict | None = None,
     ) -> str: ...
+
+    def preflight(self) -> None: ...
 
 
 class HttpChatClient:
@@ -61,6 +67,47 @@ class HttpChatClient:
             "OPENAI_API_KEY"
         )
         self.timeout = timeout
+
+    def _request(
+        self, path: str, *, data: bytes | None = None
+    ) -> urllib.request.Request:
+        """Build a request on the shared base URL with the shared auth header."""
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=data,
+            headers={"Content-Type": "application/json"} if data is not None else {},
+            method="POST" if data is not None else "GET",
+        )
+        if self._api_key:
+            request.add_header("Authorization", f"Bearer {self._api_key}")
+        return request
+
+    def _send(self, request: urllib.request.Request) -> tuple[int, bytes]:
+        """Send one request and return its status and body."""
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return response.status, response.read()
+
+    def _unavailable(self, detail: str) -> ModelUnavailableError:
+        """Build the error that names the model and endpoint, never the key."""
+        return ModelUnavailableError(
+            f"model {self.model!r} is not available at {self.base_url}: {detail}"
+        )
+
+    def preflight(self) -> None:
+        """Fail unless the endpoint lists the configured model id."""
+        try:
+            status, raw = self._send(self._request("/models"))
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise self._unavailable(f"request failed: {exc}") from exc
+        if not 200 <= status < 300:
+            raise self._unavailable(f"HTTP {status}")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+            model_ids = [entry["id"] for entry in payload["data"]]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise self._unavailable("the model list was not OpenAI-compatible") from exc
+        if self.model not in model_ids:
+            raise self._unavailable("the model is not in the endpoint's model list")
 
     def complete(
         self,
@@ -82,17 +129,9 @@ class HttpChatClient:
                 "json_schema": {"name": "clio_bench_verdict", "schema": json_schema},
             }
         data = json.dumps(body).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.base_url}/v1/chat/completions",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        if self._api_key:
-            request.add_header("Authorization", f"Bearer {self._api_key}")
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            _, raw = self._send(self._request("/v1/chat/completions", data=data))
+            payload = json.loads(raw.decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise ChatClientError(
                 f"model endpoint {self.base_url} unreachable: {exc}"
@@ -115,6 +154,9 @@ class StubChatClient:
     def __init__(self, replies: list[str] | Callable[[list[dict]], str]) -> None:
         self._replies = replies
         self.calls: list[list[dict]] = []
+
+    def preflight(self) -> None:
+        """A stub is always available."""
 
     def complete(
         self,

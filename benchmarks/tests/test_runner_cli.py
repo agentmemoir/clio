@@ -261,6 +261,8 @@ class CliTests(unittest.TestCase):
             with mock.patch(
                 "benchmarks.clio_bench.cli.load_suite", return_value=synthetic_suite()
             ), mock.patch(
+                "benchmarks.clio_bench.llm.HttpChatClient.preflight"
+            ), mock.patch(
                 "benchmarks.clio_bench.judges.llm_judge.LlmJudge.score",
                 side_effect=ChatClientError("judge endpoint down"),
             ):
@@ -286,6 +288,50 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(code, 2)
             self.assertFalse(out.exists())
+
+    def test_judge_preflight_failure_produces_no_report(self) -> None:
+        """An unavailable judge stops the run before any suite is loaded."""
+        from benchmarks.clio_bench.llm import ModelUnavailableError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "should-not-exist.json"
+            md = Path(tmp) / "should-not-exist.md"
+            stderr = io.StringIO()
+            with mock.patch(
+                "benchmarks.clio_bench.cli.load_suite"
+            ) as load, mock.patch(
+                "benchmarks.clio_bench.llm.HttpChatClient.preflight",
+                side_effect=ModelUnavailableError(
+                    "model 'm' is not available at http://127.0.0.1:8899"
+                ),
+            ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                stderr
+            ):
+                code = main(
+                    [
+                        "--suite",
+                        "locomo",
+                        "--adapter",
+                        "memory",
+                        "--judge",
+                        "local",
+                        "--generator",
+                        "stub",
+                        "--partition",
+                        "train",
+                        "--out",
+                        str(out),
+                        "--report-md",
+                        str(md),
+                        "--cache-dir",
+                        tmp,
+                    ]
+                )
+                load.assert_not_called()
+            self.assertEqual(code, 2)
+            self.assertFalse(out.exists())
+            self.assertFalse(md.exists())
+            self.assertIn("judge unavailable", stderr.getvalue())
 
 
 if __name__ == "__main__":
