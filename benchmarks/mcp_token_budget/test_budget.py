@@ -24,7 +24,9 @@ if str(HERE) not in sys.path:
 import offline_tokenizer
 
 MEASURE = HERE / "measure.py"
-PACK = HERE.parents[1] / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
+REPO_ROOT = HERE.parents[1]
+SCRIPT = REPO_ROOT / "scripts" / "mcp_token_budget.sh"
+PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
 LABELS = frozenset(
     {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}
@@ -265,6 +267,32 @@ class MeasureTests(unittest.TestCase):
                         completed.stderr.decode("utf-8", "replace"),
                     ),
                 )
+
+
+class DocumentedCommandTests(unittest.TestCase):
+    """The documented `scripts/mcp_token_budget.sh` wrapper, driven end to end."""
+
+    def test_script_reports_export_failure_cleanly(self):
+        """A failed `mcp schema-export` must fail the command and emit no rows.
+
+        The wrapper exports into a temp file and checks that status before it runs
+        the measurement, so this path never needs tiktoken: the export fails first.
+        """
+        self.assertTrue(SCRIPT.is_file(), f"missing wrapper script: {SCRIPT}")
+        child_env = dict(os.environ)
+        child_env["CLIO_BIN"] = "/bin/false"
+        child_env["PYTHON"] = sys.executable
+        completed = subprocess.run(
+            [str(SCRIPT)],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            env=child_env,
+            check=False,
+        )
+        stderr = completed.stderr.decode("utf-8", "replace")
+        self.assertEqual(completed.returncode, 1, stderr)
+        self.assertEqual(completed.stdout, b"", stderr)
+        self.assertIn("clio mcp schema-export failed", stderr)
 
 
 if __name__ == "__main__":

@@ -23,4 +23,14 @@ fi
 
 python="${PYTHON:-python3}"
 
-"$bin" mcp schema-export | "$python" "$root/benchmarks/mcp_token_budget/measure.py"
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+# Export first and check its status. Piping straight into the measurement would let
+# a partial pack produce rows (and a bare exit 1) after a failed export.
+if ! "$bin" mcp schema-export >"$tmp"; then
+  printf '%s\n' "mcp-token-budget: clio mcp schema-export failed" >&2
+  exit 1
+fi
+
+"$python" "$root/benchmarks/mcp_token_budget/measure.py" --pack "$tmp"
