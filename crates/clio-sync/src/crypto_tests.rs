@@ -182,7 +182,8 @@ fn the_derived_key_differs_from_the_legacy_sha256_digest() {
     let secret = crate::credential_fixtures::secret("legacy-kdf-path");
     let key = crate::crypto::SyncCipherKey::from_secret(&secret);
     let legacy_hex = clio_store::sha256_hex(secret.as_bytes(), "am-sync-key");
-    let legacy_digest = super::hex_to_bytes(&legacy_hex);
+    let legacy_digest =
+        super::hex_to_bytes(&legacy_hex).expect("sha256_hex output is lowercase hex");
     assert_ne!(
         key.key_bytes(),
         legacy_digest.as_slice(),
@@ -294,4 +295,81 @@ fn a_different_associated_data_fails_authentication() {
         key.open(&cipher, TEST_AAD).is_ok(),
         "the envelope it was sealed under still opens it"
     );
+}
+
+/// The legacy hex decoder is gone: an odd number of bytes is an error, not a
+/// panic and not a dropped trailing digit.
+#[test]
+fn odd_length_is_refused_without_panicking() {
+    for input in ["abc", "a"] {
+        let err = super::hex_to_bytes(input).expect_err("odd length must be refused");
+        assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+        assert!(
+            err.message.contains("odd"),
+            "the message names the odd length: {}",
+            err.message
+        );
+    }
+}
+
+/// Every byte that is not an ASCII hex digit is refused, including the leading
+/// `+` that `u8::from_str_radix` accepts.
+#[test]
+fn non_hex_characters_are_refused() {
+    for input in ["zz", "0g", "g0", "+1"] {
+        let err = super::hex_to_bytes(input).expect_err("non-hex input must be refused");
+        assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+    }
+}
+
+/// A multi-byte UTF-8 character spans more than one byte, so a byte-count slice
+/// used to panic on it. Decoding over the raw bytes refuses it without panic.
+#[test]
+fn multi_byte_utf8_is_refused_without_panicking() {
+    let err = super::hex_to_bytes("aéb").expect_err("multi-byte UTF-8 must be refused");
+    assert_eq!(err.code, clio_types::ErrorCode::InvalidArgument);
+}
+
+/// Both cases decode to the same bytes, and mixed case is accepted.
+#[test]
+fn hex_decoding_accepts_both_cases() {
+    let expected = vec![0x00, 0x0f, 0x10, 0xff];
+    assert_eq!(
+        super::hex_to_bytes("000f10ff").expect("lowercase hex"),
+        expected
+    );
+    assert_eq!(
+        super::hex_to_bytes("000F10FF").expect("uppercase hex"),
+        expected
+    );
+    assert_eq!(
+        super::hex_to_bytes("000f10FF").expect("mixed-case hex"),
+        expected
+    );
+}
+
+/// Empty input carries no bytes and is not an error.
+#[test]
+fn empty_hex_decodes_to_no_bytes() {
+    let bytes = super::hex_to_bytes("").expect("empty hex");
+    assert!(bytes.is_empty(), "empty input has no bytes: {bytes:?}");
+}
+
+/// The salt is still the first 16 bytes of the first 32 hex characters of the
+/// secret's SHA-256, decoded exactly as the retired decoder did, so a key
+/// derived before this change is still derived the same way after it.
+#[test]
+fn from_secret_still_derives_the_legacy_key_for_a_known_secret() {
+    let secret = "known-secret";
+    let key = crate::crypto::SyncCipherKey::from_secret(secret);
+    let salt_hex = clio_store::sha256_hex(secret.as_bytes(), super::SyncCipherKey::SALT_DOMAIN);
+    let legacy_salt: Vec<u8> = (0..32)
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&salt_hex[i..i + 2], 16).expect("legacy hex"))
+        .collect();
+    let mut expected = [0u8; 32];
+    argon2::Argon2::default()
+        .hash_password_into(secret.as_bytes(), &legacy_salt, &mut expected)
+        .expect("argon2 key derivation with default parameters");
+    assert_eq!(key.key_bytes(), expected.as_slice());
 }

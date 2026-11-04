@@ -1,0 +1,1 @@
+Sync key derivation now refuses a hex salt with an odd byte count or a non-hex character instead of panicking or silently decoding it as zero bytes; the salt is always 64 lowercase hex characters, so every valid sync key derives the same key as before.

@@ -108,7 +108,8 @@ impl SyncCipherKey {
         // identifier from it alone, with no wire-format change. It stays
         // unique per secret, and Argon2id's cost applies to every guess.
         let salt_hex = clio_store::sha256_hex(secret.as_bytes(), Self::SALT_DOMAIN);
-        let salt = hex_to_bytes(&salt_hex[..32]);
+        let salt = hex_to_bytes(&salt_hex[..32])
+            .expect("sha256_hex returns 64 lowercase hex characters, so the first 32 are hex");
         let mut key = [0u8; 32];
         // `Argon2::hash_password_into` documents these errors: `PwdTooLong`
         // (password above 4 GiB - 1 bytes), `SaltTooShort` and `SaltTooLong`
@@ -250,11 +251,42 @@ fn truncated_hex_digest(domain: &[u8], sep: u8, chars: usize, key: &[u8]) -> Str
     out
 }
 
-fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0))
-        .collect()
+/// Decode a hex string into bytes. Both cases are accepted, an odd number of
+/// bytes and any non-hex byte are refused, and every byte is checked before a
+/// pair is combined so a multi-byte UTF-8 sequence cannot split a character.
+fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, AmError> {
+    let bytes = hex.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("hex string has an odd length: {} bytes", bytes.len()),
+        ));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.as_chunks::<2>().0 {
+        let high = hex_digit_value(pair[0])?;
+        let low = hex_digit_value(pair[1])?;
+        out.push((high << 4) | low);
+    }
+    Ok(out)
+}
+
+/// Map one ASCII hex digit byte to its value, refusing every other byte by
+/// naming the character it stands for. The guard leaves only `A` to `F` for the
+/// last match arm, so no pair of characters can be decoded by accident.
+fn hex_digit_value(byte: u8) -> Result<u8, AmError> {
+    if !byte.is_ascii_hexdigit() {
+        return Err(AmError::new(
+            ErrorCode::InvalidArgument,
+            format!("hex string has a non-hex character: {:?}", byte as char),
+        ));
+    }
+    let value = match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        _ => byte - b'A' + 10,
+    };
+    Ok(value)
 }
 
 #[cfg(test)]
