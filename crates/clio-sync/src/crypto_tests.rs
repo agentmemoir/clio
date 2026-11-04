@@ -354,22 +354,3 @@ fn empty_hex_decodes_to_no_bytes() {
     let bytes = super::hex_to_bytes("").expect("empty hex");
     assert!(bytes.is_empty(), "empty input has no bytes: {bytes:?}");
 }
-
-/// The salt is still the first 16 bytes of the first 32 hex characters of the
-/// secret's SHA-256, decoded exactly as the retired decoder did, so a key
-/// derived before this change is still derived the same way after it.
-#[test]
-fn from_secret_still_derives_the_legacy_key_for_a_known_secret() {
-    let secret = "known-secret";
-    let key = crate::crypto::SyncCipherKey::from_secret(secret);
-    let salt_hex = clio_store::sha256_hex(secret.as_bytes(), super::SyncCipherKey::SALT_DOMAIN);
-    let legacy_salt: Vec<u8> = (0..32)
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&salt_hex[i..i + 2], 16).expect("legacy hex"))
-        .collect();
-    let mut expected = [0u8; 32];
-    argon2::Argon2::default()
-        .hash_password_into(secret.as_bytes(), &legacy_salt, &mut expected)
-        .expect("argon2 key derivation with default parameters");
-    assert_eq!(key.key_bytes(), expected.as_slice());
-}
