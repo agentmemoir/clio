@@ -179,11 +179,10 @@ fn ensure_and_diagnose_paths() {
 }
 
 /// A panic inside one lock holder must not disable the DEK store for the rest
-/// of the process.
-///
-/// Every slot operation is one SQLite statement, so a holder that unwinds
-/// cannot leave a half-updated key behind; the poison flag therefore records a
-/// past fault, and the next call must still serve.
+/// of the process. One helper guards all seven call sites: ensure, both
+/// blind-index reads, encrypt, decrypt, destroy, and diagnose. Rows live in
+/// SQLite and each mutation is one statement: an unwind leaves at most a
+/// duplicate-insert no-op or a completed shred, and both are idempotent.
 #[test]
 fn a_poisoned_lock_still_serves_later_calls() {
     let kms = LocalDevKms::new();
@@ -196,9 +195,13 @@ fn a_poisoned_lock_still_serves_later_calls() {
     std::panic::set_hook(previous);
     assert!(panicked.is_err(), "the holder must unwind");
     assert!(kms.state.is_poisoned(), "the lock must record the panic");
-    assert!(
-        kms.diagnose_masked("sub-poisoned").contains("absent"),
-        "a later call must still read the slot store"
+    assert!(kms.diagnose_masked("sub-poisoned").contains("absent"));
+    let env = kms
+        .encrypt("test.field", "row", "sub-poisoned", b"recovered")
+        .unwrap();
+    assert_eq!(
+        kms.decrypt("test.field", "row", &env).unwrap(),
+        b"recovered"
     );
 }
 

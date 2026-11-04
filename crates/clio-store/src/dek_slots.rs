@@ -133,8 +133,11 @@ impl SlotStore {
 
 /// Lock a local KMS slot store, recovering the guard after a holder panicked.
 ///
-/// `SlotStore` keeps no state in memory: every read and write is one SQLite
-/// statement, so a panic cannot leave a half-updated value behind.
+/// Rows live in SQLite and each mutation is one statement. The connection is
+/// the only in-memory cache and is assigned only after a successful open, so an
+/// unwind leaves at most a duplicate-insert no-op or a completed shred; both
+/// are idempotent. A field adding mutable in-memory state across a fallible
+/// step must not rely on this recovery.
 pub(crate) fn lock_store(state: &Mutex<SlotStore>) -> MutexGuard<'_, SlotStore> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
