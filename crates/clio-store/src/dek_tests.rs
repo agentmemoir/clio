@@ -10,6 +10,7 @@
 //! ## Owns
 //! - In-memory round-trip, destroy, and malformed-envelope cases
 //! - Cross-instance persistence, refresh, and damaged key-store refusals
+//! - Lock recovery after a holder panics
 //!
 //! ## Does not own
 //! - The provider implementation (see `dek`)
@@ -174,6 +175,30 @@ fn ensure_and_diagnose_paths() {
             .code,
         ErrorCode::UnreadableContent,
         "an unparseable envelope column must be skippable"
+    );
+}
+
+/// A panic inside one lock holder must not disable the DEK store for the rest
+/// of the process.
+///
+/// Every slot operation is one SQLite statement, so a holder that unwinds
+/// cannot leave a half-updated key behind; the poison flag therefore records a
+/// past fault, and the next call must still serve.
+#[test]
+fn a_poisoned_lock_still_serves_later_calls() {
+    let kms = LocalDevKms::new();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = kms.state.lock().expect("fresh lock");
+        panic!("holder unwound");
+    }));
+    std::panic::set_hook(previous);
+    assert!(panicked.is_err(), "the holder must unwind");
+    assert!(kms.state.is_poisoned(), "the lock must record the panic");
+    assert!(
+        kms.diagnose_masked("sub-poisoned").contains("absent"),
+        "a later call must still read the slot store"
     );
 }
 

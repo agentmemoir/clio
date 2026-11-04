@@ -1,0 +1,1 @@
+A transient panic while the local key store held its lock no longer disables encryption for the rest of the process. Later calls now recover the guard and keep working, because every slot change is one SQLite statement and no in-memory key value can be left half-written.

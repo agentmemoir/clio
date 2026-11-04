@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on the DEK provider and its crypto.
 
-use crate::dek_slots::{KeySlot, SlotStore};
+use crate::dek_slots::{KeySlot, SlotStore, lock_store};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use clio_types::{AmError, ErrorCode};
@@ -296,13 +296,13 @@ impl DekProvider for LocalDevKms {
                 "subject_id must be non-empty",
             ));
         }
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         let (version, _) = store.ensure(subject_id)?;
         Ok(Self::dek_ref(subject_id, version))
     }
 
     fn blind_index_key(&self) -> Result<[u8; 32], AmError> {
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         match store.lookup(BLIND_INDEX_KEY_SUBJECT)? {
             Some(KeySlot::Active { key, .. }) => Ok(key.bytes),
             Some(KeySlot::Destroyed { .. }) => Err(AmError::new(
@@ -314,7 +314,7 @@ impl DekProvider for LocalDevKms {
     }
 
     fn ensure_blind_index_key(&self) -> Result<[u8; 32], AmError> {
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         let (_, key) = store.ensure(BLIND_INDEX_KEY_SUBJECT)?;
         Ok(key)
     }
@@ -326,7 +326,7 @@ impl DekProvider for LocalDevKms {
         subject_id: &str,
         plaintext: &[u8],
     ) -> Result<CiphertextEnvelope, AmError> {
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         let (version, key_bytes) = store.ensure(subject_id)?;
         let cipher = XChaCha20Poly1305::new((&key_bytes).into());
         let nonce_bytes: [u8; NONCE_LEN] = rand::random();
@@ -361,7 +361,7 @@ impl DekProvider for LocalDevKms {
         row_id: &str,
         envelope: &CiphertextEnvelope,
     ) -> Result<Vec<u8>, AmError> {
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         let slot = store.lookup(&envelope.subject_id)?;
         let (key, version) = match slot {
             None => {
@@ -419,12 +419,12 @@ impl DekProvider for LocalDevKms {
     }
 
     fn destroy_dek(&self, subject_id: &str) -> Result<(), AmError> {
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         store.destroy(subject_id)
     }
 
     fn diagnose_masked(&self, subject_id: &str) -> String {
-        let mut store = self.state.lock().expect("LocalDevKms mutex poisoned");
+        let mut store = lock_store(&self.state);
         match store.lookup(subject_id) {
             Ok(Some(KeySlot::Active { version, .. })) => {
                 format!(
