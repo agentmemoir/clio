@@ -1,4 +1,6 @@
-# Whole-workspace coverage on the default branch, twice a day.
+# Whole-workspace coverage: on a schedule twice a day, and on request from a
+# trusted comment. A request on a pull request measures that pull request's
+# head; a scheduled run and an issue request measure the default branch.
 #
 # GitHub starts scheduled workflows only on the default branch. GitHub disables
 # scheduled workflows in a public repository after 60 days without repository
@@ -9,9 +11,19 @@ on:
   schedule:
     - cron: "7 3,15 * * *"
   workflow_call:
-
-permissions:
-  contents: read
+    inputs:
+      ref:
+        description: The commit a pull request request measures. Empty means the event commit.
+        type: string
+        default: ""
+      request_number:
+        description: The issue or pull request number that asked for the run. Empty for the schedule.
+        type: string
+        default: ""
+      request_is_pr:
+        description: '"true" when request_number is a pull request.'
+        type: string
+        default: ""
 
 concurrency:
   group: coverage-full
@@ -25,6 +37,60 @@ env:
   CARGO_BUILD_JOBS: "1"
 
 jobs:
+  # A pull request request gets a check on its head, so progress and the result
+  # show on the pull request page. When no check can be created, or the request
+  # is on an issue, the run is announced and reported in a comment instead.
+  announce:
+    name: announce the run
+    if: inputs.request_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      issues: write
+    outputs:
+      check_id: ${{ steps.check.outputs.id }}
+      comment_id: ${{ steps.comment.outputs.id }}
+    steps:
+      - name: Create a check on the pull request head
+        id: check
+        if: inputs.request_is_pr == 'true' && inputs.ref != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD: ${{ inputs.ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          id=""
+          if ! id=$(gh api "repos/$REPO/check-runs" \
+            -f name="full coverage" \
+            -f head_sha="$HEAD" \
+            -f status=in_progress \
+            -f details_url="$RUN_URL" \
+            --jq .id); then
+            id=""
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          if [ -z "$id" ]; then
+            echo "::warning::no check could be created on $HEAD, so the result goes in a comment"
+          fi
+
+      - name: Comment when no progress is visible on the request
+        id: comment
+        if: steps.check.outputs.id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ inputs.request_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$REPO/issues/$NUMBER/comments" \
+            -f body="Full coverage started for this request. Run: $RUN_URL" \
+            --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   coverage:
     name: whole workspace (80% lines on each file)
     runs-on: ubuntu-latest
@@ -61,6 +127,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          # A pull request request checks out its head ref, so the run measures
+          # the code the comment asked about.
+          ref: ${{ inputs.request_is_pr == 'true' && format('refs/pull/{0}/head', inputs.request_number) || inputs.ref || github.sha }}
 
       # The same pin the other jobs use.
       - name: Install Rust toolchain
@@ -140,7 +209,9 @@ jobs:
           set +o pipefail
           out="$RUNNER_TEMP/coverage-summary"
           mkdir -p "$out"
-          printf '%s\n' "$GITHUB_SHA" > "$out/commit.txt"
+          # The checked-out commit, not the event commit: a pull request request
+          # measures the pull request head.
+          git rev-parse HEAD > "$out/commit.txt"
           # nextest status lines: `<STATUS> [ <secs>s] [(<n>/<total>) ]<binary> <test>`.
           # Failing statuses: FAIL, FAIL + LEAK, LEAK-FAIL, TIMEOUT, SIG<name>, ABORT,
           # XFAIL. The optional counter differs between the live line and the final
@@ -179,15 +250,18 @@ jobs:
         if: failure()
         run: dmesg --ctime 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -5 || true
 
-  # One open issue, labelled coverage-full, holds the result of these runs.
+  # One open issue, labelled coverage-full, holds the result of a scheduled run.
+  # A request reports on the page that carried the command: a check on the pull
+  # request head, or a comment when no progress is visible there.
   report:
     name: report the result
-    needs: coverage
+    needs: [coverage, announce]
     if: always() && needs.coverage.outputs.finished == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       issues: write
+      checks: write
     steps:
       - name: Download the run summary
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -195,13 +269,80 @@ jobs:
           name: coverage-summary
           path: coverage-summary
 
+      - name: Build the result body
+        id: body
+        shell: bash
+        env:
+          VERDICT: ${{ needs.coverage.outputs.verdict }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          dir=coverage-summary
+          sha=$(cat "$dir/commit.txt")
+          body="$RUNNER_TEMP/coverage-body.md"
+          if [ "$VERDICT" = "pass" ]; then
+            printf 'The full workspace coverage suite is green at %s.\n\nRun: %s\n' "$sha" "$RUN_URL" > "$body"
+          else
+            {
+              printf 'Run: %s\n\nCommit: %s\n\nFailing tests:\n' "$RUN_URL" "$sha"
+              if [ -s "$dir/failing-tests.txt" ]; then
+                sed 's/^/- /' "$dir/failing-tests.txt"
+              else
+                echo '- none named in the run log'
+              fi
+              printf '\nFiles below 80%% lines (a file at exactly 80%% passes):\n'
+              if [ -s "$dir/low-files.txt" ]; then
+                head -n 200 "$dir/low-files.txt" | sed 's/^/- /'
+                total=$(wc -l < "$dir/low-files.txt")
+                if [ "$total" -gt 200 ]; then
+                  echo "- and $((total - 200)) more, in the coverage-summary artifact of the run"
+                fi
+              else
+                echo '- none listed'
+              fi
+              if [ ! -s "$dir/failing-tests.txt" ] && [ ! -s "$dir/low-files.txt" ]; then
+                printf '\nNo test or file is named, so the run failed for another reason. The run log has the error.\n'
+              fi
+              printf '\nThe failing tests and the files above must be fixed.\n'
+            } > "$body"
+          fi
+          echo "body=$body" >> "$GITHUB_OUTPUT"
+
+      - name: Report on the request
+        if: inputs.request_number != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ inputs.request_number }}
+          VERDICT: ${{ needs.coverage.outputs.verdict }}
+          CHECK_ID: ${{ needs.announce.outputs.check_id }}
+          COMMENT_ID: ${{ needs.announce.outputs.comment_id }}
+          BODY: ${{ steps.body.outputs.body }}
+        run: |
+          set -euo pipefail
+          conclusion=failure
+          [ "$VERDICT" = "pass" ] && conclusion=success
+          if [ -n "$CHECK_ID" ]; then
+            jq -n --arg conclusion "$conclusion" --rawfile summary "$BODY" \
+              '{status:"completed", conclusion:$conclusion, output:{title:"Full coverage", summary:$summary}}' \
+              | gh api -X PATCH "repos/$REPO/check-runs/$CHECK_ID" --input -
+            exit 0
+          fi
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F "body=@$BODY" >/dev/null
+            exit 0
+          fi
+          gh issue comment "$NUMBER" -R "$REPO" --body-file "$BODY"
+
       - name: Record the result on the open coverage issue
+        if: inputs.request_number == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           VERDICT: ${{ needs.coverage.outputs.verdict }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BODY: ${{ steps.body.outputs.body }}
         run: |
           set -euo pipefail
           dir=coverage-summary
@@ -212,46 +353,21 @@ jobs:
 
           if [ "$VERDICT" = "pass" ]; then
             if [ -n "$issue" ]; then
-              gh issue comment "$issue" -R "$REPO" \
-                --body "The full workspace coverage suite is green at $sha. Run: $RUN_URL"
+              gh issue comment "$issue" -R "$REPO" --body-file "$BODY"
               gh issue close "$issue" -R "$REPO"
             fi
             exit 0
           fi
 
-          body="$RUNNER_TEMP/coverage-body.md"
-          {
-            printf 'Run: %s\n\nCommit: %s\n\nFailing tests:\n' "$RUN_URL" "$sha"
-            if [ -s "$dir/failing-tests.txt" ]; then
-              sed 's/^/- /' "$dir/failing-tests.txt"
-            else
-              echo '- none named in the run log'
-            fi
-            printf '\nFiles below 80%% lines (a file at exactly 80%% passes):\n'
-            if [ -s "$dir/low-files.txt" ]; then
-              head -n 200 "$dir/low-files.txt" | sed 's/^/- /'
-              total=$(wc -l < "$dir/low-files.txt")
-              if [ "$total" -gt 200 ]; then
-                echo "- and $((total - 200)) more, in the coverage-summary artifact of the run"
-              fi
-            else
-              echo '- none listed'
-            fi
-            if [ ! -s "$dir/failing-tests.txt" ] && [ ! -s "$dir/low-files.txt" ]; then
-              printf '\nNo test or file is named, so the run failed for another reason. The run log has the error.\n'
-            fi
-            printf '\nThe failing tests and the files above must be fixed.\n'
-          } > "$body"
-
           if [ -z "$issue" ]; then
             gh issue create -R "$REPO" --title "Full workspace coverage suite failed on master" \
               --label coverage-full --label bug --label area:tooling --label difficulty:medium \
-              --body-file "$body"
+              --body-file "$BODY"
             exit 0
           fi
           last=$(gh issue view "$issue" -R "$REPO" --json comments --jq '.comments | last | .body // ""')
           if [[ "$last" == *"$sha"* ]]; then
             echo "The latest comment on the open issue already names $sha."
           else
-            gh issue comment "$issue" -R "$REPO" --body-file "$body"
+            gh issue comment "$issue" -R "$REPO" --body-file "$BODY"
           fi

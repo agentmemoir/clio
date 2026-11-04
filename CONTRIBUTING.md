@@ -51,7 +51,7 @@ make coverage-fast       # measures that same set, judges the changed files
 
 `make coverage-fast` runs those same tests a second time under instrumentation, so running all three repeats the suite. Run `make ritual` every time. Run the other two when you want a local answer before you push, and let CI be the verdict when you do not.
 
-When the changed files are not the whole story and you want the whole workspace measured, a trusted user — an owner, a member, or a collaborator — commits `/coverage-full` on an issue or a pull request; that starts the same full coverage run the schedule starts twice a day and records its verdict on the open `coverage-full` issue, and nothing runs until someone comments the command.
+When the changed files are not the whole story and you want the whole workspace measured, a trusted user — an owner, a member, or a collaborator — commits exactly `/coverage-full` on an issue or a pull request; that starts the same full coverage run the schedule starts twice a day. On a pull request it measures that pull request's head and shows progress and the result as a check on the pull request; on an issue, or when the check cannot be created, it comments the run link instead. Nothing runs until someone commits the command.
 
 Through the gate shim, a `make coverage-fast` run with no terminal attached, such as a program's run, exits 3 and runs nothing when this worktree already made three fresh runs on this branch, when `python3 scripts/quick.py --base origin/master --plan --closure` shows it will not fit in 180 s, or when that estimate cannot be made. CI gives the verdict then.
 
