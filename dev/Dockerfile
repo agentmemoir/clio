@@ -8,7 +8,7 @@
 # box with no compiler could only ever exercise the helper, never the check that
 # dies. There is no nextest here: this box runs the small `noexec` checks, not a
 # crate test suite.
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -37,14 +37,34 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 # file into a failed build, instead of an image that quietly holds the wrong
 # compiler.
 COPY rust-toolchain.toml /tmp/rust-toolchain.toml
+# dev/Dockerfile installs a verified toolchain so the box is reproducible. The
+# base image is pinned by digest; the tag is inert and the digest decides the
+# content, so change both together or the digest silently keeps the old image.
+#
+# rustup-init is fetched from a version-pinned archive URL and checked against
+# the SHA-256 that URL's own .sha256 file publishes. 1.29.3 was the release
+# named by https://static.rust-lang.org/rustup/release-stable.toml when this pin
+# was made. Bumping rustup moves three values together: the URL version and both
+# per-architecture hashes. A missing entry or a mismatched hash fails the build.
+#
+# This verifies the bootstrap installer only. The compiler payload that rustup
+# then downloads is fetched over TLS and is not hash-checked here.
+ARG TARGETARCH
 RUN channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' /tmp/rust-toolchain.toml)" \
  && components="$(sed -n 's/^components = \[\(.*\)\]$/\1/p' /tmp/rust-toolchain.toml \
       | tr -d '"' | tr ',' ' ')" \
  && test -n "$channel" \
  && test -n "$components" \
- && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --no-modify-path --profile minimal \
-          --default-toolchain "$channel" \
+ && case "$TARGETARCH" in \
+      amd64) rust_arch=x86_64-unknown-linux-gnu; rustup_sha256=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55 ;; \
+      arm64) rust_arch=aarch64-unknown-linux-gnu; rustup_sha256=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282 ;; \
+      *) if [ -z "${TARGETARCH}" ]; then echo >&2 "TARGETARCH is unset; set the build platform"; else echo >&2 "unsupported TARGETARCH: ${TARGETARCH}"; fi; exit 1 ;; \
+    esac \
+ && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init --max-time 60 "https://static.rust-lang.org/rustup/archive/1.29.3/${rust_arch}/rustup-init" \
+ && echo "${rustup_sha256}  /tmp/rustup-init" | sha256sum -c - \
+ && chmod +x /tmp/rustup-init \
+ && /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "$channel" --default-host "$rust_arch" \
+ && rm -f /tmp/rustup-init \
  && rustup component add $components \
  && rm -f /tmp/rust-toolchain.toml
 

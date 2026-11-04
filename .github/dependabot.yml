@@ -27,3 +27,13 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/dev"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      docker:
+        patterns:
+          - "*"

@@ -1,0 +1,31 @@
+# Validate `dev/Dockerfile` when it changes. No other job builds it, so a
+# Dockerfile that no longer parses would land green. `--check` runs the
+# frontend's own validation in seconds and builds no layer.
+name: Dev image
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'dev/**'
+      - '.github/workflows/dev-image.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'dev/**'
+      - '.github/workflows/dev-image.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: dev/Dockerfile validates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check dev/Dockerfile
+        run: docker build --check -f dev/Dockerfile .
