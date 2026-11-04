@@ -105,7 +105,8 @@ impl SlotStore {
     /// this returns `ErasedSubject` instead of resurrecting it.
     ///
     /// # Errors
-    /// The subject was shredded, or the key store cannot be read or written.
+    /// The subject was shredded, the key store cannot be read or written, or
+    /// the slot vanished after the conflict-safe insert.
     pub(crate) fn ensure(&mut self, subject_id: &str) -> Result<(u32, [u8; KEY_LEN]), AmError> {
         if let Some(slot) = self.lookup(subject_id)? {
             return active_key(slot, subject_id);
@@ -116,9 +117,7 @@ impl SlotStore {
             .insert_if_absent(subject_id, 1, &encode_key(&bytes))?;
         // The insert is conflict-safe, so a row always exists now: either ours
         // or the one a concurrent writer stored (or shredded) first.
-        let stored = self
-            .lookup(subject_id)?
-            .expect("DEK slot present after conflict-safe insert");
+        let stored = require_stored_slot(self.lookup(subject_id)?, subject_id)?;
         active_key(stored, subject_id)
     }
 
@@ -148,6 +147,16 @@ fn active_key(slot: KeySlot, subject_id: &str) -> Result<(u32, [u8; KEY_LEN]), A
         KeySlot::Active { version, key } => Ok((version, key.bytes)),
         KeySlot::Destroyed { .. } => Err(destroyed_error(subject_id)),
     }
+}
+
+/// The slot an insert must have left behind; losing it is a storage defect.
+fn require_stored_slot(slot: Option<KeySlot>, subject_id: &str) -> Result<KeySlot, AmError> {
+    slot.ok_or_else(|| {
+        AmError::new(
+            ErrorCode::Internal,
+            format!("DEK slot for subject `{subject_id}` vanished after the conflict-safe insert"),
+        )
+    })
 }
 
 /// The shared crypto-shred error for a destroyed subject.

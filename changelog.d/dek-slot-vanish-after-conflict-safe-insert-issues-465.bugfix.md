@@ -1,0 +1,1 @@
+A key slot that came back missing right after the conflict-safe insert used to panic the process. The same case now returns an internal error that names the subject and says the slot vanished, so a caller sees a clear failure instead of a crash.
