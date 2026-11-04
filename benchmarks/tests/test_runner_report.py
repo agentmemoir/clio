@@ -6,7 +6,7 @@ import unittest
 
 from benchmarks.clio_bench.adapters.memory import MemoryAdapter
 from benchmarks.clio_bench.doubles import StubGenerator, StubJudge
-from benchmarks.clio_bench.fetch import load_pins
+from benchmarks.clio_bench.fetch import PinError, load_pins
 from benchmarks.clio_bench.fingerprint import (
     Fingerprint,
     FingerprintError,
@@ -50,12 +50,36 @@ class ReportTests(unittest.TestCase):
                 "max_probes": None,
                 "token_budget": 4096,
                 "adapter": "memory",
-                "judge": {"tier": "stub", "model": "stub-exact-match", "base_url": ""},
+                "judge": {
+                    "tier": "stub",
+                    "model": "stub-exact-match",
+                    "revision": "stub-revision-1",
+                    "served_model": "stub-exact-match",
+                    "base_url": "",
+                },
                 "generator": {"model": "stub-context-echo", "base_url": ""},
             },
             suite_results={"locomo": results},
             tokenizer_name="cl100k_base(test)",
             fingerprint=fingerprint or self._fingerprint(),
+        )
+
+    def _report_with_judge(self, judge: dict) -> dict:
+        return build_report(
+            pins=load_pins(_DEFAULT_PINS),
+            run_meta={
+                "suites": [],
+                "partition": "train",
+                "seed": 1,
+                "max_probes": None,
+                "token_budget": 4096,
+                "adapter": "memory",
+                "judge": judge,
+                "generator": {"model": "stub-context-echo", "base_url": ""},
+            },
+            suite_results={},
+            tokenizer_name="cl100k_base(test)",
+            fingerprint=self._fingerprint(),
         )
 
     def test_report_shape(self) -> None:
@@ -64,6 +88,48 @@ class ReportTests(unittest.TestCase):
         self.assertIn("locomo", report["suites"])
         self.assertIn("locomo", report["pins"])
         self.assertEqual(len(report["suites"]["locomo"]["probes"]), 6)
+
+    def test_report_stamps_the_judge_identity_beside_the_model(self) -> None:
+        """A reader can name the artifact and the served id that made the score."""
+        judge = self._report()["run"]["judge"]
+        self.assertEqual(judge["revision"], "stub-revision-1")
+        self.assertEqual(judge["served_model"], "stub-exact-match")
+        self.assertEqual(
+            list(judge)[:4], ["tier", "model", "revision", "served_model"]
+        )
+
+    def test_a_judge_block_without_a_revision_is_refused(self) -> None:
+        with self.assertRaises(PinError) as caught:
+            self._report_with_judge(
+                {
+                    "tier": "tier1",
+                    "model": "qwen2.5-1.5b-instruct",
+                    "served_model": "qwen2.5-1.5b-instruct",
+                    "base_url": "http://127.0.0.1:8899",
+                }
+            )
+        self.assertIn("tier1", str(caught.exception))
+        self.assertIn("revision", str(caught.exception))
+
+    def test_a_judge_block_without_a_served_model_is_refused(self) -> None:
+        with self.assertRaises(PinError) as caught:
+            self._report_with_judge(
+                {
+                    "tier": "tier1",
+                    "model": "qwen2.5-1.5b-instruct",
+                    "revision": "tier1-revision",
+                    "base_url": "http://127.0.0.1:8899",
+                }
+            )
+        self.assertIn("tier1", str(caught.exception))
+        self.assertIn("served_model", str(caught.exception))
+
+    def test_the_scorecard_names_the_judge_revision(self) -> None:
+        markdown = render_markdown(self._report())
+        self.assertIn("revision stub-revision-1", markdown)
+        self.assertIn(
+            "- Judge: stub-exact-match (stub, revision stub-revision-1)", markdown
+        )
 
     def test_report_carries_the_system_fingerprint(self) -> None:
         report = self._report()

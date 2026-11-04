@@ -104,6 +104,7 @@ class TwoSystemBaselineTests(BaselineTestCase):
         self.assertIn("## clio", markdown)
         self.assertIn("## mnemosyne", markdown)
         self.assertIn("[tier stub, 2 probes; not quotable]", markdown)
+        self.assertIn("- Judge: stub-exact-match (stub, revision stub)", markdown)
 
     def test_the_same_command_produces_the_same_configuration_block(self) -> None:
         _, first, _ = self._run_systems("first")
@@ -128,6 +129,31 @@ class TwoSystemBaselineTests(BaselineTestCase):
             code = self.run_command(argv)
         self.assertEqual(code, 2)
         self.assertFalse(out.exists())
+
+
+class JudgePreflightTests(BaselineTestCase):
+    def test_a_failed_judge_preflight_writes_no_baseline(self) -> None:
+        """Each scored judge is probed once, and a failed probe writes nothing."""
+        from benchmarks.clio_bench.llm import ChatClientError
+
+        out = Path(self.tmpdir) / "should-not-exist.json"
+        md = Path(self.tmpdir) / "should-not-exist.md"
+        with mock.patch.dict(
+            os.environ,
+            {"CLIO_BENCH_API_KEY": "sk-test-key", "OPENAI_API_KEY": ""},
+        ), mock.patch(
+            "benchmarks.clio_bench.llm.HttpChatClient.preflight",
+            side_effect=ChatClientError(
+                "model endpoint http://127.0.0.1:8899/v1 rejected the request "
+                "with HTTP 401"
+            ),
+        ) as preflight:
+            code = self.run_command(self.argv_for(out, md, judge="tier2"))
+        self.assertEqual(code, 2)
+        self.assertFalse(out.exists())
+        self.assertFalse(md.exists())
+        # Only the first scored leg probed: no judge was built and discarded.
+        self.assertEqual(preflight.call_count, 1)
 
 
 class BlockedGateTests(BaselineTestCase):

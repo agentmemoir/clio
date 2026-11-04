@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from .fetch import PinError
 from .fingerprint import Fingerprint
 from .llm import KEY_ENV_VARS
 from .scoring import aggregate
@@ -30,6 +31,41 @@ def _labelled(block: dict, tier: str, quotable: bool) -> dict:
     block["tier"] = tier
     block["quotable"] = quotable
     return block
+
+
+def _require_judge_identity(judge: dict) -> None:
+    """Refuse a pinned judge block that cannot name the artifact it scored.
+
+    The stub judge is a deterministic double with no served artifact, so it is
+    the one tier whose identity is not checked here.
+    """
+    tier = judge.get("tier")
+    if tier == "stub":
+        return
+    for field in ("revision", "served_model"):
+        if not judge.get(field):
+            raise PinError(
+                f"judge {tier!r} has no {field!r}; a score report must name it"
+            )
+
+
+def _judge_stamp(judge: dict) -> dict:
+    """Return the judge block with its artifact identity beside its model.
+
+    The revision names the exact served artifact that produced a score and the
+    served model names the id the endpoint reported, so both sit next to the
+    model id rather than after the transport details. Every other key keeps its
+    original order.
+    """
+    stamp = {
+        "tier": judge["tier"],
+        "model": judge["model"],
+        "revision": judge["revision"],
+    }
+    if "served_model" in judge:
+        stamp["served_model"] = judge["served_model"]
+    stamp.update((key, value) for key, value in judge.items() if key not in stamp)
+    return stamp
 
 
 def build_report(
@@ -48,10 +84,13 @@ def build_report(
     builds one without it.
     """
     fingerprint.validate()
+    _require_judge_identity(run_meta["judge"])
     all_results = [r for results in suite_results.values() for r in results]
     stats = suite_stats or {}
     tier = run_meta["judge"]["tier"]
     quotable = tier == "tier2"
+    run = dict(run_meta)
+    run["judge"] = _judge_stamp(run_meta["judge"])
     return {
         "harness": {
             "name": "clio-bench",
@@ -60,7 +99,7 @@ def build_report(
             "tokenizer": tokenizer_name,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
-        "run": run_meta,
+        "run": run,
         "pins": {
             suite: {k: pin.get(k) for k in ("name", "commit", "sha256", "git_blob")}
             for suite, pin in pins["suites"].items()
@@ -175,7 +214,8 @@ def render_markdown(report: dict) -> str:
         f"- Suite(s): {', '.join(run['suites'])}",
         f"- Partition: {run['partition']} (seed {run['seed']}, max probes {run['max_probes']})",
         f"- Adapter: {run['adapter']}",
-        f"- Judge: {run['judge']['model']} ({run['judge']['tier']})",
+        f"- Judge: {run['judge']['model']} ({run['judge']['tier']}, "
+        f"revision {run['judge']['revision']})",
         f"- Generator: {run['generator']['model']}",
         f"- Tokenizer: {report['harness']['tokenizer']}",
         f"- Generated: {report['harness']['generated_at']}",

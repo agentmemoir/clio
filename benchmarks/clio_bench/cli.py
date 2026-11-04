@@ -15,7 +15,7 @@ from pathlib import Path
 from .doubles import StubGenerator, StubJudge
 from .fetch import MissingSnapshotError, PinError, load_pins
 from .fingerprint import FingerprintError
-from .llm import frontier_key_present
+from .llm import ChatClientError, ModelUnavailableError, frontier_key_present
 from .report import (
     blocked_gate_record,
     build_report,
@@ -84,24 +84,74 @@ def _build_adapter(args, tokenizer):
     return builder(tokenizer, args)
 
 
+def _pin_field(settings: dict, field: str, tier: str) -> str:
+    """Return one required judge-pin field, or raise `PinError` naming it."""
+    value = settings.get(field)
+    if not value:
+        raise PinError(
+            f"judge pin {tier!r} has no {field!r}; pins.json must name it"
+        )
+    return value
+
+
+def _pin_settings(
+    pins: dict, tier: str, *, base_url_override: str | None = None
+) -> tuple[str, str, str, str, str]:
+    """Resolve the tier, model, served model, revision, and base URL of a pin."""
+    settings = pins["judge"][tier]
+    model = _pin_field(settings, "model", tier)
+    served_model = _pin_field(settings, "served_model", tier)
+    revision = _pin_field(settings, "revision", tier)
+    base_url = base_url_override or _pin_field(settings, "base_url", tier)
+    return tier, model, served_model, revision, base_url
+
+
+def _judge_settings(args, pins) -> tuple[str, str, str, str, str]:
+    """Resolve the judge identity, refusing a model override that diverges."""
+    tier = "tier1" if args.judge == "local" else "tier2"
+    tier, model, served_model, revision, base_url = _pin_settings(
+        pins, tier, base_url_override=args.judge_base_url
+    )
+    override = args.judge_model
+    if override and override != model:
+        raise PinError(
+            f"--judge-model {override!r} does not match pinned model {model!r} "
+            f"in {args.pins}"
+        )
+    return tier, model, served_model, revision, base_url
+
+
 def _build_judge(args, pins):
     if args.judge == "stub":
-        return StubJudge(), {"tier": "stub", "model": "stub-exact-match", "base_url": ""}
-    tier = "tier1" if args.judge == "local" else "tier2"
-    settings = pins["judge"][tier]
-    model = args.judge_model or settings["model"]
-    base_url = args.judge_base_url or settings["base_url"]
+        return StubJudge(), {
+            "tier": "stub",
+            "model": "stub-exact-match",
+            "revision": "stub",
+            "base_url": "",
+        }
+    tier, model, served_model, revision, base_url = _judge_settings(args, pins)
     from .judges.llm_judge import LlmJudge
     from .llm import HttpChatClient
 
+    client = HttpChatClient(
+        base_url, model, served_model=served_model, revision=revision
+    )
+    print(
+        f"clio-bench: probing {client.models_url} for served model "
+        f"{served_model!r} (timeout {client.preflight_timeout}s)",
+        file=sys.stderr,
+    )
+    client.preflight()
     return LlmJudge(
-        HttpChatClient(base_url, model),
+        client,
         model,
         tier=tier,
-        max_tokens=args.judge_max_tokens,
+        max_tokens=getattr(args, "judge_max_tokens", 200),
     ), {
         "tier": tier,
         "model": model,
+        "revision": revision,
+        "served_model": served_model,
         "base_url": base_url,
     }
 
@@ -110,14 +160,17 @@ def _build_generator(args, pins):
     if args.generator == "stub":
         return StubGenerator(), {"model": "stub-context-echo", "base_url": ""}
     tier = "tier1" if args.generator == "local" else "tier2"
-    settings = pins["judge"][tier]
-    model = args.generator_model or settings["model"]
-    base_url = args.generator_base_url or settings["base_url"]
+    tier, pinned_model, served_model, revision, base_url = _pin_settings(
+        pins, tier, base_url_override=args.generator_base_url
+    )
+    model = args.generator_model or pinned_model
     from .answerer import AnswerGenerator
     from .llm import HttpChatClient
 
     return AnswerGenerator(
-        HttpChatClient(base_url, model),
+        HttpChatClient(
+            base_url, model, served_model=served_model, revision=revision
+        ),
         model,
         max_tokens=args.generator_max_tokens,
     ), {
@@ -186,8 +239,28 @@ def main(argv: list[str] | None = None) -> int:
     tokenizer = get_tokenizer(pins["judge"]["tokenizer"])
     cache_dir = Path(args.cache_dir or "benchmarks/.cache/datasets")
     adapter = _build_adapter(args, tokenizer)
-    judge, judge_meta = _build_judge(args, pins)
-    generator, generator_meta = _build_generator(args, pins)
+    try:
+        judge, judge_meta = _build_judge(args, pins)
+    except (ModelUnavailableError, ChatClientError) as exc:
+        print(
+            f"clio-bench: judge unavailable, no score produced: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    except PinError as exc:
+        print(
+            f"clio-bench: judge pin invalid, no score produced: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        generator, generator_meta = _build_generator(args, pins)
+    except PinError as exc:
+        print(
+            f"clio-bench: generator pin invalid, no score produced: {exc}",
+            file=sys.stderr,
+        )
+        return 2
 
     if not adapter.healthcheck():
         print(f"clio-bench: adapter {args.adapter!r} is not ready", file=sys.stderr)
@@ -239,7 +312,6 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - judge/endpoint failures abort the run
         from .adapter import AdapterError
         from .judges.llm_judge import JudgeError
-        from .llm import ChatClientError
 
         if isinstance(
             exc,

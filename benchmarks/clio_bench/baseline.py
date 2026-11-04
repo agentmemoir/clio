@@ -178,7 +178,8 @@ def render_baseline_markdown(report: dict) -> str:
         f"- Systems: {', '.join(run['adapters'])}",
         f"- Suite(s): {', '.join(run['suites'])}",
         f"- Partition: {run['partition']} (seed {run['seed']}, max probes {run['max_probes']})",
-        f"- Judge: {run['judge']['model']} ({run['judge']['tier']})",
+        f"- Judge: {run['judge']['model']} ({run['judge']['tier']}, "
+        f"revision {run['judge']['revision']})",
         f"- Generator: {run['generator']['model']}",
         f"- Tokenizer: {report['harness']['tokenizer']}",
         f"- Generated: {report['harness']['generated_at']}",
@@ -214,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
             if code != 0:
                 print(
                     f"clio-bench baseline: {name} run exited {code}; no baseline "
-                    "written, because a missing or broken system is a stop "
+                    "written, because a run that exits non-zero is a stop "
                     "condition and not a reason to run with one system",
                     file=sys.stderr,
                 )

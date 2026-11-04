@@ -81,10 +81,12 @@ Datasets are downloaded at run time and never committed. Each download is verifi
 
 `judges/llm_judge.py` implements the calibrated two-tier judge. It emits a structured JSON verdict (`accuracy_score`, `temporal_correctness`, `hallucination_penalty`, `explanation`) at `temperature = 0.0`. To cancel positional bias, each probe is judged twice with the candidate and reference swapped and the two accuracy scores combined with a geometric mean. If a pass is not valid JSON, the judge raises and the run aborts — no score is fabricated.
 
-Judge settings live in `pins.json`:
+Judge settings live in `pins.json`, one pin per tier with `tier`, `model`, `revision`, `served_model`, and `base_url`:
 
 - Tier 1 (local, inner loop): `qwen2.5-1.5b-instruct` at `http://127.0.0.1:8899`.
 - Tier 2 (official): `gpt-4o-2024-08-06`. Credentials come from `CLIO_BENCH_API_KEY` or `OPENAI_API_KEY` and are never logged.
+
+Before a scored run, the preflight compares the `served_model` id the endpoint reports with the pinned `served_model`.
 
 ## Tokenizer
 
