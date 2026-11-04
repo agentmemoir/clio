@@ -153,6 +153,7 @@ GATE_SCOPE_OFF = "off"
 #: command belong in the cache key. Hashing the whole environment would put a
 #: timestamp or shell session id in the key and every run would miss. The
 #: self-test checks values read by this module against these lists.
+#: A value a scoped run sets for the command it launches belongs here too.
 ENV_KEYS = (
     "CARGO_BUILD_JOBS",
     "CARGO_INCREMENTAL",
@@ -162,6 +163,7 @@ ENV_KEYS = (
     "CARGO_TARGET_DIR",
     "CLIO_DEPLOYMENT_CONFIG",
     "CLIO_DATABASE_URL",
+    "CLIO_DATA_DIR",
     "CC",
     "CFLAGS",
     "CXX",

@@ -219,6 +219,7 @@ class CacheIdentityTests(unittest.TestCase):
         tree = TreeState("head", (), ())
         base = {"PATH": os.environ.get("PATH", "")}
         command = ["cargo", "nextest", "run"]
+        self.assertIn("CLIO_DATA_DIR", ENV_KEYS)
         for name in ("PATH", "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS", "RUSTUP_TOOLCHAIN", "RUSTC_WRAPPER"):
             with self.subTest(name=name):
                 changed = dict(base, **{name: "different"})
