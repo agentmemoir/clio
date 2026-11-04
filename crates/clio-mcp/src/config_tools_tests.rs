@@ -159,6 +159,30 @@ fn config_set_rejects_unknown_path_and_invalid_value() {
     );
 }
 
+/// A refused `config_set` for a remote plain-http endpoint returns no userinfo
+/// credentials from the attempted value.
+#[test]
+fn config_set_result_does_not_echo_endpoint_userinfo_credentials() {
+    let state = state();
+    let result = call(
+        &state,
+        "config_set",
+        serde_json::json!({
+            "path": "embed.url",
+            "value": "http://user:pw@remote.host",
+            "scope": "session"
+        }),
+    );
+    assert!(!ok(&result), "{result}");
+    assert_eq!(code_of(&result), "invalid_argument", "{result}");
+    let text = result.to_string();
+    assert!(
+        !text.contains("pw"),
+        "config_set result leaked the password: {result}"
+    );
+    assert!(!text.contains("user:pw@remote.host"), "{result}");
+}
+
 /// Profile apply returns the effective diff and the
 /// known profile list; unknown profiles are rejected.
 #[test]

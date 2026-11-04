@@ -26,7 +26,7 @@
 //!
 //! Keep this module focused on setup's deployment-config persistence.
 
-use clio_config::secret::{mask_secret, path_is_secret};
+use clio_config::secret::{mask_secret, value_is_secret};
 use clio_config::{ConfigScope, Runtime, backup_config_file};
 use clio_types::ToolResult;
 use serde_json::Value;
@@ -104,7 +104,7 @@ fn masked_display(path: &str, value: &Value) -> String {
         Value::String(s) => s.clone(),
         other => other.to_string(),
     };
-    if path_is_secret(path) {
+    if value_is_secret(path, &raw) {
         mask_secret(&raw)
     } else {
         raw

@@ -139,6 +139,35 @@ fn endpoint_parse_fails_closed_on_malformed_brackets() {
 }
 
 #[test]
+fn endpoint_parse_hides_credentials_from_error() {
+    for url in ["https://user:pw@host", "https://[::1]:pw"] {
+        let err = HttpEndpoint::parse(url).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("invalid port"), "{url}: {text}");
+        assert!(
+            !text.contains("pw") && !text.contains("user"),
+            "{url}: {text}"
+        );
+    }
+}
+
+#[test]
+fn endpoint_parse_hides_credentials_from_scheme_error() {
+    let err = HttpEndpoint::parse("postgres://user:pw@db/clio").unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains("must be http:// or https://"), "{text}");
+    assert!(!text.contains("pw") && !text.contains("user"), "{text}");
+}
+
+#[test]
+fn endpoint_gate_hides_credentials_from_error() {
+    let err = gate("http://user:pw@db.example.com:8080").unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains("must be https"), "{text}");
+    assert!(!text.contains("pw") && !text.contains("user"), "{text}");
+}
+
+#[test]
 fn parse_response_json_hides_body_for_401_403() {
     let secret_body = b"token abc123 must not leak";
     for code in [401_u16, 403] {

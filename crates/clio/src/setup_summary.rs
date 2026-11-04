@@ -29,10 +29,11 @@
 //!
 //! The summary takes [`Written`] and the answers, and it prints a count, an
 //! address broken into host and port, two endpoint URLs, and a key *location*.
-//! The password inside the address is never read, the API keys are never read,
-//! and the entry values themselves are not handed over at all. A summary that
-//! received the entry vector could eventually print one by accident; one that
-//! receives a count cannot.
+//! The database password is never read, an endpoint URL's userinfo is replaced
+//! by `***` before printing, the API keys are never read, and the entry values
+//! themselves are not handed over at all. A summary that received the entry
+//! vector could eventually print one by accident; one that receives a count
+//! cannot.
 
 use crate::setup_config::Written;
 use crate::setup_plan_db::{DatabaseChoice, DatabasePlan};
@@ -71,7 +72,7 @@ pub(crate) fn applied(
         writeln!(
             out,
             "        {name}: {} ({})",
-            service.url,
+            clio_ops::redact_credentials(&service.url),
             service_note(&service.url)
         )
         .map_err(io_err)?;

@@ -27,7 +27,7 @@ use super::validate::{validate_set_path, validate_set_value};
 use super::{ConfigGetData, ConfigScope, ConfigSetData, Runtime};
 use crate::error::{AmError, ErrorCode, ToolResult};
 use crate::log;
-use crate::secret::{masked_at_path, masked_clone, path_is_secret};
+use crate::secret::{masked_at_path, masked_clone, value_is_secret};
 use serde_json::Value;
 
 impl Runtime {
@@ -107,11 +107,12 @@ impl Runtime {
             save_overlay_file(&path_buf, &self.deployment_overlay)?;
         }
         log::info("config_set", &[("path", path), ("scope", scope.as_str())]);
+        let shown = value_as_string(&value);
         Ok(ConfigSetData {
             path: path.to_owned(),
             scope: scope.as_str().to_owned(),
-            value: if path_is_secret(path) {
-                Value::String(crate::secret::mask_secret(&value_as_string(&value)))
+            value: if value_is_secret(path, &shown) {
+                Value::String(crate::secret::mask_secret(&shown))
             } else {
                 value
             },

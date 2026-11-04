@@ -1,0 +1,1 @@
+A sidecar or embedding endpoint URL that fails to parse now reports a fixed reason and no longer repeats the URL text, so a password typed into the userinfo part of that URL can no longer appear in the error. [Issue #346](https://github.com/agentmemoir/clio/issues/346)

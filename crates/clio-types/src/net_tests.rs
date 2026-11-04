@@ -133,6 +133,19 @@ fn split_refuses_what_it_cannot_read() {
 }
 
 #[test]
+fn a_split_refusal_masks_the_password_in_the_url() {
+    let error = parse_scheme_host("http://u:topsecret@[::1/x").expect_err("no bracket");
+    assert!(
+        !error.contains("topsecret"),
+        "the password is not echoed: {error}"
+    );
+    assert!(
+        error.contains("***@[::1/x"),
+        "the address is still named: {error}"
+    );
+}
+
+#[test]
 fn an_http_target_demands_an_http_scheme() {
     let target = http_target("http://127.0.0.1:34311").expect("loopback is readable");
     assert_eq!(target.scheme, "http");
@@ -152,4 +165,20 @@ fn an_http_target_demands_an_http_scheme() {
     ] {
         assert!(http_target(bad).is_err(), "{bad} must be refused");
     }
+}
+
+#[test]
+fn a_scheme_refusal_masks_the_password_in_the_url() {
+    let error =
+        http_target("postgres://u:topsecret@db.example.com/clio").expect_err("not an http target");
+    assert!(
+        !error.contains("topsecret"),
+        "the password is not echoed: {error}"
+    );
+}
+
+#[test]
+fn a_passwordless_url_is_echoed_unchanged() {
+    let error = http_target("postgres://db.example.com/clio").expect_err("not an http target");
+    assert!(error.contains("postgres://db.example.com/clio"), "{error}");
 }

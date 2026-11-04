@@ -140,6 +140,24 @@ fn build_setup_masks_secret_and_reports_config() {
 }
 
 #[test]
+fn build_setup_redacts_url_userinfo_credentials() {
+    let dir = temp_dir("setup-userinfo");
+    let path = dir.join("deployment.json");
+    std::fs::write(
+        &path,
+        r#"{"embed.url":"http://user:pw@127.0.0.1:35551","rerank.url":"http://127.0.0.1:35552"}"#,
+    )
+    .expect("write config");
+    let rt = clio_config::Runtime::with_deployment_file(&path);
+    let view = build_setup(&rt, Some(&path));
+    let embed = view.embed.expect("embed set");
+    assert_eq!(embed.url, "http://***@127.0.0.1:35551");
+    let rerank = view.rerank.expect("rerank set");
+    assert_eq!(rerank.url, "http://127.0.0.1:35552");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn build_setup_masks_secret_keys_outside_the_watched_allowlist() {
     let dir = temp_dir("setup-extra-secret");
     let path = dir.join("deployment.json");

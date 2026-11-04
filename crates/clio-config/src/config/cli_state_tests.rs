@@ -21,9 +21,8 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
-use crate::config::ConfigScope;
-use crate::error::ToolResult;
 use crate::ranking::RankingEnvPatch;
+use crate::{config::ConfigScope, error::ToolResult};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -201,6 +200,20 @@ fn a_flush_reports_the_secret_profile_value_it_cannot_save() {
     let saved = fs::read_to_string(&path).expect("read cli state");
     assert!(!saved.contains("sk-abcdef0123456789"), "{saved}");
     assert!(!saved.contains("credentials.api_key"), "{saved}");
+}
+
+#[test]
+fn a_profile_url_with_userinfo_is_not_saved_in_clear() {
+    let scratch = Scratch::new();
+    let mut rt = boot(scratch.state_file());
+    let _ = rt.config_profile_apply("coding_local");
+    for url in ["https://user:pw@host/v1", "https://host/v1"] {
+        let set = rt.config_set("embed.url", json!(url), ConfigScope::Profile);
+        assert!(matches!(set, ToolResult::Ok { .. }), "embed.url applies");
+        let _ = rt.flush_cli_state().expect("flush");
+        let saved = fs::read_to_string(scratch.state_file()).expect("read");
+        assert_eq!(saved.contains(url), !url.contains("pw@"), "{saved}");
+    }
 }
 
 /// The profile an `effective_raw` read reports as active.

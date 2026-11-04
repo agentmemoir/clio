@@ -21,7 +21,7 @@
 //!
 //! Keep this module focused on log level and secret-safe log emission.
 
-use crate::secret::{mask_secret, path_is_secret};
+use crate::secret::value_is_secret;
 use std::fmt::{self, Write as _};
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -87,21 +87,28 @@ pub fn current_level() -> LogLevel {
     }
 }
 
+/// Render the `key=value` fields of a log line, redacting secret values.
+///
+/// A secret value is never logged, not even its last four characters: a log
+/// line leaves the process and another program may store it.
+fn format_fields(fields: &[(&str, &str)]) -> String {
+    let mut out = String::new();
+    for (key, value) in fields {
+        if value_is_secret(key, value) {
+            let _ = write!(out, " {key}=[REDACTED]");
+        } else {
+            let _ = write!(out, " {key}={value}");
+        }
+    }
+    out
+}
+
 /// Emit a log line if `level` is enabled. Secret-looking field values are masked.
 pub fn log(level: LogLevel, message: &str, fields: &[(&str, &str)]) {
     if (level as u8) > MAX_LEVEL.load(Ordering::Relaxed) {
         return;
     }
-    let mut line = format!("[{}] {message}", level.as_str());
-    for (key, value) in fields {
-        let shown = if path_is_secret(key) {
-            mask_secret(value)
-        } else {
-            (*value).to_owned()
-        };
-        let _ = write!(line, " {key}={shown}");
-    }
-    eprintln!("{line}");
+    eprintln!("[{}] {message}{}", level.as_str(), format_fields(fields));
 }
 
 /// Convenience macros would live here; keep call sites explicit for now.
@@ -152,6 +159,16 @@ mod tests {
         assert_eq!(current_level(), LogLevel::Trace);
         set_level(LogLevel::Info);
         assert_eq!(current_level(), LogLevel::Info);
+    }
+
+    #[test]
+    fn log_fields_mask_a_url_that_carries_credentials() {
+        let masked = format_fields(&[("embed.url", "https://user:pw@host/v1")]);
+        assert!(!masked.contains("user:pw"), "{masked}");
+        assert_eq!(masked, " embed.url=[REDACTED]");
+        assert!(!masked.contains("host"), "log field kept part of the url");
+        let plain = format_fields(&[("embed.url", "https://host/v1")]);
+        assert_eq!(plain, " embed.url=https://host/v1");
     }
 
     #[test]

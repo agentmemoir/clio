@@ -46,7 +46,7 @@ use super::validate::{validate_set_path, validate_set_value};
 use crate::error::{AmError, ErrorCode};
 use crate::profile::lookup_profile;
 use crate::ranking::RankingEnv;
-use crate::secret::path_is_secret;
+use crate::secret::{path_is_secret, value_is_secret};
 use serde_json::{Map, Value};
 use std::fs;
 use std::io::ErrorKind;
@@ -194,7 +194,7 @@ impl Runtime {
             // A secret cannot be sealed here, so it stays in the profile overlay
             // of the running process and out of the file rather than in the
             // clear. The caller is told, so it cannot report a full save.
-            if path_is_secret(key) {
+            if value_is_secret(key, value.as_str().unwrap_or_default()) {
                 dropped.push(key.clone());
             } else {
                 profile_overlay.insert(key.clone(), value.clone());
