@@ -388,7 +388,6 @@ dependencies = [
  "clio-store",
  "clio-types",
  "rand",
- "serde",
  "serde_json",
  "ureq",
 ]
