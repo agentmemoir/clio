@@ -8,10 +8,6 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  group: coverage-full
-  cancel-in-progress: false
-
 jobs:
   gate:
     name: Check the commenter may run full coverage
