@@ -21,6 +21,19 @@ from scoped_profiles import (
 
 # --- running -------------------------------------------------------------------
 
+# Each of these is an explicit path override that the configuration resolvers read before the data directory, so a scoped run must not inherit one.
+HOST_OVERRIDES = (
+    "CLIO_AUTH_TOKEN_FILE",
+    "CLIO_BACKUP_DIR",
+    "CLIO_COMPLIANCE_SALT",
+    "CLIO_ERASURE_JOURNAL_FILE",
+    "CLIO_EXPORT_ROOT",
+    "CLIO_KEY_FILE",
+    "CLIO_KMS_FILE",
+    "CLIO_RETENTION_PROFILES",
+    "CLIO_SYNC_KEY_FILE",
+)
+
 
 def hermetic_env() -> dict[str, str]:
     """The environment every scoped run uses.
@@ -33,11 +46,20 @@ def hermetic_env() -> dict[str, str]:
     GATE_ACTIVE passes cargo through the gate wrapper unchanged, so a scoped run
     started from inside another gated command does not recurse into a cached
     verdict for itself.
+
+    CLIO_DATA_DIR points under the coverage directory, so the run reads a data directory it owns. Without it the run resolves one from HOME and reads the developer's real erasure journal, which fails an unrelated test when that journal was written under a different key salt; the path here is one the run created.
+
+    The explicit path overrides are dropped because each of them makes a run read a file it did not create. CLIO_DATABASE_URL is left alone because the scoped tests need the database the Makefile selects, and the gate already keys on it.
     """
     env = dict(os.environ)
     env["CLIO_DEPLOYMENT_CONFIG"] = str(COV_DIR / "no-deployment-overlay.json")
     env["GATE_ACTIVE"] = "1"
+    data_dir = COV_DIR / "data"
+    env["CLIO_DATA_DIR"] = str(data_dir)
     COV_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for name in HOST_OVERRIDES:
+        env.pop(name, None)
     stale = COV_DIR / "no-deployment-overlay.json"
     if stale.exists():
         stale.unlink()
