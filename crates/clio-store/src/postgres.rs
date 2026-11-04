@@ -64,6 +64,7 @@ impl PostgresStore {
     /// # Errors
     /// Connection or migration failures.
     pub fn open(database_url: &str, kms: Arc<dyn DekProvider>) -> Result<Self, AmError> {
+        crate::pg_tls_warning::warn_encrypt_no_verify(database_url);
         let mut client = crate::pg_tls::connect(database_url).am("postgres connect")?;
         crate::postgres_ext::require_extension(&mut client, "vector")?;
         // Serialize schema checks and actual migrations. A complete current
