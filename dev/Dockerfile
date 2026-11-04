@@ -58,9 +58,9 @@ RUN channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' /tmp/rust-toolchain.toml)" \
  && case "$TARGETARCH" in \
       amd64) rust_arch=x86_64-unknown-linux-gnu; rustup_sha256=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55 ;; \
       arm64) rust_arch=aarch64-unknown-linux-gnu; rustup_sha256=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282 ;; \
-      *) echo >&2 "unsupported TARGETARCH: $TARGETARCH"; exit 1 ;; \
+      *) if [ -z "${TARGETARCH}" ]; then echo >&2 "TARGETARCH is unset; set the build platform"; else echo >&2 "unsupported TARGETARCH: ${TARGETARCH}"; fi; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.3/${rust_arch}/rustup-init" \
+ && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init --max-time 60 "https://static.rust-lang.org/rustup/archive/1.29.3/${rust_arch}/rustup-init" \
  && echo "${rustup_sha256}  /tmp/rustup-init" | sha256sum -c - \
  && chmod +x /tmp/rustup-init \
  && /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "$channel" --default-host "$rust_arch" \
