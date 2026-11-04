@@ -20,8 +20,8 @@ import tempfile
 from pathlib import Path
 
 from . import cli
-from .fetch import PinError, load_pins
-from .llm import ModelUnavailableError, frontier_key_present
+from .fetch import load_pins
+from .llm import frontier_key_present
 from .report import (
     blocked_gate_record,
     render_settings_lines,
@@ -178,7 +178,8 @@ def render_baseline_markdown(report: dict) -> str:
         f"- Systems: {', '.join(run['adapters'])}",
         f"- Suite(s): {', '.join(run['suites'])}",
         f"- Partition: {run['partition']} (seed {run['seed']}, max probes {run['max_probes']})",
-        f"- Judge: {run['judge']['model']} ({run['judge']['tier']})",
+        f"- Judge: {run['judge']['model']} ({run['judge']['tier']}, "
+        f"revision {run['judge']['revision']})",
         f"- Generator: {run['generator']['model']}",
         f"- Tokenizer: {report['harness']['tokenizer']}",
         f"- Generated: {report['harness']['generated_at']}",
@@ -203,21 +204,6 @@ def main(argv: list[str] | None = None) -> int:
     if (args.judge == "tier2" or args.generator == "tier2") and not frontier_key_present():
         return record_blocked_gate(args)
 
-    try:
-        cli.preflight_judge(args, load_pins(Path(args.pins)))
-    except ModelUnavailableError as exc:
-        print(
-            f"clio-bench baseline: judge unavailable, no baseline written: {exc}",
-            file=sys.stderr,
-        )
-        return 2
-    except PinError as exc:
-        print(
-            f"clio-bench baseline: judge pin invalid, no baseline written: {exc}",
-            file=sys.stderr,
-        )
-        return 2
-
     out_path = Path(args.out) if args.out else None
     md_path = Path(args.report_md) if args.report_md else None
     reports: dict[str, dict] = {}
@@ -229,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
             if code != 0:
                 print(
                     f"clio-bench baseline: {name} run exited {code}; no baseline "
-                    "written, because a missing or broken system is a stop "
+                    "written, because a run that exits non-zero is a stop "
                     "condition and not a reason to run with one system",
                     file=sys.stderr,
                 )

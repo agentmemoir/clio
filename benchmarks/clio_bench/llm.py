@@ -3,14 +3,17 @@
 Uses only the standard library so the harness has no third-party runtime
 dependency. Works against a local llama.cpp server or a hosted endpoint.
 Credentials come from the environment (`CLIO_BENCH_API_KEY`, falling back to
-`OPENAI_API_KEY`) and are never logged or written to reports.
+`OPENAI_API_KEY`) and are never logged or written to reports. A loopback
+endpoint never receives the frontier key.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable, Protocol
 
@@ -50,6 +53,33 @@ class ChatClient(Protocol):
     def preflight(self) -> None: ...
 
 
+# The one version segment both the models list and the chat call use, so the
+# two requests cannot drift onto different paths again.
+API_VERSION = "/v1"
+
+# Names and address ranges that mean "this machine". A judge served here must
+# never receive the frontier key.
+_LOOPBACK_HOSTS = frozenset({"localhost"})
+_LOOPBACK_NETWORKS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+)
+
+
+def _is_loopback_url(base_url: str) -> bool:
+    """Return True when the URL host is localhost, 127.0.0.0/8, or ::1."""
+    host = urllib.parse.urlsplit(base_url).hostname
+    if not host:
+        return False
+    if host.lower() in _LOOPBACK_HOSTS:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(address in network for network in _LOOPBACK_NETWORKS)
+
+
 class HttpChatClient:
     """OpenAI-compatible `/v1/chat/completions` client."""
 
@@ -58,60 +88,91 @@ class HttpChatClient:
         base_url: str,
         model: str,
         *,
+        served_model: str,
+        revision: str,
         api_key: str | None = None,
         timeout: int = 600,
-        revision: str,
+        preflight_timeout: int = 10,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.served_model = served_model
         self.revision = revision
+        self._loopback = _is_loopback_url(self.base_url)
         self._api_key = api_key or os.environ.get("CLIO_BENCH_API_KEY") or os.environ.get(
             "OPENAI_API_KEY"
         )
         self.timeout = timeout
+        self.preflight_timeout = preflight_timeout
+
+    @property
+    def api_base(self) -> str:
+        """The versioned base that both request paths are built from."""
+        return f"{self.base_url}{API_VERSION}"
+
+    @property
+    def models_url(self) -> str:
+        """The exact URL the preflight requests the model list from."""
+        return f"{self.api_base}/models"
 
     def _request(
         self, path: str, *, data: bytes | None = None
     ) -> urllib.request.Request:
-        """Build a request on the shared base URL with the shared auth header."""
+        """Build a request on the shared versioned base and auth header."""
         request = urllib.request.Request(
-            f"{self.base_url}{path}",
+            f"{self.api_base}{path}",
             data=data,
             headers={"Content-Type": "application/json"} if data is not None else {},
             method="POST" if data is not None else "GET",
         )
-        if self._api_key:
+        if self._api_key and not self._loopback:
             request.add_header("Authorization", f"Bearer {self._api_key}")
         return request
 
-    def _send(self, request: urllib.request.Request) -> tuple[int, bytes]:
+    def _send(
+        self, request: urllib.request.Request, *, timeout: int
+    ) -> tuple[int, bytes]:
         """Send one request and return its status and body."""
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, response.read()
 
+    def _unreachable(self, exc: Exception) -> ChatClientError:
+        """Build the error for a transport failure, never naming the key."""
+        return ChatClientError(f"model endpoint {self.api_base} unreachable: {exc}")
+
+    def _rejected(self, status: int) -> ChatClientError:
+        """Build the error for a status the endpoint returned on purpose."""
+        return ChatClientError(
+            f"model endpoint {self.api_base} rejected the request with HTTP {status}"
+        )
+
     def _unavailable(self, detail: str) -> ModelUnavailableError:
-        """Build the error that names the revision and endpoint, never the key."""
+        """Build the error that names the served model and endpoint, never the key."""
         return ModelUnavailableError(
-            f"model revision {self.revision!r} is not available at "
-            f"{self.base_url}: {detail}"
+            f"served model {self.served_model!r} is not served at "
+            f"{self.models_url}: {detail}"
         )
 
     def preflight(self) -> None:
-        """Fail unless the endpoint serves the configured revision id."""
+        """Fail unless the endpoint serves the configured served model id."""
         try:
-            status, raw = self._send(self._request("/models"))
+            status, raw = self._send(
+                self._request("/models"), timeout=self.preflight_timeout
+            )
+        except urllib.error.HTTPError as exc:
+            raise self._rejected(exc.code) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise self._unavailable(f"request failed: {exc}") from exc
+            raise self._unreachable(exc) from exc
         if not 200 <= status < 300:
-            raise self._unavailable(f"HTTP {status}")
+            raise self._rejected(status)
         try:
             payload = json.loads(raw.decode("utf-8"))
             model_ids = [entry["id"] for entry in payload["data"]]
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        except (json.JSONDecodeError, KeyError, TypeError, UnicodeDecodeError) as exc:
             raise self._unavailable("the model list was not OpenAI-compatible") from exc
-        if self.revision not in model_ids:
+        if self.served_model not in model_ids:
             raise self._unavailable(
-                "the revision is not in the endpoint's model list"
+                "the model list does not include the served model"
             )
 
     def complete(
@@ -135,12 +196,14 @@ class HttpChatClient:
             }
         data = json.dumps(body).encode("utf-8")
         try:
-            _, raw = self._send(self._request("/v1/chat/completions", data=data))
+            _, raw = self._send(
+                self._request("/chat/completions", data=data), timeout=self.timeout
+            )
             payload = json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise self._rejected(exc.code) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise ChatClientError(
-                f"model endpoint {self.base_url} unreachable: {exc}"
-            ) from exc
+            raise self._unreachable(exc) from exc
         except json.JSONDecodeError as exc:
             raise ChatClientError(f"model endpoint returned non-JSON: {exc}") from exc
         try:

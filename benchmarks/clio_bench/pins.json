@@ -50,13 +50,15 @@
   "judge": {
     "tier1": {
       "model": "qwen2.5-1.5b-instruct",
-      "revision": "qwen2.5-1.5b-instruct",
+      "served_model": "qwen2.5-1.5b-instruct",
+      "revision": "Qwen/Qwen2.5-1.5B-Instruct-GGUF@91cad51170dc346986eccefdc2dd33a9da36ead9",
       "base_url": "http://127.0.0.1:8899",
       "temperature": 0.0,
       "role": "inner optimization loop and offline first baseline"
     },
     "tier2": {
       "model": "gpt-4o-2024-08-06",
+      "served_model": "gpt-4o-2024-08-06",
       "revision": "gpt-4o-2024-08-06",
       "base_url": "https://api.openai.com",
       "temperature": 0.0,

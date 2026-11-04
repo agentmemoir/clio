@@ -332,6 +332,9 @@ class CliTests(unittest.TestCase):
             self.assertFalse(out.exists())
             self.assertFalse(md.exists())
             self.assertIn("judge unavailable", stderr.getvalue())
+            self.assertIn(
+                "probing http://127.0.0.1:8899/v1/models", stderr.getvalue()
+            )
 
 
     def test_a_judge_pin_without_a_revision_produces_no_report(self) -> None:
