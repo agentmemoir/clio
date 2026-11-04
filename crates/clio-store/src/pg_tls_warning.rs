@@ -11,7 +11,8 @@
 //! ## Owns
 //! - `encrypt_no_verify_warning`: the warning text for a connection string, and
 //!   `None` for every mode that checks the server certificate
-//! - `warn_encrypt_no_verify`: the stderr emission, once per process
+//! - `warn_encrypt_no_verify`: the stderr emission, once per process and only
+//!   when the process log level shows warnings
 //!
 //! ## Does not own
 //! - The mode names and what each one means at connect time (`pg_tls`)
@@ -27,6 +28,8 @@
 //! Keep this module focused on the warning text and the one place it is emitted.
 
 use std::sync::Once;
+
+use clio_config::log::{LogLevel, current_level};
 
 use crate::pg_tls::SslChoice;
 
@@ -45,7 +48,19 @@ pub(crate) fn encrypt_no_verify_warning(url: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether the process log level lets a warning reach stderr.
+///
+/// The warning is operator evidence, not a diagnostic, so it is only recorded
+/// as seen once it can actually be written: a level above `warn` leaves the
+/// guard untouched, and a later raise of the level still emits it.
+fn warnings_are_visible() -> bool {
+    current_level() >= LogLevel::Warn
+}
+
 pub(crate) fn warn_encrypt_no_verify(url: &str) {
+    if !warnings_are_visible() {
+        return;
+    }
     if let Some(message) = encrypt_no_verify_warning(url) {
         WARNED.call_once(|| {
             clio_config::log::warn(

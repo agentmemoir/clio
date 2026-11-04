@@ -11,6 +11,8 @@
 //! ## Owns
 //! - The re-executed child that drives the real connection path, and the parent
 //!   that asserts the warning fields on the child's captured stderr
+//! - The child that proves a level above `warn` defers the warning instead of
+//!   spending the once-per-process guard
 //!
 //! ## Does not own
 //! - Which modes warn (`pg_tls_warning` owns that decision)
@@ -100,6 +102,64 @@ fn an_unverified_connection_warns_on_stderr() {
 /// port; the warning is written before the attempt, and that is the only thing
 /// this process is here to produce.
 fn open_and_ignore_the_refusal() {
+    set_level(LogLevel::Info);
+    let _ = crate::pg_tls::open(REFUSED_URL);
+}
+
+/// Set only in the child that drives the level transition.
+const LEVEL_CHILD_MARKER: &str = "CLIO_STORE_WARNING_LEVEL_CHILD";
+
+/// The name fragment used to run exactly the level-transition test in the child.
+const LEVEL_TEST_NAME: &str = "a_level_above_warn_defers_the_warning_until_the_level_allows_it";
+
+/// A level above `warn` must not spend the once-per-process guard.
+///
+/// The child opens the unverified URL while the process level hides warnings,
+/// then raises the level and opens it again. The parent requires the warning on
+/// stderr exactly once, so a guard taken on the suppressed call fails the test:
+/// that call would have left nothing written and nothing for the second call to
+/// emit.
+#[test]
+fn a_level_above_warn_defers_the_warning_until_the_level_allows_it() {
+    if std::env::var_os(LEVEL_CHILD_MARKER).is_some() {
+        open_hidden_and_then_raise_the_level();
+        return;
+    }
+
+    let exe = std::env::current_exe().expect("the test binary has a path");
+    let output = Command::new(exe)
+        .args([LEVEL_TEST_NAME, "--nocapture"])
+        .env(LEVEL_CHILD_MARKER, "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("re-execute the test binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "the child run failed: {}: {stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("1 passed"),
+        "the child must run exactly one test: {stdout}"
+    );
+    assert!(
+        stderr.contains("[warn]"),
+        "raising the level must still emit the deferred warning: {stderr:?}"
+    );
+    assert_eq!(
+        stderr.matches("sslmode=encrypt-no-verify").count(),
+        1,
+        "the warning must appear once, from the call the level allowed: {stderr:?}"
+    );
+}
+
+/// Open the unverified URL while warnings are hidden, then raise the level.
+fn open_hidden_and_then_raise_the_level() {
+    set_level(LogLevel::Error);
+    let _ = crate::pg_tls::open(REFUSED_URL);
     set_level(LogLevel::Info);
     let _ = crate::pg_tls::open(REFUSED_URL);
 }
