@@ -1,0 +1,72 @@
+name: coverage-command
+
+# A comment is the only way to ask for a full run, so `issue_comment` is
+# required. Nothing from the comment reaches a shell: the gate job below reads
+# the author association, and then asks the API for the commenter's permission.
+# It refuses every commenter without repository write access.
+on:
+  issue_comment: # zizmor: ignore[dangerous-triggers] the gate job admits trusted commenters only
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Check the commenter may run full coverage
+    if: startsWith(github.event.comment.body, '/coverage-full')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.trust.outputs.allowed }}
+    steps:
+      - name: Check the commenter relationship to the repository
+        id: trust
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+        run: |
+          set -euo pipefail
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *)
+              echo "allowed=false" >> "$GITHUB_OUTPUT"
+              echo "$ACTOR commented with association $ASSOCIATION and no repository permission was looked up: denied." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
+
+          permission=""
+          if ! permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null); then
+            permission=""
+          fi
+
+          case "$permission" in
+            admin|maintain|write)
+              echo "allowed=true" >> "$GITHUB_OUTPUT"
+              echo "$ACTOR commented with association $ASSOCIATION and repository permission $permission: allowed." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            "")
+              echo "allowed=true" >> "$GITHUB_OUTPUT"
+              echo "$ACTOR commented with association $ASSOCIATION and repository permission is unknown because the lookup failed: allowed on the association check alone." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "allowed=false" >> "$GITHUB_OUTPUT"
+              echo "$ACTOR commented with association $ASSOCIATION and repository permission $permission: denied." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+  coverage:
+    name: Full coverage
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    # The called workflow's report job writes an issue, and a called workflow
+    # may only use permissions that the calling job grants it.
+    permissions:
+      contents: read
+      issues: write
+    uses: $/.github/workflows/coverage-full.yml

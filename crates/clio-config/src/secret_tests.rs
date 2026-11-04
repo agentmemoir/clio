@@ -246,9 +246,9 @@ fn masked_at_path_masks_a_url_that_carries_credentials() {
     let raw = "https://user:pw@host/v1/embeddings";
     assert!(!path_is_secret("embed.url"));
     let masked = masked_at_path("embed.url", &json!(raw));
-    assert_eq!(masked, json!("****ings"), "{masked}");
+    assert_eq!(masked, json!("[REDACTED]"), "{masked}");
     let tree = masked_clone(&json!({"embed": {"url": raw, "model": "m"}}));
-    assert_eq!(tree["embed"]["url"], json!("****ings"), "{tree}");
+    assert_eq!(tree["embed"]["url"], json!("[REDACTED]"), "{tree}");
     assert_eq!(tree["embed"]["model"], json!("m"));
 }
 
