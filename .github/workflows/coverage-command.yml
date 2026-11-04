@@ -1,0 +1,41 @@
+name: coverage-command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: coverage-full
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Check the commenter may run full coverage
+    if: startsWith(github.event.comment.body, '/coverage-full')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.trust.outputs.allowed }}
+    steps:
+      - name: Check the commenter relationship to the repository
+        id: trust
+        env:
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+        run: |
+          set -euo pipefail
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) echo "allowed=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "allowed=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  coverage:
+    name: Full coverage
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    uses: ./.github/workflows/coverage-full.yml
