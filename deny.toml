@@ -6,15 +6,15 @@ all-features = true
 yanked = "deny"
 unmaintained = "all"
 
-# ring is this workspace's only crypto provider: rustls and rustls-webpki
-# resolve to it, and the aws-lc-rs features stay off. ring 0.17.14 has had
-# no release since 2025-03-11, so a future RUSTSEC fix would arrive only
-# when upstream publishes one. Keep it monitored instead of migrating now:
-# aws-lc-rs adds a C and C++ build step to every target, including the
-# release matrix. Any advisory that names ring fails the dependency policy
-# job that runs this file every week, and that failure is the trigger to
-# revisit the choice. Upstream state as of 2026-11-04. Tracking issue:
-# https://github.com/agentmemoir/clio/issues/366
+# ring is the only crypto provider for this workspace's TLS: rustls and
+# rustls-webpki resolve to it, and the aws-lc-rs features stay off. ring
+# 0.17.14 has had no release since 2025-03-11, so a future RUSTSEC fix
+# would arrive only when upstream publishes one. Keep it monitored instead
+# of migrating now: aws-lc-rs needs a C and C++ toolchain on every target,
+# on top of the C step SQLite already requires. A vulnerability or
+# unmaintained advisory against ring fails the dependency policy job that
+# runs this file every week, and that failure is the trigger to revisit
+# the choice. Upstream state as of 2026-11-04. Recorded from issue #366.
 
 [licenses]
 allow = [
