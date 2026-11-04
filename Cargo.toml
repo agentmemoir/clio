@@ -127,8 +127,8 @@ rustls = { version = "0.23", default-features = false, features = [
 ] }
 webpki-roots = "1"
 # Single approved TLS-capable JSON transport (rustls + gzip defaults, blocking).
-# Floor of 3.5.1: 3.4.3 is the first release with the upstream TLS dependency
-# fix (rustls >= 0.23.46, webpki-roots >= 1.0.10). `"3"` could still pick 3.4.2.
+# The floor is the TLS security fix shipped in ureq 3.4.3 (upstream PR #1218):
+# rustls >= 0.23.46, webpki-roots/webpki-root-certs >= 1.0.10; 3.5.1 is newest.
 ureq = "3.5.1"
 # Gzip wrapper for the backup archive container; pinned to the version already
 # resolved as a transitive dependency of the HTTP transport (no new package).
