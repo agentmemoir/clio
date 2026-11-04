@@ -19,9 +19,22 @@ _CACHE_KEY = "9b5ad71b2ce5302211f9c61530b329a4922fc6a4"
 
 _ASSET_PATH = Path(__file__).resolve().parent / "assets" / ASSET_NAME
 
+#: Message the network guard raises when tiktoken tries to read a remote blob.
+NETWORK_GUARD_MESSAGE = "network access attempted at measurement time"
+
 
 class BudgetError(RuntimeError):
     """Raised when an exact budget measurement cannot be produced."""
+
+
+def _forbid_network(*_args, **_kwargs):
+    """Replace ``tiktoken.load.read_file`` so a cache miss can never download.
+
+    ``tiktoken.load.read_file_cached`` resolves ``read_file`` by module-global
+    name on every cache miss, so swapping it is enough to block the only
+    network path tiktoken has.
+    """
+    raise RuntimeError(NETWORK_GUARD_MESSAGE)
 
 
 class OfflineTokenizer:
@@ -68,6 +81,7 @@ def load() -> OfflineTokenizer:
     payload = _read_verified_asset()
     try:
         import tiktoken
+        import tiktoken.load
     except ImportError:
         raise BudgetError("missing required tokenizer package: tiktoken") from None
 
@@ -75,10 +89,16 @@ def load() -> OfflineTokenizer:
     try:
         Path(cache_dir, _CACHE_KEY).write_bytes(payload)
         os.environ["TIKTOKEN_CACHE_DIR"] = cache_dir
+        # A wrong cache key must fail loudly instead of falling through to an
+        # HTTPS fetch: block tiktoken's only read path for the duration of load.
+        original_read_file = tiktoken.load.read_file
+        tiktoken.load.read_file = _forbid_network
         try:
             encoding = tiktoken.get_encoding(ENCODING)
         except Exception as exc:  # noqa: BLE001 - any loader failure is fatal here
             raise BudgetError(str(exc)) from exc
+        finally:
+            tiktoken.load.read_file = original_read_file
         if encoding.name != ENCODING:
             raise BudgetError(
                 f"unexpected encoding loaded: {encoding.name!r}, expected {ENCODING!r}"

@@ -170,6 +170,52 @@ class MeasureTests(unittest.TestCase):
             self.assertEqual(len(json.loads(out.decode("utf-8"))["rows"]), 2)
             self.assertEqual(err, "")
 
+    def test_cache_miss_is_refused_instead_of_downloading(self):
+        """A wrong cache key must raise, never fall through to an HTTPS fetch.
+
+        The check runs in a fresh interpreter because tiktoken caches loaded
+        encodings in-process: a warm encoding would hide the bug entirely.
+        """
+        dead_proxy = {
+            "HTTP_PROXY": "http://127.0.0.1:1",
+            "HTTPS_PROXY": "http://127.0.0.1:1",
+            "ALL_PROXY": "http://127.0.0.1:1",
+            "NO_PROXY": "",
+        }
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(HERE)!r})\n"
+            "import offline_tokenizer\n"
+            "offline_tokenizer._CACHE_KEY = '0' * 40\n"
+            "try:\n"
+            "    offline_tokenizer.load()\n"
+            "except offline_tokenizer.BudgetError as exc:\n"
+            "    sys.exit(0 if 'network access attempted at measurement time' in str(exc) else 1)\n"
+            "sys.exit(1)\n"
+        )
+        for label, env in (("normal env", None), ("dead proxy", dead_proxy)):
+            with self.subTest(env=label):
+                child_env = dict(os.environ)
+                for key, value in (env or {}).items():
+                    child_env[key] = value
+                completed = subprocess.run(
+                    [sys.executable, "-c", script],
+                    capture_output=True,
+                    env=child_env,
+                    cwd=str(HERE),
+                    check=False,
+                )
+                self.assertEqual(
+                    completed.returncode,
+                    0,
+                    "expected a BudgetError, got exit %d: stdout=%r stderr=%r"
+                    % (
+                        completed.returncode,
+                        completed.stdout.decode("utf-8", "replace"),
+                        completed.stderr.decode("utf-8", "replace"),
+                    ),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
