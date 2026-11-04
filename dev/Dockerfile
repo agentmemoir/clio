@@ -8,7 +8,7 @@
 # box with no compiler could only ever exercise the helper, never the check that
 # dies. There is no nextest here: this box runs the small `noexec` checks, not a
 # crate test suite.
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
