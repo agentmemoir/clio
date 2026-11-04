@@ -1,0 +1,1 @@
+The local development database address now has one spelling in .env.example and the Makefile, postgres://clio:clio@127.0.0.1:34310/clio, which works against both a fresh trust-authenticated stack and a pre-existing scram-authenticated volume.
