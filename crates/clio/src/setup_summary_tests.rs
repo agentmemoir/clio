@@ -23,10 +23,11 @@
 
 use super::*;
 use crate::setup_flows_db::DatabaseAnswers;
-use crate::setup_plan_db::{DatabasePlan, existing, managed, sqlite};
+use crate::setup_plan_db::{DatabaseChoice, DatabasePlan, existing, managed, sqlite};
 use crate::setup_services::Service;
 use crate::setup_steps::Answers;
 use clio_store::SslChoice;
+use std::fs;
 use std::path::PathBuf;
 
 fn answered(plan: DatabasePlan, embed: Option<Service>, rerank: Option<Service>) -> Answers {
@@ -182,4 +183,122 @@ fn a_sqlite_run_prints_the_file_and_local_encryption() {
         "{text}"
     );
     assert!(!text.contains("Embedding:"), "{text}");
+}
+
+#[test]
+fn a_hosted_rerank_row_is_labelled_encrypted() {
+    let plan = managed(
+        "127.0.0.1",
+        "34310",
+        "clio",
+        "clio",
+        SslChoice::Prefer,
+        None,
+    )
+    .expect("a valid managed plan");
+    let mut rerank = Service::local("rerank");
+    rerank.role = ServiceRole::Hosted;
+    rerank.url = "https://rerank.example.com/v1".to_owned();
+    let text = render(
+        &answered(plan, Some(Service::local("embed")), Some(rerank)),
+        6,
+    );
+
+    assert!(
+        text.contains("Reranking: https://rerank.example.com/v1 (encrypted)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Embedding: http://127.0.0.1:34311 (this machine only)"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_postgres_address_the_parser_refuses_still_hides_the_password() {
+    let plan = DatabasePlan {
+        choice: DatabaseChoice::Existing,
+        address: "postgres://clio:pw@db.example.com:5432/clio?sslmode=bogus".to_owned(),
+        sqlite_path: None,
+        ssl: SslChoice::VerifyFull,
+        extra: Vec::new(),
+        previous_store: None,
+    };
+    let text = render(&answered(plan, None, None), 5);
+
+    assert!(
+        text.contains(
+            "Database: Postgres at postgres://***@db.example.com:5432/clio?sslmode=bogus, \
+             encryption could not be read"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains(":pw@"), "the password is shown: {text}");
+}
+
+/// One test's own directory, removed when the guard drops.
+struct Scratch {
+    root: PathBuf,
+}
+
+impl Scratch {
+    fn new(label: &str) -> Self {
+        let root =
+            std::env::temp_dir().join(format!("clio-setup-summary-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("scratch directory can be created");
+        Self { root }
+    }
+
+    fn env_path(&self) -> PathBuf {
+        self.root.join(".env")
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn stale_note(dir: &Scratch) -> String {
+    let root = dir.root.to_string_lossy().into_owned();
+    let mut out = Vec::new();
+    stale_env_note(Some(&root), &mut out).expect("a Vec writes");
+    String::from_utf8(out).expect("utf8")
+}
+
+#[test]
+fn a_legacy_compose_password_line_is_reported_without_rewriting_the_file() {
+    let dir = Scratch::new("legacy");
+    let original = "POSTGRES_PASSWORD=old-secret\nCOMPOSE_PROJECT_NAME=clio\n";
+    fs::write(dir.env_path(), original).expect("a fixture can be written");
+    let text = stale_note(&dir);
+
+    assert_eq!(text.lines().count(), 1, "{text}");
+    assert!(text.contains("still sets POSTGRES_PASSWORD"), "{text}");
+    assert!(
+        text.contains(&dir.env_path().display().to_string()),
+        "{text}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.env_path()).expect("the fixture can be read"),
+        original,
+        "the note never rewrites the file"
+    );
+}
+
+#[test]
+fn a_compose_env_without_the_password_is_not_mentioned() {
+    let dir = Scratch::new("clean");
+    fs::write(dir.env_path(), "COMPOSE_PROJECT_NAME=clio\n").expect("a fixture can be written");
+
+    assert_eq!(stale_note(&dir), "");
+}
+
+#[test]
+fn an_absent_compose_env_is_not_mentioned() {
+    let dir = Scratch::new("absent");
+
+    assert_eq!(stale_note(&dir), "");
 }
