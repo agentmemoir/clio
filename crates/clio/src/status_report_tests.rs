@@ -34,7 +34,7 @@ fn setup() -> SetupView {
         rerank: None,
         secrets: BTreeMap::from([(
             "credentials.embed_api_key".to_owned(),
-            "****cret".to_owned(),
+            "[REDACTED]".to_owned(),
         )]),
     }
 }
@@ -143,7 +143,7 @@ fn json_round_trips_the_report() {
     );
     assert_eq!(
         value["setup"]["secrets"]["credentials.embed_api_key"],
-        json!("****cret")
+        json!("[REDACTED]")
     );
 }
 
@@ -288,7 +288,7 @@ fn text_render_reports_each_compose_state() {
     assert!(text.contains("ports:    34300"), "{text}");
     assert!(text.contains("embed=running, postgres=exited"), "{text}");
     assert!(
-        text.contains("credentials.embed_api_key=****cret"),
+        text.contains("credentials.embed_api_key=[REDACTED]"),
         "{text}"
     );
 
