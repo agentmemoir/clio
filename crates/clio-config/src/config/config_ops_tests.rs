@@ -270,6 +270,27 @@ fn config_set_masks_an_endpoint_url_that_carries_credentials() {
 }
 
 #[test]
+fn config_set_masks_only_an_endpoint_url_that_carries_credentials() {
+    let mut rt = Runtime::with_env(&|_| None);
+    let clean = "https://host/v1";
+    let ToolResult::Ok { data, .. } =
+        rt.config_set("embed.url", json!(clean), ConfigScope::Session)
+    else {
+        panic!("set embed.url");
+    };
+    // A URL with no credentials keeps its own value, so a blanket mask fails here.
+    assert_eq!(data.value, json!(clean));
+    let raw = "https://user:pw@host/v1";
+    let ToolResult::Ok { data, .. } = rt.config_set("embed.url", json!(raw), ConfigScope::Session)
+    else {
+        panic!("set embed.url");
+    };
+    // The same test still proves the credential check runs.
+    assert_eq!(data.value, json!("[REDACTED]"));
+    assert_eq!(rt.effective_raw()["embed"]["url"], json!(raw));
+}
+
+#[test]
 fn config_set_updates_the_bank_policy() {
     let mut rt = Runtime::with_env(&|_| None);
     let ToolResult::Ok { .. } = rt.config_set(
