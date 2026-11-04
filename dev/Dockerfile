@@ -37,6 +37,18 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 # file into a failed build, instead of an image that quietly holds the wrong
 # compiler.
 COPY rust-toolchain.toml /tmp/rust-toolchain.toml
+# dev/Dockerfile installs a verified toolchain so the box is reproducible. The
+# base image is pinned by digest; the tag is inert and the digest decides the
+# content, so change both together or the digest silently keeps the old image.
+#
+# rustup-init is fetched from a version-pinned archive URL and checked against
+# the SHA-256 that URL's own .sha256 file publishes. 1.29.3 was the release
+# named by https://static.rust-lang.org/rustup/release-stable.toml when this pin
+# was made. Bumping rustup moves three values together: the URL version and both
+# per-architecture hashes. A missing entry or a mismatched hash fails the build.
+#
+# This verifies the bootstrap installer only. The compiler payload that rustup
+# then downloads is fetched over TLS and is not hash-checked here.
 ARG TARGETARCH
 RUN channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' /tmp/rust-toolchain.toml)" \
  && components="$(sed -n 's/^components = \[\(.*\)\]$/\1/p' /tmp/rust-toolchain.toml \
