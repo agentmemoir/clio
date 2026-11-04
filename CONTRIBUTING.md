@@ -34,7 +34,7 @@ CI is the gate. `.github/workflows/` holds one file per workflow, and each file 
 
 - `ci.yml`: `crates/**`, `sql/**`, `Cargo.toml`, `Cargo.lock`, `Makefile`, `mk/**`, `scripts/**`, `hooks.d/**`, `rust-toolchain.toml`, `.config/nextest.toml`, `changelog.d/**`, `CHANGELOG.md`, and the workflow file itself. It runs the format check, clippy, the script suites, the scoped coverage judgement (the only scoped test run; `make test-fast` is a developer target), and the Linux secret-service round-trip test.
 - `mcp-conformance.yml`: `crates/clio-mcp/**`, `Cargo.toml`, `Cargo.lock`, and the workflow file itself. It runs the pinned MCP conformance suite.
-- `benchmarks.yml`: `benchmarks/**` and the workflow file itself.
+- `benchmarks.yml`: `benchmarks/**` and the workflow file itself. Its `budget` job also starts for `crates/clio/**`, `crates/clio-mcp/**`, `crates/clio-types/**`, `Cargo.toml`, `Cargo.lock`, and `rust-toolchain.toml`, because it builds the CLI and measures the tool surface those crates define.
 - `codeql.yml`: `crates/**`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, and the workflow file itself.
 - `dependencies.yml`: `**/Cargo.toml`, `Cargo.lock`, `deny.toml`, and the workflow file itself.
 - `dev-image.yml`: `dev/**` and the workflow file itself.

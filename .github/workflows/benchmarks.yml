@@ -1,7 +1,11 @@
 # The clio-bench harness is Python, and no Rust gate compiles a line of it, so
 # the harness runs its own suite here. The path filters mirror ci.yml's rule:
-# this workflow starts only when the benchmark tree itself changes, and a
-# benchmarks-only change does not start the Rust jobs next door.
+# a benchmarks-only change does not start the Rust jobs next door, and a Rust
+# change does not start the benchmark suite. The `budget` job is the exception:
+# it builds `clio` and measures the tool surface `clio-mcp` and `clio-types`
+# define, so it also starts when those crates or the workspace manifests that
+# pin what it builds change, because a change there moves the rows it measures
+# without touching a line under `benchmarks/`.
 #
 # Two jobs run. The `tests` job stays hermetic: no dataset is downloaded, and
 # the live Mnemosyne tests skip when no binary is installed on the runner. The
@@ -18,12 +22,24 @@ on:
       - 'benchmarks/**'
       - '.github/workflows/benchmarks.yml'
       - 'scripts/mcp_token_budget.sh'
+      - 'crates/clio-mcp/**'
+      - 'crates/clio-types/**'
+      - 'crates/clio/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
   pull_request:
     branches: [master, main]
     paths:
       - 'benchmarks/**'
       - '.github/workflows/benchmarks.yml'
       - 'scripts/mcp_token_budget.sh'
+      - 'crates/clio-mcp/**'
+      - 'crates/clio-types/**'
+      - 'crates/clio/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
 
 permissions:
   contents: read
