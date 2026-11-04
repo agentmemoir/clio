@@ -121,6 +121,56 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(tokenizer.count("hello world"), 2)
         self.assertGreater(tokenizer.count("antidisestablishmentarianism"), 1)
 
+    def test_pack_tokens_match_direct_tiktoken(self):
+        """Tie the emitted `pack.tokens` row to a real cl100k_base token count.
+
+        The count is computed here straight from the committed encoding asset, so
+        it never goes through `offline_tokenizer.load()`: a tokenizer that only
+        estimates (bytes / 4, word count, ...) cannot satisfy this test.
+        """
+        import tiktoken
+
+        code, out, err = run_measure(PACK)
+        self.assertEqual(code, 0, err)
+        rows = {row["row"]: row for row in json.loads(out.decode("utf-8"))["rows"]}
+
+        # Same canonicalization as measure.py: sorted keys, no whitespace, UTF-8.
+        pack = json.loads(PACK.read_text(encoding="utf-8"))
+        canonical_bytes = json.dumps(
+            pack, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        canonical_text = canonical_bytes.decode("utf-8")
+
+        # Seed a private tiktoken cache with the repo asset under its blob URL hash,
+        # so get_encoding reads local bytes and never touches the network.
+        cache_key = hashlib.sha1(
+            b"https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
+        ).hexdigest()
+        cache_dir = tempfile.mkdtemp(prefix="clio-tiktoken-")
+        previous_cache_dir = os.environ.get("TIKTOKEN_CACHE_DIR")
+        try:
+            shutil.copyfile(
+                HERE / "assets" / "cl100k_base.tiktoken",
+                Path(cache_dir) / cache_key,
+            )
+            os.environ["TIKTOKEN_CACHE_DIR"] = cache_dir
+            encoding = tiktoken.get_encoding("cl100k_base")
+            expected = len(encoding.encode_ordinary(canonical_text))
+        finally:
+            if previous_cache_dir is None:
+                os.environ.pop("TIKTOKEN_CACHE_DIR", None)
+            else:
+                os.environ["TIKTOKEN_CACHE_DIR"] = previous_cache_dir
+            shutil.rmtree(cache_dir, ignore_errors=True)
+
+        self.assertEqual(rows["pack.bytes"]["value"], len(canonical_bytes), rows)
+        self.assertEqual(rows["pack.tokens"]["value"], expected, rows)
+        # The committed fixture is a stable snapshot: a schema change must update this pin deliberately.
+        self.assertEqual(expected, 21735, "fixture token count moved; re-pin after verifying")
+        # Estimators must fail: neither a bytes/4 constant nor a word count may pass.
+        self.assertNotEqual(rows["pack.tokens"]["value"], len(canonical_bytes) // 4)
+        self.assertNotEqual(rows["pack.tokens"]["value"], len(canonical_text.split()))
+
     def test_missing_package_fails_before_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             package = Path(tmp) / "tiktoken"
