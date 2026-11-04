@@ -28,6 +28,19 @@ Store commands accept these connection flags. The archive commands `backup list`
 
 The `--backend` and `--db` flags work before or after the subcommand.
 
+### Store TLS modes
+
+A Postgres store connection string may name an `sslmode`, and the value is read without regard to case. Four values are accepted:
+
+- `disable` opens the connection without TLS, so the traffic is in the clear.
+- `prefer` asks for TLS with the `verify-full` certificate check and carries on in the clear when the server refuses TLS.
+- `verify-full` requires TLS and checks the server certificate and the server name.
+- `encrypt-no-verify` requires TLS but does not check the server certificate.
+
+`encrypt-no-verify` keeps a passive observer from reading the traffic, but it does not prove who the server is, so any host that can intercept the path can impersonate the database. A store opened with it logs a startup warning on stderr, and that message says this and names `sslmode=verify-full` with `sslrootcert=PATH` as the safe alternative. Use that pair for a private certificate authority: a private CA needs a supplied root, not a skipped check.
+
+A string that names no `sslmode` gets `verify-full` when any host is off this machine, and `prefer` when every host is local. The names `require` and `verify-ca` are refused with a message that names the value to use instead.
+
 Five compliance commands need a compliance-privilege actor: `request-copy`, `request-exception`, `peer-disposition`, `request-events`, and `review-export`. Without `--actor harness` or `--actor system` they refuse with `local event review requires a harness or system actor with compliance privilege`. The steps below show `--actor harness` on those commands. Other commands such as `request-start`, `request-status`, `peer-status`, `peer-retry`, and `request-close` run without this gate. `request-retry` and a direct `clio erase` still reach this same authorization gate, and the CLI's default actor is an agent, so pass `--actor harness` or `--actor system` on those commands too.
 
 ## Where the evidence lives
