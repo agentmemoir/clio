@@ -8,6 +8,7 @@ name: coverage-full
 on:
   schedule:
     - cron: "7 3,15 * * *"
+  workflow_call:
 
 permissions:
   contents: read
