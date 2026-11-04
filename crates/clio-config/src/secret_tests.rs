@@ -18,7 +18,10 @@ fn mask_secret_hides_a_five_character_tail() {
     let secret = "12345";
     let masked = mask_secret(secret);
     assert_eq!(masked, "[REDACTED]");
-    assert!(!masked.contains(&secret[secret.len() - 4..]), "{masked}");
+    assert!(
+        !masked.contains(&secret[secret.len() - 4..]),
+        "no tail survives the mask"
+    );
 }
 
 #[test]
@@ -27,7 +30,10 @@ fn mask_secret_hides_a_long_tail() {
     assert_eq!(secret.len(), 32);
     let masked = mask_secret(secret);
     assert_eq!(masked, "[REDACTED]");
-    assert!(!masked.contains(&secret[secret.len() - 4..]), "{masked}");
+    assert!(
+        !masked.contains(&secret[secret.len() - 4..]),
+        "no tail survives the mask"
+    );
 }
 
 #[test]

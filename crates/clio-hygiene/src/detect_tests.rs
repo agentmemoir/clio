@@ -193,7 +193,8 @@ fn non_secret_run_preview_discloses_no_edge_characters() {
         "the masked run discloses none of its edge characters"
     );
     assert!(
-        preview.contains("daily standup notes mention") && preview.contains("for the deploy window"),
+        preview.contains("daily standup notes mention")
+            && preview.contains("for the deploy window"),
         "the prose around the run is still visible"
     );
 }

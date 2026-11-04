@@ -154,7 +154,10 @@ fn the_runtime_hands_back_plaintext_through_both_read_tools() {
         panic!("config_get store.database_url");
     };
     let text = serde_json::to_string(&data.value).expect("serialize the get result");
-    assert!(text.contains("[REDACTED]"), "the get result is masked: {text}");
+    assert!(
+        text.contains("[REDACTED]"),
+        "the get result is masked: {text}"
+    );
     assert!(
         !text.contains("hunter2"),
         "the password is not in the output"
