@@ -111,9 +111,7 @@ fn require_stored_slot_rejects_none_and_keeps_some() {
     };
     assert_eq!(missing.code, ErrorCode::Internal);
     assert!(
-        missing
-            .message
-            .contains(&format!("subject `{subject}`"))
+        missing.message.contains(&format!("subject `{subject}`"))
             && missing.message.contains("vanished"),
         "message must name the subject and the vanish: {}",
         missing.message
