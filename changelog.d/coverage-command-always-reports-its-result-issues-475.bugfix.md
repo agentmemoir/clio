@@ -1,0 +1,1 @@
+A passing coverage run started by a comment used to leave no record when no coverage issue was open. The run now reports its result on the page that carried the command, as a check on the pull request or a comment on the issue.
