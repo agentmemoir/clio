@@ -95,7 +95,7 @@ fn resolve_ref<'a>(root: &'a Value, pointer: &str) -> &'a Value {
 }
 
 /// Build minimal arguments from one published tool's `inputSchema`.
-fn minimal_args(tool: &Value) -> Value {
+pub(super) fn minimal_args(tool: &Value) -> Value {
     let schema = &tool["inputSchema"];
     minimal_instance(schema, schema)
 }

@@ -10,6 +10,8 @@
 //! ## Owns
 //! - A hidden tool passing the dispatch gate and running its body
 //! - The same result value for a valid, authorized call in both listings
+//! - Every bound tool, called once per narrow preset that hides it, answering
+//!   what it answers when listed
 //! - The same code and message for an invalid call and for an unauthorized one
 //! - A server-instance profile replaced through the config runtime changing the
 //!   next listing, with no request method selecting a profile
@@ -27,6 +29,7 @@
 //!
 //! Keep this module focused on the callable/listed/hidden parity.
 
+use super::protocol_nfr7_tests::minimal_args;
 use crate::bound_tools;
 use crate::principal::Principal;
 use crate::protocol::{ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND, McpHandler};
@@ -343,4 +346,103 @@ fn replacing_the_server_config_changes_the_next_listing() {
         "{unselected}"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Tools whose payload reports server-side state rather than the caller's
+/// arguments: a second-resolution stamp (`hygiene_log_list`, `sync_key_status`,
+/// `verify`, `diagnose`, `doctor`), an allocated id (`doctor`, `consolidate`),
+/// the configuration carrying the profile under test (`config_get`), or the
+/// device id the store minted for itself (`sync_status`). Each entry is still
+/// called while hidden and still has to agree on its outcome (JSON-RPC error,
+/// `isError`, `ok`, code, message); only the byte payload comparison is skipped.
+const SERVER_STATE_PAYLOADS: &[&str] = &[
+    "config_get",
+    "consolidate",
+    "diagnose",
+    "doctor",
+    "hygiene_log_list",
+    "sync_key_status",
+    "sync_status",
+    "verify",
+];
+
+#[test]
+fn every_catalog_tool_answers_when_hidden() {
+    let hidden_state = state_with("{}");
+    let visible_state = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
+    let set_profile = |state: &Arc<McpState>, preset: &str| {
+        let mut runtime = state.config.lock().expect("config runtime mutex poisoned");
+        runtime
+            .load_file_json(&format!(r#"{{"mcp": {{"tool_profile": "{preset}"}}}}"#))
+            .expect("a valid config layer");
+    };
+    // What the call says about itself, apart from the payload: a JSON-RPC
+    // refusal, and the tool outcome behind the envelope.
+    let outcome = |response: &Value| {
+        let content = &response["result"]["structuredContent"];
+        json!([
+            response.get("error").cloned().unwrap_or(Value::Null),
+            response["result"]["isError"],
+            content["ok"],
+            content["code"],
+            content["message"],
+        ])
+    };
+    // The bound set must be the catalog this test claims to exhaust, so a
+    // truncated or empty set fails here instead of passing vacuously.
+    let names = bound_tools();
+    assert_eq!(
+        names.len(),
+        crate::schema::catalog_defs().len(),
+        "the loop must call every catalog tool, not a subset"
+    );
+    for tool in SERVER_STATE_PAYLOADS {
+        assert!(names.contains(tool), "`{tool}` is a bound tool");
+    }
+    for name in names {
+        let hidden_by = ["minimal", "coding", "ops"]
+            .into_iter()
+            .find(|preset| {
+                set_profile(&hidden_state, preset);
+                !listed(&hidden_state).contains(&name.to_owned())
+            })
+            .unwrap_or_else(|| panic!("no preset hides the bound tool `{name}`"));
+        assert!(
+            listed(&visible_state).contains(&name.to_owned()),
+            "the all preset must list `{name}`"
+        );
+        // The arguments come from the tool's own published schema and are the
+        // same on both sides, so the profile is the only difference.
+        let args = minimal_args(
+            &crate::schema::catalog_def(name)
+                .expect("a bound tool carries a catalog definition")
+                .to_tool(),
+        );
+        let hidden = call(&hidden_state, name, &args);
+        let visible = call(&visible_state, name, &args);
+        // The gate refuses an unbound name with `-32602`: the code selects that
+        // refusal, and the message only corroborates it, so a reworded message
+        // cannot decide the check on its own.
+        let error = &hidden["error"];
+        let refused_at_gate = error["code"] == json!(ERR_INVALID_PARAMS)
+            && error["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(&format!("unknown tool `{name}`"));
+        assert!(
+            !refused_at_gate,
+            "`{name}` was refused at the dispatch gate for being unlisted by {hidden_by}: {hidden}"
+        );
+        assert_eq!(
+            outcome(&hidden),
+            outcome(&visible),
+            "`{name}` answered a different outcome while hidden by {hidden_by}"
+        );
+        if !SERVER_STATE_PAYLOADS.contains(&name) {
+            assert_eq!(
+                hidden, visible,
+                "`{name}` must answer the same payload whether its profile lists it or hides it"
+            );
+        }
+    }
 }
