@@ -99,6 +99,10 @@ mod write_tools_handlers;
 
 #[cfg(test)]
 mod lib_tests;
+#[cfg(test)]
+mod stateless;
+#[cfg(test)]
+mod stateless_fixtures;
 
 /// Pinned MCP specification revision (item 3).
 ///
