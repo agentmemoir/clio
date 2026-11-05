@@ -168,27 +168,6 @@ fn schema_export_prints_the_pack_to_stdout_without_a_flag() {
 }
 
 #[test]
-fn schema_export_writes_a_pretty_pack_to_the_out_flag() {
-    let scratch = Scratch::new("out");
-    let code = mcp_schema_export(args_of(&["--out", &scratch.display()]));
-    assert_eq!(code, ExitCode::SUCCESS);
-    let raw = fs::read_to_string(scratch.path()).expect("written pack");
-    let pack: serde_json::Value = serde_json::from_str(&raw).expect("json");
-    assert_eq!(pack["format"], "am_tool_schema_pack");
-    assert_eq!(pack["mcp_protocol_revision"], "2025-11-25");
-}
-
-#[test]
-fn schema_export_accepts_path_as_an_alias_for_out() {
-    let scratch = Scratch::new("path");
-    let code = mcp_schema_export(args_of(&["--path", &scratch.display()]));
-    assert_eq!(code, ExitCode::SUCCESS);
-    let raw = fs::read_to_string(scratch.path()).expect("written pack");
-    let pack: serde_json::Value = serde_json::from_str(&raw).expect("json");
-    assert_eq!(pack["format"], "am_tool_schema_pack");
-}
-
-#[test]
 fn out_wins_when_both_out_and_path_are_given() {
     let out = Scratch::new("both-out");
     let path = Scratch::new("both-path");

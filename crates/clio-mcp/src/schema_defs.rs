@@ -70,7 +70,7 @@ impl ToolDef {
         for (name, schema) in &self.props {
             properties.insert((*name).to_owned(), schema.clone());
         }
-        json!({
+        let mut tool = json!({
             "name": self.name,
             "description": self.description,
             "inputSchema": {
@@ -79,7 +79,12 @@ impl ToolDef {
                 "required": self.required,
                 "additionalProperties": false
             }
-        })
+        });
+        crate::schema_output_defs::insert_output_schema(
+            &mut tool,
+            crate::schema_output_defs::output_schema(self.name),
+        );
+        tool
     }
 }
 

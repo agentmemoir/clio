@@ -250,7 +250,8 @@ class SkillCommandTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "fail")
         self.assertEqual(len(report["failures"]), 1, report["failures"])
         self.assertTrue(report["failures"][0].startswith(f"{TOKENS_ROW}: "))
-        self.assertEqual(report["arms"][0]["delta"], 0)
+        self.assertEqual(report["arms"][0]["verdict"], "pass")
+        self.assertIsNotNone(report["arms"][0]["allowance"])
 
     def test_a_non_utf8_skill_path_exits_two(self):
         require_tokenizer()

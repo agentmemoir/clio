@@ -14,6 +14,15 @@
       "candidate_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
       "max_bytes": 105632,
       "max_tokens": 21691
+    },
+    {
+      "decision_id": "mcp-output-schema-growth-2026-11-05",
+      "date": "2026-11-05",
+      "reason": "The pack now carries outputSchema for the 86 inventoried tools, which grows the canonical tools array past the frozen ceilings. This record grants exactly the measured size.",
+      "base_commit": "c736c50171b668b29ef00c706d6f6ec78308f34a",
+      "candidate_sha256": "022f77f6c56c8b723aa91d82f0b22a19c87954b771f306439b8f52a03072f87c",
+      "max_bytes": 149465,
+      "max_tokens": 31815
     }
   ]
 }

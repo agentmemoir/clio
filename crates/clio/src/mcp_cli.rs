@@ -85,7 +85,7 @@ pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitC
     let pack = clio_mcp::schema::schema_pack();
     // `--path` is accepted as a documented alias for `--out`.
     if let Some(path) = flags.get("out").or_else(|| flags.get("path")) {
-        return match std::fs::write(path, serde_json::to_vec_pretty(&pack).expect("serialize")) {
+        return match std::fs::write(path, clio_mcp::schema::to_export_json(&pack)) {
             Ok(()) => {
                 println!("wrote {path}");
                 ExitCode::SUCCESS

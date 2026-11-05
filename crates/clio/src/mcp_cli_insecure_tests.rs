@@ -19,7 +19,7 @@
 //!
 //! Test-only. Never compiled into production builds.
 
-use super::tests::config_with;
+use super::tests::{args_of, config_with, memory, opts_with};
 use super::*;
 
 /// The toggle is off by default and follows its parsed value: `=false` stays
@@ -110,6 +110,33 @@ fn the_help_says_a_non_loopback_bind_needs_the_bind_any_flag() {
         bind_any_para.contains("non-loopback address"),
         "the new flag's text must say what it unlocks: {bind_any_para}"
     );
+}
+
+/// A loopback bind with no credential and no opt-out binds the listener, then
+/// the start guard refuses it, so the run exits 1 instead of serving.
+#[test]
+fn http_refuses_a_loopback_bind_with_no_credential_and_no_opt_out() {
+    let mut args = args_of(&["http"]);
+    args.extend(memory(&["--bind", "127.0.0.1:0"]));
+    assert_eq!(mcp(args), ExitCode::from(1));
+}
+
+/// The serve wrapper hands its listener to the transport, and the transport's
+/// start guard answers for a listener with no credential: the refusal proves
+/// the wrapper sits on the real path.
+#[test]
+fn the_http_serve_seam_reports_the_start_guard_refusal() {
+    let opts = opts_with(memory(&[]), &[]);
+    let state = clio_mcp::runtime::McpState::open(&opts).expect("state");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let error = mcp_http_serve(
+        &crate::sigpipe::Serving::for_test(),
+        state,
+        clio_mcp::http::HttpConfig::default(),
+        listener,
+    )
+    .expect_err("a loopback bind with no credential is refused");
+    assert!(error.to_string().contains("loopback"), "{error}");
 }
 
 /// The help names the opt-out and the required token store, and advertises

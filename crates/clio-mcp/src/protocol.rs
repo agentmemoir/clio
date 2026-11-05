@@ -307,6 +307,10 @@ fn configured_profile(state: &McpState) -> Result<ToolPreset, RpcError> {
 #[path = "protocol_nfr7_tests.rs"]
 mod protocol_nfr7_tests;
 #[cfg(test)]
+#[path = "protocol_output_schema_tests.rs"]
+mod protocol_output_schema_tests;
+
+#[cfg(test)]
 #[path = "protocol_tests.rs"]
 mod protocol_tests;
 
