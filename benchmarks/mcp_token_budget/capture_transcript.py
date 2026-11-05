@@ -9,12 +9,18 @@ is the text that crossed the pipe.
 The run is all or nothing. A non-zero exit, any stderr output, or a response
 count other than two exits 2 with a message on stderr and writes no file, so a
 partial or logged session can never become a fixture.
+
+Each fixture also records a ``capture`` block: the source commit, the sha256 of
+the executable that ran, and the UTC capture time. A recorded session can then
+be tied to the exact source and binary that produced it.
 """
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 FIXTURE_FORMAT = "am_mcp_client_session"
@@ -64,6 +70,43 @@ def frames() -> list[str]:
     ]
 
 
+def source_commit(source_dir: Path) -> str:
+    """Return the commit that names the captured source tree."""
+    result = subprocess.run(
+        ["git", "-C", str(source_dir), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise CaptureError(
+            f"`git rev-parse HEAD` in {source_dir} exited {result.returncode}: "
+            f"{result.stderr.strip()[:400]}"
+        )
+    commit = result.stdout.strip()
+    if len(commit) != 40 or any(char not in "0123456789abcdef" for char in commit):
+        raise CaptureError(f"`git rev-parse HEAD` returned {commit!r}")
+    return commit
+
+
+def binary_sha256(binary: str) -> str:
+    """Return the sha256 digest of the executable that ran the session."""
+    path = Path(binary)
+    if not path.is_file():
+        raise CaptureError(f"binary is not a file: {binary}")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def captured_at() -> str:
+    """Return the capture time as UTC ISO-8601."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def client_version(binary: str) -> str:
     """Return the first line of ``<binary> --version``."""
     result = subprocess.run(
@@ -104,7 +147,7 @@ def run_session(binary: str, requests: list[str]) -> tuple[str, str]:
     return result.stdout, result.stderr
 
 
-def build_fixture(binary: str, requests: list[str]) -> dict:
+def build_fixture(binary: str, requests: list[str], source_dir: Path) -> dict:
     """Return the fixture object for one captured session."""
     stdout, _stderr = run_session(binary, requests)
     responses = [line for line in stdout.split("\n") if line.strip()]
@@ -123,6 +166,11 @@ def build_fixture(binary: str, requests: list[str]) -> dict:
         "client_version": client_version(binary),
         "delivery": "stdio",
         "command": [binary, *SERVER_ARGS],
+        "capture": {
+            "source_commit": source_commit(source_dir),
+            "binary_sha256": binary_sha256(binary),
+            "captured_at": captured_at(),
+        },
         "exchanges": [
             {"request": request, "response": response}
             for request, response in zip(requests, responses)
@@ -138,11 +186,16 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--binary", required=True, help="clio binary to drive")
     parser.add_argument("--out", required=True, help="fixture file to write")
+    parser.add_argument(
+        "--source-dir",
+        default=".",
+        help="directory whose git HEAD names the captured source (default: .)",
+    )
     args = parser.parse_args(argv)
 
     out = Path(args.out)
     try:
-        fixture = build_fixture(args.binary, frames())
+        fixture = build_fixture(args.binary, frames(), Path(args.source_dir))
         text = json.dumps(fixture, ensure_ascii=False, indent=2) + "\n"
     except CaptureError as exc:
         sys.stderr.write(f"mcp-capture-transcript: {exc}\n")

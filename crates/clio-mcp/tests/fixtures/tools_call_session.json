@@ -11,6 +11,11 @@
     "--db",
     "sqlite::memory:"
   ],
+  "capture": {
+    "source_commit": "1c0e65bf42a9f702b9300737b840789ab30c68ba",
+    "binary_sha256": "0c6cb5972e593e5dcde81ed90586b6c52aef83bfc88ed3708e6679b5f1209cd4",
+    "captured_at": "2026-11-05T22:02:23Z"
+  },
   "exchanges": [
     {
       "request": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"clio-mcp-transcript\",\"version\":\"1\"}}}",

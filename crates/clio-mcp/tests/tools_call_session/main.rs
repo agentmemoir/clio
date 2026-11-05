@@ -37,6 +37,18 @@ crates/clio-mcp/tests/fixtures/tools_call_session.json`; write the legacy fixtur
 the same capture from a checkout of the parent commit to \
 `crates/clio-mcp/tests/fixtures/tools_call_session_before.json`";
 
+const BASE_COMMIT: &str = "ecab87064255b9312232b5cda61ee52e073319c8";
+
+const REGENERATE_BASE: &str = "regenerate with `git archive ecab87064255b9312232b5cda61ee52e073319c8 \
+| tar -x -C <scratch>`, `git init <scratch>`, `git -C <scratch> symbolic-ref HEAD \
+refs/heads/provenance`, write that commit to `<scratch>/.git/refs/heads/provenance`, \
+`touch` every `*.rs` under `<scratch>`, `CARGO_TARGET_DIR=$PWD/target cargo build -p clio --bin \
+clio` from `<scratch>`, then `python3 benchmarks/mcp_token_budget/capture_transcript.py \
+--source-dir <scratch> --binary target/debug/clio --out \
+crates/clio-mcp/tests/fixtures/tools_call_session_before.json`; regenerate the current fixture \
+with `touch` on every `*.rs` under `crates/`, the same build from the working tree, and the same \
+capture without `--source-dir` to `crates/clio-mcp/tests/fixtures/tools_call_session.json`";
+
 /// The two request frames the recorded session holds, rebuilt in code.
 fn request_frames() -> Vec<Value> {
     vec![
@@ -165,6 +177,52 @@ fn legacy_session_holds_a_duplicated_payload() {
         "the stored legacy response no longer shows two payload copies, so this guard proves \
          nothing: {REGENERATE}"
     );
+}
+
+#[test]
+fn legacy_base_result_is_the_current_payload_copied_twice() {
+    let after: Value = serde_json::from_str(&recorded(SESSION, 1, "response"))
+        .unwrap_or_else(|err| panic!("current fixture is not JSON ({err}): {REGENERATE_BASE}"));
+    let before: Value = serde_json::from_str(&recorded(SESSION_BEFORE, 1, "response"))
+        .unwrap_or_else(|err| panic!("base fixture is not JSON ({err}): {REGENERATE_BASE}"));
+    let payload = after
+        .pointer("/result/structuredContent")
+        .unwrap_or_else(|| panic!("current response has no structuredContent: {REGENERATE_BASE}"))
+        .clone();
+    let text = payload.to_string();
+    let rebuilt = json!({
+        "content": [{"type": "text", "text": text}],
+        "isError": false,
+        "structuredContent": payload,
+    });
+    assert_eq!(
+        rebuilt, before["result"],
+        "the base result is not the current payload copied into one text block: {REGENERATE_BASE}"
+    );
+}
+
+#[test]
+fn fixtures_record_the_source_commit_and_binary_digest() {
+    let base: Value = serde_json::from_str(SESSION_BEFORE)
+        .unwrap_or_else(|err| panic!("base fixture is not JSON ({err}): {REGENERATE_BASE}"));
+    let current: Value = serde_json::from_str(SESSION)
+        .unwrap_or_else(|err| panic!("current fixture is not JSON ({err}): {REGENERATE_BASE}"));
+    assert_eq!(
+        base.pointer("/capture/source_commit")
+            .and_then(Value::as_str),
+        Some(BASE_COMMIT),
+        "the base fixture does not name the commit it was captured from: {REGENERATE_BASE}"
+    );
+    for (name, fixture) in [("base", &base), ("current", &current)] {
+        let digest = fixture
+            .pointer("/capture/binary_sha256")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("{name} fixture has no binary digest: {REGENERATE_BASE}"));
+        assert!(
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "{name} fixture binary digest is not 64 hex characters: {REGENERATE_BASE}"
+        );
+    }
 }
 
 #[test]
