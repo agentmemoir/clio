@@ -1,0 +1,254 @@
+{
+  "format": "clio_mcp_frozen_baseline",
+  "format_version": 1,
+  "record_id": "mcp-tool-surface-2026-11-05",
+  "frozen": true,
+  "frozen_on": "2026-11-05",
+  "supersedes": null,
+  "policy": {
+    "append_allowed": false,
+    "later_measurements": "separate record file"
+  },
+  "tokenizer": {
+    "encoding": "cl100k_base",
+    "implementation": "tiktoken",
+    "version": "0.14.0",
+    "asset_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+  },
+  "receipts": {
+    "pinned-local-run-2026-11-05": {
+      "measured_on": "2026-11-05",
+      "encoding": "cl100k_base",
+      "implementation": "tiktoken",
+      "version": "0.14.0",
+      "recomputable_from_public_inputs": false,
+      "note": "measured once with the pinned encoding on the record date; public CI can check shape and digest only"
+    }
+  },
+  "pack": {
+    "format": "am_tool_schema_pack",
+    "format_version": 1,
+    "catalog_hash": "fnv1a64:c0fc6a61cedf1299",
+    "mcp_protocol_revision": "2025-11-25",
+    "tools_count": 86,
+    "canonical_bytes": 105771,
+    "canonical_sha256": "c4c04a1d0613f35e6e5fa4072a9aca0cea2d80c052816af35aa9fe9d5edaab43"
+  },
+  "clients": [
+    {
+      "client": "synthetic-eager-client",
+      "client_version": "1.0.0",
+      "delivery": "eager",
+      "capture": "synthetic-replay",
+      "fixture": {
+        "name": "eager_all_defs.json",
+        "version": 1,
+        "sha256": "bf68dea714b90dbe52e3e361652da14af89f32a6b7dea5d17362aebff12418d8"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "delivers": "All 86 tool definitions with their input schemas.",
+          "cumulative": true
+        }
+      ]
+    },
+    {
+      "client": "synthetic-on-demand-client",
+      "client_version": "1.0.0",
+      "delivery": "on_demand",
+      "capture": "synthetic-replay",
+      "fixture": {
+        "name": "on_demand_deferred.json",
+        "version": 1,
+        "sha256": "47265a21b14740ae9043ab335ddf5e18ba4d4cff58f04af437eebcc02f152ecd"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "delivers": "The name and description of all 86 tools, with no input schemas.",
+          "cumulative": true
+        },
+        {
+          "turn": 2,
+          "delivers": "The full definitions of admit_preview, admit_preview_batch, and associations, fetched after the catalogue and measured alone.",
+          "cumulative": false
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "row": "client/synthetic-eager-client/turn/1/bytes",
+      "value": 105632,
+      "unit": "bytes",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "input_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
+      "recomputable": true
+    },
+    {
+      "row": "client/synthetic-eager-client/turn/1/tokens",
+      "value": 21691,
+      "unit": "tokens",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "input_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
+      "recomputable": true
+    },
+    {
+      "row": "client/synthetic-on-demand-client/turn/1/bytes",
+      "value": 22384,
+      "unit": "bytes",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "input_sha256": "a2e9245ec05fc934b7195f2c7efd458d6b379206c5b5b3093166d45db2bfd709",
+      "recomputable": true
+    },
+    {
+      "row": "client/synthetic-on-demand-client/turn/1/tokens",
+      "value": 4497,
+      "unit": "tokens",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "input_sha256": "a2e9245ec05fc934b7195f2c7efd458d6b379206c5b5b3093166d45db2bfd709",
+      "recomputable": true
+    },
+    {
+      "row": "client/synthetic-on-demand-client/turn/2/bytes",
+      "value": 10738,
+      "unit": "bytes",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12",
+      "recomputable": true
+    },
+    {
+      "row": "client/synthetic-on-demand-client/turn/2/tokens",
+      "value": 2241,
+      "unit": "tokens",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12",
+      "recomputable": true
+    },
+    {
+      "row": "retired_skill_entry_point/bytes",
+      "value": 6393,
+      "unit": "bytes",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "content_sha256": "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80",
+      "tokenizer_ref": "pinned",
+      "receipt_id": "pinned-local-run-2026-11-05",
+      "recomputable": false
+    },
+    {
+      "row": "retired_skill_entry_point/tokens",
+      "value": 1518,
+      "unit": "tokens",
+      "label": "Measured",
+      "date": "2026-11-05",
+      "content_sha256": "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80",
+      "tokenizer_ref": "pinned",
+      "receipt_id": "pinned-local-run-2026-11-05",
+      "recomputable": false
+    }
+  ],
+  "per_tool_ranking": {
+    "sorted_by": "tool_tokens",
+    "tie_break": "tool ascending",
+    "items": [
+      {
+        "rank": 1,
+        "tool": "retrieve",
+        "tool_bytes": 8565,
+        "tool_tokens": 1827,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 2,
+        "tool": "admit_preview_batch",
+        "tool_bytes": 7403,
+        "tool_tokens": 1556,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 3,
+        "tool": "retention_profile_set",
+        "tool_bytes": 5359,
+        "tool_tokens": 1119,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 4,
+        "tool": "compose_context",
+        "tool_bytes": 3238,
+        "tool_tokens": 648,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 5,
+        "tool": "store",
+        "tool_bytes": 2785,
+        "tool_tokens": 576,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 6,
+        "tool": "admit_preview",
+        "tool_bytes": 2682,
+        "tool_tokens": 556,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 7,
+        "tool": "canonical_put",
+        "tool_bytes": 2355,
+        "tool_tokens": 478,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 8,
+        "tool": "sync_serve",
+        "tool_bytes": 2044,
+        "tool_tokens": 449,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 9,
+        "tool": "triple_add",
+        "tool_bytes": 2126,
+        "tool_tokens": 438,
+        "date": "2026-11-05",
+        "label": "Measured"
+      },
+      {
+        "rank": 10,
+        "tool": "shared_store",
+        "tool_bytes": 2020,
+        "tool_tokens": 420,
+        "date": "2026-11-05",
+        "label": "Measured"
+      }
+    ]
+  },
+  "unobserved": [
+    {
+      "subject": "real desktop MCP client arrival behaviour",
+      "delivery": "unobserved",
+      "reason": "no interactive desktop environment on the capture runner",
+      "closes_by": "An observation from a real desktop MCP client, recording which tools arrive at each turn, would replace this entry.",
+      "date": "2026-11-05",
+      "label": "Unverified"
+    }
+  ]
+}
