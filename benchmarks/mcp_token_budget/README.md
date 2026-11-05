@@ -20,6 +20,8 @@ Two environment variables are honoured: `CLIO_BIN` names the binary to use expli
 
 For a pack you saved earlier, run the measuring step directly: `python3 benchmarks/mcp_token_budget/measure.py --pack path/to/schema_pack.json`.
 
+The gate runs beside it: `python3 benchmarks/mcp_token_budget/budget_check.py --pack path/to/schema_pack.json` measures the same pack and exits 0 when both arms stay inside the frozen baseline, 1 when either arm grew, and 2 when an input cannot be measured. Adding `--skill PATH` measures the always-loaded skill file in the same run.
+
 ## Prerequisites
 
 Build the CLI, because the command measures what the binary prints: `cargo build --locked --bin clio` (or `make build`).
@@ -68,8 +70,12 @@ The tokenizer implementation and version are reported alongside it, in the `toke
 
 ## Scope
 
-This directory measures and reports; it holds no gate, no threshold, no budget limit, and no pass/fail verdict.
+This directory now holds one budget check that fails the build on pack byte or token growth against the immutable frozen baseline: `benchmarks/mcp_token_budget/budget_check.py` measures a pack, resolves `client/synthetic-eager-client/turn/1/bytes` and the matching `/tokens` row from `baseline/frozen-v1.json` — a file whose own digest is pinned, so a moved baseline is refused instead of compared against — and exits 1 when either arm is larger than its row.
 
-Nothing here fails a build because a number got bigger. The rows exist so a human, a review, or a separate policy can see what the tool surface actually costs and decide what to do about it.
+The preset targets are reported but not yet enforcing: `targets/frozen-v1.json` states one ceiling per preset and unit with the arithmetic that produced it, and `budget_targets.compare` reports each target beside its measured value and headroom. `PRESET_TARGETS_ENFORCED` is `False`, so a miss appears in the report and never changes the exit code, and flipping that one constant is the whole enforcement change.
 
-Keeping the measurement and the judgement apart is deliberate: a measurement that can be argued with stays trustworthy, and a threshold can move later without re-deriving how the number was produced.
+The always-loaded skill row is compared when a skill path is supplied: `--skill PATH` measures that file's raw bytes, its UTF-8 text, and its cl100k_base token count, and checks it against the frozen `retired_skill_entry_point/bytes` (6393) and `retired_skill_entry_point/tokens` (1518) rows. That arm takes no allowance, because an allowance names a pack digest, and a run without `--skill` reports the skill as not measured rather than as zero.
+
+Growth is accepted only by an exact-digest allowance record with both ceilings: `allowances/frozen-v1.json` holds the records, one record names one candidate pack digest together with `max_bytes` and `max_tokens`, and a growth with no record naming its digest — or with only one ceiling, or with both ceilings exceeded — fails and names the measure, the numbers, and the digest.
+
+Keeping the measurement and the judgement apart is deliberate, and it still holds inside the one check: `measure.py` prints the rows for a human or a review and carries no threshold, while the judgement lives in `budget_check.py` against the pinned digest, so a measurement that can be argued with stays trustworthy and a threshold can move later without re-deriving how the number was produced.

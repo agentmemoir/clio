@@ -96,6 +96,11 @@ jobs:
       - name: Build the CLI
         run: cargo build --locked -p clio --bin clio
 
+      - name: Check the pack budget against the frozen baseline
+        run: |
+          ./target/debug/clio mcp schema-export > "$RUNNER_TEMP/pack.json"
+          python3 benchmarks/mcp_token_budget/budget_check.py --pack "$RUNNER_TEMP/pack.json"
+
       - name: Run the budget tests
         run: python3 -m unittest discover -s benchmarks/mcp_token_budget -p 'test_*.py' -t . -v
 

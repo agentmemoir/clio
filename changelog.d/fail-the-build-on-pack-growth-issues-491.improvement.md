@@ -1,0 +1,1 @@
+The MCP tool-schema budget check now fails the build when the schema pack's canonical bytes or cl100k_base token count grows past the frozen baseline, and reports each preset target's headroom beside the two arms.

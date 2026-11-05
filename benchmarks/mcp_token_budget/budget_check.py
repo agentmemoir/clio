@@ -13,6 +13,15 @@ that grows must be matched by exactly one growth-allowance record naming its own
 digest, and both measured values must fit that record's independent ceilings.
 Anything else fails and names the measure, the numbers, and the digest.
 
+The always-loaded skill entry point is compared the same way when ``--skill``
+names a file, against its own frozen rows and with no allowance: an allowance
+names a pack digest, so it says nothing about a skill file. When no path is
+given the report says the skill was not measured instead of reporting zero.
+
+The preset targets are reported beside the arms. They are not enforced yet, so a
+target miss appears in the report and leaves the exit code alone; a targets file
+that cannot be trusted is an unusable input, not a silent skip.
+
 The whole report is built in memory and written once, so a failure can never
 leave half a document behind. An unusable input exits 2 with
 ``mcp-budget-check: <message>`` on stderr; a measured verdict of fail exits 1 and
@@ -27,6 +36,7 @@ from pathlib import Path
 
 import baseline_provenance
 import budget_allowances
+import budget_targets
 from measure import _parse_pack, _read_pack
 from offline_tokenizer import BudgetError, load
 
@@ -36,18 +46,26 @@ OUTPUT_FORMAT = "clio_mcp_budget_check"
 OUTPUT_FORMAT_VERSION = 1
 
 #: Digest of the committed baseline file. An edit or an append changes this value.
-PINNED_BASELINE_SHA256 = "d94fbfa8db884d75baf26da5a921bb2b124eb18f3846c670a76b50b9b8e47e82"
+PINNED_BASELINE_SHA256 = budget_targets.PINNED_BASELINE_SHA256
 
 #: Repo-relative paths reported in the output; never absolute, never host-specific.
 BASELINE_PATH = "benchmarks/mcp_token_budget/baseline/frozen-v1.json"
 BASELINE_FILE = HERE / "baseline" / "frozen-v1.json"
 ALLOWANCES_PATH = HERE / "allowances" / "frozen-v1.json"
+TARGETS_FILE = HERE / "targets" / "frozen-v1.json"
 
 BASELINE_ROW_BYTES = "client/synthetic-eager-client/turn/1/bytes"
 BASELINE_ROW_TOKENS = "client/synthetic-eager-client/turn/1/tokens"
 
 #: The two independent arms, in report order.
 ARMS = (("bytes", BASELINE_ROW_BYTES), ("tokens", BASELINE_ROW_TOKENS))
+
+#: The always-loaded skill file's own rows; a pack allowance never covers them.
+SKILL_ROW_BYTES = "retired_skill_entry_point/bytes"
+SKILL_ROW_TOKENS = "retired_skill_entry_point/tokens"
+SKILL_ARMS = (("bytes", SKILL_ROW_BYTES), ("tokens", SKILL_ROW_TOKENS))
+
+NO_SKILL_PATH = "no --skill path given"
 
 ALLOWANCE_SUMMARY_KEYS = ("decision_id", "date", "base_commit", "max_bytes", "max_tokens")
 
@@ -104,13 +122,80 @@ def baseline_value(record, row_id) -> int:
     return value
 
 
-def baseline_arms(path=BASELINE_FILE) -> dict:
-    """Return the resolved ceilings and digest of the frozen baseline."""
-    record, digest = load_baseline(path)
+def arms_from(record, digest) -> dict:
+    """Return the resolved ceilings and digest of one baseline record."""
     arms = {"path": BASELINE_PATH, "sha256": digest}
     for measure, row_id in ARMS:
         arms[measure] = baseline_value(record, row_id)
     return arms
+
+
+def baseline_arms(path=BASELINE_FILE) -> dict:
+    """Return the resolved ceilings and digest of the frozen baseline."""
+    record, digest = load_baseline(path)
+    return arms_from(record, digest)
+
+
+def baseline_rows(record) -> dict:
+    """Return every named row value in ``record``, keyed by row id."""
+    rows = record.get("rows")
+    rows = rows if isinstance(rows, list) else []
+    return {
+        row["row"]: row["value"]
+        for row in rows
+        if isinstance(row, dict) and isinstance(row.get("row"), str)
+    }
+
+
+def measure_skill(path, tokenizer) -> dict:
+    """Return the digest, raw byte length, and token count of the file at ``path``."""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise BudgetError(f"budget: cannot read skill file: {exc}") from None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BudgetError(f"budget: skill file is not valid UTF-8: {exc}") from None
+    return {
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "bytes": len(raw),
+        "tokens": tokenizer.count(text),
+    }
+
+
+def check_skill(record, candidate) -> dict:
+    """Compare one measured skill file with its frozen rows; it carries no allowance."""
+    arms = []
+    for measure, row_id in SKILL_ARMS:
+        base_value = baseline_value(record, row_id)
+        candidate_value = candidate[measure]
+        delta = candidate_value - base_value
+        arm = {
+            "measure": measure,
+            "row": row_id,
+            "baseline": base_value,
+            "candidate": candidate_value,
+            "allowance": None,
+            "delta": delta,
+            "verdict": "pass",
+        }
+        if delta > 0:
+            arm["verdict"] = "fail"
+            arm["failure"] = (
+                f"{row_id}: candidate {candidate_value} exceeds baseline "
+                f"{base_value} by {delta}"
+            )
+        arms.append(arm)
+    failures = [arm["failure"] for arm in arms if "failure" in arm]
+    return {
+        "sha256": candidate["sha256"],
+        "bytes": candidate["bytes"],
+        "tokens": candidate["tokens"],
+        "arms": arms,
+        "failures": failures,
+        "verdict": "fail" if failures else "pass",
+    }
 
 
 def measure_candidate(pack, tokenizer) -> dict:
@@ -183,17 +268,24 @@ def _arm(measure, baseline, candidate, records) -> dict:
     return arm
 
 
-def check_pack(baseline, candidate, allowances) -> dict:
+def check_pack(baseline, candidate, allowances, skill=None, targets=None) -> dict:
     """Return the report for one measured candidate against ``baseline``.
 
     ``baseline`` holds the resolved ceilings, the baseline file digest, and the
     repo-relative path. ``allowances`` is a validated allowance document or a bare
     record list; a document's declared baseline digest must match ``baseline``.
+    ``skill`` is the comparison returned by `check_skill`, and ``targets`` the one
+    returned by `budget_targets.compare`; neither contributes a failure while the
+    preset targets stay unenforced.
     """
     digest = baseline.get("sha256")
     records = _allowance_records(allowances, digest)
     arms = [_arm(measure, baseline, candidate, records) for measure, _ in ARMS]
     failures = [arm["failure"] for arm in arms if "failure" in arm]
+    if skill is not None:
+        failures.extend(skill["failures"])
+    if targets is not None:
+        failures.extend(targets["failures"])
     return {
         "baseline": {"path": baseline.get("path") or BASELINE_PATH, "sha256": digest},
         "candidate": {
@@ -203,6 +295,9 @@ def check_pack(baseline, candidate, allowances) -> dict:
         },
         "allowance": next((arm["allowance"] for arm in arms if arm["allowance"]), None),
         "arms": arms,
+        "skill": skill,
+        "skill_not_measured": None if skill is not None else NO_SKILL_PATH,
+        "targets": targets,
         "failures": failures,
         "verdict": "fail" if failures else "pass",
     }
@@ -217,6 +312,9 @@ def render(report) -> str:
         "candidate": report["candidate"],
         "allowance": report["allowance"],
         "arms": report["arms"],
+        "skill": report["skill"],
+        "skill_not_measured": report["skill_not_measured"],
+        "targets": report["targets"],
         "failures": report["failures"],
         "verdict": report["verdict"],
     }
@@ -262,17 +360,28 @@ def main(argv=None) -> int:
         default=None,
         help="growth-allowance record file; an absent file allows no growth",
     )
+    parser.add_argument(
+        "--skill",
+        metavar="PATH",
+        default=None,
+        help="always-loaded skill file to compare; not measured when omitted",
+    )
     args = parser.parse_args(argv)
 
     try:
         pack = _parse_pack(_read_pack(args.pack))
-        baseline = baseline_arms()
+        record, digest = load_baseline()
+        baseline = arms_from(record, digest)
         tokenizer = load()
         candidate = measure_candidate(pack, tokenizer)
-        allowances = _allowances(args.allowances or ALLOWANCES_PATH, baseline["sha256"])
-        report = check_pack(baseline, candidate, allowances)
+        skill = check_skill(record, measure_skill(args.skill, tokenizer)) if args.skill else None
+        allowances = _allowances(args.allowances or ALLOWANCES_PATH, digest)
+        targets = budget_targets.compare(
+            budget_targets.load(TARGETS_FILE), baseline_rows(record), candidate
+        )
+        report = check_pack(baseline, candidate, allowances, skill=skill, targets=targets)
         output = render(report)
-    except (BudgetError, budget_allowances.AllowanceError) as exc:
+    except (BudgetError, budget_allowances.AllowanceError, budget_targets.TargetError) as exc:
         sys.stderr.write(f"mcp-budget-check: {exc}\n")
         return 2
 

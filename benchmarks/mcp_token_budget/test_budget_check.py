@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for the MCP token-budget check and its growth-allowance records.
+"""Tests for the budget check's arms, allowance records, and baseline loader.
 
-A test that measures tokens needs the pinned tokenizer and skips with a named
-reason when tiktoken is absent, so the hermetic job can run the rest. The arm
-comparisons are driven through `check_pack` with the frozen baseline's own
+The arm comparisons are driven through `check_pack` with the frozen baseline's own
 numbers, so a pass, a byte-only growth, a token-only growth, and every allowance
-outcome is proven without touching the tokenizer.
+outcome is proven without touching the tokenizer; the command itself is tested in
+`test_budget_command.py`.
 """
 
-import contextlib
 import copy
-import io
 import json
 import sys
 import tempfile
@@ -25,24 +22,13 @@ import budget_allowances
 import budget_check
 from offline_tokenizer import BudgetError
 
-REPO_ROOT = HERE.parents[1]
-PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 BASELINE = HERE / "baseline" / "frozen-v1.json"
 
 PIN = budget_check.PINNED_BASELINE_SHA256
-FIXTURE_DIGEST = "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa"
 GROWN_DIGEST = "1a" * 32
 OTHER_DIGEST = "2b" * 32
 BASE_COMMIT = "abcdef0123456789abcdef0123456789abcdef01"
 ALLOWANCE_PATH = "benchmarks/mcp_token_budget/baseline/frozen-v1.json"
-
-
-def require_tokenizer():
-    """Skip with a named reason when tiktoken is absent."""
-    try:
-        import tiktoken  # noqa: F401
-    except ImportError as exc:
-        raise unittest.SkipTest(f"tiktoken is not installed: {exc}") from None
 
 
 def frozen_baseline():
@@ -202,8 +188,10 @@ class ArmTests(unittest.TestCase):
         self.assertEqual(
             list(report),
             ["format", "format_version", "baseline", "candidate", "allowance",
-             "arms", "failures", "verdict"],
+             "arms", "skill", "skill_not_measured", "targets", "failures", "verdict"],
         )
+        self.assertIsNone(report["skill"])
+        self.assertIsNone(report["targets"])
         self.assertEqual(report["format"], "clio_mcp_budget_check")
         self.assertEqual(report["format_version"], 1)
         self.assertEqual(report["baseline"], {"path": ALLOWANCE_PATH, "sha256": PIN})
@@ -392,54 +380,6 @@ class BaselineTests(unittest.TestCase):
         with self.assertRaises(BudgetError) as caught:
             budget_check.load_baseline(HERE / "baseline" / "absent.json")
         self.assertIn("budget: cannot read baseline", str(caught.exception))
-
-
-class CommandTests(unittest.TestCase):
-    def run_main(self, argv):
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            code = budget_check.main(argv)
-        return code, out.getvalue()
-
-    def test_unchanged_fixture_pack_passes_with_exit_zero(self):
-        require_tokenizer()
-        code, text = self.run_main(["--pack", str(PACK)])
-        self.assertEqual(code, 0)
-        report = json.loads(text)
-        self.assertEqual(report["format"], "clio_mcp_budget_check")
-        self.assertEqual(report["verdict"], "pass")
-        self.assertIsNone(report["allowance"])
-        self.assertEqual(report["failures"], [])
-        self.assertEqual(
-            report["candidate"],
-            {"sha256": FIXTURE_DIGEST, "bytes": 105632, "tokens": 21691},
-        )
-        for arm in report["arms"]:
-            self.assertEqual(arm["verdict"], "pass")
-            self.assertEqual(arm["delta"], 0)
-            self.assertIsNone(arm["allowance"])
-
-    def test_a_grown_pack_fails_with_exit_one(self):
-        require_tokenizer()
-        pack = json.loads(PACK.read_text(encoding="utf-8"))
-        pack["tools"][0]["description"] = pack["tools"][0]["description"] + " " + "growth " * 20
-        with tempfile.TemporaryDirectory() as tmp:
-            path = write_json(tmp, "pack.json", pack)
-            code, text = self.run_main(["--pack", str(path)])
-        self.assertEqual(code, 1, text)
-        report = json.loads(text)
-        self.assertEqual(report["verdict"], "fail")
-        self.assertTrue(report["failures"])
-        self.assertTrue(any(f.startswith("bytes:") for f in report["failures"]), report)
-        self.assertIsNone(report["allowance"])
-
-    def test_an_unusable_pack_exits_two(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "pack.json"
-            path.write_text("not json", encoding="utf-8")
-            code, text = self.run_main(["--pack", str(path)])
-        self.assertEqual(code, 2)
-        self.assertEqual(text, "")
 
 
 if __name__ == "__main__":
