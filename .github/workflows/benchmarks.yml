@@ -22,6 +22,7 @@ on:
       - 'benchmarks/**'
       - '.github/workflows/benchmarks.yml'
       - 'scripts/mcp_token_budget.sh'
+      - 'scripts/mcp_budget_check.sh'
       - 'crates/clio-mcp/**'
       - 'crates/clio-types/**'
       - 'crates/clio/**'
@@ -34,6 +35,7 @@ on:
       - 'benchmarks/**'
       - '.github/workflows/benchmarks.yml'
       - 'scripts/mcp_token_budget.sh'
+      - 'scripts/mcp_budget_check.sh'
       - 'crates/clio-mcp/**'
       - 'crates/clio-types/**'
       - 'crates/clio/**'
@@ -99,13 +101,7 @@ jobs:
       - name: Check the pack budget against the frozen baseline
         env:
           CLIO_SKILL_ENTRY_POINT: ${{ vars.CLIO_SKILL_ENTRY_POINT }}
-        run: |
-          ./target/debug/clio mcp schema-export > "$RUNNER_TEMP/pack.json"
-          args=(--pack "$RUNNER_TEMP/pack.json")
-          if [ -n "${CLIO_SKILL_ENTRY_POINT:-}" ]; then
-            args+=(--skill "$CLIO_SKILL_ENTRY_POINT")
-          fi
-          python3 benchmarks/mcp_token_budget/budget_check.py "${args[@]}"
+        run: scripts/mcp_budget_check.sh
 
       - name: Run the budget tests
         run: python3 -m unittest discover -s benchmarks/mcp_token_budget -p 'test_*.py' -t . -v

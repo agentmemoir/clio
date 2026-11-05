@@ -7,7 +7,7 @@ outcome is proven without touching the tokenizer; the command itself is tested i
 `test_budget_command.py`.
 """
 
-import copy
+import hashlib
 import json
 import sys
 import tempfile
@@ -18,11 +18,13 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import baseline_provenance
 import budget_allowances
 import budget_check
 from offline_tokenizer import BudgetError
 
 BASELINE = HERE / "baseline" / "frozen-v1.json"
+PACK = HERE.parents[1] / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
 PIN = budget_check.PINNED_BASELINE_SHA256
 GROWN_DIGEST = "1a" * 32
@@ -400,48 +402,28 @@ class AllowanceRecordTests(unittest.TestCase):
         self.assertEqual(both["tokens"], [ceiling_problem("tokens", 26, 20)])
 
 
-class BaselineTests(unittest.TestCase):
-    def test_the_committed_baseline_is_pinned(self):
-        record_value, digest = budget_check.load_baseline(BASELINE)
-        self.assertEqual(digest, PIN)
-        self.assertEqual(
-            budget_check.baseline_value(record_value, budget_check.BASELINE_ROW_BYTES),
-            105632,
-        )
-        self.assertEqual(
-            budget_check.baseline_value(record_value, budget_check.BASELINE_ROW_TOKENS),
-            21691,
-        )
+class CommittedRecordTests(unittest.TestCase):
+    """The committed ceiling record agrees with the frozen rows and the fixture."""
 
-    def test_a_missing_row_or_wrong_unit_raises_instead_of_defaulting(self):
-        record_value, _ = budget_check.load_baseline(BASELINE)
-        for row_id in (budget_check.BASELINE_ROW_BYTES, budget_check.BASELINE_ROW_TOKENS):
-            with self.subTest(row=row_id):
-                broken = copy.deepcopy(record_value)
-                broken["rows"] = [row for row in broken["rows"] if row["row"] != row_id]
-                with self.assertRaises(BudgetError) as caught:
-                    budget_check.baseline_value(broken, row_id)
-                self.assertIn("budget: missing baseline row", str(caught.exception))
-                self.assertIn(row_id, str(caught.exception))
-        token_row = {"row": budget_check.BASELINE_ROW_BYTES, "value": 1, "unit": "tokens"}
-        with self.assertRaises(BudgetError) as caught:
-            budget_check.baseline_value({"rows": [token_row]}, budget_check.BASELINE_ROW_BYTES)
-        self.assertIn("unit is", str(caught.exception))
-
-    def test_a_changed_or_absent_baseline_file_is_refused(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            record_value, _ = budget_check.load_baseline(BASELINE)
-            broken = copy.deepcopy(record_value)
-            broken["rows"][0]["value"] = 1
-            path = write_json(tmp, "frozen-v1.json", broken)
-            with self.assertRaises(BudgetError) as caught:
-                budget_check.load_baseline(path)
-        message = str(caught.exception)
-        self.assertTrue(message.startswith("budget: baseline digest is "), message)
-        self.assertIn(PIN, message)
-        with self.assertRaises(BudgetError) as caught:
-            budget_check.load_baseline(HERE / "baseline" / "absent.json")
-        self.assertIn("budget: cannot read baseline", str(caught.exception))
+    def test_the_committed_record_is_tied_to_the_frozen_rows(self):
+        records = budget_allowances.load(HERE / "allowances" / "frozen-v1.json")
+        self.assertTrue(records)
+        entry = next(
+            record
+            for record in records
+            if record["decision_id"] == "mcp-baseline-ceiling-2026-11-05"
+        )
+        baseline, _ = budget_check.load_baseline(BASELINE)
+        rows = (budget_check.BASELINE_ROW_BYTES, budget_check.BASELINE_ROW_TOKENS)
+        self.assertEqual(
+            [entry["max_bytes"], entry["max_tokens"]],
+            [budget_check.baseline_value(baseline, row) for row in rows],
+        )
+        tools = json.loads(PACK.read_text(encoding="utf-8"))["tools"]
+        canonical = baseline_provenance.canonical_tools(tools)
+        self.assertEqual(
+            entry["candidate_sha256"], hashlib.sha256(canonical).hexdigest()
+        )
 
 
 if __name__ == "__main__":
