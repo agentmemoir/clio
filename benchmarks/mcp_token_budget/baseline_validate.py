@@ -11,12 +11,13 @@ when the list is empty and prints nothing.
 """
 
 import argparse
-import hashlib
 import json
 import re
 import sys
 from datetime import date
 from pathlib import Path
+
+import baseline_provenance
 
 RECORD_FORMAT = "clio_mcp_frozen_baseline"
 FORMAT_VERSION = 1
@@ -29,8 +30,6 @@ UNITS = frozenset({"bytes", "tokens"})
 DELIVERIES = frozenset({"eager", "on_demand"})
 
 TOKENIZER_ENCODING = "cl100k_base"
-TOKENIZER_IMPLEMENTATION = "tiktoken"
-TOKENIZER_VERSION = "0.14.0"
 ASSET_SHA256 = "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
 RETIRED_SKILL_SHA256 = (
     "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80"
@@ -58,6 +57,7 @@ ALLOWED_TOP_LEVEL = frozenset(
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def _is_int(value) -> bool:
@@ -74,6 +74,13 @@ def _is_date(value) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _forbidden_path(text) -> bool:
+    """Return true for an absolute path or a path with a parent segment."""
+    if text.startswith("/") or text.startswith("\\") or DRIVE_RE.match(text):
+        return True
+    return ".." in re.split(r"[\\/]", text)
 
 
 def _objects(value):
@@ -107,20 +114,6 @@ def _rows(record):
 
 def _client_rows(record, client, turn, unit):
     return [row for row in _rows(record) if row.get("row") == f"client/{client}/turn/{turn}/{unit}"]
-
-
-def _canonical_tools(tools):
-    """Serialize one turn's tools array the way the replay module measures it."""
-    return json.dumps(tools, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def _fixture_turns(path, name):
-    """Return ``({turn: tools}, None)`` for one fixture, or ``(None, error)``."""
-    try:
-        turns = json.loads(path.read_text(encoding="utf-8"))["turns"]
-        return {item["turn"]: item["payload"]["tools"] for item in turns}, None
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        return None, f"AC3: client {name!r} fixture cannot be read: {exc}"
 
 
 def _expected_client_ids(record):
@@ -239,14 +232,6 @@ def check_record(record, base_dir) -> list:
             errors.append(f"AC3: client {name!r} has no turns")
             continue
         seen = set()
-        fixture_name = fixture.get("name") if isinstance(fixture, dict) else None
-        by_turn = None
-        if isinstance(fixture_name, str):
-            by_turn, fixture_error = _fixture_turns(
-                Path(base_dir) / "clients" / fixture_name, name
-            )
-            if fixture_error:
-                errors.append(fixture_error)
         for turn in turns:
             if not _is_int(turn) or turn < 1:
                 errors.append(f"AC3: client {name!r} turn is not a positive integer: {turn!r}")
@@ -263,28 +248,6 @@ def check_record(record, base_dir) -> list:
                     )
                 elif not isinstance(rows[0].get("label"), str):
                     errors.append(f"AC3: row {rows[0].get('row')!r} has no label")
-            if by_turn is None:
-                continue
-            if turn not in by_turn:
-                errors.append(f"AC3: client {name!r} turn {turn} is not in its fixture")
-                continue
-            canonical = _canonical_tools(by_turn[turn])
-            digest = hashlib.sha256(canonical).hexdigest()
-            bytes_rows = _client_rows(record, name, turn, "bytes")
-            tokens_rows = _client_rows(record, name, turn, "tokens")
-            if len(bytes_rows) == 1:
-                if bytes_rows[0].get("value") != len(canonical):
-                    errors.append(
-                        f"AC3: client {name!r} turn {turn} bytes value does not match the fixture"
-                    )
-                if bytes_rows[0].get("input_sha256") != digest:
-                    errors.append(
-                        f"AC3: client {name!r} turn {turn} bytes input_sha256 does not match the fixture"
-                    )
-            if len(tokens_rows) == 1 and tokens_rows[0].get("input_sha256") != digest:
-                errors.append(
-                    f"AC3: client {name!r} turn {turn} tokens input_sha256 does not match the fixture"
-                )
 
     expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS)
     seen_ids = []
@@ -406,9 +369,11 @@ def check_record(record, base_dir) -> list:
             if "value" in entry:
                 errors.append("AC5: unobserved entry must not carry a value")
 
+    errors.extend(baseline_provenance.check(record, base_dir))
+
     for text in _strings(record):
-        if text.startswith("/"):
-            errors.append("path boundary: record holds an absolute path")
+        if _forbidden_path(text):
+            errors.append("path boundary: record holds an absolute or parent path")
             break
 
     return errors

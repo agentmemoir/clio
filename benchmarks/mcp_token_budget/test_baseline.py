@@ -136,6 +136,14 @@ class BaselineTests(unittest.TestCase):
             errors = baseline_validate.validate(path)
         self.assertTrue(any("AC2" in error for error in errors), errors)
 
+    def test_ac2_wrong_fixture_digest_is_refused(self):
+        def zero_digest(record):
+            record["clients"][0]["fixture"]["sha256"] = "0" * 64
+
+        with mutated_record(zero_digest) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(any("AC2" in error and "fixture sha256" in error for error in errors), errors)
+
     def test_ac3_each_turn_has_separate_bytes_and_tokens_rows(self):
         record = load_record()
         for client in record["clients"]:
@@ -324,9 +332,7 @@ class BaselineTests(unittest.TestCase):
 
         with mutated_record(delete_row) as path:
             errors = baseline_validate.validate(path)
-        self.assertTrue(
-            any("AC7" in error and missing in error for error in errors), errors
-        )
+        self.assertTrue(any("AC7" in error and missing in error for error in errors), errors)
 
     def test_ac8_measured_token_rows_use_pinned_encoding(self):
         require_tokenizer()
@@ -371,13 +377,8 @@ class BaselineTests(unittest.TestCase):
 
         with mutated_record(drop_input_digest) as path:
             errors = baseline_validate.validate(path)
-        self.assertTrue(
-            any(
-                "AC8" in error and "client/synthetic-eager-client/turn/1/bytes" in error
-                for error in errors
-            ),
-            errors,
-        )
+        wanted = "client/synthetic-eager-client/turn/1/bytes"
+        self.assertTrue(any("AC8" in error and wanted in error for error in errors), errors)
 
         def drop_receipt(record):
             row_by_id(
@@ -386,13 +387,8 @@ class BaselineTests(unittest.TestCase):
 
         with mutated_record(drop_receipt) as path:
             errors = baseline_validate.validate(path)
-        self.assertTrue(
-            any(
-                "AC8" in error and "retired_skill_entry_point/bytes" in error
-                for error in errors
-            ),
-            errors,
-        )
+        wanted = "retired_skill_entry_point/bytes"
+        self.assertTrue(any("AC8" in error and wanted in error for error in errors), errors)
 
     def test_ac8_fallback_estimate_cannot_be_labelled_measured(self):
         for flag in ("estimated", "fallback"):
@@ -405,19 +401,45 @@ class BaselineTests(unittest.TestCase):
                 errors = baseline_validate.validate(path)
             self.assertTrue(any("AC8" in error for error in errors), errors)
 
+    def test_ac8_tokenizer_identity_is_enforced(self):
+        for key, value in (("version", "9.9.9"), ("implementation", "guesser")):
+            def change(record, key=key, value=value):
+                record["tokenizer"][key] = value
+
+            with mutated_record(change) as path:
+                errors = baseline_validate.validate(path)
+            self.assertTrue(any("AC8" in error and key in error for error in errors), errors)
+
+    def test_pack_identity_is_enforced(self):
+        def bad_bytes(record):
+            record["pack"]["canonical_bytes"] = 1
+
+        with mutated_record(bad_bytes) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(any("AC3" in error and "canonical_bytes" in error for error in errors), errors)
+
     def test_validator_rejects_absolute_path(self):
         def add_path(record):
             record["unobserved"][0]["reason"] = "/absolute/path"
 
         with mutated_record(add_path) as path:
             errors = baseline_validate.validate(path)
-        self.assertTrue(any("absolute path" in error for error in errors), errors)
+        self.assertTrue(any("path boundary" in error for error in errors), errors)
 
         def add_relative_path(record):
             record["unobserved"][0]["reason"] = "relative/path"
 
         with mutated_record(add_relative_path) as path:
             self.assertEqual(baseline_validate.validate(path), [])
+
+    def test_path_guard_refuses_absolute_and_parent_paths(self):
+        for marker in ("C:\\data\\file", "folder/../file"):
+            def add_path(record, marker=marker):
+                record["unobserved"][0]["reason"] = marker
+
+            with mutated_record(add_path) as path:
+                errors = baseline_validate.validate(path)
+            self.assertTrue(any("path boundary" in error for error in errors), errors)
 
     def test_validator_accepts_the_committed_record(self):
         self.assertEqual(baseline_validate.validate(RECORD), [])
