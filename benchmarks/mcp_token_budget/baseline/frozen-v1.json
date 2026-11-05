@@ -84,7 +84,8 @@
       "unit": "bytes",
       "label": "Measured",
       "date": "2026-11-05",
-      "input_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa"
+      "input_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
+      "recomputable": true
     },
     {
       "row": "client/synthetic-eager-client/turn/1/tokens",
@@ -92,7 +93,8 @@
       "unit": "tokens",
       "label": "Measured",
       "date": "2026-11-05",
-      "input_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa"
+      "input_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
+      "recomputable": true
     },
     {
       "row": "client/synthetic-on-demand-client/turn/1/bytes",
@@ -100,7 +102,8 @@
       "unit": "bytes",
       "label": "Measured",
       "date": "2026-11-05",
-      "input_sha256": "a2e9245ec05fc934b7195f2c7efd458d6b379206c5b5b3093166d45db2bfd709"
+      "input_sha256": "a2e9245ec05fc934b7195f2c7efd458d6b379206c5b5b3093166d45db2bfd709",
+      "recomputable": true
     },
     {
       "row": "client/synthetic-on-demand-client/turn/1/tokens",
@@ -108,7 +111,8 @@
       "unit": "tokens",
       "label": "Measured",
       "date": "2026-11-05",
-      "input_sha256": "a2e9245ec05fc934b7195f2c7efd458d6b379206c5b5b3093166d45db2bfd709"
+      "input_sha256": "a2e9245ec05fc934b7195f2c7efd458d6b379206c5b5b3093166d45db2bfd709",
+      "recomputable": true
     },
     {
       "row": "client/synthetic-on-demand-client/turn/2/bytes",
@@ -116,7 +120,8 @@
       "unit": "bytes",
       "label": "Measured",
       "date": "2026-11-05",
-      "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12"
+      "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12",
+      "recomputable": true
     },
     {
       "row": "client/synthetic-on-demand-client/turn/2/tokens",
@@ -124,7 +129,8 @@
       "unit": "tokens",
       "label": "Measured",
       "date": "2026-11-05",
-      "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12"
+      "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12",
+      "recomputable": true
     },
     {
       "row": "retired_skill_entry_point/bytes",
@@ -134,7 +140,8 @@
       "date": "2026-11-05",
       "content_sha256": "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80",
       "tokenizer_ref": "pinned",
-      "receipt_id": "pinned-local-run-2026-11-05"
+      "receipt_id": "pinned-local-run-2026-11-05",
+      "recomputable": false
     },
     {
       "row": "retired_skill_entry_point/tokens",
@@ -144,7 +151,8 @@
       "date": "2026-11-05",
       "content_sha256": "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80",
       "tokenizer_ref": "pinned",
-      "receipt_id": "pinned-local-run-2026-11-05"
+      "receipt_id": "pinned-local-run-2026-11-05",
+      "recomputable": false
     }
   ],
   "per_tool_ranking": {

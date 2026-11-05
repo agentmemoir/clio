@@ -16,6 +16,7 @@ from pathlib import Path
 
 PACK_FORMAT = "am_tool_schema_pack"
 PACK_FORMAT_VERSION = 1
+TOKENIZER_ENCODING = "cl100k_base"
 TOKENIZER_IMPLEMENTATION = "tiktoken"
 TOKENIZER_VERSION = "0.14.0"
 
@@ -105,6 +106,43 @@ def _check_pack(record, clients, fixtures, errors):
         errors.append("AC3: pack canonical_sha256 does not match the recomputed pack")
 
 
+def _check_recomputable(record, errors):
+    """Check every Measured row's recomputable flag and its receipt."""
+    receipts = record.get("receipts")
+    rows = record.get("rows")
+    rows = rows if isinstance(rows, list) else []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("label") != "Measured":
+            continue
+        row_id = row.get("row")
+        flag = row.get("recomputable")
+        if not isinstance(flag, bool):
+            errors.append(f"AC8: row {row_id!r} recomputable is not a boolean")
+            continue
+        if flag:
+            if row.get("unit") == "tokens" and not row.get("input_sha256"):
+                errors.append(f"AC8: row {row_id!r} input_sha256 is missing")
+            continue
+        receipt_id = row.get("receipt_id")
+        receipt = receipts.get(receipt_id) if isinstance(receipts, dict) else None
+        if not isinstance(receipt, dict):
+            errors.append(f"AC8: row {row_id!r} receipt_id does not resolve")
+            continue
+        if receipt.get("recomputable_from_public_inputs") is not False:
+            errors.append(
+                f"AC8: row {row_id!r} receipt recomputable_from_public_inputs is not false"
+            )
+        for key, expected in (
+            ("encoding", TOKENIZER_ENCODING),
+            ("implementation", TOKENIZER_IMPLEMENTATION),
+            ("version", TOKENIZER_VERSION),
+        ):
+            if receipt.get(key) != expected:
+                errors.append(
+                    f"AC8: row {row_id!r} receipt {key} does not match the pinned tokenizer"
+                )
+
+
 def check(record, base_dir):
     """Return every provenance error in ``record`` against fixtures under ``base_dir``."""
     errors = []
@@ -151,5 +189,6 @@ def check(record, base_dir):
                 f"AC8: tokenizer version is {tokenizer.get('version')!r}, "
                 f"expected {TOKENIZER_VERSION!r}"
             )
+    _check_recomputable(record, errors)
     _check_pack(record, clients, fixtures, errors)
     return errors

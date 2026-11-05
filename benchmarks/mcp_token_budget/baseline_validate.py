@@ -58,6 +58,7 @@ ALLOWED_TOP_LEVEL = frozenset(
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+PRIVATE_SEGMENT_RE = re.compile(r"(^|[\\/])private[\\/]")
 
 
 def _is_int(value) -> bool:
@@ -77,8 +78,10 @@ def _is_date(value) -> bool:
 
 
 def _forbidden_path(text) -> bool:
-    """Return true for an absolute path or a path with a parent segment."""
+    """Return true for an absolute path, a parent segment, or a private segment."""
     if text.startswith("/") or text.startswith("\\") or DRIVE_RE.match(text):
+        return True
+    if PRIVATE_SEGMENT_RE.search(text):
         return True
     return ".." in re.split(r"[\\/]", text)
 
@@ -400,7 +403,7 @@ def check_record(record, base_dir) -> list:
 
     for text in _strings(record):
         if _forbidden_path(text):
-            errors.append("path boundary: record holds an absolute or parent path")
+            errors.append("path boundary: record holds an absolute, parent, or private path")
             break
 
     return errors

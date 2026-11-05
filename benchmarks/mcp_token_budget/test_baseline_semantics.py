@@ -113,5 +113,43 @@ class SemanticsTests(unittest.TestCase):
         )
 
 
+    def test_measured_row_declares_whether_it_is_recomputable(self):
+        def drop_flag(record):
+            record["rows"][0].pop("recomputable")
+
+        with mutated_record(drop_flag) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(
+            any("AC8" in error and "recomputable" in error for error in errors), errors
+        )
+
+    def test_non_recomputable_row_needs_a_resolvable_receipt(self):
+        def unknown_receipt(record):
+            record["rows"][-1]["receipt_id"] = "missing-receipt"
+
+        with mutated_record(unknown_receipt) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(
+            any("AC8" in error and "receipt_id" in error for error in errors), errors
+        )
+
+        def wrong_version(record):
+            record["receipts"]["pinned-local-run-2026-11-05"]["version"] = "9.9.9"
+
+        with mutated_record(wrong_version) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(
+            any("AC8" in error and "version" in error for error in errors), errors
+        )
+
+    def test_path_guard_refuses_a_relative_private_segment(self):
+        def private_segment(record):
+            record["unobserved"][0]["reason"] = "private/work/notes"
+
+        with mutated_record(private_segment) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(any("path boundary" in error for error in errors), errors)
+
+
 if __name__ == "__main__":
     unittest.main()
