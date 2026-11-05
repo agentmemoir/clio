@@ -21,7 +21,10 @@ Anything else fails and names the measure, the numbers, and the digest.
 The always-loaded skill entry point is compared the same way when ``--skill``
 names a file, against its own frozen rows and with no allowance: an allowance
 names a pack digest, so it says nothing about a skill file. When no path is
-given the report says the skill was not measured instead of reporting zero.
+given the report carries a ``skill`` object marked ``not-measured`` that still
+shows both frozen skill rows, read through the same named-row lookup, instead of
+reporting zero. An explicitly empty ``--skill`` path is an unusable input and
+exits 2, because it is a wiring mistake, not a decision to skip the arm.
 
 The preset targets are reported beside the arms. They are not enforced yet, so a
 target miss appears in the report and leaves the exit code alone; a targets file
@@ -71,6 +74,7 @@ SKILL_ROW_TOKENS = "retired_skill_entry_point/tokens"
 SKILL_ARMS = (("bytes", SKILL_ROW_BYTES), ("tokens", SKILL_ROW_TOKENS))
 
 NO_SKILL_PATH = "no --skill path given"
+SKILL_NOT_MEASURED = "not-measured"
 
 ALLOWANCE_SUMMARY_KEYS = ("decision_id", "date", "base_commit", "max_bytes", "max_tokens")
 
@@ -169,11 +173,26 @@ def measure_skill(path, tokenizer) -> dict:
     }
 
 
+def skill_row_values(record) -> dict:
+    """Return the frozen skill row values, read by name so a missing row raises."""
+    return {row_id: baseline_value(record, row_id) for _, row_id in SKILL_ARMS}
+
+
+def skill_not_measured(rows) -> dict:
+    """Return the ``skill`` object for a run that supplied no skill path."""
+    return {
+        "status": SKILL_NOT_MEASURED,
+        "reason": NO_SKILL_PATH,
+        "baseline_rows": rows,
+    }
+
+
 def check_skill(record, candidate) -> dict:
     """Compare one measured skill file with its frozen rows; it carries no allowance."""
+    rows = skill_row_values(record)
     arms = []
     for measure, row_id in SKILL_ARMS:
-        base_value = baseline_value(record, row_id)
+        base_value = rows[row_id]
         candidate_value = candidate[measure]
         delta = candidate_value - base_value
         arm = {
@@ -197,6 +216,7 @@ def check_skill(record, candidate) -> dict:
         "sha256": candidate["sha256"],
         "bytes": candidate["bytes"],
         "tokens": candidate["tokens"],
+        "baseline_rows": rows,
         "arms": arms,
         "failures": failures,
         "verdict": "fail" if failures else "pass",
@@ -270,7 +290,9 @@ def _arm(measure, baseline, candidate, records) -> dict:
     return arm
 
 
-def check_pack(baseline, candidate, allowances, skill=None, targets=None) -> dict:
+def check_pack(
+    baseline, candidate, allowances, skill=None, targets=None, skill_rows=None
+) -> dict:
     """Return the report for one measured candidate against ``baseline``.
 
     ``baseline`` holds the resolved ceilings, the baseline file digest, and the
@@ -278,14 +300,20 @@ def check_pack(baseline, candidate, allowances, skill=None, targets=None) -> dic
     record list; a document's declared baseline digest must match ``baseline``.
     ``skill`` is the comparison returned by `check_skill`, and ``targets`` the one
     returned by `budget_targets.compare`; neither contributes a failure while the
-    preset targets stay unenforced.
+    preset targets stay unenforced. When no skill was measured the ``skill`` entry
+    still names both frozen rows through ``skill_rows`` — or, when the caller
+    passes none, through the frozen record itself — so a reader never mistakes an
+    unmeasured arm for a zero cost.
     """
     digest = baseline.get("sha256")
     records = _allowance_records(allowances, digest)
     arms = [_arm(measure, baseline, candidate, records) for measure, _ in ARMS]
+    if skill is None:
+        if skill_rows is None:
+            skill_rows = skill_row_values(load_baseline()[0])
+        skill = skill_not_measured(skill_rows)
     failures = [arm["failure"] for arm in arms if "failure" in arm]
-    if skill is not None:
-        failures.extend(skill["failures"])
+    failures.extend(skill.get("failures", []))
     if targets is not None:
         failures.extend(targets["failures"])
     return {
@@ -298,7 +326,6 @@ def check_pack(baseline, candidate, allowances, skill=None, targets=None) -> dic
         "allowance": next((arm["allowance"] for arm in arms if arm["allowance"]), None),
         "arms": arms,
         "skill": skill,
-        "skill_not_measured": None if skill is not None else NO_SKILL_PATH,
         "targets": targets,
         "failures": failures,
         "verdict": "fail" if failures else "pass",
@@ -315,7 +342,6 @@ def render(report) -> str:
         "allowance": report["allowance"],
         "arms": report["arms"],
         "skill": report["skill"],
-        "skill_not_measured": report["skill_not_measured"],
         "targets": report["targets"],
         "failures": report["failures"],
         "verdict": report["verdict"],
@@ -371,17 +397,28 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.skill == "":
+            raise BudgetError("--skill path is empty")
         pack = _parse_pack(_read_pack(args.pack))
         record, digest = load_baseline()
         baseline = arms_from(record, digest)
         tokenizer = load()
         candidate = measure_candidate(pack, tokenizer)
-        skill = check_skill(record, measure_skill(args.skill, tokenizer)) if args.skill else None
+        skill = None
+        if args.skill:
+            skill = check_skill(record, measure_skill(args.skill, tokenizer))
         allowances = _allowances(args.allowances or ALLOWANCES_PATH, digest)
         targets = budget_targets.compare(
             budget_targets.load(TARGETS_FILE), baseline_rows(record), candidate
         )
-        report = check_pack(baseline, candidate, allowances, skill=skill, targets=targets)
+        report = check_pack(
+            baseline,
+            candidate,
+            allowances,
+            skill=skill,
+            targets=targets,
+            skill_rows=skill_row_values(record),
+        )
         output = render(report)
     except (BudgetError, budget_allowances.AllowanceError, budget_targets.TargetError) as exc:
         sys.stderr.write(f"mcp-budget-check: {exc}\n")

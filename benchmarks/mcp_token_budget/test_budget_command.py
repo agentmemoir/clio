@@ -77,10 +77,17 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(
             list(report),
             ["format", "format_version", "baseline", "candidate", "allowance",
-             "arms", "skill", "skill_not_measured", "targets", "failures", "verdict"],
+             "arms", "skill", "targets", "failures", "verdict"],
         )
-        self.assertIsNone(report["skill"])
-        self.assertEqual(report["skill_not_measured"], budget_check.NO_SKILL_PATH)
+        self.assertEqual(report["skill"]["status"], "not-measured")
+        self.assertEqual(report["skill"]["reason"], budget_check.NO_SKILL_PATH)
+        self.assertEqual(
+            report["skill"]["baseline_rows"],
+            {
+                "retired_skill_entry_point/bytes": 6393,
+                "retired_skill_entry_point/tokens": 1518,
+            },
+        )
         targets = report["targets"]
         self.assertFalse(targets["enforced"])
         self.assertEqual(len(targets["comparisons"]), 8)

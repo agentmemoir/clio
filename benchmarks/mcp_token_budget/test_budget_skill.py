@@ -183,43 +183,69 @@ class SkillMeasurementTests(unittest.TestCase):
 
 
 class SkillCommandTests(unittest.TestCase):
-    """The command says the skill was not measured instead of reporting zero."""
+    """The command shows the frozen skill rows instead of a zero or a null."""
 
     def run_main(self, argv):
         out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = budget_check.main(argv)
-        return code, out.getvalue()
+        return code, out.getvalue(), err.getvalue()
 
-    def test_no_skill_path_reports_not_measured(self):
+    def test_no_skill_path_reports_not_measured_with_the_frozen_rows(self):
         require_tokenizer()
-        code, text = self.run_main(["--pack", str(PACK)])
-        self.assertEqual(code, 0, text)
+        code, text, err = self.run_main(["--pack", str(PACK)])
+        self.assertEqual(code, 0, text + err)
         report = json.loads(text)
-        self.assertIsNone(report["skill"])
-        self.assertEqual(report["skill_not_measured"], budget_check.NO_SKILL_PATH)
-        self.assertEqual(json.dumps(report["skill"]), "null")
+        self.assertNotIn("skill_not_measured", report)
+        self.assertEqual(
+            report["skill"],
+            {
+                "status": "not-measured",
+                "reason": budget_check.NO_SKILL_PATH,
+                "baseline_rows": {
+                    "retired_skill_entry_point/bytes": 6393,
+                    "retired_skill_entry_point/tokens": 1518,
+                },
+            },
+            report["skill"],
+        )
+        self.assertEqual(
+            list(report["skill"]["baseline_rows"]), [BYTES_ROW, TOKENS_ROW]
+        )
+        self.assertEqual(report["skill"]["baseline_rows"][BYTES_ROW], 6393)
+        self.assertEqual(report["skill"]["baseline_rows"][TOKENS_ROW], 1518)
+        self.assertEqual(report["verdict"], "pass")
+
+    def test_an_explicitly_empty_skill_path_exits_two(self):
+        code, text, err = self.run_main(["--pack", str(PACK), "--skill", ""])
+        self.assertEqual(code, 2, text + err)
+        self.assertEqual(text, "")
+        self.assertEqual(err, "mcp-budget-check: --skill path is empty\n")
 
     def test_a_measured_skill_path_reports_its_numbers(self):
         require_tokenizer()
         with tempfile.TemporaryDirectory() as tmp:
             path = write_text(tmp, "wayfinder.md", UNDER)
             expected = hashlib.sha256(path.read_bytes()).hexdigest()
-            code, text = self.run_main(["--pack", str(PACK), "--skill", str(path)])
-        self.assertEqual(code, 0, text)
+            code, text, err = self.run_main(["--pack", str(PACK), "--skill", str(path)])
+        self.assertEqual(code, 0, text + err)
         report = json.loads(text)
-        self.assertIsNone(report["skill_not_measured"])
         self.assertEqual(report["skill"]["sha256"], expected)
         self.assertEqual(report["skill"]["bytes"], len(UNDER.encode("utf-8")))
         self.assertEqual(report["skill"]["verdict"], "pass")
+        self.assertEqual(
+            report["skill"]["baseline_rows"],
+            {BYTES_ROW: 6393, TOKENS_ROW: 1518},
+        )
         self.assertEqual(report["failures"], [])
 
     def test_skill_growth_fails_the_run_with_exit_one(self):
         require_tokenizer()
         with tempfile.TemporaryDirectory() as tmp:
             path = write_text(tmp, "wayfinder.md", TOKEN_GROWTH)
-            code, text = self.run_main(["--pack", str(PACK), "--skill", str(path)])
-        self.assertEqual(code, 1, text)
+            code, text, err = self.run_main(["--pack", str(PACK), "--skill", str(path)])
+        self.assertEqual(code, 1, text + err)
         report = json.loads(text)
         self.assertEqual(report["verdict"], "fail")
         self.assertEqual(len(report["failures"]), 1, report["failures"])
@@ -231,9 +257,10 @@ class SkillCommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wayfinder.md"
             path.write_bytes(b"\xff\xfe\x00not utf-8")
-            code, text = self.run_main(["--pack", str(PACK), "--skill", str(path)])
-        self.assertEqual(code, 2)
+            code, text, err = self.run_main(["--pack", str(PACK), "--skill", str(path)])
+        self.assertEqual(code, 2, text + err)
         self.assertEqual(text, "")
+        self.assertIn("budget: skill file is not valid UTF-8", err)
 
 
 if __name__ == "__main__":
