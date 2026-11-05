@@ -69,7 +69,10 @@ const MINIMAL_TOOLS: [&str; 6] = [
 
 /// The minimal preset's expected listing, sorted.
 fn expected_minimal() -> Vec<String> {
-    MINIMAL_TOOLS.iter().map(|name| (*name).to_owned()).collect()
+    MINIMAL_TOOLS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect()
 }
 
 /// The full catalogue the dispatcher and the argument contract read, sorted.

@@ -138,7 +138,10 @@ fn the_all_preset_names_every_approved_row() {
 fn a_wider_preset_is_a_superset_of_the_minimal_one() {
     let all = ToolPreset::All.tools();
     for name in MINIMAL_TOOLS {
-        assert!(all.contains(&name), "`all` dropped the minimal tool `{name}`");
+        assert!(
+            all.contains(&name),
+            "`all` dropped the minimal tool `{name}`"
+        );
     }
     assert!(!MINIMAL_TOOLS.contains(&"store"));
 }
