@@ -418,28 +418,26 @@ fn retention_tools_parity_stdio_vs_http() {
             .is_some()
     );
 
-    // Both transports publish the new tools in `tools/list`.
+    // Both transports advertise the selected profile's tools in `tools/list`.
     let list = r#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#;
     let http_list: Value = serde_json::from_str(&post_json(port, list, "").body).expect("json");
-    let names: Vec<&str> = http_list["result"]["tools"]
+    let mut names: Vec<&str> = http_list["result"]["tools"]
         .as_array()
         .expect("tools")
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    for name in [
-        "admit_preview_batch",
-        "retention_profile_get",
-        "retention_profile_set",
-    ] {
-        assert!(names.contains(&name), "`{name}` missing over HTTP");
-    }
-    let stdio_list = McpHandler::tools_list();
-    let stdio_names: Vec<&str> = stdio_list["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .filter_map(|t| t["name"].as_str())
+    let bound = crate::bound_tools();
+    let mut expected: Vec<&str> = clio_types::DEFAULT_PRESET
+        .tools()
+        .into_iter()
+        .filter(|name| bound.contains(name))
         .collect();
-    assert_eq!(names, stdio_names);
+    names.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(names, expected, "the listing follows the selected profile");
+    assert!(
+        !names.contains(&"retention_profile_get"),
+        "a tool outside the profile is not advertised over HTTP"
+    );
 }

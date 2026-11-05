@@ -9,6 +9,7 @@
 //! ## Owns
 //! - `config_profiles` / `config_profile_apply`
 //! - `ranking_env_get` / `ranking_env_set`
+//! - The `mcp.tool_profile` accessor that names the configured tool preset
 //!
 //! ## Does not own
 //! - Overlay merge order or `config_get` / `config_set`
@@ -29,6 +30,7 @@ use crate::error::{AmError, ErrorCode, ToolResult};
 use crate::log;
 use crate::profile::{Profile, builtin_profiles, coding_tool_inventory, lookup_profile};
 use crate::ranking::{RankingEnv, RankingEnvPatch, preview_patch};
+use clio_types::{DEFAULT_PRESET, ToolPreset};
 use serde_json::{Value, json};
 
 impl Runtime {
@@ -119,6 +121,38 @@ impl Runtime {
     #[must_use]
     pub fn ranking_env(&self) -> &RankingEnv {
         &self.ranking
+    }
+
+    /// The tool preset `mcp.tool_profile` selects.
+    ///
+    /// An absent key is the default preset. A value that is not one of the
+    /// preset names fails closed with the names this build knows, the way the
+    /// other enum-valued keys of the effective document answer an unknown word,
+    /// so a typo cannot quietly select a different profile than the one written.
+    ///
+    /// # Errors
+    /// `mcp.tool_profile` is not a string, or names no preset this build knows.
+    #[must_use = "an unknown profile is a configuration fault, not a preset"]
+    pub fn mcp_tool_profile(&self) -> Result<ToolPreset, AmError> {
+        let binding = self.effective_raw();
+        let Some(value) = binding.pointer("/mcp/tool_profile") else {
+            return Ok(DEFAULT_PRESET);
+        };
+        let Some(name) = value.as_str() else {
+            return Err(AmError::new(
+                ErrorCode::InvalidType,
+                format!("mcp.tool_profile must be a string, got `{value}`"),
+            ));
+        };
+        ToolPreset::from_str(name).ok_or_else(|| {
+            AmError::new(
+                ErrorCode::OutOfRange,
+                format!(
+                    "mcp.tool_profile `{name}` is not one of {}",
+                    ToolPreset::ALL.map(ToolPreset::as_str).join("|")
+                ),
+            )
+        })
     }
 
     pub fn ranking_env_set(

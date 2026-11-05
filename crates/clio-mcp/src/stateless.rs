@@ -30,6 +30,7 @@
 
 use crate::protocol::{
     ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, McpHandler,
+    RpcError,
 };
 use crate::runtime::McpState;
 use serde_json::{Map, Value, json};
@@ -114,7 +115,10 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
     }
     Some(match method {
         "server/discover" => ok(id, &discover()),
-        "tools/list" => ok(id, &tools_list()),
+        "tools/list" => match tools_list(state) {
+            Ok(result) => ok(id, &result),
+            Err(err) => reject(id, err.code, err.message, err.data),
+        },
         // A real capability refusal has already answered, so a call that still
         // carries answers is refused as invalid params rather than served while
         // its answers are dropped.
@@ -231,18 +235,18 @@ fn discover() -> Value {
     })
 }
 
-/// The bound catalogue, stamped with the result fields the revision requires.
+/// The visible catalogue, stamped with the result fields the revision requires.
 ///
 /// The catalogue itself comes from the production handler, so tool definitions
-/// keep one source. A zero TTL promises no freshness; the private scope keeps
-/// the list out of any cache shared across authorization contexts.
-#[must_use]
-fn tools_list() -> Value {
-    let mut result = McpHandler::tools_list();
+/// and the configured profile keep one source. A zero TTL promises no freshness;
+/// the private scope keeps the list out of any cache shared across authorization
+/// contexts.
+fn tools_list(state: &McpState) -> Result<Value, RpcError> {
+    let mut result = McpHandler::tools_list_visible(state)?;
     stamp_result(&mut result);
     result["ttlMs"] = json!(0);
     result["cacheScope"] = json!("private");
-    result
+    Ok(result)
 }
 
 /// The result metadata block carrying the server's identity.

@@ -286,12 +286,14 @@ fn a_delegated_tool_call_error_is_passed_through_unstamped() {
 
 #[test]
 fn tools_list_serves_the_production_catalogue_for_the_revision() {
+    let state = state();
     let res = answer(
-        &state(),
+        &state,
         &request("tools/list", &required_meta(CANDIDATE_REVISION)),
     );
     let result = &res["result"];
-    assert_eq!(result["tools"], McpHandler::tools_list()["tools"]);
+    let visible = McpHandler::tools_list_visible(&state).expect("a known profile");
+    assert_eq!(result["tools"], visible["tools"]);
     assert!(
         !result["tools"].as_array().expect("a tool list").is_empty(),
         "the bound catalogue is present"
