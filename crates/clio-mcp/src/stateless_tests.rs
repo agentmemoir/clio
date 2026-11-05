@@ -14,6 +14,7 @@
 //!
 //! ## Does not own
 //! - The dispatcher itself (`stateless`)
+//! - The request shapes these fixtures send (see `stateless_fixtures`)
 //! - Transport conformance or the pinned-revision contract (see the crate's
 //!   integration suites)
 //!
@@ -26,77 +27,15 @@
 
 use super::{CANDIDATE_REVISION, SUPPORTED_REVISIONS, dispatch, required_capability};
 use crate::protocol::McpHandler;
-use crate::runtime::{McpOpenOptions, McpState};
-use serde_json::{Map, Value, json};
-use std::sync::Arc;
-
-const BANK: &str = "fixture-bank";
-
-fn state() -> Arc<McpState> {
-    let state =
-        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    state
-        .ops_store
-        .register_bank(BANK, "2024-01-01T00:00:00Z")
-        .expect("bank fixture");
-    state
-}
-
-/// Request metadata carrying the two keys the revision requires.
-fn required_meta(version: &str) -> Value {
-    json!({
-        "io.modelcontextprotocol/protocolVersion": version,
-        "io.modelcontextprotocol/clientCapabilities": {}
-    })
-}
-
-/// Request metadata declaring the client's elicitation capability.
-fn eliciting_meta(version: &str) -> Value {
-    json!({
-        "io.modelcontextprotocol/protocolVersion": version,
-        "io.modelcontextprotocol/clientCapabilities": { "elicitation": { "form": {} } }
-    })
-}
-
-/// Required metadata plus both optional keys the revision defines.
-fn full_meta(version: &str) -> Value {
-    json!({
-        "io.modelcontextprotocol/protocolVersion": version,
-        "io.modelcontextprotocol/clientCapabilities": {},
-        "io.modelcontextprotocol/clientInfo": { "name": "fixture-client", "version": "0.0.1" },
-        "io.modelcontextprotocol/logLevel": "info"
-    })
-}
-
-fn request(method: &str, meta: &Value) -> Value {
-    json!({ "jsonrpc": "2.0", "id": 7, "method": method, "params": { "_meta": meta } })
-}
-
-fn tool_call(meta: &Value, extra: Value) -> Value {
-    let mut params = Map::new();
-    params.insert("_meta".into(), meta.clone());
-    params.insert("name".into(), json!("consolidate"));
-    params.insert("arguments".into(), json!({ "bank": BANK }));
-    if let Value::Object(extra) = extra {
-        params.extend(extra);
-    }
-    json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": params })
-}
+use crate::runtime::McpState;
+use crate::stateless_fixtures::{
+    code, elicitation_answer, eliciting_meta, full_meta, message, request, required_meta,
+    sampling_answer, server_info, state, tool_call,
+};
+use serde_json::{Value, json};
 
 fn answer(state: &McpState, msg: &Value) -> Value {
     dispatch(state, msg).expect("a request carrying an id is answered")
-}
-
-fn code(res: &Value) -> i64 {
-    res["error"]["code"].as_i64().expect("an error code")
-}
-
-fn message(res: &Value) -> &str {
-    res["error"]["message"].as_str().expect("an error message")
-}
-
-fn server_info(result: &Value) -> &Value {
-    &result["_meta"]["io.modelcontextprotocol/serverInfo"]
 }
 
 fn assert_invalid_params(meta: Option<Value>, key: &str) {
@@ -120,8 +59,7 @@ fn discover_reports_the_candidate_revision_and_its_capabilities() {
     assert_eq!(res["jsonrpc"], json!("2.0"));
     assert_eq!(res["id"], json!(7));
     assert_eq!(result["resultType"], json!("complete"));
-    assert_eq!(result["supportedVersions"], json!(["2026-07-28"]));
-    assert_eq!(result["supportedVersions"], json!(SUPPORTED_REVISIONS));
+    assert_eq!(result["supportedVersions"], json!([CANDIDATE_REVISION]));
     assert_eq!(
         result["capabilities"]["tools"],
         json!({ "listChanged": false })
@@ -191,27 +129,30 @@ fn non_object_client_capabilities_is_invalid_params() {
 }
 
 #[test]
-fn optional_metadata_omitted_is_accepted() {
-    let res = answer(
-        &state(),
-        &request("server/discover", &required_meta(CANDIDATE_REVISION)),
-    );
-    assert!(
-        res.get("error").is_none(),
-        "optional keys never reject: {res}"
-    );
-}
-
-#[test]
-fn optional_metadata_present_is_accepted() {
-    let res = answer(
-        &state(),
-        &request("server/discover", &full_meta(CANDIDATE_REVISION)),
-    );
-    assert!(
-        res.get("error").is_none(),
-        "optional keys never reject: {res}"
-    );
+fn optional_metadata_never_changes_the_discovery_result() {
+    let state = state();
+    for (label, meta) in [
+        ("omitted", required_meta(CANDIDATE_REVISION)),
+        ("present", full_meta(CANDIDATE_REVISION)),
+    ] {
+        let res = answer(&state, &request("server/discover", &meta));
+        assert!(
+            res.get("error").is_none(),
+            "{label}: optional keys never reject: {res}"
+        );
+        let result = &res["result"];
+        assert_eq!(result["resultType"], json!("complete"), "{label}: {res}");
+        assert_eq!(
+            result["supportedVersions"],
+            json!([CANDIDATE_REVISION]),
+            "{label}: {res}"
+        );
+        assert_eq!(
+            server_info(result)["name"],
+            json!(env!("CARGO_PKG_NAME")),
+            "{label}: {res}"
+        );
+    }
 }
 
 #[test]
@@ -231,14 +172,25 @@ fn a_revision_outside_the_supported_set_is_refused() {
 
 #[test]
 fn only_a_tool_call_that_answers_input_requests_needs_a_capability() {
-    let answers = json!({ "inputResponses": { "ask-1": { "action": "accept", "content": {} } } });
     let cases = [
         ("tools/call", None, None),
         ("tools/call", Some(json!({})), None),
         ("tools/call", Some(json!({ "inputResponses": {} })), None),
-        ("tools/call", Some(answers.clone()), Some("elicitation")),
-        ("tools/list", Some(answers.clone()), None),
-        ("server/discover", Some(answers), None),
+        (
+            "tools/call",
+            Some(elicitation_answer()),
+            Some("elicitation"),
+        ),
+        // A sampling answer carries no `action`, so it demands no capability.
+        ("tools/call", Some(sampling_answer()), None),
+        // The revision types the answers as an object map; an array is not one.
+        (
+            "tools/call",
+            Some(json!({ "inputResponses": [{ "action": "accept" }] })),
+            None,
+        ),
+        ("tools/list", Some(elicitation_answer()), None),
+        ("server/discover", Some(elicitation_answer()), None),
     ];
     for (method, params, want) in cases {
         assert_eq!(
@@ -251,10 +203,7 @@ fn only_a_tool_call_that_answers_input_requests_needs_a_capability() {
 
 #[test]
 fn answering_input_requests_without_elicitation_is_refused() {
-    let msg = tool_call(
-        &required_meta(CANDIDATE_REVISION),
-        json!({ "inputResponses": { "ask-1": { "action": "accept", "content": {} } } }),
-    );
+    let msg = tool_call(&required_meta(CANDIDATE_REVISION), elicitation_answer());
     let res = answer(&state(), &msg);
     assert_eq!(code(&res), -32021, "{res}");
     assert!(message(&res).contains("elicitation"), "{res}");
@@ -266,18 +215,43 @@ fn answering_input_requests_without_elicitation_is_refused() {
 }
 
 #[test]
-fn answering_input_requests_with_elicitation_succeeds() {
+fn a_tool_call_that_answers_input_is_refused_as_invalid_params() {
+    let msg = tool_call(&eliciting_meta(CANDIDATE_REVISION), elicitation_answer());
+    let res = answer(&state(), &msg);
+    assert_eq!(code(&res), -32602, "{res}");
+    assert!(
+        message(&res).contains("no pending input request"),
+        "states why: {res}"
+    );
+    assert!(
+        res.get("result").is_none(),
+        "an answer is refused, never discarded: {res}"
+    );
+}
+
+#[test]
+fn a_sampling_answer_demands_no_capability_and_is_refused_as_invalid_params() {
+    let msg = tool_call(&required_meta(CANDIDATE_REVISION), sampling_answer());
+    let res = answer(&state(), &msg);
+    assert_ne!(code(&res), -32021, "sampling demands no capability: {res}");
+    assert_eq!(code(&res), -32602, "{res}");
+    assert!(
+        message(&res).contains("no pending input request"),
+        "states why: {res}"
+    );
+}
+
+#[test]
+fn a_tool_call_carrying_request_state_is_refused_as_invalid_params() {
     let msg = tool_call(
         &eliciting_meta(CANDIDATE_REVISION),
-        json!({ "inputResponses": { "ask-1": { "action": "accept", "content": {} } } }),
+        json!({ "requestState": "opaque-state" }),
     );
     let res = answer(&state(), &msg);
-    assert!(res.get("error").is_none(), "{res}");
-    assert_eq!(res["result"]["isError"], json!(false), "{res}");
-    assert_eq!(res["result"]["resultType"], json!("complete"));
-    assert_eq!(
-        server_info(&res["result"])["name"],
-        json!(env!("CARGO_PKG_NAME"))
+    assert_eq!(code(&res), -32602, "{res}");
+    assert!(
+        message(&res).contains("no pending input request"),
+        "states why: {res}"
     );
 }
 
@@ -287,9 +261,27 @@ fn ordinary_tool_calls_need_no_client_capability() {
         &state(),
         &tool_call(&required_meta(CANDIDATE_REVISION), json!({})),
     );
-    assert_ne!(res["error"]["code"], json!(-32021), "{res}");
     assert!(res.get("error").is_none(), "no invented requirement: {res}");
     assert_eq!(res["result"]["isError"], json!(false), "{res}");
+}
+
+#[test]
+fn a_delegated_tool_call_error_is_passed_through_unstamped() {
+    let msg = json!({
+        "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+        "params": {
+            "_meta": required_meta(CANDIDATE_REVISION),
+            "name": "no-such-tool",
+            "arguments": {}
+        }
+    });
+    let res = answer(&state(), &msg);
+    assert_eq!(code(&res), -32602, "{res}");
+    assert!(message(&res).contains("unknown tool"), "{res}");
+    assert!(
+        res.get("result").is_none(),
+        "the error arm stamps nothing: {res}"
+    );
 }
 
 #[test]
@@ -308,6 +300,26 @@ fn tools_list_serves_the_production_catalogue_for_the_revision() {
     assert_eq!(result["ttlMs"], json!(0));
     assert_eq!(result["cacheScope"], json!("private"));
     assert_eq!(server_info(result)["name"], json!(env!("CARGO_PKG_NAME")));
+}
+
+#[test]
+fn initialize_without_metadata_is_a_removed_method() {
+    let res = answer(
+        &state(),
+        &json!({ "jsonrpc": "2.0", "id": 7, "method": "initialize", "params": {} }),
+    );
+    assert_eq!(code(&res), -32601, "{res}");
+    assert!(message(&res).contains("initialize"), "{res}");
+}
+
+#[test]
+fn logging_set_level_is_a_removed_method() {
+    let res = answer(
+        &state(),
+        &request("logging/setLevel", &required_meta(CANDIDATE_REVISION)),
+    );
+    assert_eq!(code(&res), -32601, "{res}");
+    assert!(message(&res).contains("logging/setLevel"), "{res}");
 }
 
 #[test]
@@ -336,10 +348,11 @@ fn missing_method_is_invalid_request() {
         &json!({ "jsonrpc": "2.0", "id": 7, "params": {} }),
     );
     assert_eq!(code(&res), -32600);
+    assert_eq!(message(&res), "method is required");
 }
 
 #[test]
-fn notifications_and_id_less_messages_are_not_answered() {
+fn a_message_without_an_id_is_a_notification_and_is_never_answered() {
     let state = state();
     assert!(
         dispatch(

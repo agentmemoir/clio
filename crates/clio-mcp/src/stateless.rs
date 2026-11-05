@@ -11,6 +11,7 @@
 //! - The candidate revision constant and the supported-revision list
 //! - `params._meta` validation, the unsupported-version error, and the
 //!   required-client-capability refusal
+//! - The refusal of a tool call that answers input this server never requested
 //! - The `server/discover` result and the result fields the revision requires
 //!
 //! ## Does not own
@@ -27,15 +28,17 @@
 //!
 //! Keep this module focused on the candidate revision's request handling.
 
-use crate::protocol::{ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, McpHandler};
+use crate::protocol::{
+    ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, McpHandler,
+};
 use crate::runtime::McpState;
 use serde_json::{Map, Value, json};
 
 /// The revision this dispatcher answers as.
-pub const CANDIDATE_REVISION: &str = "2026-07-28";
+pub(crate) const CANDIDATE_REVISION: &str = "2026-07-28";
 
 /// Revisions this dispatcher accepts.
-pub const SUPPORTED_REVISIONS: &[&str] = &[CANDIDATE_REVISION];
+pub(crate) const SUPPORTED_REVISIONS: &[&str] = &[CANDIDATE_REVISION];
 
 /// JSON-RPC unsupported protocol version.
 const ERR_UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
@@ -52,14 +55,14 @@ const CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
 /// Request parameters key carrying answers to the server's input requests.
 const INPUT_RESPONSES: &str = "inputResponses";
 
+/// Request parameters key carrying state from a server input-required result.
+const REQUEST_STATE: &str = "requestState";
+
+/// Member that only an elicitation answer requires (`ElicitResult.action`).
+const ELICITATION_ACTION: &str = "action";
+
 /// Requests the served revision removed, so they answer as unknown methods.
 const REMOVED_METHODS: &[&str] = &["initialize", "ping", "logging/setLevel"];
-
-/// The client capability each request shape needs, keyed by method.
-const REQUIRED_CAPABILITIES: &[(&str, &str)] = &[("tools/call", ELICITATION)];
-
-/// The client capability an input request is answered with.
-const ELICITATION: &str = "elicitation";
 
 /// Cache hint for discovery, whose content is fixed for a given build.
 const DISCOVER_CACHE_TTL_MS: i64 = 3_600_000;
@@ -69,11 +72,13 @@ const DISCOVER_CACHE_TTL_MS: i64 = 3_600_000;
 /// A message without an `id` is a notification, including the removed
 /// `notifications/initialized`, and MCP never answers a notification.
 #[must_use]
-pub fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
+pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
     let id = msg.get("id")?;
     let Some(method) = msg.get("method").and_then(Value::as_str) else {
         return Some(reject(id, ERR_INVALID_REQUEST, "method is required", None));
     };
+    // A removed method is answered before any metadata rule: it is unknown
+    // whether or not the request carries `_meta`.
     if REMOVED_METHODS.contains(&method) {
         return Some(reject(
             id,
@@ -95,7 +100,8 @@ pub fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
             Some(data),
         ));
     }
-    if let Some(capability) = required_capability(method, msg.get("params"))
+    let params = msg.get("params");
+    if let Some(capability) = required_capability(method, params)
         && !capabilities.contains_key(capability)
     {
         let data = json!({ "requiredCapabilities": { (capability): {} } });
@@ -109,7 +115,16 @@ pub fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
     Some(match method {
         "server/discover" => ok(id, &discover()),
         "tools/list" => ok(id, &tools_list()),
-        "tools/call" => delegate(state, msg),
+        // A real capability refusal has already answered, so a call that still
+        // carries answers is refused as invalid params rather than served while
+        // its answers are dropped.
+        "tools/call" if params.is_some_and(answers_pending_input) => reject(
+            id,
+            ERR_INVALID_PARAMS,
+            "Invalid params: this server has no pending input request to answer",
+            None,
+        ),
+        "tools/call" => delegate(id, state, msg),
         other => reject(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -121,21 +136,44 @@ pub fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
 
 /// The client capability a request needs from its declared capabilities.
 ///
-/// Only a request that answers the server's input requests needs one.
+/// Only a `tools/call` that answers an elicitation input request needs one. In
+/// this revision `ElicitResult` is the sole input answer that requires an
+/// `action` member, so an answer carrying `action` is the only one read as an
+/// elicitation answer; sampling and roots answers demand no capability. The
+/// answers must be the object map the revision types them as: a shape that is
+/// not an object is refused as invalid params, not turned into a capability
+/// demand here.
 #[must_use]
-pub fn required_capability(method: &str, params: Option<&Value>) -> Option<&'static str> {
-    let capability = REQUIRED_CAPABILITIES
-        .iter()
-        .find(|(name, _)| *name == method)
-        .map(|(_, capability)| *capability)?;
-    let answers = params
+pub(crate) fn required_capability(method: &str, params: Option<&Value>) -> Option<&'static str> {
+    let answers_elicitation = params
         .and_then(|params| params.get(INPUT_RESPONSES))
-        .is_some_and(|responses| match responses {
-            Value::Array(entries) => !entries.is_empty(),
-            Value::Object(entries) => !entries.is_empty(),
-            _ => false,
+        .and_then(Value::as_object)
+        .is_some_and(|answers| {
+            answers
+                .values()
+                .any(|answer| answer.get(ELICITATION_ACTION).is_some())
         });
-    answers.then_some(capability)
+    match method {
+        "tools/call" if answers_elicitation => Some("elicitation"),
+        _ => None,
+    }
+}
+
+/// Whether a tool call tries to answer input this server never requested.
+///
+/// The revision types `inputResponses` as an object map and `requestState` as a
+/// string. A non-empty map, a non-string state, or a value of another shape all
+/// claim a pending input request, and no such request is ever issued here.
+fn answers_pending_input(params: &Value) -> bool {
+    let answers = match params.get(INPUT_RESPONSES) {
+        None | Some(Value::Null) => false,
+        Some(Value::Object(entries)) => !entries.is_empty(),
+        Some(_) => true,
+    };
+    answers
+        || params
+            .get(REQUEST_STATE)
+            .is_some_and(|state| !state.is_null())
 }
 
 /// The client's declared capabilities and the revision it requested.
@@ -158,14 +196,26 @@ fn request_meta(msg: &Value) -> Result<(&Map<String, Value>, &str), String> {
 }
 
 /// Serve a tool call from the production message path, stamped for the revision.
-fn delegate(state: &McpState, msg: &Value) -> Value {
-    let mut response = McpHandler::handle_message_with_state(state, msg)
-        .expect("the dispatcher has already accepted this message's id");
+fn delegate(id: &Value, state: &McpState, msg: &Value) -> Value {
+    let Some(mut response) = McpHandler::handle_message_with_state(state, msg) else {
+        return reject(id, ERR_INTERNAL, "the tool call produced no response", None);
+    };
     if let Some(result) = response.get_mut("result") {
-        result["resultType"] = json!("complete");
-        result["_meta"] = result_meta();
+        stamp_result(result);
     }
     response
+}
+
+/// Stamp the result fields the revision requires, keeping metadata already there.
+fn stamp_result(result: &mut Value) {
+    result["resultType"] = json!("complete");
+    let Value::Object(identity) = result_meta() else {
+        return;
+    };
+    match result.get_mut("_meta") {
+        Some(Value::Object(existing)) => existing.extend(identity),
+        _ => result["_meta"] = Value::Object(identity),
+    }
 }
 
 /// The `server/discover` result: versions, capabilities, and identity.
@@ -189,10 +239,9 @@ fn discover() -> Value {
 #[must_use]
 fn tools_list() -> Value {
     let mut result = McpHandler::tools_list();
-    result["resultType"] = json!("complete");
+    stamp_result(&mut result);
     result["ttlMs"] = json!(0);
     result["cacheScope"] = json!("private");
-    result["_meta"] = result_meta();
     result
 }
 
