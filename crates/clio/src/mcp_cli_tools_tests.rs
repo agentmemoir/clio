@@ -9,7 +9,8 @@
 //! when no flag is given.
 //!
 //! ## Owns
-//! - The usage refusal (exit 2) reaching both transport entry points
+//! - The usage refusal (exit 2) reaching both transport entry points, naming the
+//!   value it refused
 //! - The `--tools` block of both help screens
 //!
 //! ## Does not own
@@ -27,12 +28,34 @@ use super::tests::args_of;
 use super::*;
 
 /// A `--tools` value no preset and no group list can honour is refused before
-/// any transport opens a store, so no server starts on a value it cannot serve.
+/// any transport opens a store, so no server starts on a value it cannot serve
+/// and none advertises a set it guessed.
 #[test]
 fn a_bad_tools_value_stops_both_transports_with_a_usage_error() {
-    for transport in ["stdio", "http"] {
-        let code = mcp(args_of(&[transport, "--tools", "mnimal"]));
-        assert_eq!(code, ExitCode::from(2), "{transport} served anyway");
+    for value in ["mnimal", "custom:ops,bogus", "custom:"] {
+        for transport in ["stdio", "http"] {
+            let code = mcp(args_of(&[transport, "--tools", value]));
+            assert_eq!(code, ExitCode::from(2), "{transport} served `{value}`");
+        }
+    }
+}
+
+/// The refusal a bad value raises names the value that was written, so a caller
+/// can see which part of it this build does not know, and yields no groups a
+/// state could be opened with.
+#[test]
+fn a_bad_tools_value_is_refused_naming_it_and_yields_no_groups() {
+    for (value, offender) in [
+        ("mnimal", "mnimal"),
+        ("custom:ops,bogus", "bogus"),
+        ("custom:", "custom:"),
+    ] {
+        let error = crate::mcp_tools_flag::selection(&crate::cli_flags_test_support::flags_of(&[
+            "--tools", value,
+        ]))
+        .expect_err("the value names no set this build can build");
+        assert_eq!(error.exit_code(), ExitCode::from(2), "`{value}`");
+        assert!(error.message().contains(offender), "{}", error.message());
     }
 }
 

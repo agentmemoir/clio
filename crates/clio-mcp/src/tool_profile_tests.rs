@@ -14,6 +14,8 @@
 //! - A configuration with no profile key, and two states with different profiles in one process
 //! - An unknown profile name failing closed instead of listing a guessed preset
 //! - An installed tool selection winning over the configured profile
+//! - Each named preset, and a custom group list, listing exactly its own tools
+//! - The default preset's listing when no selection and no profile key exist
 //!
 //! ## Does not own
 //! - The protocol envelope and error mapping (`protocol_tests`)
@@ -29,6 +31,7 @@
 use crate::bound_tools;
 use crate::protocol::{ERR_INTERNAL, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
+use clio_types::{DEFAULT_PRESET, ToolGroup, ToolPreset};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -57,23 +60,81 @@ fn listed(state: &McpState) -> Vec<String> {
     names
 }
 
-/// The minimal preset's tool names, written out so a membership change fails
-/// these tests instead of moving the expectation with the code.
-const MINIMAL_TOOLS: [&str; 6] = [
-    "associations",
-    "compose_context",
-    "graph_link",
-    "graph_query",
-    "intent_gate",
-    "retrieve",
+/// The advertised tool names of a state carrying `groups` as the installed
+/// selection — the seam a transport's `--tools` writes before it opens — over
+/// the configuration document `config`.
+fn listed_under(config: &str, groups: &[ToolGroup]) -> Vec<String> {
+    let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
+    runtime
+        .load_file_json(config)
+        .expect("a valid config layer");
+    runtime.set_mcp_tool_groups(groups.to_vec());
+    listed(&McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state"))
+}
+
+/// The retrieval group's tools, written out so a membership change fails these
+/// tests instead of moving the expectation with the code.
+const RETRIEVAL_TOOLS: [&str; 4] = ["associations", "compose_context", "intent_gate", "retrieve"];
+
+/// The graph group's tools.
+const GRAPH_TOOLS: [&str; 2] = ["graph_link", "graph_query"];
+
+/// The item-read group's tools: the group a custom selection reaches through
+/// the dependency closure rather than by naming it.
+const ITEM_READ_TOOLS: [&str; 11] = [
+    "audit_trail",
+    "canonical_get",
+    "consolidate",
+    "get",
+    "get_gist",
+    "get_snapshot",
+    "inspect",
+    "maintenance_status",
+    "scratchpad_read",
+    "shared_retrieve",
+    "summarize",
 ];
+
+/// The persona group's tools.
+const PERSONA_TOOLS: [&str; 3] = [
+    "persona_get",
+    "persona_observe_preference",
+    "persona_put_stable",
+];
+
+/// The ops group's tools.
+const OPS_TOOLS: [&str; 6] = ["diagnose", "doctor", "repair", "reindex", "stats", "verify"];
+
+/// The hygiene group's tools.
+const HYGIENE_TOOLS: [&str; 3] = ["hygiene_audit", "hygiene_clean", "hygiene_log_list"];
+
+/// The retention group's tools.
+const RETENTION_TOOLS: [&str; 2] = ["retention_profile_get", "retention_profile_set"];
+
+/// `tools` owned and sorted, which is the shape the advertised names are compared
+/// in.
+fn sorted(tools: Vec<&str>) -> Vec<String> {
+    let mut names: Vec<String> = tools.into_iter().map(str::to_owned).collect();
+    names.sort_unstable();
+    names
+}
+
+/// The listing the written-out group sets predict, sorted and de-duplicated the
+/// way the advertised names are.
+fn expected_of(groups: &[&[&str]]) -> Vec<String> {
+    let mut names = sorted(
+        groups
+            .iter()
+            .flat_map(|group| group.iter().copied())
+            .collect(),
+    );
+    names.dedup();
+    names
+}
 
 /// The minimal preset's expected listing, sorted.
 fn expected_minimal() -> Vec<String> {
-    MINIMAL_TOOLS
-        .iter()
-        .map(|name| (*name).to_owned())
-        .collect()
+    expected_of(&[&RETRIEVAL_TOOLS, &GRAPH_TOOLS])
 }
 
 /// The full catalogue the dispatcher and the argument contract read, sorted.
@@ -189,5 +250,89 @@ fn an_installed_tool_selection_beats_the_configured_profile() {
     assert!(
         !names.contains(&"store".to_owned()),
         "a write tool outside the selection is advertised: {names:?}"
+    );
+}
+
+/// Every preset name a transport's `--tools` accepts advertises exactly that
+/// preset's tools, and the written-out group data agrees with the derivation the
+/// preset resolves through.
+#[test]
+fn each_preset_selected_by_the_override_advertises_that_presets_tool_set() {
+    for (preset, written_out) in [
+        (
+            ToolPreset::Minimal,
+            expected_of(&[&RETRIEVAL_TOOLS, &GRAPH_TOOLS]),
+        ),
+        (
+            ToolPreset::Coding,
+            expected_of(&[&RETRIEVAL_TOOLS, &ITEM_READ_TOOLS, &PERSONA_TOOLS]),
+        ),
+        (
+            ToolPreset::Ops,
+            expected_of(&[
+                &ITEM_READ_TOOLS,
+                &OPS_TOOLS,
+                &HYGIENE_TOOLS,
+                &RETENTION_TOOLS,
+            ]),
+        ),
+        (ToolPreset::All, full_catalog()),
+    ] {
+        let name = preset.as_str();
+        let advertised = listed_under(r#"{"mcp": {"tool_profile": "minimal"}}"#, &preset.resolve());
+        assert_eq!(
+            advertised, written_out,
+            "`--tools {name}` advertised {advertised:?}"
+        );
+        assert_eq!(
+            advertised,
+            sorted(preset.tools()),
+            "`--tools {name}` disagrees with the preset's own tool set"
+        );
+    }
+}
+
+/// A custom group list is accepted, and the listing carries the groups the
+/// dependency closure adds: `item-read` arrives with `ops` although the value
+/// never names it, and the closure stops at what `ops` requires.
+#[test]
+fn a_custom_selection_advertises_the_groups_its_closure_adds() {
+    let groups = clio_types::custom(&["ops"]).expect("a known group");
+    assert!(
+        ToolGroup::Ops.requires().contains(&ToolGroup::ItemRead),
+        "premise: `ops` requires the group the selection never names"
+    );
+    assert!(
+        groups.contains(&ToolGroup::ItemRead),
+        "the closure resolves `item-read` from `ops` alone"
+    );
+    let advertised = listed_under("{}", &groups);
+    assert_eq!(
+        advertised,
+        expected_of(&[&RETRIEVAL_TOOLS, &ITEM_READ_TOOLS, &GRAPH_TOOLS, &OPS_TOOLS]),
+        "the listing is the minimal set plus `ops` and everything `ops` requires"
+    );
+    for tool in ["canonical_get", "inspect", "shared_retrieve"] {
+        assert!(
+            advertised.contains(&tool.to_owned()),
+            "`{tool}` belongs to the closure-added `item-read` group: {advertised:?}"
+        );
+    }
+    assert!(
+        !advertised.contains(&"store".to_owned()),
+        "the closure did not reach `item-write`: {advertised:?}"
+    );
+}
+
+/// With no selection installed and no `mcp.tool_profile` written, the server
+/// advertises the default preset's set and nothing wider.
+#[test]
+fn no_selection_and_no_profile_setting_lists_the_default_preset_set() {
+    let advertised = listed(&state_with("{}"));
+    assert_eq!(advertised, expected_minimal());
+    assert_eq!(advertised, sorted(DEFAULT_PRESET.tools()));
+    assert!(
+        !advertised.contains(&"get".to_owned()),
+        "the default preset does not reach `item-read`: {advertised:?}"
     );
 }
