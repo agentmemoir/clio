@@ -420,10 +420,11 @@ class CommittedRecordTests(unittest.TestCase):
             [budget_check.baseline_value(baseline, row) for row in rows],
         )
         tools = json.loads(PACK.read_text(encoding="utf-8"))["tools"]
-        canonical = baseline_provenance.canonical_tools(tools)
-        self.assertEqual(
-            entry["candidate_sha256"], hashlib.sha256(canonical).hexdigest()
-        )
+        digest = hashlib.sha256(baseline_provenance.canonical_tools(tools)).hexdigest()
+        covering = [
+            record for record in records if record["candidate_sha256"] == digest
+        ]
+        self.assertEqual(len(covering), 1, records)
 
 
 if __name__ == "__main__":
