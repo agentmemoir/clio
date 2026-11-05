@@ -1,0 +1,45 @@
+{
+  "format": "clio_mcp_preset_targets",
+  "format_version": 1,
+  "baseline": {
+    "path": "benchmarks/mcp_token_budget/baseline/frozen-v1.json",
+    "format": "clio_mcp_frozen_baseline",
+    "format_version": 1,
+    "sha256": "d94fbfa8db884d75baf26da5a921bb2b124eb18f3846c670a76b50b9b8e47e82"
+  },
+  "basis": {
+    "shared_row": true,
+    "per_preset_measurement": false,
+    "reason": "frozen-v1 holds no per-preset row; every preset target is the same full-surface ceiling"
+  },
+  "tokenizer": {
+    "encoding": "cl100k_base",
+    "implementation": "tiktoken",
+    "version": "0.14.0",
+    "asset_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+    "applies_to": "every token target in this record"
+  },
+  "factor_decision": {
+    "label": "Decision",
+    "date": "2026-11-05",
+    "token_factor": { "numerator": 70, "denominator": 100 },
+    "byte_factor": { "numerator": 80, "denominator": 100 },
+    "arithmetic": "floor(baseline_value * numerator / denominator)",
+    "headroom_formula": "baseline_value - target"
+  },
+  "policy": {
+    "enforced_by": "none yet; this record states rules for a later gate or validator",
+    "missing_baseline_row": "reject",
+    "foreign_tokenizer": "reject"
+  },
+  "targets": [
+    { "preset": "minimal", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
+    { "preset": "minimal", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
+    { "preset": "coding", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
+    { "preset": "coding", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
+    { "preset": "ops", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
+    { "preset": "ops", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
+    { "preset": "all", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
+    { "preset": "all", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" }
+  ]
+}
