@@ -206,7 +206,7 @@ impl McpHandler {
             return Err(err);
         }
         let has_schema = crate::schema_output_defs::output_schema(name).is_some();
-        Ok(tool_call_envelope(result, has_schema))
+        Ok(tool_call_envelope(&result, has_schema))
     }
 
     fn ok_response(id: Option<&Value>, result: &Value) -> Value {
@@ -268,11 +268,11 @@ fn invalid_params(message: impl Into<String>) -> RpcError {
 /// declared output schema carries the serialized payload in `content` and no
 /// `structuredContent` key, because that key only means something when a
 /// schema describes its shape.
-pub(crate) fn tool_call_envelope(result: Value, has_schema: bool) -> Value {
+pub(crate) fn tool_call_envelope(result: &Value, has_schema: bool) -> Value {
     let is_error = result.get("ok").and_then(Value::as_bool) != Some(true);
     if has_schema {
         let text = if is_error {
-            error_summary(&result)
+            error_summary(result)
         } else {
             "ok".to_owned()
         };
@@ -282,7 +282,7 @@ pub(crate) fn tool_call_envelope(result: Value, has_schema: bool) -> Value {
             "structuredContent": result
         })
     } else {
-        let text = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
+        let text = serde_json::to_string(result).unwrap_or_else(|_| "{}".into());
         json!({
             "content": [{ "type": "text", "text": text }],
             "isError": is_error

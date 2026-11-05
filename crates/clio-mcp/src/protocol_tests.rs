@@ -97,7 +97,7 @@ fn tools_call_success_wraps_result() {
 #[test]
 fn schema_envelope_summarizes_status_and_carries_payload_once() {
     let payload = json!({"ok": true, "marker": "payload-once-8f3a", "items": [1, 2, 3]});
-    let envelope = tool_call_envelope(payload.clone(), true);
+    let envelope = tool_call_envelope(&payload, true);
     assert_eq!(envelope["structuredContent"], payload);
     assert_eq!(envelope["content"][0]["text"], json!("ok"));
     assert_eq!(envelope["isError"], json!(false));
@@ -113,7 +113,7 @@ fn schema_envelope_summarizes_status_and_carries_payload_once() {
 #[test]
 fn no_schema_envelope_keeps_payload_in_content_only() {
     let payload = json!({"ok": true, "marker": "no-schema-2c1d"});
-    let envelope = tool_call_envelope(payload.clone(), false);
+    let envelope = tool_call_envelope(&payload, false);
     assert!(
         envelope.get("structuredContent").is_none(),
         "no-schema envelope must omit structuredContent: {envelope}"
