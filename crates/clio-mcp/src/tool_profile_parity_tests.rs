@@ -31,7 +31,7 @@ use crate::bound_tools;
 use crate::principal::Principal;
 use crate::protocol::{ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
-use clio_types::{Actor, ToolPreset};
+use clio_types::Actor;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -111,14 +111,30 @@ fn listed(state: &Arc<McpState>) -> Vec<String> {
     names
 }
 
-/// A preset's own tool set intersected with what this build binds, sorted.
-fn expected(preset: ToolPreset) -> Vec<String> {
-    let bound = bound_tools();
-    let mut names: Vec<String> = preset
-        .tools()
-        .into_iter()
-        .filter(|tool| bound.contains(tool))
-        .map(str::to_owned)
+/// The minimal preset's tool names, written out so a membership change fails
+/// these tests instead of moving the expectation with the code.
+const MINIMAL_TOOLS: [&str; 6] = [
+    "associations",
+    "compose_context",
+    "graph_link",
+    "graph_query",
+    "intent_gate",
+    "retrieve",
+];
+
+/// The minimal preset's expected listing, sorted.
+fn expected_minimal() -> Vec<String> {
+    MINIMAL_TOOLS.iter().map(|name| (*name).to_owned()).collect()
+}
+
+/// The full bound set the dispatcher reads, which the `all` preset advertises
+/// unchanged, sorted.
+fn full_catalog() -> Vec<String> {
+    let mut names: Vec<String> = McpHandler::tools_list()["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
         .collect();
     names.sort_unstable();
     names
@@ -267,14 +283,14 @@ fn an_unauthorized_call_is_refused_the_same_whether_listed_or_hidden() {
 fn a_default_state_keeps_the_minimal_listing_next_to_a_wider_one() {
     let default_state = state_with("{}");
     let all_state = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
-    assert_eq!(listed(&default_state), expected(ToolPreset::Minimal));
-    assert_eq!(listed(&all_state), expected(ToolPreset::All));
+    assert_eq!(listed(&default_state), expected_minimal());
+    assert_eq!(listed(&all_state), full_catalog());
 
     // A request against one server instance leaves the other instance's
     // profile exactly as its own configuration selects it.
     let _ = call(&all_state, HIDDEN, &json!({}));
-    assert_eq!(listed(&default_state), expected(ToolPreset::Minimal));
-    assert_eq!(listed(&all_state), expected(ToolPreset::All));
+    assert_eq!(listed(&default_state), expected_minimal());
+    assert_eq!(listed(&all_state), full_catalog());
 }
 
 #[test]
@@ -290,7 +306,7 @@ fn replacing_the_server_config_changes_the_next_listing() {
     .expect("state");
 
     let before = listed(&state);
-    assert_eq!(before, expected(ToolPreset::Minimal));
+    assert_eq!(before, expected_minimal());
     assert!(!before.contains(&"store".to_owned()));
 
     // The runtime behind `state.config` is server-owned: the host replaces the
@@ -304,7 +320,7 @@ fn replacing_the_server_config_changes_the_next_listing() {
     }
 
     let after = listed(&state);
-    assert_eq!(after, expected(ToolPreset::All));
+    assert_eq!(after, full_catalog());
     assert!(after.contains(&"store".to_owned()), "{after:?}");
 
     // The listing followed the configuration alone: no request method selects a

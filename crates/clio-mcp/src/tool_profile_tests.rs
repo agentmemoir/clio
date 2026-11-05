@@ -8,7 +8,8 @@
 //! catalog keeps answering dispatch and the argument contract.
 //!
 //! ## Owns
-//! - The minimal profile's listing as its own tool set intersected with the bound set
+//! - The minimal profile's listing as a literal, written-out tool set
+//! - The `all` profile's listing as the full bound set
 //! - A tool outside the selected profile being absent from the listing and still bound
 //! - A configuration with no profile key, and two states with different profiles in one process
 //! - An unknown profile name failing closed instead of listing a guessed preset
@@ -27,7 +28,6 @@
 use crate::bound_tools;
 use crate::protocol::{ERR_INTERNAL, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
-use clio_types::ToolPreset;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -56,17 +56,20 @@ fn listed(state: &McpState) -> Vec<String> {
     names
 }
 
-/// A preset's own tool set intersected with what this build binds, sorted.
-fn expected(preset: ToolPreset) -> Vec<String> {
-    let bound = bound_tools();
-    let mut names: Vec<String> = preset
-        .tools()
-        .into_iter()
-        .filter(|tool| bound.contains(tool))
-        .map(str::to_owned)
-        .collect();
-    names.sort_unstable();
-    names
+/// The minimal preset's tool names, written out so a membership change fails
+/// these tests instead of moving the expectation with the code.
+const MINIMAL_TOOLS: [&str; 6] = [
+    "associations",
+    "compose_context",
+    "graph_link",
+    "graph_query",
+    "intent_gate",
+    "retrieve",
+];
+
+/// The minimal preset's expected listing, sorted.
+fn expected_minimal() -> Vec<String> {
+    MINIMAL_TOOLS.iter().map(|name| (*name).to_owned()).collect()
 }
 
 /// The full catalogue the dispatcher and the argument contract read, sorted.
@@ -82,10 +85,10 @@ fn full_catalog() -> Vec<String> {
 }
 
 #[test]
-fn the_minimal_listing_is_its_profile_intersected_with_the_bound_set() {
+fn the_minimal_listing_is_exactly_its_written_out_tool_set() {
     let state = state_with(r#"{"mcp": {"tool_profile": "minimal"}}"#);
     let names = listed(&state);
-    assert_eq!(names, expected(ToolPreset::Minimal));
+    assert_eq!(names, expected_minimal());
     assert!(names.contains(&"retrieve".to_owned()), "{names:?}");
     assert!(!names.is_empty(), "the minimal profile lists its own tools");
 }
@@ -110,10 +113,10 @@ fn a_tool_outside_the_minimal_profile_is_not_advertised_but_stays_bound() {
 #[test]
 fn a_configuration_without_the_key_lists_the_minimal_profile() {
     let state = state_with("{}");
-    assert_eq!(listed(&state), expected(ToolPreset::Minimal));
+    assert_eq!(listed(&state), expected_minimal());
     let default_state =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    assert_eq!(listed(&default_state), expected(ToolPreset::Minimal));
+    assert_eq!(listed(&default_state), expected_minimal());
 }
 
 #[test]
@@ -124,12 +127,12 @@ fn a_state_opened_with_an_effective_document_reads_its_profile() {
     )
     .expect("state");
     let all_names = listed(&all);
-    assert_eq!(all_names, expected(ToolPreset::All));
+    assert_eq!(all_names, full_catalog());
     assert!(all_names.contains(&"store".to_owned()), "{all_names:?}");
 
     let absent =
         McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
-    assert_eq!(listed(&absent), expected(ToolPreset::Minimal));
+    assert_eq!(listed(&absent), expected_minimal());
 }
 
 #[test]
@@ -138,8 +141,8 @@ fn two_states_in_one_process_list_their_own_profiles() {
     let all = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
     let minimal_names = listed(&minimal);
     let all_names = listed(&all);
-    assert_eq!(minimal_names, expected(ToolPreset::Minimal));
-    assert_eq!(all_names, expected(ToolPreset::All));
+    assert_eq!(minimal_names, expected_minimal());
+    assert_eq!(all_names, full_catalog());
     assert_ne!(minimal_names, all_names);
     assert!(
         all_names.len() > minimal_names.len(),
