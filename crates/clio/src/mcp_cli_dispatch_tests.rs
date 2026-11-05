@@ -22,7 +22,10 @@
 //! Keep this module focused on the `clio mcp` dispatch surface.
 
 use super::tests::args_of;
+use super::tests::Scratch;
 use super::*;
+use std::fs;
+use std::path::Path;
 
 /// Every help spelling the `mcp` entry point accepts prints the subcommand list
 /// and succeeds, which is what `clio mcp --help` used to fail to do.
@@ -71,6 +74,61 @@ fn schema_export_answers_help_from_its_record() {
         !text.contains("am_tool_schema_pack"),
         "help must not print the pack: {text}"
     );
+}
+
+/// Read a written pack back and pin the export shape: it parses to exactly the
+/// pack the handler built, and each `tools` array element sits on one line.
+fn assert_written_pack(path: &Path) {
+    let raw = fs::read_to_string(path).expect("written pack");
+    let pack: serde_json::Value = serde_json::from_str(&raw).expect("json");
+    assert_eq!(pack, clio_mcp::schema::schema_pack());
+    assert_eq!(pack["format"], "am_tool_schema_pack");
+    let tools = pack["tools"].as_array().expect("a tools array");
+    assert!(!tools.is_empty(), "the catalog has tools");
+    let lines: Vec<&str> = raw.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("\"tools\""))
+        .expect("a tools key");
+    assert!(lines[start].trim_end().ends_with('['), "tools opens an array");
+    let mut seen = 0;
+    for line in &lines[start + 1..] {
+        let trimmed = line.trim();
+        if trimmed == "]" || trimmed == "]," {
+            break;
+        }
+        let element: serde_json::Value =
+            serde_json::from_str(trimmed.trim_end_matches(',')).expect("one element per line");
+        assert!(element.is_object(), "a tool element is an object");
+        seen += 1;
+    }
+    assert_eq!(seen, tools.len(), "one line per tools element");
+}
+
+/// `--out` runs the real write path: the file exists, parses back to the pack
+/// the handler built, and keeps one tools element per line.
+#[test]
+fn schema_export_writes_a_pretty_pack_to_the_out_flag() {
+    let scratch = Scratch::new("out");
+    assert_eq!(
+        mcp_schema_export(args_of(&["--out", &scratch.display()])),
+        ExitCode::SUCCESS
+    );
+    assert!(scratch.path().is_file(), "--out wrote no file");
+    assert_written_pack(scratch.path());
+}
+
+/// `--path` is an alias for `--out` in the same write path, so it must produce
+/// the same file shape.
+#[test]
+fn schema_export_accepts_path_as_an_alias_for_out() {
+    let scratch = Scratch::new("path");
+    assert_eq!(
+        mcp_schema_export(args_of(&["--path", &scratch.display()])),
+        ExitCode::SUCCESS
+    );
+    assert!(scratch.path().is_file(), "--path wrote no file");
+    assert_written_pack(scratch.path());
 }
 
 /// An undeclared flag on the `stdio` transport is a usage error (exit 2), checked
