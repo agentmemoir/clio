@@ -1,0 +1,1 @@
+MCP token budget preset targets for minimal, coding, ops, and all now derive from the named frozen baseline row at 70 percent of tokens and 80 percent of bytes, and every target records its headroom and carries an Inferred label.
