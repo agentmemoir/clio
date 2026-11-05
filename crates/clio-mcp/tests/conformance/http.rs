@@ -150,19 +150,6 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
             "`{name}` missing from HTTP tools/list"
         );
     }
-    for tool in [
-        "batch",
-        "scratchpad_write",
-        "canonical_put",
-        "shared_store",
-        "validate",
-        "stats",
-    ] {
-        assert!(
-            bound.contains(&tool),
-            "additive `{tool}` is missing from the bound catalogue"
-        );
-    }
 
     // Sessions enabled: minted on initialize, required afterwards, DELETE ends it.
     let addr = spawn_http(clio_mcp::http::HttpConfig {

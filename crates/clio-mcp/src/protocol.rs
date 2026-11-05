@@ -9,7 +9,7 @@
 //! ## Owns
 //! - JSON-RPC 2.0 envelope parsing and response shaping
 //! - MCP error-code mapping (tool failures keep machine-readable codes)
-//! - The bound write+read tool registration returned by `tools/list`
+//! - The bound write+read tool set that dispatch and the argument contract read
 //!
 //! ## Does not own
 //! - Tool semantics (see `write_tools`/`mutator_tools`)
@@ -150,8 +150,8 @@ impl McpHandler {
         })
     }
 
-    /// `tools/list` over the bound write + read sets (the same dispatcher serves
-    /// both; their schemas come from the published pack).
+    /// The full bound write + read set, which dispatch and the argument
+    /// contract read; `tools/list` advertises the profile-narrowed subset.
     #[must_use]
     pub fn tools_list() -> Value {
         let bound = bound_set();

@@ -187,11 +187,9 @@ pub struct McpState {
     /// `McpState::open` keeps the env-aware runtime it already resolved
     /// providers from, so `config_get` answers with the same document the
     /// state was built against. `open_with_effective` hosts get a hermetic,
-    /// env-free runtime: the provider leg still uses the caller's document,
-    /// while the config tools serve that runtime's own (defaults-only) view.
+    /// env-free runtime whose base layer is the document they supplied.
     ///
-    /// Behind an `Arc` so a per-request clone serves one runtime; a second
-    /// `Runtime` would answer `config_get` with a different document.
+    /// Behind an `Arc` so a per-request clone serves one runtime, not a second document.
     pub config: Arc<std::sync::Mutex<clio_config::Runtime>>,
     /// Durable retention store file, when one is configured for this process.
     pub retention_path: Option<std::path::PathBuf>,
@@ -392,12 +390,12 @@ impl McpState {
     ///
     /// Hosts and tests that already resolved configuration use this to avoid a
     /// second environment read; behavior is identical to [`Self::open`] except
-    /// that the config/ranking tools are served by a hermetic, env-free
-    /// runtime (defaults only), while providers resolve from the caller's
-    /// document. This is also the one constructor that honours a
-    /// document-named erasure journal (`/erasure_journal_file`), because a
-    /// host that resolved the document is naming the path; the deployment
-    /// constructors never read that key.
+    /// that the config/ranking tools are served by a hermetic runtime that reads
+    /// no environment and takes the caller's document as its base layer, so a
+    /// tool profile the document selects governs the listing. This is also the
+    /// one constructor that honours a document-named erasure journal
+    /// (`/erasure_journal_file`), because a host that resolved the document is
+    /// naming the path; the deployment constructors never read that key.
     ///
     /// # Errors
     /// As [`Self::open`].
@@ -405,9 +403,11 @@ impl McpState {
         options: &McpOpenOptions,
         effective: &Value,
     ) -> Result<Arc<Self>, AmError> {
+        let mut runtime = clio_config::Runtime::with_env(&|_| None);
+        runtime.load_file_json(&effective.to_string())?;
         Self::open_with_runtime_and_effective(
             options,
-            clio_config::Runtime::with_env(&|_| None),
+            runtime,
             effective,
             erasure_journal_path_from_document(effective),
         )

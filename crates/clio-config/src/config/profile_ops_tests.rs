@@ -44,6 +44,18 @@ fn config_profiles_lists_builtins_and_the_active_one() {
 }
 
 #[test]
+fn a_non_string_tool_profile_is_a_configuration_fault() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.load_file_json(r#"{"mcp": {"tool_profile": 7}}"#)
+        .expect("a valid config layer");
+    let error = rt
+        .mcp_tool_profile()
+        .expect_err("a number names no preset");
+    assert_eq!(error.code, ErrorCode::InvalidType);
+    assert!(error.message.contains("must be a string"), "{}", error.message);
+}
+
+#[test]
 fn profile_apply_sets_per_repo_bank_policy() {
     let mut rt = Runtime::with_env(&|_| None);
     rt.set_repo_root("/tmp/demo-repo");

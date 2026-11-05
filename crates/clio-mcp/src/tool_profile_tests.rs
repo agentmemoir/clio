@@ -117,6 +117,22 @@ fn a_configuration_without_the_key_lists_the_minimal_profile() {
 }
 
 #[test]
+fn a_state_opened_with_an_effective_document_reads_its_profile() {
+    let all = McpState::open_with_effective(
+        &McpOpenOptions::default(),
+        &json!({"mcp": {"tool_profile": "all"}}),
+    )
+    .expect("state");
+    let all_names = listed(&all);
+    assert_eq!(all_names, expected(ToolPreset::All));
+    assert!(all_names.contains(&"store".to_owned()), "{all_names:?}");
+
+    let absent =
+        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    assert_eq!(listed(&absent), expected(ToolPreset::Minimal));
+}
+
+#[test]
 fn two_states_in_one_process_list_their_own_profiles() {
     let minimal = state_with(r#"{"mcp": {"tool_profile": "minimal"}}"#);
     let all = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
