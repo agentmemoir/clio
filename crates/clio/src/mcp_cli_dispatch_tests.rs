@@ -21,8 +21,8 @@
 //!
 //! Keep this module focused on the `clio mcp` dispatch surface.
 
-use super::tests::args_of;
 use super::tests::Scratch;
+use super::tests::args_of;
 use super::*;
 use std::fs;
 use std::path::Path;
@@ -90,7 +90,10 @@ fn assert_written_pack(path: &Path) {
         .iter()
         .position(|line| line.trim_start().starts_with("\"tools\""))
         .expect("a tools key");
-    assert!(lines[start].trim_end().ends_with('['), "tools opens an array");
+    assert!(
+        lines[start].trim_end().ends_with('['),
+        "tools opens an array"
+    );
     let mut seen = 0;
     for line in &lines[start + 1..] {
         let trimmed = line.trim();
