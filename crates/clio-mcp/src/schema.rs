@@ -67,8 +67,9 @@ pub fn catalog_def(name: &str) -> Option<ToolDef> {
 
 /// Build the complete `tool_schema` pack for the bound catalog.
 ///
-/// The pack carries the pinned MCP revision and a deterministic catalog hash
-/// so drift between the schema pack and the registered tool set is detectable.
+/// The pack carries the pinned MCP revision, a deterministic catalog hash,
+/// and the published definition of that hash, so drift between the schema pack
+/// and the registered tool set is detectable and the digest is recomputable.
 #[must_use]
 pub fn schema_pack() -> Value {
     let tools: Vec<Value> = catalog_defs().iter().map(ToolDef::to_tool).collect();
@@ -77,6 +78,7 @@ pub fn schema_pack() -> Value {
         "format_version": 1,
         "mcp_protocol_revision": MCP_PROTOCOL_REVISION,
         "catalog_hash": catalog_hash(&tools),
+        "catalog_hash_definition": catalog_hash_definition(),
         "tools": tools
     })
 }
@@ -129,6 +131,27 @@ pub fn fnv1a64_hex(data: &[u8]) -> String {
         hash = hash.wrapping_mul(0x100_0000_01b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+/// The published definition that accompanies the hash: the algorithm, its
+/// version tag, the two constants, the exact input it covers, the order the
+/// input is concatenated in, and the rendered form. It ships beside the hash
+/// it describes in every pack, so a reader can recompute the value without
+/// reading this implementation.
+#[must_use]
+fn catalog_hash_definition() -> Value {
+    json!({
+        "algorithm": "FNV-1a",
+        "version": "fnv1a64",
+        "hash_bits": 64,
+        "offset_basis": "0xcbf29ce484222325",
+        "prime": "0x100000001b3",
+        "input": "compact UTF-8 JSON encoding of every tool definition published in tools[], including name, description, inputSchema and outputSchema, with object keys in lexicographic order and array order preserved",
+        "order": "catalog registry order",
+        "concatenation": "adjacent bytes, no separator",
+        "rendered_form": "fnv1a64:{hash:016x}",
+        "rendered_form_is_external_contract": true
+    })
 }
 
 /// FNV-1a hash over the canonical serialization of the tool list: the
@@ -191,3 +214,7 @@ mod schema_tests;
 #[cfg(test)]
 #[path = "schema_context_read_schema_tests.rs"]
 mod schema_context_read_schema_tests;
+
+#[cfg(test)]
+#[path = "schema_hash_tests.rs"]
+mod schema_hash_tests;

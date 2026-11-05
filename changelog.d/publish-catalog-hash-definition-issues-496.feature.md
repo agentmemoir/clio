@@ -1,0 +1,1 @@
+The MCP schema pack and `clio help --json` now publish a `catalog_hash_definition` object, and `docs/catalog-hash.md` states the same definition in prose, so the `catalog_hash` value can be recomputed from a published pack without reading the implementation.

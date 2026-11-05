@@ -10,7 +10,7 @@ The 86 tool names come from `crates/clio-types/src/mcp_tools.rs`. `BOUND_WRITE_T
 
 ## Findings
 
-The inventory is not empty. All 86 bound tools already return a JSON object inside `structuredContent`. So every row has a value that an output schema could describe. 27 tools return a value serialized from a typed serde struct. 56 tools return a hand-built `json!`/`Map` object. 3 tools delegate to another tool (`shared_store`, `shared_discard`, `shared_retrieve`). By schema fit the split is 27 `direct`, 15 `partial-base`, 1 `partial-shapes` and 43 `by hand`. No output schema is declared anywhere in the repository. The `grep -rn 'outputSchema\|output_schema'` search finds no Rust hit. No other file in the repository holds either token. `structuredContent` is populated at `protocol.rs:215` but carries no schema. The only schema the server emits is the `inputSchema` built at `schema_defs.rs:76`.
+The inventory is not empty. All 86 bound tools already return a JSON object inside `structuredContent`. So every row has a value that an output schema could describe. 27 tools return a value serialized from a typed serde struct. 56 tools return a hand-built `json!`/`Map` object. 3 tools delegate to another tool (`shared_store`, `shared_discard`, `shared_retrieve`). By schema fit the split is 27 `direct`, 15 `partial-base`, 1 `partial-shapes` and 43 `by hand`. Every published tool carries an `outputSchema`: output schemas predate this inventory and are attached to each tool entry from `crates/clio-mcp/output_schemas.json`, so the `structuredContent` populated at `protocol.rs:215` is described by a declared schema as well as by the `inputSchema` built at `schema_defs.rs:76`.
 
 ## Write tools (50 rows, in `mcp_tools.rs` source order)
 

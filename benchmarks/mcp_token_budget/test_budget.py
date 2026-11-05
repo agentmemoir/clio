@@ -209,7 +209,7 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(rows["pack.bytes"]["value"], len(canonical_bytes), rows)
         self.assertEqual(rows["pack.tokens"]["value"], expected, rows)
         # The committed fixture is a stable snapshot: a schema change must update this pin deliberately.
-        self.assertEqual(expected, 31859, "fixture token count moved; re-pin after verifying")
+        self.assertEqual(expected, 31988, "fixture token count moved; re-pin after verifying")
         # Estimators must fail: neither a bytes/4 constant nor a word count may pass.
         self.assertNotEqual(rows["pack.tokens"]["value"], len(canonical_bytes) // 4)
         self.assertNotEqual(rows["pack.tokens"]["value"], len(canonical_text.split()))

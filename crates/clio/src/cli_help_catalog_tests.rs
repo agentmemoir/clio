@@ -69,6 +69,7 @@ fn the_catalog_holds_exactly_the_current_document_keys() {
         keys,
         vec![
             "catalog_hash",
+            "catalog_hash_definition",
             "cli_hash",
             "command_specs",
             "commands",
@@ -293,4 +294,70 @@ fn the_catalog_carries_the_pack_revision_and_hash_through() {
         pack["mcp_protocol_revision"]
     );
     assert_eq!(document["catalog_hash"], pack["catalog_hash"]);
+    assert_eq!(
+        document["catalog_hash_definition"],
+        pack["catalog_hash_definition"]
+    );
+}
+
+/// The CLI catalog's `tools[]` is the pack's array plus one `tool` key per
+/// entry, and that key is outside the hashed bytes: removing it reproduces the
+/// pack's `tools[]` exactly, while recomputing with it present lands on a value
+/// other than `catalog_hash`. A reader who hashes `clio help --json` verbatim
+/// therefore gets the wrong digest.
+#[test]
+fn the_cli_catalog_tools_carry_an_unhashed_tool_key_the_pack_omits() {
+    let document = catalog();
+    let cli_tools = document["tools"].as_array().expect("tools is an array");
+    let pack = clio_mcp::schema::schema_pack();
+    let pack_tools = pack["tools"].as_array().expect("the pack publishes tools");
+    assert_eq!(cli_tools.len(), pack_tools.len(), "one entry per pack tool");
+
+    let stripped: Vec<Value> = cli_tools
+        .iter()
+        .map(|entry| {
+            let fields = entry.as_object().expect("a catalog tool is an object");
+            let name = fields["name"].as_str().expect("a tool publishes a name");
+            assert_eq!(
+                fields["tool"],
+                json!(name),
+                "the CLI catalog's `tool` key repeats the tool's name"
+            );
+            let mut fields = fields.clone();
+            fields.remove("tool");
+            Value::Object(fields)
+        })
+        .collect();
+    assert_eq!(
+        stripped.as_slice(),
+        pack_tools.as_slice(),
+        "removing the `tool` key leaves the pack's `tools[]` entry for entry"
+    );
+
+    // The extra key is visible in the hash: the pack's bytes reproduce
+    // `catalog_hash`, and the CLI catalog's entries as published do not.
+    let hash = |tools: &[Value]| {
+        let bytes: Vec<u8> = tools
+            .iter()
+            .flat_map(|tool| {
+                serde_json::to_string(tool)
+                    .expect("a tool serializes as compact JSON")
+                    .into_bytes()
+            })
+            .collect();
+        clio_mcp::schema::fnv1a64_hex(&bytes)
+    };
+    let published = pack["catalog_hash"]
+        .as_str()
+        .expect("catalog_hash is a string");
+    assert_eq!(
+        hash(&stripped),
+        published,
+        "the stripped entries hash to the published catalog_hash"
+    );
+    assert_ne!(
+        hash(cli_tools),
+        published,
+        "the CLI catalog's entries hash to a different value"
+    );
 }
