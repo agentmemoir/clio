@@ -1,0 +1,1 @@
+Token budget measurements for the shipped tool surface now count with the real cl100k_base tokenizer from a pinned, checksum-verified local asset, so the published counts match what a model actually consumes instead of an approximation.
