@@ -5,5 +5,15 @@
     "path": "benchmarks/mcp_token_budget/baseline/frozen-v1.json",
     "sha256": "d94fbfa8db884d75baf26da5a921bb2b124eb18f3846c670a76b50b9b8e47e82"
   },
-  "records": []
+  "records": [
+    {
+      "decision_id": "mcp-baseline-ceiling-2026-11-05",
+      "date": "2026-11-05",
+      "reason": "The frozen 86-tool pack rows hold at 105632 canonical bytes and 21691 cl100k_base tokens, and any growth past these ceilings needs its own record.",
+      "base_commit": "c736c50171b668b29ef00c706d6f6ec78308f34a",
+      "candidate_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
+      "max_bytes": 105632,
+      "max_tokens": 21691
+    }
+  ]
 }
