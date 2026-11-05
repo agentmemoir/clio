@@ -21,7 +21,7 @@
 //! Changes to how the candidate tests build a request should normally require
 //! changes here. Changes to what a fixture asserts should not.
 //!
-//! Keep this module free of `#[test]` functions.
+//! Keep this module free of test functions.
 
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
