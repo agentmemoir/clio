@@ -20,7 +20,7 @@ Two environment variables are honoured: `CLIO_BIN` names the binary to use expli
 
 For a pack you saved earlier, run the measuring step directly: `python3 benchmarks/mcp_token_budget/measure.py --pack path/to/schema_pack.json`.
 
-The gate runs beside it: `scripts/mcp_budget_check.sh` exports the pack from the built binary, measures it, and exits 0 when both arms stay inside the frozen baseline, 1 when either arm grew, and 2 when an input cannot be measured. This is the same command CI runs, so a local result and a CI result come from the same check. Setting `CLIO_SKILL_ENTRY_POINT` adds the always-loaded skill arm, locally and in CI.
+The gate runs beside it: `scripts/mcp_budget_check.sh` exports the pack from the built binary, measures it, and exits 0 when both arms stay inside the frozen baseline, 1 when either arm grew, and 2 when an input cannot be measured. This is the same command CI runs, so a local result and a CI result come from the same check. The always-loaded skill arm runs only when `CLIO_SKILL_ENTRY_POINT` is set: a local run needs you to set it, and in CI it runs only when the repository variable `CLIO_SKILL_ENTRY_POINT` is configured.
 
 ## Prerequisites
 
@@ -82,6 +82,6 @@ In CI the path comes from the `CLIO_SKILL_ENTRY_POINT` repository variable, whic
 
 Growth is accepted only by an exact-digest allowance record with both ceilings: `allowances/frozen-v1.json` holds the records, one record names one candidate pack digest together with `max_bytes` and `max_tokens`, and a growth with no record naming its digest — or with only one ceiling, or with both ceilings exceeded — fails and names the measure, the numbers, and the digest. The two arms stay independent under a record: `budget_allowances.within` reports problems keyed by measure, so a byte ceiling that is breached fails the bytes arm while a token count that still fits its own ceiling keeps the tokens arm passing, and each failure message names only its own measure.
 
-An allowance record carries a stable `decision_id`, the `date` the decision was made, a `reason`, the measured `base_commit`, the exact `candidate_sha256` pack digest it covers, and its independent `max_bytes` and `max_tokens` ceilings. The commit the allowance lands in is deliberately not a field: git history records it, so the record cannot go stale by naming a commit that does not exist yet.
+An allowance record carries a stable `decision_id`, the `date` the decision was made, a `reason`, the measured `base_commit`, the exact `candidate_sha256` pack digest it covers, and its independent `max_bytes` and `max_tokens` ceilings. The commit the allowance lands in is deliberately not a field: git history records it, so the record cannot go stale by naming a commit that does not exist yet. The record grants no headroom: a grown pack has a different canonical digest, so growth needs its own record.
 
 Keeping the measurement and the judgement apart is deliberate, and it still holds inside the one check: `measure.py` prints the rows for a human or a review and carries no threshold, while the judgement lives in `budget_check.py` against the pinned digest, so a measurement that can be argued with stays trustworthy and a threshold can move later without re-deriving how the number was produced.
