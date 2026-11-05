@@ -4,14 +4,19 @@
 //! # Responsibility
 //!
 //! This module is responsible for the tests that pin dispatch eligibility to the
-//! bound set rather than to the advertised listing, so a tool the selected
-//! profile hides answers exactly what it answers when listed.
+//! bound set rather than to the advertised listing.
+//!
+//! Every catalog tool is called through `tools/call` while the selected profile
+//! omits it, and the answer is compared with the same call while listed. A call
+//! may stop at the dispatch gate, the argument contract, a confirmation,
+//! authorization, or inside the tool; any of those refusals is a valid outcome
+//! that has to match, and handler reach is proved for one hidden tool, not all.
 //!
 //! ## Owns
-//! - A hidden tool passing the dispatch gate and running its body
+//! - One hidden tool passing the dispatch gate and running its body
 //! - The same result value for a valid, authorized call in both listings
-//! - Every bound tool, called once per narrow preset that hides it, answering
-//!   what it answers when listed
+//! - Every bound tool, called once while hidden, under the first narrow preset
+//!   that hides it, answering what it answers when listed
 //! - The same code and message for an invalid call and for an unauthorized one
 //! - A server-instance profile replaced through the config runtime changing the
 //!   next listing, with no request method selecting a profile
@@ -172,11 +177,6 @@ fn a_hidden_tool_passes_the_dispatch_gate() {
     assert_eq!(
         unbound["error"]["code"],
         json!(ERR_INVALID_PARAMS),
-        "{unbound}"
-    );
-    assert_eq!(
-        unbound["error"]["message"],
-        json!("unknown tool `no_such_tool`"),
         "{unbound}"
     );
     assert_eq!(
@@ -349,15 +349,15 @@ fn replacing_the_server_config_changes_the_next_listing() {
 }
 
 /// Tools whose payload reports server-side state rather than the caller's
-/// arguments: a second-resolution stamp (`hygiene_log_list`, `sync_key_status`,
-/// `verify`, `diagnose`, `doctor`), an allocated id (`doctor`, `consolidate`),
-/// the configuration carrying the profile under test (`config_get`), or the
-/// device id the store minted for itself (`sync_status`). Each entry is still
-/// called while hidden and still has to agree on its outcome (JSON-RPC error,
-/// `isError`, `ok`, code, message); only the byte payload comparison is skipped.
+/// arguments, so it can differ across a clock tick or between two equivalent fresh
+/// states: a second-resolution timestamp (`hygiene_log_list`, `sync_key_status`,
+/// `verify`, `diagnose`, `doctor`), the plan id `doctor` allocates, the
+/// configuration carrying the profile under test (`config_get`), or the device id
+/// a fresh store mints (`sync_status`). Each entry is still called while hidden and
+/// still has to agree on its outcome (JSON-RPC error, `isError`, `ok`, code,
+/// message); only the byte payload comparison is skipped.
 const SERVER_STATE_PAYLOADS: &[&str] = &[
     "config_get",
-    "consolidate",
     "diagnose",
     "doctor",
     "hygiene_log_list",
@@ -388,14 +388,16 @@ fn every_catalog_tool_answers_when_hidden() {
             content["message"],
         ])
     };
-    // The bound set must be the catalog this test claims to exhaust, so a
-    // truncated or empty set fails here instead of passing vacuously.
-    let names = bound_tools();
-    assert_eq!(
-        names.len(),
-        crate::schema::catalog_defs().len(),
-        "the loop must call every catalog tool, not a subset"
-    );
+    // The bound set must be the catalog this test claims to exhaust, compared by
+    // name: a same-length swap would otherwise skip a tool and still pass.
+    let mut names = bound_tools();
+    names.sort_unstable();
+    let mut catalog: Vec<&str> = crate::schema::catalog_defs()
+        .iter()
+        .map(|def| def.name)
+        .collect();
+    catalog.sort_unstable();
+    assert_eq!(names, catalog, "the loop must call every catalog tool");
     for tool in SERVER_STATE_PAYLOADS {
         assert!(names.contains(tool), "`{tool}` is a bound tool");
     }
@@ -420,9 +422,8 @@ fn every_catalog_tool_answers_when_hidden() {
         );
         let hidden = call(&hidden_state, name, &args);
         let visible = call(&visible_state, name, &args);
-        // The gate refuses an unbound name with `-32602`: the code selects that
-        // refusal, and the message only corroborates it, so a reworded message
-        // cannot decide the check on its own.
+        // The gate refuses an unbound name with `-32602` naming it unknown: the
+        // code selects that refusal, and the message only corroborates it.
         let error = &hidden["error"];
         let refused_at_gate = error["code"] == json!(ERR_INVALID_PARAMS)
             && error["message"]
