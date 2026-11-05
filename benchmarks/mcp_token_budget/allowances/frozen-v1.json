@@ -20,9 +20,9 @@
       "date": "2026-11-05",
       "reason": "The pack now carries outputSchema for the 86 inventoried tools, which grows the canonical tools array past the frozen ceilings. This record grants exactly the measured size.",
       "base_commit": "c736c50171b668b29ef00c706d6f6ec78308f34a",
-      "candidate_sha256": "21bf315543681dd885de12f5fa5367b8281f9dbd4809cd999ab98c835198e1cf",
-      "max_bytes": 141987,
-      "max_tokens": 30034
+      "candidate_sha256": "022f77f6c56c8b723aa91d82f0b22a19c87954b771f306439b8f52a03072f87c",
+      "max_bytes": 149465,
+      "max_tokens": 31815
     }
   ]
 }

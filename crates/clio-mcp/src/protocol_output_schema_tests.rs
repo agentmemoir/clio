@@ -69,15 +69,19 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
         return Ok(());
     };
     if let Some(kind) = fields.get("type") {
-        let ok = match kind {
+        let matched = match kind {
             Value::String(name) => type_matches(name, value),
-            Value::Array(names) => names
+            Value::Array(names) if names.iter().all(Value::is_string) => names
                 .iter()
                 .filter_map(Value::as_str)
                 .any(|name| type_matches(name, value)),
-            _ => true,
+            _ => {
+                return Err(format!(
+                    "{path}: type must be a string or an array of strings, got {kind}"
+                ));
+            }
         };
-        if !ok {
+        if !matched {
             return Err(format!("{path}: type {kind} does not match {value}"));
         }
     }
@@ -123,7 +127,12 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
                     }
                 }
             }
-            _ => {}
+            Some(Value::Bool(true)) | None => {}
+            Some(other) => {
+                return Err(format!(
+                    "{path}: additionalProperties must be a bool or an object, got {other}"
+                ));
+            }
         }
     }
     if let (Some(items), Some(array)) = (fields.get("items"), value.as_array()) {
@@ -174,6 +183,11 @@ fn assert_keywords_supported(tool: &str, schema: &Value) {
             "items" => assert_keywords_supported(tool, child),
             "oneOf" => {
                 for node in child.as_array().expect("oneOf array") {
+                    assert_keywords_supported(tool, node);
+                }
+            }
+            "anyOf" => {
+                for node in child.as_array().expect("anyOf array") {
                     assert_keywords_supported(tool, node);
                 }
             }
@@ -233,6 +247,37 @@ fn protocol_output_schema_validator_reports_the_failing_path() {
     let any_of_miss = validate(&schema, &json!({"ok": true, "overlap": {"other": 1}}))
         .expect_err("anyOf mismatch must be rejected");
     assert_eq!(any_of_miss, "$.overlap: anyOf matched no branch out of 2");
+    let bad_type =
+        validate(&json!({"type": 3}), &json!("x")).expect_err("a non-string type must be rejected");
+    assert!(
+        bad_type.contains("type must be a string or an array of strings"),
+        "{bad_type}"
+    );
+    let bad_type_item = validate(&json!({"type": ["string", 3]}), &json!("x"))
+        .expect_err("a type array must hold only strings");
+    assert!(
+        bad_type_item.contains("type must be a string or an array of strings"),
+        "{bad_type_item}"
+    );
+    let bad_extra = validate(&json!({"additionalProperties": "yes"}), &json!({}))
+        .expect_err("a non-bool non-object additionalProperties must be rejected");
+    assert!(
+        bad_extra.contains("additionalProperties must be a bool or an object"),
+        "{bad_extra}"
+    );
+    assert!(validate(&json!({"additionalProperties": true}), &json!({})).is_ok());
+}
+
+/// Guard: a bogus keyword inside an `anyOf` branch must fail, so the guard
+/// cannot be escaped by moving an unsupported keyword into `anyOf`.
+#[test]
+#[should_panic(expected = "unsupported schema keyword `bogus`")]
+fn protocol_output_schema_guard_rejects_a_keyword_inside_an_any_of_branch() {
+    let schema = json!({
+        "type": "object",
+        "anyOf": [{"type": "object", "properties": {"ok": {"bogus": true}}}]
+    });
+    assert_keywords_supported("crafted", &schema);
 }
 
 /// Guard: every declared schema uses only keywords the validator understands.
@@ -264,7 +309,8 @@ fn protocol_output_schema_accepts_the_handled_value_for_every_tool() {
     let handler = McpHandler::new(Arc::clone(&state));
     let pack = schema_pack();
     let tools = pack["tools"].as_array().expect("tools array");
-    let mut validated = 0_usize;
+    let mut successes = 0_usize;
+    let mut failure_values = 0_usize;
     let mut failures: Vec<String> = Vec::new();
     for tool in tools {
         let name = tool["name"].as_str().expect("tool name");
@@ -286,8 +332,13 @@ fn protocol_output_schema_accepts_the_handled_value_for_every_tool() {
             !value.is_null(),
             "{name}: tools/call returned no structuredContent: {response}"
         );
+        let ok = value
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| panic!("{name}: structuredContent has no boolean `ok`: {value}"));
         match validate(schema, value) {
-            Ok(()) => validated += 1,
+            Ok(()) if ok => successes += 1,
+            Ok(()) => failure_values += 1,
             Err(mismatch) => failures.push(format!("{name}: {mismatch}\n  value: {value}")),
         }
     }
@@ -298,10 +349,100 @@ fn protocol_output_schema_accepts_the_handled_value_for_every_tool() {
         tools.len(),
         failures.join("\n")
     );
+    assert!(successes > 0, "no tool returned a success envelope");
     assert_eq!(
-        validated,
+        successes + failure_values,
         tools.len(),
-        "every published tool must be validated"
+        "every published tool must be validated: {successes} success values and \
+         {failure_values} failure values checked"
     );
-    assert!(validated > 0, "the pack must publish tools");
+}
+
+/// The confirmed belief-context correction returns `{ok: true, rule:
+/// "belief_context"}`. That confirmed shape, not only the preview shape, must
+/// validate against `correct`'s declared `outputSchema`.
+#[test]
+fn protocol_output_schema_accepts_confirmed_belief_context_correction() {
+    let state =
+        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
+    let bank = "bank-schema-belief-context";
+    let observed = crate::write_tools::dispatch(
+        &state,
+        "belief_observe",
+        &json!({
+            "proposition": "The reviewer prefers short changelogs",
+            "confidence": 0.4,
+            "evidence_ref": "turn_1",
+            "source_type": "agent_inferred",
+            "context": "morning standup",
+            "bank": bank,
+            "actor": "agent"
+        }),
+    );
+    assert_eq!(observed["outcome"], json!("created"), "{observed}");
+    let belief = observed["belief"]["id"]
+        .as_str()
+        .expect("belief id")
+        .to_owned();
+    let corrected = crate::write_tools::dispatch(
+        &state,
+        "correct",
+        &json!({
+            "item_id": belief,
+            "reason": "schema check",
+            "context": "evening review",
+            "confirm": true,
+            "bank": bank,
+            "actor": "agent"
+        }),
+    );
+    assert_eq!(corrected["ok"], json!(true), "{corrected}");
+    assert_eq!(corrected["rule"], json!("belief_context"), "{corrected}");
+    let pack = schema_pack();
+    let schema = pack["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .find(|tool| tool["name"] == json!("correct"))
+        .expect("correct tool")["outputSchema"]
+        .clone();
+    validate(&schema, &corrected)
+        .unwrap_or_else(|mismatch| panic!("{mismatch}\n  value: {corrected}"));
+}
+
+/// Guard: every schema that declares a branch structure must accept the shared
+/// failure envelope (`{ok:false, code, message}`) as a real handler value.
+#[test]
+fn protocol_output_schema_conditional_schemas_accept_the_failure_envelope() {
+    let pack = schema_pack();
+    let failure = json!({
+        "ok": false,
+        "code": "invalid_argument",
+        "message": "shared failure envelope"
+    });
+    let mut checked = 0_usize;
+    let mut failures: Vec<String> = Vec::new();
+    for tool in pack["tools"].as_array().expect("tools array") {
+        let name = tool["name"].as_str().expect("tool name");
+        let schema = tool
+            .get("outputSchema")
+            .unwrap_or_else(|| panic!("{name}: no declared outputSchema"));
+        if schema.get("oneOf").is_none() && schema.get("anyOf").is_none() {
+            continue;
+        }
+        match validate(schema, &failure) {
+            Ok(()) => checked += 1,
+            Err(mismatch) => failures.push(format!("{name}: {mismatch}")),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "conditional outputSchema rejects the shared failure envelope for {} tools:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert!(
+        checked > 0,
+        "the pack must declare at least one conditional schema"
+    );
 }

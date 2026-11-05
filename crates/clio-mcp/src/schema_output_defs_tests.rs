@@ -133,22 +133,64 @@ fn declared_tool_names() -> BTreeSet<&'static str> {
         .collect()
 }
 
+/// The pinned total of declared output schemas. A tool leaves the inventory
+/// only when a removal record keeps this total whole.
+const PINNED_SCHEMA_COUNT: usize = 86;
+
+/// Check that the inventory, declared schemas, pinned names, and removal
+/// records agree.
+fn check_inventory_agreement(
+    inventory: &BTreeSet<&str>,
+    declared: &BTreeSet<&str>,
+    pinned: &BTreeSet<&str>,
+    removals: &BTreeSet<&str>,
+    expected_total: usize,
+) -> Result<(), String> {
+    let expected: BTreeSet<&str> = declared.union(removals).copied().collect();
+    if *pinned != expected {
+        return Err(format!(
+            "pinned set must equal declared tools plus removal records; \
+             missing from pinned: {:?}; unexpected in pinned: {:?}",
+            expected.difference(pinned).collect::<Vec<_>>(),
+            pinned.difference(&expected).collect::<Vec<_>>()
+        ));
+    }
+    for removed in removals {
+        if declared.contains(removed) {
+            return Err(format!("removal record names a declared tool: {removed}"));
+        }
+        if inventory.contains(removed) {
+            return Err(format!(
+                "removal record names a tool still in the inventory: {removed}"
+            ));
+        }
+    }
+    let total = inventory.len() + removals.len();
+    if total != expected_total {
+        return Err(format!(
+            "inventory rows plus removal records = {total}, expected {expected_total}; \
+             a dropped inventory row needs a matching removal record"
+        ));
+    }
+    Ok(())
+}
+
 #[test]
 fn declared_tools_match_the_inventory() {
     let inventory = inventory_tool_names();
-    assert_eq!(
-        inventory.len(),
-        86,
-        "the inventory parse found {} tool rows; its row format changed",
-        inventory.len()
-    );
-    let inventoried: BTreeSet<&str> = inventory.into_iter().collect();
+    let inventoried: BTreeSet<&str> = inventory.iter().copied().collect();
     assert_eq!(
         inventoried.len(),
-        86,
+        inventory.len(),
         "the inventory rows hold duplicate tool names"
     );
     let declared = declared_tool_names();
+    let pinned: BTreeSet<&str> = registry().pinned.iter().map(String::as_str).collect();
+    let removals: BTreeSet<&str> = registry()
+        .removals
+        .iter()
+        .map(|removal| removal.name.as_str())
+        .collect();
 
     let missing: Vec<&&str> = inventoried.difference(&declared).collect();
     assert!(
@@ -160,7 +202,95 @@ fn declared_tools_match_the_inventory() {
         extra.is_empty(),
         "output schemas are declared for tools absent from the inventory: {extra:?}"
     );
+    check_inventory_agreement(
+        &inventoried,
+        &declared,
+        &pinned,
+        &removals,
+        PINNED_SCHEMA_COUNT,
+    )
+    .unwrap_or_else(|defect| {
+        panic!("the committed registry disagrees with its inventory: {defect}")
+    });
+
+    let names: Vec<String> = inventory.iter().map(|name| (*name).to_owned()).collect();
+    match plan_declarations(&names, "the committed inventory is not empty")
+        .expect("every inventory tool has a declared output schema")
+    {
+        Declarations::Declared(planned) => {
+            let planned: BTreeSet<&str> = planned.iter().map(String::as_str).collect();
+            assert_eq!(planned, declared);
+        }
+        Declarations::NoCode { .. } => panic!("the committed inventory is not empty"),
+    }
 }
+
+#[test]
+fn inventory_agreement_rejects_a_dropped_row_without_a_removal_record() {
+    let inventory: BTreeSet<&str> = ["store"].into_iter().collect();
+    let declared = inventory.clone();
+    let pinned = inventory.clone();
+    let removals: BTreeSet<&str> = BTreeSet::new();
+    let error = check_inventory_agreement(&inventory, &declared, &pinned, &removals, 2)
+        .expect_err("a dropped row with no removal record must fail");
+    assert!(
+        error.contains("needs a matching removal record"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn inventory_agreement_rejects_a_pinned_set_that_drops_a_declared_tool() {
+    let inventory: BTreeSet<&str> = ["store"].into_iter().collect();
+    let declared = inventory.clone();
+    let pinned: BTreeSet<&str> = BTreeSet::new();
+    let removals: BTreeSet<&str> = BTreeSet::new();
+    let error = check_inventory_agreement(&inventory, &declared, &pinned, &removals, 1)
+        .expect_err("a pinned set that drops a declared tool must fail");
+    assert!(
+        error.contains("missing from pinned"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn inventory_agreement_rejects_a_removal_record_for_a_declared_tool() {
+    let inventory: BTreeSet<&str> = ["store", "retired"].into_iter().collect();
+    let declared = inventory.clone();
+    let pinned = inventory.clone();
+    let removals: BTreeSet<&str> = ["retired"].into_iter().collect();
+    let error = check_inventory_agreement(&inventory, &declared, &pinned, &removals, 3)
+        .expect_err("a removal record for a declared tool must fail");
+    assert!(error.contains("declared tool"), "unexpected error: {error}");
+}
+
+#[test]
+fn inventory_agreement_rejects_a_removal_record_for_a_tool_still_in_the_inventory() {
+    let inventory: BTreeSet<&str> = ["store", "retired"].into_iter().collect();
+    let declared: BTreeSet<&str> = ["store"].into_iter().collect();
+    let pinned: BTreeSet<&str> = ["store", "retired"].into_iter().collect();
+    let removals: BTreeSet<&str> = ["retired"].into_iter().collect();
+    let error = check_inventory_agreement(&inventory, &declared, &pinned, &removals, 3)
+        .expect_err("a removal record for an inventoried tool must fail");
+    assert!(
+        error.contains("still in the inventory"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn inventory_agreement_accepts_a_removal_record_that_keeps_the_total() {
+    let inventory: BTreeSet<&str> = ["store"].into_iter().collect();
+    let declared = inventory.clone();
+    let pinned: BTreeSet<&str> = ["store", "retired"].into_iter().collect();
+    let removals: BTreeSet<&str> = ["retired"].into_iter().collect();
+    check_inventory_agreement(&inventory, &declared, &pinned, &removals, 2)
+        .expect("a recorded removal keeps the pinned total");
+}
+
+/// Tools that genuinely return only the shared envelope. Empty: every declared
+/// schema carries at least one handler-owned payload key.
+const ENVELOPE_ONLY_TOOLS: &[&str] = &[];
 
 #[test]
 fn every_declared_schema_describes_an_object() {
@@ -182,23 +312,34 @@ fn every_declared_schema_describes_an_object() {
             "{} must not close additionalProperties",
             entry.name
         );
+        let has_payload_key = schema["properties"]
+            .as_object()
+            .expect("properties object")
+            .keys()
+            .any(|key| !matches!(key.as_str(), "ok" | "code" | "message"));
+        assert!(
+            has_payload_key || ENVELOPE_ONLY_TOOLS.contains(&entry.name.as_str()),
+            "{} declares only envelope keys (ok, code, message); add a payload key \
+             or record it in ENVELOPE_ONLY_TOOLS",
+            entry.name
+        );
     }
 }
 
 #[test]
-fn pinned_tools_match_declared_tools() {
+fn pinned_tools_match_declared_tools_plus_removals() {
     let declared = declared_tool_names();
+    let removals: BTreeSet<&str> = registry()
+        .removals
+        .iter()
+        .map(|removal| removal.name.as_str())
+        .collect();
     let pinned: BTreeSet<&str> = registry().pinned.iter().map(String::as_str).collect();
+    let expected: BTreeSet<&str> = declared.union(&removals).copied().collect();
 
-    let unpinned: Vec<&&str> = declared.difference(&pinned).collect();
-    assert!(
-        unpinned.is_empty(),
-        "declared tools missing from pinned: {unpinned:?}"
-    );
-    let undeclared: Vec<&&str> = pinned.difference(&declared).collect();
-    assert!(
-        undeclared.is_empty(),
-        "pinned names with no declared schema: {undeclared:?}"
+    assert_eq!(
+        pinned, expected,
+        "pinned names must equal declared tools plus removal records"
     );
 }
 

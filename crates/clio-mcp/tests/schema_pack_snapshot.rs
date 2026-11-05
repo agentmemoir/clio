@@ -9,6 +9,7 @@
 //!
 //! ## Owns
 //! - `the_committed_schema_pack_matches_the_registry`
+//! - The committed fixture's one-tool-per-line layout
 //!
 //! ## Does not own
 //! - The pack document itself (`clio-mcp` `schema`)
@@ -40,6 +41,38 @@ const REGENERATE: &str = concat!(
     "crates/clio-mcp/tests/fixtures/schema_pack.json` and commit the result",
 );
 
+/// Guard: the committed fixture keeps one `tools` array element per line, the
+/// layout the export writer produces, so a compacted fixture fails the gate.
+fn assert_one_tool_per_line(raw: &str) {
+    let mut lines = raw.lines();
+    lines
+        .find(|line| line.trim_start() == "\"tools\": [")
+        .expect("the committed pack holds a `tools` array on its own line");
+    let mut item_lines = 0_usize;
+    let mut closed = false;
+    for line in lines {
+        if line == "  ]" {
+            closed = true;
+            break;
+        }
+        assert!(
+            line.starts_with("    "),
+            "each tools element must start on its own line with four spaces: {line}"
+        );
+        let item = line.strip_suffix(',').unwrap_or(line).trim_start();
+        let value: Value = serde_json::from_str(item).unwrap_or_else(|error| {
+            panic!("each tools line must hold one JSON tool: {error}: {line}")
+        });
+        assert!(
+            value.is_object(),
+            "each tools line must hold one tool object: {line}"
+        );
+        item_lines += 1;
+    }
+    assert!(closed, "the tools array must close on its own line");
+    assert!(item_lines > 0, "the tools array must hold elements");
+}
+
 #[test]
 fn the_committed_schema_pack_matches_the_registry() {
     assert!(
@@ -50,4 +83,5 @@ fn the_committed_schema_pack_matches_the_registry() {
         .expect("crates/clio-mcp/tests/fixtures/schema_pack.json holds JSON");
 
     assert_eq!(committed, schema_pack(), "{REGENERATE}");
+    assert_one_tool_per_line(COMMITTED_PACK);
 }

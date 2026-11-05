@@ -22,6 +22,13 @@
 //! should not require changes here.
 //!
 //! Keep this module focused on output-schema registry concerns.
+//!
+//! ## Test-only planning
+//!
+//! `Declarations::NoCode` and `plan_declarations` are compiled only in tests.
+//! The no-code branch records a build-time decision: an empty inventory means
+//! no schema is declared, and the recorded reason says why. It is not a runtime
+//! path, because the embedded registry already holds the declared set.
 
 use serde::Deserialize;
 use serde_json::Value;
