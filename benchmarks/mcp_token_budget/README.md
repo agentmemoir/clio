@@ -20,7 +20,7 @@ Two environment variables are honoured: `CLIO_BIN` names the binary to use expli
 
 For a pack you saved earlier, run the measuring step directly: `python3 benchmarks/mcp_token_budget/measure.py --pack path/to/schema_pack.json`.
 
-The gate runs beside it: `python3 benchmarks/mcp_token_budget/budget_check.py --pack path/to/schema_pack.json` measures the same pack and exits 0 when both arms stay inside the frozen baseline, 1 when either arm grew, and 2 when an input cannot be measured. Adding `--skill PATH` measures the always-loaded skill file in the same run.
+The gate runs beside it: `scripts/mcp_budget_check.sh` exports the pack from the built binary, measures it, and exits 0 when both arms stay inside the frozen baseline, 1 when either arm grew, and 2 when an input cannot be measured. This is the same command CI runs, so a local result and a CI result come from the same check. Setting `CLIO_SKILL_ENTRY_POINT` adds the always-loaded skill arm, locally and in CI.
 
 ## Prerequisites
 
