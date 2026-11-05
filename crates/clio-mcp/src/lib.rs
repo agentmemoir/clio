@@ -99,6 +99,9 @@ mod write_tools_handlers;
 
 #[cfg(test)]
 mod lib_tests;
+#[cfg(test)]
+#[path = "stateless.rs"]
+mod stateless;
 
 /// Pinned MCP specification revision (item 3).
 ///
