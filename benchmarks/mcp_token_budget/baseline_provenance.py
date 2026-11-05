@@ -131,7 +131,8 @@ def check(record, base_dir):
         turns = client.get("turns")
         if not isinstance(turns, list):
             continue
-        for turn in turns:
+        for item in turns:
+            turn = item.get("turn") if isinstance(item, dict) else None
             if not isinstance(turn, int) or isinstance(turn, bool) or turn < 1:
                 continue
             if turn not in by_turn:

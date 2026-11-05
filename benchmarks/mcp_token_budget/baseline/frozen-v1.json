@@ -46,7 +46,11 @@
         "sha256": "bf68dea714b90dbe52e3e361652da14af89f32a6b7dea5d17362aebff12418d8"
       },
       "turns": [
-        1
+        {
+          "turn": 1,
+          "delivers": "All 86 tool definitions with their input schemas.",
+          "cumulative": true
+        }
       ]
     },
     {
@@ -60,8 +64,16 @@
         "sha256": "47265a21b14740ae9043ab335ddf5e18ba4d4cff58f04af437eebcc02f152ecd"
       },
       "turns": [
-        1,
-        2
+        {
+          "turn": 1,
+          "delivers": "The name and description of all 86 tools, with no input schemas.",
+          "cumulative": true
+        },
+        {
+          "turn": 2,
+          "delivers": "The full definitions of admit_preview, admit_preview_batch, and associations, fetched after the catalogue and measured alone.",
+          "cumulative": false
+        }
       ]
     }
   ],
@@ -137,6 +149,7 @@
   ],
   "per_tool_ranking": {
     "sorted_by": "tool_tokens",
+    "tie_break": "tool ascending",
     "items": [
       {
         "rank": 1,
@@ -225,6 +238,7 @@
       "subject": "real desktop MCP client arrival behaviour",
       "delivery": "unobserved",
       "reason": "no interactive desktop environment on the capture runner",
+      "closes_by": "An observation from a real desktop MCP client, recording which tools arrive at each turn, would replace this entry.",
       "date": "2026-11-05",
       "label": "Unverified"
     }

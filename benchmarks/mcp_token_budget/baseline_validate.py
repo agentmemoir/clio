@@ -122,13 +122,13 @@ def _expected_client_ids(record):
     if not isinstance(clients, list):
         return set()
     return {
-        f"client/{client['client']}/turn/{turn}/{unit}"
+        f"client/{client['client']}/turn/{item['turn']}/{unit}"
         for client in clients
         if isinstance(client, dict)
         and isinstance(client.get("client"), str)
         and isinstance(client.get("turns"), list)
-        for turn in client["turns"]
-        if _is_int(turn) and turn > 0
+        for item in client["turns"]
+        if isinstance(item, dict) and _is_int(item.get("turn")) and item["turn"] > 0
         for unit in ("bytes", "tokens")
     }
 
@@ -232,7 +232,11 @@ def check_record(record, base_dir) -> list:
             errors.append(f"AC3: client {name!r} has no turns")
             continue
         seen = set()
-        for turn in turns:
+        for item in turns:
+            if not isinstance(item, dict):
+                errors.append(f"AC3: client {name!r} turn item is not an object")
+                continue
+            turn = item.get("turn")
             if not _is_int(turn) or turn < 1:
                 errors.append(f"AC3: client {name!r} turn is not a positive integer: {turn!r}")
                 continue
@@ -240,6 +244,11 @@ def check_record(record, base_dir) -> list:
                 errors.append(f"AC3: client {name!r} repeats turn {turn}")
                 continue
             seen.add(turn)
+            delivers = item.get("delivers")
+            if not isinstance(delivers, str) or not delivers.strip():
+                errors.append(f"AC3: client {name!r} turn {turn} has no delivers sentence")
+            if not isinstance(item.get("cumulative"), bool):
+                errors.append(f"AC3: client {name!r} turn {turn} cumulative is not a boolean")
             for unit in ("bytes", "tokens"):
                 rows = _client_rows(record, name, turn, unit)
                 if len(rows) != 1:
@@ -248,6 +257,18 @@ def check_record(record, base_dir) -> list:
                     )
                 elif not isinstance(rows[0].get("label"), str):
                     errors.append(f"AC3: row {rows[0].get('row')!r} has no label")
+        row_turns = set()
+        for row in _rows(record):
+            row_id = row.get("row")
+            if isinstance(row_id, str) and row_id.startswith(f"client/{name}/turn/"):
+                parts = row_id.split("/")
+                if len(parts) >= 5 and parts[3].isdigit():
+                    row_turns.add(int(parts[3]))
+        if seen != row_turns:
+            errors.append(
+                f"AC3: client {name!r} turn numbers do not match its rows: "
+                f"declared {sorted(seen)}, rows {sorted(row_turns)}"
+            )
 
     expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS)
     seen_ids = []
@@ -315,6 +336,9 @@ def check_record(record, base_dir) -> list:
     else:
         if ranking.get("sorted_by") != "tool_tokens":
             errors.append("AC4: per_tool_ranking.sorted_by must be tool_tokens")
+        tie_break = ranking.get("tie_break")
+        if not isinstance(tie_break, str) or not tie_break.strip():
+            errors.append("AC4: per_tool_ranking.tie_break must be non-empty")
         if not isinstance(items, list):
             errors.append("AC4: per_tool_ranking.items must be a list")
         else:
@@ -366,6 +390,9 @@ def check_record(record, base_dir) -> list:
             reason = entry.get("reason")
             if not isinstance(reason, str) or not reason.strip():
                 errors.append("AC5: unobserved entry needs a non-empty reason")
+            closes_by = entry.get("closes_by")
+            if not isinstance(closes_by, str) or not closes_by.strip():
+                errors.append("AC5: unobserved entry needs a non-empty closes_by")
             if "value" in entry:
                 errors.append("AC5: unobserved entry must not carry a value")
 

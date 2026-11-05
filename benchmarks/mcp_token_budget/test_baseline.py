@@ -32,7 +32,7 @@ RECORD = HERE / "baseline" / "frozen-v1.json"
 FIXTURES = HERE / "baseline" / "clients"
 
 #: Digest of the committed record file. An edit or an append changes this value.
-FROZEN_V1_SHA256 = "4c371bacf7c6a5f7110509dc4f6d115836a585ba5ca5838b6617760e5c59de9f"
+FROZEN_V1_SHA256 = "aedc2972793781c3e4a4384a162f8bcba5661140ae519b66d0dfe819ae304314"
 
 LABELS = frozenset(
     {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}
@@ -121,7 +121,7 @@ class BaselineTests(unittest.TestCase):
                 client["fixture"]["sha256"],
             )
             fixtures[client["delivery"]] = fixture
-            for turn in client["turns"]:
+            for turn in (entry["turn"] for entry in client["turns"]):
                 for unit in ("bytes", "tokens"):
                     row = row_by_id(
                         record, f"client/{client['client']}/turn/{turn}/{unit}"
@@ -147,7 +147,7 @@ class BaselineTests(unittest.TestCase):
     def test_ac3_each_turn_has_separate_bytes_and_tokens_rows(self):
         record = load_record()
         for client in record["clients"]:
-            for turn in client["turns"]:
+            for turn in (entry["turn"] for entry in client["turns"]):
                 for unit in ("bytes", "tokens"):
                     rows = [
                         row
