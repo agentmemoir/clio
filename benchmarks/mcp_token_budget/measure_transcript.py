@@ -6,11 +6,15 @@ Each input is an `am_mcp_client_session` fixture with one `initialize` and one
 response lines, and a payload copy counts each appearance of the payload in the
 call result. Token counts need the pinned tokenizer package; when it is
 missing, the token rows carry a null value and the label `Not measured`.
+Two delta rows report the after-minus-before change, and a delta row's
+`input_sha256` is the digest of the two measured input digests joined in
+measurement order.
 """
 
 import argparse
 import hashlib
 import json
+import platform
 import sys
 from pathlib import Path
 
@@ -77,8 +81,12 @@ def _render(before, after, tokenizer, tokens, reason):
     if tokenizer is None:
         tokenizer_block = {"status": "not measured", "reason": reason}
     else:
-        tokenizer_block = {"encoding": tokenizer.encoding, "implementation": "tiktoken",
-                           "version": tokenizer.provenance()["version"]}
+        tokenizer_block = {"package": "tiktoken", "encoding": tokenizer.encoding,
+                           "version": tokenizer.provenance()["version"],
+                           "interpreter": f"{platform.python_implementation()} "
+                                          f"{platform.python_version()}"}
+    pair_digest = hashlib.sha256(
+        (before["sha256"] + after["sha256"]).encode("ascii")).hexdigest()
     rows = []
     for side, info in (("before", before), ("after", after)):
         rows += [
@@ -89,6 +97,12 @@ def _render(before, after, tokenizer, tokens, reason):
             _row(f"session.{side}.tokens", tokens[side], "tokens", info["sha256"],
                  label="Not measured" if tokens[side] is None else "Measured", reason=reason),
         ]
+    delta_tokens = None if tokenizer is None else tokens["after"] - tokens["before"]
+    rows += [
+        _row("session.delta.bytes", after["bytes"] - before["bytes"], "bytes", pair_digest),
+        _row("session.delta.tokens", delta_tokens, "tokens", pair_digest,
+             label="Not measured" if delta_tokens is None else "Measured", reason=reason),
+    ]
     document = {"format": "clio_mcp_transcript_cost", "format_version": 1,
                 "tokenizer": tokenizer_block, "rows": rows}
     return json.dumps(document, ensure_ascii=False, indent=2) + "\n"

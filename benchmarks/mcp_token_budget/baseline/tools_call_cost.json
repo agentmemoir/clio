@@ -2,8 +2,10 @@
   "format": "clio_mcp_transcript_cost",
   "format_version": 1,
   "tokenizer": {
-    "status": "not measured",
-    "reason": "missing required tokenizer package: tiktoken"
+    "package": "tiktoken",
+    "encoding": "cl100k_base",
+    "version": "0.14.0",
+    "interpreter": "CPython 3.12.14"
   },
   "rows": [
     {
@@ -29,11 +31,10 @@
     },
     {
       "row": "session.before.tokens",
-      "value": null,
+      "value": 629,
       "unit": "tokens",
-      "label": "Not measured",
-      "input_sha256": "6d63f39a42719f50e64a9145180f0d04a011961ada3d0dc2f886f1d76215961d",
-      "reason": "missing required tokenizer package: tiktoken"
+      "label": "Measured",
+      "input_sha256": "6d63f39a42719f50e64a9145180f0d04a011961ada3d0dc2f886f1d76215961d"
     },
     {
       "row": "session.after.bytes",
@@ -58,11 +59,24 @@
     },
     {
       "row": "session.after.tokens",
-      "value": null,
+      "value": 354,
       "unit": "tokens",
-      "label": "Not measured",
-      "input_sha256": "55dc2c6db9cc1a381e7103ad65b838c0b6f26647cf95537a514af28de76799a9",
-      "reason": "missing required tokenizer package: tiktoken"
+      "label": "Measured",
+      "input_sha256": "55dc2c6db9cc1a381e7103ad65b838c0b6f26647cf95537a514af28de76799a9"
+    },
+    {
+      "row": "session.delta.bytes",
+      "value": -854,
+      "unit": "bytes",
+      "label": "Measured",
+      "input_sha256": "cd72709fe7d2e32dc5549e8e8c4f489782020e0835d71fbe3b16670eb861e292"
+    },
+    {
+      "row": "session.delta.tokens",
+      "value": -275,
+      "unit": "tokens",
+      "label": "Measured",
+      "input_sha256": "cd72709fe7d2e32dc5549e8e8c4f489782020e0835d71fbe3b16670eb861e292"
     }
   ]
 }
