@@ -30,6 +30,7 @@ use std::sync::Arc;
 /// Keywords the validator understands. The guard test rejects any other key.
 const ALLOWED_KEYWORDS: &[&str] = &[
     "additionalProperties",
+    "anyOf",
     "const",
     "enum",
     "items",
@@ -90,10 +91,7 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
     {
         return Err(format!("{path}: {value} is not one of {allowed:?}"));
     }
-    if let (Some(props), Some(object)) = (
-        fields.get("properties").and_then(Value::as_object),
-        value.as_object(),
-    ) {
+    if let Some(object) = value.as_object() {
         for name in fields
             .get("required")
             .and_then(Value::as_array)
@@ -105,22 +103,22 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
                 return Err(format!("{path}: missing required property `{name}`"));
             }
         }
-        for (name, child_schema) in props {
+        let props = fields.get("properties").and_then(Value::as_object);
+        for (name, child_schema) in props.into_iter().flatten() {
             if let Some(child) = object.get(name) {
                 validate_at(child_schema, child, &format!("{path}.{name}"))?;
             }
         }
+        let is_extra = |key: &String| props.is_none_or(|props| !props.contains_key(key));
         match fields.get("additionalProperties") {
             Some(Value::Bool(false)) => {
-                for key in object.keys() {
-                    if !props.contains_key(key) {
-                        return Err(format!("{path}: unexpected property `{key}`"));
-                    }
+                if let Some(key) = object.keys().find(|key| is_extra(key)) {
+                    return Err(format!("{path}: unexpected property `{key}`"));
                 }
             }
             Some(extra_schema @ Value::Object(_)) => {
                 for (key, child) in object {
-                    if !props.contains_key(key) {
+                    if is_extra(key) {
                         validate_at(extra_schema, child, &format!("{path}.{key}"))?;
                     }
                 }
@@ -141,6 +139,16 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
         if matched != 1 {
             return Err(format!("{path}: oneOf matched {matched} branches, expected 1"));
         }
+    }
+    if let Some(branches) = fields.get("anyOf").and_then(Value::as_array)
+        && !branches
+            .iter()
+            .any(|branch| validate_at(branch, value, path).is_ok())
+    {
+        return Err(format!(
+            "{path}: anyOf matched no branch out of {}",
+            branches.len()
+        ));
     }
     Ok(())
 }
@@ -185,6 +193,10 @@ fn protocol_output_schema_validator_reports_the_failing_path() {
             "tags": {"type": "array", "items": {"type": "string"}},
             "mode": {"enum": ["a", "b"]},
             "either": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+            "overlap": {"anyOf": [
+                {"type": "object", "required": ["confirm"]},
+                {"type": "object", "required": ["would_correct"]}
+            ]},
             "closed": {"type": "object", "properties": {}, "additionalProperties": false}
         },
         "required": ["ok"]
@@ -204,6 +216,18 @@ fn protocol_output_schema_validator_reports_the_failing_path() {
     let one_of_miss = validate(&schema, &json!({"ok": true, "either": 5}))
         .expect_err("oneOf mismatch must be rejected");
     assert!(one_of_miss.starts_with("$.either: oneOf matched 0"), "{one_of_miss}");
+    // anyOf accepts a value that matches more than one branch, which is the
+    // case `oneOf` would reject.
+    assert!(
+        validate(
+            &schema,
+            &json!({"ok": true, "overlap": {"confirm": false, "would_correct": {}}})
+        )
+        .is_ok()
+    );
+    let any_of_miss = validate(&schema, &json!({"ok": true, "overlap": {"other": 1}}))
+        .expect_err("anyOf mismatch must be rejected");
+    assert_eq!(any_of_miss, "$.overlap: anyOf matched no branch out of 2");
 }
 
 /// Guard: every declared schema uses only keywords the validator understands.
