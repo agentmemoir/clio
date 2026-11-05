@@ -319,3 +319,7 @@ mod tests;
 #[cfg(test)]
 #[path = "mcp_tool_groups_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "mcp_tool_groups_preset_tests.rs"]
+mod preset_tests;
