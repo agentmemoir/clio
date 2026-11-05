@@ -13,6 +13,7 @@
 //! - A tool outside the selected profile being absent from the listing and still bound
 //! - A configuration with no profile key, and two states with different profiles in one process
 //! - An unknown profile name failing closed instead of listing a guessed preset
+//! - An installed tool selection winning over the configured profile
 //!
 //! ## Does not own
 //! - The protocol envelope and error mapping (`protocol_tests`)
@@ -162,4 +163,31 @@ fn an_unknown_profile_fails_closed() {
     assert_eq!(error.code, ERR_INTERNAL);
     assert!(error.message.contains("mnimal"), "{}", error.message);
     assert!(error.message.contains("minimal"), "{}", error.message);
+}
+
+/// A selection installed on the configuration layer — what a transport's
+/// `--tools` does before it opens the state — wins over `mcp.tool_profile`, and
+/// the listing is the selection's own tool set.
+#[test]
+fn an_installed_tool_selection_beats_the_configured_profile() {
+    let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
+    runtime
+        .load_file_json(r#"{"mcp": {"tool_profile": "all"}}"#)
+        .expect("a valid config layer");
+    let groups = clio_types::custom(&["ops"]).expect("a known group");
+    runtime.set_mcp_tool_groups(groups.clone());
+    let state = McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state");
+
+    let mut expected: Vec<String> = clio_types::tools_of(&groups)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    expected.sort_unstable();
+    let names = listed(&state);
+    assert_eq!(names, expected);
+    assert_ne!(names, full_catalog(), "the configured `all` profile won");
+    assert!(
+        !names.contains(&"store".to_owned()),
+        "a write tool outside the selection is advertised: {names:?}"
+    );
 }

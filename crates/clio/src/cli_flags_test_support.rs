@@ -50,6 +50,7 @@ pub(crate) const RESERVED_FLAGS: &[&str] = &[
     "shared-bank",
     "target",
     "token-file",
+    "tools",
 ];
 
 /// The flag map `parse_flags` builds for `argv` against [`RESERVED_FLAGS`].
