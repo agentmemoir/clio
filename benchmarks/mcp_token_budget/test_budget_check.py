@@ -80,6 +80,13 @@ def arm_by_measure(report, measure):
     return next(arm for arm in report["arms"] if arm["measure"] == measure)
 
 
+def ceiling_problem(measure, value, ceiling, decision_id="allow-test-1"):
+    return (
+        f"{measure}: candidate {value} exceeds allowance ceiling {ceiling} "
+        f"for decision {decision_id!r}"
+    )
+
+
 class ArmTests(unittest.TestCase):
     """The two independent arms, driven through `check_pack` without the tokenizer."""
 
@@ -143,16 +150,72 @@ class ArmTests(unittest.TestCase):
         self.assertEqual(sorted(report["allowance"]), sorted(budget_check.ALLOWANCE_SUMMARY_KEYS))
         self.assertEqual(budget_check.check_pack(baseline, candidate, records)["verdict"], "pass")
 
-    def test_one_exceeded_ceiling_fails_and_names_it(self):
+    def test_a_bytes_only_breach_fails_the_bytes_arm_only(self):
         baseline = frozen_baseline()
-        candidate = candidate_from(baseline, byte_growth=8, token_growth=6)
-        records = [record(max_bytes=candidate["bytes"] - 1, max_tokens=candidate["tokens"])]
+        candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
+        ceiling = candidate["bytes"] - 1
+        records = [record(max_bytes=ceiling, max_tokens=candidate["tokens"])]
         report = budget_check.check_pack(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "fail", report)
-        self.assertTrue(
-            any(failure.startswith("bytes:") for failure in report["failures"]), report
+        self.assertEqual(len(report["failures"]), 1, report)
+        self.assertEqual(
+            report["failures"], [ceiling_problem("bytes", candidate["bytes"], ceiling)]
         )
-        self.assertIn(str(candidate["bytes"] - 1), report["failures"][0])
+        bytes_arm, tokens_arm = (arm_by_measure(report, m) for m in ("bytes", "tokens"))
+        self.assertEqual(bytes_arm["verdict"], "fail")
+        self.assertEqual(bytes_arm["failure"], report["failures"][0])
+        self.assertEqual(tokens_arm["verdict"], "pass")
+        self.assertNotIn("failure", tokens_arm)
+        self.assertEqual(tokens_arm["allowance"]["decision_id"], "allow-test-1")
+
+    def test_a_tokens_only_breach_fails_the_tokens_arm_only(self):
+        baseline = frozen_baseline()
+        candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
+        ceiling = candidate["tokens"] - 1
+        records = [record(max_bytes=candidate["bytes"], max_tokens=ceiling)]
+        report = budget_check.check_pack(baseline, candidate, document(records))
+        self.assertEqual(report["verdict"], "fail", report)
+        self.assertEqual(len(report["failures"]), 1, report)
+        self.assertEqual(
+            report["failures"], [ceiling_problem("tokens", candidate["tokens"], ceiling)]
+        )
+        bytes_arm, tokens_arm = (arm_by_measure(report, m) for m in ("bytes", "tokens"))
+        self.assertEqual(tokens_arm["verdict"], "fail")
+        self.assertEqual(tokens_arm["failure"], report["failures"][0])
+        self.assertEqual(bytes_arm["verdict"], "pass")
+        self.assertNotIn("failure", bytes_arm)
+        self.assertEqual(bytes_arm["allowance"]["decision_id"], "allow-test-1")
+
+    def test_both_breaches_fail_both_arms_with_two_distinct_messages(self):
+        baseline = frozen_baseline()
+        candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
+        records = [record(max_bytes=candidate["bytes"] - 1,
+                          max_tokens=candidate["tokens"] - 1)]
+        report = budget_check.check_pack(baseline, candidate, document(records))
+        self.assertEqual(report["verdict"], "fail", report)
+        self.assertEqual(
+            report["failures"],
+            [
+                ceiling_problem("bytes", candidate["bytes"], candidate["bytes"] - 1),
+                ceiling_problem("tokens", candidate["tokens"], candidate["tokens"] - 1),
+            ],
+        )
+        self.assertEqual(len(set(report["failures"])), 2, report)
+        self.assertEqual([arm["verdict"] for arm in report["arms"]], ["fail", "fail"])
+        self.assertEqual([arm["failure"] for arm in report["arms"]], report["failures"])
+        self.assertIsNone(report["allowance"], report)
+
+    def test_exactly_at_both_ceilings_passes_both_arms(self):
+        baseline = frozen_baseline()
+        candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
+        records = [record(max_bytes=candidate["bytes"], max_tokens=candidate["tokens"])]
+        report = budget_check.check_pack(baseline, candidate, document(records))
+        self.assertEqual(report["verdict"], "pass", report)
+        self.assertEqual(report["failures"], [])
+        for arm in report["arms"]:
+            self.assertEqual(arm["verdict"], "pass")
+            self.assertEqual(arm["allowance"]["decision_id"], "allow-test-1")
+        self.assertEqual(report["allowance"]["decision_id"], "allow-test-1")
 
     def test_a_different_digest_with_generous_ceilings_fails(self):
         baseline = frozen_baseline()
@@ -323,19 +386,18 @@ class AllowanceRecordTests(unittest.TestCase):
         self.assertIn("allow-test-1", message)
         self.assertIn("allow-test-2", message)
 
-    def test_within_names_each_measure_separately(self):
+    def test_within_returns_problems_keyed_by_measure(self):
         fitted, problems = budget_allowances.within(record(), 108, 26)
         self.assertTrue(fitted)
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, {"bytes": [], "tokens": []})
         fitted, problems = budget_allowances.within(record(max_bytes=105), 108, 26)
         self.assertFalse(fitted)
-        self.assertEqual(len(problems), 1)
-        self.assertTrue(problems[0].startswith("bytes: "))
-        self.assertIn("105", problems[0])
-        fitted, problems = budget_allowances.within(record(max_tokens=20), 108, 26)
+        self.assertEqual(problems["tokens"], [])
+        self.assertEqual(problems["bytes"], [ceiling_problem("bytes", 108, 105)])
+        fitted, both = budget_allowances.within(record(max_bytes=105, max_tokens=20), 108, 26)
         self.assertFalse(fitted)
-        self.assertTrue(problems[0].startswith("tokens: "))
-        self.assertIn("20", problems[0])
+        self.assertEqual(both["bytes"], [ceiling_problem("bytes", 108, 105)])
+        self.assertEqual(both["tokens"], [ceiling_problem("tokens", 26, 20)])
 
 
 class BaselineTests(unittest.TestCase):

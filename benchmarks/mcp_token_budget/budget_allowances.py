@@ -41,6 +41,9 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 PRIVATE_SEGMENT_RE = re.compile(r"(^|[\\/])private[\\/]")
 
+#: The two independent measures a record carries a ceiling for, in report order.
+MEASURES = ("bytes", "tokens")
+
 #: The record list that means no growth is allowed. Never mutate it.
 NONE = []
 
@@ -235,15 +238,21 @@ def applicable(records, candidate_sha256):
 
 
 def within(record, candidate_bytes, candidate_tokens):
-    """Return whether both measured values fit their ceilings, plus per-measure problems."""
-    problems = []
+    """Return whether both measured values fit their ceilings, plus per-measure problems.
+
+    The ceiling of one measure says nothing about the other, so the problems are
+    keyed by measure: a caller gives each arm only its own list and never leaks a
+    breach of one measure into the other. Every message names its own measure and
+    only that measure. A measure inside its ceiling contributes an empty list.
+    """
+    problems = {measure: [] for measure in MEASURES}
     for measure, value, ceiling in (
         ("bytes", candidate_bytes, record["max_bytes"]),
         ("tokens", candidate_tokens, record["max_tokens"]),
     ):
         if value > ceiling:
-            problems.append(
+            problems[measure].append(
                 f"{measure}: candidate {value} exceeds allowance ceiling {ceiling} "
                 f"for decision {record['decision_id']!r}"
             )
-    return (not problems, problems)
+    return (not any(problems.values()), problems)

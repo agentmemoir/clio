@@ -11,6 +11,11 @@ being compared against a number nobody reviewed.
 A candidate that stays inside the baseline passes with no allowance. A candidate
 that grows must be matched by exactly one growth-allowance record naming its own
 digest, and both measured values must fit that record's independent ceilings.
+
+The two arms stay independent when a record applies: each arm reads only its own
+measure's problems, so a breach of the byte ceiling fails the bytes arm and names
+``bytes`` while the tokens arm still passes inside its own ceiling, and the mirror
+case holds too. A message never reaches both arms and never appears twice.
 Anything else fails and names the measure, the numbers, and the digest.
 
 The always-loaded skill entry point is compared the same way when ``--skill``
@@ -229,11 +234,6 @@ def _summary(record) -> dict:
     return {key: record[key] for key in ALLOWANCE_SUMMARY_KEYS}
 
 
-def _own_problems(measure, problems) -> str:
-    own = [problem for problem in problems if problem.startswith(f"{measure}:")]
-    return "; ".join(own or problems)
-
-
 def _arm(measure, baseline, candidate, records) -> dict:
     """Return one arm's comparison: pass inside the ceiling or inside its allowance."""
     base_value = baseline[measure]
@@ -257,12 +257,14 @@ def _arm(measure, baseline, candidate, records) -> dict:
             f"{delta} with no allowance record for digest {candidate['sha256']}"
         )
         return arm
-    fitted, problems = budget_allowances.within(
+    _, problems = budget_allowances.within(
         record, candidate["bytes"], candidate["tokens"]
     )
-    if not fitted:
+    # Only this arm's own measure decides this arm; the other measure is its own arm's.
+    own = problems[measure]
+    if own:
         arm["verdict"] = "fail"
-        arm["failure"] = _own_problems(measure, problems)
+        arm["failure"] = "; ".join(own)
         return arm
     arm["allowance"] = _summary(record)
     return arm
