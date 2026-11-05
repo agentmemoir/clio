@@ -205,15 +205,8 @@ impl McpHandler {
             // retryable, server-defined JSON-RPC error.
             return Err(err);
         }
-        let is_error = result.get("ok").and_then(serde_json::Value::as_bool) != Some(true);
-        let text = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
-        // Structured rejections keep their machine-readable code inside the
-        // content payload and surface as `isError` tool results.
-        Ok(json!({
-            "content": [{ "type": "text", "text": text }],
-            "isError": is_error,
-            "structuredContent": result
-        }))
+        let has_schema = crate::schema_output_defs::output_schema(name).is_some();
+        Ok(tool_call_envelope(result, has_schema))
     }
 
     fn ok_response(id: Option<&Value>, result: &Value) -> Value {
@@ -266,6 +259,47 @@ fn invalid_request(message: &str) -> RpcError {
 
 fn invalid_params(message: impl Into<String>) -> RpcError {
     RpcError::new(ERR_INVALID_PARAMS, message)
+}
+
+/// Build a `tools/call` result envelope.
+///
+/// A tool with a declared output schema carries the payload once, in
+/// `structuredContent`; its `content` is a short status line. A tool with no
+/// declared output schema carries the serialized payload in `content` and no
+/// `structuredContent` key, because that key only means something when a
+/// schema describes its shape.
+pub(crate) fn tool_call_envelope(result: Value, has_schema: bool) -> Value {
+    let is_error = result.get("ok").and_then(Value::as_bool) != Some(true);
+    if has_schema {
+        let text = if is_error {
+            error_summary(&result)
+        } else {
+            "ok".to_owned()
+        };
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "isError": is_error,
+            "structuredContent": result
+        })
+    } else {
+        let text = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "isError": is_error
+        })
+    }
+}
+
+/// A short error line built from the error fields the payload actually holds.
+fn error_summary(result: &Value) -> String {
+    let code = result.get("code").and_then(Value::as_str);
+    let message = result.get("message").and_then(Value::as_str);
+    match (code, message) {
+        (Some(code), Some(message)) => format!("error: {code}: {message}"),
+        (Some(code), None) => format!("error: {code}"),
+        (None, Some(message)) => format!("error: {message}"),
+        (None, None) => "error".to_owned(),
+    }
 }
 
 /// Map an co-activation handoff failure to the `-32001` RPC error.
