@@ -32,16 +32,33 @@ use crate::mcp_tools_flag::HELP_BLOCK as TOOLS_HELP;
 /// `clio mcp stdio` usage text: the record's usage line, the database block, and
 /// the tool selection.
 pub(crate) fn mcp_stdio_help() -> String {
+    stdio_help(&|key| std::env::var(key).ok())
+}
+
+/// The `clio mcp stdio` screen with the environment read through `get`, so the
+/// database block can be built against a chosen environment.
+fn stdio_help<F>(get: &F) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
     format!(
         "{}\n\n{}\n\n{}",
-        usage_line("mcp stdio").unwrap_or_else(|| "clio mcp stdio".to_owned()),
-        database_help_block(&|key| std::env::var(key).ok()),
+        usage_text("mcp stdio"),
+        database_help_block(get),
         TOOLS_HELP
     )
 }
 
 /// `clio mcp http` usage text, including the auto-bind rule.
 pub(crate) fn mcp_http_help() -> String {
+    http_help(&|key| std::env::var(key).ok())
+}
+
+/// The `clio mcp http` screen with the environment read through `get`.
+fn http_help<F>(get: &F) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
     let range = format!(
         "{}-{}",
         crate::port_scan::FIRST_PORT,
@@ -76,7 +93,17 @@ pub(crate) fn mcp_http_help() -> String {
 {TOOLS_HELP}
 
 {}",
-        usage_line("mcp http").unwrap_or_else(|| "clio mcp http".to_owned()),
-        database_help_block(&|key| std::env::var(key).ok())
+        usage_text("mcp http"),
+        database_help_block(get)
     )
 }
+
+/// The command's registry usage line, or a plain `clio <command>` when the
+/// registry holds no record for it.
+fn usage_text(command: &str) -> String {
+    usage_line(command).unwrap_or_else(|| format!("clio {command}"))
+}
+
+#[cfg(test)]
+#[path = "mcp_cli_help_tests.rs"]
+mod tests;
