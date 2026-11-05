@@ -82,6 +82,7 @@ mod schema_config_defs;
 mod schema_defs;
 mod schema_hygiene_defs;
 mod schema_ops_defs;
+mod schema_output_defs;
 mod schema_portability_defs;
 mod schema_read_defs;
 mod schema_read_props;
