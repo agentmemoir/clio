@@ -29,6 +29,43 @@ BASELINE_FORMAT_VERSION = 1
 PINNED_BASELINE_SHA256 = "d94fbfa8db884d75baf26da5a921bb2b124eb18f3846c670a76b50b9b8e47e82"
 BASELINE_PATH = "benchmarks/mcp_token_budget/baseline/frozen-v1.json"
 
+#: The tokenizer every token target is counted with, namable without importing it.
+TOKENIZER_KEYS = frozenset(
+    {"encoding", "implementation", "version", "asset_sha256", "applies_to"}
+)
+TOKENIZER_ENCODING = "cl100k_base"
+TOKENIZER_IMPLEMENTATION = "tiktoken"
+TOKENIZER_VERSION = "0.14.0"
+TOKENIZER_ASSET_SHA256 = (
+    "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+)
+
+POLICY_KEYS = frozenset({"enforced_by", "missing_baseline_row", "foreign_tokenizer"})
+POLICY_DECISION = "reject"
+
+BASIS_KEYS = frozenset({"shared_row", "per_preset_measurement", "reason"})
+
+FACTOR_DECISION_KEYS = frozenset(
+    {
+        "label",
+        "date",
+        "token_factor",
+        "byte_factor",
+        "arithmetic",
+        "headroom_formula",
+    }
+)
+FACTOR_KEYS = frozenset({"numerator", "denominator"})
+#: The decision divides by a hundred, so a target states the numerator as its factor.
+FACTOR_DENOMINATOR = 100
+DECISION_LABEL = "Decision"
+DECISION_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+ARITHMETIC = "floor(baseline_value * numerator / denominator)"
+HEADROOM_FORMULA = "baseline_value - target"
+#: The decision block that supplies each unit's factor.
+UNIT_FACTORS = {"tokens": "token_factor", "bytes": "byte_factor"}
+TARGET_LABEL = "Inferred"
+
 #: The one switch. True makes a miss a failure; False only reports it.
 PRESET_TARGETS_ENFORCED = False
 
@@ -91,19 +128,50 @@ def _key_message(where, keys, allowed) -> str:
     return f"{where} keys must be exactly {sorted(allowed)}: " + ", ".join(parts)
 
 
-def _baseline(value) -> dict:
+def _object(value, where, allowed) -> dict:
+    """Return ``value`` as an object with exactly the ``allowed`` keys."""
     if not isinstance(value, dict):
-        _fail(f"baseline must be an object, got {type(value).__name__}")
+        _fail(f"{where} must be an object, got {type(value).__name__}")
     keys = set(value)
-    if keys != BASELINE_KEYS:
-        _fail(_key_message("baseline", keys, BASELINE_KEYS))
-    if value["format"] != BASELINE_FORMAT:
-        _fail(f"baseline format is {value['format']!r}, expected {BASELINE_FORMAT!r}")
-    if value["format_version"] != BASELINE_FORMAT_VERSION:
-        _fail(
-            f"baseline format_version is {value['format_version']!r}, "
-            f"expected {BASELINE_FORMAT_VERSION!r}"
-        )
+    if keys != allowed:
+        _fail(_key_message(where, keys, allowed))
+    return value
+
+
+def _nonempty(value, where) -> str:
+    """Return ``value`` as a non-empty string, or refuse it."""
+    if not isinstance(value, str) or not value.strip():
+        _fail(f"{where} must be a nonempty string, got {value!r}")
+    return value
+
+
+def _expect(value, where, expected) -> None:
+    """Refuse ``value`` unless it is exactly ``expected``."""
+    if value != expected or type(value) is not type(expected):
+        _fail(f"{where} is {value!r}, expected {expected!r}")
+
+
+def _repo_relative(path, where) -> str:
+    """Refuse a path that is absolute, climbs out, or names a private segment."""
+    _nonempty(path, where)
+    segments = re.split(r"[/\\]", path)
+    refusals = (
+        (path.startswith(("/", "\\")), "a leading slash or backslash"),
+        (bool(re.match(r"^[A-Za-z]:", path)), "a drive letter"),
+        (".." in segments, "a '..' segment"),
+        ("private" in segments, "a private segment"),
+    )
+    for refused, what in refusals:
+        if refused:
+            _fail(f"{where} is {path!r}, expected a repo-relative path with no {what}")
+    return path
+
+
+def _baseline(value) -> dict:
+    value = _object(value, "baseline", BASELINE_KEYS)
+    _expect(value["format"], "baseline format", BASELINE_FORMAT)
+    _expect(value["format_version"], "baseline format_version", BASELINE_FORMAT_VERSION)
+    _repo_relative(value["path"], "baseline.path")
     digest = value["sha256"]
     if not isinstance(digest, str) or not SHA256_RE.match(digest):
         _fail(f"baseline sha256 is not 64 lowercase hex: {digest!r}")
@@ -114,7 +182,77 @@ def _baseline(value) -> dict:
     return dict(value)
 
 
-def _target(item, index) -> dict:
+def _tokenizer(value) -> dict:
+    """Return the tokenizer block, or refuse a foreign or incomplete one."""
+    value = _object(value, "tokenizer", TOKENIZER_KEYS)
+    _expect(value["encoding"], "tokenizer.encoding", TOKENIZER_ENCODING)
+    _expect(
+        value["implementation"], "tokenizer.implementation", TOKENIZER_IMPLEMENTATION
+    )
+    _expect(value["version"], "tokenizer.version", TOKENIZER_VERSION)
+    _expect(value["asset_sha256"], "tokenizer.asset_sha256", TOKENIZER_ASSET_SHA256)
+    _nonempty(value["applies_to"], "tokenizer.applies_to")
+    return dict(value)
+
+
+def _policy(value) -> dict:
+    """Return the policy block, or refuse one that would accept a gap."""
+    value = _object(value, "policy", POLICY_KEYS)
+    _nonempty(value["enforced_by"], "policy.enforced_by")
+    _expect(
+        value["missing_baseline_row"],
+        "policy.missing_baseline_row",
+        POLICY_DECISION,
+    )
+    _expect(value["foreign_tokenizer"], "policy.foreign_tokenizer", POLICY_DECISION)
+    return dict(value)
+
+
+def _basis(value) -> dict:
+    """Return the basis block, or refuse one that claims per-preset measurements."""
+    value = _object(value, "basis", BASIS_KEYS)
+    for key in ("shared_row", "per_preset_measurement"):
+        if not isinstance(value[key], bool):
+            _fail(f"basis.{key} is {value[key]!r}, expected a boolean")
+    _expect(value["shared_row"], "basis.shared_row", True)
+    _expect(value["per_preset_measurement"], "basis.per_preset_measurement", False)
+    _nonempty(value["reason"], "basis.reason")
+    return dict(value)
+
+
+def _factor(value, name) -> int:
+    """Return the numerator of ``name``'s factor, or refuse the factor."""
+    where = f"factor_decision.{name}"
+    value = _object(value, where, FACTOR_KEYS)
+    for key in ("numerator", "denominator"):
+        if not _is_int(value[key]) or value[key] <= 0:
+            _fail(f"{where}.{key} is not a positive integer: {value[key]!r}")
+    if value["denominator"] != FACTOR_DENOMINATOR:
+        _fail(
+            f"{where}.denominator is {value['denominator']}, expected "
+            f"{FACTOR_DENOMINATOR}: a target states the numerator as its factor"
+        )
+    return value["numerator"]
+
+
+def _factor_decision(value) -> dict:
+    """Return each unit's frozen factor, or refuse the decision block."""
+    value = _object(value, "factor_decision", FACTOR_DECISION_KEYS)
+    _expect(value["label"], "factor_decision.label", DECISION_LABEL)
+    date = value["date"]
+    if not isinstance(date, str) or not DECISION_DATE_RE.match(date):
+        _fail(f"factor_decision.date is not YYYY-MM-DD: {date!r}")
+    factors = {}
+    for unit, name in UNIT_FACTORS.items():
+        factors[unit] = _factor(value[name], name)
+    _expect(value["arithmetic"], "factor_decision.arithmetic", ARITHMETIC)
+    _expect(
+        value["headroom_formula"], "factor_decision.headroom_formula", HEADROOM_FORMULA
+    )
+    return factors
+
+
+def _target(item, index, factors) -> dict:
     if not isinstance(item, dict):
         _fail(f"target {index} must be an object, got {type(item).__name__}")
     keys = set(item)
@@ -129,10 +267,18 @@ def _target(item, index) -> dict:
     label = f"target {preset}/{unit}"
     if item["kind"] != KIND:
         _fail(f"{label} kind is {item['kind']!r}, expected {KIND!r}")
+    if item["label"] != TARGET_LABEL:
+        _fail(f"{label} label is {item['label']!r}, expected {TARGET_LABEL!r}")
     for key in NUMBER_KEYS:
         value = item[key]
         if not _is_int(value) or value <= 0:
             _fail(f"{label} {key} is not a positive integer: {value!r}")
+    expected_factor = factors[unit]
+    if item["factor"] != expected_factor:
+        _fail(
+            f"{label} factor is {item['factor']}, expected {expected_factor} from "
+            f"factor_decision.{UNIT_FACTORS[unit]}.numerator"
+        )
     expected_row = ROW_TEMPLATE.format(unit=unit)
     if item["baseline_row"] != expected_row:
         _fail(
@@ -168,10 +314,10 @@ def _coverage(targets) -> None:
         _fail("missing targets for " + ", ".join(missing))
 
 
-def _targets(value) -> list:
+def _targets(value, factors) -> list:
     if not isinstance(value, list):
         _fail(f"targets must be a list, got {type(value).__name__}")
-    targets = [_target(item, index) for index, item in enumerate(value)]
+    targets = [_target(item, index, factors) for index, item in enumerate(value)]
     _coverage(targets)
     return targets
 
@@ -183,15 +329,14 @@ def validate(document) -> list:
     keys = set(document)
     if keys != TOP_LEVEL:
         _fail(_key_message("top-level", keys, TOP_LEVEL))
-    if document["format"] != FORMAT:
-        _fail(f"format is {document['format']!r}, expected {FORMAT!r}")
-    if document["format_version"] != FORMAT_VERSION:
-        _fail(
-            f"format_version is {document['format_version']!r}, "
-            f"expected {FORMAT_VERSION!r}"
-        )
+    _expect(document["format"], "format", FORMAT)
+    _expect(document["format_version"], "format_version", FORMAT_VERSION)
     _baseline(document["baseline"])
-    return _targets(document["targets"])
+    _basis(document["basis"])
+    _tokenizer(document["tokenizer"])
+    _policy(document["policy"])
+    factors = _factor_decision(document["factor_decision"])
+    return _targets(document["targets"], factors)
 
 
 def load(path) -> list:

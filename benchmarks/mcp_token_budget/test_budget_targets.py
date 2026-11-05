@@ -146,7 +146,7 @@ class RecordTests(unittest.TestCase):
         self.assert_refused(value, "is not floor(")
         value = document()
         entry(value, "minimal", "bytes")["factor"] = 70
-        self.assert_refused(value, "is not floor(")
+        self.assert_refused(value, "factor is 70, expected 80")
 
     def test_broken_headroom_arithmetic_is_refused(self):
         value = document()
