@@ -22,8 +22,8 @@
 //! can escape validation through an unsupported keyword.
 
 use super::*;
-use crate::schema::schema_pack;
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::schema::schema_pack;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -137,7 +137,9 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
             .filter(|branch| validate_at(branch, value, path).is_ok())
             .count();
         if matched != 1 {
-            return Err(format!("{path}: oneOf matched {matched} branches, expected 1"));
+            return Err(format!(
+                "{path}: oneOf matched {matched} branches, expected 1"
+            ));
         }
     }
     if let Some(branches) = fields.get("anyOf").and_then(Value::as_array)
@@ -215,7 +217,10 @@ fn protocol_output_schema_validator_reports_the_failing_path() {
     assert!(enum_miss.starts_with("$.mode: "), "{enum_miss}");
     let one_of_miss = validate(&schema, &json!({"ok": true, "either": 5}))
         .expect_err("oneOf mismatch must be rejected");
-    assert!(one_of_miss.starts_with("$.either: oneOf matched 0"), "{one_of_miss}");
+    assert!(
+        one_of_miss.starts_with("$.either: oneOf matched 0"),
+        "{one_of_miss}"
+    );
     // anyOf accepts a value that matches more than one branch, which is the
     // case `oneOf` would reject.
     assert!(
@@ -254,8 +259,8 @@ fn protocol_output_schema_guard_rejects_unvalidated_keywords() {
 /// A failure envelope is a real value too: the schema must accept it.
 #[test]
 fn protocol_output_schema_accepts_the_handled_value_for_every_tool() {
-    let state = McpState::open_with_effective(&McpOpenOptions::default(), &json!({}))
-        .expect("state");
+    let state =
+        McpState::open_with_effective(&McpOpenOptions::default(), &json!({})).expect("state");
     let handler = McpHandler::new(Arc::clone(&state));
     let pack = schema_pack();
     let tools = pack["tools"].as_array().expect("tools array");
