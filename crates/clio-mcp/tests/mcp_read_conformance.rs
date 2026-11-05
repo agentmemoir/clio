@@ -28,13 +28,13 @@
 #[path = "mcp_read_support/mod.rs"]
 mod support;
 
-use clio_mcp::bound_read_tools;
 use clio_mcp::protocol::McpHandler;
 use serde_json::json;
 
 use support::{BANK, read_state};
 
-/// Every Core read tool is advertised with an object inputSchema.
+/// Every read tool is bound and carries an object inputSchema; the listing
+/// advertises the selected profile's share of them.
 #[test]
 fn ac_17_01_all_read_tools_listed() {
     let handler = McpHandler::new(read_state());
@@ -43,8 +43,19 @@ fn ac_17_01_all_read_tools_listed() {
         .expect("response");
     let tools = res["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    for bound in bound_read_tools() {
-        assert!(names.contains(bound), "`{bound}` missing from tools/list");
+    let bound = clio_mcp::bound_tools();
+    for name in &names {
+        assert!(
+            bound.contains(name),
+            "`{name}` listed but not bound in this build"
+        );
+    }
+    for name in clio_types::DEFAULT_PRESET
+        .tools()
+        .into_iter()
+        .filter(|name| bound.contains(name))
+    {
+        assert!(names.contains(&name), "`{name}` missing from tools/list");
     }
     for tool in tools {
         assert_eq!(tool["inputSchema"]["type"], json!("object"));

@@ -406,6 +406,27 @@ fn presets_match_the_approved_fixture() {
     }
 }
 
+/// A preset's tool list is exactly the catalog rows of its resolved groups, and
+/// the default preset therefore names only its own groups' tools.
+#[test]
+fn preset_tools_match_the_resolved_group_rows() {
+    for (preset, _) in APPROVED_PRESETS {
+        let mut expected: Vec<&'static str> = GROUP_TABLE
+            .iter()
+            .filter(|row| preset.resolve().contains(&row.group))
+            .flat_map(|row| row.tools.iter().copied())
+            .collect();
+        let tools = preset.tools();
+        assert_eq!(tools, expected, "preset `{}`", preset.as_str());
+        let mut sorted = tools.clone();
+        sorted.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(sorted, expected);
+    }
+    assert!(DEFAULT_PRESET.tools().contains(&"retrieve"));
+    assert!(!DEFAULT_PRESET.tools().contains(&"store"));
+}
+
 #[test]
 fn preset_checker_rejects_an_extra_group() {
     let mut declared = ToolPreset::Coding.groups().to_vec();

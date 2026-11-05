@@ -122,8 +122,8 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
     );
     assert!(body["result"].get("serverInfo").is_some());
 
-    // Additive harness workspace tools are published over HTTP too:
-    // both transports share `McpHandler::tools_list`, and this pins it.
+    // Both transports advertise the selected profile's tools over HTTP, and the
+    // wider catalogue those tools belong to stays bound.
     let list = rpc(2, "tools/list", json!({}));
     let (status, listed) = http_post(&addr, &list, "");
     assert_eq!(status, 200);
@@ -133,6 +133,20 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
+    let bound = clio_mcp::bound_tools();
+    let expected: Vec<&str> = clio_types::DEFAULT_PRESET
+        .tools()
+        .into_iter()
+        .filter(|name| bound.contains(name))
+        .collect();
+    assert_eq!(
+        names.len(),
+        expected.len(),
+        "the HTTP listing follows the selected profile"
+    );
+    for name in expected {
+        assert!(names.contains(&name), "`{name}` missing from HTTP tools/list");
+    }
     for tool in [
         "batch",
         "scratchpad_write",
@@ -142,8 +156,8 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
         "stats",
     ] {
         assert!(
-            names.contains(&tool),
-            "additive `{tool}` missing from HTTP tools/list"
+            bound.contains(&tool),
+            "additive `{tool}` is missing from the bound catalogue"
         );
     }
 
