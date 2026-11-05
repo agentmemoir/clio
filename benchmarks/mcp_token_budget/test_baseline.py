@@ -12,6 +12,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -31,7 +32,7 @@ RECORD = HERE / "baseline" / "frozen-v1.json"
 FIXTURES = HERE / "baseline" / "clients"
 
 #: Digest of the committed record file. An edit or an append changes this value.
-FROZEN_V1_SHA256 = "80e18bde983db53583de844bcf2ef0f7bc3d8dc9419d97ee16b2663c284dbd1d"
+FROZEN_V1_SHA256 = "4c371bacf7c6a5f7110509dc4f6d115836a585ba5ca5838b6617760e5c59de9f"
 
 LABELS = frozenset(
     {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}
@@ -55,7 +56,12 @@ def mutated_record(mutate):
     record = copy.deepcopy(load_record())
     mutate(record)
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "frozen-v1.json"
+        temp_dir = Path(tmp)
+        (temp_dir / "clients").mkdir()
+        for fixture in FIXTURES.iterdir():
+            if fixture.is_file():
+                shutil.copyfile(fixture, temp_dir / "clients" / fixture.name)
+        path = temp_dir / "frozen-v1.json"
         path.write_text(json.dumps(record), encoding="utf-8")
         yield path
 
@@ -175,14 +181,19 @@ class BaselineTests(unittest.TestCase):
                     )
                     self.assertEqual(row["value"], result[key])
 
-        def bump(record):
-            row_by_id(record, "client/synthetic-eager-client/turn/1/tokens")["value"] += 1
+        def wrong_bytes(record):
+            row_by_id(record, "client/synthetic-eager-client/turn/1/bytes")["value"] += 1
 
-        mutated = copy.deepcopy(record)
-        bump(mutated)
-        self.assertNotEqual(
-            row_by_id(mutated, "client/synthetic-eager-client/turn/1/tokens")["value"],
-            row_by_id(record, "client/synthetic-eager-client/turn/1/tokens")["value"],
+        with mutated_record(wrong_bytes) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(
+            any(
+                "AC3" in error
+                and "synthetic-eager-client" in error
+                and "turn 1" in error
+                for error in errors
+            ),
+            errors,
         )
 
     def test_ac4_ranking_names_its_sort_figure(self):
@@ -351,6 +362,37 @@ class BaselineTests(unittest.TestCase):
         with mutated_record(mark_estimate) as path:
             errors = baseline_validate.validate(path)
         self.assertTrue(any("AC8" in error for error in errors), errors)
+
+    def test_ac8_measured_row_without_provenance_is_refused(self):
+        def drop_input_digest(record):
+            row_by_id(
+                record, "client/synthetic-eager-client/turn/1/bytes"
+            ).pop("input_sha256")
+
+        with mutated_record(drop_input_digest) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(
+            any(
+                "AC8" in error and "client/synthetic-eager-client/turn/1/bytes" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+        def drop_receipt(record):
+            row_by_id(
+                record, "retired_skill_entry_point/bytes"
+            ).pop("receipt_id")
+
+        with mutated_record(drop_receipt) as path:
+            errors = baseline_validate.validate(path)
+        self.assertTrue(
+            any(
+                "AC8" in error and "retired_skill_entry_point/bytes" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_ac8_fallback_estimate_cannot_be_labelled_measured(self):
         for flag in ("estimated", "fallback"):

@@ -15,6 +15,16 @@
     "version": "0.14.0",
     "asset_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
   },
+  "receipts": {
+    "pinned-local-run-2026-11-05": {
+      "measured_on": "2026-11-05",
+      "encoding": "cl100k_base",
+      "implementation": "tiktoken",
+      "version": "0.14.0",
+      "recomputable_from_public_inputs": false,
+      "note": "measured once with the pinned encoding on the record date; public CI can check shape and digest only"
+    }
+  },
   "pack": {
     "format": "am_tool_schema_pack",
     "format_version": 1,
@@ -111,7 +121,8 @@
       "label": "Measured",
       "date": "2026-11-05",
       "content_sha256": "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80",
-      "tokenizer_ref": "pinned"
+      "tokenizer_ref": "pinned",
+      "receipt_id": "pinned-local-run-2026-11-05"
     },
     {
       "row": "retired_skill_entry_point/tokens",
@@ -120,7 +131,8 @@
       "label": "Measured",
       "date": "2026-11-05",
       "content_sha256": "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80",
-      "tokenizer_ref": "pinned"
+      "tokenizer_ref": "pinned",
+      "receipt_id": "pinned-local-run-2026-11-05"
     }
   ],
   "per_tool_ranking": {

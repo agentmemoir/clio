@@ -11,6 +11,7 @@ when the list is empty and prints nothing.
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -51,6 +52,7 @@ ALLOWED_TOP_LEVEL = frozenset(
         "rows",
         "per_tool_ranking",
         "unobserved",
+        "receipts",
     }
 )
 
@@ -104,30 +106,41 @@ def _rows(record):
 
 
 def _client_rows(record, client, turn, unit):
-    row_id = f"client/{client}/turn/{turn}/{unit}"
-    return [row for row in _rows(record) if row.get("row") == row_id]
+    return [row for row in _rows(record) if row.get("row") == f"client/{client}/turn/{turn}/{unit}"]
+
+
+def _canonical_tools(tools):
+    """Serialize one turn's tools array the way the replay module measures it."""
+    return json.dumps(tools, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _fixture_turns(path, name):
+    """Return ``({turn: tools}, None)`` for one fixture, or ``(None, error)``."""
+    try:
+        turns = json.loads(path.read_text(encoding="utf-8"))["turns"]
+        return {item["turn"]: item["payload"]["tools"] for item in turns}, None
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return None, f"AC3: client {name!r} fixture cannot be read: {exc}"
 
 
 def _expected_client_ids(record):
     """Return the client row ids the declared clients and turns imply."""
-    expected = set()
     clients = record.get("clients")
     if not isinstance(clients, list):
-        return expected
-    for client in clients:
-        if not isinstance(client, dict) or not isinstance(client.get("client"), str):
-            continue
-        turns = client.get("turns")
-        if not isinstance(turns, list):
-            continue
-        for turn in turns:
-            if _is_int(turn) and turn > 0:
-                for unit in ("bytes", "tokens"):
-                    expected.add(f"client/{client['client']}/turn/{turn}/{unit}")
-    return expected
+        return set()
+    return {
+        f"client/{client['client']}/turn/{turn}/{unit}"
+        for client in clients
+        if isinstance(client, dict)
+        and isinstance(client.get("client"), str)
+        and isinstance(client.get("turns"), list)
+        for turn in client["turns"]
+        if _is_int(turn) and turn > 0
+        for unit in ("bytes", "tokens")
+    }
 
 
-def check_record(record) -> list:
+def check_record(record, base_dir) -> list:
     """Return every error in one record object, in check order."""
     errors = []
 
@@ -138,9 +151,7 @@ def check_record(record) -> list:
         errors.append(f"AC6: unexpected top-level key: {extra}")
 
     if record.get("format") != RECORD_FORMAT:
-        errors.append(
-            f"AC6: record format is {record.get('format')!r}, expected {RECORD_FORMAT!r}"
-        )
+        errors.append(f"AC6: record format is {record.get('format')!r}, expected {RECORD_FORMAT!r}")
     if record.get("format_version") != FORMAT_VERSION:
         errors.append(
             f"AC6: format_version is {record.get('format_version')!r}, "
@@ -210,8 +221,8 @@ def check_record(record) -> list:
                 f"AC1: client {name!r} delivery is {client.get('delivery')!r}, "
                 f"expected one of {sorted(DELIVERIES)}"
             )
+        fixture = client.get("fixture")
         if isinstance(name, str) and name.startswith("synthetic"):
-            fixture = client.get("fixture")
             if not isinstance(fixture, dict):
                 errors.append(f"AC2: client {name!r} has no fixture object")
             else:
@@ -228,34 +239,52 @@ def check_record(record) -> list:
             errors.append(f"AC3: client {name!r} has no turns")
             continue
         seen = set()
+        fixture_name = fixture.get("name") if isinstance(fixture, dict) else None
+        by_turn = None
+        if isinstance(fixture_name, str):
+            by_turn, fixture_error = _fixture_turns(
+                Path(base_dir) / "clients" / fixture_name, name
+            )
+            if fixture_error:
+                errors.append(fixture_error)
         for turn in turns:
             if not _is_int(turn) or turn < 1:
                 errors.append(f"AC3: client {name!r} turn is not a positive integer: {turn!r}")
-            elif turn in seen:
-                errors.append(f"AC3: client {name!r} repeats turn {turn}")
-            else:
-                seen.add(turn)
-
-    for client in clients:
-        if not isinstance(client, dict) or not isinstance(client.get("client"), str):
-            continue
-        turns = client.get("turns")
-        if not isinstance(turns, list):
-            continue
-        for turn in turns:
-            if not _is_int(turn) or turn < 1:
                 continue
+            if turn in seen:
+                errors.append(f"AC3: client {name!r} repeats turn {turn}")
+                continue
+            seen.add(turn)
             for unit in ("bytes", "tokens"):
-                rows = _client_rows(record, client["client"], turn, unit)
+                rows = _client_rows(record, name, turn, unit)
                 if len(rows) != 1:
                     errors.append(
-                        f"AC3: expected one {unit} row for {client['client']} turn {turn}, "
-                        f"found {len(rows)}"
+                        f"AC3: expected one {unit} row for {name} turn {turn}, found {len(rows)}"
                     )
                 elif not isinstance(rows[0].get("label"), str):
+                    errors.append(f"AC3: row {rows[0].get('row')!r} has no label")
+            if by_turn is None:
+                continue
+            if turn not in by_turn:
+                errors.append(f"AC3: client {name!r} turn {turn} is not in its fixture")
+                continue
+            canonical = _canonical_tools(by_turn[turn])
+            digest = hashlib.sha256(canonical).hexdigest()
+            bytes_rows = _client_rows(record, name, turn, "bytes")
+            tokens_rows = _client_rows(record, name, turn, "tokens")
+            if len(bytes_rows) == 1:
+                if bytes_rows[0].get("value") != len(canonical):
                     errors.append(
-                        f"AC3: row {rows[0].get('row')!r} has no label"
+                        f"AC3: client {name!r} turn {turn} bytes value does not match the fixture"
                     )
+                if bytes_rows[0].get("input_sha256") != digest:
+                    errors.append(
+                        f"AC3: client {name!r} turn {turn} bytes input_sha256 does not match the fixture"
+                    )
+            if len(tokens_rows) == 1 and tokens_rows[0].get("input_sha256") != digest:
+                errors.append(
+                    f"AC3: client {name!r} turn {turn} tokens input_sha256 does not match the fixture"
+                )
 
     expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS)
     seen_ids = []
@@ -282,7 +311,9 @@ def check_record(record) -> list:
             errors.append(f"AC5: object with a value has no real date: {obj.get('row')!r}")
         if obj.get("label") not in LABELS:
             errors.append(f"AC5: object with a value has no valid label: {obj.get('row')!r}")
-        if obj.get("label") == "Measured" and (
+        if obj.get("label") != "Measured":
+            continue
+        if (
             obj.get("estimated") is True
             or obj.get("fallback") is True
             or obj.get("unit") not in UNITS
@@ -291,6 +322,18 @@ def check_record(record) -> list:
                 f"AC8: row {obj.get('row')!r} is labelled Measured but is an estimate, "
                 f"a fallback, or outside the pinned units"
             )
+        row_id = obj.get("row")
+        if isinstance(row_id, str) and row_id.startswith("client/"):
+            digest = obj.get("input_sha256")
+            if not isinstance(digest, str) or not SHA256_RE.match(digest):
+                errors.append(f"AC8: row {row_id} is labelled Measured but has no input_sha256")
+        elif row_id in RETIRED_ROWS:
+            receipt = obj.get("receipt_id")
+            receipts = record.get("receipts")
+            if not isinstance(receipt, str) or not receipt.strip():
+                errors.append(f"AC8: row {row_id} is labelled Measured but has no receipt_id")
+            elif not isinstance(receipts, dict) or not isinstance(receipts.get(receipt), dict):
+                errors.append(f"AC8: row {row_id} receipt_id does not resolve")
 
     for row_id in RETIRED_ROWS:
         count = len([row for row in _rows(record) if row.get("row") == row_id])
@@ -385,7 +428,7 @@ def validate(path) -> list:
         return [f"AC6: record is not valid JSON: {exc}"]
     if not isinstance(record, dict):
         return [f"AC6: record must be a JSON object, got {type(record).__name__}"]
-    return check_record(record)
+    return check_record(record, Path(path).resolve().parent)
 
 
 def main(argv=None) -> int:
