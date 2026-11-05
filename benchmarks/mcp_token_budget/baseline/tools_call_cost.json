@@ -1,0 +1,68 @@
+{
+  "format": "clio_mcp_transcript_cost",
+  "format_version": 1,
+  "tokenizer": {
+    "status": "not measured",
+    "reason": "missing required tokenizer package: tiktoken"
+  },
+  "rows": [
+    {
+      "row": "session.before.bytes",
+      "value": 1904,
+      "unit": "bytes",
+      "label": "Measured",
+      "input_sha256": "6d63f39a42719f50e64a9145180f0d04a011961ada3d0dc2f886f1d76215961d"
+    },
+    {
+      "row": "call.before.bytes",
+      "value": 1740,
+      "unit": "bytes",
+      "label": "Measured",
+      "input_sha256": "3ea3b5cf1b5e04904de332c2ba86b7f0f89f0882605c9984373d7c6f9824767a"
+    },
+    {
+      "row": "call.before.payload_copies",
+      "value": 2,
+      "unit": "count",
+      "label": "Measured",
+      "input_sha256": "3ea3b5cf1b5e04904de332c2ba86b7f0f89f0882605c9984373d7c6f9824767a"
+    },
+    {
+      "row": "session.before.tokens",
+      "value": null,
+      "unit": "tokens",
+      "label": "Not measured",
+      "input_sha256": "6d63f39a42719f50e64a9145180f0d04a011961ada3d0dc2f886f1d76215961d",
+      "reason": "missing required tokenizer package: tiktoken"
+    },
+    {
+      "row": "session.after.bytes",
+      "value": 1050,
+      "unit": "bytes",
+      "label": "Measured",
+      "input_sha256": "55dc2c6db9cc1a381e7103ad65b838c0b6f26647cf95537a514af28de76799a9"
+    },
+    {
+      "row": "call.after.bytes",
+      "value": 886,
+      "unit": "bytes",
+      "label": "Measured",
+      "input_sha256": "abd4aebcfb235c272d0a1d99d69615c95907c081cb0fb2b4268633be6a3ffb1c"
+    },
+    {
+      "row": "call.after.payload_copies",
+      "value": 1,
+      "unit": "count",
+      "label": "Measured",
+      "input_sha256": "abd4aebcfb235c272d0a1d99d69615c95907c081cb0fb2b4268633be6a3ffb1c"
+    },
+    {
+      "row": "session.after.tokens",
+      "value": null,
+      "unit": "tokens",
+      "label": "Not measured",
+      "input_sha256": "55dc2c6db9cc1a381e7103ad65b838c0b6f26647cf95537a514af28de76799a9",
+      "reason": "missing required tokenizer package: tiktoken"
+    }
+  ]
+}
