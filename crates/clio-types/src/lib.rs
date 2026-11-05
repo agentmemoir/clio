@@ -34,6 +34,7 @@ pub mod gist;
 pub mod history;
 pub mod item;
 pub mod mcp_tool_groups;
+mod mcp_tool_groups_data;
 pub mod mcp_tools;
 pub mod net;
 pub mod persona;

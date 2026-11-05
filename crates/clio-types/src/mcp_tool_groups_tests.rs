@@ -3,174 +3,25 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for tests of the MCP tool-group catalog, its
-//! guidance sentences, and its preset and closure derivations.
+//! This module is responsible for tests of tool-group query behaviour: guidance sentences, closures, custom selections, names, and indexes.
 //!
 //! ## Owns
-//! - Membership, guidance, preset, closure, and custom-selection contracts
-//! - Mutation proofs that each contract check rejects a broken catalog
+//! - Guidance sentence, closure, and custom-selection behaviour
+//! - Name, preset, and index round-trips
 //!
 //! ## Does not own
+//! - Approved membership, counts, and preset exactness (`mcp_tool_groups_contract_tests`)
 //! - Tool dispatch, listing, or schema shapes
 //!
 //! ## Boundary
 //!
-//! Changes to group membership or presets should normally update tests here.
-//! Changes to tool behaviour should not require changes here.
+//! Changes to query or closure behaviour should normally update tests here.
+//! Changes to approved membership should not require changes here.
 //!
-//! Keep this module focused on the tool-group catalog contract.
+//! Keep this module focused on tool-group behaviour.
 
 use super::*;
-use crate::mcp_tools::bound_tools;
 use std::collections::BTreeSet;
-
-const RETRIEVAL_WITHOUT_RETRIEVE: &[&str] = &["intent_gate", "compose_context", "associations"];
-const GRAPH_WITH_RETRIEVE: &[&str] = &["graph_link", "graph_query", "retrieve"];
-const GRAPH_WITH_UNKNOWN: &[&str] = &["graph_link", "graph_query", "not_a_tool"];
-
-fn table_rows() -> Vec<(ToolGroup, &'static [&'static str])> {
-    GROUP_TABLE
-        .iter()
-        .map(|row| (row.group, row.tools))
-        .collect()
-}
-
-fn rows_with(
-    replacements: &[(ToolGroup, &'static [&'static str])],
-) -> Vec<(ToolGroup, &'static [&'static str])> {
-    GROUP_TABLE
-        .iter()
-        .map(|row| {
-            let members = replacements
-                .iter()
-                .find(|(group, _)| *group == row.group)
-                .map_or(row.tools, |(_, members)| *members);
-            (row.group, members)
-        })
-        .collect()
-}
-
-fn check_membership(rows: &[(ToolGroup, &'static [&'static str])]) -> Result<(), String> {
-    let catalog = bound_tools();
-    if rows.len() != ToolGroup::ALL.len() {
-        return Err(format!(
-            "group table has {} rows, expected {}",
-            rows.len(),
-            ToolGroup::ALL.len()
-        ));
-    }
-    let mut seen: Vec<&'static str> = Vec::new();
-    for (group, members) in rows {
-        for member in members.iter().copied() {
-            if !catalog.contains(&member) {
-                return Err(format!("unknown tool `{member}`"));
-            }
-            if seen.contains(&member) {
-                return Err(format!("duplicate membership for `{member}`"));
-            }
-            if group_of(member) != Some(*group) {
-                return Err(format!(
-                    "`{member}` is listed under `{}`, not its catalog group",
-                    group.as_str()
-                ));
-            }
-            seen.push(member);
-        }
-    }
-    for bound in &catalog {
-        if !seen.contains(bound) {
-            return Err(format!("catalog tool `{bound}` has no group"));
-        }
-    }
-    if seen.len() != catalog.len() {
-        return Err(format!(
-            "grouped {} tools, expected {}",
-            seen.len(),
-            catalog.len()
-        ));
-    }
-    Ok(())
-}
-
-fn check_preset(preset: ToolPreset, observed: &[ToolGroup]) -> Result<(), String> {
-    let expected = match preset {
-        ToolPreset::Minimal => vec![ToolGroup::Retrieval, ToolGroup::Graph],
-        ToolPreset::Coding => vec![
-            ToolGroup::Retrieval,
-            ToolGroup::ItemRead,
-            ToolGroup::Persona,
-        ],
-        ToolPreset::Ops => vec![
-            ToolGroup::ItemRead,
-            ToolGroup::Ops,
-            ToolGroup::Hygiene,
-            ToolGroup::Retention,
-        ],
-        ToolPreset::All => ToolGroup::ALL.to_vec(),
-    };
-    if observed != expected.as_slice() {
-        return Err(format!(
-            "preset `{}` is {observed:?}, expected {expected:?}",
-            preset.as_str()
-        ));
-    }
-    Ok(())
-}
-
-#[test]
-fn catalog_groups_every_bound_tool_exactly_once() {
-    let rows = table_rows();
-    check_membership(&rows).expect("production group table must pass");
-    let grouped: BTreeSet<&str> = rows
-        .iter()
-        .flat_map(|(_, members)| members.iter().copied())
-        .collect();
-    let bound: BTreeSet<&str> = bound_tools().into_iter().collect();
-    assert_eq!(grouped, bound);
-    assert_eq!(grouped.len(), 86);
-    assert_eq!(rows.len(), 17);
-    assert_eq!(group_of("retrieve"), Some(ToolGroup::Retrieval));
-    assert_eq!(group_of("erase_request"), Some(ToolGroup::Compliance));
-    assert_eq!(group_of("search"), None);
-}
-
-#[test]
-fn membership_checker_rejects_unknown_tool() {
-    let rows = rows_with(&[(ToolGroup::Graph, GRAPH_WITH_UNKNOWN)]);
-    let error = check_membership(&rows).expect_err("an unknown tool must fail");
-    assert!(error.contains("not_a_tool"), "message was: {error}");
-}
-
-#[test]
-fn membership_checker_rejects_ungrouped_tool() {
-    let rows = rows_with(&[(ToolGroup::Retrieval, RETRIEVAL_WITHOUT_RETRIEVE)]);
-    let error = check_membership(&rows).expect_err("an ungrouped tool must fail");
-    assert!(error.contains("retrieve"), "message was: {error}");
-}
-
-#[test]
-fn membership_checker_rejects_duplicate_membership() {
-    let rows = rows_with(&[(ToolGroup::Graph, GRAPH_WITH_RETRIEVE)]);
-    let error = check_membership(&rows).expect_err("a duplicate tool must fail");
-    assert!(error.contains("retrieve"), "message was: {error}");
-}
-
-#[test]
-fn membership_checker_rejects_wrong_row_count() {
-    let rows = table_rows();
-    let error = check_membership(&rows[..16]).expect_err("a short table must fail");
-    assert!(error.contains("17"), "message was: {error}");
-}
-
-#[test]
-fn membership_checker_detects_a_moved_tool() {
-    let rows = rows_with(&[
-        (ToolGroup::Retrieval, RETRIEVAL_WITHOUT_RETRIEVE),
-        (ToolGroup::Graph, GRAPH_WITH_RETRIEVE),
-    ]);
-    let error = check_membership(&rows).expect_err("a moved tool must fail");
-    assert!(error.contains("retrieve"), "message was: {error}");
-}
 
 #[test]
 fn when_to_use_matches_the_approved_sentences() {
@@ -211,56 +62,6 @@ fn when_to_use_matches_the_approved_sentences() {
         assert_eq!(observed, sentence, "group {}", group.as_str());
         assert!(!observed.is_empty(), "group {}", group.as_str());
         assert!(observed.ends_with('.'), "group {}", group.as_str());
-    }
-}
-
-#[test]
-fn presets_match_their_declared_sets() {
-    for preset in [
-        ToolPreset::Minimal,
-        ToolPreset::Coding,
-        ToolPreset::Ops,
-        ToolPreset::All,
-    ] {
-        check_preset(preset, preset.groups()).expect("declared preset set must pass");
-    }
-    let mut coding_plus_item_write = ToolPreset::Coding.groups().to_vec();
-    coding_plus_item_write.push(ToolGroup::ItemWrite);
-    assert!(check_preset(ToolPreset::Coding, &coding_plus_item_write).is_err());
-}
-
-#[test]
-fn presets_derive_membership_from_groups() {
-    for preset in [
-        ToolPreset::Minimal,
-        ToolPreset::Coding,
-        ToolPreset::Ops,
-        ToolPreset::All,
-    ] {
-        let resolved = preset.resolve();
-        let unique: BTreeSet<ToolGroup> = resolved.iter().copied().collect();
-        assert_eq!(
-            unique.len(),
-            resolved.len(),
-            "preset {} resolved duplicates",
-            preset.as_str()
-        );
-        let declared: BTreeSet<&str> = preset
-            .groups()
-            .iter()
-            .flat_map(|group| group.spec().tools.iter().copied())
-            .collect();
-        let derived: BTreeSet<&str> = resolved
-            .iter()
-            .flat_map(|group| group.spec().tools.iter().copied())
-            .collect();
-        assert_eq!(derived, declared, "preset {}", preset.as_str());
-        assert_eq!(
-            resolved,
-            closure(preset.groups()),
-            "preset {}",
-            preset.as_str()
-        );
     }
 }
 
@@ -370,14 +171,22 @@ fn names_round_trip_and_default_is_minimal() {
         assert_eq!(ToolGroup::from_str(group.as_str()), Some(group));
     }
     assert_eq!(ToolGroup::from_str("nope"), None);
-    for preset in [
-        ToolPreset::Minimal,
-        ToolPreset::Coding,
-        ToolPreset::Ops,
-        ToolPreset::All,
-    ] {
+    assert_eq!(ToolPreset::ALL.len(), 4);
+    for preset in ToolPreset::ALL {
         assert_ne!(preset.as_str(), "");
         assert_eq!(ToolPreset::from_str(preset.as_str()), Some(preset));
     }
     assert_eq!(ToolPreset::from_str("nope"), None);
+}
+
+#[test]
+fn every_group_has_one_row_and_an_exact_index() {
+    assert_eq!(GROUP_TABLE.len(), ToolGroup::ALL.len());
+    for (position, group) in ToolGroup::ALL.iter().enumerate() {
+        assert_eq!(group.index(), position, "group {}", group.as_str());
+        let rows = GROUP_TABLE.iter().filter(|row| row.group == *group).count();
+        assert_eq!(rows, 1, "group {}", group.as_str());
+    }
+    let unique: BTreeSet<ToolGroup> = ToolGroup::ALL.into_iter().collect();
+    assert_eq!(unique.len(), ToolGroup::ALL.len());
 }
