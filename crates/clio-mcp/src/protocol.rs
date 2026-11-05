@@ -313,3 +313,7 @@ mod protocol_tests;
 #[cfg(test)]
 #[path = "tool_profile_tests.rs"]
 mod tool_profile_tests;
+
+#[cfg(test)]
+#[path = "tool_profile_parity_tests.rs"]
+mod tool_profile_parity_tests;

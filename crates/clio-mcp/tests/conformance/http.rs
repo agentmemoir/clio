@@ -145,7 +145,10 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
         "the HTTP listing follows the selected profile"
     );
     for name in expected {
-        assert!(names.contains(&name), "`{name}` missing from HTTP tools/list");
+        assert!(
+            names.contains(&name),
+            "`{name}` missing from HTTP tools/list"
+        );
     }
     for tool in [
         "batch",

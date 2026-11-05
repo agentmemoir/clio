@@ -27,7 +27,7 @@ use crate::arg_contract::contracts;
 use crate::protocol::McpHandler;
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::schema::{catalog_def, catalog_defs};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// A tool the minimal profile hides and this build still binds.
