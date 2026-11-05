@@ -268,6 +268,15 @@ fn invalid_params(message: impl Into<String>) -> RpcError {
 /// declared output schema carries the serialized payload in `content` and no
 /// `structuredContent` key, because that key only means something when a
 /// schema describes its shape.
+///
+/// A client that reads only the text block of a schema-declaring result gets a
+/// status line (`ok`) on success, and the error code and message on failure.
+/// It does not get the payload.
+///
+/// The protocol recommendation for backwards compatibility is to also send the
+/// serialized payload as a JSON text block. This envelope omits that copy on
+/// purpose, so a payload is never sent twice. A content-only client gives up
+/// the result: it sees only the status line, or the error code and message.
 pub(crate) fn tool_call_envelope(result: &Value, has_schema: bool) -> Value {
     let is_error = result.get("ok").and_then(Value::as_bool) != Some(true);
     if has_schema {

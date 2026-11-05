@@ -111,6 +111,36 @@ fn schema_envelope_summarizes_status_and_carries_payload_once() {
 }
 
 #[test]
+fn schema_envelope_success_text_is_status_only() {
+    let payload = json!({"ok": true, "marker": "success-text-6d41", "items": [7, 8]});
+    let envelope = tool_call_envelope(&payload, true);
+    let text = envelope["content"][0]["text"].as_str().expect("text");
+    assert_eq!(text, "ok");
+    assert!(
+        !text.contains("success-text-6d41"),
+        "text must not carry the payload: {text}"
+    );
+}
+
+#[test]
+fn schema_envelope_error_text_is_code_and_message_only() {
+    let payload = json!({
+        "ok": false,
+        "code": "invalid_argument",
+        "message": "bad value",
+        "detail": "error-payload-3e59"
+    });
+    let envelope = tool_call_envelope(&payload, true);
+    assert_eq!(envelope["isError"], json!(true));
+    let text = envelope["content"][0]["text"].as_str().expect("text");
+    assert_eq!(text, "error: invalid_argument: bad value");
+    assert!(
+        !text.contains("error-payload-3e59"),
+        "text must not carry the payload: {text}"
+    );
+}
+
+#[test]
 fn no_schema_envelope_keeps_payload_in_content_only() {
     let payload = json!({"ok": true, "marker": "no-schema-2c1d"});
     let envelope = tool_call_envelope(&payload, false);
