@@ -42,6 +42,10 @@ const REGENERATE: &str = concat!(
 
 #[test]
 fn the_committed_schema_pack_matches_the_registry() {
+    assert!(
+        COMMITTED_PACK.lines().count() <= 450,
+        "the committed schema pack must stay at or under 450 lines"
+    );
     let committed: Value = serde_json::from_str(COMMITTED_PACK)
         .expect("crates/clio-mcp/tests/fixtures/schema_pack.json holds JSON");
 

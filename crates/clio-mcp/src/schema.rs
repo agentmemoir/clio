@@ -81,6 +81,42 @@ pub fn schema_pack() -> Value {
     })
 }
 
+/// Serialize a pack with one top-level key per line and one array element per
+/// line, so a committed pack stays small and each tool change diffs on one
+/// line. The output parses to the same value as the compact encoding.
+#[must_use]
+pub fn to_export_json(pack: &Value) -> String {
+    let mut out = String::from("{\n");
+    if let Some(fields) = pack.as_object() {
+        let last = fields.len().saturating_sub(1);
+        for (index, (key, value)) in fields.iter().enumerate() {
+            out.push_str("  ");
+            out.push_str(&serde_json::to_string(key).unwrap_or_default());
+            out.push_str(": ");
+            if let Some(items) = value.as_array() {
+                out.push_str("[\n");
+                for (item_index, item) in items.iter().enumerate() {
+                    out.push_str("    ");
+                    out.push_str(&serde_json::to_string(item).unwrap_or_default());
+                    if item_index + 1 < items.len() {
+                        out.push(',');
+                    }
+                    out.push('\n');
+                }
+                out.push_str("  ]");
+            } else {
+                out.push_str(&serde_json::to_string(value).unwrap_or_default());
+            }
+            if index < last {
+                out.push(',');
+            }
+            out.push('\n');
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// FNV-1a 64-bit hash over `data`, formatted as `fnv1a64:` plus 16 lowercase
 /// hex digits. This is the shared hash convention for canonical payload
 /// fingerprints; each hashed payload defines its own canonical bytes, so a

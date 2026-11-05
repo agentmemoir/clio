@@ -13,6 +13,22 @@ fn pack() -> Value {
 }
 
 #[test]
+fn t0_export_json_matches_the_pack_with_one_element_per_line() {
+    let pack = pack();
+    let raw = to_export_json(&pack);
+    let parsed: Value = serde_json::from_str(&raw).expect("export JSON parses");
+    assert_eq!(parsed, pack);
+    for tool in pack["tools"].as_array().expect("tools array") {
+        let encoded = format!("    {}", serde_json::to_string(tool).expect("tool"));
+        assert!(
+            raw.lines()
+                .any(|line| line.trim_end_matches(',') == encoded),
+            "one tool per line: {encoded}"
+        );
+    }
+}
+
+#[test]
 fn t01_pack_contains_all_core_catalog_tools_with_valid_schemas() {
     let pack = pack();
     assert_eq!(pack["format"], PACK_FORMAT);
