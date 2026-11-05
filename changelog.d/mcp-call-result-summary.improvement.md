@@ -1,0 +1,1 @@
+A `tools/call` result now carries a tool's payload once: a tool with an output schema keeps the payload in `structuredContent` and sends a short `ok` or `error: <code>: <message>` text block, while a tool with no output schema sends the payload only in the text block and omits `structuredContent`.

@@ -81,10 +81,94 @@ fn tools_call_success_wraps_result() {
         }))
         .expect("response");
     assert_eq!(res["result"]["isError"], json!(false));
-    assert_eq!(res["result"]["structuredContent"]["ok"], json!(true));
+    let payload = &res["result"]["structuredContent"];
+    assert_eq!(payload["ok"], json!(true));
     let text = res["result"]["content"][0]["text"].as_str().expect("text");
+    assert_eq!(text, "ok");
+    let serialized_payload = serde_json::to_string(payload).expect("payload JSON");
+    let raw = serde_json::to_string(&res).expect("response JSON");
+    assert_eq!(
+        raw.matches(&serialized_payload).count(),
+        1,
+        "payload must appear exactly once: {raw}"
+    );
+}
+
+#[test]
+fn schema_envelope_summarizes_status_and_carries_payload_once() {
+    let payload = json!({"ok": true, "marker": "payload-once-8f3a", "items": [1, 2, 3]});
+    let envelope = tool_call_envelope(&payload, true);
+    assert_eq!(envelope["structuredContent"], payload);
+    assert_eq!(envelope["content"][0]["text"], json!("ok"));
+    assert_eq!(envelope["isError"], json!(false));
+    let serialized_payload = serde_json::to_string(&payload).expect("payload JSON");
+    let raw = serde_json::to_string(&envelope).expect("envelope JSON");
+    assert_eq!(
+        raw.matches(&serialized_payload).count(),
+        1,
+        "payload must appear exactly once: {raw}"
+    );
+}
+
+#[test]
+fn schema_envelope_success_text_is_status_only() {
+    let payload = json!({"ok": true, "marker": "success-text-6d41", "items": [7, 8]});
+    let envelope = tool_call_envelope(&payload, true);
+    let text = envelope["content"][0]["text"].as_str().expect("text");
+    assert_eq!(text, "ok");
+    assert!(
+        !text.contains("success-text-6d41"),
+        "text must not carry the payload: {text}"
+    );
+}
+
+#[test]
+fn schema_envelope_error_text_is_code_and_message_only() {
+    let payload = json!({
+        "ok": false,
+        "code": "invalid_argument",
+        "message": "bad value",
+        "detail": "error-payload-3e59"
+    });
+    let envelope = tool_call_envelope(&payload, true);
+    assert_eq!(envelope["isError"], json!(true));
+    let text = envelope["content"][0]["text"].as_str().expect("text");
+    assert_eq!(text, "error: invalid_argument: bad value");
+    assert!(
+        !text.contains("error-payload-3e59"),
+        "text must not carry the payload: {text}"
+    );
+}
+
+#[test]
+fn no_schema_envelope_keeps_payload_in_content_only() {
+    let payload = json!({"ok": true, "marker": "no-schema-2c1d"});
+    let envelope = tool_call_envelope(&payload, false);
+    assert!(
+        envelope.get("structuredContent").is_none(),
+        "no-schema envelope must omit structuredContent: {envelope}"
+    );
+    assert_eq!(envelope["isError"], json!(false));
+    let text = envelope["content"][0]["text"].as_str().expect("text");
     let parsed: Value = serde_json::from_str(text).expect("text is JSON");
-    assert_eq!(parsed["ok"], json!(true));
+    assert_eq!(parsed, payload);
+}
+
+#[test]
+fn error_summary_drops_missing_parts() {
+    assert_eq!(
+        error_summary(&json!({"ok": false, "code": "invalid_argument", "message": "bad"})),
+        "error: invalid_argument: bad"
+    );
+    assert_eq!(
+        error_summary(&json!({"ok": false, "code": "invalid_argument"})),
+        "error: invalid_argument"
+    );
+    assert_eq!(
+        error_summary(&json!({"ok": false, "message": "bad"})),
+        "error: bad"
+    );
+    assert_eq!(error_summary(&json!({"ok": false})), "error");
 }
 
 #[test]
@@ -98,9 +182,17 @@ fn t05_gated_reject_maps_to_tool_error_result() {
     let structured = &res["result"]["structuredContent"];
     assert_eq!(structured["ok"], json!(false));
     assert_eq!(structured["code"], json!("invalid_argument"));
-    // Machine-readable code preserved in the text content too.
     let text = res["result"]["content"][0]["text"].as_str().expect("text");
-    assert!(text.contains("invalid_argument"));
+    let expected = format!(
+        "error: {}: {}",
+        structured["code"].as_str().expect("code"),
+        structured["message"].as_str().expect("message")
+    );
+    assert_eq!(text, expected);
+    assert!(
+        !text.contains('{'),
+        "text must not carry the payload: {text}"
+    );
 }
 
 #[test]
@@ -265,8 +357,7 @@ fn new_tools_round_trip_over_tools_call() {
             "{name}: {res}"
         );
         let text = res["result"]["content"][0]["text"].as_str().expect("text");
-        let parsed: Value = serde_json::from_str(text).expect("text is JSON");
-        assert_eq!(parsed["ok"], json!(true), "{name}: {parsed}");
+        assert_eq!(text, "ok", "{name}: {res}");
     }
     // `summarize` is bound but needs a configured extraction provider; without
     // one the envelope still round-trips and fails closed with a typed code.
