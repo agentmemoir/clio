@@ -33,6 +33,7 @@ pub mod error;
 pub mod gist;
 pub mod history;
 pub mod item;
+pub mod mcp_tool_groups;
 pub mod mcp_tools;
 pub mod net;
 pub mod persona;
@@ -58,6 +59,10 @@ pub use history::{
 pub use item::{
     CONTEXT_MAX_BYTES, EpisodicType, EpistemicKind, ItemKind, MemoryItem, SemanticCategory,
     SourceType, validate_context,
+};
+pub use mcp_tool_groups::{
+    DEFAULT_PRESET, GROUP_TABLE, GroupSpec, ToolGroup, ToolGroupError, ToolPreset, closure, custom,
+    group_of,
 };
 pub use mcp_tools::{BOUND_READ_TOOLS, BOUND_WRITE_TOOLS, bound_tools, is_bound};
 pub use net::{HttpTarget, is_loopback_host, parse_scheme_host, url_scheme};
