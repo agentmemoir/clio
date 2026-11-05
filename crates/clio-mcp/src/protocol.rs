@@ -73,7 +73,7 @@ impl McpHandler {
         Self::handle_message_with_state(&self.state, msg)
     }
 
-    fn handle_message_with_state(state: &McpState, msg: &Value) -> Option<Value> {
+    pub(crate) fn handle_message_with_state(state: &McpState, msg: &Value) -> Option<Value> {
         // A message without an id is a notification; MCP responses are never
         // sent for notifications, recognized or not.
         let id = msg.get("id")?;
