@@ -42,8 +42,9 @@ const CATALOG_FORMAT_VERSION: u32 = 2;
 /// Build the machine-readable CLI catalog document.
 ///
 /// The `tools` array is the pack's tool list verbatim (each entry gains a
-/// `tool` field equal to its `name`), and the pack's protocol revision and
-/// `catalog_hash` are carried through unchanged, so the CLI catalog and the
+/// `tool` field equal to its `name`), and the pack's protocol revision,
+/// `catalog_hash`, and the published definition of that hash are carried
+/// through unchanged, so the CLI catalog and the
 /// MCP schema cannot drift. `commands` is the binding table verbatim;
 /// `commands_without_tools` is the unbound command/prefix projection, so a
 /// command the CLI accepts that binds no tool is still listed.
@@ -96,6 +97,7 @@ pub(crate) fn catalog() -> Value {
         "format_version": CATALOG_FORMAT_VERSION,
         "mcp_protocol_revision": pack.get("mcp_protocol_revision").cloned().unwrap_or(Value::Null),
         "catalog_hash": pack.get("catalog_hash").cloned().unwrap_or(Value::Null),
+        "catalog_hash_definition": pack.get("catalog_hash_definition").cloned().unwrap_or(Value::Null),
         "cli_hash": cli_hash,
         "commands": commands,
         "commands_without_tools": commands_without_tools,

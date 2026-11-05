@@ -69,6 +69,7 @@ fn the_catalog_holds_exactly_the_current_document_keys() {
         keys,
         vec![
             "catalog_hash",
+            "catalog_hash_definition",
             "cli_hash",
             "command_specs",
             "commands",
@@ -293,4 +294,8 @@ fn the_catalog_carries_the_pack_revision_and_hash_through() {
         pack["mcp_protocol_revision"]
     );
     assert_eq!(document["catalog_hash"], pack["catalog_hash"]);
+    assert_eq!(
+        document["catalog_hash_definition"],
+        pack["catalog_hash_definition"]
+    );
 }

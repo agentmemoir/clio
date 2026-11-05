@@ -1,5 +1,6 @@
 {
   "catalog_hash": "fnv1a64:c9f16416dd1f84ec",
+  "catalog_hash_definition": {"algorithm":"FNV-1a","concatenation":"adjacent bytes, no separator","hash_bits":64,"input":"compact UTF-8 JSON encoding of every tool definition published in tools[], including name, description, inputSchema and outputSchema, with object keys in lexicographic order and array order preserved","offset_basis":"0xcbf29ce484222325","order":"catalog registry order","prime":"0x100000001b3","rendered_form":"fnv1a64:{hash:016x}","rendered_form_is_external_contract":true,"version":"fnv1a64"},
   "format": "am_tool_schema_pack",
   "format_version": 1,
   "mcp_protocol_revision": "2025-11-25",
