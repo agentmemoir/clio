@@ -99,14 +99,9 @@ fn bank_count(h: &McpHandler, bank: &str) -> usize {
 }
 
 #[test]
-fn additive_tools_are_registered_and_published() {
-    let h = handler(false);
-    let listed = h
-        .handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
-        .expect("response")["result"]["tools"]
-        .as_array()
-        .expect("tools")
-        .clone();
+fn additive_tools_are_registered_and_in_the_bound_catalogue() {
+    let catalogue = clio_mcp::protocol::McpHandler::tools_list();
+    let listed = catalogue["tools"].as_array().expect("tools");
     let names: Vec<&str> = listed.iter().filter_map(|t| t["name"].as_str()).collect();
     for tool in [
         "batch",

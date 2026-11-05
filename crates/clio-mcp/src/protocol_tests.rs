@@ -41,18 +41,24 @@ fn initialize_echoes_pinned_revision() {
 }
 
 #[test]
-fn t03_tools_list_returns_bound_set() {
+fn t03_tools_list_returns_the_selected_profile() {
     let (h, _) = handler();
     let res = h
         .handle_message(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))
         .expect("response");
     let tools = res["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    assert_eq!(names.len(), bound_tools().len());
-    for bound in bound_tools() {
-        assert!(names.contains(&bound), "`{bound}` missing from tools/list");
+    let bound = bound_tools();
+    let expected: Vec<&str> = clio_types::DEFAULT_PRESET
+        .tools()
+        .into_iter()
+        .filter(|name| bound.contains(name))
+        .collect();
+    assert_eq!(names.len(), expected.len());
+    for name in expected {
+        assert!(names.contains(&name), "`{name}` missing from tools/list");
     }
-    // Read tools are MCP-bound.
+    // Read tools are MCP-bound and inside the default profile.
     assert!(names.contains(&"retrieve"));
     // Every listed tool has an object inputSchema.
     for tool in tools {

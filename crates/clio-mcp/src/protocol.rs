@@ -9,7 +9,7 @@
 //! ## Owns
 //! - JSON-RPC 2.0 envelope parsing and response shaping
 //! - MCP error-code mapping (tool failures keep machine-readable codes)
-//! - The bound write+read tool registration returned by `tools/list`
+//! - The bound write+read tool set that dispatch and the argument contract read
 //!
 //! ## Does not own
 //! - Tool semantics (see `write_tools`/`mutator_tools`)
@@ -25,6 +25,7 @@
 use crate::MCP_PROTOCOL_REVISION;
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
+use clio_types::ToolPreset;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -118,7 +119,7 @@ impl McpHandler {
         match method {
             "initialize" => Ok(Self::initialize(msg)),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(Self::tools_list()),
+            "tools/list" => Self::tools_list_visible(state),
             "tools/call" => Self::tools_call(state, msg.get("params")),
             other => Err(RpcError::new(
                 ERR_METHOD_NOT_FOUND,
@@ -149,8 +150,8 @@ impl McpHandler {
         })
     }
 
-    /// `tools/list` over the bound write + read sets (the same dispatcher serves
-    /// both; their schemas come from the published pack).
+    /// The full bound write + read set, which dispatch and the argument
+    /// contract read; `tools/list` advertises the profile-narrowed subset.
     #[must_use]
     pub fn tools_list() -> Value {
         let bound = bound_set();
@@ -160,6 +161,26 @@ impl McpHandler {
             .map(crate::schema_defs::ToolDef::to_tool)
             .collect();
         json!({ "tools": tools })
+    }
+
+    /// `tools/list` over the bound catalogue narrowed to the profile the
+    /// effective configuration selects.
+    ///
+    /// Only what this build advertises shrinks: dispatch eligibility and the
+    /// argument contract keep reading [`Self::tools_list`], so a tool outside
+    /// the selected profile stays reachable and stays validated.
+    ///
+    /// # Errors
+    /// The effective configuration names a tool profile this build does not know.
+    pub(crate) fn tools_list_visible(state: &McpState) -> Result<Value, RpcError> {
+        let visible = configured_profile(state)?.tools();
+        let bound = bound_set();
+        let tools: Vec<Value> = catalog_defs()
+            .iter()
+            .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
+            .map(crate::schema_defs::ToolDef::to_tool)
+            .collect();
+        Ok(json!({ "tools": tools }))
     }
 
     fn tools_call(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {
@@ -217,10 +238,11 @@ impl McpHandler {
 }
 
 /// A JSON-RPC error with an optional structured `data` payload.
-struct RpcError {
-    code: i64,
-    message: String,
-    data: Option<Value>,
+#[derive(Debug)]
+pub(crate) struct RpcError {
+    pub(crate) code: i64,
+    pub(crate) message: String,
+    pub(crate) data: Option<Value>,
 }
 
 impl RpcError {
@@ -271,9 +293,27 @@ fn coactivation_rpc_error(result: &Value) -> Option<RpcError> {
 fn bound_set() -> Vec<&'static str> {
     crate::bound_tools()
 }
+
+/// The tool preset the state's effective configuration selects, read at call
+/// time so a configuration applied in this process governs the next listing.
+fn configured_profile(state: &McpState) -> Result<ToolPreset, RpcError> {
+    let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
+        state.config.lock().expect("config runtime mutex poisoned");
+    let profile = rt.mcp_tool_profile();
+    drop(rt);
+    profile.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))
+}
 #[cfg(test)]
 #[path = "protocol_nfr7_tests.rs"]
 mod protocol_nfr7_tests;
 #[cfg(test)]
 #[path = "protocol_tests.rs"]
 mod protocol_tests;
+
+#[cfg(test)]
+#[path = "tool_profile_tests.rs"]
+mod tool_profile_tests;
+
+#[cfg(test)]
+#[path = "tool_profile_parity_tests.rs"]
+mod tool_profile_parity_tests;

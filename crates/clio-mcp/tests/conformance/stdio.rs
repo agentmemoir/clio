@@ -73,9 +73,19 @@ fn stdio_write_set_matrix_with_parity() {
         .find(|r| r["id"].as_u64() == Some(300))
         .expect("tools/list response");
     let tools = tools_list["result"]["tools"].as_array().expect("tools");
-    assert_eq!(tools.len(), bound_tools().len(), "bound tool set listed");
-    for bound in bound_tools() {
-        assert!(tools.iter().any(|t| t["name"].as_str() == Some(bound)));
+    let bound = bound_tools();
+    let expected: Vec<&str> = clio_types::DEFAULT_PRESET
+        .tools()
+        .into_iter()
+        .filter(|name| bound.contains(name))
+        .collect();
+    assert_eq!(
+        tools.len(),
+        expected.len(),
+        "the selected profile's bound tools are listed"
+    );
+    for name in expected {
+        assert!(tools.iter().any(|t| t["name"].as_str() == Some(name)));
     }
     for (i, (name, _)) in fixtures.iter().enumerate() {
         let response = responses

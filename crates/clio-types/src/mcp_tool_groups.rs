@@ -229,6 +229,15 @@ impl ToolPreset {
     pub fn resolve(self) -> Vec<ToolGroup> {
         closure(self.groups())
     }
+
+    /// Every tool the preset's resolved groups hold, in catalog order.
+    #[must_use]
+    pub fn tools(self) -> Vec<&'static str> {
+        self.resolve()
+            .into_iter()
+            .flat_map(|group| group.spec().tools.iter().copied())
+            .collect()
+    }
 }
 
 /// Add every transitive requirement of `groups`, in canonical order without
@@ -310,3 +319,7 @@ mod tests;
 #[cfg(test)]
 #[path = "mcp_tool_groups_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "mcp_tool_groups_preset_tests.rs"]
+mod preset_tests;

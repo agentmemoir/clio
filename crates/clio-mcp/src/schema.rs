@@ -55,6 +55,16 @@ pub fn catalog_defs() -> Vec<ToolDef> {
     all
 }
 
+/// One definition from the whole catalog, by exact name.
+///
+/// The lookup reads every definition this build publishes, so neither the tool
+/// profile the configuration selects nor the bound set can narrow it: a tool a
+/// listing hides still resolves to the definition it is dispatched with.
+#[must_use]
+pub fn catalog_def(name: &str) -> Option<ToolDef> {
+    catalog_defs().into_iter().find(|def| def.name == name)
+}
+
 /// Build the complete `tool_schema` pack for the bound catalog.
 ///
 /// The pack carries the pinned MCP revision and a deterministic catalog hash
@@ -133,6 +143,10 @@ pub fn validate_tool_schema(tool: &Value) -> Vec<String> {
     }
     defects
 }
+
+#[cfg(test)]
+#[path = "catalog_lookup_tests.rs"]
+mod catalog_lookup_tests;
 
 #[cfg(test)]
 #[path = "schema_tests.rs"]

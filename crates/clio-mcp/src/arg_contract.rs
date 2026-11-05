@@ -12,6 +12,8 @@
 //! - Refusing an argument value the tool's schema does not type, and an array
 //!   entry whose type the schema's `items` does not accept
 //! - Refusing a missing required argument and a blank required string
+//! - The contract of every bound tool, read from the full catalog so no profile
+//!   and no listing can remove or change an entry
 //!
 //! ## Does not own
 //! - Per-tool value rules such as timestamps, categories, or admission gates
@@ -29,7 +31,6 @@
 //!
 //! Keep this module focused on the argument contract.
 
-use crate::protocol::McpHandler;
 use clio_types::{AmError, ErrorCode};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -170,7 +171,7 @@ fn type_error(key: &str, types: &[JsonType]) -> AmError {
 }
 
 /// What one tool's published schema declares about its arguments.
-struct Contract {
+pub(crate) struct Contract {
     /// Declared argument names, or `None` when the schema declares none.
     declared: Option<HashSet<String>>,
     /// The types each argument and each array entry accepts.
@@ -212,16 +213,17 @@ impl Contract {
 }
 
 /// Every tool's contract, built once from the schema the server publishes.
-fn contracts() -> &'static HashMap<String, Contract> {
+///
+/// The definitions come from the full catalog by exact name, narrowed only by
+/// the bound set, so the contract for a tool a profile hides is the contract of
+/// that same tool when the profile lists it.
+pub(crate) fn contracts() -> &'static HashMap<String, Contract> {
     static CONTRACTS: OnceLock<HashMap<String, Contract>> = OnceLock::new();
     CONTRACTS.get_or_init(|| {
-        McpHandler::tools_list()
-            .get("tools")
-            .and_then(Value::as_array)
+        crate::bound_tools()
             .into_iter()
-            .flatten()
-            .filter_map(|tool| {
-                let name = tool.get("name")?.as_str()?;
+            .filter_map(|name| {
+                let tool = crate::schema::catalog_def(name)?.to_tool();
                 let schema = tool.get("inputSchema")?;
                 Some((name.to_owned(), Contract::from_schema(schema)))
             })
