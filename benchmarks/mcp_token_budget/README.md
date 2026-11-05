@@ -20,6 +20,8 @@ Two environment variables are honoured: `CLIO_BIN` names the binary to use expli
 
 For a pack you saved earlier, run the measuring step directly: `python3 benchmarks/mcp_token_budget/measure.py --pack path/to/schema_pack.json`.
 
+The gate runs beside it: `python3 benchmarks/mcp_token_budget/budget_check.py --pack path/to/schema_pack.json` measures the same pack and exits 0 when both arms stay inside the frozen baseline, 1 when either arm grew, and 2 when an input cannot be measured. Adding `--skill PATH` measures the always-loaded skill file in the same run.
+
 ## Prerequisites
 
 Build the CLI, because the command measures what the binary prints: `cargo build --locked --bin clio` (or `make build`).
@@ -68,8 +70,18 @@ The tokenizer implementation and version are reported alongside it, in the `toke
 
 ## Scope
 
-This directory measures and reports; it holds no gate, no threshold, no budget limit, and no pass/fail verdict.
+This directory now holds one budget check that fails the build on pack byte or token growth against the immutable frozen baseline: `benchmarks/mcp_token_budget/budget_check.py` measures a pack, resolves `client/synthetic-eager-client/turn/1/bytes` and the matching `/tokens` row from `baseline/frozen-v1.json` — a file whose own digest is pinned, so a moved baseline is refused instead of compared against — and exits 1 when either arm is larger than its row.
 
-Nothing here fails a build because a number got bigger. The rows exist so a human, a review, or a separate policy can see what the tool surface actually costs and decide what to do about it.
+The preset targets are reported but not yet enforcing: `targets/frozen-v1.json` states one ceiling per preset and unit with the arithmetic that produced it, and `budget_targets.compare` reports each target beside its measured value and headroom. `PRESET_TARGETS_ENFORCED` is `False`, so a miss appears in the report and never changes the exit code, and flipping that one constant is the whole enforcement change.
 
-Keeping the measurement and the judgement apart is deliberate: a measurement that can be argued with stays trustworthy, and a threshold can move later without re-deriving how the number was produced.
+Two different quantities are both called headroom, and they point opposite ways. The record's `headroom` is `baseline_value - target`, the room a target leaves under its frozen baseline, and `budget_targets` refuses a target whose headroom does not equal that subtraction. The report's per-target `headroom` is `target - measured`, the room the measured pack leaves under the target, so a negative value means the measured pack is over its target while a positive one means it still fits.
+
+The always-loaded skill arm runs when a skill path is supplied: `--skill PATH` measures that file's raw bytes, its UTF-8 text, and its cl100k_base token count, and checks it against the frozen `retired_skill_entry_point/bytes` (6393) and `retired_skill_entry_point/tokens` (1518) rows. That arm takes no allowance, because an allowance names a pack digest, so a skill file that grows past either row fails the same run with exit 1 and a message naming that exact row.
+
+In CI the path comes from the `CLIO_SKILL_ENTRY_POINT` repository variable, which the budget job passes to `budget_check.py` only when it is set, because the entry point lives outside this repository and no public checkout can hard-code it. When the variable is unset the report's `skill` object says `not-measured` and still prints both frozen row values under `baseline_rows`, so an unmeasured arm is never read as a zero cost. An explicitly empty `--skill` path is refused with exit 2, because an empty argument is a wiring mistake rather than a decision to skip the arm.
+
+Growth is accepted only by an exact-digest allowance record with both ceilings: `allowances/frozen-v1.json` holds the records, one record names one candidate pack digest together with `max_bytes` and `max_tokens`, and a growth with no record naming its digest — or with only one ceiling, or with both ceilings exceeded — fails and names the measure, the numbers, and the digest. The two arms stay independent under a record: `budget_allowances.within` reports problems keyed by measure, so a byte ceiling that is breached fails the bytes arm while a token count that still fits its own ceiling keeps the tokens arm passing, and each failure message names only its own measure.
+
+An allowance record carries a stable `decision_id`, the `date` the decision was made, a `reason`, the measured `base_commit`, the exact `candidate_sha256` pack digest it covers, and its independent `max_bytes` and `max_tokens` ceilings. The commit the allowance lands in is deliberately not a field: git history records it, so the record cannot go stale by naming a commit that does not exist yet.
+
+Keeping the measurement and the judgement apart is deliberate, and it still holds inside the one check: `measure.py` prints the rows for a human or a review and carries no threshold, while the judgement lives in `budget_check.py` against the pinned digest, so a measurement that can be argued with stays trustworthy and a threshold can move later without re-deriving how the number was produced.
