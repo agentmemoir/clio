@@ -50,8 +50,9 @@ const CATALOG_FORMAT_VERSION: u32 = 2;
 /// command the CLI accepts that binds no tool is still listed.
 /// `command_specs`, `groups`, and `shared_global` serialize the registry
 /// records and their derived tables, and `cli_hash` fingerprints that
-/// CLI-side metadata — the tools, the protocol revision, and the pack's own
-/// `catalog_hash` are excluded, because they belong to the pack.
+/// CLI-side metadata — `format`, `format_version`, the tools, the protocol
+/// revision, and the pack's own `catalog_hash` and `catalog_hash_definition`
+/// are excluded, because they belong to the pack or to the document envelope.
 pub(crate) fn catalog() -> Value {
     validate_names();
     let pack = clio_mcp::schema::schema_pack();

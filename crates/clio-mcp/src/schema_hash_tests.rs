@@ -51,78 +51,55 @@ fn pack_tools(pack: &Value) -> Vec<Value> {
         .clone()
 }
 
-/// Hash a copy of the pack's tools with `mutate` applied to the first tool only,
-/// then prove that the untouched original still hashes to the original value.
-fn assert_first_tool_field_change_alters_the_hash(mutate: impl Fn(&mut Value), field: &str) {
-    let tools = pack_tools(&schema_pack());
+/// Hash the pack's tools with `mutate` applied to the first tool, prove the hash
+/// changed, then apply `revert` to that same first tool and prove the original
+/// hash returns. Nothing is re-cloned between the two assertions, so the second
+/// one is a fact about the undo and not about an untouched copy.
+fn assert_first_tool_field_change_alters_the_hash(
+    mutate: impl Fn(&mut Value),
+    revert: impl Fn(&mut Value),
+    field: &str,
+) {
+    let mut tools = pack_tools(&schema_pack());
     let original = catalog_hash(&tools);
-    let mut mutated = tools.clone();
-    mutate(&mut mutated[0]);
+    mutate(&mut tools[0]);
     assert_ne!(
-        catalog_hash(&mutated),
+        catalog_hash(&tools),
         original,
         "changing `{field}` on the first tool changes catalog_hash"
     );
+    revert(&mut tools[0]);
     assert_eq!(
         catalog_hash(&tools),
         original,
-        "restoring `{field}` restores catalog_hash"
+        "reverting `{field}` on the same tool restores catalog_hash"
     );
 }
 
 /// Protects the published definition's exact key set and values: a field cannot
 /// disappear, and none of the ten rules can drift from the documented ones.
+///
+/// The assertion compares the whole object against the literal below, so a
+/// single changed character in any value fails the test. Substring checks
+/// cannot carry this weight: an `input` string stripped of "compact UTF-8 JSON
+/// encoding" still contains every word a needle list would look for.
 #[test]
 fn definition_names_algorithm_input_order_and_rendered_form() {
-    let definition = definition();
-    let mut keys: Vec<&str> = definition.keys().map(String::as_str).collect();
-    keys.sort_unstable();
     assert_eq!(
-        keys,
-        [
-            "algorithm",
-            "concatenation",
-            "hash_bits",
-            "input",
-            "offset_basis",
-            "order",
-            "prime",
-            "rendered_form",
-            "rendered_form_is_external_contract",
-            "version",
-        ],
-        "catalog_hash_definition publishes exactly the ten documented keys"
-    );
-    assert_eq!(definition["algorithm"], json!("FNV-1a"));
-    assert_eq!(definition["version"], json!("fnv1a64"));
-    assert_eq!(definition["hash_bits"], json!(64));
-    assert_eq!(definition["offset_basis"], json!("0xcbf29ce484222325"));
-    assert_eq!(definition["prime"], json!("0x100000001b3"));
-    // The input sentence is the only prose a recomputing reader gets: it must
-    // name the hashed tool fields, the key order, and the preserved array order.
-    let input = definition["input"]
-        .as_str()
-        .expect("definition `input` is a string");
-    for needle in ["name", "description", "inputSchema", "outputSchema"] {
-        assert!(input.contains(needle), "input names `{needle}`: {input}");
-    }
-    assert!(
-        input.contains("lexicographic"),
-        "input names lexicographic object keys: {input}"
-    );
-    assert!(
-        input.contains("array order preserved"),
-        "input names preserved array order: {input}"
-    );
-    assert_eq!(definition["order"], json!("catalog registry order"));
-    assert_eq!(
-        definition["concatenation"],
-        json!("adjacent bytes, no separator")
-    );
-    assert_eq!(definition["rendered_form"], json!("fnv1a64:{hash:016x}"));
-    assert_eq!(
-        definition["rendered_form_is_external_contract"],
-        json!(true)
+        Value::Object(definition()),
+        json!({
+            "algorithm": "FNV-1a",
+            "version": "fnv1a64",
+            "hash_bits": 64,
+            "offset_basis": "0xcbf29ce484222325",
+            "prime": "0x100000001b3",
+            "input": "compact UTF-8 JSON encoding of every tool definition published in tools[], including name, description, inputSchema and outputSchema, with object keys in lexicographic order and array order preserved",
+            "order": "catalog registry order",
+            "concatenation": "adjacent bytes, no separator",
+            "rendered_form": "fnv1a64:{hash:016x}",
+            "rendered_form_is_external_contract": true
+        }),
+        "catalog_hash_definition is exactly the ten published fields with their exact published values"
     );
 }
 
@@ -190,7 +167,8 @@ fn rendered_form_is_a_version_prefix_and_sixteen_lowercase_hex_digits() {
 }
 
 /// Protects that the hash covers the tool set itself: a rename, a removal, and
-/// an addition each change it, and restoring the list restores the value.
+/// an addition each change it, and undoing each edit on the same vector
+/// restores the value.
 #[test]
 fn renaming_adding_or_removing_a_tool_changes_the_hash_and_reverting_restores_it() {
     let pack = schema_pack();
@@ -204,13 +182,19 @@ fn renaming_adding_or_removing_a_tool_changes_the_hash_and_reverting_restores_it
         "the private catalog_hash reproduces the published value"
     );
 
+    let name = tools[0]["name"].clone();
     tools[0]["name"] = json!("__renamed_first_tool__");
     assert_ne!(
         catalog_hash(&tools),
         original,
         "renaming the first tool changes the hash"
     );
-    tools = pack_tools(&pack);
+    tools[0]["name"] = name;
+    assert_eq!(
+        catalog_hash(&tools),
+        original,
+        "restoring the first tool's name restores the hash"
+    );
 
     let last = tools.last().expect("the catalog publishes tools").clone();
     tools.pop().expect("the catalog publishes tools");
@@ -219,9 +203,14 @@ fn renaming_adding_or_removing_a_tool_changes_the_hash_and_reverting_restores_it
         original,
         "removing the last tool changes the hash"
     );
-    tools = pack_tools(&pack);
+    tools.push(last);
+    assert_eq!(
+        catalog_hash(&tools),
+        original,
+        "re-inserting the last tool restores the hash"
+    );
 
-    let mut copy = last;
+    let mut copy = tools.last().expect("the catalog publishes tools").clone();
     copy["name"] = json!("__appended_tool_copy__");
     tools.push(copy);
     assert_ne!(
@@ -229,12 +218,11 @@ fn renaming_adding_or_removing_a_tool_changes_the_hash_and_reverting_restores_it
         original,
         "appending a renamed copy of the last tool changes the hash"
     );
-    tools = pack_tools(&pack);
-
+    tools.pop().expect("the appended tool");
     assert_eq!(
         catalog_hash(&tools),
         original,
-        "reverting restores the hash"
+        "removing the appended tool restores the hash"
     );
 }
 
@@ -272,16 +260,30 @@ fn changing_only_a_description_an_input_schema_or_an_output_schema_changes_the_h
         );
     }
 
+    let description = first["description"].clone();
     assert_first_tool_field_change_alters_the_hash(
         |tool| tool["description"] = json!("a description changed by the catalog-hash test"),
+        |tool| tool["description"] = description.clone(),
         "description",
     );
     assert_first_tool_field_change_alters_the_hash(
         |tool| tool["inputSchema"]["properties"]["__hash_probe"] = json!({"type": "string"}),
+        |tool| {
+            tool["inputSchema"]["properties"]
+                .as_object_mut()
+                .expect("inputSchema.properties is an object")
+                .remove("__hash_probe");
+        },
         "inputSchema.properties.__hash_probe",
     );
     assert_first_tool_field_change_alters_the_hash(
         |tool| tool["outputSchema"]["properties"]["__hash_probe"] = json!({"type": "string"}),
+        |tool| {
+            tool["outputSchema"]["properties"]
+                .as_object_mut()
+                .expect("outputSchema.properties is an object")
+                .remove("__hash_probe");
+        },
         "outputSchema.properties.__hash_probe",
     );
 }
