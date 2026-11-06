@@ -10,8 +10,9 @@
 //! ## Owns
 //! - Metaschema validity and offline compilation for all three emission paths
 //! - A dangling local reference failing both compilation and pack validation
-//! - Reference emission being smaller than its flattened expansion, with the
-//!   mission entry defined once and referenced twice
+//! - Reference emission being smaller than its flattened expansion where the
+//!   mission entry is defined once and referenced twice, plus the batch
+//!   candidate definition referenced once
 //! - The retention tools accepting and rejecting arguments their own published
 //!   schema constrains
 //! - Each retention tool resolving to the shape the base commit published
@@ -185,10 +186,14 @@ fn retention_input(name: &str) -> Value {
     catalog_def(name).expect("a retention tool").to_tool()["inputSchema"].clone()
 }
 
-/// The input schemas of both retention tools as the base commit published
-/// them, before either tool carried its own root `$defs`. The guard below
-/// compares the resolved contract, so a default, enum, or description change
-/// fails it while a change in reference packing does not.
+/// The resolved input schemas of both retention tools: each tool's document
+/// with every local reference flattened and its root `$defs` removed. The guard
+/// below compares that resolved contract, so a default, enum, or description
+/// change fails it while a change in reference packing does not.
+///
+/// The recorded batch element gained `type` and the single-item `required` list
+/// when the element became a local reference to the shared admission candidate
+/// definition, so this file pins the shape that reference resolves to.
 const RETENTION_BASE_INPUT_SCHEMAS: &str =
     include_str!("../tests/fixtures/retention_base_input_schemas.json");
 
@@ -256,54 +261,69 @@ fn a_reference_without_local_definitions_fails() {
 
 #[test]
 fn reference_based_emission_is_smaller_than_the_flattened_candidate() {
-    for name in MISSION_TOOLS {
-        let schema = retention_input(name);
-        let emitted = serde_json::to_string(&schema).expect("emitted");
-        let expanded = serde_json::to_string(&without_root_defs(&flattened(&schema, &schema)))
-            .expect("flattened");
-        assert!(
-            expanded.len() > emitted.len(),
-            "{name}: emitted {} bytes, flattened {} bytes",
-            emitted.len(),
-            expanded.len()
-        );
-        let defs = schema["$defs"].as_object().expect("root $defs");
-        assert_eq!(defs.len(), 1, "{name}: one shared definition");
-        assert!(defs.contains_key("MissionEntry"), "{name}: the shared one");
-        assert_eq!(
-            count_refs(&schema, "#/$defs/MissionEntry"),
-            2,
-            "{name}: both mission lists reference the shared definition"
-        );
-        println!(
-            "{name}: emitted {} bytes, flattened {} bytes",
-            emitted.len(),
-            expanded.len()
-        );
-    }
-
-    let pack = schema_pack();
-    let emitted = serde_json::to_string(&pack).expect("pack");
-    let mut expanded_pack = pack;
-    for tool in expanded_pack["tools"]
-        .as_array_mut()
-        .expect("the pack holds tools")
-    {
-        if let Some(schema) = tool.get("inputSchema") {
-            tool["inputSchema"] = without_root_defs(&flattened(schema, schema));
-        }
-    }
-    let expanded = serde_json::to_string(&expanded_pack).expect("flattened pack");
+    // `retention_profile_set` references the shared mission entry twice, so one
+    // definition plus two pointers is smaller than two inline copies.
+    let schema = retention_input("retention_profile_set");
+    let emitted = serde_json::to_string(&schema).expect("emitted");
+    let expanded =
+        serde_json::to_string(&without_root_defs(&flattened(&schema, &schema))).expect("flattened");
     assert!(
         expanded.len() > emitted.len(),
-        "pack: emitted {} bytes, flattened {} bytes",
+        "retention_profile_set: emitted {} bytes, flattened {} bytes",
         emitted.len(),
         expanded.len()
     );
+    let defs = schema["$defs"].as_object().expect("root $defs");
+    assert_eq!(
+        defs.len(),
+        1,
+        "retention_profile_set: one shared definition"
+    );
+    assert!(defs.contains_key("MissionEntry"), "the shared one");
+    assert_eq!(
+        count_refs(&schema, "#/$defs/MissionEntry"),
+        2,
+        "both mission lists reference the shared definition"
+    );
     println!(
-        "pack: emitted {} bytes, flattened {} bytes",
+        "retention_profile_set: emitted {} bytes, flattened {} bytes",
         emitted.len(),
         expanded.len()
+    );
+
+    // `admit_preview_batch` references its candidate definition once behind a
+    // `$defs` wrapper, which is larger than the inline copy, so its guard is
+    // the reference and definition count rather than the byte size.
+    let batch = retention_input("admit_preview_batch");
+    let candidate_ref = "#/$defs/AdmissionCandidate";
+    assert_eq!(
+        count_refs(&batch, candidate_ref),
+        1,
+        "admit_preview_batch: one candidate reference"
+    );
+    let batch_defs = batch["$defs"].as_object().expect("root $defs");
+    assert_eq!(
+        batch_defs.len(),
+        2,
+        "admit_preview_batch: the candidate plus the mission entry"
+    );
+    assert!(batch_defs.contains_key("AdmissionCandidate"));
+    assert!(batch_defs.contains_key("MissionEntry"));
+
+    let pack = schema_pack();
+    let published = pack["tools"]
+        .as_array()
+        .expect("the pack holds tools")
+        .iter()
+        .find(|tool| tool["name"] == json!("admit_preview_batch"))
+        .expect("the pack publishes the batch preview");
+    assert_eq!(count_refs(published, candidate_ref), 1);
+    assert_eq!(
+        published["inputSchema"]["$defs"]
+            .as_object()
+            .expect("root $defs")
+            .len(),
+        2
     );
 }
 
