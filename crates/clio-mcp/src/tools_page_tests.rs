@@ -16,6 +16,8 @@
 //!   cursor format version
 //! - A cursor refused when another preset governs the view, and two presets
 //!   minting two cursors over one tool set
+//! - A cursor offset at or past the end of the view, and the empty view's
+//!   initial page
 //!
 //! ## Does not own
 //! - The page-size constants and the cursor code itself (`tools_page`)
@@ -125,6 +127,17 @@ fn first_cursor(tools: &[Value], size: usize) -> String {
     cursor(&response)
         .expect("a first page with more tools carries a cursor")
         .to_owned()
+}
+
+/// Rewrite the offset field of a real cursor, so a test can aim it at a view
+/// position the server never mints.
+fn with_offset(encoded: &str, offset: usize) -> String {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .expect("a real cursor is valid base64url");
+    let mut fields: Value = serde_json::from_slice(&bytes).expect("a real cursor is a JSON tuple");
+    fields[3] = json!(offset);
+    encode_raw(&fields)
 }
 
 #[test]
@@ -286,6 +299,84 @@ fn the_first_page_cursor_differs_between_presets() {
         cursor(&minimal).expect("the `minimal` page continues"),
         "the cursor is bound to the preset that minted it"
     );
+}
+
+#[test]
+fn a_cursor_offset_at_the_end_of_the_view_is_refused() {
+    let tools = synthetic(60);
+    let encoded = first_cursor(&tools, 10);
+    let error = synthetic_page(
+        &tools,
+        &json!({ "cursor": with_offset(&encoded, tools.len()) }),
+    )
+    .expect_err("an offset at the end of the view is refused");
+    assert_eq!(error.code, ERR_INVALID_PARAMS);
+    assert!(error.message.contains("past the end"), "{}", error.message);
+}
+
+#[test]
+fn a_cursor_offset_past_the_end_of_the_view_is_refused() {
+    let tools = synthetic(60);
+    let encoded = first_cursor(&tools, 10);
+    let error = synthetic_page(
+        &tools,
+        &json!({ "cursor": with_offset(&encoded, tools.len() + 1) }),
+    )
+    .expect_err("an offset past the end of the view is refused");
+    assert_eq!(error.code, ERR_INVALID_PARAMS);
+}
+
+#[test]
+fn an_empty_view_answers_an_initial_request_with_an_empty_terminal_page() {
+    let response = synthetic_page(&[], &json!({})).expect("an empty view has a page");
+    assert_eq!(response, json!({ "tools": [] }));
+    assert!(
+        cursor(&response).is_none(),
+        "an empty view has no next page"
+    );
+}
+
+#[test]
+fn a_changed_catalog_invalidates_a_cursor() {
+    let tools = synthetic(60);
+    let encoded = first_cursor(&tools, 10);
+    let mut changed = tools.clone();
+    changed[0] = json!({ "name": "renamed_tool" });
+    let error = synthetic_page(&changed, &json!({ "cursor": encoded }))
+        .expect_err("a cursor from another catalog is refused");
+    assert_eq!(error.code, ERR_INVALID_PARAMS);
+    assert!(
+        error.message.contains("different tool view"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_changed_revision_invalidates_a_cursor() {
+    let tools = synthetic(60);
+    let encoded = first_cursor(&tools, 10);
+    let mut changed = view(ToolPreset::All);
+    changed.revision = "2026-01-01".to_owned();
+    let error = page(&tools, &changed, Some(&json!({ "cursor": encoded })))
+        .expect_err("a cursor from another revision is refused");
+    assert_eq!(error.code, ERR_INVALID_PARAMS);
+    assert!(
+        error.message.contains("different tool view"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_page_size_below_one_or_not_an_integer_is_refused() {
+    let tools = synthetic(60);
+    for size in [json!(0), json!(-1), json!(1.5), json!("ten")] {
+        let error = synthetic_page(&tools, &json!({ "_meta": { PAGE_SIZE_KEY: size } }))
+            .expect_err("a page size outside the accepted range is refused");
+        assert_eq!(error.code, ERR_INVALID_PARAMS, "{}", error.message);
+        assert!(error.message.contains(PAGE_SIZE_KEY), "{}", error.message);
+    }
 }
 
 /// A document preset this build does not know must not fail `tools/list` when

@@ -1,0 +1,1 @@
+A `tools/list` cursor whose offset equals the end of the view now answers `-32602` (`Invalid params`) instead of an empty page with no `nextCursor`. A cursor at or past the end names no tool, so the server refuses it rather than returning a page that cannot advance the walk.

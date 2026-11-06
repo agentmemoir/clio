@@ -81,8 +81,11 @@ struct Cursor {
 ///
 /// The first request of a walk carries no cursor, so it starts at offset zero
 /// with the requested size. Later requests carry a cursor, which holds the
-/// view digest, the page size, and the next offset. A page that ends before the
-/// list does carries `nextCursor`; the last page omits it.
+/// view digest, the page size, and the next offset. A cursor is refused unless
+/// its offset is inside the view, so an offset at or past the end never answers
+/// an empty page. A page that ends before the list does carries `nextCursor`;
+/// the last page omits it. An empty view answers an initial request with an
+/// empty page and no cursor.
 pub(crate) fn page(
     tools: &[Value],
     view: &ToolView,
@@ -103,15 +106,15 @@ pub(crate) fn page(
                     "`{PAGE_SIZE_KEY}` disagrees with the page size in the cursor"
                 )));
             }
+            if cursor.offset >= tools.len() {
+                return Err(invalid_params(
+                    "tools/list cursor points at or past the end of the tool view",
+                ));
+            }
             (cursor.size, cursor.offset)
         }
         None => (requested.unwrap_or(DEFAULT_PAGE_SIZE), 0),
     };
-    if offset > tools.len() {
-        return Err(invalid_params(
-            "tools/list cursor points past the end of the tool view",
-        ));
-    }
     let end = offset.saturating_add(size).min(tools.len());
     let mut result = json!({ "tools": tools[offset..end].to_vec() });
     if end < tools.len() {
