@@ -371,6 +371,64 @@ fn a_message_without_an_id_is_a_notification_and_is_never_answered() {
 }
 
 #[test]
+fn first_message_is_served_without_a_handshake() {
+    let res = answer(
+        &state(),
+        &request("tools/list", &required_meta(CANDIDATE_REVISION)),
+    );
+    assert!(res.get("error").is_none(), "no prior initialize: {res}");
+    assert!(
+        !res["result"]["tools"]
+            .as_array()
+            .expect("a tool list")
+            .is_empty(),
+        "the catalogue is served: {res}"
+    );
+}
+
+#[test]
+fn dispatch_takes_one_message_and_no_session_handle() {
+    let entry: fn(&McpState, &Value) -> Option<Value> = dispatch;
+    let res = entry(
+        &state(),
+        &request("server/discover", &required_meta(CANDIDATE_REVISION)),
+    )
+    .expect("a request carrying an id is answered");
+    assert_eq!(res["result"]["resultType"], json!("complete"), "{res}");
+}
+
+#[test]
+fn answers_carry_no_session_identity() {
+    let state = state();
+    for msg in [
+        request("server/discover", &required_meta(CANDIDATE_REVISION)),
+        request("tools/list", &required_meta(CANDIDATE_REVISION)),
+        tool_call(&required_meta(CANDIDATE_REVISION), json!({})),
+    ] {
+        let res = answer(&state, &msg);
+        let text = res.to_string();
+        assert!(!text.contains("Mcp-Session-Id"), "{text}");
+        assert!(!text.contains("sessionId"), "{text}");
+        if let Some(Value::Object(meta)) = res.pointer("/result/_meta") {
+            assert!(
+                meta.keys()
+                    .all(|key| !key.to_lowercase().contains("session")),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn independent_states_serve_the_same_request_identically() {
+    let (first, second) = (state(), state());
+    for method in ["server/discover", "tools/list"] {
+        let msg = request(method, &required_meta(CANDIDATE_REVISION));
+        assert_eq!(answer(&first, &msg), answer(&second, &msg), "{method}");
+    }
+}
+
+#[test]
 fn the_pin_is_untouched_by_the_candidate() {
     assert_eq!(crate::MCP_PROTOCOL_REVISION, "2025-11-25");
     assert_eq!(
