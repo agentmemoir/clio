@@ -27,7 +27,7 @@ import budget_targets
 REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
-FIXTURE_DIGEST = "622890f6a700b3b5188abda7a6c1e2c196f51280703bb6babaae815d55232f3e"
+FIXTURE_DIGEST = "a43d52ea02d81517f478cbebe88b87d193477c90ebe80a33332e0ac7e27586e2"
 
 
 def require_tokenizer():
@@ -59,19 +59,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(report["format"], "clio_mcp_budget_check")
         self.assertEqual(report["verdict"], "pass")
         expected_allowance = {
-            "decision_id": "mcp-retention-local-defs-2026-11-06",
+            "decision_id": "mcp-admission-candidate-def-2026-11-06",
             "date": "2026-11-06",
-            "base_commit": "3ea0d0f7ea36c120c0a62ef99e78aadae9e57a4a",
-            "max_bytes": 148633,
-            "max_tokens": 31667,
+            "base_commit": "f3ebd67c8eb99b0f6dbadda927ba234cd0fbfd96",
+            "max_bytes": 148729,
+            "max_tokens": 31691,
         }
         self.assertEqual(report["allowance"], expected_allowance)
         self.assertEqual(report["failures"], [])
         self.assertEqual(
             report["candidate"],
-            {"sha256": FIXTURE_DIGEST, "bytes": 148633, "tokens": 31667},
+            {"sha256": FIXTURE_DIGEST, "bytes": 148729, "tokens": 31691},
         )
-        self.assertEqual([arm["delta"] for arm in report["arms"]], [43001, 9976])
+        self.assertEqual([arm["delta"] for arm in report["arms"]], [43097, 10000])
         for arm in report["arms"]:
             self.assertEqual(arm["verdict"], "pass")
             self.assertEqual(arm["allowance"], expected_allowance)
