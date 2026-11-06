@@ -18,6 +18,9 @@
 //!   minting two cursors over one tool set
 //! - A cursor offset at or past the end of the view, and the empty view's
 //!   initial page
+//! - A cursor refused when the catalog, the revision, or the effective group
+//!   selection changed under it
+//! - A page size below one or not an integer refused
 //!
 //! ## Does not own
 //! - The page-size constants and the cursor code itself (`tools_page`)
@@ -360,6 +363,34 @@ fn a_changed_revision_invalidates_a_cursor() {
     changed.revision = "2026-01-01".to_owned();
     let error = page(&tools, &changed, Some(&json!({ "cursor": encoded })))
         .expect_err("a cursor from another revision is refused");
+    assert_eq!(error.code, ERR_INVALID_PARAMS);
+    assert!(
+        error.message.contains("different tool view"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_cursor_from_another_group_selection_is_refused() {
+    let tools = synthetic(60);
+    let mut selected = ToolView {
+        preset: None,
+        groups: clio_types::custom(&["ops"]).expect("a known group"),
+        revision: "2025-11-25".to_owned(),
+    };
+    let first = page(
+        &tools,
+        &selected,
+        Some(&json!({ "_meta": { PAGE_SIZE_KEY: 10 } })),
+    )
+    .expect("a valid first page");
+    let encoded = cursor(&first)
+        .expect("a first page with more tools carries a cursor")
+        .to_owned();
+    selected.groups = clio_types::custom(&["ops", "task"]).expect("a known group");
+    let error = page(&tools, &selected, Some(&json!({ "cursor": encoded })))
+        .expect_err("a cursor from another group selection is refused");
     assert_eq!(error.code, ERR_INVALID_PARAMS);
     assert!(
         error.message.contains("different tool view"),
