@@ -218,3 +218,7 @@ mod schema_context_read_schema_tests;
 #[cfg(test)]
 #[path = "schema_hash_tests.rs"]
 mod schema_hash_tests;
+
+#[cfg(test)]
+#[path = "schema_local_defs_tests.rs"]
+mod schema_local_defs_tests;

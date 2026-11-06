@@ -9,6 +9,8 @@
 //!
 //! ## Owns
 //! - One `inputSchema` per Core tool (MCP tool rules: root `type: object`)
+//! - Root `$defs` for an `inputSchema` that carries a local `#/$defs/`
+//!   reference, supplied by the tool definition that publishes it
 //! - Enum vocabulary constants (`epistemic_kind`, `update_rule`, categories,
 //!   episodic type tags) as separate properties
 //!
@@ -64,10 +66,20 @@ pub struct ToolDef {
 
 impl ToolDef {
     /// Render as an MCP tool entry with `inputSchema`.
+    ///
+    /// A property entry named exactly `$defs` is reserved: its value becomes the
+    /// `inputSchema` root `$defs`, and it is never emitted under `properties`.
+    /// This lets the module that publishes a local `#/$defs/...` reference also
+    /// publish the definitions the reference resolves against.
     #[must_use]
     pub fn to_tool(&self) -> Value {
         let mut properties = serde_json::Map::new();
+        let mut local_defs = None;
         for (name, schema) in &self.props {
+            if *name == "$defs" {
+                local_defs = Some(schema.clone());
+                continue;
+            }
             properties.insert((*name).to_owned(), schema.clone());
         }
         let mut tool = json!({
@@ -80,6 +92,12 @@ impl ToolDef {
                 "additionalProperties": false
             }
         });
+        if let Some(defs) = local_defs {
+            // A property copied out of the profile schema keeps its local
+            // `$ref`; the same document root must carry the definitions or the
+            // pointer dangles.
+            tool["inputSchema"]["$defs"] = defs;
+        }
         crate::schema_output_defs::insert_output_schema(
             &mut tool,
             crate::schema_output_defs::output_schema(self.name),
