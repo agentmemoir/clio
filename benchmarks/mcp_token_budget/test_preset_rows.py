@@ -5,6 +5,9 @@ Every byte count, digest, and token count is recomputed here from the committed
 pack, so a moved pack, a changed canonicalizer, or a stale row fails. The live
 test re-runs the recorder against a built binary inside a temporary directory, so
 the checks are never satisfied by re-reading what the recorder already wrote.
+That live comparison is skipped, naming the catalog drift, once the live ``all``
+row's ``catalog_hash`` leaves the recorded one: the record is frozen, so later
+measurements belong in a separate record file.
 """
 
 import copy
@@ -32,6 +35,8 @@ PACKS = PRESETS_DIR / "packs"
 REPO_ROOT = HERE.parents[1]
 
 EXPECTED_PRESETS = ["minimal", "coding", "ops", "all"]
+FULL_PRESET = "all"
+EAGER_CLIENT = "synthetic-eager-client"
 EAGER_ROW = "client/synthetic-eager-client/turn/1"
 ON_DEMAND_CLIENT = "synthetic-on-demand-client"
 MEASURED_LABEL = "Measured"
@@ -102,6 +107,47 @@ def pack_digests(packs=PACKS):
     }
 
 
+def catalog_hashes(rows):
+    """Return each row's recorded catalog hash, keyed by preset."""
+    return {row["preset"]: row["catalog_hash"] for row in rows}
+
+
+def catalog_drift_reason(record, live):
+    """Return why a live export cannot be compared with ``record``, or None."""
+    live_hash = catalog_hashes(live["rows"])[FULL_PRESET]
+    recorded_hash = catalog_hashes(record["rows"])[FULL_PRESET]
+    if live_hash == recorded_hash:
+        return None
+    return (
+        "the catalog moved since the measurement: the live 'all' row carries "
+        f"{live_hash}, the recorded 'all' row carries {recorded_hash}; later "
+        "measurements belong in a separate record file"
+    )
+
+
+def live_mismatches(record, live, live_packs):
+    """Return one message per disagreement between a live export and ``record``."""
+    failures = []
+    if strip_dates(live["rows"]) != strip_dates(record["rows"]):
+        failures.append("the live rows disagree with the recorded rows")
+    live_measurement = {
+        key: value for key, value in live["measurement"].items() if key != "command"
+    }
+    if live_measurement != {
+        key: value for key, value in record["measurement"].items() if key != "command"
+    }:
+        failures.append("the live measurement disagrees with the record")
+    for key in ("delivery", "delivery_note", "baseline_row", "baseline_record"):
+        if live[key] != record[key]:
+            failures.append(f"the live {key} disagrees with the record")
+    for preset in EXPECTED_PRESETS:
+        if (Path(live_packs) / f"{preset}.json").read_bytes() != (
+            PACKS / f"{preset}.json"
+        ).read_bytes():
+            failures.append(f"{preset}: the live pack differs from the committed pack")
+    return failures
+
+
 def find_binary():
     """Return the CLI binary the recorder would use, or None when none is built."""
     configured = os.environ.get("CLIO_BIN")
@@ -133,18 +179,20 @@ class PresetSurfaceTests(unittest.TestCase):
         self.assertEqual([row["preset"] for row in record["rows"]], EXPECTED_PRESETS)
         self.assertEqual(record["unobserved"], [])
 
-    def test_every_row_names_the_eager_baseline_and_never_the_on_demand_client(self):
+    def test_every_row_is_the_eager_client_turn_and_never_the_on_demand_client(self):
         record = load_record()
-        self.assertEqual(record["baseline_row"], EAGER_ROW)
         self.assertEqual(record["delivery"], "eager")
+        self.assertEqual(record["baseline_row"], EAGER_ROW)
         for row in record["rows"]:
             self.assertEqual(row["baseline_row"], EAGER_ROW)
-        serialized = RECORD.read_text(encoding="utf-8")
-        self.assertNotIn(ON_DEMAND_CLIENT, serialized)
-        self.assertNotIn("on-demand", serialized)
-        self.assertNotIn("on_demand", serialized)
-        self.assertNotIn("discovery-on", serialized)
-        self.assertIn("no discovery mode", record["delivery_note"])
+            self.assertNotIn(ON_DEMAND_CLIENT, json.dumps(row, sort_keys=True))
+            self.assertNotIn("discovery-on", json.dumps(row, sort_keys=True))
+        note = record["delivery_note"]
+        self.assertIn(record["baseline_record"]["path"], note)
+        self.assertIn(EAGER_CLIENT, note)
+        self.assertIn("discovery-off", note)
+        self.assertIn(ON_DEMAND_CLIENT, note)
+        self.assertIn("discovery-on", note)
 
     def test_every_row_carries_one_measured_label_an_iso_date_and_a_sha256(self):
         for row in load_record()["rows"]:
@@ -156,6 +204,14 @@ class PresetSurfaceTests(unittest.TestCase):
             self.assertIsInstance(row["tokens"], int)
             self.assertGreater(row["bytes"], 0)
             self.assertGreater(row["tokens"], 0)
+
+    def test_every_row_carries_the_catalog_hash_of_its_own_pack(self):
+        record = load_record()
+        self.assertNotIn("catalog_hash", record["measurement"])
+        recorded = catalog_hashes(record["rows"])
+        for preset in EXPECTED_PRESETS:
+            pack = json.loads((PACKS / f"{preset}.json").read_text(encoding="utf-8"))
+            self.assertEqual(recorded[preset], pack["catalog_hash"], preset)
 
     def test_bytes_and_sha256_recompute_from_the_committed_pack(self):
         rows = load_record()["rows"]
@@ -226,21 +282,14 @@ class PresetSurfaceTests(unittest.TestCase):
             )
             live = load_record(out)
             committed = load_record()
-            self.assertEqual(strip_dates(live["rows"]), strip_dates(committed["rows"]))
-            self.assertEqual(
-                live["measurement"]["catalog_hash"],
-                committed["measurement"]["catalog_hash"],
-            )
+            reason = catalog_drift_reason(committed, live)
+            if reason is not None:
+                self.skipTest(reason)
+            self.assertEqual(live_mismatches(committed, live, box / "packs"), [])
             self.assertEqual(
                 sorted(path.name for path in (box / "packs").iterdir()),
                 sorted(f"{preset}.json" for preset in EXPECTED_PRESETS),
             )
-            for preset in EXPECTED_PRESETS:
-                self.assertEqual(
-                    (box / "packs" / f"{preset}.json").read_bytes(),
-                    (PACKS / f"{preset}.json").read_bytes(),
-                    preset,
-                )
         self.assertEqual(pack_digests(), before)
 
 

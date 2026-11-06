@@ -33,14 +33,19 @@ RECORD_FORMAT = "am_mcp_preset_surface"
 RECORD_FORMAT_VERSION = 1
 RECORD_ID = "preset-surface-v1"
 PRESETS = ("minimal", "coding", "ops", "all")
-FULL_PRESET = "all"
 BASELINE_ROW = "client/synthetic-eager-client/turn/1"
 BASELINE_RECORD_PATH = "benchmarks/mcp_token_budget/baseline/frozen-v1.json"
 DELIVERY = "eager"
 DELIVERY_NOTE = (
-    "Eager delivery means every tool definition with its input schema is delivered "
-    "at turn 1, and this build has no discovery mode, so this is the discovery-off "
-    "surface."
+    "Eager delivery is the client mode of the frozen baseline record "
+    "benchmarks/mcp_token_budget/baseline/frozen-v1.json whose client is "
+    "synthetic-eager-client, and that mode delivers every tool definition with its "
+    "input schema at turn 1, so it is the discovery-off surface for these rows. The "
+    "same baseline record's client synthetic-on-demand-client is the discovery-on "
+    "mode, and no row here uses it."
+)
+COMMAND_TEMPLATE = (
+    "python3 benchmarks/mcp_token_budget/preset_rows.py --bin {binary} --out {out}"
 )
 NORMALIZATION = (
     "canonical bytes of the pack's tools array only; the pack envelope is excluded"
@@ -108,15 +113,19 @@ def _parse_pack(raw, preset):
     tools = pack.get("tools")
     if not isinstance(tools, list) or not tools:
         raise BudgetError(f"preset {preset!r} pack has no tools")
+    catalog_hash = pack.get("catalog_hash")
+    if not isinstance(catalog_hash, str) or not catalog_hash:
+        raise BudgetError(f"preset {preset!r} pack has no catalog_hash")
     return pack
 
 
-def _row(preset, tools, tokenizer, date):
-    """Build one measured preset row from a tools array."""
-    canonical = canonical_bytes(tools)
+def _row(preset, pack, tokenizer, date):
+    """Build one measured preset row from a validated preset pack."""
+    canonical = canonical_bytes(pack["tools"])
     return {
         "preset": preset,
         "baseline_row": BASELINE_ROW,
+        "catalog_hash": pack["catalog_hash"],
         "bytes": len(canonical),
         "tokens": tokenizer.count(canonical.decode("utf-8")),
         "label": "Measured",
@@ -126,14 +135,14 @@ def _row(preset, tools, tokenizer, date):
 
 
 def measure(binary, fixtures, tokenizer, date):
-    """Export every preset, keep each pack as a fixture, and return ``(catalog, rows)``.
+    """Export every preset, keep each pack as a fixture, and return the rows.
 
-    The recorded catalog hash is the one the ``all`` pack carries, because that
-    preset is the whole discovery-off surface the record describes.
+    Every row records the catalog hash its own pack carries, so a preset whose
+    surface narrowed at a different revision still names the revision it was
+    measured at.
     """
     fixtures = Path(fixtures)
     rows = []
-    catalog = None
     with tempfile.TemporaryDirectory(prefix="clio-preset-rows-") as staging:
         try:
             fixtures.mkdir(parents=True, exist_ok=True)
@@ -142,16 +151,14 @@ def measure(binary, fixtures, tokenizer, date):
                 _export(binary, preset, staged)
                 raw = staged.read_bytes()
                 pack = _parse_pack(raw, preset)
-                if preset == FULL_PRESET:
-                    catalog = pack.get("catalog_hash")
-                rows.append(_row(preset, pack["tools"], tokenizer, date))
+                rows.append(_row(preset, pack, tokenizer, date))
                 (fixtures / f"{preset}.json").write_bytes(raw)
         except OSError as exc:
             raise BudgetError(f"cannot keep preset fixture: {exc}") from None
-    return catalog, rows
+    return rows
 
 
-def _render(binary, out_path, catalog_hash, rows, tokenizer) -> str:
+def _render(out_path, rows, tokenizer) -> str:
     """Return the complete record document as one string."""
     try:
         baseline_sha = hashlib.sha256(_BASELINE_FILE.read_bytes()).hexdigest()
@@ -168,14 +175,12 @@ def _render(binary, out_path, catalog_hash, rows, tokenizer) -> str:
         "delivery": DELIVERY,
         "delivery_note": DELIVERY_NOTE,
         "measurement": {
-            "command": (
-                f"python3 benchmarks/mcp_token_budget/preset_rows.py "
-                f"--bin {_display(binary)} --out {_display(out_path)}"
+            "command": COMMAND_TEMPLATE.format(
+                binary="<clio-binary>", out=_display(out_path)
             ),
             "normalization": NORMALIZATION,
             "encoder": tokenizer.encoding,
             "tokenizer": f"tiktoken=={tokenizer.provenance()['version']}",
-            "catalog_hash": catalog_hash,
         },
         "rows": rows,
         "unobserved": [],
@@ -227,8 +232,8 @@ def main(argv=None) -> int:
         # Load the tokenizer before anything is written, so a missing package
         # leaves no record and no fixture behind.
         tokenizer = load()
-        catalog_hash, rows = measure(binary, out_path.parent / "packs", tokenizer, date)
-        output = _render(binary, out_path, catalog_hash, rows, tokenizer)
+        rows = measure(binary, out_path.parent / "packs", tokenizer, date)
+        output = _render(out_path, rows, tokenizer)
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(output, encoding="utf-8")
