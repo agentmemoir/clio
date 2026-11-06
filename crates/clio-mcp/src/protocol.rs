@@ -25,7 +25,8 @@
 use crate::MCP_PROTOCOL_REVISION;
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
-use clio_types::{ToolPreset, tools_of};
+use crate::tools_page::ToolView;
+use clio_types::tools_of;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -173,7 +174,8 @@ impl McpHandler {
     /// decides what every transport advertises.
     ///
     /// # Errors
-    /// The effective configuration names a tool profile this build does not know.
+    /// The effective configuration names a tool profile this build does not
+    /// know and no installed selection governs the view.
     #[cfg(test)]
     pub(crate) fn tools_list_visible(state: &McpState) -> Result<Value, RpcError> {
         let (_, tools) = visible_view(state)?;
@@ -187,15 +189,15 @@ impl McpHandler {
     /// gets the default page.
     ///
     /// # Errors
-    /// The effective configuration names an unknown profile, or the request
-    /// carries a page size or cursor this build refuses.
+    /// The effective configuration names an unknown profile and no installed
+    /// selection governs the view, or the request carries a page size or cursor
+    /// this build refuses.
     pub(crate) fn tools_list_page(
         state: &McpState,
         params: Option<&Value>,
     ) -> Result<Value, RpcError> {
-        let (profile, tools) = visible_view(state)?;
-        let discovery = discovery_token(state);
-        crate::tools_page::page(&tools, profile, &discovery, params)
+        let (view, tools) = visible_view(state)?;
+        crate::tools_page::page(&tools, &view, params)
     }
 
     fn tools_call(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {
@@ -357,15 +359,21 @@ fn bound_set() -> Vec<&'static str> {
 /// lock.
 ///
 /// The groups come from the effective selection, so an installed `--tools`
-/// selection wins over `mcp.tool_profile`; the profile name is the document's
-/// own value and covers the page digest.
-fn visible_view(state: &McpState) -> Result<(ToolPreset, Vec<Value>), RpcError> {
+/// selection wins over `mcp.tool_profile`. When a selection governs the view,
+/// `mcp_tool_groups` answers without the document, so a missing or unknown
+/// document preset cannot fail the request; the profile is then absent from the
+/// snapshot.
+fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
     let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
         state.config.lock().expect("config runtime mutex poisoned");
-    let profile = rt.mcp_tool_profile();
     let groups = rt.mcp_tool_groups();
+    let preset = rt.mcp_tool_profile();
+    let revision = rt
+        .effective_raw()
+        .pointer("/mcp/revision")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     drop(rt);
-    let profile = profile.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
     let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
     let visible = tools_of(&groups);
     let bound = bound_set();
@@ -374,25 +382,14 @@ fn visible_view(state: &McpState) -> Result<(ToolPreset, Vec<Value>), RpcError> 
         .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
         .map(crate::schema_defs::ToolDef::to_tool)
         .collect();
-    Ok((profile, tools))
+    let view = ToolView {
+        preset: preset.ok(),
+        groups,
+        revision: revision.unwrap_or_else(|| MCP_PROTOCOL_REVISION.to_owned()),
+    };
+    Ok((view, tools))
 }
 
-/// The discovery token the visible-view digest covers.
-///
-/// It is the effective `mcp.revision`, so a client that changes the revision it
-/// asks for gets cursors bound to that view; the pinned protocol revision stands
-/// in when the configuration sets none.
-fn discovery_token(state: &McpState) -> String {
-    let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
-        state.config.lock().expect("config runtime mutex poisoned");
-    let token = rt
-        .effective_raw()
-        .pointer("/mcp/revision")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    drop(rt);
-    token.unwrap_or_else(|| MCP_PROTOCOL_REVISION.to_owned())
-}
 #[cfg(test)]
 #[path = "protocol_nfr7_tests.rs"]
 mod protocol_nfr7_tests;

@@ -29,10 +29,12 @@ base64url(no padding) of [1, "<digest>", <page size>, <next offset>]
 The digest covers three inputs:
 
 1. the catalog hash of the visible definitions, in catalog order;
-2. the selected tool profile and the groups it resolves to;
-3. the discovery token, which is the effective `mcp.revision` and the pinned protocol revision when no revision is set.
+2. the preset that names the view, or a marker when an installed `--tools` selection governs it instead, and the effective groups the view resolves to;
+3. the configuration revision: the effective `mcp.revision`, or the pinned protocol revision when no revision is set.
 
-The digest binds a cursor to one view. A change to a tool definition, a profile, or the discovery token makes old cursors answer `-32602` instead of returning a page from a different view.
+A client cannot ask for a different revision, and a protocol-version change does not alter the tools. The revision input can therefore only invalidate cursors issued before the revision changed; it never detects a changed view. The catalog hash and the group selection are what detect that.
+
+The digest binds a cursor to one view. A change to a tool definition, a preset, an installed selection, or the revision makes old cursors answer `-32602` instead of returning a page from a different view.
 
 The cursor holds no secret and no session id. The server keeps no per-client pagination state.
 

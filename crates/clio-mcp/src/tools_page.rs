@@ -11,8 +11,8 @@
 //! - The default page size, the maximum page size, and the request key that
 //!   selects a page size
 //! - Cursor encoding and decoding, including its format version
-//! - The visible-view digest over the catalog hash, the selected profile, and
-//!   the discovery token
+//! - The visible-view digest over the catalog hash, the effective group
+//!   selection, the preset that names it, and the configuration revision
 //! - The page slice and its optional `nextCursor`
 //!
 //! ## Does not own
@@ -31,7 +31,7 @@
 use crate::protocol::{RpcError, invalid_params};
 use crate::schema::{catalog_hash, fnv1a64_hex};
 use base64::Engine;
-use clio_types::ToolPreset;
+use clio_types::{ToolGroup, ToolPreset};
 use serde_json::{Value, json};
 
 /// The page size a request gets when it asks for none.
@@ -46,6 +46,29 @@ pub(crate) const PAGE_SIZE_KEY: &str = "com.agentmemoir/pageSize";
 
 /// The cursor format version this build writes and accepts.
 const CURSOR_VERSION: u64 = 1;
+
+/// The digest word for a view an installed selection governs, so it cannot be
+/// read as one of the preset names.
+const INSTALLED_SELECTION: &str = "installed";
+
+/// The identity of one visible view, read under one configuration lock.
+///
+/// One snapshot holds every digest input, so a configuration change between two
+/// reads cannot bind a cursor to a state that never existed.
+pub(crate) struct ToolView {
+    /// The preset that names the view, or `None` when an installed selection
+    /// governs it and no document preset applies.
+    pub(crate) preset: Option<ToolPreset>,
+    /// The effective group selection, with its dependency closure applied.
+    pub(crate) groups: Vec<ToolGroup>,
+    /// The effective `mcp.revision`, or the pinned protocol revision when the
+    /// configuration sets none.
+    ///
+    /// A client cannot ask for a different revision, and a protocol-version
+    /// change does not alter the tools. This input can only invalidate cursors
+    /// issued before the revision changed; it never detects a changed view.
+    pub(crate) revision: String,
+}
 
 /// The decoded position one cursor carries.
 struct Cursor {
@@ -62,11 +85,10 @@ struct Cursor {
 /// list does carries `nextCursor`; the last page omits it.
 pub(crate) fn page(
     tools: &[Value],
-    profile: ToolPreset,
-    discovery: &str,
+    view: &ToolView,
     params: Option<&Value>,
 ) -> Result<Value, RpcError> {
-    let digest = visible_digest(tools, profile, discovery);
+    let digest = visible_digest(tools, view);
     let requested = requested_size(params)?;
     let (size, offset) = match requested_cursor(params)? {
         Some(encoded) => {
@@ -129,20 +151,20 @@ fn requested_cursor(params: Option<&Value>) -> Result<Option<&str>, RpcError> {
 
 /// The digest of the view a cursor belongs to.
 ///
-/// It covers the hash of the visible definitions, the preset name and its
-/// resolved group set, and the discovery token, so a cursor stops working when
-/// any of them changes.
-fn visible_digest(tools: &[Value], profile: ToolPreset, discovery: &str) -> String {
+/// It covers the hash of the visible definitions, the preset name when one
+/// applies, the effective group selection, and the configuration revision, so a
+/// cursor stops working when any of them changes.
+fn visible_digest(tools: &[Value], view: &ToolView) -> String {
     let mut canonical = String::new();
     canonical.push_str(&catalog_hash(tools));
     canonical.push('\n');
-    canonical.push_str(profile.as_str());
+    canonical.push_str(view.preset.map_or(INSTALLED_SELECTION, ToolPreset::as_str));
     canonical.push('\n');
-    for group in profile.resolve() {
+    for group in &view.groups {
         canonical.push_str(group.as_str());
         canonical.push('\n');
     }
-    canonical.push_str(discovery);
+    canonical.push_str(&view.revision);
     fnv1a64_hex(canonical.as_bytes())
 }
 

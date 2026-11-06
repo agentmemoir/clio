@@ -14,6 +14,8 @@
 //! - Byte-identical results for identical requests
 //! - The refusals for a size disagreement, a malformed cursor, and an unknown
 //!   cursor format version
+//! - A cursor refused when another preset governs the view, and two presets
+//!   minting two cursors over one tool set
 //!
 //! ## Does not own
 //! - The page-size constants and the cursor code itself (`tools_page`)
@@ -28,9 +30,9 @@
 //!
 //! Keep this module focused on the paging behaviour of one listing.
 
-use crate::protocol::{ERR_INVALID_PARAMS, McpHandler};
+use crate::protocol::{ERR_INVALID_PARAMS, McpHandler, RpcError};
 use crate::runtime::{McpOpenOptions, McpState};
-use crate::tools_page::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PAGE_SIZE_KEY, page};
+use crate::tools_page::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PAGE_SIZE_KEY, ToolView, page};
 use base64::Engine;
 use clio_types::ToolPreset;
 use serde_json::{Value, json};
@@ -85,9 +87,23 @@ fn synthetic(count: usize) -> Vec<Value> {
         .collect()
 }
 
+/// The identity of one synthetic view under `preset`.
+fn view(preset: ToolPreset) -> ToolView {
+    ToolView {
+        preset: Some(preset),
+        groups: preset.resolve(),
+        revision: "2025-11-25".to_owned(),
+    }
+}
+
+/// One page of a synthetic catalog under `preset`.
+fn preset_page(tools: &[Value], preset: ToolPreset, params: &Value) -> Result<Value, RpcError> {
+    page(tools, &view(preset), Some(params))
+}
+
 /// One page of a synthetic catalog under the `all` preset.
-fn synthetic_page(tools: &[Value], params: &Value) -> Result<Value, crate::protocol::RpcError> {
-    page(tools, ToolPreset::All, "2025-11-25", Some(params))
+fn synthetic_page(tools: &[Value], params: &Value) -> Result<Value, RpcError> {
+    preset_page(tools, ToolPreset::All, params)
 }
 
 /// The cursor one response carries, if any.
@@ -240,4 +256,55 @@ fn a_cursor_with_an_unknown_format_version_is_refused() {
         .expect_err("a cursor version this build does not write is refused");
     assert_eq!(error.code, ERR_INVALID_PARAMS);
     assert!(error.message.contains("version"), "{}", error.message);
+}
+
+/// A cursor minted under one preset is refused while another preset governs
+/// the view, because the digest binds the cursor to one view.
+#[test]
+fn a_cursor_from_another_preset_is_refused() {
+    let tools = synthetic(60);
+    let cursor = first_cursor(&tools, 10);
+    let error = preset_page(&tools, ToolPreset::Minimal, &json!({ "cursor": cursor }))
+        .expect_err("a cursor from another view is refused");
+    assert_eq!(error.code, ERR_INVALID_PARAMS);
+    assert!(
+        error.message.contains("different tool view"),
+        "{}",
+        error.message
+    );
+}
+
+/// One tool set under two presets mints two different first-page cursors, so a
+/// cursor always names the preset that produced it.
+#[test]
+fn the_first_page_cursor_differs_between_presets() {
+    let tools = synthetic(60);
+    let all = preset_page(&tools, ToolPreset::All, &json!({})).expect("a valid page");
+    let minimal = preset_page(&tools, ToolPreset::Minimal, &json!({})).expect("a valid page");
+    assert_ne!(
+        cursor(&all).expect("the `all` page continues"),
+        cursor(&minimal).expect("the `minimal` page continues"),
+        "the cursor is bound to the preset that minted it"
+    );
+}
+
+/// A document preset this build does not know must not fail `tools/list` when
+/// an installed selection governs the view; the listing is that selection.
+#[test]
+fn an_installed_selection_serves_a_listing_over_an_unknown_document_preset() {
+    let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
+    runtime
+        .load_file_json(r#"{"mcp": {"tool_profile": "mnimal"}}"#)
+        .expect("a valid config layer");
+    runtime.set_mcp_tool_groups(clio_types::custom(&["ops"]).expect("a known group"));
+    let state = McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state");
+
+    let response = request(&state, &json!({ "_meta": { PAGE_SIZE_KEY: 100 } }));
+    assert!(response.get("error").is_none(), "{response}");
+    let names = names(&response);
+    assert!(!names.is_empty(), "the installed selection lists tools");
+    assert!(
+        !names.contains(&"store".to_owned()),
+        "a write tool outside the selection is advertised: {names:?}"
+    );
 }
