@@ -78,7 +78,8 @@ where
         "mcp": {
             "revision": "2025-11-25",
             "transports": ["stdio", "streamable_http"],
-            "tool_profile": clio_types::DEFAULT_PRESET.as_str()
+            "tool_profile": clio_types::DEFAULT_PRESET.as_str(),
+            "discovery": false
         },
         "fr10_satisfied": false,
         "schema_version": 1,
