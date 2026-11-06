@@ -23,3 +23,4 @@ What belongs here is reader-facing reference: the documents a reader consults to
 - An operator works through the compliance runbook, and opens the inventory when a tool result needs explaining.
 - A maintainer adding an MCP output schema starts at the inventory, then follows the handler cited in the row.
 - A reader checking a design against the product philosophy runs the philosophy evaluation, then reads the belief it names.
+- A maintainer preparing stateless execution reads the session state inventory, then the candidate's tests.
