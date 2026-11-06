@@ -191,13 +191,13 @@ class ContractTests(unittest.TestCase):
 
     def test_a_factor_that_disagrees_with_the_decision_is_refused(self):
         value = document()
-        target = entry(value, "minimal", "tokens")
+        target = entry(value, "coding", "tokens")
         target["factor"] = 99
         target["target"] = target["baseline_value"] * 99 // 100
         target["headroom"] = target["baseline_value"] - target["target"]
         self.assert_refused(
             value,
-            "target minimal/tokens factor is 99, expected 70 from "
+            "target coding/tokens factor is 99, expected 70 from "
             "factor_decision.token_factor.numerator",
         )
         value = document()
@@ -281,7 +281,7 @@ class ContractTests(unittest.TestCase):
         self.assert_refused(value, "target 0 keys must be exactly")
 
     def test_the_committed_record_still_satisfies_every_block(self):
-        self.assertEqual(len(budget_targets.load(TARGETS)), 8)
+        self.assertEqual(len(budget_targets.load(TARGETS)), 6)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,11 @@ record states each ceiling as a factor of the frozen baseline row and carries th
 arithmetic that produced it, so a reader recomputes a target instead of trusting
 it, and a target that no longer follows its own arithmetic is refused.
 
+Not every preset carries a target. The record must hold one row per unit for
+each preset in ``TARGET_PRESETS``, and a row for any other preset is refused;
+the smallest preset carries none, because its size is a chosen value in the
+decision record rather than a ceiling derived from a measured row.
+
 Nothing here enforces. ``PRESET_TARGETS_ENFORCED`` is False, so a measured value
 above its target is reported as a miss and never changes an exit code; flipping
 that one constant is the whole enforcement change.
@@ -69,7 +74,10 @@ TARGET_LABEL = "Inferred"
 #: The one switch. True makes a miss a failure; False only reports it.
 PRESET_TARGETS_ENFORCED = False
 
+#: The preset vocabulary this record names; only ``TARGET_PRESETS`` carry targets.
 PRESET_NAMES = ("minimal", "coding", "ops", "all")
+#: The smallest preset carries no target: its size is a recorded chosen value, not a threshold.
+TARGET_PRESETS = ("coding", "ops", "all")
 UNITS = ("tokens", "bytes")
 
 TOP_LEVEL = frozenset(
@@ -259,8 +267,11 @@ def _target(item, index, factors) -> dict:
     if keys != TARGET_KEY_SET:
         _fail(_key_message(f"target {index}", keys, TARGET_KEY_SET))
     preset = item["preset"]
-    if preset not in PRESET_NAMES:
-        _fail(f"target {index} preset is {preset!r}, expected one of {list(PRESET_NAMES)}")
+    if preset not in TARGET_PRESETS:
+        _fail(
+            f"target {index} preset is {preset!r}, expected one of "
+            f"{list(TARGET_PRESETS)}"
+        )
     unit = item["unit"]
     if unit not in UNITS:
         _fail(f"target {preset} unit is {unit!r}, expected one of {list(UNITS)}")
@@ -300,6 +311,7 @@ def _target(item, index, factors) -> dict:
 
 
 def _coverage(targets) -> None:
+    """Refuse a record that does not hold exactly one row per target preset and unit."""
     seen = set()
     for target in targets:
         pair = (target["preset"], target["unit"])
@@ -307,7 +319,7 @@ def _coverage(targets) -> None:
             _fail(f"duplicate target for preset {pair[0]!r} and unit {pair[1]!r}")
         seen.add(pair)
     missing = [
-        f"{preset}/{unit}" for preset in PRESET_NAMES for unit in UNITS
+        f"{preset}/{unit}" for preset in TARGET_PRESETS for unit in UNITS
         if (preset, unit) not in seen
     ]
     if missing:
