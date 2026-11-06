@@ -71,10 +71,7 @@ fn format_and_dialect_are_declared() {
     assert_eq!(document["format"], "am_mcp_discovery_tool_defs");
     assert_eq!(document["format_version"], 1);
     assert_eq!(document["mcp_protocol_revision"], "2025-11-25");
-    assert_eq!(
-        document["json_schema_dialect"],
-        "https://json-schema.org/draft/2020-12/schema"
-    );
+    assert_eq!(document["json_schema_dialect"], "2020-12");
     assert_eq!(document["catalogScope"], "full");
 }
 

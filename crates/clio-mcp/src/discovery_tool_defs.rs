@@ -32,9 +32,8 @@ const EMBEDDED: &str = include_str!("../discovery_tool_defs.json");
 fn parsed() -> &'static Value {
     static DEFINITIONS: OnceLock<Value> = OnceLock::new();
     DEFINITIONS.get_or_init(|| {
-        serde_json::from_str(EMBEDDED).expect(
-            "embedded discovery tool definitions are malformed; this is a build defect",
-        )
+        serde_json::from_str(EMBEDDED)
+            .expect("embedded discovery tool definitions are malformed; this is a build defect")
     })
 }
 
