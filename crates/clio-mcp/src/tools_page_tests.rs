@@ -340,7 +340,7 @@ fn an_empty_view_answers_an_initial_request_with_an_empty_terminal_page() {
 fn a_changed_catalog_invalidates_a_cursor() {
     let tools = synthetic(60);
     let encoded = first_cursor(&tools, 10);
-    let mut changed = tools.clone();
+    let mut changed = tools;
     changed[0] = json!({ "name": "renamed_tool" });
     let error = synthetic_page(&changed, &json!({ "cursor": encoded }))
         .expect_err("a cursor from another catalog is refused");
