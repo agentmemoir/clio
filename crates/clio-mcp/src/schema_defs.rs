@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on per-tool schema definitions.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// Semantic categories, sourced from `clio-types` so the published enum
 /// cannot drift from the domain whitelist.
@@ -186,8 +186,18 @@ pub(crate) fn allow_duplicate_prop() -> (&'static str, Value) {
     )
 }
 
-pub(crate) fn store_like(name: &'static str, desc: &'static str) -> ToolDef {
-    let mut props = vec![
+/// Required fields of one admission candidate.
+pub(crate) const ADMISSION_REQUIRED: &[&str] = &["item", "epistemic_kind"];
+
+/// Name of the shared admission candidate definition, published in the same
+/// tool document that references it.
+pub(crate) const ADMISSION_CANDIDATE_DEF: &str = "AdmissionCandidate";
+
+/// The candidate field set each of `admit_preview`, `store`, and the batch
+/// preview element declares, in order. `bank`/`actor` stay outside it: they are
+/// connection-level arguments, not candidate fields.
+fn admission_candidate_props() -> Vec<(&'static str, Value)> {
+    vec![
         ("item", item_shell()),
         (
             "category",
@@ -217,23 +227,50 @@ pub(crate) fn store_like(name: &'static str, desc: &'static str) -> ToolDef {
             ),
         ),
         context_prop(),
-    ];
-    if name == "store" {
-        props.push(("dry_run", b("Validate and score without durable write.")));
+        // Every tool in this family can hit the unconditional exact-duplicate
+        // rejection, so every tool in this family must be able to waive it.
+        // Naming the argument for what it waives keeps it distinct from
+        // `consolidate`'s unrelated `force`.
+        (
+            "allow_duplicate",
+            b(
+                "Store this item even when its text is identical to an item already in this bank. Waives the exact-duplicate rejection only; every other gate still applies.",
+            ),
+        ),
+    ]
+}
+
+/// The admission candidate as one object schema, defined once per document and
+/// referenced locally by the tool that admits many candidates at a time.
+pub(crate) fn admission_candidate_schema() -> Value {
+    let mut properties = Map::new();
+    for (name, schema) in admission_candidate_props() {
+        properties.insert(name.to_owned(), schema);
     }
-    // Every tool in this family can hit the unconditional exact-duplicate
-    // rejection, so every tool in this family must be able to waive it. Naming
-    // the argument for what it waives keeps it distinct from `consolidate`'s
-    // unrelated `force`.
-    props.push((
-        "allow_duplicate",
-        b("Store this item even when its text is identical to an item already in this bank. Waives the exact-duplicate rejection only; every other gate still applies."),
-    ));
+    json!({
+        "type": "object",
+        "description": "One candidate scored exactly as a real write would be; `item` carries the content.",
+        "properties": Value::Object(properties),
+        "required": ADMISSION_REQUIRED,
+        "additionalProperties": false
+    })
+}
+
+pub(crate) fn store_like(name: &'static str, desc: &'static str) -> ToolDef {
+    let mut props = admission_candidate_props();
+    if name == "store" {
+        // `dry_run` sits between the candidate fields and the duplicate waiver.
+        let waiver = props.pop();
+        props.push(("dry_run", b("Validate and score without durable write.")));
+        if let Some(waiver) = waiver {
+            props.push(waiver);
+        }
+    }
     props.extend(bank_actor());
     ToolDef {
         name,
         description: desc,
-        required: &["item", "epistemic_kind"],
+        required: ADMISSION_REQUIRED,
         props,
     }
 }

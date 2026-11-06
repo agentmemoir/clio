@@ -9,9 +9,9 @@
 //! ## Owns
 //! - `inputSchema` for `admit_preview_batch`, `retention_profile_get`, and
 //!   `retention_profile_set`
-//! - The batch candidate item schema and the published profile schema reference
+//! - The batch candidate reference and the published profile schema reference
 //! - The root `$defs` those references resolve against, from the retention
-//!   schema owner
+//!   schema owner plus the admission candidate definition
 //!
 //! ## Does not own
 //! - Core catalog definitions (see `schema_defs`)
@@ -25,25 +25,28 @@
 //!
 //! Keep this module focused on retention tool schema definitions.
 
-use crate::schema_defs::{ToolDef, b, bank_actor, en, store_like};
-use serde_json::{Map, Value, json};
+use crate::schema_defs::{
+    ADMISSION_CANDIDATE_DEF, ToolDef, admission_candidate_schema, b, bank_actor, en,
+};
+use serde_json::{Value, json};
 
-/// Candidate object accepted by one batch preview item: the single-item preview
-/// arguments minus the connection-level `bank`/`actor`.
+/// One batch item: a local reference to the shared admission candidate
+/// definition, so the batch element cannot drift from the single-item preview.
 fn batch_candidate() -> Value {
-    let mut properties = Map::new();
-    for (name, schema) in store_like("admit_preview", "unused").props {
-        if name == "bank" || name == "actor" {
-            continue;
-        }
-        properties.insert(name.to_owned(), schema);
+    json!({"$ref": format!("#/$defs/{ADMISSION_CANDIDATE_DEF}")})
+}
+
+/// Root `$defs` of the batch preview: the retention-profile definitions plus
+/// the admission candidate definition every batch item resolves to.
+fn batch_root_defs() -> Value {
+    let mut defs = clio_config::retention_schema::local_defs();
+    if let Some(map) = defs.as_object_mut() {
+        map.insert(
+            ADMISSION_CANDIDATE_DEF.to_owned(),
+            admission_candidate_schema(),
+        );
     }
-    json!({
-        "type": "object",
-        "description": "One candidate scored exactly as a real write would be; `item` carries the content.",
-        "properties": Value::Object(properties),
-        "additionalProperties": false
-    })
+    defs
 }
 
 /// All retention-profile tool definitions.
@@ -73,7 +76,7 @@ pub fn retention_defs() -> Vec<ToolDef> {
                             "properties": clio_config::retention_schema::profile_json_schema()["properties"].clone()
                         }),
                     ),
-                    ("$defs", clio_config::retention_schema::local_defs()),
+                    ("$defs", batch_root_defs()),
                 ];
                 props.extend(bank_actor());
                 props
