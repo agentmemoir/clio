@@ -3,11 +3,10 @@
 
 An allowance record is the only way a deliberate tool-surface growth can pass the
 budget check. Each record names exactly one candidate digest and an independent
-ceiling for canonical bytes and for cl100k_base tokens, and it carries a `label`
-naming how those ceilings were obtained, so a growth that was reviewed can never
-be mistaken for an unreviewed one. A record never names its landing commit: that
-commit comes from git history, and a record that carries a commit field is
-malformed.
+ceiling for canonical bytes and for cl100k_base tokens, so a growth that was
+reviewed can never be mistaken for an unreviewed one. A record never names its
+landing commit: that commit comes from git history, and a record that carries a
+commit field is malformed.
 
 A record file with no records is valid and means no growth is allowed. The module
 is stdlib only, so the hermetic job can validate the file without the tokenizer.
@@ -30,18 +29,12 @@ RECORD_KEYS = (
     "reason",
     "base_commit",
     "candidate_sha256",
-    "label",
     "max_bytes",
     "max_tokens",
 )
 RECORD_KEY_SET = frozenset(RECORD_KEYS)
 CEILING_KEYS = frozenset({"max_bytes", "max_tokens"})
 COMMIT_KEYS = ("commit", "landing_commit", "containing_commit")
-
-#: The labels a record may carry, the same six the baseline rows use.
-LABELS = frozenset(
-    {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}
-)
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -151,9 +144,6 @@ def _record(item, index) -> dict:
     candidate = item["candidate_sha256"]
     if not _is_hex(candidate, SHA256_RE):
         _fail(f"{label} candidate_sha256 is not 64 lowercase hex: {candidate!r}")
-    label_value = item["label"]
-    if label_value not in LABELS:
-        _fail(f"{label} label is not one of {sorted(LABELS)}: {label_value!r}")
     for key in ("max_bytes", "max_tokens"):
         value = item[key]
         if not _is_int(value) or value <= 0:

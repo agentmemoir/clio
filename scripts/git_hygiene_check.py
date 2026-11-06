@@ -5,7 +5,7 @@ Each of the three is cheaper to refuse than to work around, and each one arrives
 
 The first is a case collision. The default APFS volume on macOS is case-insensitive, so two tracked paths that differ only in case cannot both exist on disk. A checkout writes one of them and reports success, and the other file is simply absent from that working tree, so a build that depends on it fails on one platform and passes on the other.
 
-The second is an oversized binary. A binary file this change adds or modifies is copied into every clone and into every release archive, and it never compresses away. The size ceiling is withdrawn as a derived limit, on 2026-11-06. The withdrawn value is 512000 bytes, which reads as 500 KiB. No baseline row, no factor, and no measurement ever stood behind it: it was a round KiB number mistaken for a derived ceiling. The value carries the label `Decision`, and its source is this gate's own configuration, not a measurement. Live derived size ceilings for this gate: none. The gate still compares a changed binary against the configured threshold and refuses a binary above it, so its comparison and its product behaviour are unchanged. What is withdrawn is only the claim that the number is derived.
+The second is an oversized binary. A binary file this change adds or modifies is copied into every clone and into every release archive, and it never compresses away. The size ceiling is withdrawn as a derived limit, on 2026-11-06. The withdrawn value is 512000 bytes, which reads as 500 KiB. No baseline row, no factor, and no measurement ever stood behind it: it was a round KiB number mistaken for a derived ceiling. The value carries the label `Unverified`: it was never measured, no baseline row or factor was ever stated for it, and no record of who chose it or why exists; its only source is this gate's own git history. Live derived size ceilings for this gate: none. A gate threshold with no measurement or derivation behind it is a known defect, recorded here, and retiring or deriving the threshold is a separate change outside this one. The gate still compares a changed binary against the configured threshold and refuses a binary above it, so its comparison and its product behaviour are unchanged. What is withdrawn is only the claim that the number is derived.
 
 The third is unrelated history. A branch created with `git checkout --orphan`, or a repository grafted onto another, has no common ancestor with master, so a merge of it credits every line to the merge and `git blame` stops answering. `git merge-base` is the question that shows it.
 
@@ -38,7 +38,7 @@ EXIT_GIT = 3
 
 USAGE = "usage: git_hygiene_check.py --base <rev> | --self-test"
 
-#: The largest binary this change may add or modify, in bytes: an operator-set threshold labelled `Decision`, sourced from this gate's own configuration.
+#: The largest binary this change may add or modify, in bytes: an operator-set threshold labelled `Unverified`, sourced only from this gate's own git history.
 #: The earlier claim that it was a derived ceiling was withdrawn on 2026-11-06: no baseline row, factor, or measurement stood behind it.
 #: The module docstring holds the withdrawal record.
 LIMIT = 512000
