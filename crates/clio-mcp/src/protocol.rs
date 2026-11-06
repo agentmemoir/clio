@@ -25,7 +25,7 @@
 use crate::MCP_PROTOCOL_REVISION;
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
-use clio_types::ToolPreset;
+use clio_types::{ToolPreset, tools_of};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -163,12 +163,14 @@ impl McpHandler {
         json!({ "tools": tools })
     }
 
-    /// `tools/list` over the bound catalogue narrowed to the profile the
-    /// effective configuration selects.
+    /// `tools/list` over the bound catalogue narrowed to the groups the effective
+    /// selection names.
     ///
     /// Only what this build advertises shrinks: dispatch eligibility and the
     /// argument contract keep reading [`Self::tools_list`], so a tool outside
-    /// the selected profile stays reachable and stays validated.
+    /// the selected groups stays reachable and stays validated. The stateless
+    /// transport answers through [`Self::tools_list_page`] too, so one path
+    /// decides what every transport advertises.
     ///
     /// # Errors
     /// The effective configuration names a tool profile this build does not know.
@@ -350,21 +352,22 @@ fn bound_set() -> Vec<&'static str> {
     crate::bound_tools()
 }
 
-/// The tool preset the state's effective configuration selects, read at call
-/// time so a configuration applied in this process governs the next listing.
-fn configured_profile(state: &McpState) -> Result<ToolPreset, RpcError> {
+/// The selected profile, the effective group selection, and the visible
+/// definitions it advertises, in catalog order, read under one configuration
+/// lock.
+///
+/// The groups come from the effective selection, so an installed `--tools`
+/// selection wins over `mcp.tool_profile`; the profile name is the document's
+/// own value and covers the page digest.
+fn visible_view(state: &McpState) -> Result<(ToolPreset, Vec<Value>), RpcError> {
     let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
         state.config.lock().expect("config runtime mutex poisoned");
     let profile = rt.mcp_tool_profile();
+    let groups = rt.mcp_tool_groups();
     drop(rt);
-    profile.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))
-}
-
-/// The selected profile and the visible definitions it advertises, in catalog
-/// order, read under one configuration lock.
-fn visible_view(state: &McpState) -> Result<(ToolPreset, Vec<Value>), RpcError> {
-    let profile = configured_profile(state)?;
-    let visible = profile.tools();
+    let profile = profile.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
+    let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
+    let visible = tools_of(&groups);
     let bound = bound_set();
     let tools: Vec<Value> = catalog_defs()
         .iter()

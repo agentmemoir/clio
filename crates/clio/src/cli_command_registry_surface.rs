@@ -12,7 +12,7 @@
 //!   the eight `mcp` and `ops` subcommands
 //! - The shared flag facts its children and the compose records read:
 //!   `RESERVED_GLOBALS`, `DB_BANK_UNDOCUMENTED_GLOBALS`, and
-//!   `DB_BACKEND_BANK`
+//!   `DB_BACKEND_BANK_OUTPUT`
 //! - The child modules: the seven single commands (`singles`), the three
 //!   `mcp` subcommands (`mcp`), the five `ops` subcommands (`ops`), the two
 //!   `compose` records (`compose`), and the accepted-name derivation the
@@ -56,10 +56,6 @@ const DB_BANK_UNDOCUMENTED_GLOBALS: &[&str] = &["actor", "output", "no-input", "
 /// `output` removed, because the record contract refuses a flag a record both
 /// accepts and documents.
 const DB_BANK_UNDOCUMENTED_GLOBALS_NO_OUTPUT: &[&str] = &["actor", "no-input", "yes"];
-
-/// The trio the `mcp` and `ops` subcommands print: the global value flags
-/// every one of them names on its usage line.
-const DB_BACKEND_BANK: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK];
 
 /// The trio plus the output mode: a record whose report renders through the
 /// shared `--output` mode names it on its usage line.

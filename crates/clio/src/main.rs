@@ -141,6 +141,7 @@ mod db_target;
 mod http_bind;
 mod install_cli;
 mod mcp_cli;
+mod mcp_tools_flag;
 mod ops_cli;
 mod ops_cli_actions;
 mod ops_cli_render;
