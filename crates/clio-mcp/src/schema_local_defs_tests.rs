@@ -15,7 +15,7 @@
 //!   candidate definition referenced once
 //! - The retention tools accepting and rejecting arguments their own published
 //!   schema constrains
-//! - Each retention tool resolving to the shape the base commit published
+//! - Each retention tool resolving to the contract this build publishes
 //! - The reserved `$defs` property channel never leaking into `properties`
 //!
 //! ## Does not own
@@ -186,28 +186,26 @@ fn retention_input(name: &str) -> Value {
     catalog_def(name).expect("a retention tool").to_tool()["inputSchema"].clone()
 }
 
-/// The resolved input schemas of both retention tools: each tool's document
-/// with every local reference flattened and its root `$defs` removed. The guard
-/// below compares that resolved contract, so a default, enum, or description
-/// change fails it while a change in reference packing does not.
-///
-/// The recorded batch element gained `type` and the single-item `required` list
-/// when the element became a local reference to the shared admission candidate
-/// definition, so this file pins the shape that reference resolves to.
-const RETENTION_BASE_INPUT_SCHEMAS: &str =
-    include_str!("../tests/fixtures/retention_base_input_schemas.json");
+/// The resolved input schemas of both retention tools: each document with its
+/// local references flattened and root `$defs` removed. This pins the contract
+/// this build publishes, not an earlier commit. To record an intended contract
+/// change, run the guard: a mismatch prints the resolved document to write to
+/// the fixture, and the change names the moved field. Any other difference is
+/// drift.
+const RETENTION_RESOLVED_INPUT_SCHEMAS: &str =
+    include_str!("../tests/fixtures/retention_resolved_input_schemas.json");
 
 #[test]
-fn retention_input_schemas_resolve_to_the_pre_change_base_shape() {
-    let base: Value =
-        serde_json::from_str(RETENTION_BASE_INPUT_SCHEMAS).expect("the base fixture is JSON");
+fn retention_input_schemas_resolve_to_the_published_contract() {
+    let expected_schemas: Value = serde_json::from_str(RETENTION_RESOLVED_INPUT_SCHEMAS)
+        .expect("the resolved-contract fixture is JSON");
     for name in MISSION_TOOLS {
         let live = retention_input(name);
         let resolved = without_root_defs(&flattened(&live, &live));
-        let expected = &base[name];
+        let expected = &expected_schemas[name];
         assert_eq!(
             &resolved, expected,
-            "{name}: the resolved contract drifted from the base commit"
+            "{name}: the resolved contract drifted from the published contract"
         );
         assert_eq!(
             serde_json::to_string(&resolved)
@@ -285,15 +283,12 @@ fn reference_based_emission_is_smaller_than_the_flattened_candidate() {
         2,
         "both mission lists reference the shared definition"
     );
-    println!(
-        "retention_profile_set: emitted {} bytes, flattened {} bytes",
-        emitted.len(),
-        expanded.len()
-    );
 
     // `admit_preview_batch` references its candidate definition once behind a
-    // `$defs` wrapper, which is larger than the inline copy, so its guard is
-    // the reference and definition count rather than the byte size.
+    // `$defs` wrapper, which is larger than the inline copy at this size, so
+    // that single-use definition is accepted at its measured cost and its guard
+    // is the reference and definition count. The whole pack still has to pay
+    // for reference emission, and the check below holds it to that.
     let batch = retention_input("admit_preview_batch");
     let candidate_ref = "#/$defs/AdmissionCandidate";
     assert_eq!(
@@ -324,6 +319,31 @@ fn reference_based_emission_is_smaller_than_the_flattened_candidate() {
             .expect("root $defs")
             .len(),
         2
+    );
+
+    // Pack-wide: every reference in every tool document resolved back to its
+    // definition must still cost more bytes than the definition emitted once.
+    let emitted = serde_json::to_string(&pack).expect("pack");
+    let mut expanded_pack = pack;
+    for tool in expanded_pack["tools"]
+        .as_array_mut()
+        .expect("the pack holds tools")
+    {
+        if let Some(schema) = tool.get("inputSchema") {
+            tool["inputSchema"] = without_root_defs(&flattened(schema, schema));
+        }
+    }
+    let expanded = serde_json::to_string(&expanded_pack).expect("flattened pack");
+    assert!(
+        expanded.len() > emitted.len(),
+        "pack: emitted {} bytes, flattened {} bytes",
+        emitted.len(),
+        expanded.len()
+    );
+    println!(
+        "pack: emitted {} bytes, flattened {} bytes",
+        emitted.len(),
+        expanded.len()
     );
 }
 
