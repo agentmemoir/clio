@@ -39,6 +39,7 @@ pub mod batch_preflight_records;
 pub mod batch_tools;
 pub mod config_tools;
 mod conn_pool;
+pub mod discovery_tool_defs;
 mod export_destination;
 pub mod http;
 pub mod http_auth;

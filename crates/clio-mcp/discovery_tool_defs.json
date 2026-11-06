@@ -1,0 +1,365 @@
+{
+  "format": "am_mcp_discovery_tool_defs",
+  "format_version": 1,
+  "mcp_protocol_revision": "2025-11-25",
+  "json_schema_dialect": "https://json-schema.org/draft/2020-12/schema",
+  "catalogScope": "full",
+  "tools": [
+    {
+      "name": "tool_search",
+      "description": "Search the full business tool catalog by query text, with an optional family filter and a clamped result limit. The catalog is the full set of tools this server binds, including tools the current listing hides.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Text to match against tool names and descriptions. It must hold at least one non-whitespace character."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 10,
+            "description": "Maximum number of tools to return. Values above 25 are clamped to 25."
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "retrieval",
+              "item-write",
+              "item-read",
+              "persona",
+              "task",
+              "memtree",
+              "triple",
+              "belief",
+              "graph",
+              "hygiene",
+              "portability",
+              "ops",
+              "retention",
+              "config",
+              "ranking",
+              "sync",
+              "compliance"
+            ],
+            "description": "Restrict the search to one tool family."
+          }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "description": "Matching tools in catalog order.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The tool name to pass to tool_describe or tool_invoke."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "The tool description as the catalog publishes it."
+                },
+                "group": {
+                  "type": "string",
+                  "enum": [
+                    "retrieval",
+                    "item-write",
+                    "item-read",
+                    "persona",
+                    "task",
+                    "memtree",
+                    "triple",
+                    "belief",
+                    "graph",
+                    "hygiene",
+                    "portability",
+                    "ops",
+                    "retention",
+                    "config",
+                    "ranking",
+                    "sync",
+                    "compliance"
+                  ],
+                  "description": "The tool family the catalog assigns to this tool."
+                }
+              },
+              "required": ["name", "description", "group"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["tools"],
+        "additionalProperties": false
+      },
+      "argumentRules": {
+        "limit": {
+          "default": 10,
+          "maximum": 25,
+          "clamp": true
+        }
+      },
+      "examples": {
+        "valid": [
+          {"query": "store", "limit": 5},
+          {"query": "store"},
+          {"query": "store", "limit": 100},
+          {"query": "store", "family": "item-write"},
+          {"query": "  store  "}
+        ],
+        "invalid": [
+          {
+            "input": {"query": "   "},
+            "keyword": "pattern",
+            "instancePath": "/query",
+            "code": -32602
+          },
+          {
+            "input": {},
+            "keyword": "required",
+            "instancePath": "",
+            "code": -32602
+          },
+          {
+            "input": {"query": "store", "limit": 0},
+            "keyword": "minimum",
+            "instancePath": "/limit",
+            "code": -32602
+          },
+          {
+            "input": {"query": "store", "limit": "5"},
+            "keyword": "type",
+            "instancePath": "/limit",
+            "code": -32602
+          },
+          {
+            "input": {"query": "store", "limit": 2.5},
+            "keyword": "type",
+            "instancePath": "/limit",
+            "code": -32602
+          },
+          {
+            "input": {"query": "store", "family": "nope"},
+            "keyword": "enum",
+            "instancePath": "/family",
+            "code": -32602
+          },
+          {
+            "input": {"query": "store", "extra": 1},
+            "keyword": "additionalProperties",
+            "instancePath": "",
+            "code": -32602
+          }
+        ],
+        "refused": [
+          {
+            "label": "refused target tool_search",
+            "arguments": {"name": "tool_search"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          },
+          {
+            "label": "refused target tool_describe",
+            "arguments": {"name": "tool_describe"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          },
+          {
+            "label": "refused target tool_invoke",
+            "arguments": {"name": "tool_invoke"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          }
+        ]
+      }
+    },
+    {
+      "name": "tool_describe",
+      "description": "Return the published definition of one tool in the full business catalog: name, description, input schema and output schema. The catalog is the full set of tools this server binds, including tools the current listing hides.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The exact catalog tool name to describe."
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The catalog tool name."
+          },
+          "description": {
+            "type": "string",
+            "description": "The tool description as the catalog publishes it."
+          },
+          "inputSchema": {
+            "type": "object",
+            "description": "The input schema the catalog publishes for this tool."
+          },
+          "outputSchema": {
+            "type": "object",
+            "description": "The output schema the catalog publishes for this tool, when one is declared."
+          }
+        },
+        "required": ["name", "description", "inputSchema"],
+        "additionalProperties": false
+      },
+      "examples": {
+        "valid": [
+          {"name": "store"}
+        ],
+        "invalid": [
+          {
+            "input": {"name": ""},
+            "keyword": "minLength",
+            "instancePath": "/name",
+            "code": -32602
+          },
+          {
+            "input": {},
+            "keyword": "required",
+            "instancePath": "",
+            "code": -32602
+          },
+          {
+            "input": {"name": "store", "extra": 1},
+            "keyword": "additionalProperties",
+            "instancePath": "",
+            "code": -32602
+          },
+          {
+            "input": {"name": 5},
+            "keyword": "type",
+            "instancePath": "/name",
+            "code": -32602
+          }
+        ],
+        "refused": [
+          {
+            "label": "refused target tool_search",
+            "arguments": {"name": "tool_search"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          },
+          {
+            "label": "refused target tool_describe",
+            "arguments": {"name": "tool_describe"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          },
+          {
+            "label": "refused target tool_invoke",
+            "arguments": {"name": "tool_invoke"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          }
+        ]
+      }
+    },
+    {
+      "name": "tool_invoke",
+      "description": "Call one tool in the full business catalog and return its MCP call result unchanged. The catalog is the full set of tools this server binds, including tools the current listing hides.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The exact catalog tool name to call."
+          },
+          "arguments": {
+            "type": "object",
+            "default": {},
+            "description": "Arguments for the target tool, which its own input schema constrains."
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "description": "The unstructured content blocks of the target tool's result."
+          },
+          "structuredContent": {
+            "type": "object",
+            "description": "The structured result, when the target tool declares an output schema."
+          },
+          "isError": {
+            "type": "boolean",
+            "description": "True when the target tool reported an error inside its result."
+          },
+          "_meta": {
+            "type": "object",
+            "description": "Optional result metadata."
+          }
+        },
+        "required": ["content"],
+        "additionalProperties": true
+      },
+      "argumentRules": {
+        "arguments": {
+          "default": {}
+        }
+      },
+      "examples": {
+        "valid": [
+          {"name": "store", "arguments": {}},
+          {"name": "store"}
+        ],
+        "invalid": [
+          {
+            "input": {"name": "store", "arguments": "missing"},
+            "keyword": "type",
+            "instancePath": "/arguments",
+            "code": -32602
+          },
+          {
+            "input": {},
+            "keyword": "required",
+            "instancePath": "",
+            "code": -32602
+          },
+          {
+            "input": {"name": ""},
+            "keyword": "minLength",
+            "instancePath": "/name",
+            "code": -32602
+          },
+          {
+            "input": {"name": "store", "extra": 1},
+            "keyword": "additionalProperties",
+            "instancePath": "",
+            "code": -32602
+          }
+        ],
+        "refused": [
+          {
+            "label": "refused target tool_search",
+            "arguments": {"name": "tool_search"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          },
+          {
+            "label": "refused target tool_describe",
+            "arguments": {"name": "tool_describe"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          },
+          {
+            "label": "refused target tool_invoke",
+            "arguments": {"name": "tool_invoke"},
+            "reason": "search, describe and invoke targets are refused to prevent recursion"
+          }
+        ]
+      }
+    }
+  ]
+}
