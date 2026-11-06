@@ -17,6 +17,7 @@ What belongs here is reader-facing reference: the documents a reader consults to
 | [mcp-session-state-inventory.md](mcp-session-state-inventory.md) | One row per field the MCP protocol session owns, its owner and its readers and writers, classified as domain state or as lifecycle and bookkeeping state. |
 | [mcp-tool-result-inventory.md](mcp-tool-result-inventory.md) | One row per bound MCP tool, naming the handler that builds the result, the kind of value it builds, and whether an output schema could describe that value. |
 | [philosophy-eval.md](philosophy-eval.md) | Twenty hand-run scenarios that test whether a behaviour follows the beliefs in `PHILOSOPHY.md`, with a scoring rule for a pass and a fail. |
+| [tools-list-pagination.md](tools-list-pagination.md) | The `tools/list` page-size extension, the default and clamped page sizes, the opaque cursor and the view digest it carries, and the requests the server refuses. |
 
 ## Reading paths
 

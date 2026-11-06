@@ -115,7 +115,7 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
     }
     Some(match method {
         "server/discover" => ok(id, &discover()),
-        "tools/list" => match tools_list(state) {
+        "tools/list" => match tools_list(state, params) {
             Ok(result) => ok(id, &result),
             Err(err) => reject(id, err.code, err.message, err.data),
         },
@@ -235,14 +235,15 @@ fn discover() -> Value {
     })
 }
 
-/// The visible catalogue, stamped with the result fields the revision requires.
+/// The visible catalogue page, stamped with the result fields the revision
+/// requires.
 ///
-/// The catalogue itself comes from the production handler, so tool definitions
-/// and the configured profile keep one source. A zero TTL promises no freshness;
-/// the private scope keeps the list out of any cache shared across authorization
-/// contexts.
-fn tools_list(state: &McpState) -> Result<Value, RpcError> {
-    let mut result = McpHandler::tools_list_visible(state)?;
+/// The catalogue itself comes from the production handler, so tool definitions,
+/// the configured profile, and paging keep one source. A zero TTL promises no
+/// freshness; the private scope keeps the list out of any cache shared across
+/// authorization contexts.
+fn tools_list(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {
+    let mut result = McpHandler::tools_list_page(state, params)?;
     stamp_result(&mut result);
     result["ttlMs"] = json!(0);
     result["cacheScope"] = json!("private");

@@ -44,7 +44,8 @@ fn initialize_echoes_pinned_revision() {
 fn t03_tools_list_returns_the_selected_profile() {
     let (h, _) = handler();
     let res = h
-        .handle_message(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))
+        .handle_message(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list",
+                "params":{"_meta":{"com.agentmemoir/pageSize":100}}}))
         .expect("response");
     let tools = res["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();

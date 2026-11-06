@@ -103,11 +103,12 @@ fn refusal(state: &Arc<McpState>, name: &str, args: &Value) -> (String, String) 
     )
 }
 
-/// The tool names one `tools/list` request advertises, sorted.
+/// The tool names one `tools/list` request advertises, in one full page.
 fn listed(state: &Arc<McpState>) -> Vec<String> {
     let response = request(
         state,
-        &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+                "params": {"_meta": {"com.agentmemoir/pageSize": 100}}}),
     );
     let mut names: Vec<String> = response["result"]["tools"]
         .as_array()
