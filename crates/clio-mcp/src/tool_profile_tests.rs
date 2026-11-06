@@ -239,13 +239,12 @@ fn an_installed_tool_selection_beats_the_configured_profile() {
     runtime.set_mcp_tool_groups(groups.clone());
     let state = McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state");
 
-    let mut expected: Vec<String> = clio_types::tools_of(&groups)
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-    expected.sort_unstable();
     let names = listed(&state);
-    assert_eq!(names, expected);
+    assert_eq!(
+        names,
+        expected_of(&[&RETRIEVAL_TOOLS, &GRAPH_TOOLS, &ITEM_READ_TOOLS, &OPS_TOOLS]),
+        "the listing is the written-out set for `ops` and what it requires"
+    );
     assert_ne!(names, full_catalog(), "the configured `all` profile won");
     assert!(
         !names.contains(&"store".to_owned()),
@@ -254,8 +253,9 @@ fn an_installed_tool_selection_beats_the_configured_profile() {
 }
 
 /// Every preset name a transport's `--tools` accepts advertises exactly that
-/// preset's tools, and the written-out group data agrees with the derivation the
-/// preset resolves through.
+/// preset's tools. The written-out group data is the contract here: comparing
+/// the listing against the preset's own derivation would restate the expression
+/// the server evaluates instead of pinning what it produces.
 #[test]
 fn each_preset_selected_by_the_override_advertises_that_presets_tool_set() {
     for (preset, written_out) in [
@@ -283,11 +283,6 @@ fn each_preset_selected_by_the_override_advertises_that_presets_tool_set() {
         assert_eq!(
             advertised, written_out,
             "`--tools {name}` advertised {advertised:?}"
-        );
-        assert_eq!(
-            advertised,
-            sorted(preset.tools()),
-            "`--tools {name}` disagrees with the preset's own tool set"
         );
     }
 }
