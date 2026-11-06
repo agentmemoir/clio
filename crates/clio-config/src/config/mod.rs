@@ -56,7 +56,7 @@ use crate::log::{self, LogLevel};
 use crate::ranking::RankingEnv;
 use crate::retention_store::{RetentionStore, resolve_retention_path};
 use crate::secret::masked_clone;
-use clio_types::HistoryPolicy;
+use clio_types::{HistoryPolicy, ToolGroup};
 use merge::{Overlay, apply_overlay, flatten_object, set_path, system_defaults};
 use persist::{load_overlay_file, resolve_deployment_path_with, save_overlay_file};
 use serde_json::Value;
@@ -81,6 +81,7 @@ pub struct Runtime {
     cli_state_path: Option<PathBuf>,
     retention: RetentionStore,
     retention_path: Option<PathBuf>,
+    tool_groups: Option<Vec<ToolGroup>>,
 }
 
 impl Default for Runtime {
@@ -167,6 +168,7 @@ impl Runtime {
             cli_state_path,
             retention: RetentionStore::default(),
             retention_path,
+            tool_groups: None,
         };
         rt.finish_boot(get);
         rt

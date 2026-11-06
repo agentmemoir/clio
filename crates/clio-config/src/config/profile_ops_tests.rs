@@ -57,6 +57,42 @@ fn a_non_string_tool_profile_is_a_configuration_fault() {
     );
 }
 
+/// The installed branch answers with its dependency closure applied, so a
+/// caller that installs a raw group reads back the groups that group requires
+/// rather than the raw selection alone.
+#[test]
+fn an_installed_selection_is_closed_through_its_requirements() {
+    let mut rt = Runtime::with_env(&|_| None);
+    rt.set_mcp_tool_groups(vec![ToolGroup::Ops]);
+    let groups = rt.mcp_tool_groups().expect("a known selection");
+    assert_eq!(groups, closure(&[ToolGroup::Ops]));
+    assert!(
+        groups.contains(&ToolGroup::ItemRead),
+        "`ops` requires `item-read`: {groups:?}"
+    );
+}
+
+/// The installed branch and the configured branch resolve the same selection to
+/// the same shape, so one reader cannot report a surface the other denies.
+#[test]
+fn the_installed_and_configured_branches_resolve_the_same_shape() {
+    let mut installed = Runtime::with_env(&|_| None);
+    installed.set_mcp_tool_groups(vec![
+        ToolGroup::Retention,
+        ToolGroup::Ops,
+        ToolGroup::Hygiene,
+        ToolGroup::ItemRead,
+    ]);
+    let mut configured = Runtime::with_env(&|_| None);
+    configured
+        .load_file_json(r#"{"mcp": {"tool_profile": "ops"}}"#)
+        .expect("a valid config layer");
+    assert_eq!(
+        installed.mcp_tool_groups().expect("a known selection"),
+        configured.mcp_tool_groups().expect("a known preset")
+    );
+}
+
 #[test]
 fn profile_apply_sets_per_repo_bank_policy() {
     let mut rt = Runtime::with_env(&|_| None);
