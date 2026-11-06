@@ -74,8 +74,6 @@ TARGET_LABEL = "Inferred"
 #: The one switch. True makes a miss a failure; False only reports it.
 PRESET_TARGETS_ENFORCED = False
 
-#: The preset vocabulary this record names; only ``TARGET_PRESETS`` carry targets.
-PRESET_NAMES = ("minimal", "coding", "ops", "all")
 #: The smallest preset carries no target: its size is a recorded chosen value, not a threshold.
 TARGET_PRESETS = ("coding", "ops", "all")
 UNITS = ("tokens", "bytes")

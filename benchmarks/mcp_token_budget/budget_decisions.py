@@ -27,7 +27,9 @@ DECISION_LABEL = "Decision"
 DERIVED_JUDGEMENT = "derived"
 MEASURED_LABEL = "Measured"
 
-TOP_LEVEL = frozenset({"format", "format_version", "record_id", "frozen", "policy", "records"})
+TOP_LEVEL = frozenset(
+    {"format", "format_version", "record_id", "policy", "records"}
+)
 POLICY_KEYS = frozenset({"gate_input", "rule"})
 RECORD_KEYS = (
     "decision_id", "date", "label", "judgement", "preset",
@@ -46,6 +48,7 @@ CITED_MEASURES = (
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+USAGE = "decisions: usage: budget_decisions.py --check"
 _HERE = Path(__file__).resolve().parent
 
 
@@ -149,7 +152,6 @@ def validate(document, presets) -> list:
     _expect(document["format"], "format", RECORD_FORMAT)
     _expect(document["format_version"], "format_version", RECORD_FORMAT_VERSION)
     _expect(document["record_id"], "record_id", RECORD_ID)
-    _expect(document["frozen"], "frozen", False)
     policy = _object(document["policy"], "policy", POLICY_KEYS)
     _expect(policy["gate_input"], "policy.gate_input", False)
     _nonempty(policy["rule"], "policy.rule")
@@ -197,12 +199,14 @@ class _Parser(argparse.ArgumentParser):
 
 
 def main(argv=None) -> int:
-    """Validate the committed record and print one summary line; return the exit code."""
+    """Validate the committed record under ``--check`` and return the exit code."""
     parser = _Parser(prog="budget_decisions.py",
                      description="Validate the MCP budget decision record.")
     parser.add_argument("--check", action="store_true",
                         help="validate the committed record and print a summary line")
-    parser.parse_args(argv)
+    if not parser.parse_args(argv).check:
+        sys.stderr.write(f"{USAGE}\n")
+        return 2
     try:
         records = load(_HERE / "decisions" / "frozen-v1.json",
                        _HERE / "presets" / "frozen-v1.json")

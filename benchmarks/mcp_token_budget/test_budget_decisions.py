@@ -6,13 +6,17 @@ rule is refused without the tokenizer: a value the cited row does not state, a
 record that names its own landing commit, and a policy that would let a decision
 gate a check are each refused with one named ``decisions:`` line. The committed
 record is also read back field by field, so the one chosen value on file cannot
-drift from the measurement that supports it.
+drift from the measurement that supports it, and its ``base_commit`` is resolved
+with git, so a stale or unreachable commit is caught; that test asserts hard and
+skips only when the commit object is absent from a shallow checkout.
 """
 
 import contextlib
 import copy
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -28,6 +32,8 @@ import budget_decisions
 DECISIONS = HERE / "decisions" / "frozen-v1.json"
 PRESETS = HERE / "presets" / "frozen-v1.json"
 REPO_ROOT = HERE.parents[1]
+GIT = os.environ.get("GIT", "git")
+PACK_PATH = "benchmarks/mcp_token_budget/presets/packs/{preset}.json"
 
 DERIVED_FROM = {
     "record": "benchmarks/mcp_token_budget/presets/frozen-v1.json",
@@ -46,6 +52,17 @@ def document():
 def presets():
     """Return the committed presets record as a mutable document."""
     return json.loads(PRESETS.read_text(encoding="utf-8"))
+
+
+def git(*args):
+    """Run ``git`` in the repository root and return the completed process."""
+    return subprocess.run(
+        [GIT, *args],
+        cwd=str(REPO_ROOT),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def record(value):
@@ -78,7 +95,12 @@ class CommittedRecordTests(unittest.TestCase):
             decision["base_commit"], "0352da7084042f04f1cc7a6db15379705009bf52"
         )
         self.assertIn("17321 bytes and 3652 tokens", decision["reason"])
-        self.assertTrue(decision["reason"].startswith("The minimal preset is the six tools"))
+        self.assertTrue(
+            decision["reason"].startswith(
+                "The minimal preset is the six tools in the retrieval and graph groups"
+            )
+        )
+        self.assertIn("the default turn never calls", decision["reason"])
 
     def test_the_committed_record_is_never_a_gate_input(self):
         value = document()
@@ -111,6 +133,55 @@ class CommittedRecordTests(unittest.TestCase):
         self.assertEqual(REPO_ROOT / budget_decisions.PRESETS_PATH, PRESETS)
         self.assertEqual(
             budget_decisions.load.__defaults__, (budget_decisions.PRESETS_PATH,)
+        )
+
+
+class BaseCommitTests(unittest.TestCase):
+    """The measured ``base_commit`` exists, precedes HEAD, and holds the cited row."""
+
+    def test_the_base_commit_is_an_ancestor_that_holds_the_cited_row(self):
+        decision = budget_decisions.load(DECISIONS)[0]
+        commit = decision["base_commit"]
+        present = git("cat-file", "-e", f"{commit}^{{commit}}")
+        if present.returncode != 0:
+            self.skipTest(
+                f"base_commit {commit} is not in this checkout, which CI checks out "
+                f"shallow: {present.stderr.strip() or 'git cat-file -e failed'}"
+            )
+        ancestor = git("merge-base", "--is-ancestor", commit, "HEAD")
+        self.assertEqual(
+            ancestor.returncode,
+            0,
+            f"base_commit {commit} is not an ancestor of HEAD: {ancestor.stderr.strip()}",
+        )
+        shown = git("show", f"{commit}:{budget_decisions.PRESETS_PATH}")
+        self.assertEqual(shown.returncode, 0, shown.stderr.strip())
+        cited = decision["derived_from"]
+        rows = [
+            item for item in json.loads(shown.stdout)["rows"]
+            if item["preset"] == decision["preset"]
+        ]
+        self.assertEqual(len(rows), 1, f"{commit} holds {len(rows)} cited rows")
+        stated = rows[0]
+        for field, expected in (
+            ("bytes", decision["bytes"]),
+            ("tokens", decision["tokens"]),
+            ("input_sha256", cited["input_sha256"]),
+        ):
+            with self.subTest(field=field):
+                self.assertEqual(
+                    stated[field],
+                    expected,
+                    f"{commit} states {field} {stated[field]!r}, the record cites {expected!r}",
+                )
+        # That commit's presets row predates the row-level catalog_hash, so the
+        # hash it records for the same catalog lives in the pack the row pins.
+        pack = git("show", f"{commit}:{PACK_PATH.format(preset=decision['preset'])}")
+        self.assertEqual(pack.returncode, 0, pack.stderr.strip())
+        self.assertEqual(
+            json.loads(pack.stdout)["catalog_hash"],
+            cited["catalog_hash"],
+            f"{commit} states a different catalog_hash for the cited pack",
         )
 
 
@@ -251,8 +322,8 @@ class RecordTests(unittest.TestCase):
         value["record_id"] = "other"
         self.assert_refused(value, "record_id is 'other'")
         value = document()
-        value["frozen"] = True
-        self.assert_refused(value, "frozen is True, expected False")
+        value["frozen"] = False
+        self.assert_refused(value, "top-level keys must be exactly")
 
     def test_a_citation_of_another_record_is_refused(self):
         value = document()
@@ -305,7 +376,7 @@ class RecordTests(unittest.TestCase):
 
 
 class CheckCommandTests(unittest.TestCase):
-    """``--check`` validates the committed record and prints one summary line."""
+    """``--check`` validates the record and prints one summary line; a bare run refuses."""
 
     def test_check_reports_one_record_and_exits_zero(self):
         out = io.StringIO()
@@ -322,6 +393,14 @@ class CheckCommandTests(unittest.TestCase):
                 code = budget_decisions.main(["--check"])
         self.assertEqual(code, 2)
         self.assertEqual(err.getvalue(), "decisions: broken record\n")
+
+    def test_a_bare_invocation_prints_one_usage_line_and_exits_two(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = budget_decisions.main([])
+        self.assertEqual(code, 2)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), f"{budget_decisions.USAGE}\n")
 
 
 if __name__ == "__main__":

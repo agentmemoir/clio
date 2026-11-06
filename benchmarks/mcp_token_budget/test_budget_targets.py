@@ -84,12 +84,8 @@ class RecordTests(unittest.TestCase):
         )
 
     def test_the_committed_record_carries_no_target_for_the_smallest_preset(self):
-        targets = budget_targets.load(TARGETS)
-        self.assertIn("minimal", budget_targets.PRESET_NAMES)
-        self.assertEqual(
-            [item for item in targets if item["preset"] == "minimal"], []
-        )
-        for item in targets:
+        self.assertNotIn("minimal", [item["preset"] for item in document()["targets"]])
+        for item in budget_targets.load(TARGETS):
             with self.subTest(preset=item["preset"]):
                 self.assertIn(item["preset"], budget_targets.TARGET_PRESETS)
 
