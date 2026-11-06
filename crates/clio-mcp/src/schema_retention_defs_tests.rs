@@ -7,7 +7,7 @@
 //! published defs, mapping tables, and pack wiring.
 
 use super::*;
-use crate::schema::{catalog_defs, schema_pack, validate_tool_schema};
+use crate::schema::{catalog_def, catalog_defs, schema_pack, validate_tool_schema};
 use serde_json::Value;
 
 fn def(name: &str) -> ToolDef {
@@ -15,6 +15,18 @@ fn def(name: &str) -> ToolDef {
         .into_iter()
         .find(|d| d.name == name)
         .unwrap_or_else(|| panic!("{name} missing"))
+}
+
+/// The node a local `#/$defs/<name>` reference points at inside `root`. The
+/// shape here is one pointer token, which is all these schemas emit.
+fn resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
+    let Some(reference) = node.get("$ref").and_then(Value::as_str) else {
+        return node;
+    };
+    let name = reference
+        .strip_prefix("#/$defs/")
+        .unwrap_or_else(|| panic!("unexpected reference `{reference}`"));
+    &root["$defs"][name]
 }
 
 #[test]
@@ -42,9 +54,45 @@ fn batch_preview_schema_caps_items_and_reuses_candidate_fields() {
         tool["inputSchema"]["required"],
         serde_json::json!(["items"])
     );
-    let item = &tool["inputSchema"]["properties"]["items"]["items"];
+    let item = resolve(
+        &tool["inputSchema"],
+        &tool["inputSchema"]["properties"]["items"]["items"],
+    );
+
+    // The element is the single-item preview argument set: its live properties
+    // minus the connection-level `bank`/`actor` pair, and its `required` list
+    // narrowed to the keys that survive. Deriving both from the live definition
+    // means a change to either side alone fails this guard.
+    let single = catalog_def("admit_preview")
+        .expect("the single-item preview")
+        .to_tool();
+    let single_schema = &single["inputSchema"];
+    let mut candidate_props = single_schema["properties"]
+        .as_object()
+        .expect("the preview declares properties")
+        .clone();
+    assert!(candidate_props.remove("bank").is_some());
+    assert!(candidate_props.remove("actor").is_some());
+    let candidate_required: Vec<&str> = single_schema["required"]
+        .as_array()
+        .expect("the preview declares required")
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|name| candidate_props.contains_key(*name))
+        .collect();
+
     assert_eq!(item["type"], "object");
-    // Candidate fields come from the single-item preview schema, minus bank/actor.
+    assert_eq!(item["additionalProperties"], false);
+    assert_eq!(
+        item["properties"],
+        Value::Object(candidate_props),
+        "the batch element fields drifted from the single-item preview"
+    );
+    assert_eq!(
+        item["required"],
+        serde_json::json!(candidate_required),
+        "the batch element required list drifted from the single-item preview"
+    );
     assert!(item["properties"]["category"]["enum"].is_array());
     assert!(item["properties"]["episodic_type"]["enum"].is_array());
     assert!(item["properties"]["epistemic_kind"]["enum"].is_array());
