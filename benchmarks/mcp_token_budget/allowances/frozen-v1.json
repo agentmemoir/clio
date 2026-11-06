@@ -12,6 +12,7 @@
       "reason": "The frozen 86-tool pack rows hold at 105632 canonical bytes and 21691 cl100k_base tokens, and any growth past these ceilings needs its own record. The record grants no headroom: a grown pack has a different canonical digest, so growth needs its own record.",
       "base_commit": "c736c50171b668b29ef00c706d6f6ec78308f34a",
       "candidate_sha256": "41a7fdbb1494ee4280b0572de6db5131a8f263d9abd8e3421552271a2e2d2eaa",
+      "label": "Measured",
       "max_bytes": 105632,
       "max_tokens": 21691
     },
@@ -21,6 +22,7 @@
       "reason": "The pack now carries outputSchema for the 86 inventoried tools, which grows the canonical tools array past the frozen ceilings. This record grants exactly the measured size.",
       "base_commit": "c736c50171b668b29ef00c706d6f6ec78308f34a",
       "candidate_sha256": "022f77f6c56c8b723aa91d82f0b22a19c87954b771f306439b8f52a03072f87c",
+      "label": "Measured",
       "max_bytes": 149465,
       "max_tokens": 31815
     }

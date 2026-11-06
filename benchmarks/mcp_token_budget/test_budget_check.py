@@ -55,6 +55,7 @@ def record(**overrides):
         "reason": "reviewed growth",
         "base_commit": BASE_COMMIT,
         "candidate_sha256": GROWN_DIGEST,
+        "label": "Measured",
         "max_bytes": 110,
         "max_tokens": 30,
     }
