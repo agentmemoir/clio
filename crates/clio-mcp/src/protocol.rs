@@ -25,7 +25,7 @@
 use crate::MCP_PROTOCOL_REVISION;
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
-use clio_types::ToolPreset;
+use clio_types::{ToolGroup, tools_of};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -163,17 +163,19 @@ impl McpHandler {
         json!({ "tools": tools })
     }
 
-    /// `tools/list` over the bound catalogue narrowed to the profile the
-    /// effective configuration selects.
+    /// `tools/list` over the bound catalogue narrowed to the groups the effective
+    /// selection names.
     ///
     /// Only what this build advertises shrinks: dispatch eligibility and the
     /// argument contract keep reading [`Self::tools_list`], so a tool outside
-    /// the selected profile stays reachable and stays validated.
+    /// the selected groups stays reachable and stays validated. The stateless
+    /// transport answers through this function too, so one path decides what
+    /// every transport advertises.
     ///
     /// # Errors
     /// The effective configuration names a tool profile this build does not know.
     pub(crate) fn tools_list_visible(state: &McpState) -> Result<Value, RpcError> {
-        let visible = configured_profile(state)?.tools();
+        let visible = tools_of(&configured_groups(state)?);
         let bound = bound_set();
         let tools: Vec<Value> = catalog_defs()
             .iter()
@@ -337,14 +339,14 @@ fn bound_set() -> Vec<&'static str> {
     crate::bound_tools()
 }
 
-/// The tool preset the state's effective configuration selects, read at call
-/// time so a configuration applied in this process governs the next listing.
-fn configured_profile(state: &McpState) -> Result<ToolPreset, RpcError> {
+/// The tool groups the state's effective selection names, read at call time so a
+/// selection installed in this process governs the next listing.
+fn configured_groups(state: &McpState) -> Result<Vec<ToolGroup>, RpcError> {
     let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
         state.config.lock().expect("config runtime mutex poisoned");
-    let profile = rt.mcp_tool_profile();
+    let groups = rt.mcp_tool_groups();
     drop(rt);
-    profile.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))
+    groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))
 }
 #[cfg(test)]
 #[path = "protocol_nfr7_tests.rs"]

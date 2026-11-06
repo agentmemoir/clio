@@ -10,6 +10,7 @@
 //! - `config_profiles` / `config_profile_apply`
 //! - `ranking_env_get` / `ranking_env_set`
 //! - The `mcp.tool_profile` accessor that names the configured tool preset
+//! - The installed-selection accessor that resolves the effective tool groups
 //!
 //! ## Does not own
 //! - Overlay merge order or `config_get` / `config_set`
@@ -30,7 +31,7 @@ use crate::error::{AmError, ErrorCode, ToolResult};
 use crate::log;
 use crate::profile::{Profile, builtin_profiles, coding_tool_inventory, lookup_profile};
 use crate::ranking::{RankingEnv, RankingEnvPatch, preview_patch};
-use clio_types::{DEFAULT_PRESET, ToolPreset};
+use clio_types::{DEFAULT_PRESET, ToolGroup, ToolPreset, closure};
 use serde_json::{Value, json};
 
 impl Runtime {
@@ -153,6 +154,32 @@ impl Runtime {
                 ),
             )
         })
+    }
+
+    /// The tool groups the effective selection names: the selection a caller
+    /// installed ahead of the document, else `mcp.tool_profile`, else
+    /// [`DEFAULT_PRESET`].
+    ///
+    /// Every reader of the visible tool set resolves here, so a flag, a config
+    /// setting, and the default have exactly one precedence. Both branches
+    /// answer with their dependency closure applied, so a caller installing a
+    /// raw group reads back the same set a listing derives from, not the raw
+    /// selection alone.
+    ///
+    /// # Errors
+    /// `mcp.tool_profile` is not a string, or names no preset this build knows.
+    #[must_use = "an unknown profile is a configuration fault, not a grouping"]
+    pub fn mcp_tool_groups(&self) -> Result<Vec<ToolGroup>, AmError> {
+        match &self.tool_groups {
+            Some(groups) => Ok(closure(groups)),
+            None => Ok(self.mcp_tool_profile()?.resolve()),
+        }
+    }
+
+    /// Select the tool groups ahead of `mcp.tool_profile`, the way a transport
+    /// surfaces its own selection flag.
+    pub fn set_mcp_tool_groups(&mut self, groups: Vec<ToolGroup>) {
+        self.tool_groups = Some(groups);
     }
 
     pub fn ranking_env_set(

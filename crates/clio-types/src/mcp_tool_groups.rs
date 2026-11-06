@@ -7,7 +7,8 @@
 //!
 //! ## Owns
 //! - `ToolGroup`, `ToolPreset`, and `DEFAULT_PRESET`
-//! - `closure` and `custom`, which add transitive group requirements
+//! - `closure`, `custom`, and `tools_of`, which turn a selection into groups
+//!   and tools
 //! - The public re-export of `GroupSpec` and `GROUP_TABLE`
 //!
 //! ## Does not own
@@ -233,11 +234,21 @@ impl ToolPreset {
     /// Every tool the preset's resolved groups hold, in catalog order.
     #[must_use]
     pub fn tools(self) -> Vec<&'static str> {
-        self.resolve()
-            .into_iter()
-            .flat_map(|group| group.spec().tools.iter().copied())
-            .collect()
+        tools_of(self.groups())
     }
+}
+
+/// Every tool a selection of `groups` holds, in catalog order.
+///
+/// This is the one groups-to-tools derivation: a preset and a caller-supplied
+/// selection both resolve through [`closure`] here, so the two can never
+/// advertise different tools for the same groups.
+#[must_use]
+pub fn tools_of(groups: &[ToolGroup]) -> Vec<&'static str> {
+    closure(groups)
+        .into_iter()
+        .flat_map(|group| group.spec().tools.iter().copied())
+        .collect()
 }
 
 /// Add every transitive requirement of `groups`, in canonical order without

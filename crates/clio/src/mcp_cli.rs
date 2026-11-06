@@ -8,13 +8,16 @@
 //! launcher with their flag-to-options decoding.
 //!
 //! ## Owns
-//! - `clio mcp schema-export|stdio|http` handlers and their usage text
-//! - Decoding CLI flags and environment into `McpOpenOptions`
+//! - `clio mcp schema-export|stdio|http` handlers
+//! - Decoding CLI flags and environment into `McpOpenOptions`, including the
+//!   `--tools` selection the server state is opened under
 //! - The stdio session seam (`mcp_stdio_serve`) over injected streams
 //!
 //! ## Does not own
 //! - The argument grammar (`parse_flags`, see the binary root)
 //! - MCP protocol/tool semantics or transports themselves (see `clio-mcp`)
+//! - The two transports' `--help` text (see `mcp_cli_help`) or what `--tools`
+//!   accepts (see `mcp_tools_flag`)
 //! - The top-level help layout (see the binary root)
 //!
 //! ## Boundary
@@ -25,13 +28,17 @@
 //!
 //! Keep this module focused on the `clio mcp` subcommand handlers.
 
-use super::cli_top_level::database_help_block;
 use super::cli_top_level::parse_flags;
 use clio_mcp::http::http_start_guard::{BindRefusal, bind_refusal};
 use std::process::ExitCode;
 
 #[path = "mcp_cli_credentials.rs"]
 mod mcp_cli_credentials;
+
+#[path = "mcp_cli_help.rs"]
+mod mcp_cli_help;
+
+pub(crate) use mcp_cli_help::{mcp_http_help, mcp_stdio_help};
 
 /// `clio mcp` subcommands: schema export, stdio server, Streamable HTTP server.
 pub(crate) fn mcp(args: impl IntoIterator<Item = String>) -> ExitCode {
@@ -167,12 +174,7 @@ pub(crate) fn wants_help(args: &[String]) -> bool {
 fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     let collected: Vec<String> = args.into_iter().collect();
     if wants_help(&collected) {
-        println!(
-            "{}\n\n{}",
-            crate::cli_help_usage::usage_line("mcp stdio")
-                .unwrap_or_else(|| "clio mcp stdio".to_owned()),
-            database_help_block(&|key| std::env::var(key).ok())
-        );
+        println!("{}", mcp_stdio_help());
         return ExitCode::SUCCESS;
     }
     // A flag this transport does not take is a usage error (exit 2), checked
@@ -182,9 +184,14 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     // transport sets; the shared builder below parses the http record's wider
     // one and reports only open failures.
     let names = crate::cli_command_registry_surface::parse_flag_names("mcp stdio");
-    if let Err(error) = parse_flags(collected.iter().cloned(), &names) {
-        return crate::cli_top_level::report_surface_usage_error(&error, &collected);
-    }
+    let flags = match parse_flags(collected.iter().cloned(), &names) {
+        Ok(flags) => flags,
+        Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
+    };
+    let tool_groups = match crate::mcp_tools_flag::selection(&flags) {
+        Ok(groups) => groups,
+        Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
+    };
     let opts = match mcp_options(collected) {
         Ok(opts) => opts,
         Err(reason) => {
@@ -199,7 +206,13 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     let serving = crate::sigpipe::begin_serving();
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
-    mcp_stdio_serve(&serving, &opts, stdin.lock(), &mut stdout)
+    mcp_stdio_serve(
+        &serving,
+        &opts,
+        tool_groups.as_deref(),
+        stdin.lock(),
+        &mut stdout,
+    )
 }
 
 /// Open the store and serve one MCP stdio session over injected streams.
@@ -207,13 +220,15 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
 /// Split out from [`mcp_stdio`] so the session path is testable without a TTY.
 /// The `Serving` witness is what proves `SIGPIPE` was ignored before the
 /// session starts; only [`crate::sigpipe::begin_serving`] can make one.
+/// `tool_groups` is the transport's `--tools` selection, when it was given.
 pub(crate) fn mcp_stdio_serve<R: std::io::BufRead, W: std::io::Write>(
     _serving: &crate::sigpipe::Serving,
     opts: &clio_mcp::runtime::McpOpenOptions,
+    tool_groups: Option<&[clio_types::ToolGroup]>,
     input: R,
     output: &mut W,
 ) -> ExitCode {
-    match clio_mcp::runtime::McpState::open(opts) {
+    match crate::mcp_tools_flag::open_state(opts, tool_groups) {
         Ok(state) => {
             // Background index drain: drains the durable outbox off the
             // response path (post-write nudge + periodic sweep for retries).
@@ -248,6 +263,10 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     if let Err(error) = refuse_sessions_value(&flags) {
         return crate::cli_top_level::report_surface_usage_error(&error, &collected);
     }
+    let tool_groups = match crate::mcp_tools_flag::selection(&flags) {
+        Ok(groups) => groups,
+        Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
+    };
     let opts = match mcp_options(collected.iter().cloned()) {
         Ok(opts) => opts,
         Err(reason) => {
@@ -271,7 +290,7 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     cfg.credentials = credentials;
     // As for the stdio transport: the server must outlive one client going away.
     let serving = crate::sigpipe::begin_serving();
-    match clio_mcp::runtime::McpState::open(&opts) {
+    match crate::mcp_tools_flag::open_state(&opts, tool_groups.as_deref()) {
         Ok(state) => {
             // Same background index drain as the stdio transport.
             let _sweeper = state.spawn_index_sweeper();
@@ -379,46 +398,6 @@ fn refuse_sessions_value(
     }
 }
 
-/// `clio mcp http` usage text, including the auto-bind rule.
-pub(crate) fn mcp_http_help() -> String {
-    let range = format!(
-        "{}-{}",
-        crate::port_scan::FIRST_PORT,
-        crate::port_scan::LAST_PORT
-    );
-    format!(
-        "{}\n\n--bind ADDR  Bind address. With no flag, or with a bare `--bind`, scan 127.0.0.1:{range}
-             for the first free port. An explicit `--bind HOST:PORT` binds exactly
-             that address; a non-loopback address also requires a credential, or
-             both --insecure-no-auth and --insecure-bind-any.
-
---token-file PATH
-             Credential store whose records name an actor and the banks it may reach
-             (see `clio auth token add`). Loaded once at start; a path that is
-             absent, unreadable, malformed, or holds no record refuses the start.
-             Required on every bind unless --insecure-no-auth is given; outside
-             loopback that opt-out also needs --insecure-bind-any.
-
---insecure-no-auth
-             Permit a bind with no credential. Without it a credential is
-             required everywhere, including loopback: name a --token-file store,
-             or the start is refused. A --token-file store, when given, is still
-             enforced. It does not permit a non-loopback bind: that needs
-             --insecure-bind-any as well.
-
---insecure-bind-any
-             Permit --insecure-no-auth to bind a non-loopback address. The start
-             then warns that every host that can reach the port can use every
-             tool. Without it a non-loopback bind with no credential is refused
-             even with --insecure-no-auth.
-
-{}",
-        crate::cli_help_usage::usage_line("mcp http")
-            .unwrap_or_else(|| "clio mcp http".to_owned()),
-        database_help_block(&|key| std::env::var(key).ok())
-    )
-}
-
 #[cfg(test)]
 #[path = "mcp_cli_tests.rs"]
 pub(crate) mod tests;
@@ -434,3 +413,7 @@ mod sessions_tests;
 #[cfg(test)]
 #[path = "mcp_cli_insecure_tests.rs"]
 mod insecure_tests;
+
+#[cfg(test)]
+#[path = "mcp_cli_tools_tests.rs"]
+mod tools_tests;

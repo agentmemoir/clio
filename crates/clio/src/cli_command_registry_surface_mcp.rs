@@ -12,6 +12,7 @@
 //!   `out`) and both documented spellings the pair names
 //! - The `http` record's `--bind`, `--token-file`, `--sessions`, and
 //!   `--insecure-no-auth` flags, and the database trio both transports print
+//! - The `--tools` flag both transports document and refuse a bad value for
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche and the shared flag facts its children read (see
@@ -30,7 +31,7 @@
 //! Keep this module focused on the three `mcp` records.
 //
 
-use super::{DB_BACKEND_BANK, DB_BANK_UNDOCUMENTED_GLOBALS, RESERVED_GLOBALS};
+use super::{DB_BANK_UNDOCUMENTED_GLOBALS, RESERVED_GLOBALS};
 use crate::cli_command_registry::{GLOBAL_BACKEND, GLOBAL_BANK, GLOBAL_DB};
 use crate::cli_command_spec::{CommandSpec, Example, Flag, Section};
 
@@ -40,6 +41,17 @@ const BIND: Flag = Flag {
     value_optional: true,
     ..Flag::text("bind", "ADDR", "Bind address `mcp_cli` scans or uses.")
 };
+
+/// The tool-selection flag both transports document: the preset names, the
+/// `custom:` group list, and the setting that decides when no flag is given.
+const TOOLS: Flag = Flag::text(
+    "tools",
+    "PRESET",
+    "Tool groups the server advertises: `minimal`, `coding`, `ops`, `all`, or custom:GROUP[,GROUP] for the minimal set plus the listed groups and what they require. With no --tools the config setting mcp.tool_profile applies; when that is unset the minimal preset is selected.",
+);
+
+/// The database trio both transports document, plus the tool selection.
+const DB_BACKEND_BANK_TOOLS: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK, TOOLS];
 
 /// The flags `mcp http` documents past the database trio.
 const TOKEN_FILE: Flag = Flag::text("token-file", "PATH", "Credential store `mcp_cli` loads.");
@@ -98,7 +110,7 @@ pub(crate) const MCP_STDIO: CommandSpec = CommandSpec {
     summary: "Run the MCP stdio transport",
     notes: &[],
     positionals: &[],
-    documented: DB_BACKEND_BANK,
+    documented: DB_BACKEND_BANK_TOOLS,
     accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -139,6 +151,7 @@ pub(crate) const MCP_HTTP: CommandSpec = CommandSpec {
         SESSIONS,
         INSECURE_NO_AUTH,
         INSECURE_BIND_ANY,
+        TOOLS,
     ],
     accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
     flag_aliases: &[],
