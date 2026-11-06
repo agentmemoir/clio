@@ -124,7 +124,11 @@ fn t06_http_initialize_and_optional_session_lifecycle() {
 
     // Both transports advertise the selected profile's tools over HTTP, and the
     // wider catalogue those tools belong to stays bound.
-    let list = rpc(2, "tools/list", json!({}));
+    let list = rpc(
+        2,
+        "tools/list",
+        json!({"_meta": {"com.agentmemoir/pageSize": 100}}),
+    );
     let (status, listed) = http_post(&addr, &list, "");
     assert_eq!(status, 200);
     let names: Vec<&str> = listed["result"]["tools"]

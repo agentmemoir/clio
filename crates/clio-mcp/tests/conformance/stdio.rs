@@ -60,7 +60,11 @@ fn stdio_write_set_matrix_with_parity() {
         ));
         frames.push('\n');
     }
-    frames.push_str(&rpc(300, "tools/list", json!({})));
+    frames.push_str(&rpc(
+        300,
+        "tools/list",
+        json!({"_meta": {"com.agentmemoir/pageSize": 100}}),
+    ));
     frames.push('\n');
     let responses = run_stdio(&frames);
     assert_eq!(

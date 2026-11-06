@@ -419,7 +419,8 @@ fn retention_tools_parity_stdio_vs_http() {
     );
 
     // Both transports advertise the selected profile's tools in `tools/list`.
-    let list = r#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#;
+    let list = r#"{"jsonrpc":"2.0","id":4,"method":"tools/list",
+        "params":{"_meta":{"com.agentmemoir/pageSize":100}}}"#;
     let http_list: Value = serde_json::from_str(&post_json(port, list, "").body).expect("json");
     let mut names: Vec<&str> = http_list["result"]["tools"]
         .as_array()

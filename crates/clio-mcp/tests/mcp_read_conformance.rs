@@ -39,7 +39,8 @@ use support::{BANK, read_state};
 fn ac_17_01_all_read_tools_listed() {
     let handler = McpHandler::new(read_state());
     let res = handler
-        .handle_message(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))
+        .handle_message(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list",
+                "params":{"_meta":{"com.agentmemoir/pageSize":100}}}))
         .expect("response");
     let tools = res["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
