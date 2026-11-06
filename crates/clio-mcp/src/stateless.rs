@@ -81,9 +81,10 @@ pub(crate) struct CacheHints {
 
 /// The one cache-hint pair this dispatcher answers for every cacheable result.
 ///
-/// Discovery content and the visible catalogue are both derived from this build
-/// and from the request's own view. Neither is promised any freshness here, and
-/// neither may be handed to a cache shared across authorization contexts.
+/// The two cacheable operations, discovery and the visible catalogue, share
+/// this one freshness window and this one cache scope, so a client reads the
+/// same reuse terms whichever of them it asks for, and no result may be handed
+/// to a cache shared across authorization contexts.
 pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
     ttl_ms: 300_000,
     scope: "private",

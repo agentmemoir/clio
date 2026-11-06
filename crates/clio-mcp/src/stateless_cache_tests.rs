@@ -9,13 +9,13 @@
 //! call, and the shape of an envelope that answers an error at all.
 //!
 //! ## Owns
-//! - Every assertion that `CACHE_HINTS` reaches a result the revision caches
+//! - The pinned hint values, and that they reach the wire in their declared types
 //! - The walk over every page of one listing, and the one hint pair it collects
 //! - The claim that a `tools/call` failure is still a complete result
 //! - The claim that an error envelope carries no result and no result type
 //!
 //! ## Does not own
-//! - The hint values and the stamping itself (see `stateless`)
+//! - The stamping of the pair onto a result (see `stateless`)
 //! - The request shapes these tests send (see `stateless_fixtures`)
 //! - The parse-error frame path, which owns its own assertion (see
 //!   `protocol_tests`)
@@ -52,6 +52,40 @@ fn assert_error_envelope(res: &Value) {
     assert!(res.get("result").is_none(), "carries no result: {res}");
     let raw = serde_json::to_string(res).expect("an envelope serializes");
     assert!(!raw.contains("resultType"), "carries no result type: {raw}");
+}
+
+/// The decision value itself is pinned here and nowhere else, so a deliberate
+/// change of either hint must change this test.
+#[test]
+fn the_chosen_hint_pair_is_pinned() {
+    assert_eq!(
+        (CACHE_HINTS.ttl_ms, CACHE_HINTS.scope),
+        (300_000, "private"),
+        "one freshness window of five minutes and one private cache scope"
+    );
+}
+
+/// The revision types `ttlMs` as a non-negative integer and `cacheScope` as one
+/// of `public`/`private`, so a real listing must publish them as such and not as
+/// a string, a float, or a missing member.
+#[test]
+fn the_hint_pair_reaches_the_wire_with_the_declared_types() {
+    let res = answer(
+        &state(),
+        &request("tools/list", &required_meta(CANDIDATE_REVISION)),
+    );
+    assert!(res.get("error").is_none(), "the listing is served: {res}");
+    let result = &res["result"];
+    assert_eq!(
+        result["ttlMs"].as_i64(),
+        Some(300_000),
+        "an integer ttl of the pinned length: {result}"
+    );
+    assert_eq!(
+        result["cacheScope"].as_str(),
+        Some("private"),
+        "the JSON string `private`: {result}"
+    );
 }
 
 /// The revision types `resultType` on every result and reports tool failure in
@@ -134,6 +168,32 @@ fn a_complete_tool_call_result_carries_no_cache_hints() {
     assert!(
         !result.contains_key("cacheScope"),
         "a tool result carries no scope: {result:?}"
+    );
+}
+
+/// A failing tool call is still a tool result, and no tool result is cacheable
+/// under this revision, so failure carries neither hint either.
+#[test]
+fn a_failing_tool_call_result_carries_no_cache_hints() {
+    let res = answer(
+        &state(),
+        &failing_tool_call(&required_meta(CANDIDATE_REVISION)),
+    );
+    let result = res["result"]
+        .as_object()
+        .unwrap_or_else(|| panic!("a tool result object: {res}"));
+    assert_eq!(
+        result.get("isError"),
+        Some(&json!(true)),
+        "the tool does fail: {result:?}"
+    );
+    assert!(
+        !result.contains_key("ttlMs"),
+        "a failed tool result carries no ttl: {result:?}"
+    );
+    assert!(
+        !result.contains_key("cacheScope"),
+        "a failed tool result carries no scope: {result:?}"
     );
 }
 
