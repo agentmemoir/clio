@@ -32,6 +32,15 @@
       "candidate_sha256": "622890f6a700b3b5188abda7a6c1e2c196f51280703bb6babaae815d55232f3e",
       "max_bytes": 148633,
       "max_tokens": 31667
+    },
+    {
+      "decision_id": "mcp-admission-candidate-def-2026-11-06",
+      "date": "2026-11-06",
+      "reason": "The batch admission element now references one local AdmissionCandidate definition instead of repeating that object inline, so admit_preview_batch grows by 96 bytes and 24 tokens: 37 bytes for the required item and epistemic_kind list the resolved element now carries, plus 22 bytes for the new $defs key. Every other tool keeps its exact bytes, and the definition is emitted once.",
+      "base_commit": "f3ebd67c8eb99b0f6dbadda927ba234cd0fbfd96",
+      "candidate_sha256": "a43d52ea02d81517f478cbebe88b87d193477c90ebe80a33332e0ac7e27586e2",
+      "max_bytes": 148729,
+      "max_tokens": 31691
     }
   ]
 }
