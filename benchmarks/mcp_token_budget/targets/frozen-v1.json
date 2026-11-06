@@ -10,7 +10,7 @@
   "basis": {
     "shared_row": true,
     "per_preset_measurement": false,
-    "reason": "frozen-v1 holds no per-preset row; every preset target is the same full-surface ceiling"
+    "reason": "preset rows exist for all four presets, but every target still rests on the shared full-surface row. The smallest preset carries no target: its size is a chosen value recorded in the decision record, and a chosen value is never a gate input."
   },
   "tokenizer": {
     "encoding": "cl100k_base",
@@ -33,8 +33,6 @@
     "foreign_tokenizer": "reject"
   },
   "targets": [
-    { "preset": "minimal", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
-    { "preset": "minimal", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
     { "preset": "coding", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
     { "preset": "coding", "kind": "ceiling", "unit": "bytes", "baseline_row": "client/synthetic-eager-client/turn/1/bytes", "baseline_value": 105632, "factor": 80, "target": 84505, "headroom": 21127, "label": "Inferred" },
     { "preset": "ops", "kind": "ceiling", "unit": "tokens", "baseline_row": "client/synthetic-eager-client/turn/1/tokens", "baseline_value": 21691, "factor": 70, "target": 15183, "headroom": 6508, "label": "Inferred" },
