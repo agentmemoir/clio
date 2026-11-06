@@ -73,11 +73,34 @@ pub fn catalog_def(name: &str) -> Option<ToolDef> {
 #[must_use]
 pub fn schema_pack() -> Value {
     let tools: Vec<Value> = catalog_defs().iter().map(ToolDef::to_tool).collect();
+    pack_of(&tools)
+}
+
+/// Build the `tool_schema` pack holding only the tools `groups` select.
+///
+/// The selection resolves through [`clio_types::tools_of`], the same derivation
+/// a preset resolves through, so a narrowed pack and a listing made under that
+/// selection hold the same tools. The hash covers the tools the pack publishes,
+/// exactly as it does for the full pack.
+#[must_use]
+pub fn schema_pack_for_groups(groups: &[clio_types::ToolGroup]) -> Value {
+    let names = clio_types::tools_of(groups);
+    let tools: Vec<Value> = catalog_defs()
+        .iter()
+        .filter(|def| names.contains(&def.name))
+        .map(ToolDef::to_tool)
+        .collect();
+    pack_of(&tools)
+}
+
+/// Assemble the pack document around `tools`, so the object shape is written
+/// once and a narrowed pack cannot drift from the full one.
+fn pack_of(tools: &[Value]) -> Value {
     json!({
         "format": PACK_FORMAT,
         "format_version": 1,
         "mcp_protocol_revision": MCP_PROTOCOL_REVISION,
-        "catalog_hash": catalog_hash(&tools),
+        "catalog_hash": catalog_hash(tools),
         "catalog_hash_definition": catalog_hash_definition(),
         "tools": tools
     })

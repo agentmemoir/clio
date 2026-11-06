@@ -63,11 +63,12 @@ fn schema_export_carries_its_help_prose_and_matches_its_flag_table() {
     assert_eq!(
         spec.notes,
         [
-            "--out FILE writes the pack to a file; --path is an accepted alias.\nWith neither flag the pack is written to stdout."
+            "--out FILE writes the pack to a file; --path is an accepted alias.\nWith neither flag the pack is written to stdout.",
+            "--tools narrows the pack to a tool-group selection: minimal, coding, ops, all, or custom:GROUP[,GROUP] for the minimal set plus the listed groups and what they require. With no --tools the pack holds every tool in the catalog."
         ]
     );
     let names = crate::cli_command_registry_surface::parse_flag_names("mcp schema-export");
-    assert_eq!(names, ["out", "path"]);
+    assert_eq!(names, ["out", "path", "tools"]);
     let bare =
         crate::cli_top_level::parse_flags(["--out".to_owned(), "pack.json".to_owned()], &names)
             .expect("--out is documented");

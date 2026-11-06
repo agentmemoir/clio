@@ -12,7 +12,8 @@
 //!   `out`) and both documented spellings the pair names
 //! - The `http` record's `--bind`, `--token-file`, `--sessions`, and
 //!   `--insecure-no-auth` flags, and the database trio both transports print
-//! - The `--tools` flag both transports document and refuse a bad value for
+//! - The `--tools` flag both transports and the export document, and the
+//!   usage refusal a bad value raises
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche and the shared flag facts its children read (see
@@ -70,6 +71,15 @@ const INSECURE_BIND_ANY: Flag = Flag::toggle(
 const SCHEMA_EXPORT_OUT: Flag = Flag::text("out", "FILE", "Pack file `mcp_cli` writes.");
 const SCHEMA_EXPORT_PATH: Flag = Flag::text("path", "FILE", "Alias of `--out` for the pack.");
 
+/// The tool selection the export documents: the preset names, the `custom:`
+/// group list, and the full catalog a pack with no flag holds.
+const SCHEMA_EXPORT_TOOLS: Flag = Flag::text(
+    "tools",
+    "PRESET",
+    "Tool groups the pack holds: `minimal`, `coding`, `ops`, `all`, or custom:GROUP[,GROUP] for the minimal set plus the listed groups and what they require. With no --tools the pack holds the whole catalog.",
+);
+const SCHEMA_EXPORT_FLAGS: &[Flag] = &[SCHEMA_EXPORT_OUT, SCHEMA_EXPORT_PATH, SCHEMA_EXPORT_TOOLS];
+
 /// `clio mcp schema-export`: print or write the tool schema pack.
 pub(crate) const MCP_SCHEMA_EXPORT: CommandSpec = CommandSpec {
     name: "mcp schema-export",
@@ -77,9 +87,10 @@ pub(crate) const MCP_SCHEMA_EXPORT: CommandSpec = CommandSpec {
     summary: "Print/write the tool_schema pack (alias: --path)",
     notes: &[
         "--out FILE writes the pack to a file; --path is an accepted alias.\nWith neither flag the pack is written to stdout.",
+        "--tools narrows the pack to a tool-group selection: minimal, coding, ops, all, or custom:GROUP[,GROUP] for the minimal set plus the listed groups and what they require. With no --tools the pack holds every tool in the catalog.",
     ],
     positionals: &[],
-    documented: &[SCHEMA_EXPORT_OUT, SCHEMA_EXPORT_PATH],
+    documented: SCHEMA_EXPORT_FLAGS,
     accepted_extra: RESERVED_GLOBALS,
     flag_aliases: &[("path", "out")],
     usage_override: None,
