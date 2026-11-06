@@ -1,0 +1,1 @@
+The measured cost of the shipped MCP tool surface is now recorded per preset, so an operator can quote the discovery-off bytes and tokens of the minimal, coding, ops, and all presets without exporting them again.
