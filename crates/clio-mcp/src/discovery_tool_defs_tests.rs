@@ -14,7 +14,7 @@
 //!   keyword and instance path it declares
 //! - The family and group enums matching the tool-group table
 //! - The declared argument rules producing the stated effective arguments
-//! - The refused recursive targets and the declared tool set
+//! - The refused recursive targets on `tool_invoke` and the declared tool set
 //!
 //! ## Does not own
 //! - Catalog registration, dispatch, or ranking for these tools
@@ -221,21 +221,68 @@ fn arguments_rule_defaults_to_an_empty_object() {
 }
 
 #[test]
-fn search_describe_and_invoke_targets_are_declared_as_refused() {
+fn invoke_refuses_search_describe_and_invoke_targets() {
+    for name in TOOL_NAMES {
+        let refused = tool(name)["examples"].get("refused");
+        assert_eq!(
+            refused.is_some(),
+            name == "tool_invoke",
+            "{name}: only tool_invoke declares refused targets"
+        );
+    }
     let expected: Vec<Value> = TOOL_NAMES
         .iter()
         .map(|name| Value::String((*name).to_owned()))
         .collect();
-    for name in TOOL_NAMES {
-        let refused = tool(name)["examples"]["refused"]
-            .as_array()
-            .unwrap_or_else(|| panic!("{name}: no refused examples are declared"));
-        let targets: Vec<Value> = refused
-            .iter()
-            .map(|entry| entry["arguments"]["name"].clone())
-            .collect();
-        assert_eq!(targets, expected, "{name}: refused targets changed");
+    let refused = tool("tool_invoke")["examples"]["refused"]
+        .as_array()
+        .expect("tool_invoke declares refused examples");
+    let targets: Vec<Value> = refused
+        .iter()
+        .map(|entry| entry["arguments"]["name"].clone())
+        .collect();
+    assert_eq!(targets, expected, "refused targets changed");
+}
+
+#[test]
+fn every_refused_example_is_valid_input_for_its_owning_tool() {
+    for tool in tools() {
+        let Some(refused) = tool["examples"].get("refused").and_then(Value::as_array) else {
+            continue;
+        };
+        let validator = validator(&tool["inputSchema"]);
+        for entry in refused {
+            assert!(
+                validator.is_valid(&entry["arguments"]),
+                "{}: refused example {} is not valid input",
+                tool["name"],
+                entry["label"]
+            );
+        }
     }
+}
+
+#[test]
+fn no_schema_declares_a_schema_keyword() {
+    for tool in tools() {
+        for key in ["inputSchema", "outputSchema"] {
+            assert!(
+                tool[key].get("$schema").is_none(),
+                "{}: {key} declares $schema",
+                tool["name"]
+            );
+        }
+    }
+}
+
+#[test]
+fn describe_declares_the_existing_unknown_name_refusal() {
+    let refusal = &tool("tool_describe")["refusals"]["unknownName"];
+    assert_eq!(
+        refusal["code"].as_i64(),
+        Some(crate::protocol::ERR_INVALID_PARAMS)
+    );
+    assert_eq!(refusal["messageTemplate"], "unknown tool `{name}`");
 }
 
 #[test]

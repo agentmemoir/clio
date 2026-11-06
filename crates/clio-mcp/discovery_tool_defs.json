@@ -54,7 +54,7 @@
         "properties": {
           "tools": {
             "type": "array",
-            "description": "Matching tools in catalog order.",
+            "description": "Matching tools in ranked order.",
             "items": {
               "type": "object",
               "properties": {
@@ -156,23 +156,6 @@
             "instancePath": "",
             "code": -32602
           }
-        ],
-        "refused": [
-          {
-            "label": "refused target tool_search",
-            "arguments": {"name": "tool_search"},
-            "reason": "search, describe and invoke targets are refused to prevent recursion"
-          },
-          {
-            "label": "refused target tool_describe",
-            "arguments": {"name": "tool_describe"},
-            "reason": "search, describe and invoke targets are refused to prevent recursion"
-          },
-          {
-            "label": "refused target tool_invoke",
-            "arguments": {"name": "tool_invoke"},
-            "reason": "search, describe and invoke targets are refused to prevent recursion"
-          }
         ]
       }
     },
@@ -243,24 +226,13 @@
             "instancePath": "/name",
             "code": -32602
           }
-        ],
-        "refused": [
-          {
-            "label": "refused target tool_search",
-            "arguments": {"name": "tool_search"},
-            "reason": "search, describe and invoke targets are refused to prevent recursion"
-          },
-          {
-            "label": "refused target tool_describe",
-            "arguments": {"name": "tool_describe"},
-            "reason": "search, describe and invoke targets are refused to prevent recursion"
-          },
-          {
-            "label": "refused target tool_invoke",
-            "arguments": {"name": "tool_invoke"},
-            "reason": "search, describe and invoke targets are refused to prevent recursion"
-          }
         ]
+      },
+      "refusals": {
+        "unknownName": {
+          "code": -32602,
+          "messageTemplate": "unknown tool `{name}`"
+        }
       }
     },
     {
