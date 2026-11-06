@@ -129,6 +129,74 @@ fn catalog_hash_is_deterministic_and_covers_tools() {
     assert_ne!(a["catalog_hash"], Value::from(empty));
 }
 
+/// The sorted tool names a pack publishes.
+fn published_names(pack: &Value) -> Vec<String> {
+    let mut names: Vec<String> = pack["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+/// A narrowed pack publishes exactly the tools its preset's groups hold, and a
+/// group the preset does not reach is absent rather than published.
+#[test]
+fn a_group_selection_narrows_the_pack_to_its_presets_tools() {
+    let preset = clio_types::ToolPreset::Minimal;
+    let narrowed = schema_pack_for_groups(&preset.resolve());
+    let mut expected: Vec<String> = preset
+        .tools()
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(published_names(&narrowed), expected);
+    assert_eq!(narrowed["format"], PACK_FORMAT);
+    assert_eq!(narrowed["mcp_protocol_revision"], MCP_PROTOCOL_REVISION);
+    assert!(
+        !published_names(&narrowed).contains(&"store".to_owned()),
+        "a tool outside the preset is published: {:?}",
+        published_names(&narrowed)
+    );
+}
+
+/// The `all` preset reaches every group, so its pack publishes the same tool
+/// names as the full pack.
+#[test]
+fn the_all_preset_publishes_the_full_packs_tools() {
+    let narrowed = schema_pack_for_groups(&clio_types::ToolPreset::All.resolve());
+    assert_eq!(published_names(&narrowed), published_names(&pack()));
+}
+
+/// The narrowed pack carries the same document shape as the full one, and its
+/// hash covers the tools it publishes rather than the whole catalog.
+#[test]
+fn a_narrowed_pack_keeps_the_pack_shape_and_hashes_only_its_tools() {
+    let narrowed = schema_pack_for_groups(&clio_types::ToolPreset::Minimal.resolve());
+    let full = pack();
+    let keys = |value: &Value| {
+        let mut keys: Vec<String> = value
+            .as_object()
+            .expect("a pack object")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort_unstable();
+        keys
+    };
+    assert_eq!(keys(&narrowed), keys(&full));
+    assert_eq!(
+        narrowed["catalog_hash_definition"],
+        full["catalog_hash_definition"]
+    );
+    assert_ne!(narrowed["catalog_hash"], full["catalog_hash"]);
+    let tools: Vec<Value> = narrowed["tools"].as_array().expect("tools array").clone();
+    assert_eq!(narrowed["catalog_hash"], Value::from(catalog_hash(&tools)));
+}
+
 #[test]
 fn validate_flags_broken_schemas() {
     let mut tool = serde_json::json!({

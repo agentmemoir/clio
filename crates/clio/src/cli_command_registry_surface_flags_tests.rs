@@ -100,7 +100,7 @@ fn the_derived_names_keep_each_surfaces_accepted_set() {
     );
     assert_eq!(
         super::parse_flag_names("mcp schema-export"),
-        ["out", "path"]
+        ["out", "path", "tools"]
     );
     assert_eq!(
         super::parse_flag_names("status"),

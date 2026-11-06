@@ -1,0 +1,1 @@
+`clio mcp schema-export` now accepts `--tools PRESET`, taking `minimal`, `coding`, `ops`, `all`, or `custom:GROUP[,GROUP]`, so the exported pack holds that selection's tools instead of the whole catalog; with no flag the pack still holds every tool, and a value naming no preset or no known group is a usage error naming it instead of a pack built from a guessed selection.

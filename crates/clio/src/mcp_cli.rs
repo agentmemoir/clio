@@ -89,7 +89,14 @@ pub(crate) fn mcp_schema_export(args: impl IntoIterator<Item = String>) -> ExitC
             return crate::cli_top_level::report_surface_usage_error(&error, &collected);
         }
     };
-    let pack = clio_mcp::schema::schema_pack();
+    let tools = match crate::mcp_tools_flag::selection(&flags) {
+        Ok(tools) => tools,
+        Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
+    };
+    let pack = match tools {
+        Some(groups) => clio_mcp::schema::schema_pack_for_groups(&groups),
+        None => clio_mcp::schema::schema_pack(),
+    };
     // `--path` is accepted as a documented alias for `--out`.
     if let Some(path) = flags.get("out").or_else(|| flags.get("path")) {
         return match std::fs::write(path, clio_mcp::schema::to_export_json(&pack)) {

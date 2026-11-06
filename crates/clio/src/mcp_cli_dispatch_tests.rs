@@ -27,6 +27,71 @@ use super::*;
 use std::fs;
 use std::path::Path;
 
+/// `--tools` narrows the pack the handler builds: the minimal preset's tool set
+/// and no tool outside it, through the same write path the export uses.
+#[test]
+fn schema_export_narrows_the_pack_to_the_tools_flag() {
+    let scratch = Scratch::new("tools-minimal");
+    assert_eq!(
+        mcp_schema_export(args_of(&[
+            "--tools",
+            "minimal",
+            "--out",
+            &scratch.display()
+        ])),
+        ExitCode::SUCCESS
+    );
+    let raw = fs::read_to_string(scratch.path()).expect("written pack");
+    let pack: serde_json::Value = serde_json::from_str(&raw).expect("json");
+    let mut published: Vec<&str> = pack["tools"]
+        .as_array()
+        .expect("a tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    published.sort_unstable();
+    let mut expected = clio_types::ToolPreset::Minimal.tools();
+    expected.sort_unstable();
+    assert_eq!(published, expected);
+    assert!(
+        !published.contains(&"store"),
+        "a tool outside the minimal preset shipped in the pack: {published:?}"
+    );
+    assert!(
+        published.len()
+            < clio_mcp::schema::schema_pack()["tools"]
+                .as_array()
+                .expect("a tools array")
+                .len(),
+        "the flag did not narrow the pack"
+    );
+}
+
+/// A `--tools` value no preset and no group list can honour stops the export
+/// with the usage refusal the transports give it, so no pack is printed for a
+/// selection this build cannot build.
+#[test]
+fn schema_export_refuses_an_unknown_tools_value() {
+    for value in ["mnimal", "custom:bogus"] {
+        assert_eq!(
+            mcp(args_of(&["schema-export", "--tools", value])),
+            ExitCode::from(2),
+            "`{value}` was accepted"
+        );
+    }
+    let error = crate::mcp_tools_flag::selection(&crate::cli_flags_test_support::flags_of(&[
+        "--tools", "mnimal",
+    ]))
+    .expect_err("the value names no preset this build knows");
+    assert!(
+        error
+            .message()
+            .contains("--tools `mnimal` is not a preset this build knows"),
+        "{}",
+        error.message()
+    );
+}
+
 /// Every help spelling the `mcp` entry point accepts prints the subcommand list
 /// and succeeds, which is what `clio mcp --help` used to fail to do.
 #[test]

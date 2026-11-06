@@ -175,7 +175,7 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     ("help", "clio help [--json] [--markdown --out DIR] [TOPIC]"),
     (
         "mcp schema-export",
-        "clio mcp schema-export [--out FILE] [--path FILE]",
+        "clio mcp schema-export [--out FILE] [--path FILE] [--tools PRESET]",
     ),
     (
         "mcp stdio",
