@@ -305,3 +305,7 @@ fn reject(id: &Value, code: i64, message: impl Into<String>, data: Option<Value>
 #[cfg(test)]
 #[path = "stateless_tests.rs"]
 mod stateless_tests;
+
+#[cfg(test)]
+#[path = "stateless_cache_tests.rs"]
+mod stateless_cache_tests;

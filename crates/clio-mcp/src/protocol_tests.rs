@@ -253,10 +253,14 @@ fn ping_and_notifications() {
         h.handle_message(&json!({"jsonrpc":"2.0","method":"notifications/unknown"}))
             .is_none()
     );
-    // Malformed frame maps to a parse error with null id.
+    // Malformed frame maps to a parse error with null id, and the envelope
+    // carries no result and no result type: a frame the server never read
+    // claims nothing about a result.
     let res = h.handle_frame("not json").expect("response");
     assert_eq!(res["error"]["code"], json!(ERR_PARSE));
     assert!(res["id"].is_null());
+    assert!(res.get("result").is_none(), "{res}");
+    assert!(!res.to_string().contains("resultType"), "{res}");
 }
 
 #[test]
