@@ -13,7 +13,7 @@
 //! - Accessors for a response's error code, error message, and server identity
 //!
 //! ## Does not own
-//! - Any assertion (see `stateless_tests`)
+//! - Any assertion (see `stateless_tests` and `stateless_cache_tests`)
 //! - The dispatcher itself (see `stateless`)
 //!
 //! ## Boundary
@@ -27,6 +27,7 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::runtime::{McpOpenOptions, McpState};
+use crate::tools_page::PAGE_SIZE_KEY;
 
 pub(super) const BANK: &str = "fixture-bank";
 
@@ -79,6 +80,33 @@ pub(super) fn tool_call(meta: &Value, extra: Value) -> Value {
         params.extend(extra);
     }
     json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": params })
+}
+
+/// A tool call this build cannot serve without a configured extraction
+/// provider, so the tool answers a result whose `isError` is `true` rather than
+/// a JSON-RPC error: the failure is the tool's, not the protocol's.
+pub(super) fn failing_tool_call(meta: &Value) -> Value {
+    json!({
+        "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+        "params": {
+            "_meta": meta,
+            "name": "summarize",
+            "arguments": { "scope": "bank" }
+        }
+    })
+}
+
+/// A `tools/list` request for one page of a view: the page size the extension
+/// asks for, and the cursor of the page before it when the walk has started.
+pub(super) fn paged_list(meta: &Value, size: usize, cursor: Option<&str>) -> Value {
+    let mut params = Map::new();
+    let mut meta = meta.clone();
+    meta[PAGE_SIZE_KEY] = json!(size);
+    params.insert("_meta".into(), meta);
+    if let Some(cursor) = cursor {
+        params.insert("cursor".into(), json!(cursor));
+    }
+    json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": params })
 }
 
 /// An answer the revision types as `ElicitResult`, whose `action` is required.
