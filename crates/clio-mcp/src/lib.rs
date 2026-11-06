@@ -95,6 +95,7 @@ pub mod store_write;
 pub mod subject_request_tools;
 mod summarize_tools;
 pub mod sync_tools;
+mod tools_page;
 pub mod write_tools;
 mod write_tools_handlers;
 
@@ -104,6 +105,9 @@ mod lib_tests;
 mod stateless;
 #[cfg(test)]
 mod stateless_fixtures;
+#[cfg(test)]
+#[path = "tools_page_tests.rs"]
+mod tools_page_tests;
 
 /// Pinned MCP specification revision (item 3).
 ///

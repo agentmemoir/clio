@@ -1,0 +1,1 @@
+`tools/list` is now paginated: a request may set the Clio-specific `params._meta["com.agentmemoir/pageSize"]` key (default 25, clamped to 100), pages stay in catalog order, the last page omits `nextCursor`, and an opaque cursor bound to the visible view lets a client walk every tool exactly once.

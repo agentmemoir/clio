@@ -157,7 +157,7 @@ fn catalog_hash_definition() -> Value {
 /// FNV-1a hash over the canonical serialization of the tool list: the
 /// compact encodings of every tool, concatenated in registry order.
 #[must_use]
-fn catalog_hash(tools: &[Value]) -> String {
+pub(crate) fn catalog_hash(tools: &[Value]) -> String {
     let mut canonical = Vec::new();
     for tool in tools {
         let encoded = serde_json::to_string(tool).unwrap_or_default();

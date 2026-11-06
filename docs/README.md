@@ -16,6 +16,7 @@ What belongs here is reader-facing reference: the documents a reader consults to
 | [compliance-operator-runbook.md](compliance-operator-runbook.md) | The full local walk of one subject request by one self-hosted operator, from scope inventory and verification to copy custody, erasure retry, journal backup, the guarded restore drill, and closure. |
 | [mcp-tool-result-inventory.md](mcp-tool-result-inventory.md) | One row per bound MCP tool, naming the handler that builds the result, the kind of value it builds, and whether an output schema could describe that value. |
 | [philosophy-eval.md](philosophy-eval.md) | Twenty hand-run scenarios that test whether a behaviour follows the beliefs in `PHILOSOPHY.md`, with a scoring rule for a pass and a fail. |
+| [tools-list-pagination.md](tools-list-pagination.md) | The `tools/list` page-size extension, the default and clamped page sizes, the opaque cursor and the view digest it carries, and the requests the server refuses. |
 
 ## Reading paths
 

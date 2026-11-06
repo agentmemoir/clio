@@ -119,7 +119,7 @@ impl McpHandler {
         match method {
             "initialize" => Ok(Self::initialize(msg)),
             "ping" => Ok(json!({})),
-            "tools/list" => Self::tools_list_visible(state),
+            "tools/list" => Self::tools_list_page(state, msg.get("params")),
             "tools/call" => Self::tools_call(state, msg.get("params")),
             other => Err(RpcError::new(
                 ERR_METHOD_NOT_FOUND,
@@ -172,15 +172,28 @@ impl McpHandler {
     ///
     /// # Errors
     /// The effective configuration names a tool profile this build does not know.
+    #[cfg(test)]
     pub(crate) fn tools_list_visible(state: &McpState) -> Result<Value, RpcError> {
-        let visible = configured_profile(state)?.tools();
-        let bound = bound_set();
-        let tools: Vec<Value> = catalog_defs()
-            .iter()
-            .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
-            .map(crate::schema_defs::ToolDef::to_tool)
-            .collect();
+        let (_, tools) = visible_view(state)?;
         Ok(json!({ "tools": tools }))
+    }
+
+    /// `tools/list` with the page the request selects.
+    ///
+    /// The view is the same whole listing the profile advertises; only the
+    /// slice and its `nextCursor` differ. A request that selects no page size
+    /// gets the default page.
+    ///
+    /// # Errors
+    /// The effective configuration names an unknown profile, or the request
+    /// carries a page size or cursor this build refuses.
+    pub(crate) fn tools_list_page(
+        state: &McpState,
+        params: Option<&Value>,
+    ) -> Result<Value, RpcError> {
+        let (profile, tools) = visible_view(state)?;
+        let discovery = discovery_token(state);
+        crate::tools_page::page(&tools, profile, &discovery, params)
     }
 
     fn tools_call(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {
@@ -239,7 +252,7 @@ pub(crate) struct RpcError {
 }
 
 impl RpcError {
-    fn new(code: i64, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: i64, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -257,7 +270,7 @@ fn invalid_request(message: &str) -> RpcError {
     RpcError::new(ERR_INVALID_REQUEST, message)
 }
 
-fn invalid_params(message: impl Into<String>) -> RpcError {
+pub(crate) fn invalid_params(message: impl Into<String>) -> RpcError {
     RpcError::new(ERR_INVALID_PARAMS, message)
 }
 
@@ -345,6 +358,37 @@ fn configured_profile(state: &McpState) -> Result<ToolPreset, RpcError> {
     let profile = rt.mcp_tool_profile();
     drop(rt);
     profile.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))
+}
+
+/// The selected profile and the visible definitions it advertises, in catalog
+/// order, read under one configuration lock.
+fn visible_view(state: &McpState) -> Result<(ToolPreset, Vec<Value>), RpcError> {
+    let profile = configured_profile(state)?;
+    let visible = profile.tools();
+    let bound = bound_set();
+    let tools: Vec<Value> = catalog_defs()
+        .iter()
+        .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
+        .map(crate::schema_defs::ToolDef::to_tool)
+        .collect();
+    Ok((profile, tools))
+}
+
+/// The discovery token the visible-view digest covers.
+///
+/// It is the effective `mcp.revision`, so a client that changes the revision it
+/// asks for gets cursors bound to that view; the pinned protocol revision stands
+/// in when the configuration sets none.
+fn discovery_token(state: &McpState) -> String {
+    let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
+        state.config.lock().expect("config runtime mutex poisoned");
+    let token = rt
+        .effective_raw()
+        .pointer("/mcp/revision")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    drop(rt);
+    token.unwrap_or_else(|| MCP_PROTOCOL_REVISION.to_owned())
 }
 #[cfg(test)]
 #[path = "protocol_nfr7_tests.rs"]
