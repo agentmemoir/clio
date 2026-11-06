@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - `profile_json_schema()` with the exact mapping tables, mission fields, and
-//!   the inline mission-entry schema
+//!   the local mission-entry definition
+//! - `local_defs()`, the `$defs` object that owns the mission entry once
 //! - `schema_refs_resolve()`, the `$ref` pointer-resolution check used by
 //!   schema-pack tests
 //!
@@ -35,12 +36,15 @@ use crate::retention::{
 use crate::retention_mission::{
     MAX_MISSION_ENTRY_CHARS, MAX_MISSION_EXAMPLES_PER_LIST, MAX_MISSION_STATEMENT_CHARS,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
-/// One mission example entry schema, inlined into the keep/drop item schemas.
-/// Kept as a definition-free inline object so the schema stays valid under any
-/// document embedding (JSON Pointer `$ref`s are document-root-relative and
-/// break when the schema is embedded elsewhere, e.g. in MCP tool input schemas).
+/// The `$defs` key that names the mission entry definition.
+pub const MISSION_ENTRY_DEF: &str = "MissionEntry";
+
+/// One mission example entry schema. Defined once in the profile root `$defs`
+/// and referenced locally by the keep/drop item schemas, so both lists cannot
+/// drift apart. A consumer that embeds the profile properties must carry the
+/// same local `$defs` object at its own root for the reference to resolve.
 fn mission_entry_schema() -> Value {
     json!({
         "type": "object",
@@ -67,15 +71,24 @@ fn mission_entry_schema() -> Value {
     })
 }
 
+/// The local `$defs` object published at the profile schema root.
+#[must_use]
+pub fn local_defs() -> Value {
+    let mut defs = Map::new();
+    defs.insert(MISSION_ENTRY_DEF.to_owned(), mission_entry_schema());
+    Value::Object(defs)
+}
+
 /// Published JSON Schema for the profile object, with the exact mapping tables.
 #[must_use]
 pub fn profile_json_schema() -> Value {
     let key_names: Vec<&str> = KNOWN_ADMISSION_KEYS.to_vec();
-    let mission_entry = mission_entry_schema();
+    let mission_entry_ref = json!({"$ref": format!("#/$defs/{MISSION_ENTRY_DEF}")});
     json!({
         "type": "object",
         "description": "Per-bank retention profile: verbosity, bounded per-category theta offsets, duplicate tolerance, recall scope, and an optional deterministic retention mission.",
         "additionalProperties": false,
+        "$defs": local_defs(),
         "x-retention-profile-version": RETENTION_PROFILE_VERSION,
         "x-verbosity-mapping": {
             "selective": {"theta_delta": SELECTIVE_THETA_DELTA, "novelty_floor": SELECTIVE_NOVELTY_FLOOR},
@@ -173,14 +186,14 @@ pub fn profile_json_schema() -> Value {
                     "keep_examples": {
                         "type": "array",
                         "maxItems": MAX_MISSION_EXAMPLES_PER_LIST,
-                        "items": mission_entry,
+                        "items": mission_entry_ref,
                         "description": "Patterns whose hits add +0.15 to the utility factor; never rescues a gate or span-verification failure."
                     },
                     "drop_examples": {
                         "type": "array",
                         "minItems": 1,
                         "maxItems": MAX_MISSION_EXAMPLES_PER_LIST,
-                        "items": mission_entry,
+                        "items": mission_entry_ref,
                         "description": "Patterns whose hits subtract 0.30 from the utility factor; reject=true entries (the default) reject outright with mission_drop:<rule_id>."
                     }
                 }

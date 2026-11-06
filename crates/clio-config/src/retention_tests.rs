@@ -359,30 +359,36 @@ fn published_schema_carries_version_and_exact_mappings() {
     assert_eq!(key_index("nope"), None);
 }
 
-/// The published profile schema must never carry a dangling `$ref`: pointers
-/// are document-root-relative, so the mission entry schema is inlined instead
-/// of referenced. Also self-checks the pointer-resolution walker it relies on.
+/// The published profile schema defines the mission entry once in its root
+/// `$defs` and references it locally, so one source owns the entry and the
+/// document never carries a dangling `$ref`. Also self-checks the
+/// pointer-resolution walker it relies on.
 #[test]
-fn published_schema_has_no_dangling_refs() {
-    use crate::retention_schema::schema_refs_resolve;
+fn published_schema_defines_mission_entry_at_the_root_and_refs_it_locally() {
+    use crate::retention_schema::{MISSION_ENTRY_DEF, local_defs, schema_refs_resolve};
 
     let schema = profile_json_schema();
+    assert_eq!(
+        schema["$defs"],
+        local_defs(),
+        "the profile root owns the local definitions"
+    );
+    assert_eq!(
+        schema["$defs"][MISSION_ENTRY_DEF]["type"], "object",
+        "the mission entry definition is published at the root"
+    );
+    let mission = &schema["properties"]["mission"];
+    let expected = serde_json::json!({"$ref": "#/$defs/MissionEntry"});
+    for list in ["keep_examples", "drop_examples"] {
+        assert_eq!(
+            mission["properties"][list]["items"], expected,
+            "{list} items must reference the local mission entry"
+        );
+    }
     assert!(
         schema_refs_resolve(&schema),
         "published profile schema has an unresolvable $ref: {schema}"
     );
-    let mission = &schema["properties"]["mission"];
-    for list in ["keep_examples", "drop_examples"] {
-        let items = &mission["properties"][list]["items"];
-        assert!(
-            items.get("properties").is_some(),
-            "entry schema is inlined: {items}"
-        );
-        assert!(
-            items.get("$ref").is_none(),
-            "no $ref under embedding: {items}"
-        );
-    }
 
     let dangling = serde_json::json!({"properties": {"a": {"$ref": "#/definitions/missing"}}});
     assert!(!schema_refs_resolve(&dangling));

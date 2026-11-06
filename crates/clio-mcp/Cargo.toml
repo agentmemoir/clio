@@ -30,6 +30,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# Schema-pack tests compile every emitted schema offline, so a reference that
+# only resolves over the network fails the suite instead of a client.
+jsonschema = { version = "0.60.2", default-features = false }
 # Sealing in these tests uses the process test key, so they never reach the
 # machine's real key store; without the feature a developer machine holding both
 # a keystore entry and a key file fails every seal with the two-store refusal.

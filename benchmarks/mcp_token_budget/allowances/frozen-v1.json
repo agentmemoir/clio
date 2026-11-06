@@ -23,6 +23,15 @@
       "candidate_sha256": "022f77f6c56c8b723aa91d82f0b22a19c87954b771f306439b8f52a03072f87c",
       "max_bytes": 149465,
       "max_tokens": 31815
+    },
+    {
+      "decision_id": "mcp-retention-local-defs-2026-11-06",
+      "date": "2026-11-06",
+      "reason": "The retention profile now carries its local definitions, so the emitted pack shrank by 832 bytes, while the frozen v1 baseline predates the current 86-tool pack; this record covers the new candidate digest at a ceiling no larger than the previous record's 149465 bytes and 31815 tokens.",
+      "base_commit": "3ea0d0f7ea36c120c0a62ef99e78aadae9e57a4a",
+      "candidate_sha256": "622890f6a700b3b5188abda7a6c1e2c196f51280703bb6babaae815d55232f3e",
+      "max_bytes": 148633,
+      "max_tokens": 31667
     }
   ]
 }

@@ -5,7 +5,7 @@ Each of the three is cheaper to refuse than to work around, and each one arrives
 
 The first is a case collision. The default APFS volume on macOS is case-insensitive, so two tracked paths that differ only in case cannot both exist on disk. A checkout writes one of them and reports success, and the other file is simply absent from that working tree, so a build that depends on it fails on one platform and passes on the other.
 
-The second is an oversized binary. A binary file this change adds or modifies is copied into every clone and into every release archive, and it never compresses away. The limit is 512000 bytes, because a threshold in KiB reads as a round number while a comparison in bytes is the one git reports.
+The second is an oversized binary. A binary file this change adds or modifies is copied into every clone and into every release archive, and it never compresses away. The size ceiling is withdrawn as a derived limit, on 2026-11-06. The withdrawn value is 512000 bytes, which reads as 500 KiB. No baseline row, no factor, and no measurement ever stood behind it: it was a round KiB number mistaken for a derived ceiling. The value carries the label `Unverified`: it was never measured, no baseline row or factor was ever stated for it, and no record of who chose it or why exists; its only source is this gate's own git history. Live derived size ceilings for this gate: none. A gate threshold with no measurement or derivation behind it is a known defect, recorded here, and retiring or deriving the threshold is a separate change outside this one. The gate still compares a changed binary against the configured threshold and refuses a binary above it, so its comparison and its product behaviour are unchanged. What is withdrawn is only the claim that the number is derived.
 
 The third is unrelated history. A branch created with `git checkout --orphan`, or a repository grafted onto another, has no common ancestor with master, so a merge of it credits every line to the merge and `git blame` stops answering. `git merge-base` is the question that shows it.
 
@@ -38,7 +38,9 @@ EXIT_GIT = 3
 
 USAGE = "usage: git_hygiene_check.py --base <rev> | --self-test"
 
-#: The largest binary this change may add or modify, in bytes.
+#: The largest binary this change may add or modify, in bytes: an operator-set threshold labelled `Unverified`, sourced only from this gate's own git history.
+#: The earlier claim that it was a derived ceiling was withdrawn on 2026-11-06: no baseline row, factor, or measurement stood behind it.
+#: The module docstring holds the withdrawal record.
 LIMIT = 512000
 
 #: The repository this script runs in. The self-test points it at a temporary
@@ -120,7 +122,8 @@ def evaluate(
         for first, other in collisions
     ]
     findings += [
-        f"git-hygiene: FINDING blob-size: {path} is {size} bytes (limit {LIMIT})"
+        f"git-hygiene: FINDING blob-size: {path} is {size} bytes "
+        f"(configured limit {LIMIT}, Unverified, not a derived ceiling)"
         for path, size in big
     ]
     if not ancestor:
@@ -140,7 +143,8 @@ def evaluate(
     )
     lines.append(
         f"git-hygiene: blob-size: {binaries} changed binary file(s), "
-        f"{len(big)} over {LIMIT} bytes"
+        f"{len(big)} over the configured limit of {LIMIT} bytes "
+        "(Unverified, not a derived ceiling)"
     )
     if ancestor:
         lines.append(
@@ -286,7 +290,9 @@ def _self_test() -> int:
             [
                 "git-hygiene: clean (3 tracked file(s), 0 changed binary file(s))",
                 "git-hygiene: case-collision: 3 tracked path(s), 0 collision(s)",
-                "git-hygiene: blob-size: 0 changed binary file(s), 0 over 512000 bytes",
+                f"git-hygiene: blob-size: 0 changed binary file(s), "
+                f"0 over the configured limit of {LIMIT} bytes "
+                "(Unverified, not a derived ceiling)",
             ],
         ),
         (
@@ -327,20 +333,26 @@ def _self_test() -> int:
             "a binary under the limit",
             EXIT_OK,
             ["src/main.rs", "assets/logo.png"],
-            [("assets/logo.png", 512000, True)],
+            [("assets/logo.png", LIMIT, True)],
             True,
             [
                 "git-hygiene: clean (2 tracked file(s), 1 changed binary file(s))",
-                "git-hygiene: blob-size: 1 changed binary file(s), 0 over 512000 bytes",
+                f"git-hygiene: blob-size: 1 changed binary file(s), "
+                f"0 over the configured limit of {LIMIT} bytes "
+                "(Unverified, not a derived ceiling)",
             ],
         ),
         (
             "a binary over the limit",
             EXIT_FINDINGS,
             ["assets/frame.bin"],
-            [("assets/frame.bin", 512001, True)],
+            [("assets/frame.bin", LIMIT + 1, True)],
             True,
-            ["git-hygiene: FINDING blob-size: assets/frame.bin is 512001 bytes (limit 512000)"],
+            [
+                f"git-hygiene: FINDING blob-size: assets/frame.bin is "
+                f"{LIMIT + 1} bytes (configured limit {LIMIT}, "
+                "Unverified, not a derived ceiling)"
+            ],
         ),
         (
             "a text file over the limit is ignored",

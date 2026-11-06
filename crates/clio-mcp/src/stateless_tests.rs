@@ -38,6 +38,14 @@ fn answer(state: &McpState, msg: &Value) -> Value {
     dispatch(state, msg).expect("a request carrying an id is answered")
 }
 
+fn assert_states_agree(first: &McpState, second: &McpState, msg: &Value) -> Value {
+    let (one, two) = (answer(first, msg), answer(second, msg));
+    assert!(one.get("error").is_none(), "{msg}: {one}");
+    assert!(two.get("error").is_none(), "{msg}: {two}");
+    assert_eq!(one, two, "{msg}");
+    one
+}
+
 fn assert_invalid_params(meta: Option<Value>, key: &str) {
     let state = state();
     let msg = meta.map_or_else(
@@ -368,6 +376,61 @@ fn a_message_without_an_id_is_a_notification_and_is_never_answered() {
         "params": { "_meta": required_meta(CANDIDATE_REVISION) }
     });
     assert!(dispatch(&state, &msg).is_none());
+}
+
+#[test]
+fn first_message_is_served_without_a_handshake() {
+    let res = answer(
+        &state(),
+        &request("tools/list", &required_meta(CANDIDATE_REVISION)),
+    );
+    assert!(res.get("error").is_none(), "no prior initialize: {res}");
+    assert!(
+        !res["result"]["tools"]
+            .as_array()
+            .expect("a tool list")
+            .is_empty(),
+        "the catalogue is served: {res}"
+    );
+}
+
+#[test]
+fn dispatch_takes_one_message_and_no_session_handle() {
+    let entry: fn(&McpState, &Value) -> Option<Value> = dispatch;
+    let res = entry(
+        &state(),
+        &request("server/discover", &required_meta(CANDIDATE_REVISION)),
+    )
+    .expect("a request carrying an id is answered");
+    assert_eq!(res["result"]["resultType"], json!("complete"), "{res}");
+}
+
+#[test]
+fn answer_envelopes_carry_no_session_key() {
+    let state = state();
+    let args = required_meta(CANDIDATE_REVISION);
+    let requests = ["server/discover", "tools/list"].map(|method| request(method, &args));
+    for msg in requests.into_iter().chain([tool_call(&args, json!({}))]) {
+        let res = answer(&state, &msg);
+        for object in [&res, &res["result"], &res["result"]["_meta"]] {
+            for key in object.as_object().into_iter().flat_map(|map| map.keys()) {
+                assert!(!key.to_lowercase().contains("session"), "{key} in {object}");
+            }
+        }
+    }
+}
+
+#[test]
+fn repeated_calls_in_two_states_answer_identically() {
+    let (first, second) = (state(), state());
+    let args = required_meta(CANDIDATE_REVISION);
+    let list = request("tools/list", &args);
+    assert_states_agree(&first, &second, &request("server/discover", &args));
+    let before = assert_states_agree(&first, &second, &list);
+    let used = answer(&first, &tool_call(&args, json!({})));
+    assert!(used.get("error").is_none(), "the prior call: {used}");
+    let after = assert_states_agree(&first, &second, &list);
+    assert_eq!(after, before, "a prior call leaves the catalogue alone");
 }
 
 #[test]

@@ -1,0 +1,1 @@
+Each of the two retention tool schemas now carries its own root `$defs` and references it locally, so both mission example lists share one definition that resolves inside the schema carrying it, and no pack-level definitions object is introduced. Tool names, parameter defaults, enums, required lists, and retention behavior do not change.
