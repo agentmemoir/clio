@@ -112,7 +112,7 @@ scripts-check-exec-tempdir:
 scripts-check-lockfile-diff:
 	python3 scripts/lockfile_diff.py --self-test
 
-# Whether git holds a case-only path collision, a binary over 500 KiB, or a branch with no common ancestor with its base. macOS checks out a case-insensitive volume by default, so two tracked paths that differ only by case silently lose one of them; the binary is copied into every clone and every release archive; and the branch collapses `git blame` when it merges. The self-test creates its own repositories, so no host's filesystem decides the answer. Runs no build.
+# Whether git holds a case-only path collision, a binary above the configured size limit, or a branch with no common ancestor with its base. macOS checks out a case-insensitive volume by default, so two tracked paths that differ only by case silently lose one of them; the binary is copied into every clone and every release archive; and the branch collapses `git blame` when it merges. The self-test creates its own repositories, so no host's filesystem decides the answer. Runs no build.
 scripts-check-git-hygiene:
 	python3 scripts/git_hygiene_check.py --self-test
 
