@@ -236,7 +236,7 @@ fn an_installed_tool_selection_beats_the_configured_profile() {
         .load_file_json(r#"{"mcp": {"tool_profile": "all"}}"#)
         .expect("a valid config layer");
     let groups = clio_types::custom(&["ops"]).expect("a known group");
-    runtime.set_mcp_tool_groups(groups.clone());
+    runtime.set_mcp_tool_groups(groups);
     let state = McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state");
 
     let names = listed(&state);
