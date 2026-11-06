@@ -9,6 +9,8 @@
 //!
 //! ## Owns
 //! - One `inputSchema` per Core tool (MCP tool rules: root `type: object`)
+//! - Root `$defs` for an `inputSchema` that carries a local `#/$defs/`
+//!   reference, sourced from the retention schema owner
 //! - Enum vocabulary constants (`epistemic_kind`, `update_rule`, categories,
 //!   episodic type tags) as separate properties
 //!
@@ -70,6 +72,7 @@ impl ToolDef {
         for (name, schema) in &self.props {
             properties.insert((*name).to_owned(), schema.clone());
         }
+        let needs_local_defs = properties.values().any(has_local_def_ref);
         let mut tool = json!({
             "name": self.name,
             "description": self.description,
@@ -80,11 +83,32 @@ impl ToolDef {
                 "additionalProperties": false
             }
         });
+        if needs_local_defs {
+            // A property copied out of the profile schema keeps its local
+            // `$ref`; the same document root must carry the definitions or the
+            // pointer dangles.
+            tool["inputSchema"]["$defs"] = clio_config::retention_schema::local_defs();
+        }
         crate::schema_output_defs::insert_output_schema(
             &mut tool,
             crate::schema_output_defs::output_schema(self.name),
         );
         tool
+    }
+}
+
+/// True when `value` holds, at any depth in objects and arrays, a string `$ref`
+/// that points inside this schema's own root `$defs`.
+fn has_local_def_ref(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.get("$ref")
+                .and_then(Value::as_str)
+                .is_some_and(|reference| reference.starts_with("#/$defs/"))
+                || map.values().any(has_local_def_ref)
+        }
+        Value::Array(items) => items.iter().any(has_local_def_ref),
+        _ => false,
     }
 }
 
