@@ -25,7 +25,7 @@
 //!
 //! Keep this module focused on the candidate dispatcher's fixtures.
 
-use super::{CANDIDATE_REVISION, SUPPORTED_REVISIONS, dispatch, required_capability};
+use super::{CACHE_HINTS, CANDIDATE_REVISION, SUPPORTED_REVISIONS, dispatch, required_capability};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
@@ -72,8 +72,8 @@ fn discover_reports_the_candidate_revision_and_its_capabilities() {
         result["capabilities"]["tools"],
         json!({ "listChanged": false })
     );
-    assert_eq!(result["ttlMs"], json!(3_600_000));
-    assert_eq!(result["cacheScope"], json!("public"));
+    assert_eq!(result["ttlMs"], json!(CACHE_HINTS.ttl_ms));
+    assert_eq!(result["cacheScope"], json!(CACHE_HINTS.scope));
 }
 
 #[test]
@@ -307,8 +307,8 @@ fn tools_list_serves_the_production_catalogue_for_the_revision() {
         "the bound catalogue is present"
     );
     assert_eq!(result["resultType"], json!("complete"));
-    assert_eq!(result["ttlMs"], json!(0));
-    assert_eq!(result["cacheScope"], json!("private"));
+    assert_eq!(result["ttlMs"], json!(CACHE_HINTS.ttl_ms));
+    assert_eq!(result["cacheScope"], json!(CACHE_HINTS.scope));
     assert_eq!(server_info(result)["name"], json!(env!("CARGO_PKG_NAME")));
 }
 

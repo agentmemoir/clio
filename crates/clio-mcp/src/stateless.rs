@@ -13,6 +13,7 @@
 //!   required-client-capability refusal
 //! - The refusal of a tool call that answers input this server never requested
 //! - The `server/discover` result and the result fields the revision requires
+//! - The one cache-hint pair every cacheable result of this dispatcher carries
 //!
 //! ## Does not own
 //! - The pinned revision, the tool catalogue, and the transports (see
@@ -65,8 +66,28 @@ const ELICITATION_ACTION: &str = "action";
 /// Requests the served revision removed, so they answer as unknown methods.
 const REMOVED_METHODS: &[&str] = &["initialize", "ping", "logging/setLevel"];
 
-/// Cache hint for discovery, whose content is fixed for a given build.
-const DISCOVER_CACHE_TTL_MS: i64 = 3_600_000;
+/// The cache hints a complete result of a cacheable request carries.
+///
+/// The revision requires both members on every such result and requires every
+/// page of a paginated listing to share one scope, so a request answered in
+/// several pages cannot pick a scope of its own.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CacheHints {
+    /// How long, in milliseconds, a client may reuse the result as it stands.
+    pub(crate) ttl_ms: i64,
+    /// The scope the result may be reused in.
+    pub(crate) scope: &'static str,
+}
+
+/// The one cache-hint pair this dispatcher answers for every cacheable result.
+///
+/// Discovery content and the visible catalogue are both derived from this build
+/// and from the request's own view. Neither is promised any freshness here, and
+/// neither may be handed to a cache shared across authorization contexts.
+pub(crate) const CACHE_HINTS: CacheHints = CacheHints {
+    ttl_ms: 300_000,
+    scope: "private",
+};
 
 /// Answer one candidate-revision message; `None` for a message without an `id`.
 ///
@@ -229,8 +250,8 @@ fn discover() -> Value {
         "resultType": "complete",
         "supportedVersions": SUPPORTED_REVISIONS,
         "capabilities": { "tools": { "listChanged": false } },
-        "ttlMs": DISCOVER_CACHE_TTL_MS,
-        "cacheScope": "public",
+        "ttlMs": CACHE_HINTS.ttl_ms,
+        "cacheScope": CACHE_HINTS.scope,
         "_meta": result_meta()
     })
 }
@@ -239,14 +260,14 @@ fn discover() -> Value {
 /// requires.
 ///
 /// The catalogue itself comes from the production handler, so tool definitions,
-/// the configured profile, and paging keep one source. A zero TTL promises no
-/// freshness; the private scope keeps the list out of any cache shared across
-/// authorization contexts.
+/// the configured profile, and paging keep one source. The cache hints are the
+/// module's one decision value, so a page never promises what discovery does
+/// not.
 fn tools_list(state: &McpState, params: Option<&Value>) -> Result<Value, RpcError> {
     let mut result = McpHandler::tools_list_page(state, params)?;
     stamp_result(&mut result);
-    result["ttlMs"] = json!(0);
-    result["cacheScope"] = json!("private");
+    result["ttlMs"] = json!(CACHE_HINTS.ttl_ms);
+    result["cacheScope"] = json!(CACHE_HINTS.scope);
     Ok(result)
 }
 
