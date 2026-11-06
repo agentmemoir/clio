@@ -122,7 +122,8 @@ def evaluate(
         for first, other in collisions
     ]
     findings += [
-        f"git-hygiene: FINDING blob-size: {path} is {size} bytes (limit {LIMIT})"
+        f"git-hygiene: FINDING blob-size: {path} is {size} bytes "
+        f"(configured limit {LIMIT}, Unverified, not a derived ceiling)"
         for path, size in big
     ]
     if not ancestor:
@@ -142,7 +143,8 @@ def evaluate(
     )
     lines.append(
         f"git-hygiene: blob-size: {binaries} changed binary file(s), "
-        f"{len(big)} over {LIMIT} bytes"
+        f"{len(big)} over the configured limit of {LIMIT} bytes "
+        "(Unverified, not a derived ceiling)"
     )
     if ancestor:
         lines.append(
@@ -288,7 +290,9 @@ def _self_test() -> int:
             [
                 "git-hygiene: clean (3 tracked file(s), 0 changed binary file(s))",
                 "git-hygiene: case-collision: 3 tracked path(s), 0 collision(s)",
-                f"git-hygiene: blob-size: 0 changed binary file(s), 0 over {LIMIT} bytes",
+                f"git-hygiene: blob-size: 0 changed binary file(s), "
+                f"0 over the configured limit of {LIMIT} bytes "
+                "(Unverified, not a derived ceiling)",
             ],
         ),
         (
@@ -333,7 +337,9 @@ def _self_test() -> int:
             True,
             [
                 "git-hygiene: clean (2 tracked file(s), 1 changed binary file(s))",
-                f"git-hygiene: blob-size: 1 changed binary file(s), 0 over {LIMIT} bytes",
+                f"git-hygiene: blob-size: 1 changed binary file(s), "
+                f"0 over the configured limit of {LIMIT} bytes "
+                "(Unverified, not a derived ceiling)",
             ],
         ),
         (
@@ -342,7 +348,11 @@ def _self_test() -> int:
             ["assets/frame.bin"],
             [("assets/frame.bin", LIMIT + 1, True)],
             True,
-            [f"git-hygiene: FINDING blob-size: assets/frame.bin is {LIMIT + 1} bytes (limit {LIMIT})"],
+            [
+                f"git-hygiene: FINDING blob-size: assets/frame.bin is "
+                f"{LIMIT + 1} bytes (configured limit {LIMIT}, "
+                "Unverified, not a derived ceiling)"
+            ],
         ),
         (
             "a text file over the limit is ignored",
