@@ -13,7 +13,7 @@ Tools stay in catalog order. The page size governs one page only.
 
 ## Cursor
 
-A page that ends before the view does carries `nextCursor`. The last page omits the key.
+A page that ends before the view does carries `nextCursor`. The last page omits the key. An empty view answers the initial request with an empty page and no `nextCursor`.
 
 The cursor is opaque. Its shape is:
 
@@ -46,7 +46,7 @@ The server answers `-32602` (`Invalid params`) when:
 - the cursor format version is not `1`;
 - the cursor digest does not match the current view;
 - the page size in the request differs from the page size in the cursor;
-- the cursor offset is past the end of the view.
+- the cursor offset is at or past the end of the view.
 
 A request may repeat the page size that the first request used, or omit it. Both are accepted.
 
