@@ -197,3 +197,7 @@ fn cursor_integer(value: &Value) -> Result<usize, RpcError> {
     usize::try_from(raw)
         .map_err(|_| invalid_params("tools/list cursor carries an out-of-range field"))
 }
+
+#[cfg(test)]
+#[path = "tools_page_tests.rs"]
+mod tools_page_tests;

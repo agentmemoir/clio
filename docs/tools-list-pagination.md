@@ -1,8 +1,6 @@
 # `tools/list` pagination
 
-Clio pages `tools/list`. A client reads one page at a time and asks for the next page with the cursor the server returns.
-The page-size request key is a Clio extension, not part of the Model Context Protocol request shape.
-A client that sends no extension key still gets valid pages, so a spec-only client walks the whole listing without changes.
+Clio pages `tools/list`. A client reads one page at a time and asks for the next page with the cursor the server returns. The page-size request key is a Clio extension, not part of the Model Context Protocol request shape. A client that sends no extension key still gets valid pages, so a spec-only client walks the whole listing without changes.
 
 ## Page size
 
@@ -66,5 +64,4 @@ A walk visits every visible tool exactly once, in catalog order, with no duplica
 
 ## Repeatability
 
-Identical requests against an unchanged view return byte-identical result bytes, cursors included.
-The result carries no time, randomness, or session id.
+Identical requests against an unchanged view return byte-identical result bytes, cursors included. The result carries no time, randomness, or session id.

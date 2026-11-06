@@ -105,9 +105,6 @@ mod lib_tests;
 mod stateless;
 #[cfg(test)]
 mod stateless_fixtures;
-#[cfg(test)]
-#[path = "tools_page_tests.rs"]
-mod tools_page_tests;
 
 /// Pinned MCP specification revision (item 3).
 ///
