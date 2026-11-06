@@ -10,6 +10,8 @@
 //! - `inputSchema` for `admit_preview_batch`, `retention_profile_get`, and
 //!   `retention_profile_set`
 //! - The batch candidate item schema and the published profile schema reference
+//! - The root `$defs` those references resolve against, from the retention
+//!   schema owner
 //!
 //! ## Does not own
 //! - Core catalog definitions (see `schema_defs`)
@@ -71,6 +73,7 @@ pub fn retention_defs() -> Vec<ToolDef> {
                             "properties": clio_config::retention_schema::profile_json_schema()["properties"].clone()
                         }),
                     ),
+                    ("$defs", clio_config::retention_schema::local_defs()),
                 ];
                 props.extend(bank_actor());
                 props
@@ -108,6 +111,7 @@ pub fn retention_defs() -> Vec<ToolDef> {
                         "confirm",
                         b("Confirm the profile change; without it nothing is stored."),
                     ),
+                    ("$defs", clio_config::retention_schema::local_defs()),
                 ];
                 props.extend(bank_actor());
                 props

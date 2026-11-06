@@ -14,6 +14,8 @@
 //!   mission entry defined once and referenced twice
 //! - The retention tools accepting and rejecting arguments their own published
 //!   schema constrains
+//! - Each retention tool resolving to the shape the base commit published
+//! - The reserved `$defs` property channel never leaking into `properties`
 //!
 //! ## Does not own
 //! - The pack shape or its hash (`schema_tests`, `schema_hash_tests`)
@@ -181,6 +183,48 @@ fn count_refs(value: &Value, reference: &str) -> usize {
 
 fn retention_input(name: &str) -> Value {
     catalog_def(name).expect("a retention tool").to_tool()["inputSchema"].clone()
+}
+
+/// The input schemas of both retention tools as the base commit published
+/// them, before either tool carried its own root `$defs`. The guard below
+/// compares the resolved contract, so a default, enum, or description change
+/// fails it while a change in reference packing does not.
+const RETENTION_BASE_INPUT_SCHEMAS: &str =
+    include_str!("../tests/fixtures/retention_base_input_schemas.json");
+
+#[test]
+fn retention_input_schemas_resolve_to_the_pre_change_base_shape() {
+    let base: Value =
+        serde_json::from_str(RETENTION_BASE_INPUT_SCHEMAS).expect("the base fixture is JSON");
+    for name in MISSION_TOOLS {
+        let live = retention_input(name);
+        let resolved = without_root_defs(&flattened(&live, &live));
+        let expected = &base[name];
+        assert_eq!(
+            &resolved, expected,
+            "{name}: the resolved contract drifted from the base commit"
+        );
+        assert_eq!(
+            serde_json::to_string(&resolved)
+                .expect("resolved bytes")
+                .len(),
+            serde_json::to_string(expected).expect("base bytes").len(),
+            "{name}: the resolved contract changed size"
+        );
+    }
+}
+
+#[test]
+fn no_emitted_tool_exposes_the_reserved_defs_channel_as_a_property() {
+    for (path, name, tool) in emitted_tools() {
+        let properties = tool["inputSchema"]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{path}:{name} declares no properties"));
+        assert!(
+            !properties.contains_key("$defs"),
+            "{path}:{name} leaks the reserved `$defs` channel into properties"
+        );
+    }
 }
 
 #[test]
