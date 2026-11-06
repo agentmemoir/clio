@@ -5,7 +5,7 @@ Each of the three is cheaper to refuse than to work around, and each one arrives
 
 The first is a case collision. The default APFS volume on macOS is case-insensitive, so two tracked paths that differ only in case cannot both exist on disk. A checkout writes one of them and reports success, and the other file is simply absent from that working tree, so a build that depends on it fails on one platform and passes on the other.
 
-The second is an oversized binary. A binary file this change adds or modifies is copied into every clone and into every release archive, and it never compresses away. The limit is 512000 bytes, because a threshold in KiB reads as a round number while a comparison in bytes is the one git reports.
+The second is an oversized binary. A binary file this change adds or modifies is copied into every clone and into every release archive, and it never compresses away. The size ceiling is withdrawn as a derived limit, on 2026-11-06. The withdrawn value is 512000 bytes, which reads as 500 KiB. No baseline row, no factor, and no measurement ever stood behind it: it was a round KiB number mistaken for a derived ceiling. The value carries the label `Decision`, and its source is this gate's own configuration, not a measurement. Live derived size ceilings for this gate: none. The gate still compares a changed binary against the configured threshold and refuses a binary above it, so its comparison and its product behaviour are unchanged. What is withdrawn is only the claim that the number is derived.
 
 The third is unrelated history. A branch created with `git checkout --orphan`, or a repository grafted onto another, has no common ancestor with master, so a merge of it credits every line to the merge and `git blame` stops answering. `git merge-base` is the question that shows it.
 
@@ -38,7 +38,7 @@ EXIT_GIT = 3
 
 USAGE = "usage: git_hygiene_check.py --base <rev> | --self-test"
 
-#: The largest binary this change may add or modify, in bytes.
+#: The largest binary this change may add or modify, in bytes. An operator picks this threshold, and it carries the label `Decision`; the module docstring holds the record of why it is not a derived ceiling.
 LIMIT = 512000
 
 #: The repository this script runs in. The self-test points it at a temporary
