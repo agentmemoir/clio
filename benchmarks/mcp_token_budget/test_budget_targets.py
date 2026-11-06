@@ -67,21 +67,27 @@ class RecordTests(unittest.TestCase):
         self.assertIn(expected, message)
         return message
 
-    def test_the_committed_record_loads_its_eight_targets(self):
+    def test_the_committed_record_loads_its_six_targets(self):
         targets = budget_targets.load(TARGETS)
-        self.assertEqual(len(targets), 8)
+        self.assertEqual(len(targets), 6)
         self.assertEqual(
             [(item["preset"], item["unit"]) for item in targets],
-            [(preset, unit) for preset in budget_targets.PRESET_NAMES
+            [(preset, unit) for preset in budget_targets.TARGET_PRESETS
              for unit in budget_targets.UNITS],
         )
-        minimal_tokens = entry({"targets": targets}, "minimal", "tokens")
-        self.assertEqual(minimal_tokens["target"], 15183)
-        self.assertEqual(minimal_tokens["baseline_value"], 21691)
-        self.assertEqual(minimal_tokens["headroom"], 6508)
+        coding_tokens = entry({"targets": targets}, "coding", "tokens")
+        self.assertEqual(coding_tokens["target"], 15183)
+        self.assertEqual(coding_tokens["baseline_value"], 21691)
+        self.assertEqual(coding_tokens["headroom"], 6508)
         self.assertEqual(
-            minimal_tokens["baseline_row"], "client/synthetic-eager-client/turn/1/tokens"
+            coding_tokens["baseline_row"], "client/synthetic-eager-client/turn/1/tokens"
         )
+
+    def test_the_committed_record_carries_no_target_for_the_smallest_preset(self):
+        self.assertNotIn("minimal", [item["preset"] for item in document()["targets"]])
+        for item in budget_targets.load(TARGETS):
+            with self.subTest(preset=item["preset"]):
+                self.assertIn(item["preset"], budget_targets.TARGET_PRESETS)
 
     def test_the_record_is_not_enforcing_yet(self):
         self.assertFalse(budget_targets.PRESET_TARGETS_ENFORCED)
@@ -123,11 +129,16 @@ class RecordTests(unittest.TestCase):
 
     def test_a_duplicate_or_missing_preset_unit_pair_is_refused(self):
         duplicate = document()
-        entry(duplicate, "coding", "tokens")["preset"] = "minimal"
-        self.assert_refused(duplicate, "duplicate target for preset 'minimal' and unit 'tokens'")
+        entry(duplicate, "ops", "tokens")["preset"] = "coding"
+        self.assert_refused(duplicate, "duplicate target for preset 'coding' and unit 'tokens'")
         missing = document()
         missing["targets"].pop()
-        self.assert_refused(missing, "missing targets for")
+        self.assert_refused(missing, "missing targets for all/bytes")
+
+    def test_a_target_for_the_smallest_preset_is_refused_by_name(self):
+        value = document()
+        entry(value, "coding", "tokens")["preset"] = "minimal"
+        self.assert_refused(value, "preset is 'minimal'")
 
     def test_a_kind_other_than_ceiling_is_refused(self):
         value = document()
@@ -142,10 +153,10 @@ class RecordTests(unittest.TestCase):
 
     def test_broken_target_arithmetic_is_refused(self):
         value = document()
-        entry(value, "minimal", "bytes")["target"] += 1
+        entry(value, "coding", "bytes")["target"] += 1
         self.assert_refused(value, "is not floor(")
         value = document()
-        entry(value, "minimal", "bytes")["factor"] = 70
+        entry(value, "coding", "bytes")["factor"] = 70
         self.assert_refused(value, "factor is 70, expected 80")
 
     def test_broken_headroom_arithmetic_is_refused(self):
@@ -158,15 +169,15 @@ class RecordTests(unittest.TestCase):
             for bad in (0, -1, True, False, 1.5, "15183"):
                 with self.subTest(key=key, value=bad):
                     value = document()
-                    entry(value, "minimal", "tokens")[key] = bad
+                    entry(value, "coding", "tokens")[key] = bad
                     self.assert_refused(value, f"{key} is not a positive integer")
 
     def test_an_unknown_preset_or_unit_is_refused(self):
         value = document()
-        entry(value, "minimal", "tokens")["preset"] = "turbo"
+        entry(value, "coding", "tokens")["preset"] = "turbo"
         self.assert_refused(value, "preset is 'turbo'")
         value = document()
-        entry(value, "minimal", "tokens")["unit"] = "words"
+        entry(value, "coding", "tokens")["unit"] = "words"
         self.assert_refused(value, "unit is 'words'")
 
     def test_an_entry_with_the_wrong_keys_or_shape_is_refused(self):
@@ -205,7 +216,7 @@ class CompareTests(unittest.TestCase):
         result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidate())
         self.assertFalse(result["enforced"])
         self.assertEqual(result["failures"], [])
-        self.assertEqual(len(result["comparisons"]), 8)
+        self.assertEqual(len(result["comparisons"]), 6)
         first = result["comparisons"][0]
         self.assertEqual(
             list(first), ["preset", "unit", "target", "measured", "headroom", "verdict"]
@@ -213,7 +224,7 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(
             first,
             {
-                "preset": "minimal",
+                "preset": "coding",
                 "unit": "tokens",
                 "target": 15183,
                 "measured": 21691,
@@ -223,12 +234,12 @@ class CompareTests(unittest.TestCase):
         )
         self.assertTrue(all(item["verdict"] == "miss" for item in result["comparisons"]))
 
-    def test_the_minimal_headroom_matches_the_frozen_rows(self):
+    def test_the_coding_headroom_matches_the_frozen_rows(self):
         result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidate())
         by_unit = {
             item["unit"]: item
             for item in result["comparisons"]
-            if item["preset"] == "minimal"
+            if item["preset"] == "coding"
         }
         self.assertEqual(by_unit["tokens"]["headroom"], 15183 - 21691)
         self.assertEqual(by_unit["tokens"]["headroom"], -6508)
@@ -246,13 +257,13 @@ class CompareTests(unittest.TestCase):
         with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
             result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidate())
         self.assertTrue(result["enforced"])
-        self.assertEqual(len(result["failures"]), 8)
+        self.assertEqual(len(result["failures"]), 6)
         tokens = next(
             failure
             for failure in result["failures"]
-            if "minimal" in failure and "tokens" in failure
+            if "coding" in failure and "tokens" in failure
         )
-        for expected in ("minimal", "tokens", "15183", "21691", "-6508"):
+        for expected in ("coding", "tokens", "15183", "21691", "-6508"):
             self.assertIn(expected, tokens)
         self.assertTrue(all(item["verdict"] == "miss" for item in result["comparisons"]))
 

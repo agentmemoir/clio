@@ -97,7 +97,7 @@ class CommandTests(unittest.TestCase):
         )
         targets = report["targets"]
         self.assertFalse(targets["enforced"])
-        self.assertEqual(len(targets["comparisons"]), 8)
+        self.assertEqual(len(targets["comparisons"]), 6)
         self.assertEqual(targets["failures"], [])
         self.assertTrue(all(item["verdict"] == "miss" for item in targets["comparisons"]))
 
@@ -110,7 +110,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1, text)
         report = json.loads(text)
         self.assertEqual(report["verdict"], "fail")
-        self.assertEqual(len(report["failures"]), 8, report["failures"])
+        self.assertEqual(len(report["failures"]), 6, report["failures"])
         self.assertTrue(all(item["verdict"] == "miss" for item in report["targets"]["comparisons"]))
 
     def test_a_grown_pack_fails_with_exit_one(self):
