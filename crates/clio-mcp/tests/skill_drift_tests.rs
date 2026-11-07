@@ -16,9 +16,11 @@
 //! - `every_call_rule_appears_exactly_once`
 //! - `four_call_budget_appears_once_and_scopes_only_retrieval`
 //! - `version_check_runs_once_and_applies_no_update`
+//! - `reference_files_match_group_table`
 //!
 //! ## Does not own
-//! - The wording of the skill, its frontmatter, or its reference files
+//! - The wording of the skill, its frontmatter, or the prose of its reference
+//!   files
 //! - The approved group membership and guidance the table mirrors
 //!   (`clio-types` `mcp_tool_groups_data`)
 //! - Advertising, listing, or dispatching a tool (`clio-mcp`)
@@ -34,6 +36,10 @@
 //! Every structural assertion is anchored to an exact line or an exact section
 //! body rather than to a substring, because a substring check reads a widened
 //! sentence, an added column, or a second table as the wording it expects.
+//!
+//! The three group reference files are read with `include_str!` for the same
+//! reason, so a tool list that drifts from its catalog row fails here instead of
+//! reaching a caller.
 
 use clio_types::GROUP_TABLE;
 
@@ -333,6 +339,76 @@ fn version_check_runs_once_and_applies_no_update() {
         assert!(
             !lowered.contains(claim),
             "the skill says `{claim}`, which turns the check into a mutation: remove it, because the check reports and applies no update"
+        );
+    }
+}
+
+#[test]
+fn reference_files_match_group_table() {
+    let references: [(&str, &str); 3] = [
+        (
+            "01-retrieval.md",
+            include_str!("../../../skills/clio-mcp/references/01-retrieval.md"),
+        ),
+        (
+            "02-item-write.md",
+            include_str!("../../../skills/clio-mcp/references/02-item-write.md"),
+        ),
+        (
+            "03-item-read.md",
+            include_str!("../../../skills/clio-mcp/references/03-item-read.md"),
+        ),
+    ];
+    for (index, (name, text)) in references.iter().enumerate() {
+        let spec = &GROUP_TABLE[index];
+        let group = spec.group.as_str();
+        let lines: Vec<&str> = text.lines().collect();
+        let heading = lines
+            .iter()
+            .position(|line| *line == "## Tools")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the reference `{name}` has no `## Tools` heading: give the `{group}` file one tool list, because that list ties the file to its catalog row"
+                )
+            });
+        let tools_line = lines[heading + 1..]
+            .iter()
+            .map(|line| line.trim())
+            .find(|line| !line.is_empty())
+            .unwrap_or_else(|| {
+                panic!(
+                    "the reference `{name}` has no tool list under its `## Tools` heading: put the one tool list after the heading"
+                )
+            });
+        let mut listed: Vec<&str> = tools_line
+            .split(',')
+            .map(str::trim)
+            .map(|entry| {
+                entry
+                    .strip_prefix('`')
+                    .and_then(|inner| inner.strip_suffix('`'))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "the reference `{name}` has the tool entry `{entry}`: wrap every entry in one pair of backticks and separate the entries with commas, because the catalog names each tool without backticks"
+                        )
+                    })
+            })
+            .collect();
+        let mut catalog: Vec<&str> = spec.tools.to_vec();
+        listed.sort_unstable();
+        catalog.sort_unstable();
+        assert_eq!(
+            listed, catalog,
+            "the reference `{name}` lists {listed:?} against the `{group}` catalog row {catalog:?}: list exactly the group's tools, because a missing or extra tool leaves the file and the catalog telling a caller different things"
+        );
+        assert!(
+            text.contains(spec.when_to_use),
+            "the reference `{name}` does not carry the catalog sentence `{}`: copy `when_to_use` from the `{group}` row verbatim, because the file is the group's one home for that guidance",
+            spec.when_to_use
+        );
+        assert!(
+            text.contains("tool_describe"),
+            "the reference `{name}` does not point at `tool_describe`: keep the pointer so a caller can read exact arguments instead of guessing"
         );
     }
 }
