@@ -211,10 +211,33 @@ impl McpHandler {
         }
         let empty = json!({});
         let args = params.get("arguments").unwrap_or(&empty);
+        Self::execute_tool_call(state, name, args)
+    }
+
+    /// Run one tool call and shape its result into a `tools/call` response.
+    ///
+    /// The three rules around a tool body live here once, so every path that
+    /// executes a call applies them the same way: the argument contract refuses
+    /// before the handler runs, the handler's call is counted, and a failed
+    /// durable handoff fails the call closed.
+    ///
+    /// # Errors
+    /// The tool's result reports a failed co-activation durability handoff.
+    pub(crate) fn execute_tool_call(
+        state: &McpState,
+        name: &str,
+        args: &Value,
+    ) -> Result<Value, RpcError> {
         // An argument the schema does not declare, or a blank required value, is
         // refused here. Before this check it was dropped, and the write went on.
         let result = match crate::arg_contract::check(name, args) {
-            Ok(()) => crate::write_tools::dispatch(state, name, args),
+            Ok(()) => {
+                let result = crate::write_tools::dispatch(state, name, args);
+                // Only a call the handler answered is counted: a call the
+                // contract refused never reached a tool.
+                state.calls.record(name);
+                result
+            }
             Err(err) => crate::write_tools::tool_result(Err(err)),
         };
         if let Some(err) = coactivation_rpc_error(&result) {
@@ -390,6 +413,9 @@ fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
     Ok((view, tools))
 }
 
+#[cfg(test)]
+#[path = "protocol_call_accounting_tests.rs"]
+mod protocol_call_accounting_tests;
 #[cfg(test)]
 #[path = "protocol_nfr7_tests.rs"]
 mod protocol_nfr7_tests;

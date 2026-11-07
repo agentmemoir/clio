@@ -216,6 +216,7 @@ pub struct McpState {
     /// Behind an `Arc` because the counter must stay process-wide: a per-request
     /// clone starting from the same value would mint colliding item ids.
     pub(crate) id_counter: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) calls: Arc<crate::call_accounting::DirectCallAccounting>,
     /// The credential-bound identity for calls dispatched against this state.
     ///
     /// `None` is the unbound contract: the caller-declared actor wins, and any
