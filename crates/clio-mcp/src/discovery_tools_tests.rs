@@ -174,6 +174,9 @@ fn the_arguments_are_the_published_name_field_only() {
         json!({ "name": "" }),
         json!({ "name": 5 }),
         json!({ "name": "store", "extra": 1 }),
+        json!(null),
+        json!([]),
+        json!("x"),
     ] {
         let response = call(&state, "tool_describe", &args);
         assert_eq!(
@@ -181,8 +184,32 @@ fn the_arguments_are_the_published_name_field_only() {
             json!(ERR_INVALID_PARAMS),
             "{args} must be refused"
         );
+        assert!(
+            matches!(response["error"]["message"].as_str(), Some(message) if !message.is_empty()),
+            "{args} must carry a message"
+        );
         assert!(response.get("result").is_none(), "{args}");
     }
+    // A request with no `arguments` key at all is refused the same way.
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": "tool_describe" }
+    });
+    let response = McpHandler::new(Arc::clone(&state))
+        .handle_message(&request)
+        .expect("a request with an id has a response");
+    assert_eq!(
+        response["error"]["code"],
+        json!(ERR_INVALID_PARAMS),
+        "a missing arguments key must be refused"
+    );
+    assert!(
+        matches!(response["error"]["message"].as_str(), Some(message) if !message.is_empty()),
+        "a missing arguments key must carry a message"
+    );
+    assert!(response.get("result").is_none());
     let declared = &declaration()["inputSchema"];
     assert_eq!(declared["required"], json!(["name"]));
     assert_eq!(declared["properties"]["name"]["minLength"], json!(1));
@@ -191,7 +218,12 @@ fn the_arguments_are_the_published_name_field_only() {
 
 #[test]
 fn every_described_schema_resolves_with_no_network() {
-    for def in catalog_defs() {
+    let defs = catalog_defs();
+    assert!(
+        !defs.is_empty(),
+        "the catalogue must define at least one tool"
+    );
+    for def in defs {
         let tool = def.to_tool();
         let input = &tool["inputSchema"];
         assert!(
@@ -203,6 +235,7 @@ fn every_described_schema_resolves_with_no_network() {
             .offline()
             .build(input)
             .unwrap_or_else(|error| panic!("{}: inputSchema does not build: {error}", def.name));
+        // This loop covers each output schema when the tool declares one.
         if let Some(output) = tool.get("outputSchema") {
             assert!(
                 jsonschema::draft202012::meta::is_valid(output),
@@ -215,11 +248,31 @@ fn every_described_schema_resolves_with_no_network() {
                 .unwrap_or_else(|error| {
                     panic!("{}: outputSchema does not build: {error}", def.name)
                 });
+            assert!(
+                clio_config::retention_schema::schema_refs_resolve(output),
+                "{}: outputSchema has an unresolved reference",
+                def.name
+            );
         }
         assert!(
             clio_config::retention_schema::schema_refs_resolve(input),
             "{}: inputSchema has an unresolved reference",
             def.name
+        );
+    }
+}
+
+#[test]
+fn the_discovery_names_are_not_bound_tools() {
+    let bound = clio_types::mcp_tools::bound_tools();
+    for name in [
+        "tool_search",
+        crate::discovery_tools::TOOL_DESCRIBE,
+        "tool_invoke",
+    ] {
+        assert!(
+            !bound.contains(&name),
+            "`{name}` must stay outside the bound set"
         );
     }
 }

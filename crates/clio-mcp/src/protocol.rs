@@ -23,6 +23,7 @@
 //! Keep this module focused on shared MCP protocol handling.
 
 use crate::MCP_PROTOCOL_REVISION;
+use crate::discovery_tools::TOOL_DESCRIBE;
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
 use crate::tools_page::ToolView;
@@ -208,7 +209,10 @@ impl McpHandler {
             .ok_or_else(|| invalid_params("tools/call.name is required"))?;
         let empty = json!({});
         let args = params.get("arguments").unwrap_or(&empty);
-        if name == crate::discovery_tools::TOOL_DESCRIBE {
+        // A bound tool that later takes this name keeps the normal dispatch
+        // path, so the guard names binding explicitly instead of assuming the
+        // discovery tool is never bound.
+        if name == TOOL_DESCRIBE && !bound_set().contains(&name) {
             let payload = crate::discovery_tools::describe(args)?;
             return Ok(json!({
                 "content": [{ "type": "text", "text": "ok" }],
