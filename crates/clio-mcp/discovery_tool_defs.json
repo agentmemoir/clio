@@ -293,25 +293,25 @@
             "input": {"name": "store", "arguments": "missing"},
             "keyword": "type",
             "instancePath": "/arguments",
-            "code": -32602
+            "code": "invalid_type"
           },
           {
             "input": {},
             "keyword": "required",
             "instancePath": "",
-            "code": -32602
+            "code": "invalid_argument"
           },
           {
             "input": {"name": ""},
             "keyword": "minLength",
             "instancePath": "/name",
-            "code": -32602
+            "code": "invalid_argument"
           },
           {
             "input": {"name": "store", "extra": 1},
             "keyword": "additionalProperties",
             "instancePath": "",
-            "code": -32602
+            "code": "invalid_argument"
           }
         ],
         "refused": [

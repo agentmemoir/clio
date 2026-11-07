@@ -166,7 +166,7 @@ fn an_invalid_argument_for_a_hidden_tool_is_refused_as_when_listed() {
 }
 
 #[test]
-fn the_contract_set_is_the_bound_catalog_whatever_the_profile() {
+fn the_contract_set_is_the_bound_catalog_plus_the_published_discovery_definitions() {
     let before: Vec<String> = {
         let mut names: Vec<String> = contracts().keys().cloned().collect();
         names.sort_unstable();

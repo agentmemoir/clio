@@ -10,10 +10,12 @@
 //!
 //! ## Owns
 //! - `an_invoked_target_answers_as_the_direct_call_does`
+//! - `an_invocation_forwards_the_callers_arguments_to_the_target`
 //! - `an_absent_arguments_member_answers_as_an_explicit_empty_object`
 //! - `a_discovery_target_is_refused_and_records_nothing`
 //! - `an_unbound_target_is_refused_and_named`
 //! - `an_invalid_target_argument_names_the_target_and_the_field`
+//! - `an_unknown_target_argument_names_the_target_once`
 //! - `a_wrapper_failure_names_the_wrapper_and_the_field`
 //! - `one_invocation_records_only_the_target`
 //! - `the_execute_path_refuses_a_discovery_name_by_any_route`
@@ -24,6 +26,8 @@
 //! - The tally's own arithmetic (see `call_accounting_tests`)
 //! - The declaration of the three discovery tools (see
 //!   `discovery_tool_defs_tests`)
+//! - Whether a published example matches the handler (see
+//!   `catalog_invoke_examples_tests`)
 //!
 //! ## Boundary
 //!
@@ -32,9 +36,10 @@
 //! payload should not: the wrapper is compared against the direct call path, not
 //! against a pinned payload.
 //!
-//! Every test opens its own state over the in-memory backend and reads a
-//! configuration-only target, so the module opens no path, holds no clock, and
-//! depends on no environment.
+//! Every test opens its own state over the in-memory backend. The targets are
+//! configuration reads, apart from the one test that writes an item through the
+//! store at a pinned id and timestamp and reads it back by that id, so the
+//! module opens no path, holds no clock, and depends on no environment.
 
 use super::*;
 use crate::protocol::ERR_INVALID_PARAMS;
@@ -47,8 +52,36 @@ use std::sync::Arc;
 /// alone, so two calls with the same arguments answer the same bytes.
 const TARGET: &str = "config_profiles";
 
+/// The read tool whose declared `item_id` decides its answer: the item stored
+/// under that id, or a not-found naming the id it was given.
+const BY_ID: &str = "get";
+
+/// The item the forwarding test writes and reads back. Both halves name the same
+/// pinned id and the write pins its timestamp, so nothing here is minted.
+const STORED_ITEM: &str = "itm-invoke-forwarding";
+
 /// The three names the embedded document declares, which the wrapper refuses.
 const DISCOVERY: [&str; 3] = ["tool_search", "tool_describe", "tool_invoke"];
+
+/// The `store` arguments that write [`STORED_ITEM`] into the default bank.
+fn stored_item() -> Value {
+    json!({
+        "item": {
+            "id": STORED_ITEM,
+            "subject_id": STORED_ITEM,
+            "gist": "prefers terse answers",
+            "snapshot": {
+                "entity": "terse answers",
+                "amount": 1,
+                "date": "2024-01-01"
+            }
+        },
+        "category": "persona",
+        "epistemic_kind": "fact",
+        "source_text": "The user prefers terse answers (1 note since 2024-01-01).",
+        "timestamp": "2024-01-01T00:00:00Z"
+    })
+}
 
 /// A state whose configuration layer is exactly `config`, and a handler on it.
 fn handler_with(config: &Value) -> (McpHandler, Arc<McpState>) {
@@ -58,7 +91,7 @@ fn handler_with(config: &Value) -> (McpHandler, Arc<McpState>) {
 }
 
 /// A state whose configuration turns discovery on, so the wrapper is reachable.
-fn handler() -> (McpHandler, Arc<McpState>) {
+pub(super) fn handler() -> (McpHandler, Arc<McpState>) {
     handler_with(&json!({ "mcp": { "discovery": true } }))
 }
 
@@ -75,14 +108,14 @@ fn request(handler: &McpHandler, params: Value) -> Value {
 }
 
 /// Send one `tools/call` naming a tool and its arguments.
-fn call(handler: &McpHandler, name: &str, args: &Value) -> Value {
+pub(super) fn call(handler: &McpHandler, name: &str, args: &Value) -> Value {
     request(handler, json!({ "name": name, "arguments": args }))
 }
 
 /// The payload a `tools/call` result carries, whichever block holds it: the
 /// `structuredContent` of a tool with a declared output schema, or the text
 /// block of one without.
-fn payload(response: &Value) -> Value {
+pub(super) fn payload(response: &Value) -> Value {
     let result = &response["result"];
     if let Some(structured) = result.get("structuredContent") {
         return structured.clone();
@@ -94,7 +127,7 @@ fn payload(response: &Value) -> Value {
 }
 
 /// The code and message of one refused `tool_invoke` call.
-fn refusal_of(response: &Value) -> (String, String) {
+pub(super) fn refusal_of(response: &Value) -> (String, String) {
     assert_eq!(response["result"]["isError"], json!(true), "{response}");
     let payload = payload(response);
     assert_eq!(payload["ok"], json!(false), "{payload}");
@@ -123,6 +156,56 @@ fn an_invoked_target_answers_as_the_direct_call_does() {
     assert_eq!(
         invoked, direct,
         "an invoked call answers exactly what the direct call answers"
+    );
+}
+
+#[test]
+fn an_invocation_forwards_the_callers_arguments_to_the_target() {
+    let (handler, _state) = handler();
+    let write = call(&handler, "store", &stored_item());
+    assert_eq!(write["result"]["isError"], json!(false), "{write}");
+
+    // `get` answers from the id its argument names, so the argument decides the
+    // response: the stored item, or a not-found carrying whatever id arrived.
+    let args = json!({ "item_id": STORED_ITEM });
+    let direct = call(&handler, BY_ID, &args);
+    assert_eq!(direct["result"]["isError"], json!(false), "{direct}");
+
+    let invoked = call(
+        &handler,
+        TOOL_INVOKE,
+        &json!({ "name": BY_ID, "arguments": args }),
+    );
+    assert_eq!(
+        invoked, direct,
+        "the forwarded call answers exactly what the direct call answers"
+    );
+    assert_eq!(
+        payload(&invoked)["id"],
+        json!(STORED_ITEM),
+        "the answer is the item the caller's argument named: {invoked}"
+    );
+
+    let without = call(
+        &handler,
+        TOOL_INVOKE,
+        &json!({ "name": BY_ID, "arguments": {} }),
+    );
+    assert_ne!(
+        without, invoked,
+        "an invocation carrying no argument is not this answer, so a wrapper \
+         that dropped the caller's arguments fails here"
+    );
+    let elsewhere = call(
+        &handler,
+        TOOL_INVOKE,
+        &json!({ "name": BY_ID, "arguments": { "item_id": "itm-not-stored" } }),
+    );
+    let (code, message) = refusal_of(&elsewhere);
+    assert_eq!(code, "item_not_found", "{elsewhere}");
+    assert!(
+        message.contains("itm-not-stored"),
+        "the id the caller's argument named is the one reported: {message}"
     );
 }
 
@@ -197,6 +280,35 @@ fn an_invalid_target_argument_names_the_target_and_the_field() {
     assert_eq!(code, "invalid_argument", "{response}");
     assert!(message.contains("store"), "names the target: {message}");
     assert!(message.contains("item"), "names the field: {message}");
+    assert!(
+        state.calls.snapshot().is_empty(),
+        "a refused target never ran: {:?}",
+        state.calls.snapshot()
+    );
+}
+
+#[test]
+fn an_unknown_target_argument_names_the_target_once() {
+    let (handler, state) = handler();
+    // The contract's own message for an undeclared argument already names the
+    // tool, so the wrapper adds nothing and the target appears once.
+    let response = call(
+        &handler,
+        TOOL_INVOKE,
+        &json!({
+            "name": "store",
+            "arguments": { "item": {}, "epistemic_kind": "fact", "bogus": 1 }
+        }),
+    );
+    let (code, message) = refusal_of(&response);
+
+    assert_eq!(code, "invalid_argument", "{response}");
+    assert_eq!(
+        message.matches("store").count(),
+        1,
+        "the target is named exactly once: {message}"
+    );
+    assert!(message.contains("bogus"), "names the field: {message}");
     assert!(
         state.calls.snapshot().is_empty(),
         "a refused target never ran: {:?}",

@@ -141,7 +141,13 @@ pub(crate) fn invoke(state: &McpState, params: &Value) -> Result<Value, RpcError
         return Ok(refusal(TOOL_INVOKE, err));
     }
     if let Err(err) = crate::arg_contract::check(target, &target_args) {
-        let message = format!("{target}: {}", err.message);
+        // A fault the contract already attributes to the tool keeps its message,
+        // so the target is named once and the failing field is still named.
+        let message = if err.message.contains(target) {
+            err.message
+        } else {
+            format!("{target}: {}", err.message)
+        };
         return Ok(refusal(target, AmError::new(err.code, message)));
     }
     McpHandler::execute_tool_call(state, target, &target_args)
@@ -150,3 +156,7 @@ pub(crate) fn invoke(state: &McpState, params: &Value) -> Result<Value, RpcError
 #[cfg(test)]
 #[path = "catalog_invoke_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "catalog_invoke_examples_tests.rs"]
+mod examples_tests;
