@@ -211,11 +211,18 @@ impl McpHandler {
         if name == crate::catalog_invoke::TOOL_INVOKE && crate::catalog_invoke::enabled(state) {
             return crate::catalog_invoke::invoke(state, params);
         }
+        let empty = json!({});
+        let args = params.get("arguments").unwrap_or(&empty);
+        if name == crate::catalog_search::NAME {
+            if !crate::catalog_search::enabled(state) {
+                return Err(invalid_params(format!("unknown tool `{name}`")));
+            }
+            let page = crate::catalog_search::call(args)?;
+            return Ok(crate::catalog_search::envelope(page));
+        }
         if !bound_set().contains(&name) {
             return Err(invalid_params(format!("unknown tool `{name}`")));
         }
-        let empty = json!({});
-        let args = params.get("arguments").unwrap_or(&empty);
         Self::execute_tool_call(state, name, args)
     }
 
@@ -403,6 +410,7 @@ fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
         state.config.lock().expect("config runtime mutex poisoned");
     let groups = rt.mcp_tool_groups();
     let preset = rt.mcp_tool_profile();
+    let discovery = rt.mcp_discovery();
     let revision = rt
         .effective_raw()
         .pointer("/mcp/revision")
@@ -412,11 +420,14 @@ fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
     let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
     let visible = tools_of(&groups);
     let bound = bound_set();
-    let tools: Vec<Value> = catalog_defs()
+    let mut tools: Vec<Value> = catalog_defs()
         .iter()
         .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
         .map(crate::schema_defs::ToolDef::to_tool)
         .collect();
+    if discovery {
+        tools.push(crate::catalog_search::listing_entry());
+    }
     let view = ToolView {
         preset: preset.ok(),
         groups,

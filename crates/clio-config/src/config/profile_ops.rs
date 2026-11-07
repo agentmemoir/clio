@@ -10,6 +10,7 @@
 //! - `config_profiles` / `config_profile_apply`
 //! - `ranking_env_get` / `ranking_env_set`
 //! - The `mcp.tool_profile` accessor that names the configured tool preset
+//! - The `mcp.discovery` accessor that gates the discovery tools
 //! - The installed-selection accessor that resolves the effective tool groups
 //!
 //! ## Does not own
@@ -154,6 +155,18 @@ impl Runtime {
                 ),
             )
         })
+    }
+
+    /// True when `mcp.discovery` enables the discovery tools.
+    ///
+    /// An absent key, or a value that is not a boolean, reads as off, so a
+    /// deployment that never sets the key keeps the listing and dispatch it has.
+    #[must_use]
+    pub fn mcp_discovery(&self) -> bool {
+        self.effective_raw()
+            .pointer("/mcp/discovery")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     /// The tool groups the effective selection names: the selection a caller
