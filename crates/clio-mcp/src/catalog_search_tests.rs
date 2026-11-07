@@ -255,6 +255,11 @@ fn discovery_off_keeps_the_advertised_count_unchanged() {
         "the default listing keeps today's tool count"
     );
     let on = listed(&state_with(r#"{"mcp": {"discovery": true}}"#));
-    assert_eq!(on.len(), absent.len() + 1);
+    assert_eq!(
+        on.len(),
+        absent.len() + 2,
+        "the gate adds tool_search and its tool_describe sibling"
+    );
     assert_eq!(on.iter().filter(|name| *name == NAME).count(), 1);
+    assert_eq!(on.iter().filter(|name| *name == "tool_describe").count(), 1);
 }
