@@ -345,7 +345,7 @@ fn version_check_runs_once_and_applies_no_update() {
 
 #[test]
 fn reference_files_match_group_table() {
-    let references: [(&str, &str); 6] = [
+    let references: [(&str, &str); 8] = [
         (
             "01-retrieval.md",
             include_str!("../../../skills/clio-mcp/references/01-retrieval.md"),
@@ -369,6 +369,14 @@ fn reference_files_match_group_table() {
         (
             "06-memtree.md",
             include_str!("../../../skills/clio-mcp/references/06-memtree.md"),
+        ),
+        (
+            "07-triple.md",
+            include_str!("../../../skills/clio-mcp/references/07-triple.md"),
+        ),
+        (
+            "08-belief.md",
+            include_str!("../../../skills/clio-mcp/references/08-belief.md"),
         ),
     ];
     for (index, (name, text)) in references.iter().enumerate() {
