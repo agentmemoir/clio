@@ -37,7 +37,7 @@
 //! body rather than to a substring, because a substring check reads a widened
 //! sentence, an added column, or a second table as the wording it expects.
 //!
-//! The three group reference files are read with `include_str!` for the same
+//! The group reference files are read with `include_str!` for the same
 //! reason, so a tool list that drifts from its catalog row fails here instead of
 //! reaching a caller.
 
@@ -345,7 +345,7 @@ fn version_check_runs_once_and_applies_no_update() {
 
 #[test]
 fn reference_files_match_group_table() {
-    let references: [(&str, &str); 3] = [
+    let references: [(&str, &str); 6] = [
         (
             "01-retrieval.md",
             include_str!("../../../skills/clio-mcp/references/01-retrieval.md"),
@@ -357,6 +357,18 @@ fn reference_files_match_group_table() {
         (
             "03-item-read.md",
             include_str!("../../../skills/clio-mcp/references/03-item-read.md"),
+        ),
+        (
+            "04-persona.md",
+            include_str!("../../../skills/clio-mcp/references/04-persona.md"),
+        ),
+        (
+            "05-task.md",
+            include_str!("../../../skills/clio-mcp/references/05-task.md"),
+        ),
+        (
+            "06-memtree.md",
+            include_str!("../../../skills/clio-mcp/references/06-memtree.md"),
         ),
     ];
     for (index, (name, text)) in references.iter().enumerate() {
