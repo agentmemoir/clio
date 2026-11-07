@@ -11,9 +11,11 @@ The token counts come from the repo-pinned offline tokenizer (`tiktoken==0.14.0`
 | `ops` | 22 | 33466 | 7181 | `fnv1a64:8e0c2ec55c64f36d` | `client/synthetic-eager-client/turn/1` |
 | `all` | 86 | 148729 | 31691 | `fnv1a64:2b74f4ad094e2424` | `client/synthetic-eager-client/turn/1` |
 
-Eager delivery is the client mode of the frozen baseline record `benchmarks/mcp_token_budget/baseline/frozen-v1.json` whose client is `synthetic-eager-client`, and that mode delivers every tool definition with its input schema at turn 1, so that mode is the discovery-off surface for these rows.
+The frozen baseline record `benchmarks/mcp_token_budget/baseline/frozen-v1.json` whose client is `synthetic-eager-client` measures eager client mode, which delivers every tool definition with its input schema at turn 1, so these rows are eager-client rows.
 
-The same baseline record's `synthetic-on-demand-client` is the discovery-on mode, and no row here uses it, so no row may be quoted as a discovery-on row.
+The same baseline record's `synthetic-on-demand-client` measures on-demand client mode, and no row here uses it, so no row may be quoted as an on-demand-client row.
+
+The `--discovery off` and `--discovery on` pair is measured only in [discovery-v1.json](discovery-v1.json), the frozen rows in this directory are not flag rows, and that pair's off row must be taken from that file and never from a pre-flag record.
 
 Each pack carries its own catalog hash, recorded on the row measured from that pack, so the four rows need not share one revision: the `all` pack's hash `fnv1a64:2b74f4ad094e2424` is the one to compare against for a same-revision comparison with the `all` row, which is the full surface, and the frozen baseline row was measured at `fnv1a64:c0fc6a61cedf1299`.
 
