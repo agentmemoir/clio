@@ -34,13 +34,11 @@
 //! it expects. `body_under` is the only section reader, so a check that needs a
 //! section body compares against exactly the lines under that heading.
 
-#[path = "skill_drift/group_references.rs"]
 mod group_references;
-#[path = "skill_drift/router_policy.rs"]
 mod router_policy;
 
 /// The skill under check, read at compile time so no run can see another copy.
-const SKILL: &str = include_str!("../../../skills/clio-mcp/SKILL.md");
+const SKILL: &str = include_str!("../../../../skills/clio-mcp/SKILL.md");
 
 /// The trimmed body under the exact `heading` line in `text`, up to the next
 /// `## ` heading, or a failure naming `label` and the heading it lacks.
