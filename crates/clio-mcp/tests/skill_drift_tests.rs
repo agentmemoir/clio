@@ -78,10 +78,12 @@ fn frontmatter_value(key: &str) -> &'static str {
         .skip(1)
         .take_while(|line| *line != "---")
         .find_map(|line| line.strip_prefix(&prefix))
-        .map(str::trim)
-        .unwrap_or_else(|| {
-            panic!("the skill frontmatter has no `{key}:` line: declare it so the router states its identity")
-        })
+        .map_or_else(
+            || {
+                panic!("the skill frontmatter has no `{key}:` line: declare it so the router states its identity")
+            },
+            str::trim,
+        )
 }
 
 /// The router table's data rows, in file order, without the header or separator.
