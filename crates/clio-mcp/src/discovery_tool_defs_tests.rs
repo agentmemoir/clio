@@ -314,3 +314,21 @@ fn all_three_tools_are_declared() {
         .collect();
     assert_eq!(declared, TOOL_NAMES);
 }
+
+/// Every published listing entry carries exactly the four contract keys, so no
+/// declaration-only field leaks into `tools/list`.
+#[test]
+fn a_listing_entry_carries_only_the_four_published_keys() {
+    for tool in tools() {
+        let name = tool["name"].as_str().expect("a tool name");
+        let entry = crate::discovery_tool_defs::entry(name);
+        let object = entry.as_object().expect("an entry object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["description", "inputSchema", "name", "outputSchema"],
+            "`{name}` published {keys:?}"
+        );
+    }
+}

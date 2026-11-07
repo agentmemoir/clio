@@ -72,6 +72,18 @@ fn listed_under(config: &str, groups: &[ToolGroup]) -> Vec<String> {
     listed(&McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state"))
 }
 
+/// The advertised tool names of a state carrying `groups` and `discovery` as
+/// the installed selections — the seam a transport writes before it opens.
+fn listed_with(config: &str, groups: &[ToolGroup], discovery: Option<bool>) -> Vec<String> {
+    let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
+    runtime
+        .load_file_json(config)
+        .expect("a valid config layer");
+    runtime.set_mcp_tool_groups(groups.to_vec());
+    runtime.set_mcp_discovery(discovery);
+    listed(&McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state"))
+}
+
 /// The retrieval group's tools, written out so a membership change fails these
 /// tests instead of moving the expectation with the code.
 const RETRIEVAL_TOOLS: [&str; 4] = ["associations", "compose_context", "intent_gate", "retrieve"];
@@ -329,5 +341,53 @@ fn no_selection_and_no_profile_setting_lists_the_default_preset_set() {
     assert!(
         !advertised.contains(&"get".to_owned()),
         "the default preset does not reach `item-read`: {advertised:?}"
+    );
+}
+
+/// The three discovery tools, sorted.
+const DISCOVERY_TOOLS: [&str; 3] = ["tool_describe", "tool_invoke", "tool_search"];
+
+/// Discovery on adds exactly the three discovery tools to every preset and to
+/// a custom list, and adds no tool group: the difference between on and off is
+/// those three names and nothing else.
+#[test]
+fn discovery_adds_exactly_three_to_every_preset() {
+    let custom = clio_types::custom(&["ops"]).expect("a known group");
+    for (name, groups) in [
+        ("minimal", ToolPreset::Minimal.resolve()),
+        ("coding", ToolPreset::Coding.resolve()),
+        ("ops", ToolPreset::Ops.resolve()),
+        ("all", ToolPreset::All.resolve()),
+        ("custom:ops", custom),
+    ] {
+        let off = listed_with("{}", &groups, Some(false));
+        let on = listed_with("{}", &groups, Some(true));
+        assert_eq!(
+            on.len(),
+            off.len() + 3,
+            "`{name}` gained {} tools instead of three",
+            on.len() - off.len()
+        );
+        let added: Vec<String> = on
+            .iter()
+            .filter(|tool| !off.contains(tool))
+            .cloned()
+            .collect();
+        assert_eq!(
+            added,
+            DISCOVERY_TOOLS.map(str::to_owned),
+            "`{name}` gained {added:?}"
+        );
+    }
+    for tool in DISCOVERY_TOOLS {
+        assert!(
+            clio_types::group_of(tool).is_none(),
+            "`{tool}` must belong to no tool group"
+        );
+    }
+    assert_eq!(
+        ToolGroup::ALL.len(),
+        17,
+        "discovery adds no row to the tool-group table"
     );
 }
