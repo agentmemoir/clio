@@ -13,7 +13,8 @@
 //!   entry whose type the schema's `items` does not accept
 //! - Refusing a missing required argument and a blank required string
 //! - The contract of every bound tool, read from the full catalog so no profile
-//!   and no listing can remove or change an entry
+//!   and no listing can remove or change an entry, plus the contract of each
+//!   published discovery definition
 //!
 //! ## Does not own
 //! - Per-tool value rules such as timestamps, categories, or admission gates
@@ -214,21 +215,43 @@ impl Contract {
 
 /// Every tool's contract, built once from the schema the server publishes.
 ///
-/// The definitions come from the full catalog by exact name, narrowed only by
-/// the bound set, so the contract for a tool a profile hides is the contract of
-/// that same tool when the profile lists it.
+/// The business definitions come from the full catalog by exact name, narrowed
+/// only by the bound set, so the contract for a tool a profile hides is the
+/// contract of that same tool when the profile lists it. The published
+/// discovery definitions join them: the `tool_invoke` wrapper is checked by
+/// these rules, and so is every target it is asked to call.
 pub(crate) fn contracts() -> &'static HashMap<String, Contract> {
     static CONTRACTS: OnceLock<HashMap<String, Contract>> = OnceLock::new();
     CONTRACTS.get_or_init(|| {
-        crate::bound_tools()
-            .into_iter()
-            .filter_map(|name| {
-                let tool = crate::schema::catalog_def(name)?.to_tool();
-                let schema = tool.get("inputSchema")?;
-                Some((name.to_owned(), Contract::from_schema(schema)))
-            })
-            .collect()
+        let mut contracts = bound_contracts();
+        contracts.extend(published_discovery_defs().iter().filter_map(contract_of));
+        contracts
     })
+}
+
+/// The contract of every bound tool, read from the full catalog by exact name.
+fn bound_contracts() -> HashMap<String, Contract> {
+    crate::bound_tools()
+        .into_iter()
+        .filter_map(|name| contract_of(&crate::schema::catalog_def(name)?.to_tool()))
+        .collect()
+}
+
+/// The tool definitions the embedded discovery document declares.
+fn published_discovery_defs() -> &'static [Value] {
+    crate::discovery_tool_defs::definitions()
+        .get("tools")
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
+}
+
+/// One published definition's contract, keyed by the name it declares. `None`
+/// when the definition carries no input schema, which leaves that tool to its
+/// handler exactly as a missing catalog entry does.
+fn contract_of(tool: &Value) -> Option<(String, Contract)> {
+    let name = tool.get("name").and_then(Value::as_str)?;
+    let schema = tool.get("inputSchema")?;
+    Some((name.to_owned(), Contract::from_schema(schema)))
 }
 
 /// Check one `tools/call`'s arguments against the tool's contract. A tool with
