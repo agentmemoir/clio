@@ -206,8 +206,7 @@ impl McpHandler {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| invalid_params("tools/call.name is required"))?;
-        // The wrapper is not bound, so its route sits ahead of the bound check.
-        // With discovery off the name falls through to that check untouched.
+        // The wrapper is not bound; with discovery off the name falls through.
         if name == crate::catalog_invoke::TOOL_INVOKE && crate::catalog_invoke::enabled(state) {
             return crate::catalog_invoke::invoke(state, params);
         }
@@ -226,24 +225,16 @@ impl McpHandler {
         Self::execute_tool_call(state, name, args)
     }
 
-    /// Run one tool call and shape its result into a `tools/call` response.
-    ///
-    /// The four rules around a tool body live here once, so every path that
-    /// executes a call applies them the same way: a discovery tool is refused
-    /// before anything reads its arguments, the argument contract refuses
-    /// before the handler runs, the handler's call is counted, and a failed
-    /// durable handoff fails the call closed.
+    /// Run one tool call and shape the result into a `tools/call` response.
     ///
     /// # Errors
-    /// The name is a discovery tool, or the result reports a failed
-    /// co-activation durability handoff.
+    /// A recursion refusal, a contract refusal, or a durable handoff error.
     pub(crate) fn execute_tool_call(
         state: &McpState,
         name: &str,
         args: &Value,
     ) -> Result<Value, RpcError> {
-        // The one function every name-routed dispatch goes through, so a chain
-        // that reached it indirectly is refused here as well.
+        // Refused here too, so an indirect chain cannot bypass the check.
         if let Some(err) = crate::catalog_invoke::recursion_refusal(name) {
             return Err(err);
         }
