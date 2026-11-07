@@ -15,6 +15,6 @@ retrieve({"query": "deploy steps"})
 compose_context({"budget_tokens": 1000})
 ```
 
-## Arguments
+## Exact arguments
 
 Call `tool_describe` with a tool name from the list above for the exact arguments. For example: `tool_describe("retrieve")`.

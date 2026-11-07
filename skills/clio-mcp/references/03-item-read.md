@@ -15,6 +15,6 @@ get({"item_id": "demo-note"})
 inspect({})
 ```
 
-## Arguments
+## Exact arguments
 
 Call `tool_describe` with a tool name from the list above for the exact arguments. For example: `tool_describe("get")`.

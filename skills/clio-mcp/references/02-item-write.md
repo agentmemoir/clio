@@ -12,9 +12,9 @@ Create, correct or remove memory items.
 
 ```
 store({"item": {"id": "demo-note", "gist": "prefers terse answers"}, "category": "persona", "epistemic_kind": "fact"})
-discard({"item_id": "demo-note", "reason": "superseded"})
+discard({"item_id": "demo-note", "reason": "superseded", "confirm": true})
 ```
 
-## Arguments
+## Exact arguments
 
 Call `tool_describe` with a tool name from the list above for the exact arguments. For example: `tool_describe("store")`.
