@@ -206,6 +206,11 @@ impl McpHandler {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| invalid_params("tools/call.name is required"))?;
+        // The wrapper is not bound, so its route sits ahead of the bound check.
+        // With discovery off the name falls through to that check untouched.
+        if name == crate::catalog_invoke::TOOL_INVOKE && crate::catalog_invoke::enabled(state) {
+            return crate::catalog_invoke::invoke(state, params);
+        }
         if !bound_set().contains(&name) {
             return Err(invalid_params(format!("unknown tool `{name}`")));
         }
@@ -216,18 +221,25 @@ impl McpHandler {
 
     /// Run one tool call and shape its result into a `tools/call` response.
     ///
-    /// The three rules around a tool body live here once, so every path that
-    /// executes a call applies them the same way: the argument contract refuses
+    /// The four rules around a tool body live here once, so every path that
+    /// executes a call applies them the same way: a discovery tool is refused
+    /// before anything reads its arguments, the argument contract refuses
     /// before the handler runs, the handler's call is counted, and a failed
     /// durable handoff fails the call closed.
     ///
     /// # Errors
-    /// The tool's result reports a failed co-activation durability handoff.
+    /// The name is a discovery tool, or the result reports a failed
+    /// co-activation durability handoff.
     pub(crate) fn execute_tool_call(
         state: &McpState,
         name: &str,
         args: &Value,
     ) -> Result<Value, RpcError> {
+        // The one function every name-routed dispatch goes through, so a chain
+        // that reached it indirectly is refused here as well.
+        if let Some(err) = crate::catalog_invoke::recursion_refusal(name) {
+            return Err(err);
+        }
         // An argument the schema does not declare, or a blank required value, is
         // refused here. Before this check it was dropped, and the write went on.
         let result = match crate::arg_contract::check(name, args) {

@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - An exact lookup resolving a tool the selected profile hides
-//! - The contract set equalling the bound catalog rather than the listing
+//! - The contract set equalling the bound catalog plus the published discovery
+//!   definitions, rather than the listing
 //! - One refusal, of one code and one message, whether the tool is hidden or listed
 //!
 //! ## Does not own
@@ -176,7 +177,24 @@ fn the_contract_set_is_the_bound_catalog_whatever_the_profile() {
         .map(str::to_owned)
         .collect();
     bound.sort_unstable();
-    assert_eq!(before, bound, "every bound tool has a contract");
+    // The published discovery definitions carry a contract too, because the
+    // `tool_invoke` wrapper and every target it is asked for are checked by the
+    // same rules. They are a flag-controlled surface, not business tools, so
+    // they are named here beside the bound catalog rather than inside it.
+    let mut discovery: Vec<String> = crate::discovery_tool_defs::definitions()["tools"]
+        .as_array()
+        .expect("the document declares a tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+        .collect();
+    discovery.sort_unstable();
+    let mut expected = bound.clone();
+    expected.extend(discovery.clone());
+    expected.sort_unstable();
+    assert_eq!(
+        before, expected,
+        "every bound tool and every published discovery tool has a contract"
+    );
 
     let minimal = state_with(r#"{"mcp": {"tool_profile": "minimal"}}"#);
     let all = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
@@ -187,15 +205,16 @@ fn the_contract_set_is_the_bound_catalog_whatever_the_profile() {
         "the two profiles list differently"
     );
     assert!(
-        minimal_names.len() < before.len(),
+        minimal_names.len() < bound.len(),
         "a profile narrows the listing and not the contract set"
     );
-    assert_eq!(before.len(), contracts().len());
+    assert_eq!(before.len(), bound.len() + discovery.len());
     assert_eq!(
-        before.len(),
+        bound.len(),
         McpHandler::tools_list()["tools"]
             .as_array()
             .expect("tools")
-            .len()
+            .len(),
+        "the listing is the bound catalog, and no discovery tool is bound"
     );
 }
