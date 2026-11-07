@@ -9,7 +9,7 @@ Clio pages `tools/list`. A client reads one page at a time and asks for the next
 - A value above 100 is clamped to 100.
 - A value below 1, a non-integer, or a value of another JSON type answers `-32602` (`Invalid params`).
 
-Tools stay in catalog order. The page size governs one page only.
+Catalog tools stay in catalog order. A discovery tool, when the deployment enables it, is appended after them. The page size governs one page only.
 
 ## Cursor
 
@@ -28,7 +28,7 @@ base64url(no padding) of [1, "<digest>", <page size>, <next offset>]
 
 The digest covers three inputs:
 
-1. the catalog hash of the visible definitions, in catalog order;
+1. the catalog hash of the visible definitions, in listing order;
 2. the preset that names the view, or a marker when an installed `--tools` selection governs it instead, and the effective groups the view resolves to;
 3. the configuration revision: the effective `mcp.revision`, or the pinned protocol revision when no revision is set.
 
@@ -62,7 +62,7 @@ The answer carries at most 50 tools and, when more remain, a `nextCursor`. The n
 {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"cursor": "<nextCursor>", "_meta": {"com.agentmemoir/pageSize": 50}}}
 ```
 
-A walk visits every visible tool exactly once, in catalog order, with no duplicate, omission, or reorder.
+A walk visits every visible tool exactly once, in listing order, with no duplicate, omission, or reorder.
 
 ## Repeatability
 
