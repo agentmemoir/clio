@@ -32,32 +32,44 @@
 //! module compares the two routes against each other, never against a pinned
 //! response.
 //!
-//! Every test opens its own in-memory state. The set under test is read from the
-//! catalog, so a tool that starts declaring `confirm` enters these loops without
-//! an edit, and a tool that stops declaring it is picked up by the ungated loop.
+//! Every test opens its own in-memory state, with the shared bank surface
+//! enabled so both `shared_*` tools reach their own gate rather than the
+//! surface's refusal. The set under test is read from the catalog, so a tool
+//! that stops declaring `confirm` falls into the ungated loop without an edit. A
+//! tool that starts declaring it enters these loops from the catalog as well,
+//! but its arguments have to carry it past whatever it checks before the gate:
+//! that prerequisite table lives in `catalog_invoke_gate_fixture_tests`, which
+//! panics on a gated tool it has no expectation for. So a newly gated tool needs
+//! an edit there, and none here.
 
 use super::TOOL_INVOKE;
-use super::tests::{call, handler, payload, refusal_of};
+use super::tests::{call, payload, refusal_of};
 use crate::protocol::McpHandler;
-use crate::runtime::McpState;
+use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 /// The instant every derived argument carries, so a payload that echoes the
 /// call's time is the same bytes on both routes and on two fresh states.
-const PINNED: &str = "2024-01-01T00:00:00Z";
+pub(super) const PINNED: &str = "2024-01-01T00:00:00Z";
 
-/// A handler whose configuration lists `preset` and keeps the wrapper reachable.
-fn handler_with(preset: &str) -> (McpHandler, Arc<McpState>) {
-    let (handler, state) = handler();
+/// A handler whose configuration lists `preset`, keeps the wrapper reachable,
+/// and enables the shared bank surface.
+///
+/// The surface is on because two gated tools need it before they read
+/// `confirm`: `shared_discard` is refused while the surface is off, and
+/// `reindex` is refused without an explicit bank while it is off.
+pub(super) fn handler_with(preset: &str) -> (McpHandler, Arc<McpState>) {
     let document = json!({ "mcp": { "discovery": true, "tool_profile": preset } });
-    {
-        let mut runtime = state.config.lock().expect("config runtime mutex poisoned");
-        runtime
-            .load_file_json(&document.to_string())
-            .expect("a valid config layer");
-    }
-    (handler, state)
+    let state = McpState::open_with_effective(
+        &McpOpenOptions {
+            shared_bank_enabled: true,
+            ..McpOpenOptions::default()
+        },
+        &document,
+    )
+    .expect("a state over the in-memory backend");
+    (McpHandler::new(Arc::clone(&state)), state)
 }
 
 /// The tool names one `tools/list` request advertises, in one full page.
@@ -84,7 +96,7 @@ fn listed(state: &Arc<McpState>) -> Vec<String> {
 /// The set is read from the catalog rather than written here, so a tool that
 /// gains (or loses) a `confirm` property moves between the gated loops and the
 /// ungated one without an edit to this module.
-fn gated_tools() -> Vec<Value> {
+pub(super) fn gated_tools() -> Vec<Value> {
     crate::schema::catalog_defs()
         .iter()
         .map(crate::schema_defs::ToolDef::to_tool)
@@ -108,7 +120,7 @@ fn gated_names() -> Vec<String> {
 /// not fire, and the call's time is pinned. A tool is only compared on the
 /// routes once its own contract accepts these arguments, because the wrapper
 /// deliberately prefixes an argument-contract failure with the target name.
-fn contract_args(tool: &Value) -> Value {
+pub(super) fn contract_args(tool: &Value) -> Value {
     let schema = &tool["inputSchema"];
     let props = schema["properties"].as_object();
     let mut args = Map::new();
@@ -158,7 +170,7 @@ fn resolve_ref<'a>(root: &'a Value, pointer: &str) -> &'a Value {
 
 /// One response, normalized: a JSON-RPC refusal keeps its `error`, and a tool
 /// answer keeps its envelope plus the whole payload behind it.
-fn outcome(response: &Value) -> Value {
+pub(super) fn outcome(response: &Value) -> Value {
     if let Some(error) = response.get("error") {
         return json!({
             "error": error,
@@ -174,15 +186,19 @@ fn outcome(response: &Value) -> Value {
 }
 
 /// Call `name` directly and through the wrapper with the same arguments, and
-/// return both normalized outcomes for comparison.
-fn both_routes(handler: &McpHandler, name: &str, args: &Value) -> (Value, Value) {
+/// return both normalized outcomes, each with the identities the one store they
+/// share minted masked out.
+fn both_routes(handler: &McpHandler, state: &McpState, name: &str, args: &Value) -> (Value, Value) {
     let direct = call(handler, name, args);
     let invoked = call(
         handler,
         TOOL_INVOKE,
         &json!({ "name": name, "arguments": args }),
     );
-    (outcome(&direct), outcome(&invoked))
+    (
+        without_own_identity(&outcome(&direct), state),
+        without_own_identity(&outcome(&invoked), state),
+    )
 }
 
 /// A digit run at least this long inside a payload string marks that string as
@@ -197,7 +213,7 @@ const MINTED_DIGITS: usize = 12;
 /// store identity from reading as a difference between the routes, while every
 /// other byte is compared as it arrives: the envelope, each `code`, each
 /// `message`, every non-string field, and every caller-supplied value.
-fn without_own_identity(value: &Value, state: &McpState) -> Value {
+pub(super) fn without_own_identity(value: &Value, state: &McpState) -> Value {
     match value {
         Value::String(text) if text == &state.device_id || carries_minted_id(text) => {
             json!("<minted>")
@@ -279,12 +295,18 @@ fn an_unconfirmed_call_answers_alike_listed_or_hidden() {
             bound.contains(&name),
             "`{name}` stays dispatchable while its profile hides it"
         );
-        let args = contract_args(tool);
+        // The arguments each handler needs to reach its own gate, prepared on
+        // that handler's store: nothing about the two calls differs but the
+        // profile the state lists.
+        let args = super::gate_fixture_tests::prepare(&listed_handler, tool);
+        let hidden_args = super::gate_fixture_tests::prepare(&hidden_handler, tool);
+        assert_eq!(hidden_args, args, "`{name}` is given the same arguments");
 
-        let (direct, invoked) = both_routes(&listed_handler, name, &args);
+        let (direct, invoked) = both_routes(&listed_handler, &listed_state, name, &args);
         assert_eq!(invoked, direct, "`{name}` answers alike while listed");
 
-        let (hidden_direct, hidden_invoked) = both_routes(&hidden_handler, name, &args);
+        let (hidden_direct, hidden_invoked) =
+            both_routes(&hidden_handler, &hidden_state, name, &hidden_args);
         assert_eq!(
             hidden_invoked, hidden_direct,
             "`{name}` answers alike while hidden"
@@ -303,40 +325,33 @@ fn a_confirmed_call_answers_alike_on_both_routes() {
         !gated.is_empty(),
         "a supplied confirmation has a gated tool to compare"
     );
-    let mut answered_differently = 0_usize;
     for tool in &gated {
         let name = tool["name"]
             .as_str()
             .expect("a published tool names itself");
-        let unconfirmed = contract_args(tool);
-        let mut args = unconfirmed.clone();
+        // Each route gets its own fresh state, so a confirmed call mutates one
+        // store rather than being applied twice to the same one. The arguments
+        // carry the tool past everything it checks before its gate, so the
+        // answer compared here is the gate's answer.
+        let (direct_handler, direct_state) = handler_with("all");
+        let (invoke_handler, invoke_state) = handler_with("all");
+        let mut args = super::gate_fixture_tests::prepare(&direct_handler, tool);
+        let prepared_for_invoke = super::gate_fixture_tests::prepare(&invoke_handler, tool);
+        assert_eq!(prepared_for_invoke, args, "`{name}` is prepared alike");
         args["confirm"] = json!(true);
 
-        // Each route gets its own fresh state, so a confirmed call mutates one
-        // store rather than being applied twice to the same one.
-        let (direct_handler, _direct_state) = handler_with("all");
-        let (invoke_handler, _invoke_state) = handler_with("all");
-        let direct = outcome(&call(&direct_handler, name, &args));
-        let invoked = outcome(&call(
-            &invoke_handler,
-            TOOL_INVOKE,
-            &json!({ "name": name, "arguments": args }),
-        ));
+        let direct =
+            without_own_identity(&outcome(&call(&direct_handler, name, &args)), &direct_state);
+        let invoked = without_own_identity(
+            &outcome(&call(
+                &invoke_handler,
+                TOOL_INVOKE,
+                &json!({ "name": name, "arguments": args }),
+            )),
+            &invoke_state,
+        );
         assert_eq!(invoked, direct, "`{name}` answers alike once confirmed");
-
-        // The confirmation has to reach past the gate: on a third fresh state
-        // the unconfirmed answer is compared with the confirmed one, and at
-        // least one gated tool must answer differently, or `confirm` was read
-        // by neither route.
-        let (control_handler, _control_state) = handler_with("all");
-        if outcome(&call(&control_handler, name, &unconfirmed)) != direct {
-            answered_differently += 1;
-        }
     }
-    assert!(
-        answered_differently > 0,
-        "a supplied confirmation changes what at least one gated tool answers"
-    );
 }
 
 #[test]
