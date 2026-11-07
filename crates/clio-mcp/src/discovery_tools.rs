@@ -10,11 +10,13 @@
 //! - The `tool_describe` name and its `arguments` validation
 //! - The exact refusal for a name the catalog does not define
 //! - The definition this call returns, read from the full catalog
+//! - The discovery gate `protocol` reads under the config lock
+//! - The `tools/list` entry the discovery gate advertises
 //!
 //! ## Does not own
 //! - The catalog itself or how a definition renders (see `schema` and
 //!   `schema_defs`)
-//! - Tool dispatch, binding, or the `tools/list` page (see `protocol`)
+//! - Tool dispatch or binding (see `protocol`)
 //! - The embedded declaration of `tool_describe` (see `discovery_tool_defs`)
 //!
 //! ## Boundary
@@ -26,8 +28,9 @@
 //! Keep this module focused on describing one catalog tool.
 
 use crate::protocol::{RpcError, invalid_params, unknown_tool};
+use crate::runtime::McpState;
 use crate::schema::catalog_def;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// The discovery tool that returns one catalog definition.
 pub(crate) const TOOL_DESCRIBE: &str = "tool_describe";
@@ -44,6 +47,40 @@ pub(crate) fn describe(args: &Value) -> Result<Value, RpcError> {
     let name = exact_name(args)?;
     let def = catalog_def(name).ok_or_else(|| unknown_tool(name))?;
     Ok(def.to_tool())
+}
+
+/// True when `mcp.discovery` turns the discovery tools on for this state.
+///
+/// An absent key reads as off, so a deployment that never sets it advertises
+/// and dispatches exactly the tools it did before the key existed.
+pub(crate) fn enabled(state: &McpState) -> bool {
+    let runtime = state.config.lock().expect("config runtime mutex poisoned");
+    runtime.mcp_discovery()
+}
+
+/// The `tools/list` entry the discovery gate advertises.
+///
+/// The entry is the embedded declaration projected to the four keys a client
+/// reads. `examples` and `refusals` stay out of the published listing.
+///
+/// # Panics
+/// Panics when the embedded declaration does not hold `tool_describe`, which is
+/// a build defect.
+pub(crate) fn listing_entry() -> Value {
+    let entry = crate::discovery_tool_defs::definitions()["tools"]
+        .as_array()
+        .and_then(|tools| {
+            tools
+                .iter()
+                .find(|tool| tool["name"].as_str() == Some(TOOL_DESCRIBE))
+        })
+        .expect("the embedded discovery definitions declare tool_describe; this is a build defect");
+    json!({
+        "name": entry["name"].clone(),
+        "description": entry["description"].clone(),
+        "inputSchema": entry["inputSchema"].clone(),
+        "outputSchema": entry["outputSchema"].clone(),
+    })
 }
 
 /// The single `name` field the published schema declares.

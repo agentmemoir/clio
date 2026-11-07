@@ -213,6 +213,9 @@ impl McpHandler {
         // path, so the guard names binding explicitly instead of assuming the
         // discovery tool is never bound.
         if name == TOOL_DESCRIBE && !bound_set().contains(&name) {
+            if !crate::discovery_tools::enabled(state) {
+                return Err(unknown_tool(name));
+            }
             let payload = crate::discovery_tools::describe(args)?;
             return Ok(json!({
                 "content": [{ "type": "text", "text": "ok" }],
@@ -411,6 +414,7 @@ fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
         .collect();
     if discovery {
         tools.push(crate::catalog_search::listing_entry());
+        tools.push(crate::discovery_tools::listing_entry());
     }
     let view = ToolView {
         preset: preset.ok(),

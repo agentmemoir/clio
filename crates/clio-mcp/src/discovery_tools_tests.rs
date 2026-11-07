@@ -14,6 +14,8 @@
 //! - The response keys and the published argument rules
 //! - Every described schema building in the offline validator
 //! - The call envelope carrying the definition as structured content
+//! - The off and on behaviour of the `mcp.discovery` gate, alongside
+//!   `tool_search`
 //!
 //! ## Does not own
 //! - What a profile advertises (`tool_profile_tests`)
@@ -26,11 +28,15 @@
 //!
 //! Keep this module focused on describing one catalog tool.
 
+use super::{TOOL_DESCRIBE, listing_entry};
 use crate::protocol::{ERR_INVALID_PARAMS, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::schema::{catalog_def, catalog_defs, schema_pack};
 use serde_json::{Value, json};
 use std::sync::Arc;
+
+/// The `mcp.discovery` layer that turns the discovery tools on.
+const DISCOVERY_ON: &str = r#"{"mcp": {"discovery": true}}"#;
 
 /// A server state whose configuration layer is exactly `config`.
 fn state_with(config: &str) -> Arc<McpState> {
@@ -39,6 +45,11 @@ fn state_with(config: &str) -> Arc<McpState> {
         .load_file_json(config)
         .expect("a valid config layer");
     McpState::open_with_runtime(&McpOpenOptions::default(), runtime).expect("state")
+}
+
+/// A gate-on state, which is the only state that answers `tool_describe`.
+fn discoverable() -> Arc<McpState> {
+    state_with(DISCOVERY_ON)
 }
 
 /// The advertised tool names for one state.
@@ -76,13 +87,13 @@ fn declaration() -> &'static Value {
         .as_array()
         .expect("a tools array")
         .iter()
-        .find(|tool| tool["name"] == json!("tool_describe"))
+        .find(|tool| tool["name"] == json!(TOOL_DESCRIBE))
         .expect("the document declares tool_describe")
 }
 
 #[test]
 fn the_description_is_the_catalog_definition() {
-    let state = state_with("{}");
+    let state = discoverable();
     let pack = schema_pack();
     let tools = pack["tools"].as_array().expect("tools");
     for name in ["store", "admit_preview_batch", "retrieve"] {
@@ -113,8 +124,8 @@ fn the_description_is_the_catalog_definition() {
 
 #[test]
 fn a_tool_the_profile_hides_is_answered_the_same_way() {
-    let hidden = state_with(r#"{"mcp": {"tool_profile": "minimal"}}"#);
-    let all = state_with(r#"{"mcp": {"tool_profile": "all"}}"#);
+    let hidden = state_with(r#"{"mcp": {"tool_profile": "minimal", "discovery": true}}"#);
+    let all = state_with(r#"{"mcp": {"tool_profile": "all", "discovery": true}}"#);
     assert!(
         !listed(&hidden).contains(&"store".to_owned()),
         "the minimal profile hides store"
@@ -136,7 +147,7 @@ fn a_tool_the_profile_hides_is_answered_the_same_way() {
 
 #[test]
 fn an_unknown_name_is_the_shared_unknown_tool_refusal() {
-    let state = state_with("{}");
+    let state = discoverable();
     let unknown = call(&state, "tool_describe", &json!({ "name": "no_such_tool" }));
     let gate = call(&state, "no_such_tool", &json!({}));
     assert_eq!(
@@ -153,7 +164,7 @@ fn an_unknown_name_is_the_shared_unknown_tool_refusal() {
 
 #[test]
 fn the_response_holds_only_the_described_tool() {
-    let state = state_with("{}");
+    let state = discoverable();
     let payload = described(&state, "store");
     let fields = payload.as_object().expect("a definition object");
     for key in fields.keys() {
@@ -168,7 +179,7 @@ fn the_response_holds_only_the_described_tool() {
 
 #[test]
 fn the_arguments_are_the_published_name_field_only() {
-    let state = state_with("{}");
+    let state = discoverable();
     for args in [
         json!({}),
         json!({ "name": "" }),
@@ -265,11 +276,7 @@ fn every_described_schema_resolves_with_no_network() {
 #[test]
 fn the_discovery_names_are_not_bound_tools() {
     let bound = clio_types::mcp_tools::bound_tools();
-    for name in [
-        "tool_search",
-        crate::discovery_tools::TOOL_DESCRIBE,
-        "tool_invoke",
-    ] {
+    for name in ["tool_search", TOOL_DESCRIBE, "tool_invoke"] {
         assert!(
             !bound.contains(&name),
             "`{name}` must stay outside the bound set"
@@ -278,8 +285,67 @@ fn the_discovery_names_are_not_bound_tools() {
 }
 
 #[test]
+fn discovery_off_refuses_the_call_and_keeps_the_listing_unchanged() {
+    let absent = McpHandler::tools_list_visible(&state_with("{}")).expect("a known profile");
+    let off = McpHandler::tools_list_visible(&state_with(r#"{"mcp": {"discovery": false}}"#))
+        .expect("a known profile");
+    assert_eq!(absent, off, "the absent key and an explicit false agree");
+    for payload in [&absent, &off] {
+        let names: Vec<&str> = payload["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(!names.contains(&"tool_search"), "the sibling stays hidden");
+        assert!(
+            !names.contains(&TOOL_DESCRIBE),
+            "tool_describe stays hidden"
+        );
+    }
+    let response = call(
+        &state_with("{}"),
+        TOOL_DESCRIBE,
+        &json!({ "name": "store" }),
+    );
+    assert_eq!(response["error"]["code"], json!(ERR_INVALID_PARAMS));
+    assert_eq!(
+        response["error"]["message"],
+        json!(format!("unknown tool `{TOOL_DESCRIBE}`"))
+    );
+    assert!(response.get("result").is_none());
+}
+
+#[test]
+fn discovery_on_lists_search_and_describe_with_the_declaration() {
+    let state = discoverable();
+    let value = McpHandler::tools_list_visible(&state).expect("a known profile");
+    let tools = value["tools"].as_array().expect("tools");
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(names.contains(&"tool_search"), "the sibling is listed");
+    assert!(names.contains(&TOOL_DESCRIBE), "tool_describe is listed");
+    let entry = tools
+        .iter()
+        .find(|tool| tool["name"] == json!(TOOL_DESCRIBE))
+        .expect("the listing advertises tool_describe");
+    assert_eq!(entry, &listing_entry(), "the gate uses the published entry");
+    let declaration = declaration();
+    for key in ["name", "description", "inputSchema", "outputSchema"] {
+        assert_eq!(
+            entry[key], declaration[key],
+            "`{key}` must come from the declaration"
+        );
+    }
+    assert!(entry.get("examples").is_none());
+    assert!(entry.get("refusals").is_none());
+}
+
+#[test]
 fn the_call_envelope_carries_the_definition_as_structured_content() {
-    let state = state_with("{}");
+    let state = discoverable();
     let response = call(&state, "tool_describe", &json!({ "name": "store" }));
     let result = &response["result"];
     assert_eq!(result["isError"], json!(false));
