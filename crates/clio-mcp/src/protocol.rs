@@ -206,11 +206,18 @@ impl McpHandler {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| invalid_params("tools/call.name is required"))?;
+        let empty = json!({});
+        let args = params.get("arguments").unwrap_or(&empty);
+        if name == crate::catalog_search::NAME {
+            if !crate::catalog_search::enabled(state) {
+                return Err(invalid_params(format!("unknown tool `{name}`")));
+            }
+            let page = crate::catalog_search::call(args)?;
+            return Ok(crate::catalog_search::envelope(page));
+        }
         if !bound_set().contains(&name) {
             return Err(invalid_params(format!("unknown tool `{name}`")));
         }
-        let empty = json!({});
-        let args = params.get("arguments").unwrap_or(&empty);
         // An argument the schema does not declare, or a blank required value, is
         // refused here. Before this check it was dropped, and the write went on.
         let result = match crate::arg_contract::check(name, args) {
@@ -368,6 +375,7 @@ fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
         state.config.lock().expect("config runtime mutex poisoned");
     let groups = rt.mcp_tool_groups();
     let preset = rt.mcp_tool_profile();
+    let discovery = rt.mcp_discovery();
     let revision = rt
         .effective_raw()
         .pointer("/mcp/revision")
@@ -377,11 +385,14 @@ fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
     let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
     let visible = tools_of(&groups);
     let bound = bound_set();
-    let tools: Vec<Value> = catalog_defs()
+    let mut tools: Vec<Value> = catalog_defs()
         .iter()
         .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
         .map(crate::schema_defs::ToolDef::to_tool)
         .collect();
+    if discovery {
+        tools.push(crate::catalog_search::listing_entry());
+    }
     let view = ToolView {
         preset: preset.ok(),
         groups,
