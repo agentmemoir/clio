@@ -206,11 +206,19 @@ impl McpHandler {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| invalid_params("tools/call.name is required"))?;
-        if !bound_set().contains(&name) {
-            return Err(invalid_params(format!("unknown tool `{name}`")));
-        }
         let empty = json!({});
         let args = params.get("arguments").unwrap_or(&empty);
+        if name == crate::discovery_tools::TOOL_DESCRIBE {
+            let payload = crate::discovery_tools::describe(args)?;
+            return Ok(json!({
+                "content": [{ "type": "text", "text": "ok" }],
+                "isError": false,
+                "structuredContent": payload
+            }));
+        }
+        if !bound_set().contains(&name) {
+            return Err(unknown_tool(name));
+        }
         // An argument the schema does not declare, or a blank required value, is
         // refused here. Before this check it was dropped, and the write went on.
         let result = match crate::arg_contract::check(name, args) {
@@ -276,6 +284,11 @@ fn invalid_request(message: &str) -> RpcError {
 
 pub(crate) fn invalid_params(message: impl Into<String>) -> RpcError {
     RpcError::new(ERR_INVALID_PARAMS, message)
+}
+
+/// The one refusal for a tool name this server does not dispatch.
+pub(crate) fn unknown_tool(name: &str) -> RpcError {
+    invalid_params(format!("unknown tool `{name}`"))
 }
 
 /// Build a `tools/call` result envelope.
