@@ -12,7 +12,7 @@ Read or record stable preferences.
 
 ```
 persona_get({})
-persona_put_stable({"key": "communication_style", "value": "concise"})
+persona_observe_preference({"key": "brevity_affinity", "observed_value": 0.6})
 ```
 
 ## Exact arguments

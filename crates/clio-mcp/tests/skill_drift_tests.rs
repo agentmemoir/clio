@@ -422,5 +422,26 @@ fn reference_files_match_group_table() {
             text.contains("tool_describe"),
             "the reference `{name}` does not point at `tool_describe`: keep the pointer so a caller can read exact arguments instead of guessing"
         );
+        let fenced = text.split_once("## Examples");
+        let fenced = fenced.and_then(|(_, after)| after.split_once("```"));
+        let fenced = fenced.and_then(|(_, after)| after.split_once("```"));
+        assert!(
+            fenced.is_some(),
+            "the reference `{name}` has no fenced example block under `## Examples`: keep one pair of triple-backtick fences there, because a caller copies the calls inside them"
+        );
+        let examples = fenced.map_or("", |(fenced, _)| fenced).lines();
+        for example in examples.map(str::trim).filter(|line| !line.is_empty()) {
+            let (tool, rest) = example.split_once('(').unwrap_or_default();
+            let args = rest.strip_suffix(')').unwrap_or(rest);
+            assert!(
+                spec.tools.contains(&tool),
+                "the example `{example}` in `{name}` calls `{tool}`, which is not in the `{group}` catalog row: name only that row's tools, because a caller copies the example and a tool outside the group is one the file never promised"
+            );
+            let parsed = serde_json::from_str::<serde_json::Value>(args);
+            assert!(
+                parsed.is_ok_and(|value| value.is_object()),
+                "the example `{example}` in `{name}` passes `{args}`, which is not one JSON object: pass an object literal, because the tools take named arguments"
+            );
+        }
     }
 }

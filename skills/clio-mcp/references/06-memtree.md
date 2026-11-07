@@ -11,8 +11,8 @@ Read hierarchical or temporal memory.
 ## Examples
 
 ```
-memtree_query({"task_id": "tsk-1"})
-temporal_history({"target": "preference:communication_style"})
+memtree_query({"limit": 10})
+temporal_history({"target": "preference:brevity_affinity"})
 ```
 
 ## Exact arguments
