@@ -13,14 +13,13 @@ their on-minus-off size, derived here and never read from an input. The
 that predate the flag and must not be compared with this pair.
 
 Tokens come from the repo-pinned offline tokenizer, so this script performs no
-network I/O and never substitutes an estimate. Every failure exits 2 with
-``mcp-discovery-rows: <message>`` on stderr and writes no record.
+network I/O and never substitutes an estimate. Every refused measurement exits 2
+with ``mcp-discovery-rows: <message>`` on stderr and writes no record.
 """
 
 import argparse
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -35,10 +34,11 @@ RECORD_ID = "discovery-surface-v1"
 DELIVERY = "served-tools-list"
 DEFAULT_PRESET = "minimal"
 OFF_TOOL_COUNTS = {"minimal": 6}
-DISCOVERY_TOOL_COUNT = 3
+DISCOVERY_TOOLS = ("tool_search", "tool_describe", "tool_invoke")
 FLAGS = ("off", "on")
 COMMAND_TEMPLATE = (
-    "python3 benchmarks/mcp_token_budget/discovery_rows.py --bin {binary} --out {out}"
+    "python3 benchmarks/mcp_token_budget/discovery_rows.py --bin {binary} "
+    "--preset {preset} --commit {commit} --out {out}"
 )
 NORMALIZATION = "canonical bytes of the served tools/list tools array only"
 PRE_FLAG_PATHS = (
@@ -144,26 +144,25 @@ def _version(binary):
 
 
 def _commit(explicit):
-    """Return the measured commit: ``explicit`` or the checkout's ``HEAD``."""
-    if explicit:
-        commit = explicit.strip()
-    else:
-        try:
-            completed = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=str(_REPO_ROOT),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            raise BudgetError(f"cannot read the build commit: {exc}") from None
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or "no stderr"
-            raise BudgetError(f"cannot read the build commit: {detail}")
-        commit = completed.stdout.strip()
+    """Return the commit the binary was built from, requiring it to resolve."""
+    commit = (explicit or "").strip()
     if not commit:
         raise BudgetError("build identity has no commit")
+    try:
+        completed = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise BudgetError(f"cannot resolve build commit {commit}: {exc}") from None
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "no stderr"
+        raise BudgetError(
+            f"build commit {commit} does not resolve in this checkout: {detail}"
+        )
     return commit
 
 
@@ -190,28 +189,74 @@ def row(flag, tools, tokenizer):
 
 
 def _by_flag(rows):
-    """Index two rows by flag, requiring exactly one ``off`` and one ``on``."""
-    indexed = {row["flag"]: row for row in rows}
-    if set(indexed) != set(FLAGS):
+    """Index two rows by flag, requiring exactly one ``off`` and one ``on`` row."""
+    flags = [row.get("flag") if isinstance(row, dict) else None for row in rows]
+    if len(flags) != len(FLAGS) or set(flags) != set(FLAGS):
         raise BudgetError("the rows must hold one 'off' row and one 'on' row")
-    return indexed
+    return dict(zip(flags, rows))
 
 
-def check_tool_counts(preset, rows):
-    """Require the recorded counts: the preset's off count and off plus three."""
+def _names(tools, flag, preset):
+    """Return the tool names of one capture, requiring one unique name per tool."""
+    names = []
+    for tool in tools:
+        name = tool.get("name") if isinstance(tool, dict) else None
+        if not isinstance(name, str) or not name:
+            raise BudgetError(
+                f"preset {preset!r} served a tool with no name with the flag {flag}"
+            )
+        names.append(name)
+    if len(set(names)) != len(names):
+        raise BudgetError(
+            f"preset {preset!r} served a duplicate tool name with the flag {flag}"
+        )
+    return names
+
+
+def check_discovery_tools(preset, off_tools, on_tools):
+    """Require the on capture to add exactly the three discovery tools."""
+    off_names = _names(off_tools, "off", preset)
+    on_names = _names(on_tools, "on", preset)
+    leaked = sorted(set(off_names) & set(DISCOVERY_TOOLS))
+    if leaked:
+        raise BudgetError(
+            f"preset {preset!r} served {', '.join(leaked)} with the flag off"
+        )
+    missing = sorted(set(DISCOVERY_TOOLS) - set(on_names))
+    if missing:
+        raise BudgetError(
+            f"preset {preset!r} did not serve {', '.join(missing)} with the flag on"
+        )
+    on_only = sorted(set(on_names) - set(off_names))
+    if on_only != sorted(DISCOVERY_TOOLS):
+        added = ", ".join(on_only) or "no tools"
+        expected = ", ".join(DISCOVERY_TOOLS)
+        raise BudgetError(
+            f"preset {preset!r} added {added} with the flag on, expected {expected}"
+        )
+
+
+def check_tool_counts(preset, rows, off_tools, on_tools):
+    """Require the recorded counts and the three discovery tools."""
     indexed = _by_flag(rows)
     expected = OFF_TOOL_COUNTS.get(preset)
-    if expected is not None and indexed["off"]["tools"] != expected:
+    if expected is None:
+        known = ", ".join(sorted(OFF_TOOL_COUNTS))
+        raise BudgetError(
+            f"preset {preset!r} has no known off tool count; known presets: {known}"
+        )
+    if indexed["off"]["tools"] != expected:
         raise BudgetError(
             f"preset {preset!r} served {indexed['off']['tools']} tools with the "
             f"flag off, expected {expected}"
         )
-    wanted_on = indexed["off"]["tools"] + DISCOVERY_TOOL_COUNT
+    wanted_on = expected + len(DISCOVERY_TOOLS)
     if indexed["on"]["tools"] != wanted_on:
         raise BudgetError(
             f"preset {preset!r} served {indexed['on']['tools']} tools with the "
             f"flag on, expected {wanted_on}"
         )
+    check_discovery_tools(preset, off_tools, on_tools)
 
 
 def cost(rows):
@@ -266,7 +311,7 @@ def measure(binary, preset, tokenizer):
         row("off", off_tools, tokenizer),
         row("on", on_tools, tokenizer),
     ]
-    check_tool_counts(preset, rows)
+    check_tool_counts(preset, rows, off_tools, on_tools)
     return rows
 
 
@@ -282,7 +327,10 @@ def render(out_path, preset, date, build, rows, tokenizer) -> str:
         "build": build,
         "measurement": {
             "command": COMMAND_TEMPLATE.format(
-                binary="<clio-binary>", out=_display(out_path)
+                binary="<clio-binary>",
+                preset=preset,
+                commit=build["commit"],
+                out=_display(out_path),
             ),
             "normalization": NORMALIZATION,
             "encoder": tokenizer.encoding,
@@ -333,8 +381,8 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--commit",
         metavar="SHA",
-        default=None,
-        help="commit the binary was built from; defaults to git rev-parse HEAD",
+        required=True,
+        help="commit the binary was built from; must resolve in this checkout",
     )
     parser.add_argument(
         "--date",

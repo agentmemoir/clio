@@ -38,7 +38,8 @@ TOOLS = [
     },
 ]
 OFF_TOOLS = [{"name": f"tool_{index}"} for index in range(6)]
-ON_TOOLS = OFF_TOOLS + [{"name": f"discovery_{index}"} for index in range(3)]
+DISCOVERY_TOOLS = ("tool_search", "tool_describe", "tool_invoke")
+ON_TOOLS = OFF_TOOLS + [{"name": name} for name in DISCOVERY_TOOLS]
 
 
 def require_tokenizer(test):
@@ -54,17 +55,17 @@ def require_tokenizer(test):
 
 def make_rows(off_tools=OFF_TOOLS, on_tools=ON_TOOLS):
     """Return two handcrafted rows whose size fields are independent inputs."""
-    def one(flag, tools, byte_step):
+    def one(flag, tools, byte_step, token_step):
         return {
             "flag": flag,
             "label": "Measured",
             "tools": len(tools),
             "bytes": 100 + byte_step,
-            "tokens": 20 + byte_step,
+            "tokens": 20 + token_step,
             "input_sha256": "0" * 64,
         }
 
-    return [one("off", off_tools, 0), one("on", on_tools, 7)]
+    return [one("off", off_tools, 0, 0), one("on", on_tools, 7, 5)]
 
 
 class RowTests(unittest.TestCase):
@@ -94,32 +95,74 @@ class CostTests(unittest.TestCase):
     def test_cost_is_derived_as_on_minus_off(self):
         rows = make_rows()
         self.assertEqual(
-            discovery_rows.cost(rows), {"bytes": 7, "tokens": 7}
+            discovery_rows.cost(rows), {"bytes": 7, "tokens": 5}
         )
 
     def test_cost_rejects_a_missing_flag_row(self):
         with self.assertRaises(offline_tokenizer.BudgetError):
             discovery_rows.cost(make_rows()[:1])
 
+    def test_cost_rejects_a_duplicated_flag_row(self):
+        rows = make_rows()
+        rows.append(dict(rows[0]))
+        with self.assertRaises(offline_tokenizer.BudgetError):
+            discovery_rows.cost(rows)
+
 
 class ToolCountGuardTests(unittest.TestCase):
     def test_minimal_off_count_must_be_six(self):
-        rows = make_rows(
-            off_tools=OFF_TOOLS[:5], on_tools=OFF_TOOLS[:5] + ON_TOOLS[-3:]
-        )
+        off_tools = OFF_TOOLS[:5]
+        on_tools = off_tools + ON_TOOLS[-3:]
+        rows = make_rows(off_tools=off_tools, on_tools=on_tools)
         with self.assertRaises(offline_tokenizer.BudgetError) as caught:
-            discovery_rows.check_tool_counts("minimal", rows)
+            discovery_rows.check_tool_counts("minimal", rows, off_tools, on_tools)
         self.assertIn("expected 6", str(caught.exception))
 
     def test_on_count_must_be_off_plus_three(self):
-        rows = make_rows(on_tools=OFF_TOOLS + ON_TOOLS[:2])
+        on_tools = OFF_TOOLS + ON_TOOLS[:2]
+        rows = make_rows(on_tools=on_tools)
         with self.assertRaises(offline_tokenizer.BudgetError) as caught:
-            discovery_rows.check_tool_counts("minimal", rows)
+            discovery_rows.check_tool_counts("minimal", rows, OFF_TOOLS, on_tools)
         self.assertIn("served 8", str(caught.exception))
         self.assertIn("expected 9", str(caught.exception))
 
+    def test_a_renamed_discovery_tool_is_refused(self):
+        on_tools = OFF_TOOLS[:5] + [
+            {"name": "tool_search"},
+            {"name": "tool_describe"},
+            {"name": "tool_invoke"},
+            {"name": "not_discovery_search"},
+        ]
+        rows = make_rows(on_tools=on_tools)
+        with self.assertRaises(offline_tokenizer.BudgetError) as caught:
+            discovery_rows.check_tool_counts("minimal", rows, OFF_TOOLS, on_tools)
+        self.assertIn("not_discovery_search", str(caught.exception))
+
+    def test_a_discovery_tool_in_the_off_capture_is_refused(self):
+        off_tools = OFF_TOOLS[:5] + [{"name": "tool_search"}]
+        on_tools = off_tools + [
+            {"name": "tool_describe"},
+            {"name": "tool_invoke"},
+            {"name": "tool_extra"},
+        ]
+        rows = make_rows(off_tools=off_tools, on_tools=on_tools)
+        with self.assertRaises(offline_tokenizer.BudgetError) as caught:
+            discovery_rows.check_tool_counts("minimal", rows, off_tools, on_tools)
+        self.assertIn("tool_search", str(caught.exception))
+
+    def test_an_unknown_preset_is_refused(self):
+        with self.assertRaises(offline_tokenizer.BudgetError) as caught:
+            discovery_rows.check_tool_counts(
+                "coding", make_rows(), OFF_TOOLS, ON_TOOLS
+            )
+        self.assertIn("no known off tool count", str(caught.exception))
+
     def test_the_expected_counts_pass(self):
-        self.assertIsNone(discovery_rows.check_tool_counts("minimal", make_rows()))
+        self.assertIsNone(
+            discovery_rows.check_tool_counts(
+                "minimal", make_rows(), OFF_TOOLS, ON_TOOLS
+            )
+        )
 
 
 class BuildIdentityGuardTests(unittest.TestCase):
@@ -136,6 +179,11 @@ class BuildIdentityGuardTests(unittest.TestCase):
             discovery_rows.build_identity(" 25a1717 ", " clio 0.1.0 "),
             {"commit": "25a1717", "version": "clio 0.1.0"},
         )
+
+    def test_an_unresolvable_commit_is_refused(self):
+        with self.assertRaises(offline_tokenizer.BudgetError) as caught:
+            discovery_rows._commit("0" * 40)
+        self.assertIn("does not resolve", str(caught.exception))
 
 
 class RenderTests(unittest.TestCase):
@@ -163,6 +211,9 @@ class RenderTests(unittest.TestCase):
         )
         self.assertEqual(document["delivery"], "served-tools-list")
         self.assertEqual(document["preset"], "minimal")
+        command = document["measurement"]["command"]
+        self.assertIn("--preset minimal", command)
+        self.assertIn("--commit 25a1717", command)
 
 
 if __name__ == "__main__":

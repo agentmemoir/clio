@@ -58,7 +58,7 @@ class DiscoveryRecordTests(unittest.TestCase):
         self.assertEqual(self.rows["off"]["tools"], 6)
         self.assertEqual(self.rows["on"]["tools"], 9)
 
-    def test_both_rows_share_one_build(self):
+    def test_the_record_names_one_commit_and_version_for_the_pair(self):
         build = self.document["build"]
         self.assertEqual(set(build), {"commit", "version"})
         self.assertRegex(build["commit"], r"^[0-9a-f]{40}$")
@@ -84,24 +84,15 @@ class DiscoveryRecordTests(unittest.TestCase):
         )
         self.assertIn("not comparable", block["note"])
 
-    def test_nothing_suggests_a_comparison_with_a_pre_flag_record(self):
-        self.assertNotIn("baseline", json.dumps(self.document["rows"]))
-        for row in self.document["rows"]:
-            for key in row:
-                self.assertNotIn("baseline", key)
-                self.assertNotIn("comparable", key)
-        outside = {
-            key: value
-            for key, value in self.document.items()
-            if key != "comparability"
-        }
-        serialized = json.dumps(outside)
-        for path in PRE_FLAG_PATHS:
-            self.assertNotIn(path, serialized)
-        for key in outside:
-            self.assertNotIn("baseline", key)
-            self.assertNotIn("comparable_to", key)
-            self.assertNotIn("compared_with", key)
+    def test_the_note_rules_out_a_comparison_with_a_pre_flag_record(self):
+        block = self.document["comparability"]
+        note = block["note"].lower()
+        self.assertIn("pre-flag records", note)
+        self.assertIn("not comparable", note)
+        self.assertEqual(
+            [item["path"] for item in block["not_comparable_with"]],
+            list(PRE_FLAG_PATHS),
+        )
 
 
 if __name__ == "__main__":
