@@ -37,6 +37,8 @@ mod arg_contract;
 pub mod batch_preflight;
 pub mod batch_preflight_records;
 pub mod batch_tools;
+pub mod call_accounting;
+pub mod catalog_invoke;
 mod catalog_search;
 pub mod config_tools;
 mod conn_pool;

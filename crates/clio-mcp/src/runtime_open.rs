@@ -27,6 +27,7 @@
 //!
 //! Keep this module focused on runtime state construction.
 
+use crate::call_accounting::DirectCallAccounting;
 use crate::index_drain::{INDEX_MAX_BATCH, IndexDrain};
 use crate::ops_embedder::{OpsEmbedConfig, build_ops_embedder_from};
 use crate::runtime::{McpOpenOptions, McpState, PipelineStatus};
@@ -302,6 +303,7 @@ impl McpState {
                 != clio_config::ExportRootTier::RelativeFallback,
             config: Arc::new(std::sync::Mutex::new(config)),
             id_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            calls: Arc::new(DirectCallAccounting::default()),
             // Unbound at construction: only a credential-bearing transport ever
             // attaches a principal, and it does so per request.
             principal: None,

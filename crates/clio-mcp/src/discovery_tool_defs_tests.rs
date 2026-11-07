@@ -15,6 +15,7 @@
 //! - The family and group enums matching the tool-group table
 //! - The declared argument rules producing the stated effective arguments
 //! - The refused recursive targets on `tool_invoke` and the declared tool set
+//! - The code every invalid example declares, in the shape its tool answers
 //!
 //! ## Does not own
 //! - Catalog registration, dispatch, or ranking for these tools
@@ -153,18 +154,38 @@ fn every_invalid_example_fails_with_the_declared_keyword() {
     }
 }
 
+/// The codes a `tools/call` result payload carries for a bad argument. A call
+/// with bad arguments answers an `isError` result, matching the direct call it
+/// is held to, so these are the only codes the wrapper can answer.
+const TOOL_RESULT_CODES: [&str; 2] = ["invalid_argument", "invalid_type"];
+
+/// Each invalid example declares a code: the payload code a tool whose handler
+/// shares the direct call's parity answers, and the JSON-RPC code for a tool
+/// this build does not route yet.
 #[test]
-fn every_invalid_example_declares_the_invalid_params_code() {
+fn every_invalid_example_declares_a_code_its_tool_answers() {
     for tool in tools() {
+        let name = tool["name"].as_str().expect("a tool name");
         for example in tool["examples"]["invalid"]
             .as_array()
             .expect("invalid examples")
         {
-            assert_eq!(
-                example["code"], -32602,
-                "{}: an invalid example must declare the invalid-params code",
-                tool["name"]
-            );
+            let declared = &example["code"];
+            if name == crate::catalog_invoke::TOOL_INVOKE {
+                let code = declared
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{name}: {declared} is not a tool-result code"));
+                assert!(
+                    TOOL_RESULT_CODES.contains(&code),
+                    "{name}: `{code}` is not a code a tools/call result carries"
+                );
+            } else {
+                assert_eq!(
+                    declared,
+                    crate::protocol::ERR_INVALID_PARAMS,
+                    "{name}: an invalid example must declare the invalid-params code"
+                );
+            }
         }
     }
 }
