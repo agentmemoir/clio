@@ -15,8 +15,8 @@
 //!   `confirm` argument at all
 //! - The same non-success outcome for a well-formed call that fails a domain
 //!   check rather than the argument contract
-//! - Masking the identity a fresh store mints for itself, so the ungated
-//!   comparison reads a route difference rather than two stores' own ids
+//! - Masking the identity a fresh store mints for itself and the live clock,
+//!   so a comparison reads a route difference rather than ids or seconds
 //!
 //! ## Does not own
 //! - What the confirmation gate decides, or the zero-write previews (see
@@ -340,18 +340,34 @@ fn a_confirmed_call_answers_alike_on_both_routes() {
         assert_eq!(prepared_for_invoke, args, "`{name}` is prepared alike");
         args["confirm"] = json!(true);
 
-        let direct =
-            without_own_identity(&outcome(&call(&direct_handler, name, &args)), &direct_state);
-        let invoked = without_own_identity(
-            &outcome(&call(
-                &invoke_handler,
-                TOOL_INVOKE,
-                &json!({ "name": name, "arguments": args }),
-            )),
-            &invoke_state,
+        let direct = without_live_clock(outcome(&call(&direct_handler, name, &args)));
+        let invoked = without_live_clock(outcome(&call(
+            &invoke_handler,
+            TOOL_INVOKE,
+            &json!({ "name": name, "arguments": args }),
+        )));
+        assert_eq!(
+            without_own_identity(&invoked, &invoke_state),
+            without_own_identity(&direct, &direct_state),
+            "`{name}` answers alike once confirmed"
         );
-        assert_eq!(invoked, direct, "`{name}` answers alike once confirmed");
     }
+}
+
+/// One outcome with the live clock values dropped: two calls never agree on
+/// measured latency, and a server-stamped `timestamp` is the second they ran
+/// in. A caller-supplied timestamp survives, so an echo is still compared.
+fn without_live_clock(mut value: Value) -> Value {
+    if let Some(payload) = value.get_mut("payload").and_then(Value::as_object_mut) {
+        payload.remove("metrics");
+        if payload
+            .get("timestamp")
+            .is_some_and(|stamp| stamp.as_str() != Some(PINNED))
+        {
+            payload.insert("timestamp".to_owned(), json!("<clock>"));
+        }
+    }
+    value
 }
 
 #[test]
@@ -377,12 +393,12 @@ fn an_ungated_call_answers_alike_on_both_routes() {
                 err.message
             )
         });
-        let direct = outcome(&call(&direct_handler, name, &args));
-        let invoked = outcome(&call(
+        let direct = without_live_clock(outcome(&call(&direct_handler, name, &args)));
+        let invoked = without_live_clock(outcome(&call(
             &invoke_handler,
             TOOL_INVOKE,
             &json!({ "name": name, "arguments": args }),
-        ));
+        )));
         if invoked == direct {
             exact += 1;
         }
@@ -397,8 +413,9 @@ fn an_ungated_call_answers_alike_on_both_routes() {
         exercised > 0,
         "the ungated loop exercised at least one tool"
     );
-    // The masking must stay narrow: some ungated tool answers the same bytes on
-    // both routes with nothing masked at all.
+    // The masking must stay narrow: some ungated tool answers the same content
+    // on both routes once live clock values are dropped, with no identity
+    // masking applied at all.
     assert!(exact > 0, "the ungated loop compares some answer unmasked");
 }
 
