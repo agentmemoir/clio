@@ -9,7 +9,8 @@
 //! result unchanged.
 //!
 //! ## Owns
-//! - The `mcp.discovery` flag that decides whether the wrapper is reachable
+//! - The discovery switch, read through the runtime, that decides whether the
+//!   wrapper is reachable and the flag that overrides it
 //! - Checking the wrapper arguments, and the refusal a failure produces
 //! - Refusing a discovery tool or a name no catalog binds, before dispatch
 //! - The recursion refusal a discovery name gets at the shared execute path
@@ -39,18 +40,15 @@ pub(crate) const TOOL_INVOKE: &str = "tool_invoke";
 
 /// Whether this deployment exposes the discovery tools.
 ///
-/// `mcp.discovery` absent, off, or unreadable keeps them off, which is the
-/// recorded default: a deployment that never sets the key neither lists the
-/// helpers nor calls one by name.
+/// The runtime accessor answers with the switch a transport installed ahead of
+/// the document, else `mcp.discovery`. An absent key, an off value, or an
+/// unreadable one keeps them off, so a deployment that never sets it neither
+/// lists the helpers nor calls one by name.
 pub(crate) fn enabled(state: &McpState) -> bool {
     let Ok(runtime) = state.config.lock() else {
         return false;
     };
-    runtime
-        .effective_raw()
-        .pointer("/mcp/discovery")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    runtime.mcp_discovery()
 }
 
 /// Whether the embedded discovery document declares `name`.

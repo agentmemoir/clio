@@ -12,12 +12,14 @@
 //! - The usage refusal (exit 2) for an unknown preset, a malformed value, or an
 //!   unknown group inside `custom:`
 //! - The `--tools` help block both transport help screens print
-//! - Opening the server state under a selection, ahead of the config setting
+//! - Opening the server state under a `--tools` selection and a `--discovery`
+//!   switch, ahead of the config settings
 //!
 //! ## Does not own
 //! - The group, preset, and closure data or their derivations (see `clio-types`)
 //! - The precedence between a selection, `mcp.tool_profile`, and the default
 //!   preset (see `clio_config::config::Runtime::mcp_tool_groups`)
+//! - Decoding `--discovery` (see `mcp_discovery_flag`)
 //! - Flag arity and the accepted-name lists (see the surface records)
 //!
 //! ## Boundary
@@ -25,7 +27,7 @@
 //! Changes to what `--tools` accepts or prints should normally require changes
 //! here. Changes to which tools a group holds should not.
 //!
-//! Keep this module focused on the `--tools` flag.
+//! Keep this module focused on the `--tools` flag and the shared opener.
 
 use crate::cli_error::CliError;
 use clio_mcp::runtime::{McpOpenOptions, McpState};
@@ -92,20 +94,40 @@ fn groups_hint() -> String {
     )
 }
 
-/// Open the server state under `groups`, when the transport selected any.
+/// Open the server state under `groups` and `discovery`, when the transport
+/// selected either.
 ///
 /// Without a selection this is [`McpState::open`] with the same env-aware
-/// runtime, so the configured `mcp.tool_profile` keeps deciding.
+/// runtime, so the configured `mcp.tool_profile` keeps deciding. Each selection
+/// is an absolute override on its own axis, so an installed value wins even
+/// when it turns the configured setting off.
 ///
 /// # Errors
 /// As [`McpState::open`].
 pub(crate) fn open_state(
     opts: &McpOpenOptions,
     groups: Option<&[ToolGroup]>,
+    discovery: Option<bool>,
 ) -> Result<Arc<McpState>, clio_types::AmError> {
-    let mut runtime = clio_config::Runtime::new();
+    open_state_with_runtime(opts, clio_config::Runtime::new(), groups, discovery)
+}
+
+/// [`open_state`] over a caller-supplied runtime, so a test can name the whole
+/// configuration layer instead of inheriting the host's environment.
+///
+/// # Errors
+/// As [`McpState::open`].
+pub(crate) fn open_state_with_runtime(
+    opts: &McpOpenOptions,
+    mut runtime: clio_config::Runtime,
+    groups: Option<&[ToolGroup]>,
+    discovery: Option<bool>,
+) -> Result<Arc<McpState>, clio_types::AmError> {
     if let Some(groups) = groups {
         runtime.set_mcp_tool_groups(groups.to_vec());
+    }
+    if let Some(discovery) = discovery {
+        runtime.set_mcp_discovery(Some(discovery));
     }
     McpState::open_with_runtime(opts, runtime)
 }

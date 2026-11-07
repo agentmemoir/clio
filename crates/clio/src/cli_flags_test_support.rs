@@ -35,6 +35,7 @@ pub(crate) const RESERVED_FLAGS: &[&str] = &[
     "confirm",
     "db",
     "dir",
+    "discovery",
     "dry-run",
     "insecure-bind-any",
     "insecure-no-auth",

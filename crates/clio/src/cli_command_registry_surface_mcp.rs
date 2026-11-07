@@ -14,6 +14,7 @@
 //!   `--insecure-no-auth` flags, and the database trio both transports print
 //! - The `--tools` flag both transports and the export document, and the
 //!   usage refusal a bad value raises
+//! - The `--discovery` switch both transports document
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche and the shared flag facts its children read (see
@@ -51,8 +52,17 @@ const TOOLS: Flag = Flag::text(
     "Tool groups the server advertises: `minimal`, `coding`, `ops`, `all`, or custom:GROUP[,GROUP] for the minimal set plus the listed groups and what they require. With no --tools the config setting mcp.tool_profile applies; when that is unset the minimal preset is selected.",
 );
 
-/// The database trio both transports document, plus the tool selection.
-const DB_BACKEND_BANK_TOOLS: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK, TOOLS];
+/// The discovery switch both transports document: whether the three discovery
+/// tools are advertised.
+const DISCOVERY: Flag = Flag::choice(
+    "discovery",
+    "on|off",
+    "Discovery tools `mcp_cli` advertises; with no flag the config setting mcp.discovery applies.",
+    &["on", "off"],
+);
+
+/// The database trio both transports document, plus the two selections.
+const DB_BACKEND_BANK_TOOLS: &[Flag] = &[GLOBAL_DB, GLOBAL_BACKEND, GLOBAL_BANK, TOOLS, DISCOVERY];
 
 /// The flags `mcp http` documents past the database trio.
 const TOKEN_FILE: Flag = Flag::text("token-file", "PATH", "Credential store `mcp_cli` loads.");
@@ -163,6 +173,7 @@ pub(crate) const MCP_HTTP: CommandSpec = CommandSpec {
         INSECURE_NO_AUTH,
         INSECURE_BIND_ANY,
         TOOLS,
+        DISCOVERY,
     ],
     accepted_extra: DB_BANK_UNDOCUMENTED_GLOBALS,
     flag_aliases: &[],

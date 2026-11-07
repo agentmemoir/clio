@@ -1,0 +1,1 @@
+The two `clio mcp` transports now accept `--discovery on` and `--discovery off`, so a server can advertise the three discovery tools (`tool_search`, `tool_describe`, and `tool_invoke`) without a configuration change; `--discovery off` hides them even when `mcp.discovery` is true, and with no flag the setting applies, off by default.

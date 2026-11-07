@@ -81,7 +81,7 @@ fn shared_bank_is_accepted_by_the_transports_and_printed_nowhere() {
 fn the_derived_names_keep_each_surfaces_accepted_set() {
     assert_eq!(
         super::parse_flag_names("mcp stdio"),
-        ["backend", "bank", "db", "shared-bank", "tools"]
+        ["backend", "bank", "db", "discovery", "shared-bank", "tools"]
     );
     assert_eq!(
         super::parse_flag_names("mcp http"),
@@ -90,6 +90,7 @@ fn the_derived_names_keep_each_surfaces_accepted_set() {
             "bank",
             "bind",
             "db",
+            "discovery",
             "insecure-bind-any",
             "insecure-no-auth",
             "sessions",

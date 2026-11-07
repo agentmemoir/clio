@@ -10,7 +10,8 @@
 //! - `config_profiles` / `config_profile_apply`
 //! - `ranking_env_get` / `ranking_env_set`
 //! - The `mcp.tool_profile` accessor that names the configured tool preset
-//! - The `mcp.discovery` accessor that gates the discovery tools
+//! - The `mcp.discovery` accessor that gates the discovery tools, and the
+//!   installed switch that overrides it
 //! - The installed-selection accessor that resolves the effective tool groups
 //!
 //! ## Does not own
@@ -157,16 +158,26 @@ impl Runtime {
         })
     }
 
-    /// True when `mcp.discovery` enables the discovery tools.
+    /// True when discovery is on: the switch a caller installed ahead of the
+    /// document, else `mcp.discovery`.
     ///
     /// An absent key, or a value that is not a boolean, reads as off, so a
     /// deployment that never sets the key keeps the listing and dispatch it has.
     #[must_use]
     pub fn mcp_discovery(&self) -> bool {
+        if let Some(discovery) = self.discovery {
+            return discovery;
+        }
         self.effective_raw()
             .pointer("/mcp/discovery")
             .and_then(Value::as_bool)
             .unwrap_or(false)
+    }
+
+    /// Select discovery ahead of `mcp.discovery`, the way a transport surfaces
+    /// its own switch.
+    pub fn set_mcp_discovery(&mut self, discovery: Option<bool>) {
+        self.discovery = discovery;
     }
 
     /// The tool groups the effective selection names: the selection a caller

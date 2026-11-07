@@ -82,6 +82,7 @@ pub struct Runtime {
     retention: RetentionStore,
     retention_path: Option<PathBuf>,
     tool_groups: Option<Vec<ToolGroup>>,
+    discovery: Option<bool>,
 }
 
 impl Default for Runtime {
@@ -169,6 +170,7 @@ impl Runtime {
             retention: RetentionStore::default(),
             retention_path,
             tool_groups: None,
+            discovery: None,
         };
         rt.finish_boot(get);
         rt
