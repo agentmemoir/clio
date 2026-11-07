@@ -14,6 +14,8 @@
 //!   value it refused
 //! - The selection a valid value names arriving in the listing the transport
 //!   actually serves, as a written-out tool set
+//! - A default first page carrying the three discovery tools for the widest
+//!   preset and a large custom list
 //! - The `--discovery` switch turning the three discovery tools on, and off
 //!   when the configuration document sets them on
 //! - An arbitrary client `_meta` key leaving the listing unchanged
@@ -147,17 +149,27 @@ const DISCOVERY_TOOLS: [&str; 3] = ["tool_describe", "tool_invoke", "tool_search
 const TOOLS_LIST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
 
 /// The raw response bytes one `tools/list` request gets over the stdio serve
-/// path, with `groups` and `discovery` as the transport's selections.
-fn served_bytes(
+/// path, with `config` as the whole configuration layer and `groups` and
+/// `discovery` as the transport's selections.
+///
+/// The runtime reads no process environment, so the answer cannot depend on the
+/// host's deployment config or on any other host setting.
+fn served_bytes_under(
+    config: &str,
     groups: Option<&[clio_types::ToolGroup]>,
     discovery: Option<bool>,
     request: &str,
 ) -> Vec<u8> {
+    let mut runtime = clio_config::Runtime::with_env(&|_: &str| None);
+    runtime
+        .load_file_json(config)
+        .expect("a valid config layer");
     let mut out: Vec<u8> = Vec::new();
     assert_eq!(
         mcp_stdio_serve(
             &crate::sigpipe::Serving::for_test(),
             &clio_mcp::runtime::McpOpenOptions::default(),
+            runtime,
             groups,
             discovery,
             std::io::Cursor::new(format!("{request}\n").into_bytes()),
@@ -169,16 +181,31 @@ fn served_bytes(
     out
 }
 
-/// The advertised tool names in one served response, sorted.
-fn names_in(bytes: &[u8]) -> Vec<String> {
+/// The raw response bytes one `tools/list` request gets over the stdio serve
+/// path under an empty configuration layer.
+fn served_bytes(
+    groups: Option<&[clio_types::ToolGroup]>,
+    discovery: Option<bool>,
+    request: &str,
+) -> Vec<u8> {
+    served_bytes_under("{}", groups, discovery, request)
+}
+
+/// The advertised tool names in one served response, in the order served.
+fn ordered_names_in(bytes: &[u8]) -> Vec<String> {
     let response: serde_json::Value =
         serde_json::from_slice(bytes).expect("one response line per request");
-    let mut names: Vec<String> = response["result"]["tools"]
+    response["result"]["tools"]
         .as_array()
         .expect("a served tools/list result carries a tools array")
         .iter()
         .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
-        .collect();
+        .collect()
+}
+
+/// The advertised tool names in one served response, sorted.
+fn names_in(bytes: &[u8]) -> Vec<String> {
+    let mut names = ordered_names_in(bytes);
     names.sort_unstable();
     names
 }
@@ -372,3 +399,10 @@ fn a_bad_discovery_value_stops_both_transports_with_exit_2() {
         );
     }
 }
+
+// The page-order and switch-precedence cases live in a child module: they need
+// the served helpers above, and moving them out is what leaves this file room
+// for the transport-wiring cases.
+#[cfg(test)]
+#[path = "mcp_cli_discovery_page_tests.rs"]
+mod discovery_page_tests;

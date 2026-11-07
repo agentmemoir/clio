@@ -220,6 +220,7 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
     mcp_stdio_serve(
         &serving,
         &opts,
+        clio_config::Runtime::new(),
         tool_groups.as_deref(),
         discovery,
         stdin.lock(),
@@ -233,16 +234,19 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
 /// The `Serving` witness is what proves `SIGPIPE` was ignored before the
 /// session starts; only [`crate::sigpipe::begin_serving`] can make one.
 /// `tool_groups` is the transport's `--tools` selection, when it was given, and
-/// `discovery` is its `--discovery` switch, when it was given.
+/// `discovery` is its `--discovery` switch, when it was given. `runtime` is the
+/// configuration layer the session opens under, which lets a test name the
+/// whole layer instead of inheriting the host's environment.
 pub(crate) fn mcp_stdio_serve<R: std::io::BufRead, W: std::io::Write>(
     _serving: &crate::sigpipe::Serving,
     opts: &clio_mcp::runtime::McpOpenOptions,
+    runtime: clio_config::Runtime,
     tool_groups: Option<&[clio_types::ToolGroup]>,
     discovery: Option<bool>,
     input: R,
     output: &mut W,
 ) -> ExitCode {
-    match crate::mcp_tools_flag::open_state(opts, tool_groups, discovery) {
+    match crate::mcp_tools_flag::open_state_with_runtime(opts, runtime, tool_groups, discovery) {
         Ok(state) => {
             // Background index drain: drains the durable outbox off the
             // response path (post-write nudge + periodic sweep for retries).

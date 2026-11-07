@@ -109,7 +109,20 @@ pub(crate) fn open_state(
     groups: Option<&[ToolGroup]>,
     discovery: Option<bool>,
 ) -> Result<Arc<McpState>, clio_types::AmError> {
-    let mut runtime = clio_config::Runtime::new();
+    open_state_with_runtime(opts, clio_config::Runtime::new(), groups, discovery)
+}
+
+/// [`open_state`] over a caller-supplied runtime, so a test can name the whole
+/// configuration layer instead of inheriting the host's environment.
+///
+/// # Errors
+/// As [`McpState::open`].
+pub(crate) fn open_state_with_runtime(
+    opts: &McpOpenOptions,
+    mut runtime: clio_config::Runtime,
+    groups: Option<&[ToolGroup]>,
+    discovery: Option<bool>,
+) -> Result<Arc<McpState>, clio_types::AmError> {
     if let Some(groups) = groups {
         runtime.set_mcp_tool_groups(groups.to_vec());
     }

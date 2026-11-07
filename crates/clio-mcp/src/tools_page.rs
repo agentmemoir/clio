@@ -81,8 +81,10 @@ struct Cursor {
 }
 
 /// The selected profile, the effective group selection, and the visible
-/// definitions it advertises, in catalog order, read under one configuration
-/// lock.
+/// definitions it advertises, read under one configuration lock.
+///
+/// The discovery entries sit first, so a default first page carries all three
+/// whatever preset governs the view; the catalog follows them in catalog order.
 ///
 /// The groups come from the effective selection, so an installed `--tools`
 /// selection wins over `mcp.tool_profile`. When a selection governs the view,
@@ -104,14 +106,17 @@ pub(crate) fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), R
     let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
     let visible = tools_of(&groups);
     let bound = crate::bound_tools();
-    let mut tools: Vec<Value> = crate::schema::catalog_defs()
-        .iter()
-        .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
-        .map(crate::schema_defs::ToolDef::to_tool)
-        .collect();
-    if discovery {
-        tools.extend(crate::discovery_tool_defs::entries());
-    }
+    let mut tools: Vec<Value> = if discovery {
+        crate::discovery_tool_defs::entries()
+    } else {
+        Vec::new()
+    };
+    tools.extend(
+        crate::schema::catalog_defs()
+            .iter()
+            .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
+            .map(crate::schema_defs::ToolDef::to_tool),
+    );
     let view = ToolView {
         preset: preset.ok(),
         groups,
