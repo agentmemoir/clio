@@ -23,11 +23,8 @@
 //! Keep this module focused on shared MCP protocol handling.
 
 use crate::MCP_PROTOCOL_REVISION;
-use crate::discovery_tools::TOOL_DESCRIBE;
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
-use crate::tools_page::ToolView;
-use clio_types::tools_of;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -179,7 +176,7 @@ impl McpHandler {
     /// know and no installed selection governs the view.
     #[cfg(test)]
     pub(crate) fn tools_list_visible(state: &McpState) -> Result<Value, RpcError> {
-        let (_, tools) = visible_view(state)?;
+        let (_, tools) = crate::tools_page::visible_view(state)?;
         Ok(json!({ "tools": tools }))
     }
 
@@ -197,7 +194,7 @@ impl McpHandler {
         state: &McpState,
         params: Option<&Value>,
     ) -> Result<Value, RpcError> {
-        let (view, tools) = visible_view(state)?;
+        let (view, tools) = crate::tools_page::visible_view(state)?;
         crate::tools_page::page(&tools, &view, params)
     }
 
@@ -213,28 +210,13 @@ impl McpHandler {
         }
         let empty = json!({});
         let args = params.get("arguments").unwrap_or(&empty);
-        // A bound tool that later takes this name keeps the normal dispatch
-        // path, so the guard names binding explicitly instead of assuming the
-        // discovery tool is never bound.
-        if name == TOOL_DESCRIBE && !bound_set().contains(&name) {
-            if !crate::discovery_tools::enabled(state) {
-                return Err(unknown_tool(name));
-            }
-            let payload = crate::discovery_tools::describe(args)?;
-            return Ok(json!({
-                "content": [{ "type": "text", "text": "ok" }],
-                "isError": false,
-                "structuredContent": payload
-            }));
+        // Each discovery tool owns its dispatch arm and the gate that guards
+        // it; a name neither owns falls through to the bound write + read set.
+        if let Some(result) = crate::discovery_tools::route(state, name, args) {
+            return result;
         }
-        // `tool_search` dispatches over the whole catalog, so it serves a name
-        // outside the bound set while the discovery setting keeps it on.
         if name == crate::catalog_search::NAME {
-            if !crate::catalog_search::enabled(state) {
-                return Err(unknown_tool(name));
-            }
-            let page = crate::catalog_search::call(args)?;
-            return Ok(crate::catalog_search::envelope(page));
+            return crate::catalog_search::route(state, args);
         }
         if !bound_set().contains(&name) {
             return Err(unknown_tool(name));
@@ -407,47 +389,6 @@ fn coactivation_rpc_error(result: &Value) -> Option<RpcError> {
 #[must_use]
 fn bound_set() -> Vec<&'static str> {
     crate::bound_tools()
-}
-
-/// The selected profile, the effective group selection, and the visible
-/// definitions it advertises, in catalog order, read under one configuration
-/// lock.
-///
-/// The groups come from the effective selection, so an installed `--tools`
-/// selection wins over `mcp.tool_profile`. When a selection governs the view,
-/// `mcp_tool_groups` answers without the document, so a missing or unknown
-/// document preset cannot fail the request; the profile is then absent from the
-/// snapshot.
-fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
-    let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
-        state.config.lock().expect("config runtime mutex poisoned");
-    let groups = rt.mcp_tool_groups();
-    let preset = rt.mcp_tool_profile();
-    let discovery = rt.mcp_discovery();
-    let revision = rt
-        .effective_raw()
-        .pointer("/mcp/revision")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    drop(rt);
-    let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
-    let visible = tools_of(&groups);
-    let bound = bound_set();
-    let mut tools: Vec<Value> = catalog_defs()
-        .iter()
-        .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
-        .map(crate::schema_defs::ToolDef::to_tool)
-        .collect();
-    if discovery {
-        tools.push(crate::catalog_search::listing_entry());
-        tools.push(crate::discovery_tools::listing_entry());
-    }
-    let view = ToolView {
-        preset: preset.ok(),
-        groups,
-        revision: revision.unwrap_or_else(|| MCP_PROTOCOL_REVISION.to_owned()),
-    };
-    Ok((view, tools))
 }
 
 #[cfg(test)]

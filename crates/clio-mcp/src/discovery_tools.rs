@@ -83,6 +83,28 @@ pub(crate) fn listing_entry() -> Value {
     })
 }
 
+/// Route a `tools/call` name this module owns, or `None` for any other name.
+///
+/// A bound tool that later takes this name keeps the normal dispatch path, so
+/// the guard names binding explicitly instead of assuming the discovery tool is
+/// never bound. Discovery off refuses the call with the same unknown-tool error
+/// the unbound set answers.
+pub(crate) fn route(state: &McpState, name: &str, args: &Value) -> Option<Result<Value, RpcError>> {
+    if name != TOOL_DESCRIBE || crate::bound_tools().contains(&name) {
+        return None;
+    }
+    if !enabled(state) {
+        return Some(Err(unknown_tool(name)));
+    }
+    Some(describe(args).map(|payload| {
+        json!({
+            "content": [{ "type": "text", "text": "ok" }],
+            "isError": false,
+            "structuredContent": payload
+        })
+    }))
+}
+
 /// The single `name` field the published schema declares.
 fn exact_name(args: &Value) -> Result<&str, RpcError> {
     let Some(fields) = args.as_object() else {

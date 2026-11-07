@@ -23,7 +23,7 @@
 //!
 //! Keep this module focused on one search request and its page.
 
-use crate::protocol::{RpcError, invalid_params};
+use crate::protocol::{RpcError, invalid_params, unknown_tool};
 use crate::runtime::McpState;
 use crate::schema::catalog_defs;
 use crate::schema_defs::ToolDef;
@@ -151,6 +151,20 @@ pub(crate) fn envelope(result: Value) -> Value {
         "isError": false,
         "structuredContent": result,
     })
+}
+
+/// Route one `tools/call` for this tool.
+///
+/// `tool_search` dispatches over the whole catalog, so it serves a name outside
+/// the bound set while the discovery setting keeps it on.
+///
+/// # Errors
+/// Discovery is off, or the arguments fail the `tool_search` contract.
+pub(crate) fn route(state: &McpState, args: &Value) -> Result<Value, RpcError> {
+    if !enabled(state) {
+        return Err(unknown_tool(NAME));
+    }
+    Ok(envelope(call(args)?))
 }
 
 /// The requested page size, clamped to the maximum, or the default when absent.
