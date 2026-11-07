@@ -388,6 +388,7 @@ fn the_stdio_session_serves_until_end_of_input() {
             &crate::sigpipe::Serving::for_test(),
             &opts,
             None,
+            None,
             std::io::Cursor::new(Vec::<u8>::new()),
             &mut out
         ),
@@ -406,6 +407,7 @@ fn a_stdio_session_stops_with_one_when_its_output_stream_refuses() {
             &crate::sigpipe::Serving::for_test(),
             &opts,
             None,
+            None,
             input,
             &mut RefusesWrites
         ),
@@ -421,6 +423,7 @@ fn a_stdio_session_that_cannot_open_its_target_exits_1() {
         mcp_stdio_serve(
             &crate::sigpipe::Serving::for_test(),
             &bad,
+            None,
             None,
             std::io::Cursor::new(Vec::<u8>::new()),
             &mut out

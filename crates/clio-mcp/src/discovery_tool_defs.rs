@@ -9,6 +9,7 @@
 //! ## Owns
 //! - Parsing the embedded discovery tool-definition document
 //! - The parsed document served to callers as one JSON value
+//! - The `tools/list` entries projected from the declarations
 //!
 //! ## Does not own
 //! - Registering these tools in the catalog or binding them for dispatch
@@ -23,7 +24,7 @@
 //!
 //! Keep this module focused on loading the discovery tool declarations.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::sync::OnceLock;
 
 /// The compiled-in discovery tool-definition document.
@@ -45,6 +46,58 @@ fn parsed() -> &'static Value {
 #[must_use]
 pub fn definitions() -> &'static Value {
     parsed()
+}
+
+/// The four keys a `tools/list` entry publishes, projected from one declaration.
+///
+/// `argumentRules`, `examples`, and `refusals` stay out of the published entry.
+fn published(tool: &Value) -> Value {
+    json!({
+        "name": tool["name"].clone(),
+        "description": tool["description"].clone(),
+        "inputSchema": tool["inputSchema"].clone(),
+        "outputSchema": tool["outputSchema"].clone(),
+    })
+}
+
+/// The `tools/list` entry for the declaration named `name`.
+///
+/// # Panics
+///
+/// Panics when the embedded document declares no tool named `name`, which is a
+/// build defect.
+#[must_use]
+pub(crate) fn entry(name: &str) -> Value {
+    parsed()["tools"]
+        .as_array()
+        .and_then(|tools| {
+            tools
+                .iter()
+                .find(|tool| tool["name"].as_str() == Some(name))
+        })
+        .map_or_else(
+            || {
+                panic!(
+                    "the embedded discovery definitions declare `{name}`; this is a build defect"
+                )
+            },
+            published,
+        )
+}
+
+/// Every `tools/list` entry, in document order.
+#[must_use]
+pub(crate) fn entries() -> Vec<Value> {
+    parsed()["tools"]
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| tool["name"].as_str())
+                .map(entry)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

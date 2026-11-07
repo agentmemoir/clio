@@ -152,6 +152,7 @@ fn served_listing(groups: &[clio_types::ToolGroup]) -> Vec<String> {
             &crate::sigpipe::Serving::for_test(),
             &clio_mcp::runtime::McpOpenOptions::default(),
             Some(groups),
+            None,
             std::io::Cursor::new(format!("{request}\n").into_bytes()),
             &mut out,
         ),

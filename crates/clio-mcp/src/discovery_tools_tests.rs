@@ -28,7 +28,7 @@
 //!
 //! Keep this module focused on describing one catalog tool.
 
-use super::{TOOL_DESCRIBE, listing_entry};
+use super::TOOL_DESCRIBE;
 use crate::protocol::{ERR_INVALID_PARAMS, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
 use crate::schema::{catalog_def, catalog_defs, schema_pack};
@@ -327,11 +327,16 @@ fn discovery_on_lists_search_and_describe_with_the_declaration() {
         .collect();
     assert!(names.contains(&"tool_search"), "the sibling is listed");
     assert!(names.contains(&TOOL_DESCRIBE), "tool_describe is listed");
+    assert!(names.contains(&"tool_invoke"), "tool_invoke is listed");
     let entry = tools
         .iter()
         .find(|tool| tool["name"] == json!(TOOL_DESCRIBE))
         .expect("the listing advertises tool_describe");
-    assert_eq!(entry, &listing_entry(), "the gate uses the published entry");
+    assert_eq!(
+        entry,
+        &crate::discovery_tool_defs::entry(TOOL_DESCRIBE),
+        "the gate uses the published entry"
+    );
     let declaration = declaration();
     for key in ["name", "description", "inputSchema", "outputSchema"] {
         assert_eq!(

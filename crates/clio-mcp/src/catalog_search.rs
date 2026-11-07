@@ -9,7 +9,7 @@
 //! ## Owns
 //! - The `tool_search` name, its argument validation, and its result page
 //! - The tokenizer and the raw overlap score that ranks a tool
-//! - The `tools/list` entry and the `tools/call` success envelope it publishes
+//! - The `tools/call` success envelope it publishes
 //!
 //! ## Does not own
 //! - Catalog membership or catalog order (see `schema`)
@@ -114,32 +114,7 @@ pub(crate) fn enabled(state: &McpState) -> bool {
     runtime.mcp_discovery()
 }
 
-/// The `tools/list` entry the discovery gate advertises.
-///
-/// The entry is the embedded declaration projected to the four keys a client
-/// reads. `argumentRules` and `examples` stay out of the published listing.
-///
-/// # Panics
-/// Panics when the embedded declaration does not hold `tool_search`, which is a
-/// build defect.
-pub(crate) fn listing_entry() -> Value {
-    let entry = crate::discovery_tool_defs::definitions()["tools"]
-        .as_array()
-        .and_then(|tools| {
-            tools
-                .iter()
-                .find(|tool| tool["name"].as_str() == Some(NAME))
-        })
-        .expect("the embedded discovery definitions declare tool_search; this is a build defect");
-    json!({
-        "name": entry["name"].clone(),
-        "description": entry["description"].clone(),
-        "inputSchema": entry["inputSchema"].clone(),
-        "outputSchema": entry["outputSchema"].clone(),
-    })
-}
-
-/// Build the `tools/call` success envelope for one result page.
+/// The `tools/call` success envelope for one result page.
 ///
 /// The tool declares an output schema, so the page travels once in
 /// `structuredContent` and `content` carries the short status line. Success is

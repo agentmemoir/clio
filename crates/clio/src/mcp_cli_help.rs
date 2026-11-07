@@ -16,6 +16,7 @@
 //! - The flags themselves or which names a transport accepts (see the surface
 //!   records and `mcp_cli`)
 //! - The `--tools` value and its help block (see `mcp_tools_flag`)
+//! - The `--discovery` value and its help block (see `mcp_discovery_flag`)
 //! - The database precedence block (see `cli_top_level::database_help_block`)
 //!
 //! ## Boundary
@@ -27,6 +28,7 @@
 
 use crate::cli_help_usage::usage_line;
 use crate::cli_top_level::database_help_block;
+use crate::mcp_discovery_flag::HELP_BLOCK as DISCOVERY_HELP;
 use crate::mcp_tools_flag::HELP_BLOCK as TOOLS_HELP;
 
 /// `clio mcp stdio` usage text: the record's usage line, the database block, and
@@ -42,9 +44,10 @@ where
     F: Fn(&str) -> Option<String>,
 {
     format!(
-        "{}\n\n{}\n\n{}",
+        "{}\n\n{}\n\n{}\n\n{}",
         usage_text("mcp stdio"),
         database_help_block(get),
+        DISCOVERY_HELP,
         TOOLS_HELP
     )
 }
@@ -89,6 +92,8 @@ where
              then warns that every host that can reach the port can use every
              tool. Without it a non-loopback bind with no credential is refused
              even with --insecure-no-auth.
+
+{DISCOVERY_HELP}
 
 {TOOLS_HELP}
 

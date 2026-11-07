@@ -11,7 +11,6 @@
 //! - The exact refusal for a name the catalog does not define
 //! - The definition this call returns, read from the full catalog
 //! - The discovery gate `protocol` reads under the config lock
-//! - The `tools/list` entry the discovery gate advertises
 //!
 //! ## Does not own
 //! - The catalog itself or how a definition renders (see `schema` and
@@ -56,31 +55,6 @@ pub(crate) fn describe(args: &Value) -> Result<Value, RpcError> {
 pub(crate) fn enabled(state: &McpState) -> bool {
     let runtime = state.config.lock().expect("config runtime mutex poisoned");
     runtime.mcp_discovery()
-}
-
-/// The `tools/list` entry the discovery gate advertises.
-///
-/// The entry is the embedded declaration projected to the four keys a client
-/// reads. `examples` and `refusals` stay out of the published listing.
-///
-/// # Panics
-/// Panics when the embedded declaration does not hold `tool_describe`, which is
-/// a build defect.
-pub(crate) fn listing_entry() -> Value {
-    let entry = crate::discovery_tool_defs::definitions()["tools"]
-        .as_array()
-        .and_then(|tools| {
-            tools
-                .iter()
-                .find(|tool| tool["name"].as_str() == Some(TOOL_DESCRIBE))
-        })
-        .expect("the embedded discovery definitions declare tool_describe; this is a build defect");
-    json!({
-        "name": entry["name"].clone(),
-        "description": entry["description"].clone(),
-        "inputSchema": entry["inputSchema"].clone(),
-        "outputSchema": entry["outputSchema"].clone(),
-    })
 }
 
 /// Route a `tools/call` name this module owns, or `None` for any other name.

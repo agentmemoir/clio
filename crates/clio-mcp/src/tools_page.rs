@@ -110,8 +110,7 @@ pub(crate) fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), R
         .map(crate::schema_defs::ToolDef::to_tool)
         .collect();
     if discovery {
-        tools.push(crate::catalog_search::listing_entry());
-        tools.push(crate::discovery_tools::listing_entry());
+        tools.extend(crate::discovery_tool_defs::entries());
     }
     let view = ToolView {
         preset: preset.ok(),

@@ -214,6 +214,7 @@ fn mcp_stdio_serve_serves_and_reports_open_failure() {
             &crate::sigpipe::Serving::for_test(),
             &ok,
             None,
+            None,
             std::io::Cursor::new(Vec::new()),
             &mut out
         ),
@@ -226,6 +227,7 @@ fn mcp_stdio_serve_serves_and_reports_open_failure() {
         mcp_stdio_serve(
             &crate::sigpipe::Serving::for_test(),
             &bad,
+            None,
             None,
             std::io::Cursor::new(Vec::new()),
             &mut out

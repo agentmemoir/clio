@@ -26,7 +26,7 @@
 //!
 //! Keep this module focused on the contract and the gate.
 
-use super::{NAME, call, envelope, listing_entry, score, tokens};
+use super::{NAME, call, envelope, score, tokens};
 use crate::protocol::{ERR_INVALID_PARAMS, McpHandler};
 use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::{Value, json};
@@ -187,7 +187,7 @@ fn an_unknown_argument_is_refused() {
 
 #[test]
 fn the_listing_entry_publishes_only_the_four_contract_keys() {
-    let entry = listing_entry();
+    let entry = crate::discovery_tool_defs::entry(NAME);
     let object = entry.as_object().expect("an entry object");
     let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
     keys.sort_unstable();
@@ -257,9 +257,10 @@ fn discovery_off_keeps_the_advertised_count_unchanged() {
     let on = listed(&state_with(r#"{"mcp": {"discovery": true}}"#));
     assert_eq!(
         on.len(),
-        absent.len() + 2,
-        "the gate adds tool_search and its tool_describe sibling"
+        absent.len() + 3,
+        "the gate adds tool_search, tool_describe, and tool_invoke"
     );
-    assert_eq!(on.iter().filter(|name| *name == NAME).count(), 1);
-    assert_eq!(on.iter().filter(|name| *name == "tool_describe").count(), 1);
+    for name in [NAME, "tool_describe", "tool_invoke"] {
+        assert_eq!(on.iter().filter(|listed| *listed == name).count(), 1);
+    }
 }

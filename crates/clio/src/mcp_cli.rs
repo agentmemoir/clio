@@ -10,7 +10,7 @@
 //! ## Owns
 //! - `clio mcp schema-export|stdio|http` handlers
 //! - Decoding CLI flags and environment into `McpOpenOptions`, including the
-//!   `--tools` selection the server state is opened under
+//!   `--tools` and `--discovery` selections the server state is opened under
 //! - The stdio session seam (`mcp_stdio_serve`) over injected streams
 //!
 //! ## Does not own
@@ -199,6 +199,10 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
         Ok(groups) => groups,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
     };
+    let discovery = match crate::mcp_discovery_flag::selection(&flags) {
+        Ok(discovery) => discovery,
+        Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
+    };
     let opts = match mcp_options(collected) {
         Ok(opts) => opts,
         Err(reason) => {
@@ -217,6 +221,7 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
         &serving,
         &opts,
         tool_groups.as_deref(),
+        discovery,
         stdin.lock(),
         &mut stdout,
     )
@@ -227,15 +232,17 @@ fn mcp_stdio(args: impl IntoIterator<Item = String>) -> ExitCode {
 /// Split out from [`mcp_stdio`] so the session path is testable without a TTY.
 /// The `Serving` witness is what proves `SIGPIPE` was ignored before the
 /// session starts; only [`crate::sigpipe::begin_serving`] can make one.
-/// `tool_groups` is the transport's `--tools` selection, when it was given.
+/// `tool_groups` is the transport's `--tools` selection, when it was given, and
+/// `discovery` is its `--discovery` switch, when it was given.
 pub(crate) fn mcp_stdio_serve<R: std::io::BufRead, W: std::io::Write>(
     _serving: &crate::sigpipe::Serving,
     opts: &clio_mcp::runtime::McpOpenOptions,
     tool_groups: Option<&[clio_types::ToolGroup]>,
+    discovery: Option<bool>,
     input: R,
     output: &mut W,
 ) -> ExitCode {
-    match crate::mcp_tools_flag::open_state(opts, tool_groups) {
+    match crate::mcp_tools_flag::open_state(opts, tool_groups, discovery) {
         Ok(state) => {
             // Background index drain: drains the durable outbox off the
             // response path (post-write nudge + periodic sweep for retries).
@@ -274,6 +281,10 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
         Ok(groups) => groups,
         Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
     };
+    let discovery = match crate::mcp_discovery_flag::selection(&flags) {
+        Ok(discovery) => discovery,
+        Err(error) => return crate::cli_top_level::report_surface_usage_error(&error, &collected),
+    };
     let opts = match mcp_options(collected.iter().cloned()) {
         Ok(opts) => opts,
         Err(reason) => {
@@ -297,7 +308,7 @@ fn mcp_http(args: impl IntoIterator<Item = String>) -> ExitCode {
     cfg.credentials = credentials;
     // As for the stdio transport: the server must outlive one client going away.
     let serving = crate::sigpipe::begin_serving();
-    match crate::mcp_tools_flag::open_state(&opts, tool_groups.as_deref()) {
+    match crate::mcp_tools_flag::open_state(&opts, tool_groups.as_deref(), discovery) {
         Ok(state) => {
             // Same background index drain as the stdio transport.
             let _sweeper = state.spawn_index_sweeper();

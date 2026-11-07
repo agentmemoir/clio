@@ -179,13 +179,14 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
     ),
     (
         "mcp stdio",
-        "clio mcp stdio [--db PATH] [--backend sqlite|postgres] [--bank BANK] [--tools PRESET]",
+        "clio mcp stdio [--db PATH] [--backend sqlite|postgres] [--bank BANK] \
+         [--tools PRESET] [--discovery on|off]",
     ),
     (
         "mcp http",
         "clio mcp http [--bind [ADDR]] [--db PATH] [--backend sqlite|postgres] \
          [--bank BANK] [--token-file PATH] [--sessions] [--insecure-no-auth] \
-         [--insecure-bind-any] [--tools PRESET]",
+         [--insecure-bind-any] [--tools PRESET] [--discovery on|off]",
     ),
     (
         "ops diagnose",
