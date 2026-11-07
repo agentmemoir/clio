@@ -129,10 +129,45 @@ fn the_same_query_returns_the_same_order_twice() {
 #[test]
 fn an_oversized_limit_clamps_to_twenty_five() {
     let state = searchable();
-    let big = page(&state, &json!({"query": "memory", "limit": 1000}));
-    let max = page(&state, &json!({"query": "memory", "limit": 25}));
-    assert!(big.len() <= 25, "a page holds at most 25 tools: {big:?}");
-    assert_eq!(big, max, "1000 and 25 return the same page");
+    let query = "the";
+    let matched = expected_ranking(query, usize::MAX);
+    eprintln!("query `{query}` matches {} catalog tools", matched.len());
+    assert!(
+        matched.len() > 25,
+        "the query must match more than one maximum page to observe the clamp: {} matches",
+        matched.len()
+    );
+
+    let defaulted = page(&state, &json!({"query": query}));
+    assert_eq!(
+        defaulted.len(),
+        10,
+        "an absent limit returns the default page: {defaulted:?}"
+    );
+
+    let big = page(&state, &json!({"query": query, "limit": 1000}));
+    let max = page(&state, &json!({"query": query, "limit": 25}));
+    assert_eq!(big.len(), 25, "1000 clamps to 25 tools: {big:?}");
+    assert_eq!(
+        max.len(),
+        25,
+        "the maximum page is full, so the clamp is observable: {max:?}"
+    );
+    assert_eq!(big, max, "1000 and 25 return the same page in order");
+
+    let query_tokens = tokens(query);
+    for name in &big {
+        let def = catalog_defs()
+            .into_iter()
+            .find(|def| def.name == name.as_str())
+            .unwrap_or_else(|| panic!("a page names a catalog tool: {name}"));
+        let mut tool_tokens = tokens(def.name);
+        tool_tokens.extend(tokens(def.description));
+        assert!(
+            score(&query_tokens, &tool_tokens) > 0,
+            "every returned tool matches the query: {name}"
+        );
+    }
 }
 
 #[test]

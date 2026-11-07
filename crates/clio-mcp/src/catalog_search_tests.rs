@@ -222,6 +222,18 @@ fn discovery_off_hides_the_tool_and_refuses_the_call() {
 }
 
 #[test]
+fn a_non_boolean_discovery_value_reads_as_off() {
+    let state = state_with(r#"{"mcp": {"discovery": "yes"}}"#);
+    assert!(!listed(&state).contains(&NAME.to_owned()));
+    let response = dispatched(&state, &json!({"query": "store"}));
+    assert_eq!(response["error"]["code"].as_i64(), Some(ERR_INVALID_PARAMS));
+    assert_eq!(
+        response["error"]["message"].as_str(),
+        Some("unknown tool `tool_search`")
+    );
+}
+
+#[test]
 fn discovery_on_lists_the_tool_and_answers_a_call() {
     let state = state_with(r#"{"mcp": {"discovery": true}}"#);
     assert!(listed(&state).contains(&NAME.to_owned()));

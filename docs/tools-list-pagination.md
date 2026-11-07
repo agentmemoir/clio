@@ -28,7 +28,7 @@ base64url(no padding) of [1, "<digest>", <page size>, <next offset>]
 
 The digest covers three inputs:
 
-1. the catalog hash of the visible definitions, in catalog order;
+1. the catalog hash of the visible definitions, in listing order;
 2. the preset that names the view, or a marker when an installed `--tools` selection governs it instead, and the effective groups the view resolves to;
 3. the configuration revision: the effective `mcp.revision`, or the pinned protocol revision when no revision is set.
 
