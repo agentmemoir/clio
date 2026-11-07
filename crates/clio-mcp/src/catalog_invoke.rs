@@ -160,3 +160,11 @@ mod tests;
 #[cfg(test)]
 #[path = "catalog_invoke_examples_tests.rs"]
 mod examples_tests;
+
+#[cfg(test)]
+#[path = "catalog_invoke_confirmation_tests.rs"]
+mod confirmation_tests;
+
+#[cfg(test)]
+#[path = "catalog_invoke_gate_fixture_tests.rs"]
+mod gate_fixture_tests;
