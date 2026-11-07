@@ -343,33 +343,27 @@ fn version_check_runs_once_and_applies_no_update() {
     }
 }
 
+macro_rules! reference {
+    ($name:literal) => {
+        (
+            $name,
+            include_str!(concat!("../../../skills/clio-mcp/references/", $name)),
+        )
+    };
+}
+
 #[test]
 fn reference_files_match_group_table() {
-    let references: [(&str, &str); 6] = [
-        (
-            "01-retrieval.md",
-            include_str!("../../../skills/clio-mcp/references/01-retrieval.md"),
-        ),
-        (
-            "02-item-write.md",
-            include_str!("../../../skills/clio-mcp/references/02-item-write.md"),
-        ),
-        (
-            "03-item-read.md",
-            include_str!("../../../skills/clio-mcp/references/03-item-read.md"),
-        ),
-        (
-            "04-persona.md",
-            include_str!("../../../skills/clio-mcp/references/04-persona.md"),
-        ),
-        (
-            "05-task.md",
-            include_str!("../../../skills/clio-mcp/references/05-task.md"),
-        ),
-        (
-            "06-memtree.md",
-            include_str!("../../../skills/clio-mcp/references/06-memtree.md"),
-        ),
+    let references: [(&str, &str); 9] = [
+        reference!("01-retrieval.md"),
+        reference!("02-item-write.md"),
+        reference!("03-item-read.md"),
+        reference!("04-persona.md"),
+        reference!("05-task.md"),
+        reference!("06-memtree.md"),
+        reference!("07-triple.md"),
+        reference!("08-belief.md"),
+        reference!("09-graph.md"),
     ];
     for (index, (name, text)) in references.iter().enumerate() {
         let spec = &GROUP_TABLE[index];

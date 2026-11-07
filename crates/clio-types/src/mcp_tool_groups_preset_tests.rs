@@ -9,6 +9,7 @@
 //! ## Owns
 //! - The minimal preset's exact tool list, in catalog order
 //! - The `all` preset's exact tool list, every approved row, in catalog order
+//! - The graph tools' absence from the `coding` and `ops` presets
 //!
 //! ## Does not own
 //! - Group closure, name parsing, or custom selection (`mcp_tool_groups_tests`)
@@ -144,4 +145,25 @@ fn a_wider_preset_is_a_superset_of_the_minimal_one() {
         );
     }
     assert!(!MINIMAL_TOOLS.contains(&"store"));
+}
+
+#[test]
+fn the_graph_tools_are_listed_only_by_presets_that_hold_their_group() {
+    let minimal = ToolPreset::Minimal.tools();
+    for name in ["graph_link", "graph_query"] {
+        assert!(
+            minimal.contains(&name),
+            "`minimal` is missing the graph tool `{name}`"
+        );
+    }
+    for preset in [ToolPreset::Coding, ToolPreset::Ops] {
+        let tools = preset.tools();
+        for name in ["graph_link", "graph_query"] {
+            assert!(
+                !tools.contains(&name),
+                "`{}` lists the graph tool `{name}`",
+                preset.as_str()
+            );
+        }
+    }
 }
