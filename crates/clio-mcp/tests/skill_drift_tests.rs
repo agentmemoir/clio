@@ -354,7 +354,7 @@ macro_rules! reference {
 
 #[test]
 fn reference_files_match_group_table() {
-    let references: [(&str, &str); 10] = [
+    let references: [(&str, &str); 11] = [
         reference!("01-retrieval.md"),
         reference!("02-item-write.md"),
         reference!("03-item-read.md"),
@@ -365,6 +365,7 @@ fn reference_files_match_group_table() {
         reference!("08-belief.md"),
         reference!("09-graph.md"),
         reference!("10-hygiene.md"),
+        reference!("11-portability.md"),
     ];
     for (index, (name, text)) in references.iter().enumerate() {
         let spec = &GROUP_TABLE[index];
