@@ -22,4 +22,5 @@ Comparing any preset row with the frozen baseline row of 105632 bytes / 21691 to
 Regenerate from the repository root with `python3 benchmarks/mcp_token_budget/preset_rows.py --bin target/release/clio --out benchmarks/mcp_token_budget/presets/frozen-v1.json`, which rewrites this record and the four packs from the binary's own exports.
 
 The record is [frozen-v1.json](frozen-v1.json), its exact exports are in [packs/](packs/), and the baseline it pins is [the frozen baseline record](../baseline/frozen-v1.json).
+
 The same-build discovery pair is [discovery-v1.json](discovery-v1.json), separate from the frozen rows and not comparable with them.
