@@ -8,7 +8,9 @@ measured: it is canonicalized with the helpers of ``preset_rows.py``, so its
 bytes give the byte length, the cl100k_base token count, and the sha256 that
 ties a row back to the exact surface the server advertised. The three discovery
 tools are the only difference between the two runs, so the record's ``cost`` is
-their on-minus-off size, derived here and never read from an input.
+their on-minus-off size, derived here and never read from an input. The
+``comparability`` block names the build both rows share and the frozen records
+that predate the flag and must not be compared with this pair.
 
 Tokens come from the repo-pinned offline tokenizer, so this script performs no
 network I/O and never substitutes an estimate. Every failure exits 2 with
@@ -39,6 +41,15 @@ COMMAND_TEMPLATE = (
     "python3 benchmarks/mcp_token_budget/discovery_rows.py --bin {binary} --out {out}"
 )
 NORMALIZATION = "canonical bytes of the served tools/list tools array only"
+PRE_FLAG_PATHS = (
+    "benchmarks/mcp_token_budget/presets/frozen-v1.json",
+    "benchmarks/mcp_token_budget/baseline/frozen-v1.json",
+)
+COMPARABILITY_NOTE = (
+    "Both rows were served by the same build, so the cost is the discovery flag "
+    "alone. The pre-flag records listed here predate the flag and are not "
+    "comparable with either row."
+)
 _PROTOCOL_VERSION = "2025-11-25"
 _CAPTURE_TIMEOUT = 60
 _VERSION_TIMEOUT = 30
@@ -212,6 +223,41 @@ def cost(rows):
     }
 
 
+def _record_date(path):
+    """Return the single row date of one frozen record, or raise BudgetError."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BudgetError(f"cannot read pre-flag record {path.name}: {exc}") from None
+    dates = {
+        row.get("date")
+        for row in document.get("rows", [])
+        if isinstance(row, dict) and row.get("date")
+    }
+    if len(dates) != 1:
+        raise BudgetError(f"pre-flag record {path.name} has no single row date")
+    return dates.pop()
+
+
+def pre_flag_records():
+    """Return the frozen records that predate the flag, with their row date."""
+    return [
+        {"path": path, "date": _record_date(_REPO_ROOT / path)}
+        for path in PRE_FLAG_PATHS
+    ]
+
+
+def comparability(rows, build):
+    """Return the block that pins the row pair and rules out older records."""
+    indexed = _by_flag(rows)
+    return {
+        "pair": [indexed["off"]["flag"], indexed["on"]["flag"]],
+        "shared_build": build,
+        "not_comparable_with": pre_flag_records(),
+        "note": COMPARABILITY_NOTE,
+    }
+
+
 def measure(binary, preset, tokenizer):
     """Capture both flag states and return the two measured rows."""
     off_tools = _serve(binary, preset, "off")
@@ -244,6 +290,7 @@ def render(out_path, preset, date, build, rows, tokenizer) -> str:
         },
         "rows": rows,
         "cost": cost(rows),
+        "comparability": comparability(rows, build),
     }
     return (
         json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
