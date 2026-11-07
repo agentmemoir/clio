@@ -10,13 +10,15 @@
 //! ## Owns
 //! - The default page size, the maximum page size, and the request key that
 //!   selects a page size
+//! - The advertised view: the bound catalog narrowed to the effective group
+//!   selection, plus the discovery entries the gate turns on
 //! - Cursor encoding and decoding, including its format version
 //! - The visible-view digest over the catalog hash, the effective group
 //!   selection, the preset that names it, and the configuration revision
 //! - The page slice and its optional `nextCursor`
 //!
 //! ## Does not own
-//! - Which tools the selected profile advertises (see `protocol`)
+//! - Tool semantics and dispatch (see `write_tools` and `protocol`)
 //! - The catalog hash convention (see `schema`)
 //! - JSON-RPC envelope shaping and the error code set (see `protocol`)
 //!
@@ -28,10 +30,11 @@
 //!
 //! Keep this module focused on turning one visible tool list into pages.
 
-use crate::protocol::{RpcError, invalid_params};
+use crate::protocol::{ERR_INTERNAL, RpcError, invalid_params};
+use crate::runtime::McpState;
 use crate::schema::{catalog_hash, fnv1a64_hex};
 use base64::Engine;
-use clio_types::{ToolGroup, ToolPreset};
+use clio_types::{ToolGroup, ToolPreset, tools_of};
 use serde_json::{Value, json};
 
 /// The page size a request gets when it asks for none.
@@ -75,6 +78,47 @@ struct Cursor {
     digest: String,
     size: usize,
     offset: usize,
+}
+
+/// The selected profile, the effective group selection, and the visible
+/// definitions it advertises, in catalog order, read under one configuration
+/// lock.
+///
+/// The groups come from the effective selection, so an installed `--tools`
+/// selection wins over `mcp.tool_profile`. When a selection governs the view,
+/// `mcp_tool_groups` answers without the document, so a missing or unknown
+/// document preset cannot fail the request; the profile is then absent from the
+/// snapshot.
+pub(crate) fn visible_view(state: &McpState) -> Result<(ToolView, Vec<Value>), RpcError> {
+    let rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
+        state.config.lock().expect("config runtime mutex poisoned");
+    let groups = rt.mcp_tool_groups();
+    let preset = rt.mcp_tool_profile();
+    let discovery = rt.mcp_discovery();
+    let revision = rt
+        .effective_raw()
+        .pointer("/mcp/revision")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    drop(rt);
+    let groups = groups.map_err(|err| RpcError::new(ERR_INTERNAL, err.message))?;
+    let visible = tools_of(&groups);
+    let bound = crate::bound_tools();
+    let mut tools: Vec<Value> = crate::schema::catalog_defs()
+        .iter()
+        .filter(|def| bound.contains(&def.name) && visible.contains(&def.name))
+        .map(crate::schema_defs::ToolDef::to_tool)
+        .collect();
+    if discovery {
+        tools.push(crate::catalog_search::listing_entry());
+        tools.push(crate::discovery_tools::listing_entry());
+    }
+    let view = ToolView {
+        preset: preset.ok(),
+        groups,
+        revision: revision.unwrap_or_else(|| crate::MCP_PROTOCOL_REVISION.to_owned()),
+    };
+    Ok((view, tools))
 }
 
 /// Slice one visible tool list into the page a request selects.
