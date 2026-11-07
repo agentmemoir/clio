@@ -30,18 +30,39 @@
 //! the skill's router wording belongs here only when it moves one of the policy
 //! sentences above; a membership change belongs in `mcp_tool_groups_data`,
 //! which the table is compared against.
+//!
+//! Every structural assertion is anchored to an exact line or an exact section
+//! body rather than to a substring, because a substring check reads a widened
+//! sentence, an added column, or a second table as the wording it expects.
 
 use clio_types::GROUP_TABLE;
 
 /// The skill under check, read at compile time so no run can see another copy.
 const SKILL: &str = include_str!("../../../skills/clio-mcp/SKILL.md");
 
+/// The one frontmatter `name` the skill may declare.
+const SKILL_NAME: &str = "clio-mcp";
+
+/// The one frontmatter `description` the skill may declare: one trigger
+/// sentence and one negative trigger, with no further claim beside them.
+const SKILL_DESCRIPTION: &str = "Use when the task needs Clio memory: store, retrieve, update, persona, tasks, graph, or maintenance. DO NOT TRIGGER on a greenfield turn that needs no prior state.";
+
+/// The router table's header line, spelled exactly as the table must spell it.
+const TABLE_HEADER: &str = "| Group | When you need | Read |";
+
+/// The router table's separator line, which must follow the header directly.
+const TABLE_SEPARATOR: &str = "|---|---|---|";
+
 /// The two operations the per-turn retrieval budget scopes.
 const BUDGETED_OPERATIONS: [&str; 2] = ["`retrieve`", "`compose_context`"];
 
-/// The one sentence that states the per-turn retrieval budget.
-const BUDGET_SENTENCE: &str =
-    "At most four `retrieve` and `compose_context` calls combined are allowed per turn.";
+/// The whole `## Turn budget` body, trimmed: one sentence with the value and a
+/// second that scopes it to retrieval, so a third sentence cannot join them.
+const BUDGET_BODY: &str = "At most four `retrieve` and `compose_context` calls combined are allowed per turn. This budget does not cap any other tool.";
+
+/// The whole `## End-of-session check` body, trimmed: one read that reports and
+/// applies nothing, so an added sentence cannot turn the check into a mutation.
+const CHECK_BODY: &str = "At session end, run `clio version --check` once. Repeat its one result line word for word. Report a newer release when the line names one. Report the check as unavailable when the line names no release. Apply no update.";
 
 /// Every call rule the router states, each exactly once.
 const CALL_RULES: [&str; 6] = [
@@ -54,20 +75,25 @@ const CALL_RULES: [&str; 6] = [
 ];
 
 /// Claims that a client loads the skill body without being asked to.
-const NO_CLIENT_LOADING: [&str; 4] = [
+const NO_CLIENT_LOADING: [&str; 6] = [
     "auto-load",
     "autoload",
-    "automatically loads",
+    "automatically load",
+    "loads automatically",
+    "loaded automatically",
     "loads the body automatically",
 ];
 
-/// Claims that the end-of-session check changes the installation.
-const NO_UPDATE: [&str; 5] = [
+/// Claims that the end-of-session check applies an update rather than reporting
+/// one. Reporting a newer release stays allowed, so neither `update clio` nor
+/// `tell the user to update` is banned.
+const NO_UPDATE: [&str; 6] = [
     "apply the update",
+    "apply an update",
     "install the update",
     "run the update",
+    "clio update",
     "upgrade clio",
-    "update clio",
 ];
 
 /// One frontmatter value by key, or a failure naming the missing key.
@@ -87,13 +113,60 @@ fn frontmatter_value(key: &str) -> &'static str {
 }
 
 /// The router table's data rows, in file order, without the header or separator.
+///
+/// The scan starts only after the exact header and its exact separator, so a
+/// renamed column, a row placed above the header, or a second table cannot pass
+/// as a router row.
 fn data_rows() -> Vec<&'static str> {
-    SKILL
-        .lines()
-        .skip_while(|line| !line.starts_with('|'))
+    let lines: Vec<&'static str> = SKILL.lines().collect();
+    let headers = lines.iter().filter(|line| **line == TABLE_HEADER).count();
+    assert_eq!(
+        headers, 1,
+        "the skill has {headers} lines equal to `{TABLE_HEADER}` rather than one: restore the router table's three-column header verbatim, because every row is read from below that line"
+    );
+    let header = lines
+        .iter()
+        .position(|line| *line == TABLE_HEADER)
+        .expect("the header count of one guarantees the header line");
+    assert_eq!(
+        lines.get(header + 1).copied(),
+        Some(TABLE_SEPARATOR),
+        "the line after `{TABLE_HEADER}` is `{:?}` rather than `{TABLE_SEPARATOR}`: keep the separator directly under the header so the header and the rows stay one table",
+        lines.get(header + 1)
+    );
+    let first = header + 2;
+    let rows: Vec<&'static str> = lines[first..]
+        .iter()
+        .copied()
         .take_while(|line| line.starts_with('|'))
-        .filter(|line| !line.starts_with("| Group |") && !line.starts_with("|---"))
-        .collect()
+        .collect();
+    let tail = first + rows.len();
+    for line in &lines[tail..] {
+        assert!(
+            !line.trim_start().starts_with('|'),
+            "the skill has the table row `{line}` after the router table ends: keep every table row in the one table, because a second table is a second router"
+        );
+    }
+    rows
+}
+
+/// The trimmed body under `heading`, up to the next `## ` heading.
+fn section_body(heading: &str) -> String {
+    let lines: Vec<&'static str> = SKILL.lines().collect();
+    let start = lines.iter().position(|line| *line == heading).map_or_else(
+        || {
+            panic!(
+                "the skill has no `{heading}` heading: keep the section so its policy has one home"
+            )
+        },
+        |index| index + 1,
+    );
+    let body: Vec<&str> = lines[start..]
+        .iter()
+        .copied()
+        .take_while(|line| !line.starts_with("## "))
+        .collect();
+    body.join("\n").trim().to_string()
 }
 
 /// A table cell with one pair of surrounding backticks removed.
@@ -113,17 +186,19 @@ fn word_count(word: &str) -> usize {
 
 #[test]
 fn metadata_declares_the_identity_and_negative_trigger() {
+    assert!(
+        SKILL.starts_with("---\n"),
+        "the skill does not open with a `---` frontmatter fence: start the file with the fence, because metadata outside the frontmatter is prose a client never reads as identity"
+    );
+    let name = frontmatter_value("name");
     assert_eq!(
-        frontmatter_value("name"),
-        "clio-mcp",
-        "the skill's frontmatter `name` is `{}`, not `clio-mcp`: name the skill after its directory",
-        frontmatter_value("name")
+        name, SKILL_NAME,
+        "the skill's frontmatter `name` is `{name}`, not `{SKILL_NAME}`: name the skill after its directory"
     );
     let description = frontmatter_value("description");
-    let trigger = "DO NOT TRIGGER on a greenfield turn that needs no prior state.";
-    assert!(
-        description.contains(trigger),
-        "the frontmatter `description` is `{description}` and lacks `{trigger}`: keep the negative trigger in the description a client reads first"
+    assert_eq!(
+        description, SKILL_DESCRIPTION,
+        "the frontmatter `description` is `{description}`, not `{SKILL_DESCRIPTION}`: keep the one trigger sentence and the one negative trigger, because a client reads this line first and an added claim rides along unread"
     );
     let lowered = SKILL.to_lowercase();
     for claim in NO_CLIENT_LOADING {
@@ -152,6 +227,11 @@ fn router_has_one_valid_row_per_catalog_group() {
     );
     for (index, (row, spec)) in rows.iter().zip(GROUP_TABLE).enumerate() {
         let row_number = index + 1;
+        let fields = row.split('|').count();
+        assert_eq!(
+            fields, 5,
+            "table row {row_number} is `{row}` and splits on `|` into {fields} fields rather than 5: keep three columns between the two edge separators, because a fourth cell is a fourth column nothing here validates"
+        );
         let id = spec.group.as_str();
         let opening = format!("| {id} |");
         assert!(
@@ -173,22 +253,31 @@ fn router_has_one_valid_row_per_catalog_group() {
 
 #[test]
 fn router_table_names_no_individual_tool() {
+    // A scan of the bare row collides with the catalog's own wording: `correct`
+    // is a word of item-write, `inspect` of item-read and belief, `summarize`
+    // of item-read, `verify` and `repair` of ops, and the substrings `store`
+    // (in "stored"), `import` and `export` (in "imports" and "exports") each
+    // spell a tool. A whole-word scan keeps the last three and still fails on
+    // the first five, so each row is scanned with its one approved sentence
+    // masked out instead: the group cell, the reference cell, and any text
+    // added around the sentence all still fail on a tool name.
     let tools: Vec<&'static str> = GROUP_TABLE
         .iter()
         .flat_map(|spec| spec.tools.iter().copied())
         .collect();
-    for (index, row) in data_rows().iter().enumerate() {
+    for (index, (row, spec)) in data_rows().iter().zip(GROUP_TABLE).enumerate() {
         let row_number = index + 1;
         let cells: Vec<&str> = row.split('|').map(str::trim).map(unbackticked).collect();
+        let masked = row.replace(spec.when_to_use, "");
         for tool in &tools {
+            assert!(
+                !masked.contains(tool),
+                "table row {row_number} is `{row}`, which names the individual tool `{tool}` outside the catalog sentence `{}`: a row names a group and a reference file, never a tool",
+                spec.when_to_use
+            );
             assert!(
                 !cells.contains(tool),
                 "table row {row_number} is `{row}`, whose cell `{tool}` names an individual tool: keep the table at group granularity and leave `{tool}` to its group reference file"
-            );
-            let backticked = format!("`{tool}`");
-            assert!(
-                !row.contains(&backticked),
-                "table row {row_number} is `{row}`, which names the individual tool `{tool}`: a row names a group and a reference file, never a tool"
             );
         }
     }
@@ -207,10 +296,10 @@ fn every_call_rule_appears_exactly_once() {
 
 #[test]
 fn four_call_budget_appears_once_and_scopes_only_retrieval() {
-    let budgets = SKILL.matches(BUDGET_SENTENCE).count();
+    let body = section_body("## Turn budget");
     assert_eq!(
-        budgets, 1,
-        "the budget sentence `{BUDGET_SENTENCE}` appears {budgets} times: keep one sentence so the cap has one value"
+        body, BUDGET_BODY,
+        "the `## Turn budget` section reads `{body}` rather than `{BUDGET_BODY}`: keep the one budget sentence with its one value and its scope, because an added sentence, a widened scope, a changed value, or a duplicate all change what a turn may call"
     );
     for operation in BUDGETED_OPERATIONS {
         let count = SKILL.matches(operation).count();
@@ -219,11 +308,6 @@ fn four_call_budget_appears_once_and_scopes_only_retrieval() {
             "the budgeted operation {operation} appears {count} times: the budget names each of the two operations once and no other"
         );
     }
-    let scope = "This budget does not cap any other tool.";
-    assert!(
-        SKILL.contains(scope),
-        "the skill lacks `{scope}`: state the budget's scope so no reader applies it to another tool"
-    );
     let fours = word_count("four");
     assert_eq!(
         fours, 1,
@@ -233,16 +317,16 @@ fn four_call_budget_appears_once_and_scopes_only_retrieval() {
 
 #[test]
 fn version_check_runs_once_and_applies_no_update() {
+    let body = section_body("## End-of-session check");
+    assert_eq!(
+        body, CHECK_BODY,
+        "the `## End-of-session check` section reads `{body}` rather than `{CHECK_BODY}`: keep the check to one read that reports and applies nothing, because an added sentence can widen it into a mutation"
+    );
     let check = "`clio version --check`";
     let checks = SKILL.matches(check).count();
     assert_eq!(
         checks, 1,
         "the command {check} appears {checks} times: run the check once at session end"
-    );
-    let no_update = "Apply no update.";
-    assert!(
-        SKILL.contains(no_update),
-        "the skill lacks `{no_update}`: state that the check reads and changes nothing"
     );
     let lowered = SKILL.to_lowercase();
     for claim in NO_UPDATE {
