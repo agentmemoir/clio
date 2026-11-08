@@ -10,8 +10,8 @@
 //! ## Owns
 //! - The supported-harness hint, generated from the registry
 //! - The usage errors for a missing, unknown, or known-but-unsupported harness
-//! - The full help text, including the portable-only default for install and
-//!   what `--force` replaces
+//! - The full help text, including the portable-only default for install, the
+//!   installed package identity, and what `--force` replaces
 //! - The success text, including a harness's config-surface note
 //!
 //! ## Does not own
@@ -88,6 +88,10 @@ pub(crate) fn success_text(record: &HarnessRecord, message: &str) -> String {
 /// user here.
 const FORCE_PARAGRAPH: &str = "--force replaces the skill assets clio recorded, and only those: without it, a locally edited asset, a missing asset, or an unexpected file in the package directory refuses the whole install. It never deletes an unowned file and never deletes a skill root.";
 
+/// The installed package identity, stated once where a user installing reads it:
+/// the directory the package lands in, and the name its frontmatter carries.
+const PACKAGE_IDENTITY_PARAGRAPH: &str = "The skill package directory is clio-mcp, and the same name is the name field in that package's SKILL.md frontmatter.";
+
 /// The surface help: the usage line, what the verb does, the supported list
 /// from the registry, and one example.
 pub(crate) fn print_help(verb: Verb) {
@@ -96,10 +100,10 @@ pub(crate) fn print_help(verb: Verb) {
 
 /// The full help text, split from `print_help` so a test can read it without
 /// capturing stdout. Install states that a call with no `--harness` writes only
-/// the portable skill package and skips registration, and what `--force`
-/// replaces. The Antigravity config-surface note is included because help lists
-/// every supported harness, and an Antigravity user needs to know which file
-/// received the entry.
+/// the portable skill package and skips registration, names the installed
+/// package identity, and says what `--force` replaces. The Antigravity
+/// config-surface note is included because help lists every supported harness,
+/// and an Antigravity user needs to know which file received the entry.
 pub(crate) fn help_text(verb: Verb) -> String {
     let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or_else(|| match verb {
         Verb::Install => "clio install [--harness <name>] [--force]".to_owned(),
@@ -110,6 +114,8 @@ pub(crate) fn help_text(verb: Verb) -> String {
         text.push_str(
             "With no --harness, write the portable skill package to ~/.agents/skills/clio-mcp and skip server registration.\n\n",
         );
+        text.push_str(PACKAGE_IDENTITY_PARAGRAPH);
+        text.push_str("\n\n");
         text.push_str(FORCE_PARAGRAPH);
         text.push_str("\n\n");
     }

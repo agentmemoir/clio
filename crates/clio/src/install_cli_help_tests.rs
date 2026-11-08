@@ -120,6 +120,21 @@ fn install_help_names_the_portable_default_and_an_example() {
 }
 
 #[test]
+fn install_help_states_the_installed_package_identity_once() {
+    let sentence = "The skill package directory is clio-mcp, and the same name is the name field in that package's SKILL.md frontmatter.";
+    let text = help_text(Verb::Install);
+    assert_eq!(
+        text.matches(sentence).count(),
+        1,
+        "the install help names the package identity exactly once: {text}"
+    );
+    assert!(
+        !help_text(Verb::Uninstall).contains(sentence),
+        "only the install help carries the package identity"
+    );
+}
+
+#[test]
 fn uninstall_help_omits_the_portable_default() {
     let text = help_text(Verb::Uninstall);
     assert!(text.contains("clio uninstall"), "{text}");
