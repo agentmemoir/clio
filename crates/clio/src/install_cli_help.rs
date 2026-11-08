@@ -11,7 +11,8 @@
 //! - The supported-harness hint, generated from the registry
 //! - The usage errors for a missing, unknown, or known-but-unsupported harness
 //! - The full help text, including the portable-only default for install, the
-//!   installed package identity, and what `--force` replaces
+//!   installed package identity, what `--force` replaces, and what
+//!   `--skill-only` removes
 //! - The success text, including a harness's config-surface note
 //!
 //! ## Does not own
@@ -94,6 +95,9 @@ const FORCE_PARAGRAPH: &str = "--force replaces the files the skill package owns
 /// the directory the package lands in, and the name its frontmatter carries.
 const PACKAGE_IDENTITY_PARAGRAPH: &str = "The skill package directory is clio-mcp, and the same name is the name field in that package's SKILL.md frontmatter.";
 
+/// What `uninstall --skill-only` removes and what it leaves alone.
+const SKILL_ONLY_PARAGRAPH: &str = "With --skill-only, remove only the installed clio-mcp skill package and keep the server registration. With no --harness it targets ~/.agents/skills/clio-mcp and removes that copy only when no harness still references it. When a path from the home directory to the package, or the marker itself, is a symbolic link, the copy is left untouched and nothing is removed.";
+
 /// The surface help: the usage line, what the verb does, the supported list
 /// from the registry, and one example.
 pub(crate) fn print_help(verb: Verb) {
@@ -103,13 +107,14 @@ pub(crate) fn print_help(verb: Verb) {
 /// The full help text, split from `print_help` so a test can read it without
 /// capturing stdout. Install states that a call with no `--harness` writes only
 /// the portable skill package and skips registration, names the installed
-/// package identity, and says what `--force` replaces. The Antigravity
+/// package identity, and says what `--force` replaces. Uninstall states what
+/// `--skill-only` removes and what it leaves alone. The Antigravity
 /// config-surface note is included because help lists every supported harness,
 /// and an Antigravity user needs to know which file received the entry.
 pub(crate) fn help_text(verb: Verb) -> String {
     let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or_else(|| match verb {
         Verb::Install => "clio install [--harness <name>] [--force]".to_owned(),
-        Verb::Uninstall => "clio uninstall --harness <name>".to_owned(),
+        Verb::Uninstall => "clio uninstall [--harness <name>] [--skill-only]".to_owned(),
     });
     let mut text = format!("{usage}\n\n{}\n\n", verb.purpose());
     if verb == Verb::Install {
@@ -119,6 +124,9 @@ pub(crate) fn help_text(verb: Verb) -> String {
         text.push_str(PACKAGE_IDENTITY_PARAGRAPH);
         text.push_str("\n\n");
         text.push_str(FORCE_PARAGRAPH);
+        text.push_str("\n\n");
+    } else {
+        text.push_str(SKILL_ONLY_PARAGRAPH);
         text.push_str("\n\n");
     }
     text.push_str(&supported_hint());

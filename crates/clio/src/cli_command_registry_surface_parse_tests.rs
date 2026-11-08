@@ -359,10 +359,11 @@ fn setup_states_its_accepted_set_and_matches_its_parser() {
 }
 
 /// `install` takes `--harness` as optional and accepts `--force`, `uninstall`
-/// requires `--harness` and documents no `--force`, and the record-derived name
-/// list gates the flag through the shared parser in both value spellings.
+/// documents optional `--harness` and `--skill-only` and no `--force`, and the
+/// record-derived name list gates the flag through the shared parser in both
+/// value spellings.
 #[test]
-fn install_takes_harness_as_optional_and_uninstall_requires_it() {
+fn install_takes_harness_as_optional_and_uninstall_documents_skill_only() {
     let install = record("install");
     assert_eq!(
         install.usage_line(),
@@ -373,8 +374,14 @@ fn install_takes_harness_as_optional_and_uninstall_requires_it() {
         "install must accept a call with no --harness"
     );
     let uninstall = record("uninstall");
-    assert_eq!(uninstall.usage_line(), "clio uninstall --harness <name>");
-    assert_eq!(uninstall.required_flags(), ["harness"]);
+    assert_eq!(
+        uninstall.usage_line(),
+        "clio uninstall [--harness <name>] [--skill-only]"
+    );
+    assert!(
+        uninstall.required_flags().is_empty(),
+        "uninstall accepts no harness under --skill-only, so the decide step enforces the pair"
+    );
 
     let install_parser = install.parser_spec();
     assert_eq!(
@@ -388,8 +395,13 @@ fn install_takes_harness_as_optional_and_uninstall_requires_it() {
     );
     let uninstall_parser = record("uninstall").parser_spec();
     assert_eq!(
+        uninstall_parser.value_flags(),
+        ["db", "backend", "bank", "actor", "output", "harness"],
+        "uninstall documents the same optional --harness value flag"
+    );
+    assert_eq!(
         uninstall_parser.bool_flags(),
-        ["no-input", "yes"],
+        ["no-input", "yes", "skill-only"],
         "uninstall documents no --force"
     );
 

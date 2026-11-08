@@ -13,6 +13,8 @@
 //!   the exit code
 //! - The install flow's order: write the embedded skill assets, then register;
 //!   with no `--harness`, write the portable package only and skip registration
+//! - The skill-only uninstall flow: remove the recorded skill package and never
+//!   touch the harness registration
 //! - Threading `--force` from the parsed decision into the skill step, so a
 //!   conflicting skill package is replaced instead of refused
 //! - The `clio` executable lookup, with an injected seam for tests
@@ -30,7 +32,8 @@
 //!   module owns every spawned process, and the writer modules own the file
 //!   merge, backup, and parse-refusal primitives
 //! - Writing the skill package (`skill_install`) or its text
-//!   (`skill_install_text`)
+//!   (`skill_install_text`), and removing it (`skill_uninstall`,
+//!   `skill_uninstall_text`)
 //! - Which harnesses exist, their names, and their argv shapes
 //!   (`agent_harness`)
 //!
@@ -47,8 +50,8 @@
 //!   harness binary is missing, the harness command exited non-zero, the
 //!   change could not be verified, the harness's config file could not be
 //!   read, parsed, or written, or the portable skill write failed).
-//! - `2`: an unknown `--harness`, a missing `--harness` on uninstall, or any
-//!   other flag error.
+//! - `2`: an unknown `--harness`, a missing `--harness` on uninstall outside
+//!   `--skill-only`, or any other flag error.
 //!
 //! Keep this module focused on the install and uninstall command surfaces.
 
@@ -154,6 +157,15 @@ pub(crate) fn run_with_skills(
             }
             println!("{}", supported_hint());
             ExitCode::SUCCESS
+        }
+        Decision::SkillOnly { record } => {
+            match crate::skill_uninstall::uninstall_skill_only_and_report(
+                record,
+                &direct_write_env(),
+            ) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(message) => fail(verb, &message),
+            }
         }
         Decision::Run { record, force } => {
             if verb == Verb::Install

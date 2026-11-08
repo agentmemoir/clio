@@ -114,6 +114,7 @@ pub(crate) fn install(
         env,
         &missing,
         force,
+        Some(record.name),
     )
 }
 
@@ -126,7 +127,7 @@ pub(crate) fn install_portable(
     force: bool,
 ) -> Result<SkillOutcome, WriteError> {
     let missing = "cannot resolve the portable skill root because the home directory is unknown";
-    write_into_all(PORTABLE_ROOTS, env, missing, force)
+    write_into_all(PORTABLE_ROOTS, env, missing, force, None)
 }
 
 /// Plan every root, then write. Planning reads each package directory and its marker and runs no write, so a conflict in one root is known before another root is touched.
@@ -135,11 +136,12 @@ fn write_into_all(
     env: &DirectWriteEnv,
     missing: &str,
     force: bool,
+    harness: Option<&str>,
 ) -> Result<SkillOutcome, WriteError> {
     let mut work = Vec::with_capacity(roots.len());
     let mut conflicts = Vec::new();
     for package in resolve_packages(roots, env, missing)? {
-        match plan_package(&package, force)? {
+        match plan_package(&package, force, harness)? {
             Ok(plan) => work.push((package, plan)),
             Err(reasons) => conflicts.push(RootConflict {
                 dir: package,
@@ -169,7 +171,8 @@ fn write_into_all(
             RootWork::Write {
                 files,
                 preserved_foreign,
-            } => write_package(&package, &files, preserved_foreign)?,
+                marker,
+            } => write_package(&package, &files, preserved_foreign, &marker)?,
         });
     }
     Ok(SkillOutcome::Written { roots })
@@ -202,6 +205,8 @@ enum RootWork {
     Write {
         files: Vec<String>,
         preserved_foreign: Vec<String>,
+        /// The marker the write records, merged from the install state.
+        marker: SkillMarker,
     },
 }
 
@@ -220,9 +225,12 @@ enum InstalledMarker {
 /// The plan compares the marker on disk with the marker these assets produce, so a difference in the installer, the package version, the catalog hash, the payload digest, or the recorded file map is planned as a write even when every asset already matches.
 ///
 /// An unreadable marker is its own conflict and is refused even with `force`: without the record of which files this program owns, no file's bytes can be attributed to it, so replacing anything would be a guess.
+///
+/// The expected marker carries the install state too: the recorded state when a marker is there, and otherwise whether this installation must create the package directory plus the `harness` that asked for it.
 fn plan_package(
     package: &Path,
     force: bool,
+    harness: Option<&str>,
 ) -> Result<Result<RootWork, Vec<ConflictReason>>, WriteError> {
     let on_disk = scan_package_dir(package)?;
     let marker = match installed_marker(package)? {
@@ -234,7 +242,8 @@ fn plan_package(
             }]));
         }
     };
-    let expected = SkillMarker::from_assets(SKILL_ASSETS, &skill_marker::catalog_hash());
+    let expected = SkillMarker::from_assets(SKILL_ASSETS, &skill_marker::catalog_hash())
+        .with_install_state(marker.as_ref(), harness, package.exists());
     Ok(
         match plan_install(marker.as_ref(), &expected, &on_disk, force) {
             InstallPlan::Conflict { reasons } => Err(reasons),
@@ -245,6 +254,7 @@ fn plan_package(
             } => Ok(RootWork::Write {
                 files,
                 preserved_foreign,
+                marker: expected,
             }),
         },
     )
@@ -268,11 +278,12 @@ fn installed_marker(package: &Path) -> Result<InstalledMarker, WriteError> {
 
 /// Write the planned files into `package`, the marker last.
 ///
-/// The references go first and the router goes last, so a failure on a reference leaves no loadable router that points at a missing file. Only the files the plan named are touched, so a plan holding nothing but the marker rewrites the marker and leaves every asset's bytes and timestamp alone. The marker is built from the incoming assets, never from what the directory holds.
+/// The references go first and the router goes last, so a failure on a reference leaves no loadable router that points at a missing file. Only the files the plan named are touched, so a plan holding nothing but the marker rewrites the marker and leaves every asset's bytes and timestamp alone. The marker written is the one the plan built from the incoming assets and the install state.
 fn write_package(
     package: &Path,
     files: &[String],
     preserved_foreign: Vec<String>,
+    marker: &SkillMarker,
 ) -> Result<SkillRootOutcome, WriteError> {
     std::fs::create_dir_all(package).map_err(|error| io_error("create", package, &error))?;
     let planned = |name: &str| files.iter().any(|file| file == name);
@@ -289,7 +300,7 @@ fn write_package(
         write_asset(package, name, text)?;
         written.push(name.to_owned());
     }
-    if planned(SKILL_MARKER_FILE) && write_marker(package)? {
+    if planned(SKILL_MARKER_FILE) && write_marker(package, marker)? {
         written.push(SKILL_MARKER_FILE.to_owned());
     }
     Ok(SkillRootOutcome {
@@ -308,10 +319,9 @@ fn write_asset(package: &Path, name: &str, text: &str) -> Result<(), WriteError>
     write_bytes_atomic(&path, text.as_bytes())
 }
 
-/// Write the marker the incoming assets record, unless the package already holds exactly those bytes. The plan already asked for it whenever a recorded field differs; the byte comparison stays as the last guard, so a marker that is somehow current is never rewritten. Returns whether it wrote, so the outcome names the marker only when the file changed.
-fn write_marker(package: &Path) -> Result<bool, WriteError> {
+/// Write `marker` unless the package already holds exactly those bytes. The plan already asked for it whenever a recorded field differs; the byte comparison stays as the last guard, so a marker that is somehow current is never rewritten. Returns whether it wrote, so the outcome names the marker only when the file changed.
+fn write_marker(package: &Path, marker: &SkillMarker) -> Result<bool, WriteError> {
     let path = package.join(SKILL_MARKER_FILE);
-    let marker = SkillMarker::from_assets(SKILL_ASSETS, &skill_marker::catalog_hash());
     let bytes = marker.to_bytes().map_err(|error| WriteError::Io {
         detail: format!(
             "failed to serialize the skill marker for {}: {error:?}",
@@ -335,7 +345,7 @@ fn report(text: String, outcome: &SkillOutcome) -> Result<(), String> {
 }
 
 /// Replace `path` with `bytes` through a same-directory temp sibling and a rename. No backup is made: the assets are generated from the binary and a re-run restores them. A file whose bytes already match is never rewritten, which is what keeps a repeated install free of timestamp changes.
-fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
+pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
     let tmp = temp_sibling(path);
     std::fs::write(&tmp, bytes).map_err(|error| io_error("write", &tmp, &error))?;
     if let Err(error) = std::fs::rename(&tmp, path) {

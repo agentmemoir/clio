@@ -8,8 +8,8 @@
 //! canonical byte form two builds of the same assets produce.
 //!
 //! ## Owns
-//! - Every assertion over `SkillMarker`, `payload_digest`, `owned_files`, and
-//!   `sha256_hex`
+//! - Every assertion over `SkillMarker`, `payload_digest`, `payload_digest_of_bytes`,
+//!   `owned_files`, and `sha256_hex`
 //!
 //! ## Does not own
 //! - The marker implementation under test (`skill_marker`)
@@ -133,6 +133,33 @@ fn bytes_that_are_not_a_marker_are_refused() {
 }
 
 #[test]
+fn a_marker_that_names_a_path_outside_the_package_is_refused() {
+    let marker = SkillMarker::from_assets(&assets(), CATALOG);
+    for key in [
+        "/etc/passwd",
+        "../sibling/SKILL.md",
+        "references/../../escape",
+        ".",
+        "",
+        SKILL_MARKER_FILE,
+    ] {
+        let mut value = serde_json::to_value(&marker).expect("the marker is a JSON value");
+        value["files"]
+            .as_object_mut()
+            .expect("the marker records a file map")
+            .insert(key.to_owned(), serde_json::json!("outside"));
+        let bytes = serde_json::to_vec(&value).expect("the value serializes");
+        assert!(
+            matches!(
+                SkillMarker::from_bytes(&bytes),
+                Err(MarkerError::Malformed { .. })
+            ),
+            "{key:?} must be refused"
+        );
+    }
+}
+
+#[test]
 fn a_field_this_version_does_not_know_is_refused() {
     let marker = SkillMarker::from_assets(&assets(), CATALOG);
     let mut value = serde_json::to_value(&marker).expect("the marker is a JSON value");
@@ -153,6 +180,57 @@ fn the_catalog_hash_is_the_one_the_schema_pack_publishes() {
         .expect("the pack publishes a catalog hash");
     assert_eq!(catalog_hash(), expected);
     assert!(expected.starts_with("fnv1a64:"), "{expected}");
+}
+
+#[test]
+fn the_install_state_records_the_origin_of_the_directory_and_every_harness() {
+    let marker = SkillMarker::from_assets(&assets(), CATALOG).with_install_state(
+        None,
+        Some("claude"),
+        false,
+    );
+    assert!(
+        marker.created_package_dir,
+        "an installation into a directory it made records that it made it"
+    );
+    let harnesses: Vec<&str> = marker.harnesses.iter().map(String::as_str).collect();
+    assert_eq!(harnesses, ["claude"]);
+
+    let merged = SkillMarker::from_assets(&assets(), CATALOG).with_install_state(
+        Some(&marker),
+        Some("codex"),
+        true,
+    );
+    assert!(
+        merged.created_package_dir,
+        "a rewrite keeps the origin the recorded marker names"
+    );
+    let harnesses: Vec<&str> = merged.harnesses.iter().map(String::as_str).collect();
+    assert_eq!(
+        harnesses,
+        ["claude", "codex"],
+        "a later harness joins the set"
+    );
+
+    let bytes = merged.to_bytes().expect("the marker serializes");
+    let text = String::from_utf8(bytes).expect("the marker is UTF-8");
+    let ordered = ["\"files\"", "\"created_package_dir\"", "\"harnesses\""]
+        .map(|field| text.find(field).expect("the field is recorded"));
+    assert!(
+        ordered.windows(2).all(|pair| pair[0] < pair[1]),
+        "the install state keeps its declared order after the file map: {text}"
+    );
+
+    let mut old = serde_json::to_value(SkillMarker::from_assets(&assets(), CATALOG))
+        .expect("the marker is a JSON value");
+    let object = old.as_object_mut().expect("the marker is a JSON object");
+    object.remove("created_package_dir");
+    object.remove("harnesses");
+    let old_bytes = serde_json::to_vec(&old).expect("the older marker serializes");
+    let parsed =
+        SkillMarker::from_bytes(&old_bytes).expect("a marker without the install state parses");
+    assert!(!parsed.created_package_dir);
+    assert!(parsed.harnesses.is_empty());
 }
 
 #[test]

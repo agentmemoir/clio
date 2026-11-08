@@ -162,10 +162,22 @@ fn uninstall_help_omits_the_portable_default() {
     let text = help_text(Verb::Uninstall);
     assert!(text.contains("clio uninstall"), "{text}");
     assert!(
+        text.contains("clio uninstall [--harness <name>] [--skill-only]"),
+        "{text}"
+    );
+    assert!(
         text.contains("Remove the clio MCP server registration from a supported agent harness."),
         "{text}"
     );
     assert!(!text.contains("portable skill package"), "{text}");
+    assert!(
+        text.contains("With --skill-only, remove only the installed clio-mcp skill package"),
+        "{text}"
+    );
+    assert!(
+        text.contains("removes that copy only when no harness still references it"),
+        "{text}"
+    );
     assert!(
         text.contains("Example: clio uninstall --harness claude"),
         "{text}"
