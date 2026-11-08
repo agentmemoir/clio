@@ -3,17 +3,18 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for declaring the drift target's four check
+//! This module is responsible for declaring the drift target's five check
 //! modules and for the inputs they share: the skill text and the section
 //! readers every structural assertion anchors to. The router policy lives in
 //! `router_policy`; the group reference files live in `group_references`; the
 //! reference file examples live in `reference_examples`; the ownership rule
-//! lives in `ownership`.
+//! lives in `ownership`; the catalog hash check lives in `catalog_hash`.
 //!
 //! ## Owns
 //! - The target's module declarations
 //! - `SKILL`, the skill under check, read at compile time
 //! - `body_under`, the single section reader all four modules call
+//! - The catalog hash drift check (`catalog_hash`)
 //!
 //! ## Does not own
 //! - The router policy checks (`router_policy`)
@@ -38,6 +39,7 @@
 //! so a check that needs a section body compares against exactly the lines
 //! under that heading.
 
+mod catalog_hash;
 mod group_references;
 mod ownership;
 mod reference_examples;
