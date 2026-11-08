@@ -129,7 +129,10 @@ fn references() -> Vec<(String, String)> {
                 .file_name()
                 .into_string()
                 .unwrap_or_else(|name| {
-                    panic!("the references directory `{REFERENCES_DIR}` holds `{name:?}`, a name that is not UTF-8")
+                    panic!(
+                        "the references directory `{REFERENCES_DIR}` holds `{}`, a name that is not UTF-8",
+                        name.display()
+                    )
                 })
         })
         .collect();
