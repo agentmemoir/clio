@@ -3,21 +3,23 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for declaring the drift target's three check
+//! This module is responsible for declaring the drift target's four check
 //! modules and for the inputs they share: the skill text and the section
 //! readers every structural assertion anchors to. The router policy lives in
 //! `router_policy`; the group reference files live in `group_references`; the
-//! reference file examples live in `reference_examples`.
+//! reference file examples live in `reference_examples`; the ownership rule
+//! lives in `ownership`.
 //!
 //! ## Owns
 //! - The target's module declarations
 //! - `SKILL`, the skill under check, read at compile time
-//! - `body_under`, the single section reader all three modules call
+//! - `body_under`, the single section reader all four modules call
 //!
 //! ## Does not own
 //! - The router policy checks (`router_policy`)
 //! - The group reference checks (`group_references`)
 //! - The reference example checks (`reference_examples`)
+//! - The ownership rule over the reference tool lists (`ownership`)
 //! - The wording of the skill, its frontmatter, or the prose of its reference
 //!   files
 //!
@@ -29,7 +31,7 @@
 //! change to how a section body is read belongs here, because all three
 //! modules must read the same slice the same way.
 //!
-//! Every structural assertion in all three modules is anchored to an exact
+//! Every structural assertion in all four modules is anchored to an exact
 //! line or an exact section body rather than to a substring, because a
 //! substring check reads a widened sentence, an added column, or a second
 //! table as the wording it expects. `body_under` is the only section reader,
@@ -37,6 +39,7 @@
 //! under that heading.
 
 mod group_references;
+mod ownership;
 mod reference_examples;
 mod router_policy;
 

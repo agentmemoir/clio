@@ -1,0 +1,1 @@
+The MCP skill package now has a read-only ownership check that gives each of the 86 bound business tools exactly one group owner and reports unknown, unbound, missing, wrong-group, and duplicate entries distinctly.

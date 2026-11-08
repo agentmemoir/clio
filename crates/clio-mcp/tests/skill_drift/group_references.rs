@@ -110,7 +110,7 @@ const POINTER: &str = "tool_describe";
 /// name is also compared with the name the row derives, so a hand-written list
 /// that disagrees with the catalog fails here instead of reading a file the
 /// router never points at.
-fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)> {
+pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)> {
     REFERENCES
         .iter()
         .enumerate()
@@ -135,8 +135,9 @@ fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static G
 ///
 /// The list is read from the first non-empty line only, and
 /// `reference_tool_list_has_no_continuation_line` fails on a second one, so a
-/// tool added on a line of its own cannot slip past the set comparison below.
-fn tools_line<'a>(label: &str, name: &str, text: &'a str) -> &'a str {
+/// tool added on a line of its own cannot slip past the ownership rule that
+/// reads this line.
+pub(crate) fn tools_line<'a>(label: &str, name: &str, text: &'a str) -> &'a str {
     let lines: Vec<&'a str> = text.lines().collect();
     let heading = lines
         .iter()
@@ -158,7 +159,7 @@ fn tools_line<'a>(label: &str, name: &str, text: &'a str) -> &'a str {
 }
 
 /// The backticked tool entries of `tools`, or a failure naming the bare entry.
-fn listed_tools<'a>(name: &str, tools: &'a str) -> Vec<&'a str> {
+pub(crate) fn listed_tools<'a>(name: &str, tools: &'a str) -> Vec<&'a str> {
     tools
         .split(',')
         .map(str::trim)
@@ -198,15 +199,10 @@ fn reference_files_match_group_table() {
             spec.when_to_use
         );
 
-        let tools = tools_line(group, name, text);
-        let mut listed = listed_tools(name, tools);
-        let mut catalog: Vec<&str> = spec.tools.to_vec();
-        listed.sort_unstable();
-        catalog.sort_unstable();
-        assert_eq!(
-            listed, catalog,
-            "the reference `{name}` lists {listed:?} against the `{group}` catalog row {catalog:?}: list exactly the group's tools, because a missing or extra tool leaves the file and the catalog telling a caller different things"
-        );
+        // Exact tool membership belongs to the named ownership rules, which
+        // report one rule at a time instead of one generic set difference. This
+        // test keeps the reference count, the derived name, the when-to-use
+        // sentence, the pointer, and the example.
 
         // The pointer lives in its own section, so a file that mentions
         // `tool_describe` in prose elsewhere no longer satisfies the contract.
