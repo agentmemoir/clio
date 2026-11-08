@@ -87,3 +87,7 @@ impl fmt::Display for Version {
         write!(formatter, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
+
+#[cfg(test)]
+#[path = "version_check_semver_tests.rs"]
+mod tests;

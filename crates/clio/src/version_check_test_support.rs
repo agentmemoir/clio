@@ -13,8 +13,8 @@
 //! - `Server` and `Reply`, the listener and what it answers
 //!
 //! ## Does not own
-//! - Any assertion (`version_check_tests`, `version_check_http_tests`)
-//! - The check's implementation under test (`version_check`)
+//! - Any assertion (`version_check_tests`, `version_check_release_tests`)
+//! - The implementation under test (`version_check`, `version_check_release`)
 //!
 //! ## Boundary
 //!
@@ -34,12 +34,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 /// One test's own directory, removed when the guard drops.
-pub(super) struct Scratch {
+pub(crate) struct Scratch {
     root: PathBuf,
 }
 
 impl Scratch {
-    pub(super) fn new(label: &str) -> Scratch {
+    pub(crate) fn new(label: &str) -> Scratch {
         static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
         let nanos = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -53,7 +53,7 @@ impl Scratch {
         Scratch { root }
     }
 
-    pub(super) fn home(&self) -> &Path {
+    pub(crate) fn home(&self) -> &Path {
         &self.root
     }
 }
@@ -65,12 +65,12 @@ impl Drop for Scratch {
 }
 
 /// A Linux-layout environment rooted at `home`, so no test reads the real home.
-pub(super) fn env(home: &Path) -> DirectWriteEnv {
+pub(crate) fn env(home: &Path) -> DirectWriteEnv {
     DirectWriteEnv::with(OsLayout::Linux, home.to_path_buf(), None, None, None)
 }
 
 /// The package directory one home-relative root holds.
-pub(super) fn package(home: &Path, parts: &[&str]) -> PathBuf {
+pub(crate) fn package(home: &Path, parts: &[&str]) -> PathBuf {
     parts
         .iter()
         .fold(home.to_path_buf(), |path, part| path.join(part))
@@ -78,7 +78,7 @@ pub(super) fn package(home: &Path, parts: &[&str]) -> PathBuf {
 }
 
 /// Write a marker recording `package_version` and `catalog_hash` into `package`.
-pub(super) fn write_marker(package: &Path, package_version: &str, catalog_hash: &str) {
+pub(crate) fn write_marker(package: &Path, package_version: &str, catalog_hash: &str) {
     std::fs::create_dir_all(package).expect("the package directory can be created");
     let marker = SkillMarker {
         installer: crate::skill_marker::SKILL_INSTALLER.to_owned(),
@@ -97,7 +97,7 @@ pub(super) fn write_marker(package: &Path, package_version: &str, catalog_hash: 
 }
 
 /// The four keys the report's line carries, in the order it writes them.
-pub(super) const KEYS: [&str; 4] = [
+pub(crate) const KEYS: [&str; 4] = [
     "\"skillVersion\"",
     "\"catalogHash\"",
     "\"releaseStatus\"",
@@ -105,7 +105,7 @@ pub(super) const KEYS: [&str; 4] = [
 ];
 
 /// Every key of the line, in the order the line states them.
-pub(super) fn keys_of(line: &str) -> Vec<&'static str> {
+pub(crate) fn keys_of(line: &str) -> Vec<&'static str> {
     let mut found: Vec<(usize, &'static str)> = KEYS
         .iter()
         .filter_map(|key| line.find(key).map(|at| (at, *key)))
@@ -115,7 +115,7 @@ pub(super) fn keys_of(line: &str) -> Vec<&'static str> {
 }
 
 /// What the loopback listener does with the one request it receives.
-pub(super) enum Reply {
+pub(crate) enum Reply {
     /// Answer with these exact bytes and close.
     Bytes(Vec<u8>),
     /// Answer nothing, holding the connection open until the test stops it.
@@ -124,7 +124,7 @@ pub(super) enum Reply {
 
 /// One test's own loopback listener: bound to port 0, stopped and joined when
 /// the test ends, so no test shares a port and none leaks a thread.
-pub(super) struct Server {
+pub(crate) struct Server {
     address: String,
     requests: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
@@ -132,7 +132,7 @@ pub(super) struct Server {
 }
 
 impl Server {
-    pub(super) fn start(reply: Reply) -> Server {
+    pub(crate) fn start(reply: Reply) -> Server {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
         listener
             .set_nonblocking(true)
@@ -177,12 +177,12 @@ impl Server {
     }
 
     /// The endpoint URL for `path` on this listener.
-    pub(super) fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.address)
     }
 
     /// Stop the listener, join its thread, and report how many requests it saw.
-    pub(super) fn stop_and_count(mut self) -> usize {
+    pub(crate) fn stop_and_count(mut self) -> usize {
         self.stop.store(true, Ordering::Relaxed);
         let count = self.requests.load(Ordering::Relaxed);
         if let Some(handle) = self.handle.take() {
@@ -202,7 +202,7 @@ impl Drop for Server {
 }
 
 /// A 200 answer carrying `body` as JSON.
-pub(super) fn json_reply(body: &str) -> Vec<u8> {
+pub(crate) fn json_reply(body: &str) -> Vec<u8> {
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
@@ -211,17 +211,17 @@ pub(super) fn json_reply(body: &str) -> Vec<u8> {
 }
 
 /// A status answer with no body.
-pub(super) fn status_reply(code: u16) -> Vec<u8> {
+pub(crate) fn status_reply(code: u16) -> Vec<u8> {
     format!("HTTP/1.1 {code} Status\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").into_bytes()
 }
 
 /// A redirect to a port nothing listens on, so following it would fail loudly.
-pub(super) fn redirect_reply() -> Vec<u8> {
+pub(crate) fn redirect_reply() -> Vec<u8> {
     b"HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:1/elsewhere\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_vec()
 }
 
 /// A 200 answer one byte past the cap.
-pub(super) fn oversized_reply() -> Vec<u8> {
+pub(crate) fn oversized_reply() -> Vec<u8> {
     let body = vec![b'a'; crate::version_check_release::MAX_RESPONSE_BYTES + 1];
     let mut reply = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",

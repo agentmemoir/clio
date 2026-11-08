@@ -3,76 +3,37 @@
 //
 //! # Responsibility
 //!
-//! This module tests the parts of the `version` verb's check that need no
-//! socket: which roots the installation evidence is read from, the version
-//! text's grammar and ordering, the unavailable line, and the flags the verb
-//! refuses.
+//! This module tests the `version` verb's check itself: which roots the
+//! installation evidence is read from, the comparison an established answer
+//! drives, the unavailable line, and the flags the verb refuses.
 //!
 //! ## Owns
 //! - The root-selection and evidence cases: portable default, harness roots,
 //!   missing marker, disagreeing markers, unknown harness
-//! - The version parser and comparison cases
+//! - The evidence cases that must make no request at all
+//! - The comparison cases: current and newer, the line each one reports, and the
+//!   exit code it maps to
 //! - The unavailable JSON line, and the flag refusals
 //!
 //! ## Does not own
-//! - Anything that reads a release answer (`version_check_http_tests`)
+//! - The release request and every way its answer is refused
+//!   (`version_check_release_tests`)
+//! - The version text and its ordering (`version_check_semver_tests`)
 //! - The shared scratch home and listener (`version_check_test_support`)
 //! - The process boundary (`version_check_harness`)
 //!
 //! ## Boundary
 //!
-//! Test-only. Never compiled into production builds.
+//! Test-only. Never compiled into production builds. Every endpoint is a
+//! listener this test owns on port 0, so no test reaches the real network.
 //!
-//! Keep this module focused on the check's evidence and flags.
+//! Keep this module focused on the check's evidence, comparison, and flags.
 
-use super::test_support::{KEYS, Scratch, env, keys_of, package, write_marker};
-use super::{Missing, check, installation_evidence, version};
-use crate::version_check_semver::Version;
+use super::{Missing, ReleaseStatus, check, installation_evidence, version};
+use crate::version_check::test_support::{
+    KEYS, Reply, Scratch, Server, env, json_reply, keys_of, package, write_marker,
+};
 use std::process::ExitCode;
-
-/// A leading `v` is what a release tag carries, and the normalized form drops it.
-#[test]
-fn a_leading_v_is_accepted_and_never_rendered() {
-    let parsed = Version::parse("v1.2.3").expect("a tagged version parses");
-    assert_eq!(parsed.to_string(), "1.2.3");
-    assert_eq!(Version::parse("1.2.3"), Some(parsed));
-}
-
-/// Equal versions are equal, and the ordering follows the three parts.
-#[test]
-fn versions_order_by_their_three_parts() {
-    let older = Version::parse("1.2.3").expect("parses");
-    assert_eq!(older, Version::parse("v1.2.3").expect("parses"));
-    assert!(older < Version::parse("1.2.4").expect("parses"));
-    assert!(older < Version::parse("1.3.0").expect("parses"));
-    assert!(older < Version::parse("2.0.0").expect("parses"));
-    assert!(Version::parse("v2.0.0").expect("parses") > older);
-}
-
-/// Anything that is not exactly three numeric parts is refused, so an invalid
-/// tag can never be compared as if it were a version.
-#[test]
-fn malformed_versions_are_refused() {
-    for text in [
-        "",
-        "v",
-        "1",
-        "1.2",
-        "1.2.3.4",
-        "1.2.3-beta.1",
-        "v1.2.3-rc1",
-        "1.2.3+build.5",
-        "1.2.x",
-        " 1.2.3",
-        "1.2.3 ",
-        "1..3",
-        "01.2.3.4",
-        "99999999999999999999999.1.1",
-        "release-1.2.3",
-    ] {
-        assert_eq!(Version::parse(text), None, "`{text}` is not a version");
-    }
-}
 
 /// With no `--harness` the portable root is the only root read, which is what
 /// `clio install` writes with no harness.
@@ -181,6 +142,131 @@ fn an_unknown_harness_selects_no_root() {
         installation_evidence(Some("frobnicate"), &env(scratch.home())),
         Err(Missing::UnknownHarness)
     );
+}
+
+/// Missing evidence makes no request: the command never asks about a release it
+/// could not compare against.
+#[test]
+fn missing_evidence_makes_no_request() {
+    let scratch = Scratch::new("no-request");
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v9.9.9\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 0, "no request may be made");
+    assert_eq!(report.release_status, ReleaseStatus::Unavailable);
+    assert_eq!(report.exit_code(), 1);
+}
+
+/// Conflicting markers also make no request, and are unavailable rather than
+/// current.
+#[test]
+fn conflicting_evidence_makes_no_request() {
+    let scratch = Scratch::new("conflict-line");
+    write_marker(
+        &package(scratch.home(), &[".claude", "skills"]),
+        "0.4.1",
+        "fnv1a64:cafe",
+    );
+    write_marker(
+        &package(scratch.home(), &[".agents", "skills"]),
+        "0.5.0",
+        "fnv1a64:cafe",
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v9.9.9\"}")));
+    let report = check(Some("claude"), &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 0, "no request may be made");
+    assert_eq!(report.release_status, ReleaseStatus::Unavailable);
+    assert_eq!(report.exit_code(), 1);
+}
+
+/// An installed version the parser refuses is unavailable, and the request is
+/// skipped because there is nothing an answer could be compared with.
+#[test]
+fn an_unparseable_installed_version_is_unavailable_without_a_request() {
+    let scratch = Scratch::new("bad-installed");
+    write_marker(
+        &package(scratch.home(), &[".agents", "skills"]),
+        "1.2.3-beta",
+        "fnv1a64:cafe",
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v2.0.0\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 0);
+    assert_eq!(report.skill_version.as_deref(), Some("1.2.3-beta"));
+    assert_eq!(report.latest_version, None);
+    assert_eq!(report.exit_code(), 1);
+}
+
+/// An installed version equal to the release is current, and the line names the
+/// normalized release version rather than the tag's spelling.
+#[test]
+fn an_installed_version_equal_to_the_release_is_current() {
+    let scratch = Scratch::new("current");
+    write_marker(
+        &package(scratch.home(), &[".agents", "skills"]),
+        "1.2.3",
+        "fnv1a64:cafe",
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v1.2.3\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 1, "exactly one request is made");
+    assert_eq!(
+        report.line(),
+        "{\"skillVersion\":\"1.2.3\",\"catalogHash\":\"fnv1a64:cafe\",\
+         \"releaseStatus\":\"current\",\"latestVersion\":\"1.2.3\"}"
+    );
+    assert_eq!(keys_of(&report.line()), KEYS);
+    assert_eq!(report.exit_code(), 0);
+}
+
+/// An installed version below the release is newer-available, and it succeeds
+/// too: a newer release is an answer, not a failure.
+#[test]
+fn an_older_installed_version_reports_a_newer_release() {
+    let scratch = Scratch::new("newer");
+    write_marker(
+        &package(scratch.home(), &[".agents", "skills"]),
+        "1.2.3",
+        "fnv1a64:cafe",
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"2.0.0\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 1);
+    assert_eq!(report.release_status, ReleaseStatus::Newer);
+    assert_eq!(report.latest_version.as_deref(), Some("2.0.0"));
+    assert_eq!(report.exit_code(), 0);
+}
+
+/// An installed version above the release is current: a release that is not
+/// newer is no newer release.
+#[test]
+fn an_installed_version_above_the_release_is_current() {
+    let scratch = Scratch::new("ahead");
+    write_marker(
+        &package(scratch.home(), &[".agents", "skills"]),
+        "3.0.0",
+        "fnv1a64:cafe",
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v2.9.9\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 1);
+    assert_eq!(report.release_status, ReleaseStatus::Current);
+    assert_eq!(report.exit_code(), 0);
+}
+
+/// An empty recorded catalog hash is unknown, so it is reported as null.
+#[test]
+fn an_empty_recorded_catalog_hash_is_null() {
+    let scratch = Scratch::new("empty-hash");
+    write_marker(
+        &package(scratch.home(), &[".agents", "skills"]),
+        "1.2.3",
+        "",
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v1.2.3\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 1);
+    assert_eq!(report.catalog_hash, None);
+    assert_eq!(report.release_status, ReleaseStatus::Current);
 }
 
 /// The unavailable line states four keys, in order, and every one of them is

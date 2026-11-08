@@ -261,14 +261,13 @@ impl Report {
     }
 }
 
+/// The scratch home, marker writer, and loopback listener that this module's
+/// suite and `version_check_release`'s suite share. Declared once, and
+/// `pub(crate)` because the sibling suite is not a child of this module.
 #[cfg(test)]
 #[path = "version_check_test_support.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "version_check_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "version_check_http_tests.rs"]
-mod http_tests;

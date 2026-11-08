@@ -107,3 +107,7 @@ fn read_capped(body: &mut ureq::Body) -> Option<Vec<u8>> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "version_check_release_tests.rs"]
+mod tests;
