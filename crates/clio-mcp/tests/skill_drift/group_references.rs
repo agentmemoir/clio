@@ -23,6 +23,7 @@
 //! - `reference_files_state_no_tool_count`
 //! - `reference_tool_list_has_no_continuation_line`
 //! - `reference_directory_holds_exactly_the_catalog_files`
+//! - `embedded_assets_match_the_packaged_files`
 //! - `no_two_references_share_a_when_to_use_paragraph`
 //!
 //! ## Does not own
@@ -34,17 +35,22 @@
 //!
 //! ## Boundary
 //!
-//! Every reference file is the embedded asset `build.rs` generated, so a file
-//! whose shape drifts from the contract fails here instead of reaching a
-//! caller, and no run can see a copy other than the one that compiles. Exact
+//! The shape checks read each reference file as the compiled asset `build.rs`
+//! generated, so a file whose shape drifts from the contract fails here instead
+//! of reaching a caller. `reference_directory_holds_exactly_the_catalog_files`
+//! and `embedded_assets_match_the_packaged_files` also read the packaged
+//! directory, so the compiled copy is compared against the files on disk. Exact
 //! tool membership is checked in `ownership` against the same compiled text.
 //! Each assertion is anchored to an exact heading line or to the body under one,
 //! never to a substring of the whole file, because a substring check reads a
 //! sentence that moved into another section, or a key that appears anywhere, as
 //! the wording it expects.
 
+use std::fs;
+use std::path::Path;
+
 use clio_mcp::skill_asset_names::{REFERENCES_DIR, check_reference_set, reference_file_name};
-use clio_mcp::skill_assets::references;
+use clio_mcp::skill_assets::{SKILL_ASSETS, references};
 use clio_types::{GROUP_TABLE, GroupSpec};
 
 use crate::{body_under, paragraph_under};
@@ -110,7 +116,7 @@ pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str,
             assert_eq!(
                 *name,
                 derived,
-                "the reference read at catalog row {} is `{name}` rather than `{derived}`: name each file after its `GROUP_TABLE` row as two digits, a dash and the group id, because a hand-written name reads a file the router never points at",
+                "the reference read at catalog row {} is `{name}` rather than `{derived}`: name each file after its `GROUP_TABLE` row as two digits, a dash and the group id, because a name that does not follow its row reads a file the router never points at",
                 index + 1
             );
             (index, *name, *text, spec)
@@ -367,5 +373,21 @@ fn no_two_references_share_a_when_to_use_paragraph() {
             );
         }
         seen.push((name.to_owned(), when));
+    }
+}
+
+#[test]
+fn embedded_assets_match_the_packaged_files() {
+    let package = concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/clio-mcp");
+    for (name, text) in SKILL_ASSETS {
+        let path = Path::new(package).join(name);
+        let packaged = fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("the packaged `{}` cannot be read: {error}", path.display())
+        });
+        assert!(
+            packaged == *text,
+            "the embedded copy of `{name}` is stale: it differs from the packaged `{}`, so rebuild the crate or embed the packaged text, because a caller receives the embedded copy",
+            path.display()
+        );
     }
 }

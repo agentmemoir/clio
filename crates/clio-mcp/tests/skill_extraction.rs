@@ -3,14 +3,13 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for proving that the skill package assets are in
-//! the built test binary and nowhere else: it extracts every embedded asset
-//! into a directory it creates and compares the bytes it reads back.
+//! This module is responsible for proving that every skill package asset is in
+//! the built test binary: it writes every embedded asset into a directory it
+//! creates and compares the bytes it reads back with the text it embeds.
 //!
 //! ## Owns
 //! - `the_built_binary_extracts_every_embedded_asset_without_a_source_tree`
-//! - The child mode that writes `SKILL_ASSETS` into the directory named by
-//!   `CLIO_SKILL_ASSET_EXTRACT_DIR`
+//! - The temporary directory that write fills and the guard that removes it
 //!
 //! ## Does not own
 //! - The embedded table (`clio_mcp::skill_assets`)
@@ -19,31 +18,23 @@
 //!
 //! ## Boundary
 //!
-//! The test re-execs its own binary and reads back only the directory it made
+//! The test reads only the contents of `SKILL_ASSETS` and the directory it made
 //! under the system temporary directory, so it opens no repository path and no
 //! socket: the bytes it compares are the ones the compiler put in the binary it
 //! is running. A change to how the assets are embedded belongs to `build.rs`; a
-//! change to which assets are expected belongs to the group catalog. The one
-//! variable is set on the child's `Command` only, so the parent environment and
-//! every peer test are untouched.
+//! change to which assets are expected belongs to the group catalog. The
+//! directory is always removed, so a failing run leaves nothing behind.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use clio_mcp::skill_asset_names::expected_asset_names;
+use clio_mcp::skill_asset_names::{REFERENCES_DIR, SKILL_ROUTER_FILE, expected_asset_names};
 use clio_mcp::skill_assets::SKILL_ASSETS;
 use clio_types::GROUP_TABLE;
 
-/// The test this file holds: the parent re-execs the binary with this name, and
-/// the child returns as soon as it has written the assets.
-const TEST_NAME: &str = "the_built_binary_extracts_every_embedded_asset_without_a_source_tree";
-
-/// The variable that turns the one test into the child that extracts the assets.
-const EXTRACT_VAR: &str = "CLIO_SKILL_ASSET_EXTRACT_DIR";
-
-/// The directory the child fills, under the temporary root the parent owns.
+/// The directory the test fills, under the temporary root it owns.
 const ASSETS_DIR: &str = "assets";
 
 /// A temporary root removed when it goes out of scope, on every exit path.
@@ -61,19 +52,19 @@ fn groups() -> Vec<&'static str> {
     GROUP_TABLE.iter().map(|spec| spec.group.as_str()).collect()
 }
 
-/// A root no other test run shares: the process id and the current nanosecond.
+/// A root under the system temporary directory, named by this process and the
+/// current nanosecond so a leftover from an earlier run is not reused.
 fn new_root() -> PathBuf {
-    let nanos = match UNIX_EPOCH.elapsed() {
-        Ok(since) => since.as_nanos(),
-        Err(_) => 0,
-    };
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
     std::env::temp_dir().join(format!("clio-skill-assets-{}-{nanos}", std::process::id()))
 }
 
-/// Write every embedded asset under `root`, creating the directories it needs.
-fn extract(root: &Path) {
+/// Write every embedded asset under `assets`, creating the directories it needs.
+fn extract(assets: &Path) {
     for (name, text) in SKILL_ASSETS {
-        let path = root.join(name);
+        let path = assets.join(name);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .unwrap_or_else(|error| panic!("cannot create `{}`: {error}", parent.display()));
@@ -83,90 +74,30 @@ fn extract(root: &Path) {
     }
 }
 
-/// Every file under `root`, named relative to it, top level and one level deep.
-fn files_under(root: &Path) -> Vec<String> {
-    let mut names = Vec::new();
-    let entries = fs::read_dir(root)
-        .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", root.display()));
-    for entry in entries {
-        let entry = entry.unwrap_or_else(|error| {
-            panic!("cannot read an entry of `{}`: {error}", root.display())
-        });
-        let name = entry.file_name().into_string().unwrap_or_else(|raw| {
-            panic!(
-                "`{}` holds `{}`, a name that is not UTF-8",
-                root.display(),
-                raw.display()
-            )
-        });
-        if entry.path().is_dir() {
-            let inner = fs::read_dir(entry.path()).unwrap_or_else(|error| {
-                panic!("cannot read `{}`: {error}", entry.path().display())
-            });
-            for child in inner {
-                let child = child.unwrap_or_else(|error| {
-                    panic!(
-                        "cannot read an entry of `{}`: {error}",
-                        entry.path().display()
-                    )
-                });
-                let leaf = child.file_name().into_string().unwrap_or_else(|raw| {
-                    panic!(
-                        "`{}` holds `{}`, a name that is not UTF-8",
-                        entry.path().display(),
-                        raw.display()
-                    )
-                });
-                names.push(format!("{name}/{leaf}"));
-            }
-        } else {
-            names.push(name);
-        }
-    }
-    names.sort_unstable();
-    names
-}
-
 #[test]
 fn the_built_binary_extracts_every_embedded_asset_without_a_source_tree() {
-    if let Some(destination) = std::env::var_os(EXTRACT_VAR) {
-        extract(Path::new(&destination));
-        return;
-    }
-
     let root = TempRoot(new_root());
-    fs::create_dir_all(&root.0).unwrap_or_else(|error| {
+    let assets = root.0.join(ASSETS_DIR);
+    fs::create_dir_all(&assets).unwrap_or_else(|error| {
         panic!(
-            "cannot create the temporary root `{}`: {error}",
-            root.0.display()
+            "cannot create the temporary directory `{}`: {error}",
+            assets.display()
         )
     });
-    let assets = root.0.join(ASSETS_DIR);
-    let output = Command::new(std::env::current_exe().expect("this test binary has a path"))
-        .args(["--exact", TEST_NAME])
-        .current_dir(&root.0)
-        .env(EXTRACT_VAR, &assets)
-        .output()
-        .unwrap_or_else(|error| panic!("cannot run the extraction child: {error}"));
+    extract(&assets);
+
+    let router = assets.join(SKILL_ROUTER_FILE);
     assert!(
-        output.status.success(),
-        "the extraction child exited with {}: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
+        router.is_file(),
+        "the binary embeds no `{SKILL_ROUTER_FILE}`: embed the router file so a caller loads the skill body it ships"
+    );
+    let references = assets.join(REFERENCES_DIR);
+    assert!(
+        references.is_dir(),
+        "the binary embeds no `{REFERENCES_DIR}` directory: embed one reference file per catalog group"
     );
 
-    assert!(
-        assets.join("SKILL.md").is_file(),
-        "the child wrote no `SKILL.md` under `{}`",
-        assets.display()
-    );
-    assert!(
-        assets.join("references").is_dir(),
-        "the child wrote no `references` directory under `{}`",
-        assets.display()
-    );
-
-    let mut expected = expected_asset_names(&groups());
+    let expected = expected_asset_names(&groups());
     let count = expected.len();
     assert_eq!(
         SKILL_ASSETS.len(),
@@ -174,15 +105,15 @@ fn the_built_binary_extracts_every_embedded_asset_without_a_source_tree() {
         "the binary embeds {} assets against the {count} the catalog names: embed one asset per catalog group plus the router file",
         SKILL_ASSETS.len()
     );
-    expected.sort_unstable();
-    let written = files_under(&assets);
-    assert_eq!(
-        written, expected,
-        "the extracted set is not the set the catalog names: extract every embedded asset, because an asset the catalog names and the binary lacks is guidance a caller never receives"
-    );
 
-    for (name, text) in SKILL_ASSETS {
-        let path = assets.join(name);
+    let embedded: BTreeMap<&str, &str> = SKILL_ASSETS.iter().copied().collect();
+    for name in expected {
+        let text = embedded.get(name.as_str()).unwrap_or_else(|| {
+            panic!(
+                "the catalog names the asset `{name}` and the binary does not embed it: embed one asset per catalog group plus the router file"
+            )
+        });
+        let path = assets.join(&name);
         let bytes = fs::read(&path)
             .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", path.display()));
         assert!(

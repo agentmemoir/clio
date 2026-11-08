@@ -36,9 +36,9 @@ fn refusal(groups: &[&str], found: &[String]) -> String {
 
 #[test]
 fn a_reference_is_numbered_from_one_and_named_by_its_group() {
-    assert_eq!(reference_file_name(0, "retrieval"), "01-retrieval.md");
-    assert_eq!(reference_file_name(9, "graph"), "10-graph.md");
-    assert_eq!(reference_file_name(16, "compliance"), "17-compliance.md");
+    assert_eq!(reference_file_name(0, "alpha"), "01-alpha.md");
+    assert_eq!(reference_file_name(9, "beta"), "10-beta.md");
+    assert_eq!(reference_file_name(16, "gamma"), "17-gamma.md");
 }
 
 #[test]

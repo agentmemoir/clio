@@ -28,12 +28,16 @@
 //!
 //! ## Boundary
 //!
-//! The skill and the reference files are the assets `build.rs` embeds, so no
-//! check has a working directory, clock, or network input and none can read a
-//! stale copy. A change to a check belongs in the module that owns it; a change to
-//! how a section body is read belongs here, because the group reference,
-//! reference example, and router policy checks must read the same slice the
-//! same way.
+//! The drift tests read two sources: the embedded assets `build.rs` generated,
+//! which are the bytes the crate ships, and the packaged files under
+//! `skills/clio-mcp`, resolved from `CARGO_MANIFEST_DIR`.
+//! `group_references` reads the packaged references directory, `reference_examples`
+//! reads the packaged reference files, and `catalog_hash` reads the committed
+//! hash, so a stale embed is compared with the files the build read rather than
+//! passing unnoticed. No check has a clock or a network input. A change to a
+//! check belongs in the module that owns it; a change to how a section body is
+//! read belongs here, because the group reference, reference example, and router
+//! policy checks must read the same slice the same way.
 //!
 //! Every structural assertion in these checks is anchored to an exact line or
 //! an exact section body rather than to a substring, because a substring check

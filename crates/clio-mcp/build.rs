@@ -21,8 +21,9 @@
 //! Changes to how the assets are embedded belong here. Changes to which assets
 //! are expected belong in the catalog, not in this script.
 //!
-//! The script never keeps a hand-written list: an asset the catalog does not
-//! name, or a file the catalog names that the package lacks, fails the build.
+//! The script never keeps a hand-written list: a reference file the catalog does
+//! not name, or a reference file the catalog names that the package lacks, fails
+//! the build.
 
 use std::env;
 use std::fmt::Write as _;
