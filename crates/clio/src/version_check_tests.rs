@@ -9,8 +9,8 @@
 //!
 //! ## Owns
 //! - The root-selection and evidence cases: portable default, harness roots,
-//!   missing marker, disagreeing markers, unknown harness, a marker reached
-//!   through a symbolic link
+//!   missing marker, disagreeing markers, an unknown harness refused as install's
+//!   usage error, a marker reached through a symbolic link
 //! - The evidence cases that must make no request at all
 //! - The comparison cases: current and newer, the line each one reports, and the
 //!   exit code it maps to
@@ -33,7 +33,8 @@
 //!
 //! Keep this module focused on the check's evidence, comparison, and flags.
 
-use super::{Missing, ReleaseStatus, check, installation_evidence, version};
+use super::{Missing, ReleaseStatus, check, harness_usage_error, installation_evidence, version};
+use crate::install_cli_help::supported_hint;
 use crate::skill_marker::SKILL_MARKER_FILE;
 use crate::version_check::test_support::{
     KEYS, Reply, Scratch, Server, env, json_reply, keys_of, package, write_marker,
@@ -164,19 +165,35 @@ fn disagreeing_markers_are_conflicting_evidence() {
     );
 }
 
-/// A name install does not accept selects no root at all, so the check has
-/// nothing to read.
+/// A name install does not accept is the same usage error install raises: the
+/// verb exits 2 with install's own message and supported-harness hint, and never
+/// reports a null line that would read as "nothing is installed". A name install
+/// accepts is no refusal at all.
 #[test]
-fn an_unknown_harness_selects_no_root() {
-    let scratch = Scratch::new("unknown");
-    write_marker(
-        &package(scratch.home(), &[".agents", "skills"]),
-        "0.4.1",
-        "fnv1a64:cafe",
+fn an_unknown_harness_is_the_installation_usage_error() {
+    for name in ["claude", "claude-code", "vs code"] {
+        assert!(harness_usage_error(Some(name)).is_none(), "{name}");
+    }
+    assert!(
+        harness_usage_error(None).is_none(),
+        "no name means the portable root, not a refusal"
     );
+    let error = harness_usage_error(Some("frobnicate")).expect("the name is refused");
+    assert_eq!(error.message(), "unknown harness `frobnicate`");
+    let hint = supported_hint();
+    assert_eq!(error.hint(), Some(hint.as_str()));
+    assert!(
+        hint.starts_with("supported harnesses: ") && hint.contains("claude"),
+        "{hint}"
+    );
+    assert_eq!(error.exit_code(), ExitCode::from(2));
     assert_eq!(
-        installation_evidence(Some("frobnicate"), &env(scratch.home())),
-        Err(Missing::UnknownHarness)
+        version(&[
+            "--check".to_owned(),
+            "--harness".to_owned(),
+            "frobnicate".to_owned(),
+        ]),
+        ExitCode::from(2)
     );
 }
 

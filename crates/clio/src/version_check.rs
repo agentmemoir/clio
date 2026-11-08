@@ -43,14 +43,19 @@
 //! The refusal reuses the guard the removal path applies to the same file, so
 //! what may be trusted is decided in one place.
 //!
+//! A `--harness` name that install would refuse is refused here too, as the same
+//! usage error and before any evidence is read: a misspelled name must not read
+//! as "nothing is installed".
+//!
 //! Keep this module focused on the `version` verb's check request.
 
 use crate::agent_harness::{self, SkillRoot};
 use crate::agent_harness_targets::{DirectWriteEnv, resolve_skill_root};
-use crate::cli_error::{EXIT_OK, EXIT_OPERATIONAL};
+use crate::cli_error::{CliError, EXIT_OK, EXIT_OPERATIONAL};
 use crate::cli_top_level::{
     parse_flags, print_version_help, record_flag_names, report_usage_error,
 };
+use crate::install_cli_help::{known_but_unsupported, unknown_harness};
 use crate::skill_install::{InstalledMarker, SKILL_DIR_NAME, installed_marker};
 use crate::skill_marker::SKILL_MARKER_FILE;
 use crate::skill_uninstall_guard::symlink_component;
@@ -102,6 +107,8 @@ pub(crate) enum Missing {
     /// Two selected roots hold markers that disagree.
     ConflictingMarkers,
     /// The `--harness` name is not one install accepts, so no root is selected.
+    /// The verb raises install's usage error for such a name before it reads any
+    /// evidence; the variant guards a caller that resolves the name itself.
     UnknownHarness,
 }
 
@@ -137,6 +144,12 @@ pub(crate) fn version(args: &[String]) -> ExitCode {
         println!("{}", clio::identity());
         return ExitCode::SUCCESS;
     }
+    // A name install would refuse is refused here the same way, before any
+    // evidence is read, so a typo is a usage error rather than "nothing is
+    // installed".
+    if let Some(error) = harness_usage_error(harness) {
+        return report_usage_error(&error, args);
+    }
     let report = check(
         harness,
         &DirectWriteEnv::production(),
@@ -144,6 +157,23 @@ pub(crate) fn version(args: &[String]) -> ExitCode {
     );
     println!("{}", report.line());
     ExitCode::from(report.exit_code())
+}
+
+/// The usage error the selected `--harness` name earns when `clio install` would
+/// refuse it, or `None` when install accepts the name or no name was given.
+///
+/// The name is resolved exactly as install resolves it, and the refusal is the
+/// same text, so the two verbs cannot disagree about which names exist or what a
+/// bad one costs.
+pub(crate) fn harness_usage_error(harness: Option<&str>) -> Option<CliError> {
+    let name = harness?;
+    match agent_harness::resolve(name) {
+        Some(_) => None,
+        None => Some(match agent_harness::normalize(name) {
+            Some(canonical) => known_but_unsupported(canonical),
+            None => unknown_harness(name),
+        }),
+    }
 }
 
 /// The endpoint the command reads. Named here so the one address the process

@@ -14,6 +14,8 @@
 //! - The one-line JSON contract at the process boundary when no installation
 //!   evidence exists, and the nulls it carries
 //! - The unavailable answer's exit code, and that it writes nothing to stderr
+//! - The usage refusal an unknown `--harness` name earns: exit 2, no report line,
+//!   and a stderr message naming the harness and the supported ones
 //!
 //! ## Does not own
 //! - The check's own logic and its request (`version_check_tests`)
@@ -157,4 +159,25 @@ fn an_unpaired_harness_flag_exits_two() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// A name `clio install` refuses is refused here the same way: exit 2, no report
+/// line at all, and a stderr message that names the unknown harness and lists the
+/// supported ones. Without that, a typo would read as "nothing is installed".
+#[test]
+fn an_unknown_harness_exits_two_without_a_report_line() {
+    let scratch = Scratch::new("unknown-harness");
+    let output = clio(
+        scratch.home(),
+        &["version", "--check", "--harness", "frobnicate"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stdout_of(&output),
+        "",
+        "a usage error prints no report line"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown harness `frobnicate`"), "{stderr}");
+    assert!(stderr.contains("supported harnesses:"), "{stderr}");
 }
