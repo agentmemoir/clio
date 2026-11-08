@@ -13,7 +13,8 @@
 //! ## Owns
 //! - The target's module declarations
 //! - `SKILL`, the skill under check, read at compile time
-//! - `body_under`, the single section reader all four modules call
+//! - `body_under`, the section reader the group reference, reference example,
+//!   and router policy checks call
 //! - The catalog hash drift check (`catalog_hash`)
 //!
 //! ## Does not own
@@ -28,16 +29,19 @@
 //!
 //! The skill and the reference files are read with `include_str!`, so no check
 //! has a working directory, clock, or network input and none can read a stale
-//! copy. A change to a check belongs in the module that owns it; a
-//! change to how a section body is read belongs here, because all three
-//! modules must read the same slice the same way.
+//! copy. A change to a check belongs in the module that owns it; a change to
+//! how a section body is read belongs here, because the group reference,
+//! reference example, and router policy checks must read the same slice the
+//! same way.
 //!
-//! Every structural assertion in all four modules is anchored to an exact
-//! line or an exact section body rather than to a substring, because a
-//! substring check reads a widened sentence, an added column, or a second
-//! table as the wording it expects. `body_under` is the only section reader,
-//! so a check that needs a section body compares against exactly the lines
-//! under that heading.
+//! Every structural assertion in these checks is anchored to an exact line or
+//! an exact section body rather than to a substring, because a substring check
+//! reads a widened sentence, an added column, or a second table as the wording
+//! it expects. `body_under` is the only function that reads a section body, and
+//! `paragraph_under` cuts it at the first blank line: the group reference,
+//! reference example, and router policy modules call it, `ownership` reads the
+//! tool list line through `tools_line` instead, and `catalog_hash` reads no
+//! section at all.
 
 mod catalog_hash;
 mod group_references;

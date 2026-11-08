@@ -4,16 +4,20 @@
 //! # Responsibility
 //!
 //! This module is responsible for holding every group reference file under
-//! `skills/clio-mcp/references/` to the package contract: an exact
-//! `## When to use` heading whose first paragraph is the catalog sentence, an
-//! exact `## Tools` heading whose one line lists exactly the catalog row's
-//! tools, one fenced example block that only calls that row's tools with one
+//! `skills/clio-mcp/references/` to its shape: a name derived from its catalog
+//! row, an exact `## When to use` heading whose first paragraph is the catalog
+//! sentence, an exact `## Tools` heading with one tool list line, one fenced
+//! example block that only calls tools of that file's catalog row with one
 //! JSON object each, and an exact `## Exact arguments` heading whose body
-//! carries the `tool_describe` pointer. It is also the gate for the two
+//! carries the `tool_describe` pointer. Exact tool membership and the
+//! one-owner count belong to `ownership`. It is also the gate for the two
 //! prohibitions: no schema content and no parameter table anywhere in a
 //! reference file, and no restated tool count.
 //!
 //! ## Owns
+//! - The reference-file shape: the derived name, the one-line `## Tools` list,
+//!   the when-to-use sentence, the exact-arguments pointer, and the example
+//!   checks
 //! - `reference_files_match_group_table`
 //! - `reference_files_carry_no_schema_or_parameter_table`
 //! - `reference_files_state_no_tool_count`
@@ -30,12 +34,14 @@
 //!
 //! ## Boundary
 //!
-//! Every reference file is read with `include_str!`, so a tool list that drifts
-//! from its catalog row fails here instead of reaching a caller, and no run can
-//! see a copy other than the one that compiles. Each assertion is anchored to an
-//! exact heading line or to the body under one, never to a substring of the
-//! whole file, because a substring check reads a sentence that moved into
-//! another section, or a key that appears anywhere, as the wording it expects.
+//! Every reference file is read with `include_str!`, so a file whose shape
+//! drifts from the contract fails here instead of reaching a caller, and no run
+//! can see a copy other than the one that compiles. Exact tool membership is
+//! checked in `ownership` against the same compiled text. Each assertion is
+//! anchored to an exact heading line or to the body under one, never to a
+//! substring of the whole file, because a substring check reads a sentence that
+//! moved into another section, or a key that appears anywhere, as the wording it
+//! expects.
 
 use clio_types::{GROUP_TABLE, GroupSpec};
 
@@ -106,10 +112,11 @@ const POINTER: &str = "tool_describe";
 ///
 /// The pairing is positional on purpose: a reference file is numbered by its
 /// 1-based catalog row, so a reordered catalog changes which file the checks
-/// read and the tool set comparison fails rather than passing on stale text. The
-/// name is also compared with the name the row derives, so a hand-written list
-/// that disagrees with the catalog fails here instead of reading a file the
-/// router never points at.
+/// read and the derived name comparison fails rather than passing on stale
+/// text. The name is compared with the name the row derives, so a hand-written
+/// list that disagrees with the catalog fails here instead of reading a file
+/// the router never points at. Exact tool membership and the one-owner count
+/// belong to `ownership`.
 pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)>
 {
     REFERENCES
@@ -323,7 +330,7 @@ fn reference_tool_list_has_no_continuation_line() {
         if let Some(line) = continuation {
             assert!(
                 line.starts_with("## "),
-                "the reference `{name}` continues its `{TOOLS_HEADING}` list with `{line}`: keep the list on one comma-separated line, because a second line is a second list that the set comparison above reads as one tool fewer than the file names"
+                "the reference `{name}` continues its `{TOOLS_HEADING}` list with `{line}`: keep the list on one comma-separated line, because a second line is a second list that `tools_line` never reads, so the tools on it never reach the ownership rule"
             );
         }
     }
