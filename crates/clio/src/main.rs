@@ -217,6 +217,13 @@ mod setup_verify;
 mod setup_wizard;
 mod sigpipe;
 mod skill_install;
+// The installation plan and the marker it reads are complete in themselves and
+// are called by the installer step; until that call exists they are reached only
+// from their own tests, so the binary build has nothing to point at.
+#[cfg_attr(not(test), allow(dead_code))]
+mod skill_install_plan;
+#[cfg_attr(not(test), allow(dead_code))]
+mod skill_marker;
 mod status_cli;
 mod status_report;
 mod sync_cli;
