@@ -38,6 +38,16 @@ def frozen_baseline():
     return budget_check.baseline_arms(BASELINE)
 
 
+def frozen_record():
+    """Return the committed record those ceilings were read from."""
+    return budget_check.load_baseline(BASELINE)[0]
+
+
+def report_for(baseline, candidate, allowances):
+    """Return `check_pack`'s report for the committed record and these inputs."""
+    return budget_check.check_pack(baseline, candidate, allowances, frozen_record())
+
+
 def candidate_from(baseline, byte_growth=0, token_growth=0, digest=GROWN_DIGEST):
     """Return a synthetic candidate that differs from ``baseline`` by the given growth."""
     return {
@@ -94,7 +104,7 @@ class ArmTests(unittest.TestCase):
 
     def test_unchanged_pack_passes(self):
         baseline = frozen_baseline()
-        report = budget_check.check_pack(
+        report = report_for(
             baseline, candidate_from(baseline), budget_allowances.NONE
         )
         self.assertEqual(report["verdict"], "pass", report)
@@ -109,7 +119,7 @@ class ArmTests(unittest.TestCase):
     def test_bytes_growth_with_unchanged_tokens_names_bytes_only(self):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=8)
-        report = budget_check.check_pack(baseline, candidate, budget_allowances.NONE)
+        report = report_for(baseline, candidate, budget_allowances.NONE)
         self.assertEqual(report["verdict"], "fail", report)
         self.assertEqual(arm_by_measure(report, "bytes")["delta"], 8)
         self.assertEqual(arm_by_measure(report, "tokens")["delta"], 0)
@@ -123,7 +133,7 @@ class ArmTests(unittest.TestCase):
     def test_tokens_growth_with_unchanged_bytes_names_tokens_only(self):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, token_growth=6)
-        report = budget_check.check_pack(baseline, candidate, budget_allowances.NONE)
+        report = report_for(baseline, candidate, budget_allowances.NONE)
         self.assertEqual(report["verdict"], "fail", report)
         self.assertEqual(arm_by_measure(report, "tokens")["delta"], 6)
         self.assertTrue(
@@ -136,28 +146,28 @@ class ArmTests(unittest.TestCase):
     def test_growth_without_a_record_names_the_digest(self):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=8)
-        report = budget_check.check_pack(baseline, candidate, budget_allowances.skip())
+        report = report_for(baseline, candidate, budget_allowances.skip())
         self.assertIn(GROWN_DIGEST, report["failures"][0])
 
     def test_growth_within_a_matching_allowance_passes(self):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=8, token_growth=6)
         records = [record(max_bytes=candidate["bytes"], max_tokens=candidate["tokens"])]
-        report = budget_check.check_pack(baseline, candidate, document(records))
+        report = report_for(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "pass", report)
         self.assertEqual(report["failures"], [])
         self.assertEqual(report["allowance"]["decision_id"], "allow-test-1")
         self.assertEqual(arm_by_measure(report, "bytes")["delta"], 8)
         self.assertEqual(arm_by_measure(report, "tokens")["delta"], 6)
         self.assertEqual(sorted(report["allowance"]), sorted(budget_check.ALLOWANCE_SUMMARY_KEYS))
-        self.assertEqual(budget_check.check_pack(baseline, candidate, records)["verdict"], "pass")
+        self.assertEqual(report_for(baseline, candidate, records)["verdict"], "pass")
 
     def test_a_bytes_only_breach_fails_the_bytes_arm_only(self):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
         ceiling = candidate["bytes"] - 1
         records = [record(max_bytes=ceiling, max_tokens=candidate["tokens"])]
-        report = budget_check.check_pack(baseline, candidate, document(records))
+        report = report_for(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "fail", report)
         self.assertEqual(len(report["failures"]), 1, report)
         self.assertEqual(
@@ -175,7 +185,7 @@ class ArmTests(unittest.TestCase):
         candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
         ceiling = candidate["tokens"] - 1
         records = [record(max_bytes=candidate["bytes"], max_tokens=ceiling)]
-        report = budget_check.check_pack(baseline, candidate, document(records))
+        report = report_for(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "fail", report)
         self.assertEqual(len(report["failures"]), 1, report)
         self.assertEqual(
@@ -193,7 +203,7 @@ class ArmTests(unittest.TestCase):
         candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
         records = [record(max_bytes=candidate["bytes"] - 1,
                           max_tokens=candidate["tokens"] - 1)]
-        report = budget_check.check_pack(baseline, candidate, document(records))
+        report = report_for(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "fail", report)
         self.assertEqual(
             report["failures"],
@@ -211,7 +221,7 @@ class ArmTests(unittest.TestCase):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=5, token_growth=5)
         records = [record(max_bytes=candidate["bytes"], max_tokens=candidate["tokens"])]
-        report = budget_check.check_pack(baseline, candidate, document(records))
+        report = report_for(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "pass", report)
         self.assertEqual(report["failures"], [])
         for arm in report["arms"]:
@@ -225,7 +235,7 @@ class ArmTests(unittest.TestCase):
         records = [
             record(candidate_sha256=OTHER_DIGEST, max_bytes=10**6, max_tokens=10**6)
         ]
-        report = budget_check.check_pack(baseline, candidate, document(records))
+        report = report_for(baseline, candidate, document(records))
         self.assertEqual(report["verdict"], "fail", report)
         self.assertEqual(len(report["failures"]), 2, report)
         self.assertTrue(
@@ -236,7 +246,7 @@ class ArmTests(unittest.TestCase):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=8)
         with self.assertRaises(BudgetError) as caught:
-            budget_check.check_pack(
+            report_for(
                 baseline, candidate, document([record()], digest=OTHER_DIGEST)
             )
         self.assertIn("targets a different baseline", str(caught.exception))
@@ -246,7 +256,7 @@ class ArmTests(unittest.TestCase):
         baseline = frozen_baseline()
         candidate = candidate_from(baseline, byte_growth=8)
         rendered = budget_check.render(
-            budget_check.check_pack(baseline, candidate, budget_allowances.NONE)
+            report_for(baseline, candidate, budget_allowances.NONE)
         )
         self.assertTrue(rendered.endswith("}\n"))
         report = json.loads(rendered)

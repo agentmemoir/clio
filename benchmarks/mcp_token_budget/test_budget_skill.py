@@ -26,14 +26,17 @@ import activated_budget
 import activated_row
 import budget_allowances
 import budget_check
+import budget_targets
 from offline_tokenizer import BudgetError, load
 
 REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 BASELINE = HERE / "baseline" / "frozen-v1.json"
+TARGETS = HERE / "targets" / "frozen-v1.json"
 
 BYTES_ROW = "retired_skill_entry_point/bytes"
 TOKENS_ROW = "retired_skill_entry_point/tokens"
+FROZEN_ROWS = {BYTES_ROW: 6393, TOKENS_ROW: 1518}
 
 ACTIVATED_ROW = "activated_skill_body/tokens"
 ACTIVATED_PATH = REPO_ROOT / "skills" / "clio-mcp" / "SKILL.md"
@@ -234,19 +237,12 @@ class SkillCommandTests(unittest.TestCase):
             {
                 "status": "not-measured",
                 "reason": budget_check.NO_SKILL_PATH,
-                "baseline_rows": {
-                    "retired_skill_entry_point/bytes": 6393,
-                    "retired_skill_entry_point/tokens": 1518,
-                },
+                "baseline_rows": FROZEN_ROWS,
             },
             report["skill"],
         )
-        self.assertEqual(
-            list(report["skill"]["baseline_rows"]), [BYTES_ROW, TOKENS_ROW]
-        )
-        self.assertEqual(report["skill"]["baseline_rows"][BYTES_ROW], 6393)
-        self.assertEqual(report["skill"]["baseline_rows"][TOKENS_ROW], 1518)
         self.assertEqual(report["verdict"], "pass")
+        self.assertEqual(list(report["skill"]["baseline_rows"]), [BYTES_ROW, TOKENS_ROW])
 
     def test_an_explicitly_empty_skill_path_exits_two(self):
         code, text, err = self.run_main(["--pack", str(PACK), "--skill", ""])
@@ -265,10 +261,7 @@ class SkillCommandTests(unittest.TestCase):
         self.assertEqual(report["skill"]["sha256"], expected)
         self.assertEqual(report["skill"]["bytes"], len(UNDER.encode("utf-8")))
         self.assertEqual(report["skill"]["verdict"], "pass")
-        self.assertEqual(
-            report["skill"]["baseline_rows"],
-            {BYTES_ROW: 6393, TOKENS_ROW: 1518},
-        )
+        self.assertEqual(report["skill"]["baseline_rows"], FROZEN_ROWS)
         self.assertEqual(report["failures"], [])
 
     def test_skill_growth_fails_the_run_with_exit_one(self):
@@ -329,48 +322,35 @@ class ActivatedBodyTests(unittest.TestCase):
         self.assertEqual(result["sha256"], OTHER_SHA)
         self.assertEqual(result["frozen_sha256"], activated_row.CONTENT_SHA256)
 
+    def assert_refused(self, record, *named):
+        """Assert `check` refuses ``record`` with a message naming each of ``named``."""
+        with self.assertRaises(BudgetError) as caught:
+            activated_budget.check(record, body(1))
+        for needle in named:
+            self.assertIn(needle, str(caught.exception))
+
     def test_a_factor_other_than_one_is_refused(self):
         for factor in (1.5, 0.5, 1, 2, "1.0", True, None):
             with self.subTest(factor=factor):
-                with self.assertRaises(BudgetError) as caught:
-                    activated_budget.check(changed_row(factor=factor), body(1))
-                message = str(caught.exception)
-                self.assertIn(ACTIVATED_ROW, message)
-                self.assertIn("factor", message)
+                self.assert_refused(changed_row(factor=factor), ACTIVATED_ROW, "factor")
 
     def test_a_missing_row_is_refused(self):
         record = baseline_record()
         record["rows"] = [row for row in record["rows"] if row["row"] != ACTIVATED_ROW]
-        with self.assertRaises(BudgetError) as caught:
-            activated_budget.check(record, body(1))
-        message = str(caught.exception)
-        self.assertIn(ACTIVATED_ROW, message)
-        self.assertIn("exactly one", message)
+        self.assert_refused(record, ACTIVATED_ROW, "exactly one")
 
     def test_a_duplicate_row_is_refused(self):
         record = baseline_record()
         record["rows"].append(copy.deepcopy(activated_row_of(record)))
-        with self.assertRaises(BudgetError) as caught:
-            activated_budget.check(record, body(1))
-        message = str(caught.exception)
-        self.assertIn(ACTIVATED_ROW, message)
-        self.assertIn("exactly one", message)
+        self.assert_refused(record, ACTIVATED_ROW, "exactly one")
 
     def test_a_non_positive_value_is_refused(self):
         for value in (0, -594, True):
             with self.subTest(value=value):
-                with self.assertRaises(BudgetError) as caught:
-                    activated_budget.check(changed_row(value=value), body(1))
-                message = str(caught.exception)
-                self.assertIn(ACTIVATED_ROW, message)
-                self.assertIn("value", message)
+                self.assert_refused(changed_row(value=value), ACTIVATED_ROW, "value")
 
     def test_a_wrong_unit_is_refused(self):
-        with self.assertRaises(BudgetError) as caught:
-            activated_budget.check(changed_row(unit="bytes"), body(1))
-        message = str(caught.exception)
-        self.assertIn(ACTIVATED_ROW, message)
-        self.assertIn("unit", message)
+        self.assert_refused(changed_row(unit="bytes"), ACTIVATED_ROW, "unit")
 
     def test_a_failing_check_leaves_the_record_untouched(self):
         before = hashlib.sha256(BASELINE.read_bytes()).hexdigest()
@@ -389,40 +369,71 @@ class ActivatedBodyTests(unittest.TestCase):
         self.assertEqual(later["ceiling"], ACTIVATED_TOKENS)
         self.assertEqual(later["ceiling"], grown["ceiling"])
         self.assertEqual(later["verdict"], "pass")
-        frozen = activated_budget.frozen_ceiling(record)
-        self.assertEqual(frozen["ceiling"], ACTIVATED_TOKENS)
+        self.assertEqual(activated_budget.frozen_ceiling(record)["ceiling"], ACTIVATED_TOKENS)
 
     def test_the_retired_rows_do_not_set_the_ceiling(self):
         record = baseline_record()
         for row in record["rows"]:
             if row["row"] != ACTIVATED_ROW:
                 row["value"] = 1
-        self.assertEqual(
-            activated_budget.frozen_ceiling(record)["ceiling"], ACTIVATED_TOKENS
-        )
+        self.assertEqual(activated_budget.frozen_ceiling(record)["ceiling"], ACTIVATED_TOKENS)
 
     def test_the_targets_do_not_set_the_ceiling(self):
-        baseline = budget_check.baseline_arms(BASELINE)
-        activated = activated_budget.check(baseline_record(), body(ACTIVATED_TOKENS))
-        report = budget_check.check_pack(
-            baseline,
+        require_tokenizer()
+        record = baseline_record()
+        baseline = budget_check.arms_from(record, budget_check.PINNED_BASELINE_SHA256)
+        document = json.loads(TARGETS.read_text(encoding="utf-8"))
+        document["factor_decision"]["token_factor"]["numerator"] = 1
+        for item in document["targets"]:
+            if item["unit"] == "tokens":
+                item["factor"] = 1
+                item["target"] = item["baseline_value"] // 100
+                item["headroom"] = item["baseline_value"] - item["target"]
+        targets = budget_targets.compare(
+            budget_targets.validate(document), budget_check.baseline_rows(record),
             pack_candidate(baseline),
-            budget_allowances.NONE,
-            activated=activated,
-            targets={"enforced": False, "comparisons": [], "failures": []},
         )
+        report = budget_check.check_pack(
+            baseline, pack_candidate(baseline), budget_allowances.NONE, record,
+            targets=targets,
+            activated_body=budget_check.measure_skill(ACTIVATED_PATH, load()),
+        )
+        squeezed = [i["target"] for i in targets["comparisons"] if i["unit"] == "tokens"]
+        self.assertLess(max(squeezed), ACTIVATED_TOKENS)
+        self.assertEqual(report["activated"]["tokens"], ACTIVATED_TOKENS)
         self.assertEqual(report["activated"]["ceiling"], ACTIVATED_TOKENS)
-        self.assertEqual(report["verdict"], "pass", report)
+        self.assertEqual(report["activated"]["row"], ACTIVATED_ROW)
+        self.assertEqual(report["activated"]["failures"], [])
+        self.assertEqual(report["failures"], [])
+
+    def test_a_lowered_record_row_fails_naming_the_row(self):
+        require_tokenizer()
+        record = changed_row(value=100)
+        baseline = budget_check.arms_from(record, budget_check.PINNED_BASELINE_SHA256)
+        report = budget_check.check_pack(
+            baseline, pack_candidate(baseline), budget_allowances.NONE, record,
+            activated_body=budget_check.measure_skill(ACTIVATED_PATH, load()),
+        )
+        self.assertEqual(report["activated"]["ceiling"], 100)
+        self.assertEqual(report["activated"]["row"], ACTIVATED_ROW)
+        self.assertTrue(report["activated"]["digest_matches"])
+        self.assertEqual([item["verdict"] for item in report["arms"]], ["pass", "pass"])
+        self.assertEqual(report["verdict"], "fail", report)
+        self.assertEqual(
+            report["failures"],
+            [f"{ACTIVATED_ROW}: candidate {ACTIVATED_TOKENS} exceeds baseline 100 "
+             f"by {ACTIVATED_TOKENS - 100}"],
+        )
 
     def test_an_activated_failure_reaches_the_pack_report(self):
-        baseline = budget_check.baseline_arms(BASELINE)
-        activated = activated_budget.check(
-            baseline_record(), body(ACTIVATED_TOKENS + 6)
-        )
+        record = baseline_record()
+        baseline = budget_check.arms_from(record, budget_check.PINNED_BASELINE_SHA256)
+        activated = activated_budget.check(record, body(ACTIVATED_TOKENS + 6))
         report = budget_check.check_pack(
             baseline,
             pack_candidate(baseline),
             budget_allowances.NONE,
+            record,
             activated=activated,
         )
         self.assertEqual(report["verdict"], "fail", report)

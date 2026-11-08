@@ -20,25 +20,24 @@ Anything else fails and names the measure, the numbers, and the digest.
 
 The always-loaded skill entry point is compared the same way when ``--skill``
 names a file, against its own frozen rows and with no allowance: an allowance
-names a pack digest, so it says nothing about a skill file. When no path is
-given the report carries a ``skill`` object marked ``not-measured`` that still
-shows both frozen skill rows, read through the same named-row lookup, instead of
-reporting zero. An explicitly empty ``--skill`` path is an unusable input and
-exits 2, because it is a wiring mistake, not a decision to skip the arm.
+names a pack digest, so it says nothing about a skill file. When no path is given
+the report carries a ``skill`` object marked ``not-measured`` that still shows
+both frozen skill rows, read through the same named-row lookup, instead of
+reporting zero. An empty ``--skill`` path is a wiring mistake and exits 2.
 
 The activated skill body is always measured, against the one frozen row that
 carries its token count and the factor that count is multiplied by. The bound is
 token growth alone, so a body whose bytes or digest moved without growing its
-count passes and the two digests are reported side by side.
+count passes and the two digests are reported side by side. That row is read from
+the baseline record the run was given, never from a second read of the file.
 
 The preset targets are reported beside the arms. They are not enforced yet, so a
 target miss appears in the report and leaves the exit code alone; a targets file
 that cannot be trusted is an unusable input, not a silent skip.
 
-The whole report is built in memory and written once, so a failure can never
-leave half a document behind. An unusable input exits 2 with
-``mcp-budget-check: <message>`` on stderr; a measured verdict of fail exits 1 and
-still prints the report, so the failure reason reaches the build log.
+The whole report is built in memory and written once, so a failure can never leave
+half a document behind. An unusable input exits 2 with ``mcp-budget-check:
+<message>`` on stderr; a fail verdict exits 1 and still prints the report.
 """
 
 import argparse
@@ -297,31 +296,37 @@ def _arm(measure, baseline, candidate, records) -> dict:
 
 
 def check_pack(
-    baseline, candidate, allowances, skill=None, activated=None, targets=None,
-    skill_rows=None,
+    baseline, candidate, allowances, record, skill=None, activated=None,
+    targets=None, skill_rows=None, activated_body=None,
 ) -> dict:
     """Return the report for one measured candidate against ``baseline``.
 
     ``baseline`` holds the resolved ceilings, the baseline file digest, and the
     repo-relative path. ``allowances`` is a validated allowance document or a bare
     record list; a document's declared baseline digest must match ``baseline``.
-    ``skill`` is the comparison returned by `check_skill`, ``activated`` the one
-    returned by `activated_budget.check`, and ``targets`` the one returned by
+    ``record`` is the baseline record the run is judged against: every row read
+    below comes from it and never from a second read of the baseline file, so a
+    caller that passes a changed record sees that change. ``skill`` is the
+    comparison returned by `check_skill`, ``activated`` the one returned by
+    `activated_budget.check`, and ``targets`` the one returned by
     `budget_targets.compare`; the preset targets stay unenforced, and the
-    activated body is reported even when its digest differs. When no skill was
-    measured the ``skill`` entry still names both frozen rows through
-    ``skill_rows`` — or, when the caller passes none, through the frozen record
-    itself — so a reader never mistakes an unmeasured arm for a zero cost.
+    activated body is reported even when its digest differs. With no activated
+    comparison, ``activated_body`` is compared against ``record`` here, and with
+    no body either the entry is marked not-measured, never reported as zero.
+    When no skill was measured the ``skill`` entry still names both frozen rows
+    through ``skill_rows`` — or, when the caller passes none, through ``record``.
     """
     digest = baseline.get("sha256")
     records = _allowance_records(allowances, digest)
     arms = [_arm(measure, baseline, candidate, records) for measure, _ in ARMS]
     if skill is None:
         if skill_rows is None:
-            skill_rows = skill_row_values(load_baseline()[0])
+            skill_rows = skill_row_values(record)
         skill = skill_not_measured(skill_rows)
+    if activated is None and activated_body is not None:
+        activated = activated_budget.check(record, activated_body)
     if activated is None:
-        activated = activated_budget.not_measured(load_baseline()[0])
+        activated = activated_budget.not_measured(record)
     failures = [arm["failure"] for arm in arms if "failure" in arm]
     failures.extend(skill.get("failures", []))
     failures.extend(activated["failures"])
@@ -424,9 +429,7 @@ def main(argv=None) -> int:
             budget_targets.load(TARGETS_FILE), baseline_rows(record), candidate
         )
         report = check_pack(
-            baseline,
-            candidate,
-            allowances,
+            baseline, candidate, allowances, record,
             skill=skill,
             activated=activated,
             targets=targets,
