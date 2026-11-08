@@ -8,17 +8,18 @@
 //! resolution, delegate-outcome mapping, and exit codes.
 //!
 //! ## Owns
-//! - The `clio install|uninstall` entry points and their flags (`--harness`)
+//! - The `clio install|uninstall` entry points and their flags (`--harness`,
+//!   optional for install and required for uninstall)
 //! - The parse-and-decide step both verbs share, so they cannot drift
-//! - The install flow's order: write the embedded skill assets, then register
+//! - The install flow's order: write the embedded skill assets, then register;
+//!   with no `--harness`, write the portable package only and skip registration
 //! - The `clio` executable lookup, with an injected seam for tests
 //! - The direct-write path: resolving the harness's config file through the
 //!   injectable `DirectWriteEnv` seam and mapping the write outcome to
 //!   messages and exit codes
 //! - The mapping from delegate outcomes to messages and exit codes
-//! - The surface help, including the supported-harness list
 //! - The success text, including a harness's config-surface note naming the
-//!   file that received the entry
+//!   file that received the entry (see `install_cli_help`)
 //!
 //! ## Does not own
 //! - Running any harness command or writing any harness config; the delegate
@@ -38,9 +39,10 @@
 //! - `0`: success; the delegate reported the change.
 //! - `1`: a precondition failed (the clio executable could not be resolved, the
 //!   harness binary is missing, the harness command exited non-zero, the
-//!   change could not be verified, or the harness's config file could not be
-//!   read, parsed, or written).
-//! - `2`: unknown or missing `--harness`, or any other flag error.
+//!   change could not be verified, the harness's config file could not be
+//!   read, parsed, or written, or the portable skill write failed).
+//! - `2`: an unknown `--harness`, a missing `--harness` on uninstall, or any
+//!   other flag error.
 //!
 //! Keep this module focused on the install and uninstall command surfaces.
 
@@ -55,6 +57,10 @@ use crate::cli_error::CliError;
 use crate::cli_top_level::{
     parse_flags, record_flag_names, report_surface_usage_error, wants_help,
 };
+use crate::install_cli_help::{
+    known_but_unsupported, missing_harness, print_help, success_text, supported_hint,
+    unknown_harness,
+};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -68,7 +74,7 @@ pub(crate) enum Verb {
 
 impl Verb {
     /// The command name a user sees.
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Verb::Install => "install",
             Verb::Uninstall => "uninstall",
@@ -76,7 +82,7 @@ impl Verb {
     }
 
     /// What the verb does, for the help text.
-    fn purpose(self) -> &'static str {
+    pub(crate) fn purpose(self) -> &'static str {
         match self {
             Verb::Install => "Register the clio MCP server with a supported agent harness.",
             Verb::Uninstall => {
@@ -90,10 +96,14 @@ impl Verb {
 #[derive(Debug)]
 enum Decision {
     Help,
+    /// `clio install` with no `--harness`: write the portable skill package
+    /// only and skip server registration.
+    Portable,
     Run(&'static HarnessRecord),
 }
 
-/// `clio install`: register the clio MCP server with the named harness.
+/// `clio install`: register the clio MCP server with the named harness, or
+/// write the portable skill package when no harness is named.
 pub fn install(args: &[String]) -> ExitCode {
     run(Verb::Install, args)
 }
@@ -118,7 +128,10 @@ fn run(verb: Verb, args: &[String]) -> ExitCode {
         &|| DirectWriteEnv::production(),
         &install,
         &uninstall,
-        &crate::skill_install::install_and_report,
+        &|record, env| match record {
+            Some(record) => crate::skill_install::install_and_report(record, env),
+            None => crate::skill_install::install_portable_and_report(env),
+        },
     )
 }
 
@@ -132,7 +145,7 @@ fn run_with(
     install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
     uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
 ) -> ExitCode {
-    let skill_step = |_: &HarnessRecord, _: &DirectWriteEnv| Ok(());
+    let skill_step = |_: Option<&HarnessRecord>, _: &DirectWriteEnv| Ok(());
     run_with_skills(
         verb,
         args,
@@ -152,9 +165,9 @@ pub(crate) fn run_with_skills(
     direct_write_env: &dyn Fn() -> DirectWriteEnv,
     install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
     uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
-    skill_step: &dyn Fn(&HarnessRecord, &DirectWriteEnv) -> Result<(), String>,
+    skill_step: &dyn Fn(Option<&HarnessRecord>, &DirectWriteEnv) -> Result<(), String>,
 ) -> ExitCode {
-    let decision = match decide(args) {
+    let decision = match decide(verb, args) {
         Ok(decision) => decision,
         Err(error) => return report_surface_usage_error(&error, args),
     };
@@ -163,9 +176,16 @@ pub(crate) fn run_with_skills(
             print_help(verb);
             ExitCode::SUCCESS
         }
+        Decision::Portable => {
+            if let Err(message) = skill_step(None, &direct_write_env()) {
+                return fail(verb, &message);
+            }
+            println!("{}", supported_hint());
+            ExitCode::SUCCESS
+        }
         Decision::Run(record) => {
             if verb == Verb::Install {
-                if let Err(message) = skill_step(record, &direct_write_env()) {
+                if let Err(message) = skill_step(Some(record), &direct_write_env()) {
                     return fail(verb, &message);
                 }
             }
@@ -294,8 +314,9 @@ fn current_exe() -> std::io::Result<PathBuf> {
 }
 
 /// Parse the arguments and decide what the verb should do. Pure: no lookup, no
-/// delegate call, no output.
-fn decide(args: &[String]) -> Result<Decision, CliError> {
+/// delegate call, no output. A missing `--harness` is the portable-only install
+/// when the verb is install, and a usage error when it is uninstall.
+fn decide(verb: Verb, args: &[String]) -> Result<Decision, CliError> {
     if wants_help(args) {
         return Ok(Decision::Help);
     }
@@ -306,6 +327,7 @@ fn decide(args: &[String]) -> Result<Decision, CliError> {
     }
     let name = match flags.get("harness") {
         Some(name) => name.as_str(),
+        None if verb == Verb::Install => return Ok(Decision::Portable),
         None => return Err(missing_harness()),
     };
     match agent_harness::resolve(name) {
@@ -315,35 +337,6 @@ fn decide(args: &[String]) -> Result<Decision, CliError> {
             None => Err(unknown_harness(name)),
         },
     }
-}
-
-/// The supported-harness list, generated from the registry so the help and the
-/// usage errors cannot drift apart.
-fn supported_hint() -> String {
-    format!(
-        "supported harnesses: {}",
-        agent_harness::supported_names().join(", ")
-    )
-}
-
-/// A call with no `--harness` flag.
-fn missing_harness() -> CliError {
-    CliError::usage("--harness is required").with_hint(supported_hint())
-}
-
-/// A call naming a harness the registry does not know.
-fn unknown_harness(name: &str) -> CliError {
-    CliError::usage(format!("unknown harness `{name}`")).with_hint(supported_hint())
-}
-
-/// A call naming a harness the registry recognizes by name but does not yet
-/// implement, such as `cursor` or the Copilot alias `vs code`. The name is
-/// understood, so the refusal says so rather than calling it unknown.
-fn known_but_unsupported(canonical: &str) -> CliError {
-    CliError::usage(format!(
-        "harness `{canonical}` is known but not yet supported"
-    ))
-    .with_hint(supported_hint())
 }
 
 /// Why the executable lookup failed, for a plain failure message.
@@ -370,29 +363,6 @@ fn failure_message(error: &DelegateError) -> String {
     }
 }
 
-/// The config-surface note for a harness whose entry lands in a vendor-owned
-/// file the user may not expect. The delegate writes the Antigravity CLI
-/// global config, so the note names that file. Only Antigravity has a note
-/// today, so no other harness gets one.
-fn config_surface_note(record: &HarnessRecord) -> Option<String> {
-    (record.name == "antigravity").then(|| {
-        format!(
-            "note: antigravity writes the CLI global config (~/{})",
-            record.config_file
-        )
-    })
-}
-
-/// The text a successful install or uninstall prints for this harness: the
-/// delegate's message, with the config-surface note appended when the harness
-/// has one. Pure, so a test can check the note without capturing stdout.
-fn success_text(record: &HarnessRecord, message: &str) -> String {
-    match config_surface_note(record) {
-        Some(note) => format!("{message}\n{note}"),
-        None => message.to_owned(),
-    }
-}
-
 /// Map a delegate outcome: the message on stdout and exit 0, or a plain
 /// failure message on stderr and exit 1.
 fn report(verb: Verb, record: &HarnessRecord, outcome: Result<String, DelegateError>) -> ExitCode {
@@ -411,37 +381,13 @@ fn fail(verb: Verb, message: &str) -> ExitCode {
     ExitCode::from(1)
 }
 
-/// The surface help: the usage line, what the verb does, the supported list
-/// from the registry, and one example.
-fn print_help(verb: Verb) {
-    println!("{}", help_text(verb));
-}
-
-/// The full help text, split from `print_help` so a test can read it without
-/// capturing stdout. The Antigravity config-surface note is included because
-/// help lists every supported harness, and an Antigravity user needs to know
-/// which file received the entry.
-fn help_text(verb: Verb) -> String {
-    let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or_else(|| match verb {
-        Verb::Install => "clio install --harness <name>".to_owned(),
-        Verb::Uninstall => "clio uninstall --harness <name>".to_owned(),
-    });
-    let mut text = format!(
-        "{usage}\n\n{}\n\n{}\n\nExample: clio {} --harness claude",
-        verb.purpose(),
-        supported_hint(),
-        verb.label(),
-    );
-    if let Some(note) = agent_harness::resolve("antigravity").and_then(config_surface_note) {
-        text.push_str("\n\n");
-        text.push_str(&note);
-    }
-    text
-}
-
 #[cfg(test)]
 #[path = "install_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "install_cli_portable_tests.rs"]
+mod portable_tests;
 
 #[cfg(test)]
 #[path = "install_cli_direct_write_tests.rs"]

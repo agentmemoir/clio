@@ -140,6 +140,7 @@ mod count_noun;
 mod db_target;
 mod http_bind;
 mod install_cli;
+mod install_cli_help;
 mod mcp_cli;
 mod mcp_discovery_flag;
 mod mcp_tools_flag;

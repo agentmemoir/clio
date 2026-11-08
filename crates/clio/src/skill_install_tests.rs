@@ -208,10 +208,55 @@ fn the_outcome_line_names_the_absolute_directory_and_the_count() {
 }
 
 #[test]
+fn no_harness_install_writes_only_the_portable_root() {
+    let scratch = Scratch::new("portable");
+    let outcome = install_portable(&env(&scratch.root)).expect("the portable assets install");
+    assert_eq!(
+        outcome.dir,
+        scratch
+            .root
+            .join(".agents")
+            .join("skills")
+            .join(SKILL_DIR_NAME)
+    );
+    assert_eq!(outcome.assets, 18);
+    assert_eq!(outcome.written, 18);
+    assert!(
+        !scratch.root.join(".claude").exists(),
+        "no harness-native root is written"
+    );
+}
+
+#[test]
+fn the_portable_outcome_line_names_the_absolute_directory_and_the_count() {
+    let scratch = Scratch::new("portable-text");
+    let outcome = install_portable(&env(&scratch.root)).expect("the portable assets install");
+    let text = portable_outcome_text(&outcome);
+    assert!(text.contains(&outcome.dir.display().to_string()), "{text}");
+    assert!(text.contains("18 skill assets"), "{text}");
+    assert!(!text.contains("loaded"), "{text}");
+}
+
+#[test]
+fn a_portable_write_failure_names_the_failing_path_and_cause() {
+    let scratch = Scratch::new("portable-failure");
+    let skills = scratch.root.join(".agents").join("skills");
+    fs::create_dir_all(&skills).expect("the portable root can be created");
+    fs::write(skills.join(SKILL_DIR_NAME), b"not a directory")
+        .expect("the blocking file can be written");
+
+    let error = install_portable(&env(&scratch.root))
+        .expect_err("a file at the package path blocks the directory");
+    let message = portable_failure_message(&error);
+    assert!(message.contains(SKILL_DIR_NAME), "{message}");
+    assert!(message.contains("failed to create"), "{message}");
+}
+
+#[test]
 fn the_skill_step_runs_before_registration() {
     let scratch = Scratch::new("order");
     let order = RefCell::new(Vec::new());
-    let skill = |_: &HarnessRecord, _: &DirectWriteEnv| {
+    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv| {
         order.borrow_mut().push("skill");
         Ok(())
     };
@@ -237,7 +282,8 @@ fn the_skill_step_runs_before_registration() {
 #[test]
 fn a_skill_failure_stops_registration() {
     let scratch = Scratch::new("stop");
-    let skill = |_: &HarnessRecord, _: &DirectWriteEnv| Err("skill write failed".to_owned());
+    let skill =
+        |_: Option<&HarnessRecord>, _: &DirectWriteEnv| Err("skill write failed".to_owned());
 
     let code = run_with_skills(
         Verb::Install,

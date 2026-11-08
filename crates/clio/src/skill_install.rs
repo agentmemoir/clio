@@ -22,7 +22,7 @@
 //!
 //! Keep this module focused on writing the embedded skill package.
 
-use crate::agent_harness::{self, HarnessRecord};
+use crate::agent_harness::{self, HarnessRecord, SkillRoot};
 use crate::agent_harness_targets::{DirectWriteEnv, resolve_skill_root};
 use crate::agent_harness_write::WriteError;
 use clio_mcp::skill_assets::SKILL_ASSETS;
@@ -57,6 +57,15 @@ pub(crate) fn install_and_report(
     Ok(())
 }
 
+/// Install the portable skill package with no harness selected, and print its
+/// outcome line. Returns `Err` with a plain message when the write fails, and
+/// the caller must then report the failure and skip registration.
+pub(crate) fn install_portable_and_report(env: &DirectWriteEnv) -> Result<(), String> {
+    let outcome = install_portable(env).map_err(|error| portable_failure_message(&error))?;
+    println!("{}", portable_outcome_text(&outcome));
+    Ok(())
+}
+
 /// Write every embedded asset into `<root>/clio-mcp/`. A file whose bytes already match is left untouched, so a re-run is safe and reports zero written.
 ///
 /// # Errors
@@ -74,6 +83,25 @@ pub(crate) fn install(
                 ),
             }
         })?;
+    write_into(&root)
+}
+
+/// Write the embedded assets into the portable cross-client root. Used when
+/// `clio install` names no harness.
+///
+/// # Errors
+/// The home directory is unknown, a directory cannot be created, or a file
+/// cannot be replaced.
+pub(crate) fn install_portable(env: &DirectWriteEnv) -> Result<SkillOutcome, WriteError> {
+    let root = resolve_skill_root(SkillRoot::Portable, env).ok_or_else(|| WriteError::Io {
+        detail: "cannot resolve the portable skill root because the home directory is unknown"
+            .to_owned(),
+    })?;
+    write_into(&root)
+}
+
+/// Write every embedded asset into `<root>/clio-mcp/`.
+fn write_into(root: &Path) -> Result<SkillOutcome, WriteError> {
     let dir = root.join(SKILL_DIR_NAME);
     std::fs::create_dir_all(&dir).map_err(|error| io_error("create", &dir, &error))?;
     let mut written = 0;
@@ -97,7 +125,22 @@ pub(crate) fn install(
 
 /// The skill outcome line: the absolute directory and the asset count, plus whether anything changed. A harness that receives the portable copy also gets the reason line. The text never claims a client loaded the skill.
 pub(crate) fn outcome_text(record: &HarnessRecord, outcome: &SkillOutcome) -> String {
-    let line = if outcome.written == 0 {
+    let line = outcome_line(outcome);
+    match portable_reason(record) {
+        Some(reason) => format!("{line}\n{reason}"),
+        None => line,
+    }
+}
+
+/// The outcome line for the portable-only install, which names no harness.
+pub(crate) fn portable_outcome_text(outcome: &SkillOutcome) -> String {
+    outcome_line(outcome)
+}
+
+/// The shared outcome line: the absolute directory and the asset count, plus
+/// whether anything changed.
+fn outcome_line(outcome: &SkillOutcome) -> String {
+    if outcome.written == 0 {
         format!(
             "skill assets already current in {} ({} assets, nothing written)",
             outcome.dir.display(),
@@ -110,10 +153,6 @@ pub(crate) fn outcome_text(record: &HarnessRecord, outcome: &SkillOutcome) -> St
             outcome.dir.display(),
             outcome.written
         )
-    };
-    match portable_reason(record) {
-        Some(reason) => format!("{line}\n{reason}"),
-        None => line,
     }
 }
 
@@ -129,6 +168,20 @@ pub(crate) fn failure_message(record: &HarnessRecord, error: &WriteError) -> Str
         WriteError::Unparseable { path, snippet } => format!(
             "could not install the {} skill assets: {} {snippet}",
             record.name,
+            path.display()
+        ),
+    }
+}
+
+/// The plain failure message for the portable-only write: the failing path and
+/// the cause. `WriteError` already carries the path in its detail.
+pub(crate) fn portable_failure_message(error: &WriteError) -> String {
+    match error {
+        WriteError::Io { detail } => {
+            format!("could not install the portable clio-mcp skill assets: {detail}")
+        }
+        WriteError::Unparseable { path, snippet } => format!(
+            "could not install the portable clio-mcp skill assets: {} {snippet}",
             path.display()
         ),
     }

@@ -358,15 +358,23 @@ fn setup_states_its_accepted_set_and_matches_its_parser() {
     assert_eq!(helped.get("help").map(String::as_str), Some("true"));
 }
 
-/// `install` and `uninstall` require `--harness`, and the record-derived name
-/// list gates it through the shared parser in both value spellings.
+/// `install` takes `--harness` as optional and `uninstall` requires it, and
+/// the record-derived name list gates the flag through the shared parser in
+/// both value spellings.
 #[test]
-fn install_and_uninstall_require_harness_and_match_the_shared_parser() {
+fn install_takes_harness_as_optional_and_uninstall_requires_it() {
+    let install = record("install");
+    assert_eq!(install.usage_line(), "clio install [--harness <name>]");
+    assert!(
+        install.required_flags().is_empty(),
+        "install must accept a call with no --harness"
+    );
+    let uninstall = record("uninstall");
+    assert_eq!(uninstall.usage_line(), "clio uninstall --harness <name>");
+    assert_eq!(uninstall.required_flags(), ["harness"]);
+
     for name in ["install", "uninstall"] {
-        let spec = record(name);
-        assert_eq!(spec.usage_line(), format!("clio {name} --harness <name>"));
-        assert_eq!(spec.required_flags(), ["harness"]);
-        let parser = spec.parser_spec();
+        let parser = record(name).parser_spec();
         assert_eq!(
             parser.value_flags(),
             ["db", "backend", "bank", "actor", "output", "harness"]
