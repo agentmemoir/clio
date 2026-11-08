@@ -16,35 +16,24 @@
 //! - `every_call_rule_appears_exactly_once`
 //! - `four_call_budget_appears_once_and_scopes_only_retrieval`
 //! - `version_check_runs_once_and_applies_no_update`
-//! - `reference_files_match_group_table`
 //!
 //! ## Does not own
-//! - The wording of the skill, its frontmatter, or the prose of its reference
-//!   files
+//! - The group reference files or their contents (`group_references`)
 //! - The approved group membership and guidance the table mirrors
 //!   (`clio-types` `mcp_tool_groups_data`)
 //! - Advertising, listing, or dispatching a tool (`clio-mcp`)
 //!
 //! ## Boundary
 //!
-//! The skill is read with `include_str!`, so this check has no working
-//! directory, clock, or network input and cannot read a stale copy. A change to
-//! the skill's router wording belongs here only when it moves one of the policy
-//! sentences above; a membership change belongs in `mcp_tool_groups_data`,
-//! which the table is compared against.
-//!
-//! Every structural assertion is anchored to an exact line or an exact section
-//! body rather than to a substring, because a substring check reads a widened
-//! sentence, an added column, or a second table as the wording it expects.
-//!
-//! The group reference files are read with `include_str!` for the same
-//! reason, so a tool list that drifts from its catalog row fails here instead of
-//! reaching a caller.
+//! The skill text and its one section reader are declared by the target module,
+//! so this module has no working directory, clock, or network input of its own.
+//! A change to the skill's router wording belongs here only when it moves one of
+//! the policy sentences below; a membership change belongs in
+//! `mcp_tool_groups_data`, which the table is compared against.
 
 use clio_types::GROUP_TABLE;
 
-/// The skill under check, read at compile time so no run can see another copy.
-const SKILL: &str = include_str!("../../../skills/clio-mcp/SKILL.md");
+use crate::{SKILL, body_under};
 
 /// The one frontmatter `name` the skill may declare.
 const SKILL_NAME: &str = "clio-mcp";
@@ -52,6 +41,9 @@ const SKILL_NAME: &str = "clio-mcp";
 /// The one frontmatter `description` the skill may declare: one trigger
 /// sentence and one negative trigger, with no further claim beside them.
 const SKILL_DESCRIPTION: &str = "Use when the task needs Clio memory: store, retrieve, update, persona, tasks, graph, or maintenance. DO NOT TRIGGER on a greenfield turn that needs no prior state.";
+
+/// The label used when a failure names the file it read.
+const SKILL_LABEL: &str = "the skill `skills/clio-mcp/SKILL.md`";
 
 /// The router table's header line, spelled exactly as the table must spell it.
 const TABLE_HEADER: &str = "| Group | When you need | Read |";
@@ -154,25 +146,6 @@ fn data_rows() -> Vec<&'static str> {
         );
     }
     rows
-}
-
-/// The trimmed body under `heading`, up to the next `## ` heading.
-fn section_body(heading: &str) -> String {
-    let lines: Vec<&'static str> = SKILL.lines().collect();
-    let start = lines.iter().position(|line| *line == heading).map_or_else(
-        || {
-            panic!(
-                "the skill has no `{heading}` heading: keep the section so its policy has one home"
-            )
-        },
-        |index| index + 1,
-    );
-    let body: Vec<&str> = lines[start..]
-        .iter()
-        .copied()
-        .take_while(|line| !line.starts_with("## "))
-        .collect();
-    body.join("\n").trim().to_string()
 }
 
 /// A table cell with one pair of surrounding backticks removed.
@@ -302,7 +275,7 @@ fn every_call_rule_appears_exactly_once() {
 
 #[test]
 fn four_call_budget_appears_once_and_scopes_only_retrieval() {
-    let body = section_body("## Turn budget");
+    let body = body_under(SKILL_LABEL, SKILL, "## Turn budget");
     assert_eq!(
         body, BUDGET_BODY,
         "the `## Turn budget` section reads `{body}` rather than `{BUDGET_BODY}`: keep the one budget sentence with its one value and its scope, because an added sentence, a widened scope, a changed value, or a duplicate all change what a turn may call"
@@ -323,7 +296,7 @@ fn four_call_budget_appears_once_and_scopes_only_retrieval() {
 
 #[test]
 fn version_check_runs_once_and_applies_no_update() {
-    let body = section_body("## End-of-session check");
+    let body = body_under(SKILL_LABEL, SKILL, "## End-of-session check");
     assert_eq!(
         body, CHECK_BODY,
         "the `## End-of-session check` section reads `{body}` rather than `{CHECK_BODY}`: keep the check to one read that reports and applies nothing, because an added sentence can widen it into a mutation"
@@ -340,102 +313,5 @@ fn version_check_runs_once_and_applies_no_update() {
             !lowered.contains(claim),
             "the skill says `{claim}`, which turns the check into a mutation: remove it, because the check reports and applies no update"
         );
-    }
-}
-
-macro_rules! reference {
-    ($name:literal) => {
-        (
-            $name,
-            include_str!(concat!("../../../skills/clio-mcp/references/", $name)),
-        )
-    };
-}
-
-#[test]
-fn reference_files_match_group_table() {
-    let references: [(&str, &str); 9] = [
-        reference!("01-retrieval.md"),
-        reference!("02-item-write.md"),
-        reference!("03-item-read.md"),
-        reference!("04-persona.md"),
-        reference!("05-task.md"),
-        reference!("06-memtree.md"),
-        reference!("07-triple.md"),
-        reference!("08-belief.md"),
-        reference!("09-graph.md"),
-    ];
-    for (index, (name, text)) in references.iter().enumerate() {
-        let spec = &GROUP_TABLE[index];
-        let group = spec.group.as_str();
-        let lines: Vec<&str> = text.lines().collect();
-        let heading = lines
-            .iter()
-            .position(|line| *line == "## Tools")
-            .unwrap_or_else(|| {
-                panic!(
-                    "the reference `{name}` has no `## Tools` heading: give the `{group}` file one tool list, because that list ties the file to its catalog row"
-                )
-            });
-        let tools_line = lines[heading + 1..]
-            .iter()
-            .map(|line| line.trim())
-            .find(|line| !line.is_empty())
-            .unwrap_or_else(|| {
-                panic!(
-                    "the reference `{name}` has no tool list under its `## Tools` heading: put the one tool list after the heading"
-                )
-            });
-        let mut listed: Vec<&str> = tools_line
-            .split(',')
-            .map(str::trim)
-            .map(|entry| {
-                entry
-                    .strip_prefix('`')
-                    .and_then(|inner| inner.strip_suffix('`'))
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "the reference `{name}` has the tool entry `{entry}`: wrap every entry in one pair of backticks and separate the entries with commas, because the catalog names each tool without backticks"
-                        )
-                    })
-            })
-            .collect();
-        let mut catalog: Vec<&str> = spec.tools.to_vec();
-        listed.sort_unstable();
-        catalog.sort_unstable();
-        assert_eq!(
-            listed, catalog,
-            "the reference `{name}` lists {listed:?} against the `{group}` catalog row {catalog:?}: list exactly the group's tools, because a missing or extra tool leaves the file and the catalog telling a caller different things"
-        );
-        assert!(
-            text.contains(spec.when_to_use),
-            "the reference `{name}` does not carry the catalog sentence `{}`: copy `when_to_use` from the `{group}` row verbatim, because the file is the group's one home for that guidance",
-            spec.when_to_use
-        );
-        assert!(
-            text.contains("tool_describe"),
-            "the reference `{name}` does not point at `tool_describe`: keep the pointer so a caller can read exact arguments instead of guessing"
-        );
-        let fenced = text.split_once("## Examples");
-        let fenced = fenced.and_then(|(_, after)| after.split_once("```"));
-        let fenced = fenced.and_then(|(_, after)| after.split_once("```"));
-        assert!(
-            fenced.is_some(),
-            "the reference `{name}` has no fenced example block under `## Examples`: keep one pair of triple-backtick fences there, because a caller copies the calls inside them"
-        );
-        let examples = fenced.map_or("", |(fenced, _)| fenced).lines();
-        for example in examples.map(str::trim).filter(|line| !line.is_empty()) {
-            let (tool, rest) = example.split_once('(').unwrap_or_default();
-            let args = rest.strip_suffix(')').unwrap_or(rest);
-            assert!(
-                spec.tools.contains(&tool),
-                "the example `{example}` in `{name}` calls `{tool}`, which is not in the `{group}` catalog row: name only that row's tools, because a caller copies the example and a tool outside the group is one the file never promised"
-            );
-            let parsed = serde_json::from_str::<serde_json::Value>(args);
-            assert!(
-                parsed.is_ok_and(|value| value.is_object()),
-                "the example `{example}` in `{name}` passes `{args}`, which is not one JSON object: pass an object literal, because the tools take named arguments"
-            );
-        }
     }
 }
