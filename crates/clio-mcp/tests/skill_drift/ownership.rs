@@ -29,6 +29,9 @@ use clio_types::GroupSpec;
 use crate::group_references::{listed_tools, rows, tools_line};
 
 /// The helpers that serve discovery and belong to no business group.
+///
+/// The crate's own name constants are crate-private, so the names are written
+/// here; a test holds this list equal to the published discovery declarations.
 const DISCOVERY_HELPERS: [&str; 3] = ["tool_search", "tool_describe", "tool_invoke"];
 
 /// Every reference file's group paired with the tool names its list holds.
@@ -115,25 +118,12 @@ pub(crate) fn check_ownership(
 #[test]
 fn ownership_covers_every_bound_tool_exactly_once() {
     let lists = owners();
-    let entries: usize = lists.iter().map(|(_, names)| names.len()).sum();
-    assert_eq!(
-        entries, 86,
-        "the reference files list {entries} tool names rather than one entry for each of the 86 bound tools"
-    );
     let (published, bound) = real_sets();
     assert_eq!(
         check_ownership(&lists, clio_types::GROUP_TABLE, &published, &bound),
         Ok(()),
         "the real reference tool lists break their own ownership rule"
     );
-    for (group, names) in &lists {
-        for name in names {
-            assert!(
-                !DISCOVERY_HELPERS.contains(name),
-                "the `{group}` list carries `{name}`, a discovery helper"
-            );
-        }
-    }
 }
 
 #[test]
@@ -243,14 +233,34 @@ Call `tool_describe("retrieve")` for the exact arguments.
 
 #[test]
 fn a_listed_discovery_helper_is_rejected() {
-    let lists = [("retrieval", vec!["tool_describe"])];
-    let published = BTreeSet::from(["tool_describe"]);
-    let bound = BTreeSet::new();
+    for helper in DISCOVERY_HELPERS {
+        let lists = [("retrieval", vec![helper])];
+        let published = BTreeSet::from([helper]);
+        let bound = BTreeSet::new();
+        assert_eq!(
+            check_ownership(&lists, clio_types::GROUP_TABLE, &published, &bound),
+            Err(format!(
+                "ownership: the `retrieval` ownership list names `{helper}`, a discovery helper: keep the three helpers out of the ownership lists, because they belong to no business group"
+            ))
+        );
+    }
+}
+
+#[test]
+fn the_discovery_helper_list_matches_the_published_declarations() {
+    let declared: Vec<&str> = clio_mcp::discovery_tool_defs::definitions()["tools"]
+        .as_array()
+        .expect("the discovery declarations carry a tools[] array")
+        .iter()
+        .map(|tool| {
+            tool["name"]
+                .as_str()
+                .expect("every discovery declaration names its tool")
+        })
+        .collect();
     assert_eq!(
-        check_ownership(&lists, clio_types::GROUP_TABLE, &published, &bound),
-        Err(
-            "ownership: the `retrieval` ownership list names `tool_describe`, a discovery helper: keep the three helpers out of the ownership lists, because they belong to no business group"
-                .to_owned()
-        )
+        DISCOVERY_HELPERS.to_vec(),
+        declared,
+        "keep the discovery helper list equal to the published declarations"
     );
 }

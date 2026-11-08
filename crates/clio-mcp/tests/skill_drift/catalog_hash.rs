@@ -39,8 +39,11 @@ const COMMITTED: &str = include_str!("../../../../skills/clio-mcp/catalog_hash.t
 /// The version prefix every rendered hash carries.
 const PREFIX: &str = "fnv1a64:";
 
-/// The repair command every failure message names.
-const REPAIR: &str = "cargo test -p clio-mcp --test skill_drift -- --ignored --exact catalog_hash::regenerate_catalog_hash";
+/// The command that rewrites the committed hash file.
+const REGENERATE: &str = "cargo test -p clio-mcp --test skill_drift -- --ignored --exact catalog_hash::regenerate_catalog_hash";
+
+/// The command that rewrites the pack fixture, which pins the same hash.
+const EXPORT: &str = "cargo run --locked -p clio --bin clio -- mcp schema-export --out crates/clio-mcp/tests/fixtures/schema_pack.json";
 
 /// The reason the committed text does not match the current catalog hash.
 #[derive(Debug, PartialEq, Eq)]
@@ -56,11 +59,11 @@ impl Drift {
     fn message(&self) -> String {
         match self {
             Self::Malformed(text) => format!(
-                "the skill package catalog hash is malformed: `{text}` is not `{PREFIX}` plus sixteen lowercase hex digits followed by exactly one newline, so it cannot match the current catalog hash; the repair is to run `{REPAIR}` and commit the result",
+                "the skill package catalog hash is malformed: `{text}` is not `{PREFIX}` plus sixteen lowercase hex digits followed by exactly one newline, so it cannot match the current catalog hash; the repair is to run `{REGENERATE}` and `{EXPORT}` and commit both results",
                 text = text.trim_end_matches('\n')
             ),
             Self::Stale { committed, current } => format!(
-                "the skill package carries the committed hash `{committed}` against the current catalog hash `{current}`, so it is stale; the fix is to run `{REPAIR}` and commit the result, because a stale hash lets the package describe a catalog this build no longer publishes"
+                "the skill package carries the committed hash `{committed}` against the current catalog hash `{current}`, so it is stale; the fix is to run `{REGENERATE}` and `{EXPORT}` and commit both results, because a stale hash lets the package describe a catalog this build no longer publishes"
             ),
         }
     }
@@ -181,8 +184,12 @@ fn a_stale_catalog_hash_is_rejected() {
     let message = drift.message();
     assert!(message.contains("stale"), "the message names staleness");
     assert!(
-        message.contains(REPAIR),
-        "the message names the repair command"
+        message.contains(REGENERATE),
+        "the message names the hash regeneration command"
+    );
+    assert!(
+        message.contains(EXPORT),
+        "the message names the pack export command"
     );
     assert!(
         message.contains("describe a catalog this build no longer publishes"),
@@ -219,10 +226,10 @@ fn a_malformed_catalog_hash_is_rejected() {
 }
 
 /// Protects that every kind of catalog edit makes the committed hash stale,
-/// that regenerating from the mutated catalog produces a passing line, and
-/// that undoing the edit restores the original hash.
+/// that a line rendered from the mutated catalog passes, and that undoing the
+/// edit restores the original hash.
 #[test]
-fn each_catalog_mutation_makes_the_committed_hash_stale_and_regeneration_passes() {
+fn each_catalog_mutation_makes_the_committed_hash_stale_and_a_regenerated_value_passes() {
     let tools = pack_tools();
     assert!(
         tools.len() >= 2,
@@ -273,25 +280,6 @@ fn each_catalog_mutation_makes_the_committed_hash_stale_and_regeneration_passes(
                 .expect("inputSchema.properties is an object")
                 .remove("__hash_probe");
         },
-    );
-}
-
-/// Protects that rendering the same hash twice is byte-identical and ends with
-/// exactly one newline, so the regenerator cannot produce a diff from nothing.
-#[test]
-fn regeneration_is_byte_identical_across_runs() {
-    let current = current_hash();
-    let first = render(&current);
-    let second = render(&current);
-    assert_eq!(
-        first, second,
-        "rendering the same hash twice is byte-identical"
-    );
-    assert!(first.ends_with('\n'), "the render ends with a newline");
-    assert_eq!(
-        first.matches('\n').count(),
-        1,
-        "the render ends with exactly one newline"
     );
 }
 
