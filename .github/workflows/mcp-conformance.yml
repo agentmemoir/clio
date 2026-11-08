@@ -5,9 +5,10 @@
 # asks the same question before the job is scheduled, so that step and its diff
 # resolution are gone with it.
 #
-# The path list is this workflow's own subject - `clio-mcp` and the manifest that
-# can change what it compiles - and is deliberately not a copy of `ci.yml`'s wider
-# filter, so the two lists cannot drift apart into a claim about each other.
+# The path list is this workflow's own subject - `clio-mcp`, the skill package
+# whose drift checks are tests of that crate, and the manifest that can change
+# what it compiles - and is deliberately not a copy of `ci.yml`'s wider filter,
+# so the two lists cannot drift apart into a claim about each other.
 name: MCP conformance
 
 on:
@@ -15,6 +16,7 @@ on:
     branches: [master, main]
     paths:
       - 'crates/clio-mcp/**'
+      - 'skills/clio-mcp/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/mcp-conformance.yml'
@@ -22,6 +24,7 @@ on:
     branches: [master, main]
     paths:
       - 'crates/clio-mcp/**'
+      - 'skills/clio-mcp/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/mcp-conformance.yml'

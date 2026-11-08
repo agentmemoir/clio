@@ -3,21 +3,25 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for declaring the drift target's three check
+//! This module is responsible for declaring the drift target's five check
 //! modules and for the inputs they share: the skill text and the section
 //! readers every structural assertion anchors to. The router policy lives in
 //! `router_policy`; the group reference files live in `group_references`; the
-//! reference file examples live in `reference_examples`.
+//! reference file examples live in `reference_examples`; the ownership rule
+//! lives in `ownership`; the catalog hash check lives in `catalog_hash`.
 //!
 //! ## Owns
 //! - The target's module declarations
 //! - `SKILL`, the skill under check, read at compile time
-//! - `body_under`, the single section reader all three modules call
+//! - `body_under`, the section reader the group reference, reference example,
+//!   and router policy checks call
+//! - The catalog hash drift check (`catalog_hash`)
 //!
 //! ## Does not own
 //! - The router policy checks (`router_policy`)
 //! - The group reference checks (`group_references`)
 //! - The reference example checks (`reference_examples`)
+//! - The ownership rule over the reference tool lists (`ownership`)
 //! - The wording of the skill, its frontmatter, or the prose of its reference
 //!   files
 //!
@@ -25,18 +29,23 @@
 //!
 //! The skill and the reference files are read with `include_str!`, so no check
 //! has a working directory, clock, or network input and none can read a stale
-//! copy. A change to a check belongs in the module that owns it; a
-//! change to how a section body is read belongs here, because all three
-//! modules must read the same slice the same way.
+//! copy. A change to a check belongs in the module that owns it; a change to
+//! how a section body is read belongs here, because the group reference,
+//! reference example, and router policy checks must read the same slice the
+//! same way.
 //!
-//! Every structural assertion in all three modules is anchored to an exact
-//! line or an exact section body rather than to a substring, because a
-//! substring check reads a widened sentence, an added column, or a second
-//! table as the wording it expects. `body_under` is the only section reader,
-//! so a check that needs a section body compares against exactly the lines
-//! under that heading.
+//! Every structural assertion in these checks is anchored to an exact line or
+//! an exact section body rather than to a substring, because a substring check
+//! reads a widened sentence, an added column, or a second table as the wording
+//! it expects. `body_under` is the only function that reads a section body, and
+//! `paragraph_under` cuts it at the first blank line: the group reference,
+//! reference example, and router policy modules call it, `ownership` reads the
+//! tool list line through `tools_line` instead, and `catalog_hash` reads no
+//! section at all.
 
+mod catalog_hash;
 mod group_references;
+mod ownership;
 mod reference_examples;
 mod router_policy;
 
