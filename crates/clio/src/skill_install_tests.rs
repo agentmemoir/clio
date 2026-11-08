@@ -297,3 +297,150 @@ fn a_skill_failure_stops_registration() {
 
     assert_eq!(code, ExitCode::from(1));
 }
+
+/// An environment whose home directory is unknown, so no skill root resolves.
+fn unknown_home_env() -> DirectWriteEnv {
+    DirectWriteEnv::with(OsLayout::Linux, PathBuf::new(), None, None, None)
+}
+
+#[test]
+fn install_and_report_succeeds_for_a_resolved_root() {
+    let scratch = Scratch::new("report");
+    install_and_report(record("claude"), &env(&scratch.root)).expect("the assets install");
+    assert!(
+        scratch
+            .root
+            .join(".claude")
+            .join("skills")
+            .join(SKILL_DIR_NAME)
+            .join("SKILL.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn install_and_report_names_the_unknown_home_failure() {
+    let message = install_and_report(record("claude"), &unknown_home_env())
+        .expect_err("an unknown home cannot resolve a skill root");
+    assert!(
+        message.contains("could not install the claude skill assets"),
+        "{message}"
+    );
+    assert!(
+        message.contains("cannot resolve a skill root for `claude`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn install_portable_and_report_succeeds_for_a_resolved_root() {
+    let scratch = Scratch::new("portable-report");
+    install_portable_and_report(&env(&scratch.root)).expect("the portable assets install");
+    assert!(
+        scratch
+            .root
+            .join(".agents")
+            .join("skills")
+            .join(SKILL_DIR_NAME)
+            .join("SKILL.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn install_portable_and_report_names_the_unknown_home_failure() {
+    let message = install_portable_and_report(&unknown_home_env())
+        .expect_err("an unknown home cannot resolve the portable root");
+    assert!(
+        message.contains("could not install the portable clio-mcp skill assets"),
+        "{message}"
+    );
+    assert!(
+        message.contains("cannot resolve the portable skill root"),
+        "{message}"
+    );
+}
+
+#[test]
+fn an_unknown_home_fails_install_with_a_plain_message() {
+    let error = install(record("claude"), &unknown_home_env())
+        .expect_err("an unknown home cannot resolve a skill root");
+    let message = failure_message(record("claude"), &error);
+    assert!(
+        message.contains("cannot resolve a skill root for `claude`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn an_unknown_home_fails_the_portable_install_with_a_plain_message() {
+    let error = install_portable(&unknown_home_env())
+        .expect_err("an unknown home cannot resolve the portable root");
+    let message = portable_failure_message(&error);
+    assert!(
+        message.contains("cannot resolve the portable skill root"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_blocked_reference_directory_names_the_create_failure() {
+    let scratch = Scratch::new("blocked-parent");
+    let dir = scratch
+        .root
+        .join(".claude")
+        .join("skills")
+        .join(SKILL_DIR_NAME);
+    fs::create_dir_all(&dir).expect("the package directory can be created");
+    fs::write(dir.join("references"), b"not a directory")
+        .expect("the blocking file can be written");
+
+    let error = install(record("claude"), &env(&scratch.root))
+        .expect_err("a file at the reference path blocks the directory");
+    let message = failure_message(record("claude"), &error);
+    assert!(message.contains("failed to create"), "{message}");
+    assert!(message.contains("references"), "{message}");
+}
+
+#[test]
+fn a_directory_at_an_asset_path_names_the_replace_failure() {
+    let scratch = Scratch::new("blocked-asset");
+    let dir = scratch
+        .root
+        .join(".claude")
+        .join("skills")
+        .join(SKILL_DIR_NAME);
+    fs::create_dir_all(dir.join("SKILL.md")).expect("the blocking directory can be created");
+
+    let error = install(record("claude"), &env(&scratch.root))
+        .expect_err("a directory at the asset path blocks the replace");
+    let message = failure_message(record("claude"), &error);
+    assert!(message.contains("failed to replace"), "{message}");
+    assert!(message.contains("SKILL.md"), "{message}");
+}
+
+#[test]
+fn an_unparseable_skill_write_names_the_path_and_the_snippet() {
+    let error = WriteError::Unparseable {
+        path: PathBuf::from("/skills/clio-mcp/SKILL.md"),
+        snippet: "line 4: broken".to_owned(),
+    };
+    let message = failure_message(record("claude"), &error);
+    assert_eq!(
+        message,
+        "could not install the claude skill assets: /skills/clio-mcp/SKILL.md line 4: broken"
+    );
+}
+
+#[test]
+fn an_unparseable_portable_write_names_the_path_and_the_snippet() {
+    let error = WriteError::Unparseable {
+        path: PathBuf::from("/skills/clio-mcp/SKILL.md"),
+        snippet: "line 4: broken".to_owned(),
+    };
+    let message = portable_failure_message(&error);
+    assert_eq!(
+        message,
+        "could not install the portable clio-mcp skill assets: /skills/clio-mcp/SKILL.md line 4: broken"
+    );
+}

@@ -104,14 +104,17 @@ pub(crate) fn help_text(verb: Verb) -> String {
             "With no --harness, write the portable skill package to ~/.agents/skills/clio-mcp and skip server registration.\n\n",
         );
     }
-    text.push_str(&format!(
-        "{}\n\nExample: clio {} --harness claude",
-        supported_hint(),
-        verb.label(),
-    ));
+    text.push_str(&supported_hint());
+    text.push_str("\n\nExample: clio ");
+    text.push_str(verb.label());
+    text.push_str(" --harness claude");
     if let Some(note) = agent_harness::resolve("antigravity").and_then(config_surface_note) {
         text.push_str("\n\n");
         text.push_str(&note);
     }
     text
 }
+
+#[cfg(test)]
+#[path = "install_cli_help_tests.rs"]
+mod tests;

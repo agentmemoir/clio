@@ -128,12 +128,18 @@ fn run(verb: Verb, args: &[String]) -> ExitCode {
         &|| DirectWriteEnv::production(),
         &install,
         &uninstall,
-        &|record, env| match record {
-            Some(record) => crate::skill_install::install_and_report(record, env),
-            None => crate::skill_install::install_portable_and_report(env),
+        &|record, skill_env| match record {
+            Some(record) => crate::skill_install::install_and_report(record, skill_env),
+            None => crate::skill_install::install_portable_and_report(skill_env),
         },
     )
 }
+
+/// The skill step: write the embedded skill assets before registration. `None`
+/// means `clio install` named no harness and only the portable package is
+/// written.
+pub(crate) type SkillStep<'a> =
+    &'a dyn Fn(Option<&HarnessRecord>, &DirectWriteEnv) -> Result<(), String>;
 
 /// [`run_with_skills`] with the skill step left out. Test-only: a test that injects the executable lookup and both delegate calls must never write into a real home directory.
 #[cfg(test)]
@@ -165,7 +171,7 @@ pub(crate) fn run_with_skills(
     direct_write_env: &dyn Fn() -> DirectWriteEnv,
     install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
     uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
-    skill_step: &dyn Fn(Option<&HarnessRecord>, &DirectWriteEnv) -> Result<(), String>,
+    skill_step: SkillStep<'_>,
 ) -> ExitCode {
     let decision = match decide(verb, args) {
         Ok(decision) => decision,
@@ -184,10 +190,10 @@ pub(crate) fn run_with_skills(
             ExitCode::SUCCESS
         }
         Decision::Run(record) => {
-            if verb == Verb::Install {
-                if let Err(message) = skill_step(Some(record), &direct_write_env()) {
-                    return fail(verb, &message);
-                }
+            if verb == Verb::Install
+                && let Err(message) = skill_step(Some(record), &direct_write_env())
+            {
+                return fail(verb, &message);
             }
             match record.mechanism {
                 Mechanism::DirectWrite => run_direct_write(verb, record, exe, direct_write_env),
