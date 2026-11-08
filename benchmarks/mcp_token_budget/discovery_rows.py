@@ -45,6 +45,11 @@ PRE_FLAG_PATHS = (
     "benchmarks/mcp_token_budget/presets/frozen-v1.json",
     "benchmarks/mcp_token_budget/baseline/frozen-v1.json",
 )
+#: A row id under this prefix measures the served surface; other row ids name a
+#: different role, so they never set the record date.
+SURFACE_ROW_PREFIX = "client/"
+#: The keys a frozen record uses to carry a row id.
+ROW_ID_KEYS = ("row", "baseline_row")
 COMPARABILITY_NOTE = (
     "Both rows were served by the same build, so the cost is the discovery flag "
     "alone. The pre-flag records listed here predate the flag and are not "
@@ -60,17 +65,13 @@ def _serve(binary, preset, flag):
     command = [
         str(binary), "mcp", "stdio", "--tools", preset, "--discovery", flag
     ]
+    initialize = {
+        "protocolVersion": _PROTOCOL_VERSION,
+        "capabilities": {},
+        "clientInfo": {"name": "discovery-rows", "version": "0"},
+    }
     requests = [
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": _PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "discovery-rows", "version": "0"},
-            },
-        },
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": initialize},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
     ]
     payload = "".join(
@@ -268,28 +269,42 @@ def cost(rows):
     }
 
 
-def _record_date(path):
-    """Return the date the record's served surface rows share, or raise BudgetError.
+class RecordDateError(BudgetError):
+    """Raised when a pre-flag record yields no one served-surface row date."""
 
-    A row measured after the capture states its own date, so the surface rows
-    decide the capture date and a later addition cannot move it.
+
+def _row_id(row):
+    """Return a record row's id, whichever key that record uses to carry it."""
+    return next((row[key] for key in ROW_ID_KEYS if isinstance(row.get(key), str)), "")
+
+
+def is_surface_row(row):
+    """Return whether a record row measures the served surface itself."""
+    return isinstance(row, dict) and _row_id(row).startswith(SURFACE_ROW_PREFIX)
+
+
+def _record_date(path):
+    """Return the one date the record's served surface rows share, or raise.
+
+    A row of any other role cannot move the date, and no surface row, an undated
+    one, or surface rows that disagree each raise ``RecordDateError``.
     """
+    name = f"pre-flag record {path.name}"
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise BudgetError(f"cannot read pre-flag record {path.name}: {exc}") from None
-    rows = [
-        row
-        for row in document.get("rows", [])
-        if isinstance(row, dict) and row.get("date")
-    ]
-    surface = [
-        row for row in rows if "row" not in row or str(row["row"]).startswith("client/")
-    ]
-    dates = {row["date"] for row in (surface or rows)}
+    surface = [row for row in document.get("rows", []) if is_surface_row(row)]
+    if not surface:
+        raise RecordDateError(f"{name} has no {SURFACE_ROW_PREFIX!r} surface row")
+    for row in surface:
+        date = row.get("date")
+        if not isinstance(date, str) or not date.strip():
+            raise RecordDateError(f"{name} has an undated surface row {_row_id(row)!r}")
+    dates = sorted({row["date"] for row in surface})
     if len(dates) != 1:
-        raise BudgetError(f"pre-flag record {path.name} has no single row date")
-    return dates.pop()
+        raise RecordDateError(f"{name} has surface rows dated {', '.join(dates)}")
+    return dates[0]
 
 
 def pre_flag_records():
