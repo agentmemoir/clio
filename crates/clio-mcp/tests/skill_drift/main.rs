@@ -3,38 +3,41 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for declaring the drift target's two check
-//! modules and for the two inputs they share: the skill text and the one
-//! section reader every structural assertion anchors to. The router policy
-//! lives in `router_policy`; the group reference files live in
-//! `group_references`.
+//! This module is responsible for declaring the drift target's three check
+//! modules and for the inputs they share: the skill text and the section
+//! readers every structural assertion anchors to. The router policy lives in
+//! `router_policy`; the group reference files live in `group_references`; the
+//! reference file examples live in `reference_examples`.
 //!
 //! ## Owns
 //! - The target's module declarations
 //! - `SKILL`, the skill under check, read at compile time
-//! - `body_under`, the single section reader both modules call
+//! - `body_under`, the single section reader all three modules call
 //!
 //! ## Does not own
 //! - The router policy checks (`router_policy`)
 //! - The group reference checks (`group_references`)
+//! - The reference example checks (`reference_examples`)
 //! - The wording of the skill, its frontmatter, or the prose of its reference
 //!   files
 //!
 //! ## Boundary
 //!
-//! The skill and the reference files are read with `include_str!`, so neither
-//! check has a working directory, clock, or network input and neither can read
-//! a stale copy. A change to a check belongs in the module that owns it; a
-//! change to how a section body is read belongs here, because both modules must
-//! read the same slice the same way.
+//! The skill and the reference files are read with `include_str!`, so no check
+//! has a working directory, clock, or network input and none can read a stale
+//! copy. A change to a check belongs in the module that owns it; a
+//! change to how a section body is read belongs here, because all three
+//! modules must read the same slice the same way.
 //!
-//! Every structural assertion in both modules is anchored to an exact line or
-//! an exact section body rather than to a substring, because a substring check
-//! reads a widened sentence, an added column, or a second table as the wording
-//! it expects. `body_under` is the only section reader, so a check that needs a
-//! section body compares against exactly the lines under that heading.
+//! Every structural assertion in all three modules is anchored to an exact
+//! line or an exact section body rather than to a substring, because a
+//! substring check reads a widened sentence, an added column, or a second
+//! table as the wording it expects. `body_under` is the only section reader,
+//! so a check that needs a section body compares against exactly the lines
+//! under that heading.
 
 mod group_references;
+mod reference_examples;
 mod router_policy;
 
 /// The skill under check, read at compile time so no run can see another copy.

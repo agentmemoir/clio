@@ -12,10 +12,10 @@ The default `minimal` preset does not list this group, so `tools/list` may not s
 
 ## Examples
 
-`export` writes `destination` inside the export root and is refused unless the call names a `harness` or `system` `actor`, while `import` reads `source` from the server process working directory.
+`export` writes `destination` inside the export root and is refused unless the call acts as a `harness` or `system` actor, which the transport resolves from the session credential, the `actor` runtime argument or the session default, while `import` reads `source` from the server process working directory.
 
 ```
-export({"destination": "demo-bundle.json", "actor": "harness"})
+export({"destination": "demo-bundle.json"})
 import({"source": "demo-bundle.json", "dry_run": true})
 ```
 

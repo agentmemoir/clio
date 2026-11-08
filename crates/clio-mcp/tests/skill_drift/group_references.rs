@@ -18,9 +18,12 @@
 //! - `reference_files_carry_no_schema_or_parameter_table`
 //! - `reference_files_state_no_tool_count`
 //! - `reference_tool_list_has_no_continuation_line`
+//! - `reference_directory_holds_exactly_the_catalog_files`
+//! - `no_two_references_share_a_when_to_use_paragraph`
 //!
 //! ## Does not own
 //! - `SKILL.md` or its router policy (`router_policy`)
+//! - The exported-schema validation of the examples (`reference_examples`)
 //! - The approved group membership and guidance the files mirror
 //!   (`clio-types` `mcp_tool_groups_data`)
 //! - The prose of a reference file beyond the four parts listed above
@@ -51,7 +54,7 @@ macro_rules! reference {
 
 /// Every reference file the router table currently points at, paired with its
 /// name, read at compile time so no run can see another copy.
-const REFERENCES: [(&str, &str); 15] = [
+const REFERENCES: [(&str, &str); 17] = [
     reference!("01-retrieval.md"),
     reference!("02-item-write.md"),
     reference!("03-item-read.md"),
@@ -67,6 +70,8 @@ const REFERENCES: [(&str, &str); 15] = [
     reference!("13-retention.md"),
     reference!("14-config.md"),
     reference!("15-ranking.md"),
+    reference!("16-sync.md"),
+    reference!("17-compliance.md"),
 ];
 
 /// Words that state an argument schema: a type declaration, a properties map,
@@ -81,10 +86,18 @@ const WHEN_HEADING: &str = "## When to use";
 const ARGUMENTS_HEADING: &str = "## Exact arguments";
 
 /// The exact heading that opens the tool list of a reference file.
-const TOOLS_HEADING: &str = "## Tools";
+pub(crate) const TOOLS_HEADING: &str = "## Tools";
 
 /// The exact heading that opens the example block of a reference file.
-const EXAMPLES_HEADING: &str = "## Examples";
+pub(crate) const EXAMPLES_HEADING: &str = "## Examples";
+
+/// The one group whose reference file carries no invocation example.
+///
+/// The compliance tools erase data, so a copied call in that file can destroy
+/// the wrong record: the file names its tools and points at `tool_describe`
+/// instead. The reason lives here because neither the file nor its heading says
+/// it, and every other group keeps the example requirement unchanged.
+const NO_EXAMPLE_GROUP: &str = "compliance";
 
 /// The pointer to the tool that reports exact arguments.
 const POINTER: &str = "tool_describe";
@@ -93,7 +106,10 @@ const POINTER: &str = "tool_describe";
 ///
 /// The pairing is positional on purpose: a reference file is numbered by its
 /// 1-based catalog row, so a reordered catalog changes which file the checks
-/// read and the tool set comparison fails rather than passing on stale text.
+/// read and the tool set comparison fails rather than passing on stale text. The
+/// name is also compared with the name the row derives, so a hand-written list
+/// that disagrees with the catalog fails here instead of reading a file the
+/// router never points at.
 fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)> {
     REFERENCES
         .iter()
@@ -104,6 +120,13 @@ fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static G
                     "the reference `{name}` has no `GROUP_TABLE` row at index {index}: number each reference file by the catalog row it serves, because the file and the row must be read as one"
                 )
             });
+            let derived = crate::reference_examples::derived_name(index);
+            assert_eq!(
+                *name,
+                derived,
+                "the reference read at catalog row {} is `{name}` rather than `{derived}`: name each file after its `GROUP_TABLE` row as two digits, a dash and the group id, because a hand-written name reads a file the router never points at",
+                index + 1
+            );
             (index, *name, *text, spec)
         })
 }
@@ -154,6 +177,13 @@ fn listed_tools<'a>(name: &str, tools: &'a str) -> Vec<&'a str> {
 
 #[test]
 fn reference_files_match_group_table() {
+    assert_eq!(
+        REFERENCES.len(),
+        GROUP_TABLE.len(),
+        "the check reads {} reference files against {} catalog groups: give every `GROUP_TABLE` row one reference file, because a group with no file leaves a caller holding guidance nothing reads",
+        REFERENCES.len(),
+        GROUP_TABLE.len()
+    );
     for (index, name, text, spec) in rows() {
         let group = spec.group.as_str();
         let row_number = index + 1;
@@ -185,6 +215,14 @@ fn reference_files_match_group_table() {
             arguments.contains(POINTER),
             "the `{ARGUMENTS_HEADING}` section of `{name}` reads `{arguments}`, which does not point at `{POINTER}`: keep the pointer inside that section, so a caller can read exact arguments instead of guessing"
         );
+
+        // The compliance file is the one documented exception: its tools erase
+        // data, so it names them and points at `tool_describe` rather than
+        // showing a call a caller can copy. Every other file keeps the example
+        // requirement unchanged.
+        if group == NO_EXAMPLE_GROUP {
+            continue;
+        }
 
         let fenced = text.split_once(EXAMPLES_HEADING);
         let fenced = fenced.and_then(|(_, after)| after.split_once("```"));
@@ -291,5 +329,61 @@ fn reference_tool_list_has_no_continuation_line() {
                 "the reference `{name}` continues its `{TOOLS_HEADING}` list with `{line}`: keep the list on one comma-separated line, because a second line is a second list that the set comparison above reads as one tool fewer than the file names"
             );
         }
+    }
+}
+
+#[test]
+fn reference_directory_holds_exactly_the_catalog_files() {
+    // The files are read from the directory as well as at compile time, so a
+    // file the router points at and a file the directory holds cannot disagree:
+    // an extra, missing or twice-named file fails here.
+    let directory = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../skills/clio-mcp/references"
+    );
+    let names: Vec<String> = std::fs::read_dir(directory)
+        .unwrap_or_else(|error| {
+            panic!("the references directory `{directory}` cannot be read: {error}")
+        })
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|error| {
+                    panic!("the references directory `{directory}` has an unreadable entry: {error}")
+                })
+                .file_name()
+                .into_string()
+                .unwrap_or_else(|name| {
+                    panic!("the references directory `{directory}` holds `{name:?}`, a name that is not UTF-8")
+                })
+        })
+        .collect();
+    if let Err(difference) = crate::reference_examples::check_reference_set(&names) {
+        panic!(
+            "the references directory `{directory}` {difference}: keep exactly one reference file per catalog group, because a file nothing routes to is guidance a caller never reads and a missing one is a group with no guidance"
+        );
+    }
+    assert_eq!(
+        names.len(),
+        GROUP_TABLE.len(),
+        "the references directory holds {} files against {} catalog groups and the derived names already match: the directory is clean and the catalog moved, so add the row and its file together",
+        names.len(),
+        GROUP_TABLE.len()
+    );
+}
+
+#[test]
+fn no_two_references_share_a_when_to_use_paragraph() {
+    // Two files that open with the same paragraph are two homes for one piece of
+    // guidance, and a caller reads whichever the router sends it to. The catalog
+    // sentence is compared as a whole, so a paraphrase is not a duplicate here.
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for (_, name, text, _) in rows() {
+        let when = paragraph_under(&format!("the reference `{name}`"), text, WHEN_HEADING);
+        if let Some((other, _)) = seen.iter().find(|(_, paragraph)| *paragraph == when) {
+            panic!(
+                "the references `{other}` and `{name}` both open their `{WHEN_HEADING}` section with `{when}`: give each group its own guidance, because two files carrying one paragraph leave a caller reading the same words for two different groups"
+            );
+        }
+        seen.push((name.to_owned(), when));
     }
 }
