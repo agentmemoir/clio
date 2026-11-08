@@ -25,7 +25,9 @@
 use super::*;
 use crate::agent_harness_targets::{DirectWriteEnv, OsLayout};
 use std::cell::RefCell;
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|item| (*item).to_owned()).collect()
@@ -33,6 +35,40 @@ fn args(list: &[&str]) -> Vec<String> {
 
 fn fake_exe() -> PathBuf {
     PathBuf::from("clio")
+}
+
+/// Nanoseconds plus a process-global counter: two calls never collide.
+static HOME_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// One test's own home directory, removed when the guard drops.
+struct TempHome {
+    root: PathBuf,
+}
+
+impl TempHome {
+    fn new(label: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let seq = HOME_SEQ.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "clio-install-portable-{label}-{}-{nanos}-{seq}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("the scratch home can be created");
+        Self { root }
+    }
+}
+
+impl Drop for TempHome {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+/// A Linux-layout environment rooted at the scratch home, so no path leaves the test's own directory.
+fn linux_env(home: &Path) -> DirectWriteEnv {
+    DirectWriteEnv::with(OsLayout::Linux, home.to_path_buf(), None, None, None)
 }
 
 fn never_install(_: &HarnessRecord, _: &Path) -> Result<String, DelegateError> {
@@ -170,4 +206,21 @@ fn a_selected_harness_runs_the_skill_step_then_registers() {
     );
     assert_eq!(code, ExitCode::SUCCESS);
     assert_eq!(*order.borrow(), vec!["skill claude", "register claude"]);
+}
+
+#[test]
+fn a_no_harness_install_writes_only_the_portable_skill_root() {
+    let home = TempHome::new("portable-write");
+    crate::skill_install::install_portable(&linux_env(&home.root))
+        .expect("the portable assets install");
+    let package = home
+        .root
+        .join(".agents")
+        .join("skills")
+        .join(crate::skill_install::SKILL_DIR_NAME);
+    assert!(package.join("SKILL.md").is_file(), "the router is written");
+    assert!(
+        !home.root.join(".claude").exists(),
+        "no harness-native root is written"
+    );
 }

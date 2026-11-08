@@ -3,7 +3,7 @@
 //
 //! # Responsibility
 //!
-//! This module tests the skill installer: the root each harness selects, the assets written, byte identity with the embedded table, idempotent re-runs, refusal on a blocked path, and the order of the skill step before registration.
+//! This module tests the skill installer: the assets written, byte identity with the embedded table, idempotent re-runs, refusal on a blocked path, the failure text, and the order of the skill step before registration. The root each harness selects is tested in `skill_install_roots_tests`.
 //!
 //! ## Owns
 //! - The `Scratch` unique temp directory guard and every assertion over `install`, `outcome_text`, and `failure_message`
@@ -69,95 +69,36 @@ fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|item| (*item).to_owned()).collect()
 }
 
-#[test]
-fn claude_writes_into_the_native_skill_root() {
-    let scratch = Scratch::new("claude");
-    let outcome = install(record("claude"), &env(&scratch.root)).expect("the assets install");
-    assert_eq!(
-        outcome.dir,
-        scratch
-            .root
-            .join(".claude")
-            .join("skills")
-            .join(SKILL_DIR_NAME)
-    );
-    assert_eq!(outcome.assets, 18);
-    assert_eq!(outcome.written, 18);
-}
-
-#[test]
-fn antigravity_writes_into_the_native_gemini_skill_root() {
-    let scratch = Scratch::new("antigravity");
-    let outcome = install(record("antigravity"), &env(&scratch.root)).expect("the assets install");
-    assert_eq!(
-        outcome.dir,
-        scratch
-            .root
-            .join(".gemini")
-            .join("config")
-            .join("skills")
-            .join(SKILL_DIR_NAME)
-    );
-}
-
-#[test]
-fn codex_writes_into_the_portable_skill_root() {
-    let scratch = Scratch::new("codex");
-    let outcome = install(record("codex"), &env(&scratch.root)).expect("the assets install");
-    assert_eq!(
-        outcome.dir,
-        scratch
-            .root
-            .join(".agents")
-            .join("skills")
-            .join(SKILL_DIR_NAME)
-    );
-}
-
-#[test]
-fn hermes_uses_the_portable_root_and_states_the_reason() {
-    let scratch = Scratch::new("hermes");
-    let outcome = install(record("hermes"), &env(&scratch.root)).expect("the assets install");
-    assert_eq!(
-        outcome.dir,
-        scratch
-            .root
-            .join(".agents")
-            .join("skills")
-            .join(SKILL_DIR_NAME)
-    );
-    let text = outcome_text(record("hermes"), &outcome);
-    assert!(
-        text.contains("no documented native skill mechanism"),
-        "{text}"
-    );
-    assert!(!text.contains("loaded"), "{text}");
+/// The package directory of the first written root.
+fn first_dir(outcome: &SkillOutcome) -> &Path {
+    &outcome.roots[0].dir
 }
 
 #[test]
 fn every_asset_is_written_byte_identical_to_the_embedded_table() {
     let scratch = Scratch::new("bytes");
-    let outcome = install(record("claude"), &env(&scratch.root)).expect("the assets install");
+    let outcome = install_portable(&env(&scratch.root)).expect("the assets install");
+    let dir = first_dir(&outcome);
     for (name, text) in SKILL_ASSETS {
-        let bytes = fs::read(outcome.dir.join(name)).expect("the asset exists");
+        let bytes = fs::read(dir.join(name)).expect("the asset exists");
         assert_eq!(
             bytes,
             text.as_bytes(),
             "{name} differs from the embedded text"
         );
     }
-    assert!(outcome.dir.join("references/01-retrieval.md").is_file());
-    assert!(outcome.dir.join("references/17-compliance.md").is_file());
+    assert!(dir.join("references/01-retrieval.md").is_file());
+    assert!(dir.join("references/17-compliance.md").is_file());
 }
 
 #[test]
 fn a_second_run_writes_nothing() {
     let scratch = Scratch::new("idempotent");
-    let first = install(record("claude"), &env(&scratch.root)).expect("the first run writes");
-    assert_eq!(first.written, 18);
-    let second = install(record("claude"), &env(&scratch.root)).expect("the second run is safe");
-    assert_eq!(second.written, 0);
-    assert!(outcome_text(record("claude"), &second).contains("nothing written"));
+    let first = install_portable(&env(&scratch.root)).expect("the first run writes");
+    assert_eq!(first.roots[0].written, 18);
+    let second = install_portable(&env(&scratch.root)).expect("the second run is safe");
+    assert_eq!(second.roots[0].written, 0);
+    assert!(portable_outcome_text(&second).contains("nothing written"));
 }
 
 #[test]
@@ -200,9 +141,12 @@ fn a_write_failure_names_the_failing_path_and_cause() {
 #[test]
 fn the_outcome_line_names_the_absolute_directory_and_the_count() {
     let scratch = Scratch::new("text");
-    let outcome = install(record("claude"), &env(&scratch.root)).expect("the assets install");
-    let text = outcome_text(record("claude"), &outcome);
-    assert!(text.contains(&outcome.dir.display().to_string()), "{text}");
+    let outcome = install_portable(&env(&scratch.root)).expect("the assets install");
+    let text = portable_outcome_text(&outcome);
+    assert!(
+        text.contains(&first_dir(&outcome).display().to_string()),
+        "{text}"
+    );
     assert!(text.contains("18 skill assets"), "{text}");
     assert!(!text.contains("loaded"), "{text}");
 }
@@ -212,7 +156,12 @@ fn no_harness_install_writes_only_the_portable_root() {
     let scratch = Scratch::new("portable");
     let outcome = install_portable(&env(&scratch.root)).expect("the portable assets install");
     assert_eq!(
-        outcome.dir,
+        outcome.roots.len(),
+        1,
+        "the portable install writes one root"
+    );
+    assert_eq!(
+        first_dir(&outcome),
         scratch
             .root
             .join(".agents")
@@ -220,7 +169,7 @@ fn no_harness_install_writes_only_the_portable_root() {
             .join(SKILL_DIR_NAME)
     );
     assert_eq!(outcome.assets, 18);
-    assert_eq!(outcome.written, 18);
+    assert_eq!(outcome.roots[0].written, 18);
     assert!(
         !scratch.root.join(".claude").exists(),
         "no harness-native root is written"
@@ -232,7 +181,10 @@ fn the_portable_outcome_line_names_the_absolute_directory_and_the_count() {
     let scratch = Scratch::new("portable-text");
     let outcome = install_portable(&env(&scratch.root)).expect("the portable assets install");
     let text = portable_outcome_text(&outcome);
-    assert!(text.contains(&outcome.dir.display().to_string()), "{text}");
+    assert!(
+        text.contains(&first_dir(&outcome).display().to_string()),
+        "{text}"
+    );
     assert!(text.contains("18 skill assets"), "{text}");
     assert!(!text.contains("loaded"), "{text}");
 }

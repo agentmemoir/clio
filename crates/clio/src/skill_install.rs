@@ -3,13 +3,13 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for installing the embedded `clio-mcp` skill package from the binary into the skill root the selected harness reads, and for rendering the skill outcome.
+//! This module is responsible for installing the embedded `clio-mcp` skill package from the binary into every skill root the selected harness reads, and for rendering the skill outcome.
 //!
 //! ## Owns
-//! - Resolving the skill root for a harness through the injectable `DirectWriteEnv` seam
-//! - Writing every embedded asset into `<root>/clio-mcp/`, creating the directories it needs
+//! - Resolving every skill root for a harness through the injectable `DirectWriteEnv` seam
+//! - Writing every embedded asset into each `<root>/clio-mcp/`, creating the directories it needs
 //! - Byte comparison so a re-run rewrites nothing that already matches, and a count of what changed
-//! - The skill outcome line and the portable-root reason line
+//! - The skill outcome line, one line per root, and the portable-root reason line
 //!
 //! ## Does not own
 //! - The embedded asset table (`clio_mcp::skill_assets`)
@@ -25,29 +25,39 @@
 use crate::agent_harness::{self, HarnessRecord, SkillRoot};
 use crate::agent_harness_targets::{DirectWriteEnv, resolve_skill_root};
 use crate::agent_harness_write::WriteError;
-use clio_mcp::skill_assets::SKILL_ASSETS;
+use clio_mcp::skill_assets::{SKILL_ASSETS, references};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The directory name of the installed skill package. It matches the `name` in the router frontmatter, as the Agent Skills format requires.
 pub(crate) const SKILL_DIR_NAME: &str = "clio-mcp";
 
+/// The portable root alone, used when `clio install` names no harness.
+const PORTABLE_ROOTS: &[SkillRoot] = &[SkillRoot::Portable];
+
 /// The hermes reason line: its client has no documented native skill mechanism, so it receives the portable copy.
 const PORTABLE_REASON: &str =
     "note: hermes has no documented native skill mechanism, so the portable skill root is used";
 
-/// What a successful skill install left behind.
+/// What one target root received.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct SkillOutcome {
-    /// The absolute directory the assets were written into.
+pub(crate) struct SkillRootOutcome {
+    /// The absolute package directory, `<root>/clio-mcp`.
     pub dir: PathBuf,
-    /// The number of embedded assets written or already current.
-    pub assets: usize,
-    /// The number of files whose bytes were created or changed. Zero means the directory was already current.
+    /// The number of files whose bytes were created or changed in this root. Zero means the root was already current.
     pub written: usize,
 }
 
-/// Install every embedded skill asset for `record` and print the skill outcome line. Returns `Err` with a plain message when the write fails, and the caller must then skip registration.
+/// What a successful skill install left behind.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SkillOutcome {
+    /// One entry per written root, in mapping order.
+    pub roots: Vec<SkillRootOutcome>,
+    /// The number of embedded assets in the package, the same for every root.
+    pub assets: usize,
+}
+
+/// Install every embedded skill asset for `record` and print the skill outcome text, one line per root. Returns `Err` with a plain message when the write fails, and the caller must then skip registration.
 pub(crate) fn install_and_report(
     record: &HarnessRecord,
     env: &DirectWriteEnv,
@@ -58,7 +68,7 @@ pub(crate) fn install_and_report(
 }
 
 /// Install the portable skill package with no harness selected, and print its
-/// outcome line. Returns `Err` with a plain message when the write fails, and
+/// outcome text. Returns `Err` with a plain message when the write fails, and
 /// the caller must then report the failure and skip registration.
 pub(crate) fn install_portable_and_report(env: &DirectWriteEnv) -> Result<(), String> {
     let outcome = install_portable(env).map_err(|error| portable_failure_message(&error))?;
@@ -66,24 +76,19 @@ pub(crate) fn install_portable_and_report(env: &DirectWriteEnv) -> Result<(), St
     Ok(())
 }
 
-/// Write every embedded asset into `<root>/clio-mcp/`. A file whose bytes already match is left untouched, so a re-run is safe and reports zero written.
+/// Write every embedded asset into every skill root `record` reads. A file whose bytes already match is left untouched, so a re-run is safe and reports zero written for that root.
 ///
 /// # Errors
-/// The skill root cannot be resolved, a directory cannot be created, or a file cannot be replaced.
+/// A skill root cannot be resolved, a directory cannot be created, or a file cannot be replaced.
 pub(crate) fn install(
     record: &HarnessRecord,
     env: &DirectWriteEnv,
 ) -> Result<SkillOutcome, WriteError> {
-    let root =
-        resolve_skill_root(agent_harness::skill_root(record.name), env).ok_or_else(|| {
-            WriteError::Io {
-                detail: format!(
-                    "cannot resolve a skill root for `{}` because the home directory is unknown",
-                    record.name
-                ),
-            }
-        })?;
-    write_into(&root)
+    let missing = format!(
+        "cannot resolve a skill root for `{}` because the home directory is unknown",
+        record.name
+    );
+    write_into_all(agent_harness::skill_roots(record.name), env, &missing)
 }
 
 /// Write the embedded assets into the portable cross-client root. Used when
@@ -93,65 +98,108 @@ pub(crate) fn install(
 /// The home directory is unknown, a directory cannot be created, or a file
 /// cannot be replaced.
 pub(crate) fn install_portable(env: &DirectWriteEnv) -> Result<SkillOutcome, WriteError> {
-    let root = resolve_skill_root(SkillRoot::Portable, env).ok_or_else(|| WriteError::Io {
-        detail: "cannot resolve the portable skill root because the home directory is unknown"
-            .to_owned(),
-    })?;
-    write_into(&root)
+    let missing = "cannot resolve the portable skill root because the home directory is unknown";
+    write_into_all(PORTABLE_ROOTS, env, missing)
 }
 
-/// Write every embedded asset into `<root>/clio-mcp/`.
-fn write_into(root: &Path) -> Result<SkillOutcome, WriteError> {
-    let dir = root.join(SKILL_DIR_NAME);
-    std::fs::create_dir_all(&dir).map_err(|error| io_error("create", &dir, &error))?;
-    let mut written = 0;
-    for (name, text) in SKILL_ASSETS {
-        let path = dir.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| io_error("create", parent, &error))?;
+/// Resolve every target root and write the package into each. A root that
+/// resolves to a path already in the set is written once, so a harness whose
+/// native root equals the portable root never gets a duplicate write.
+fn write_into_all(
+    roots: &[SkillRoot],
+    env: &DirectWriteEnv,
+    missing: &str,
+) -> Result<SkillOutcome, WriteError> {
+    let mut dirs: Vec<PathBuf> = Vec::with_capacity(roots.len());
+    for root in roots {
+        let path = resolve_skill_root(*root, env).ok_or_else(|| WriteError::Io {
+            detail: missing.to_owned(),
+        })?;
+        if !dirs.contains(&path) {
+            dirs.push(path);
         }
-        if std::fs::read(&path).is_ok_and(|bytes| bytes == text.as_bytes()) {
-            continue;
-        }
-        write_bytes_atomic(&path, text.as_bytes())?;
-        written += 1;
+    }
+    let mut outcomes = Vec::with_capacity(dirs.len());
+    for root in &dirs {
+        outcomes.push(write_into(root)?);
     }
     Ok(SkillOutcome {
-        dir,
+        roots: outcomes,
         assets: SKILL_ASSETS.len(),
-        written,
     })
 }
 
-/// The skill outcome line: the absolute directory and the asset count, plus whether anything changed. A harness that receives the portable copy also gets the reason line. The text never claims a client loaded the skill.
+/// Write every embedded asset into `<root>/clio-mcp/`. The references go first
+/// and the router goes last, so a failure on a reference leaves no loadable
+/// router that points at a missing file.
+fn write_into(root: &Path) -> Result<SkillRootOutcome, WriteError> {
+    let dir = root.join(SKILL_DIR_NAME);
+    std::fs::create_dir_all(&dir).map_err(|error| io_error("create", &dir, &error))?;
+    let mut written = 0;
+    for (name, text) in references() {
+        written += write_asset(&dir, name, text)?;
+    }
+    // The router is the first embedded asset; `references()` starts after it.
+    let (name, text) = SKILL_ASSETS[0];
+    written += write_asset(&dir, name, text)?;
+    Ok(SkillRootOutcome { dir, written })
+}
+
+/// Write one asset into `dir`, skipping it when its bytes already match.
+fn write_asset(dir: &Path, name: &str, text: &str) -> Result<usize, WriteError> {
+    let path = dir.join(name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| io_error("create", parent, &error))?;
+    }
+    if std::fs::read(&path).is_ok_and(|bytes| bytes == text.as_bytes()) {
+        return Ok(0);
+    }
+    write_bytes_atomic(&path, text.as_bytes())?;
+    Ok(1)
+}
+
+/// The skill outcome text: one line per written root naming its absolute
+/// directory and the asset count, plus whether anything changed there. A
+/// harness that receives the portable copy also gets the reason line. The text
+/// never claims a client loaded the skill.
 pub(crate) fn outcome_text(record: &HarnessRecord, outcome: &SkillOutcome) -> String {
-    let line = outcome_line(outcome);
+    let lines = outcome_lines(outcome);
     match portable_reason(record) {
-        Some(reason) => format!("{line}\n{reason}"),
-        None => line,
+        Some(reason) => format!("{lines}\n{reason}"),
+        None => lines,
     }
 }
 
-/// The outcome line for the portable-only install, which names no harness.
+/// The outcome text for the portable-only install, which names no harness.
 pub(crate) fn portable_outcome_text(outcome: &SkillOutcome) -> String {
-    outcome_line(outcome)
+    outcome_lines(outcome)
 }
 
-/// The shared outcome line: the absolute directory and the asset count, plus
-/// whether anything changed.
-fn outcome_line(outcome: &SkillOutcome) -> String {
-    if outcome.written == 0 {
+/// One line per written root, so every directory is named.
+fn outcome_lines(outcome: &SkillOutcome) -> String {
+    outcome
+        .roots
+        .iter()
+        .map(|root| root_line(root, outcome.assets))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The shared root line: the absolute directory and the asset count, plus
+/// whether anything changed in that root.
+fn root_line(root: &SkillRootOutcome, assets: usize) -> String {
+    if root.written == 0 {
         format!(
             "skill assets already current in {} ({} assets, nothing written)",
-            outcome.dir.display(),
-            outcome.assets
+            root.dir.display(),
+            assets
         )
     } else {
         format!(
             "installed {} skill assets into {} ({} written)",
-            outcome.assets,
-            outcome.dir.display(),
-            outcome.written
+            assets,
+            root.dir.display(),
+            root.written
         )
     }
 }
@@ -226,3 +274,7 @@ fn io_error(action: &str, path: &Path, error: &std::io::Error) -> WriteError {
 #[cfg(test)]
 #[path = "skill_install_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "skill_install_roots_tests.rs"]
+mod roots_tests;
