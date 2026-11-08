@@ -5,15 +5,17 @@
 //!
 //! This module tests the portable-only install flow: a call with no
 //! `--harness` writes the portable skill package and skips registration, an
-//! unknown harness writes nothing, and a selected harness still registers.
+//! unknown harness writes nothing, and a selected harness still registers. It
+//! also pins that `--force` reaches the skill step.
 //!
 //! ## Owns
 //! - The `Decision::Portable` routing and the registration skip
 //! - The exit codes for a portable write failure and an unknown harness
+//! - The `--force` handoff from the parsed decision to the skill step
 //!
 //! ## Does not own
-//! - The shared parse-and-decide step and the delegate outcome mapping
-//!   (`install_cli_tests`)
+//! - The parse-and-decide step and the delegate outcome mapping
+//!   (`install_cli_decide_tests`, `install_cli_tests`)
 //! - The asset writing itself (`skill_install_tests`)
 //!
 //! ## Boundary
@@ -94,7 +96,10 @@ fn unused_env() -> DirectWriteEnv {
 #[test]
 fn install_with_no_harness_returns_a_portable_decision() {
     let decision = decide(Verb::Install, &args(&[])).expect("no --harness is the portable install");
-    assert!(matches!(decision, Decision::Portable), "{decision:?}");
+    assert!(
+        matches!(decision, Decision::Portable { .. }),
+        "{decision:?}"
+    );
 }
 
 #[test]
@@ -130,7 +135,7 @@ fn uninstall_missing_harness_usage_error_lists_every_supported_harness() {
 #[test]
 fn install_with_no_harness_writes_the_portable_package_and_skips_registration() {
     let calls = RefCell::new(Vec::new());
-    let skill = |record: Option<&HarnessRecord>, _: &DirectWriteEnv| {
+    let skill = |record: Option<&HarnessRecord>, _: &DirectWriteEnv, _: bool| {
         calls
             .borrow_mut()
             .push(record.map_or("portable", |record| record.name));
@@ -151,7 +156,7 @@ fn install_with_no_harness_writes_the_portable_package_and_skips_registration() 
 
 #[test]
 fn a_portable_skill_failure_exits_1_and_skips_registration() {
-    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv| {
+    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv, _: bool| {
         Err("could not install the portable clio-mcp skill assets: blocked".to_owned())
     };
     let code = run_with_skills(
@@ -168,7 +173,7 @@ fn a_portable_skill_failure_exits_1_and_skips_registration() {
 
 #[test]
 fn an_unknown_harness_writes_no_skill_and_registers_nothing() {
-    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv| {
+    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv, _: bool| {
         panic!("the skill step must not run for an unknown harness")
     };
     let code = run_with_skills(
@@ -186,7 +191,7 @@ fn an_unknown_harness_writes_no_skill_and_registers_nothing() {
 #[test]
 fn a_selected_harness_runs_the_skill_step_then_registers() {
     let order = RefCell::new(Vec::new());
-    let skill = |record: Option<&HarnessRecord>, _: &DirectWriteEnv| {
+    let skill = |record: Option<&HarnessRecord>, _: &DirectWriteEnv, _: bool| {
         let record = record.expect("a selected harness reaches the skill step");
         order.borrow_mut().push(format!("skill {}", record.name));
         Ok(())
@@ -211,7 +216,7 @@ fn a_selected_harness_runs_the_skill_step_then_registers() {
 #[test]
 fn a_no_harness_install_writes_only_the_portable_skill_root() {
     let home = TempHome::new("portable-write");
-    crate::skill_install::install_portable(&linux_env(&home.root))
+    crate::skill_install::install_portable(&linux_env(&home.root), false)
         .expect("the portable assets install");
     let package = home
         .root
@@ -223,4 +228,36 @@ fn a_no_harness_install_writes_only_the_portable_skill_root() {
         !home.root.join(".claude").exists(),
         "no harness-native root is written"
     );
+}
+
+#[test]
+fn the_force_flag_reaches_the_skill_step() {
+    let seen = RefCell::new(Vec::new());
+    let skill = |record: Option<&HarnessRecord>, _: &DirectWriteEnv, force: bool| {
+        seen.borrow_mut().push(match record {
+            Some(record) => format!("{} {force}", record.name),
+            None => format!("portable {force}"),
+        });
+        Ok(())
+    };
+    let install = |_: &HarnessRecord, _: &Path| -> Result<String, DelegateError> {
+        Ok("registered".to_owned())
+    };
+
+    for (argv, expected) in [
+        (args(&["--force"]), "portable true"),
+        (args(&["--harness", "claude", "--force"]), "claude true"),
+    ] {
+        let code = run_with_skills(
+            Verb::Install,
+            &argv,
+            &|| Ok(fake_exe()),
+            &unused_env,
+            &install,
+            &never_uninstall,
+            &skill,
+        );
+        assert_eq!(code, ExitCode::SUCCESS, "{argv:?}");
+        assert_eq!(seen.borrow().last(), Some(&expected.to_owned()), "{argv:?}");
+    }
 }

@@ -120,6 +120,44 @@ fn install_help_names_the_portable_default_and_an_example() {
 }
 
 #[test]
+fn install_help_states_the_installed_package_identity_once() {
+    let sentence = "The skill package directory is clio-mcp, and the same name is the name field in that package's SKILL.md frontmatter.";
+    let text = help_text(Verb::Install);
+    assert_eq!(
+        text.matches(sentence).count(),
+        1,
+        "the install help names the package identity exactly once: {text}"
+    );
+    assert!(
+        !help_text(Verb::Uninstall).contains(sentence),
+        "only the install help carries the package identity"
+    );
+}
+
+#[test]
+fn install_help_states_what_force_replaces_for_a_markerless_package() {
+    let text = help_text(Verb::Install);
+    assert!(
+        text.contains("--force replaces the files the skill package owns"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "when no marker records a package because an earlier clio installed it, the files whose names that package owns"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("never deletes a file it does not own and never deletes a skill root"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("replaces the skill assets clio recorded, and only those"),
+        "the help must not promise force touches only recorded assets: {text}"
+    );
+}
+
+#[test]
 fn uninstall_help_omits_the_portable_default() {
     let text = help_text(Verb::Uninstall);
     assert!(text.contains("clio uninstall"), "{text}");

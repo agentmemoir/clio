@@ -3,21 +3,21 @@
 //
 //! # Responsibility
 //!
-//! This module tests the `clio install` / `clio uninstall` surfaces: the shared
-//! parse-and-decide step, delegate-outcome-to-exit-code mapping, and the help
-//! text. Most tests inject the executable lookup and both delegate calls, so
-//! no test spawns a process or touches the host environment; the help test
-//! calls the pub entry points with the production wiring, and the executable
-//! test reads the live process executable.
+//! This module tests the `clio install` / `clio uninstall` surfaces after
+//! parsing: delegate-outcome-to-exit-code mapping, the direct-write flow's
+//! seams, and the help text. Most tests inject the executable lookup and both
+//! delegate calls, so no test spawns a process or touches the host environment;
+//! the help test calls the pub entry points with the production wiring, and the
+//! executable test reads the live process executable.
 //!
 //! ## Owns
-//! - Assertions over `decide`, `run_with`, `failure_message`,
-//!   `exe_failure_message`, `success_text`, and `help_text`, with delegate
-//!   doubles that must never run
+//! - Assertions over `run_with`, `failure_message`, `exe_failure_message`,
+//!   `success_text`, and `help_text`, with delegate doubles that must never run
 //! - The pub-entry-point help wiring and the live-executable lookup contract
 //!
 //! ## Does not own
 //! - The surface implementation under test (`install_cli`)
+//! - The parse-and-decide step and its flag parsing (`install_cli_decide_tests`)
 //!
 //! ## Boundary
 //!
@@ -96,76 +96,6 @@ fn uninstall_also_answers_help() {
 }
 
 #[test]
-fn help_with_an_explicit_value_is_answered_through_parse_flags() {
-    // `--help=x` is not one of the exact tokens `wants_help` matches, so it
-    // must reach the help decision through the parsed `help` flag instead.
-    let decision =
-        decide(Verb::Install, &args(&["--help=x"])).expect("--help=x is a valid help spelling");
-    assert!(matches!(decision, Decision::Help), "{decision:?}");
-}
-
-#[test]
-fn unknown_harness_is_refused_with_the_supported_list() {
-    let error =
-        decide(Verb::Install, &args(&["--harness", "vim"])).expect_err("vim is not supported");
-    assert_eq!(error.exit_code(), ExitCode::from(2));
-    assert!(
-        error.message().contains("unknown harness `vim`"),
-        "{error:?}"
-    );
-    assert!(error.hint().unwrap_or_default().contains("claude"));
-}
-
-#[test]
-fn gh_copilot_is_an_unknown_harness_usage_error_with_the_supported_list() {
-    let error = decide(Verb::Install, &args(&["--harness", "gh-copilot"]))
-        .expect_err("gh-copilot is not an accepted name");
-    assert_eq!(error.exit_code(), ExitCode::from(2));
-    assert!(
-        error.message().contains("unknown harness `gh-copilot`"),
-        "{error:?}"
-    );
-    assert!(
-        error
-            .hint()
-            .unwrap_or_default()
-            .contains("supported harnesses: claude, codex, opencode, antigravity, hermes, cursor, github copilot"),
-        "{error:?}"
-    );
-}
-
-#[test]
-fn cursor_resolves_to_an_installable_direct_write_record() {
-    let decision =
-        decide(Verb::Install, &args(&["--harness", "cursor"])).expect("cursor is supported");
-    assert!(
-        matches!(decision, Decision::Run(record) if record.mechanism == Mechanism::DirectWrite),
-        "{decision:?}"
-    );
-}
-
-#[test]
-fn vs_code_alias_resolves_to_the_github_copilot_direct_write_record() {
-    let decision = decide(Verb::Install, &args(&["--harness", "vs code"]))
-        .expect("the vs code alias resolves");
-    assert!(
-        matches!(decision, Decision::Run(record) if record.name == "github copilot"
-            && record.mechanism == Mechanism::DirectWrite),
-        "{decision:?}"
-    );
-}
-
-#[test]
-fn github_copilot_resolves_to_an_installable_direct_write_record() {
-    let decision = decide(Verb::Install, &args(&["--harness", "github copilot"]))
-        .expect("github copilot is supported");
-    assert!(
-        matches!(decision, Decision::Run(record) if record.mechanism == Mechanism::DirectWrite),
-        "{decision:?}"
-    );
-}
-
-#[test]
 fn unknown_flag_is_a_usage_error_before_the_delegate_runs() {
     let code = run_with(
         Verb::Install,
@@ -199,20 +129,6 @@ fn harness_with_no_value_is_a_usage_error_before_the_delegate_runs() {
         ExitCode::from(2),
         "a value-less --harness must fail with the usage code"
     );
-}
-
-#[test]
-fn canonical_name_resolves_to_its_record() {
-    let decision =
-        decide(Verb::Install, &args(&["--harness", "claude"])).expect("claude is supported");
-    assert!(matches!(decision, Decision::Run(record) if record.name == "claude"));
-}
-
-#[test]
-fn alias_and_capitalization_resolve_to_the_canonical_record() {
-    let decision =
-        decide(Verb::Install, &args(&["--harness", "Claude-Code"])).expect("alias must resolve");
-    assert!(matches!(decision, Decision::Run(record) if record.name == "claude"));
 }
 
 #[test]

@@ -46,6 +46,38 @@ fn the_singles_records_carry_complete_metadata() {
     assert_eq!(crate::cli_command_registry::check_metadata(&specs), Ok(()));
 }
 
+/// The `install` record's `--force` text states the markerless case: a package an
+/// earlier Clio installed records nothing, so force replaces the files whose names
+/// the package owns, and it still never deletes a file it does not own.
+#[test]
+fn the_install_force_flag_states_the_markerless_case() {
+    let spec = record("install");
+    let force = spec
+        .documented
+        .iter()
+        .find(|flag| flag.long == "force")
+        .expect("install documents --force");
+    assert!(
+        force
+            .description
+            .contains("the files whose names that package owns"),
+        "{}",
+        force.description
+    );
+    assert!(
+        force
+            .description
+            .contains("Never deletes a file it does not own"),
+        "{}",
+        force.description
+    );
+    assert!(
+        !force.description.contains("and only those"),
+        "the flag must not promise force touches only recorded assets: {}",
+        force.description
+    );
+}
+
 /// The `help` record's `TOPIC` positional is optional and described, and the
 /// record keeps one example for each contract shape: the plain catalog, a
 /// topic, and the JSON catalog.

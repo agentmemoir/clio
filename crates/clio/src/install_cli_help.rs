@@ -10,11 +10,12 @@
 //! ## Owns
 //! - The supported-harness hint, generated from the registry
 //! - The usage errors for a missing, unknown, or known-but-unsupported harness
-//! - The full help text, including the portable-only default for install
+//! - The full help text, including the portable-only default for install, the
+//!   installed package identity, and what `--force` replaces
 //! - The success text, including a harness's config-surface note
 //!
 //! ## Does not own
-//! - Parsing flags or deciding what a verb runs (`install_cli`)
+//! - Parsing flags or deciding what a verb runs (`install_cli_decide`)
 //! - Registering the MCP server or writing skill assets
 //! - Which harnesses exist, their names, and their config files
 //!   (`agent_harness`)
@@ -28,7 +29,7 @@
 
 use crate::agent_harness::{self, HarnessRecord};
 use crate::cli_error::CliError;
-use crate::install_cli::Verb;
+use crate::install_cli_decide::Verb;
 
 /// The supported-harness list, generated from the registry so the help and the
 /// usage errors cannot drift apart.
@@ -82,6 +83,17 @@ pub(crate) fn success_text(record: &HarnessRecord, message: &str) -> String {
     }
 }
 
+/// What `--force` replaces, and what it never touches. The paragraph is part of
+/// the install help because the refusal a conflicting package earns points a
+/// user here. It names the markerless case, because a package an earlier clio
+/// installed records nothing and force then replaces the files whose names the
+/// package owns, which the "only the assets clio recorded" wording denied.
+const FORCE_PARAGRAPH: &str = "--force replaces the files the skill package owns: the assets clio recorded, and when no marker records a package because an earlier clio installed it, the files whose names that package owns. Without it, a locally edited asset, a missing asset, or an unexpected file in the package directory refuses the whole install. It never deletes a file it does not own and never deletes a skill root.";
+
+/// The installed package identity, stated once where a user installing reads it:
+/// the directory the package lands in, and the name its frontmatter carries.
+const PACKAGE_IDENTITY_PARAGRAPH: &str = "The skill package directory is clio-mcp, and the same name is the name field in that package's SKILL.md frontmatter.";
+
 /// The surface help: the usage line, what the verb does, the supported list
 /// from the registry, and one example.
 pub(crate) fn print_help(verb: Verb) {
@@ -90,12 +102,13 @@ pub(crate) fn print_help(verb: Verb) {
 
 /// The full help text, split from `print_help` so a test can read it without
 /// capturing stdout. Install states that a call with no `--harness` writes only
-/// the portable skill package and skips registration. The Antigravity
+/// the portable skill package and skips registration, names the installed
+/// package identity, and says what `--force` replaces. The Antigravity
 /// config-surface note is included because help lists every supported harness,
 /// and an Antigravity user needs to know which file received the entry.
 pub(crate) fn help_text(verb: Verb) -> String {
     let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or_else(|| match verb {
-        Verb::Install => "clio install [--harness <name>]".to_owned(),
+        Verb::Install => "clio install [--harness <name>] [--force]".to_owned(),
         Verb::Uninstall => "clio uninstall --harness <name>".to_owned(),
     });
     let mut text = format!("{usage}\n\n{}\n\n", verb.purpose());
@@ -103,6 +116,10 @@ pub(crate) fn help_text(verb: Verb) -> String {
         text.push_str(
             "With no --harness, write the portable skill package to ~/.agents/skills/clio-mcp and skip server registration.\n\n",
         );
+        text.push_str(PACKAGE_IDENTITY_PARAGRAPH);
+        text.push_str("\n\n");
+        text.push_str(FORCE_PARAGRAPH);
+        text.push_str("\n\n");
     }
     text.push_str(&supported_hint());
     text.push_str("\n\nExample: clio ");

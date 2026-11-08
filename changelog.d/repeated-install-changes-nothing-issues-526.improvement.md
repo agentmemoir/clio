@@ -1,0 +1,1 @@
+A repeated `clio install` now changes nothing: clio records a provenance marker beside the skill package, a locally edited or unexpected skill file refuses the install by default, and `--force` replaces only the assets clio recorded, never deleting a file it does not own.
