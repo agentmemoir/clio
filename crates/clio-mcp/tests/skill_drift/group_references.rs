@@ -23,6 +23,7 @@
 //! - `reference_files_state_no_tool_count`
 //! - `reference_tool_list_has_no_continuation_line`
 //! - `reference_directory_holds_exactly_the_catalog_files`
+//! - `embedded_assets_match_the_packaged_files`
 //! - `no_two_references_share_a_when_to_use_paragraph`
 //!
 //! ## Does not own
@@ -34,51 +35,31 @@
 //!
 //! ## Boundary
 //!
-//! Every reference file is read with `include_str!`, so a file whose shape
-//! drifts from the contract fails here instead of reaching a caller, and no run
-//! can see a copy other than the one that compiles. Exact tool membership is
-//! checked in `ownership` against the same compiled text. Each assertion is
-//! anchored to an exact heading line or to the body under one, never to a
-//! substring of the whole file, because a substring check reads a sentence that
-//! moved into another section, or a key that appears anywhere, as the wording it
-//! expects.
+//! The shape checks read each reference file as the compiled asset `build.rs`
+//! generated, so a file whose shape drifts from the contract fails here instead
+//! of reaching a caller. `reference_directory_holds_exactly_the_catalog_files`
+//! and `embedded_assets_match_the_packaged_files` also read the packaged
+//! directory, so the compiled copy is compared against the files on disk. Exact
+//! tool membership is checked in `ownership` against the same compiled text.
+//! Each assertion is anchored to an exact heading line or to the body under one,
+//! never to a substring of the whole file, because a substring check reads a
+//! sentence that moved into another section, or a key that appears anywhere, as
+//! the wording it expects.
 
+use std::fs;
+use std::path::Path;
+
+use clio_mcp::skill_asset_names::{REFERENCES_DIR, check_reference_set, reference_file_name};
+use clio_mcp::skill_assets::{SKILL_ASSETS, references};
 use clio_types::{GROUP_TABLE, GroupSpec};
 
 use crate::{body_under, paragraph_under};
 
-/// One reference file, paired with its name, read at compile time so no run can
-/// see another copy.
-macro_rules! reference {
-    ($name:literal) => {
-        (
-            $name,
-            include_str!(concat!("../../../../skills/clio-mcp/references/", $name)),
-        )
-    };
+/// Every catalog group id, in catalog order: the one list the asset names derive
+/// from, so no check keeps a hand-written copy of the catalog.
+pub(crate) fn groups() -> Vec<&'static str> {
+    GROUP_TABLE.iter().map(|spec| spec.group.as_str()).collect()
 }
-
-/// Every reference file the router table currently points at, paired with its
-/// name, read at compile time so no run can see another copy.
-const REFERENCES: [(&str, &str); 17] = [
-    reference!("01-retrieval.md"),
-    reference!("02-item-write.md"),
-    reference!("03-item-read.md"),
-    reference!("04-persona.md"),
-    reference!("05-task.md"),
-    reference!("06-memtree.md"),
-    reference!("07-triple.md"),
-    reference!("08-belief.md"),
-    reference!("09-graph.md"),
-    reference!("10-hygiene.md"),
-    reference!("11-portability.md"),
-    reference!("12-ops.md"),
-    reference!("13-retention.md"),
-    reference!("14-config.md"),
-    reference!("15-ranking.md"),
-    reference!("16-sync.md"),
-    reference!("17-compliance.md"),
-];
 
 /// Words that state an argument schema: a type declaration, a properties map,
 /// a required list, or a closed-object marker. A reference file names its
@@ -119,7 +100,7 @@ const POINTER: &str = "tool_describe";
 /// belong to `ownership`.
 pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)>
 {
-    REFERENCES
+    references()
         .iter()
         .enumerate()
         .map(|(index, (name, text))| {
@@ -128,11 +109,14 @@ pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str,
                     "the reference `{name}` has no `GROUP_TABLE` row at index {index}: number each reference file by the catalog row it serves, because the file and the row must be read as one"
                 )
             });
-            let derived = crate::reference_examples::derived_name(index);
+            let derived = format!(
+                "{REFERENCES_DIR}/{}",
+                reference_file_name(index, spec.group.as_str())
+            );
             assert_eq!(
                 *name,
                 derived,
-                "the reference read at catalog row {} is `{name}` rather than `{derived}`: name each file after its `GROUP_TABLE` row as two digits, a dash and the group id, because a hand-written name reads a file the router never points at",
+                "the reference read at catalog row {} is `{name}` rather than `{derived}`: name each file after its `GROUP_TABLE` row as two digits, a dash and the group id, because a name that does not follow its row reads a file the router never points at",
                 index + 1
             );
             (index, *name, *text, spec)
@@ -187,10 +171,10 @@ pub(crate) fn listed_tools<'a>(name: &str, tools: &'a str) -> Vec<&'a str> {
 #[test]
 fn reference_files_match_group_table() {
     assert_eq!(
-        REFERENCES.len(),
+        references().len(),
         GROUP_TABLE.len(),
         "the check reads {} reference files against {} catalog groups: give every `GROUP_TABLE` row one reference file, because a group with no file leaves a caller holding guidance nothing reads",
-        REFERENCES.len(),
+        references().len(),
         GROUP_TABLE.len()
     );
     for (index, name, text, spec) in rows() {
@@ -361,7 +345,7 @@ fn reference_directory_holds_exactly_the_catalog_files() {
                 })
         })
         .collect();
-    if let Err(difference) = crate::reference_examples::check_reference_set(&names) {
+    if let Err(difference) = check_reference_set(&groups(), &names) {
         panic!(
             "the references directory `{directory}` {difference}: keep exactly one reference file per catalog group, because a file nothing routes to is guidance a caller never reads and a missing one is a group with no guidance"
         );
@@ -389,5 +373,21 @@ fn no_two_references_share_a_when_to_use_paragraph() {
             );
         }
         seen.push((name.to_owned(), when));
+    }
+}
+
+#[test]
+fn embedded_assets_match_the_packaged_files() {
+    let package = concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/clio-mcp");
+    for (name, text) in SKILL_ASSETS {
+        let path = Path::new(package).join(name);
+        let packaged = fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("the packaged `{}` cannot be read: {error}", path.display())
+        });
+        assert!(
+            packaged == *text,
+            "the embedded copy of `{name}` is stale: it differs from the packaged `{}`, so rebuild the crate or embed the packaged text, because a caller receives the embedded copy",
+            path.display()
+        );
     }
 }

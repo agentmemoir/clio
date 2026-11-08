@@ -193,12 +193,6 @@ fn router_has_one_valid_row_per_catalog_group() {
     let rows = data_rows();
     assert_eq!(
         rows.len(),
-        17,
-        "the router table has {} data rows rather than 17: give every catalog group exactly one row",
-        rows.len()
-    );
-    assert_eq!(
-        rows.len(),
         GROUP_TABLE.len(),
         "the router table has {} data rows against {} catalog groups: the table must mirror `GROUP_TABLE`",
         rows.len(),

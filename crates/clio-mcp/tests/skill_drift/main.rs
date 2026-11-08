@@ -12,7 +12,8 @@
 //!
 //! ## Owns
 //! - The target's module declarations
-//! - `SKILL`, the skill under check, read at compile time
+//! - `SKILL`, the skill under check: the embedded first asset, so the text the
+//!   check reads is the text the crate ships
 //! - `body_under`, the section reader the group reference, reference example,
 //!   and router policy checks call
 //! - The catalog hash drift check (`catalog_hash`)
@@ -27,12 +28,16 @@
 //!
 //! ## Boundary
 //!
-//! The skill and the reference files are read with `include_str!`, so no check
-//! has a working directory, clock, or network input and none can read a stale
-//! copy. A change to a check belongs in the module that owns it; a change to
-//! how a section body is read belongs here, because the group reference,
-//! reference example, and router policy checks must read the same slice the
-//! same way.
+//! The drift tests read two sources: the embedded assets `build.rs` generated,
+//! which are the bytes the crate ships, and the packaged files under
+//! `skills/clio-mcp`, resolved from `CARGO_MANIFEST_DIR`.
+//! `group_references` reads the packaged references directory, `reference_examples`
+//! reads the packaged reference files, and `catalog_hash` reads the committed
+//! hash, so a stale embed is compared with the files the build read rather than
+//! passing unnoticed. No check has a clock or a network input. A change to a
+//! check belongs in the module that owns it; a change to how a section body is
+//! read belongs here, because the group reference, reference example, and router
+//! policy checks must read the same slice the same way.
 //!
 //! Every structural assertion in these checks is anchored to an exact line or
 //! an exact section body rather than to a substring, because a substring check
@@ -49,8 +54,9 @@ mod ownership;
 mod reference_examples;
 mod router_policy;
 
-/// The skill under check, read at compile time so no run can see another copy.
-const SKILL: &str = include_str!("../../../../skills/clio-mcp/SKILL.md");
+/// The skill under check: the router file, the first asset `build.rs` embedded,
+/// so no run can see a copy other than the one the crate ships.
+const SKILL: &str = clio_mcp::skill_assets::SKILL_ASSETS[0].1;
 
 /// The trimmed body under the exact `heading` line in `text`, up to the next
 /// `## ` heading, or a failure naming `label` and the heading it lacks.

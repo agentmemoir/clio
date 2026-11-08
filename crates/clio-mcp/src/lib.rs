@@ -95,6 +95,8 @@ mod schema_record_defs;
 mod schema_request_defs;
 mod schema_retention_defs;
 mod schema_sync_defs;
+pub mod skill_asset_names;
+pub mod skill_assets;
 pub mod stdio;
 pub mod store_write;
 pub mod subject_request_tools;
