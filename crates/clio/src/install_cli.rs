@@ -10,6 +10,7 @@
 //! ## Owns
 //! - The `clio install|uninstall` entry points and their flags (`--harness`)
 //! - The parse-and-decide step both verbs share, so they cannot drift
+//! - The install flow's order: write the embedded skill assets, then register
 //! - The `clio` executable lookup, with an injected seam for tests
 //! - The direct-write path: resolving the harness's config file through the
 //!   injectable `DirectWriteEnv` seam and mapping the write outcome to
@@ -60,7 +61,7 @@ use std::process::ExitCode;
 
 /// The two verbs, so the parse-decide-report flow runs once for both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Verb {
+pub(crate) enum Verb {
     Install,
     Uninstall,
 }
@@ -102,11 +103,7 @@ pub fn uninstall(args: &[String]) -> ExitCode {
     run(Verb::Uninstall, args)
 }
 
-/// One flow for both verbs: parse, decide, resolve the executable (install
-/// only), then run the record's mechanism — the delegate for vendor-CLI
-/// harnesses, the direct writer for direct-write harnesses — and map the
-/// outcome to an exit code. The production delegate calls and environment
-/// are built here; the delegate owns every spawned process.
+/// One flow for both verbs: parse, decide, resolve the executable (install only), then run the record's mechanism — the delegate for vendor-CLI harnesses, the direct writer for direct-write harnesses — and map the outcome to an exit code. The production delegate calls and environment are built here; the delegate owns every spawned process.
 fn run(verb: Verb, args: &[String]) -> ExitCode {
     let install = |record: &HarnessRecord, exe: &Path| -> Result<String, DelegateError> {
         agent_harness_delegate::install(record, SERVER_NAME, exe, &DelegateEnv::production())
@@ -114,19 +111,19 @@ fn run(verb: Verb, args: &[String]) -> ExitCode {
     let uninstall = |record: &HarnessRecord| -> Result<String, DelegateError> {
         agent_harness_delegate::uninstall(record, SERVER_NAME, &DelegateEnv::production())
     };
-    run_with(
+    run_with_skills(
         verb,
         args,
         &current_exe,
         &|| DirectWriteEnv::production(),
         &install,
         &uninstall,
+        &crate::skill_install::install_and_report,
     )
 }
 
-/// [`run`] with the executable lookup, the direct-write environment, and both
-/// delegate calls injected, so a test can decide outcomes without spawning a
-/// process or touching the host environment (the `mcp_options_with` pattern).
+/// [`run_with_skills`] with the skill step left out. Test-only: a test that injects the executable lookup and both delegate calls must never write into a real home directory.
+#[cfg(test)]
 fn run_with(
     verb: Verb,
     args: &[String],
@@ -134,6 +131,28 @@ fn run_with(
     direct_write_env: &dyn Fn() -> DirectWriteEnv,
     install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
     uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
+) -> ExitCode {
+    let skill_step = |_: &HarnessRecord, _: &DirectWriteEnv| Ok(());
+    run_with_skills(
+        verb,
+        args,
+        exe,
+        direct_write_env,
+        install_call,
+        uninstall_call,
+        &skill_step,
+    )
+}
+
+/// [`run`] with the executable lookup, the direct-write environment, both delegate calls, and the skill step injected, so a test can decide outcomes without spawning a process or touching the host environment (the `mcp_options_with` pattern).
+pub(crate) fn run_with_skills(
+    verb: Verb,
+    args: &[String],
+    exe: &dyn Fn() -> std::io::Result<PathBuf>,
+    direct_write_env: &dyn Fn() -> DirectWriteEnv,
+    install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
+    uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
+    skill_step: &dyn Fn(&HarnessRecord, &DirectWriteEnv) -> Result<(), String>,
 ) -> ExitCode {
     let decision = match decide(args) {
         Ok(decision) => decision,
@@ -144,29 +163,30 @@ fn run_with(
             print_help(verb);
             ExitCode::SUCCESS
         }
-        Decision::Run(record) => match record.mechanism {
-            Mechanism::DirectWrite => run_direct_write(verb, record, exe, direct_write_env),
-            Mechanism::Delegate => match verb {
-                Verb::Install => {
-                    let path = match exe() {
-                        Ok(path) => path,
-                        Err(error) => return fail(verb, &exe_failure_message(&error)),
-                    };
-                    report(verb, record, install_call(record, &path))
+        Decision::Run(record) => {
+            if verb == Verb::Install {
+                if let Err(message) = skill_step(record, &direct_write_env()) {
+                    return fail(verb, &message);
                 }
-                Verb::Uninstall => report(verb, record, uninstall_call(record)),
-            },
-        },
+            }
+            match record.mechanism {
+                Mechanism::DirectWrite => run_direct_write(verb, record, exe, direct_write_env),
+                Mechanism::Delegate => match verb {
+                    Verb::Install => {
+                        let path = match exe() {
+                            Ok(path) => path,
+                            Err(error) => return fail(verb, &exe_failure_message(&error)),
+                        };
+                        report(verb, record, install_call(record, &path))
+                    }
+                    Verb::Uninstall => report(verb, record, uninstall_call(record)),
+                },
+            }
+        }
     }
 }
 
-/// The direct-write path: resolve the harness's config file for this machine,
-/// build the server argv from the resolved executable, and map the write
-/// outcome to a message and exit code. Install needs the executable, because
-/// the written entry and the refusal snippet name it. Uninstall removes by
-/// name, so a failed executable lookup is not fatal: the lookup only feeds
-/// the refusal snippet, and uninstall proceeds without it rather than failing
-/// an otherwise valid removal.
+/// The direct-write path: resolve the harness's config file for this machine, build the server argv from the resolved executable, and map the write outcome to a message and exit code. Install needs the executable, because the written entry and the refusal snippet name it. Uninstall removes by name, so a failed executable lookup is not fatal: the lookup only feeds the refusal snippet, and uninstall proceeds without it rather than failing an otherwise valid removal.
 fn run_direct_write(
     verb: Verb,
     record: &HarnessRecord,
@@ -199,10 +219,7 @@ fn run_direct_write(
     }
 }
 
-/// Perform the direct-write install or uninstall and render its message: the
-/// success text on `Ok`, the plain failure text on `Err`. The message is
-/// returned rather than printed, so a test can check it and the file effects
-/// together without capturing stdout.
+/// Perform the direct-write install or uninstall and render its message: the success text on `Ok`, the plain failure text on `Err`. The message is returned rather than printed, so a test can check it and the file effects together without capturing stdout.
 fn direct_write_outcome_text(
     verb: Verb,
     record: &HarnessRecord,
@@ -259,10 +276,7 @@ fn direct_write_uninstall_text(config: &DirectWriteConfig, outcome: &RemoveOutco
     }
 }
 
-/// The plain message for a direct-write failure. An unparseable file was not
-/// changed, so the message carries the manual snippet the user can paste by
-/// hand; the writer already combined the entry snippet with the offending
-/// line's number.
+/// The plain message for a direct-write failure. An unparseable file was not changed, so the message carries the manual snippet the user can paste by hand; the writer already combined the entry snippet with the offending line's number.
 fn write_error_message(error: &WriteError) -> String {
     match error {
         WriteError::Unparseable { path, snippet } => format!(
@@ -285,10 +299,7 @@ fn decide(args: &[String]) -> Result<Decision, CliError> {
     if wants_help(args) {
         return Ok(Decision::Help);
     }
-    // The flags the verb accepts are the ones its registry record documents;
-    // any other flag is a usage error rather than a silently ignored token.
-    // Both verbs' records document the same single flag, and the tranche tests
-    // pin them equal, so one record's names gate both parsers.
+    // The flags the verb accepts are the ones its registry record documents; any other flag is a usage error rather than a silently ignored token. Both verbs' records document the same single flag, and the tranche tests pin them equal, so one record's names gate both parsers.
     let flags = parse_flags(args.iter().cloned(), &record_flag_names("install"))?;
     if flags.contains_key("help") {
         return Ok(Decision::Help);

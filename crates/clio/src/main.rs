@@ -215,6 +215,7 @@ mod setup_validate;
 mod setup_verify;
 mod setup_wizard;
 mod sigpipe;
+mod skill_install;
 mod status_cli;
 mod status_report;
 mod sync_cli;
