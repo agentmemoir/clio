@@ -110,7 +110,8 @@ const POINTER: &str = "tool_describe";
 /// name is also compared with the name the row derives, so a hand-written list
 /// that disagrees with the catalog fails here instead of reading a file the
 /// router never points at.
-pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)> {
+pub(crate) fn rows() -> impl Iterator<Item = (usize, &'static str, &'static str, &'static GroupSpec)>
+{
     REFERENCES
         .iter()
         .enumerate()

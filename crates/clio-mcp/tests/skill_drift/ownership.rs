@@ -235,7 +235,10 @@ retrieve({"query": "deploy steps"})
 Call `tool_describe("retrieve")` for the exact arguments.
 "#;
     let line = tools_line("retrieval", "synthetic.md", text);
-    assert_eq!(listed_tools("synthetic.md", line), vec!["retrieve", "store"]);
+    assert_eq!(
+        listed_tools("synthetic.md", line),
+        vec!["retrieve", "store"]
+    );
 }
 
 #[test]
