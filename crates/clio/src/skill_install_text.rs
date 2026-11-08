@@ -120,10 +120,10 @@ fn refusal_text(conflicts: &[RootConflict]) -> String {
         }
     }
     lines.push(String::from(
-        "nothing was written in any skill root; re-run with --force to replace the assets clio recorded",
+        "nothing was written in any skill root; re-run with --force to replace the files the package owns",
     ));
     lines.push(String::from(
-        "--force replaces owned assets only: it never deletes an unowned file and never deletes a skill root",
+        "--force replaces the files the package owns and only those: it never deletes a file it does not own and never deletes a skill root",
     ));
     if conflicts.iter().any(|conflict| {
         conflict
@@ -142,7 +142,7 @@ fn reason_text(reason: &ConflictReason) -> &'static str {
         ConflictReason::LocalEdit { .. } => "local edit",
         ConflictReason::MissingOwned { .. } => "missing owned file",
         ConflictReason::UnexpectedFile { .. } => "unexpected file",
-        ConflictReason::Unrecorded { .. } => "unrecorded package",
+        ConflictReason::EarlierInstall { .. } => "installed by an earlier clio without a marker",
         ConflictReason::UnreadableMarker { .. } => "unreadable marker",
     }
 }

@@ -115,7 +115,7 @@ fn a_refusal_names_every_path_and_reason_with_the_force_note() {
                     ConflictReason::UnexpectedFile {
                         path: "notes.md".to_owned(),
                     },
-                    ConflictReason::Unrecorded {
+                    ConflictReason::EarlierInstall {
                         path: "other.md".to_owned(),
                     },
                 ],
@@ -131,7 +131,7 @@ fn a_refusal_names_every_path_and_reason_with_the_force_note() {
         "    SKILL.md: local edit",
         "    references/01-retrieval.md: missing owned file",
         "    notes.md: unexpected file",
-        "    other.md: unrecorded package",
+        "    other.md: installed by an earlier clio without a marker",
     ] {
         assert!(
             text.contains(line),
@@ -143,10 +143,17 @@ fn a_refusal_names_every_path_and_reason_with_the_force_note() {
         "{text}"
     );
     assert!(
-        text.contains("--force replaces owned assets only"),
+        text.contains("re-run with --force to replace the files the package owns"),
         "{text}"
     );
-    assert!(text.contains("never deletes an unowned file"), "{text}");
+    assert!(
+        text.contains("--force replaces the files the package owns and only those"),
+        "{text}"
+    );
+    assert!(
+        text.contains("never deletes a file it does not own"),
+        "{text}"
+    );
     assert!(text.contains("never deletes a skill root"), "{text}");
     assert!(!text.contains("refused even with --force"), "{text}");
 }

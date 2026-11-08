@@ -51,12 +51,14 @@ const HARNESS_REQUIRED: Flag = Flag {
 /// portable skill package and skips registration.
 const HARNESS_OPTIONAL: Flag = Flag::text("harness", "<name>", "Harness `install_cli` resolves.");
 
-/// The `--force` flag of `install`: it replaces the skill assets Clio recorded,
-/// and only those, so a conflicting package can be reinstalled without deleting
-/// anything Clio does not own.
+/// The `--force` flag of `install`: it replaces the files the installed skill
+/// package owns — the assets Clio recorded, and, for a package an earlier Clio
+/// installed with no marker, the files whose names that package owns — so a
+/// conflicting package can be reinstalled without deleting anything Clio does
+/// not own.
 const INSTALL_FORCE: Flag = Flag::toggle(
     "force",
-    "Replaces the skill assets Clio recorded, and only those; a locally edited asset, a missing asset, or an unexpected file in the package directory refuses the install without it. Never deletes an unowned file or a skill root.",
+    "Replaces the files the skill package owns: the assets Clio recorded, and when no marker records a package because an earlier Clio installed it, the files whose names that package owns. A locally edited asset, a missing asset, or an unexpected file in the package directory refuses the install without it. Never deletes a file it does not own and never deletes a skill root.",
 );
 
 /// The `--json` flag of `help`, one of the two boolean flags the help dispatch

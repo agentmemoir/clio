@@ -9,7 +9,7 @@
 //!
 //! ## Owns
 //! - The `Scratch` unique temp directory guard and every assertion over
-//!   `plan_install` and `scan_package_dir`
+//!   `plan_install`, `scan_package_dir`, and the temp-sibling name
 //!
 //! ## Does not own
 //! - The decision implementation under test (`skill_install_plan`)
@@ -87,8 +87,18 @@ fn marker_entry() -> (String, String) {
     )
 }
 
+/// The paths of `assets` in path order, which is the order the plan lists them in.
 fn every_asset(assets: &[(&str, &str)]) -> Vec<String> {
-    assets.iter().map(|(name, _)| (*name).to_owned()).collect()
+    let mut names: Vec<String> = assets.iter().map(|(name, _)| (*name).to_owned()).collect();
+    names.sort();
+    names
+}
+
+/// What a first installation of `assets` writes: every asset, then the marker.
+fn first_install(assets: &[(&str, &str)]) -> Vec<String> {
+    let mut names = every_asset(assets);
+    names.push(SKILL_MARKER_FILE.to_owned());
+    names
 }
 
 #[test]
@@ -99,7 +109,7 @@ fn an_identical_installation_is_a_no_op() {
     let (path, hash) = marker_entry();
     disk.insert(path, hash);
     assert_eq!(
-        plan_install(Some(&recorded), &assets, &disk, false),
+        plan_install(Some(&recorded), &marker(&assets), &disk, false),
         InstallPlan::NoOp
     );
 }
@@ -111,7 +121,7 @@ fn a_locally_edited_owned_file_is_a_conflict() {
     let mut disk = on_disk(&assets);
     disk.insert("SKILL.md".to_owned(), sha256_hex(b"my own router\n"));
     assert_eq!(
-        plan_install(Some(&recorded), &assets, &disk, false),
+        plan_install(Some(&recorded), &marker(&assets), &disk, false),
         InstallPlan::Conflict {
             reasons: vec![ConflictReason::LocalEdit {
                 path: "SKILL.md".to_owned()
@@ -127,7 +137,7 @@ fn a_missing_owned_file_is_a_conflict() {
     let mut disk = on_disk(&assets);
     disk.remove("references/02-write.md");
     assert_eq!(
-        plan_install(Some(&recorded), &assets, &disk, false),
+        plan_install(Some(&recorded), &marker(&assets), &disk, false),
         InstallPlan::Conflict {
             reasons: vec![ConflictReason::MissingOwned {
                 path: "references/02-write.md".to_owned()
@@ -143,7 +153,7 @@ fn an_unexpected_file_inside_the_package_is_a_conflict() {
     let mut disk = on_disk(&assets);
     disk.insert("notes.md".to_owned(), sha256_hex(b"mine"));
     assert_eq!(
-        plan_install(Some(&recorded), &assets, &disk, false),
+        plan_install(Some(&recorded), &marker(&assets), &disk, false),
         InstallPlan::Conflict {
             reasons: vec![ConflictReason::UnexpectedFile {
                 path: "notes.md".to_owned()
@@ -153,21 +163,32 @@ fn an_unexpected_file_inside_the_package_is_a_conflict() {
 }
 
 #[test]
-fn a_package_without_a_marker_is_a_conflict() {
+fn a_markerless_package_identical_to_the_payload_adopts_the_marker() {
     let assets = assets();
     let disk = on_disk(&assets);
-    match plan_install(None, &assets, &disk, false) {
-        InstallPlan::Conflict { reasons } => {
-            assert_eq!(reasons.len(), 3, "{reasons:?}");
-            assert!(
-                reasons
-                    .iter()
-                    .all(|reason| matches!(reason, ConflictReason::Unrecorded { .. })),
-                "{reasons:?}"
-            );
+    assert_eq!(
+        plan_install(None, &marker(&assets), &disk, false),
+        InstallPlan::Write {
+            files: vec![SKILL_MARKER_FILE.to_owned()],
+            preserved_foreign: Vec::new()
+        },
+        "an earlier clio's package that already matches the payload writes the marker alone"
+    );
+}
+
+#[test]
+fn a_markerless_package_that_differs_keeps_refusing() {
+    let assets = assets();
+    let mut disk = on_disk(&assets);
+    disk.insert("SKILL.md".to_owned(), sha256_hex(b"my own router\n"));
+    assert_eq!(
+        plan_install(None, &marker(&assets), &disk, false),
+        InstallPlan::Conflict {
+            reasons: vec![ConflictReason::EarlierInstall {
+                path: "SKILL.md".to_owned()
+            }]
         }
-        other => panic!("expected a conflict, got {other:?}"),
-    }
+    );
 }
 
 #[test]
@@ -175,9 +196,9 @@ fn an_empty_package_without_a_marker_is_written_in_full() {
     let assets = assets();
     let disk = BTreeMap::new();
     assert_eq!(
-        plan_install(None, &assets, &disk, false),
+        plan_install(None, &marker(&assets), &disk, false),
         InstallPlan::Write {
-            files: every_asset(&assets),
+            files: first_install(&assets),
             preserved_foreign: Vec::new()
         }
     );
@@ -192,9 +213,12 @@ fn a_newer_payload_is_written_over_an_unchanged_installation() {
     let recorded = marker(&installed);
     let disk = on_disk(&installed);
     assert_eq!(
-        plan_install(Some(&recorded), &assets(), &disk, false),
+        plan_install(Some(&recorded), &marker(&assets()), &disk, false),
         InstallPlan::Write {
-            files: vec!["references/02-write.md".to_owned()],
+            files: vec![
+                "references/02-write.md".to_owned(),
+                SKILL_MARKER_FILE.to_owned()
+            ],
             preserved_foreign: Vec::new()
         }
     );
@@ -208,7 +232,7 @@ fn force_turns_a_local_edit_into_a_write_that_preserves_foreign_files() {
     disk.insert("SKILL.md".to_owned(), sha256_hex(b"my own router\n"));
     disk.insert("notes.md".to_owned(), sha256_hex(b"mine"));
     assert_eq!(
-        plan_install(Some(&recorded), &assets, &disk, true),
+        plan_install(Some(&recorded), &marker(&assets), &disk, true),
         InstallPlan::Write {
             files: vec!["SKILL.md".to_owned()],
             preserved_foreign: vec!["notes.md".to_owned()]
@@ -222,11 +246,12 @@ fn force_writes_over_an_unrecorded_package_and_keeps_its_other_files() {
     let mut disk = on_disk(&assets);
     disk.insert("notes.md".to_owned(), sha256_hex(b"mine"));
     assert_eq!(
-        plan_install(None, &assets, &disk, true),
+        plan_install(None, &marker(&assets), &disk, true),
         InstallPlan::Write {
-            files: Vec::new(),
+            files: vec![SKILL_MARKER_FILE.to_owned()],
             preserved_foreign: vec!["notes.md".to_owned()]
-        }
+        },
+        "force records the package and keeps the file it does not own"
     );
 }
 
@@ -237,7 +262,7 @@ fn conflict_reasons_are_reported_in_path_order() {
     let mut disk = on_disk(&assets);
     disk.remove("SKILL.md");
     disk.insert("AAA.md".to_owned(), sha256_hex(b"mine"));
-    match plan_install(Some(&recorded), &assets, &disk, false) {
+    match plan_install(Some(&recorded), &marker(&assets), &disk, false) {
         InstallPlan::Conflict { reasons } => {
             let paths: Vec<&str> = reasons.iter().map(ConflictReason::path).collect();
             assert_eq!(paths, vec!["AAA.md", "SKILL.md"]);
@@ -258,7 +283,7 @@ fn each_reason_names_the_file_it_is_about() {
         ConflictReason::UnexpectedFile {
             path: "c".to_owned(),
         },
-        ConflictReason::Unrecorded {
+        ConflictReason::EarlierInstall {
             path: "d".to_owned(),
         },
         ConflictReason::UnreadableMarker {
@@ -283,9 +308,9 @@ fn a_file_beside_the_package_directory_is_not_scanned() {
     );
     let assets = assets();
     assert_eq!(
-        plan_install(None, &assets, &disk, false),
+        plan_install(None, &marker(&assets), &disk, false),
         InstallPlan::Write {
-            files: every_asset(&assets),
+            files: first_install(&assets),
             preserved_foreign: Vec::new()
         }
     );
@@ -318,4 +343,89 @@ fn a_package_directory_that_does_not_exist_scans_as_empty() {
     let scratch = Scratch::new("absent");
     let disk = scan_package_dir(&scratch.package()).expect("a missing directory holds no files");
     assert!(disk.is_empty(), "{disk:?}");
+}
+
+#[test]
+fn every_recorded_marker_field_is_compared_with_the_incoming_one() {
+    let assets = assets();
+    let disk = on_disk(&assets);
+    let expected = marker(&assets);
+    let drifted = [
+        (
+            "installer",
+            SkillMarker {
+                installer: "another-installer".to_owned(),
+                ..expected.clone()
+            },
+        ),
+        (
+            "package_version",
+            SkillMarker {
+                package_version: "0.0.1-old".to_owned(),
+                ..expected.clone()
+            },
+        ),
+        (
+            "catalog_hash",
+            SkillMarker {
+                catalog_hash: "fnv1a64:0000000000000000".to_owned(),
+                ..expected.clone()
+            },
+        ),
+        (
+            "payload_digest",
+            SkillMarker {
+                payload_digest: "00".repeat(32),
+                ..expected.clone()
+            },
+        ),
+    ];
+    for (field, recorded) in drifted {
+        assert_eq!(
+            plan_install(Some(&recorded), &expected, &disk, false),
+            InstallPlan::Write {
+                files: vec![SKILL_MARKER_FILE.to_owned()],
+                preserved_foreign: Vec::new()
+            },
+            "a stale {field} with every asset unchanged rewrites only the marker"
+        );
+    }
+}
+
+#[test]
+fn the_installer_temp_sibling_name_is_recognized_and_a_lookalike_is_not() {
+    let name = temp_sibling_name("SKILL.md", 999, 123, 0);
+    assert_eq!(name, ".SKILL.md.999.123.0.tmp");
+    assert!(is_temp_sibling(&name), "{name}");
+    for other in [
+        "SKILL.md",
+        "notes.tmp",
+        ".SKILL.md.999.123.tmp",
+        ".SKILL.md.x.123.0.tmp",
+        "..999.123.0.tmp",
+        ".SKILL.md.999.123.-1.tmp",
+    ] {
+        assert!(!is_temp_sibling(other), "{other} is not a temp sibling");
+    }
+}
+
+#[test]
+fn a_leftover_temp_sibling_is_not_scanned() {
+    let scratch = Scratch::new("temp-sibling");
+    let package = scratch.package();
+    fs::create_dir_all(&package).expect("the package directory can be created");
+    fs::write(package.join("SKILL.md"), b"router").expect("the router can be written");
+    fs::write(
+        package.join(temp_sibling_name("references", 999, 123, 0)),
+        b"half written",
+    )
+    .expect("the leftover temp sibling can be written");
+
+    let disk = scan_package_dir(&package).expect("the package directory scans");
+    let keys: Vec<&str> = disk.keys().map(String::as_str).collect();
+    assert_eq!(
+        keys,
+        vec!["SKILL.md"],
+        "this program's own temp sibling is not a package file"
+    );
 }

@@ -135,6 +135,29 @@ fn install_help_states_the_installed_package_identity_once() {
 }
 
 #[test]
+fn install_help_states_what_force_replaces_for_a_markerless_package() {
+    let text = help_text(Verb::Install);
+    assert!(
+        text.contains("--force replaces the files the skill package owns"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "when no marker records a package because an earlier clio installed it, the files whose names that package owns"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("never deletes a file it does not own and never deletes a skill root"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("replaces the skill assets clio recorded, and only those"),
+        "the help must not promise force touches only recorded assets: {text}"
+    );
+}
+
+#[test]
 fn uninstall_help_omits_the_portable_default() {
     let text = help_text(Verb::Uninstall);
     assert!(text.contains("clio uninstall"), "{text}");

@@ -140,10 +140,13 @@ fn a_locally_edited_asset_is_refused_by_default_and_changes_no_byte() {
         "{text}"
     );
     assert!(
-        text.contains("--force replaces owned assets only"),
+        text.contains("--force replaces the files the package owns and only those"),
         "{text}"
     );
-    assert!(text.contains("never deletes an unowned file"), "{text}");
+    assert!(
+        text.contains("never deletes a file it does not own"),
+        "{text}"
+    );
     assert!(text.contains("never deletes a skill root"), "{text}");
 }
 

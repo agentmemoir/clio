@@ -85,8 +85,10 @@ pub(crate) fn success_text(record: &HarnessRecord, message: &str) -> String {
 
 /// What `--force` replaces, and what it never touches. The paragraph is part of
 /// the install help because the refusal a conflicting package earns points a
-/// user here.
-const FORCE_PARAGRAPH: &str = "--force replaces the skill assets clio recorded, and only those: without it, a locally edited asset, a missing asset, or an unexpected file in the package directory refuses the whole install. It never deletes an unowned file and never deletes a skill root.";
+/// user here. It names the markerless case, because a package an earlier clio
+/// installed records nothing and force then replaces the files whose names the
+/// package owns, which the "only the assets clio recorded" wording denied.
+const FORCE_PARAGRAPH: &str = "--force replaces the files the skill package owns: the assets clio recorded, and when no marker records a package because an earlier clio installed it, the files whose names that package owns. Without it, a locally edited asset, a missing asset, or an unexpected file in the package directory refuses the whole install. It never deletes a file it does not own and never deletes a skill root.";
 
 /// The installed package identity, stated once where a user installing reads it:
 /// the directory the package lands in, and the name its frontmatter carries.

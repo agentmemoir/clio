@@ -9,6 +9,7 @@
 //! - Resolving every skill root for a harness through the injectable `DirectWriteEnv` seam
 //! - Reading each package directory and its provenance marker, so every root is planned before any root is written
 //! - Writing the planned assets, then the marker last, creating the directories it needs
+//! - Writing the marker alone when only its own recorded fields are stale, and adopting a package an earlier clio installed with no marker
 //! - Leaving an already-current root untouched: no asset write, no marker write, no timestamp change
 //! - The skill outcome value: written, unchanged, or refused with every conflict reason
 //!
@@ -31,7 +32,9 @@
 use crate::agent_harness::{self, HarnessRecord, SkillRoot};
 use crate::agent_harness_targets::{DirectWriteEnv, resolve_skill_root};
 use crate::agent_harness_write::WriteError;
-use crate::skill_install_plan::{ConflictReason, InstallPlan, plan_install, scan_package_dir};
+use crate::skill_install_plan::{
+    ConflictReason, InstallPlan, plan_install, scan_package_dir, temp_sibling_name,
+};
 use crate::skill_install_text::{
     failure_message, outcome_text, portable_failure_message, portable_outcome_text, refused,
 };
@@ -214,6 +217,8 @@ enum InstalledMarker {
 
 /// Plan one package directory: scan it, read its marker, and let the plan decide.
 ///
+/// The plan compares the marker on disk with the marker these assets produce, so a difference in the installer, the package version, the catalog hash, the payload digest, or the recorded file map is planned as a write even when every asset already matches.
+///
 /// An unreadable marker is its own conflict and is refused even with `force`: without the record of which files this program owns, no file's bytes can be attributed to it, so replacing anything would be a guess.
 fn plan_package(
     package: &Path,
@@ -229,8 +234,9 @@ fn plan_package(
             }]));
         }
     };
+    let expected = SkillMarker::from_assets(SKILL_ASSETS, &skill_marker::catalog_hash());
     Ok(
-        match plan_install(marker.as_ref(), SKILL_ASSETS, &on_disk, force) {
+        match plan_install(marker.as_ref(), &expected, &on_disk, force) {
             InstallPlan::Conflict { reasons } => Err(reasons),
             InstallPlan::NoOp => Ok(RootWork::Current),
             InstallPlan::Write {
@@ -260,9 +266,9 @@ fn installed_marker(package: &Path) -> Result<InstalledMarker, WriteError> {
     })
 }
 
-/// Write the planned assets into `package`, then the marker last.
+/// Write the planned files into `package`, the marker last.
 ///
-/// The references go first and the router goes last, so a failure on a reference leaves no loadable router that points at a missing file. The marker is built from the incoming assets, never from what the directory holds, and it is written only when its bytes differ from the one already there.
+/// The references go first and the router goes last, so a failure on a reference leaves no loadable router that points at a missing file. Only the files the plan named are touched, so a plan holding nothing but the marker rewrites the marker and leaves every asset's bytes and timestamp alone. The marker is built from the incoming assets, never from what the directory holds.
 fn write_package(
     package: &Path,
     files: &[String],
@@ -283,7 +289,7 @@ fn write_package(
         write_asset(package, name, text)?;
         written.push(name.to_owned());
     }
-    if write_marker(package)? {
+    if planned(SKILL_MARKER_FILE) && write_marker(package)? {
         written.push(SKILL_MARKER_FILE.to_owned());
     }
     Ok(SkillRootOutcome {
@@ -302,7 +308,7 @@ fn write_asset(package: &Path, name: &str, text: &str) -> Result<(), WriteError>
     write_bytes_atomic(&path, text.as_bytes())
 }
 
-/// Write the marker the incoming assets record, unless the package already holds exactly those bytes. Returns whether it wrote, so a root whose marker is current reports no marker write.
+/// Write the marker the incoming assets record, unless the package already holds exactly those bytes. The plan already asked for it whenever a recorded field differs; the byte comparison stays as the last guard, so a marker that is somehow current is never rewritten. Returns whether it wrote, so the outcome names the marker only when the file changed.
 fn write_marker(package: &Path) -> Result<bool, WriteError> {
     let path = package.join(SKILL_MARKER_FILE);
     let marker = SkillMarker::from_assets(SKILL_ASSETS, &skill_marker::catalog_hash());
@@ -339,7 +345,7 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
     Ok(())
 }
 
-/// A hidden temp sibling beside `path`, unique across threads and processes.
+/// A hidden temp sibling beside `path`, unique across threads and processes. The name comes from `skill_install_plan`, which the package scan reads to leave this program's own leftovers out of a plan.
 fn temp_sibling(path: &Path) -> PathBuf {
     static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let name = path
@@ -350,7 +356,7 @@ fn temp_sibling(path: &Path) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    path.with_file_name(format!(".{name}.{}.{nanos}.{seq}.tmp", std::process::id()))
+    path.with_file_name(temp_sibling_name(name, std::process::id(), nanos, seq))
 }
 
 fn io_error(action: &str, path: &Path, error: &std::io::Error) -> WriteError {
@@ -370,6 +376,10 @@ mod roots_tests;
 #[cfg(test)]
 #[path = "skill_install_marker_tests.rs"]
 mod marker_tests;
+
+#[cfg(test)]
+#[path = "skill_install_adoption_tests.rs"]
+mod adoption_tests;
 
 #[cfg(test)]
 #[path = "skill_install_test_support.rs"]
