@@ -170,7 +170,7 @@ pub(crate) fn ops_usage_lines(sub: &str) -> Option<Vec<String>> {
 /// compose record tests.
 #[cfg(test)]
 const SURFACE_USAGE: &[(&str, &str)] = &[
-    ("version", "clio version"),
+    ("version", "clio version [--check] [--harness <name>]"),
     ("health", "clio health"),
     ("help", "clio help [--json] [--markdown --out DIR] [TOPIC]"),
     (

@@ -246,15 +246,17 @@ fn the_no_flag_commands_print_help_and_succeed() {
     assert_eq!(super::print_health_help(), ExitCode::SUCCESS);
 }
 
-/// `version` documents no flag of its own, so its record help shows only the
-/// shared globals group: the same options block `full_usage` appends, so every
-/// help path shows the same flag data.
+/// `version` documents the two flags its check reads, so its record help shows
+/// its own options block and then the shared globals group: the same options
+/// block `full_usage` appends, so every help path shows the same flag data.
 #[test]
-fn the_version_record_help_shows_only_the_shared_globals_group() {
+fn the_version_record_help_shows_its_own_flags_and_the_shared_globals_group() {
     let spec = crate::cli_command_registry::find("version").expect("`version` is registered");
     let options = spec.options_help();
-    assert!(options.starts_with("Global flags:"), "{options}");
-    assert!(!options.contains("Options:"), "{options}");
+    assert!(options.starts_with("Options:"), "{options}");
+    assert!(options.contains("--check"), "{options}");
+    assert!(options.contains("--harness <name>"), "{options}");
+    assert!(options.contains("Global flags:"), "{options}");
 }
 
 /// The database block every surface prints also states the empty-value rule, so a

@@ -40,6 +40,29 @@ fn version_aliases() {
     }
 }
 
+/// The `--version` and `-V` aliases stay plain: they ignore trailing text and
+/// still print the identity line. The `version` verb is the one that reads
+/// flags, so what it does not declare is a usage error.
+#[test]
+fn version_aliases_stay_plain_while_the_verb_reads_its_flags() {
+    for alias in ["--version", "-V"] {
+        assert_eq!(
+            run(vec![alias.into(), "--frobnicate".into()]),
+            ExitCode::SUCCESS,
+            "{alias} ignores trailing text"
+        );
+    }
+    assert_eq!(
+        run(vec!["version".into(), "--frobnicate".into()]),
+        ExitCode::from(2)
+    );
+    assert_eq!(
+        run(vec!["version".into(), "--harness".into(), "claude".into()]),
+        ExitCode::from(2),
+        "--harness needs --check"
+    );
+}
+
 #[test]
 fn health_ok() {
     assert_eq!(run(vec!["health".into()]), ExitCode::SUCCESS);

@@ -99,14 +99,32 @@ const TOPIC: Positional = Positional {
                   with no topic the whole catalog prints.",
 };
 
-/// `clio version`: the package identity line, over no flags and no tool.
+/// The `--check` flag of `version`: the identity line becomes the release check,
+/// one JSON line over the installed skill package and the published release.
+const VERSION_CHECK: Flag = Flag::toggle(
+    "check",
+    "Reports the version and catalog hash the installed skill marker recorded, and whether a newer release exists, as one JSON line.",
+);
+
+/// The optional `--harness` flag of `version --check`: it narrows the check to
+/// the roots that harness reads, which are the roots `install` writes.
+const VERSION_HARNESS: Flag = Flag::text(
+    "harness",
+    "<name>",
+    "Narrows `--check` to the skill roots that harness reads, the same roots `install --harness` writes.",
+);
+
+/// `clio version`: the package identity line, or with `--check` the one-line
+/// release report over the installed skill marker.
 pub(crate) const VERSION: CommandSpec = CommandSpec {
     name: "version",
     aliases: &[],
     summary: "Print package identity",
-    notes: &["Prints the package name and version. Takes no flags."],
+    notes: &[
+        "Prints the package name and version. With --check it prints one JSON line instead: the version and catalog hash the installed skill marker recorded, whether a newer release exists, and exits 1 whenever that answer cannot be established.",
+    ],
     positionals: &[],
-    documented: &[],
+    documented: &[VERSION_CHECK, VERSION_HARNESS],
     accepted_extra: RESERVED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
@@ -115,6 +133,10 @@ pub(crate) const VERSION: CommandSpec = CommandSpec {
         Example {
             command: "clio version",
             comment: Some("Print the package name and version."),
+        },
+        Example {
+            command: "clio version --check",
+            comment: Some("Report the installed skill version and the published release."),
         },
         Example {
             command: "clio version --help",

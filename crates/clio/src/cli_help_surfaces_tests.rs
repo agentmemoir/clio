@@ -91,7 +91,10 @@ fn a_long_usage_line_wraps_under_its_first_flag() {
 /// A short line is not wrapped at all, so `version` and `health` print one line.
 #[test]
 fn a_short_usage_line_stays_on_one_line() {
-    assert_eq!(wrapped_usage("version", 74, 0), vec!["clio version"]);
+    assert_eq!(
+        wrapped_usage("version", 74, 0),
+        vec!["clio version [--check] [--harness <name>]"]
+    );
     assert_eq!(wrapped_usage("health", 74, 0), vec!["clio health"]);
 }
 

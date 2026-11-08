@@ -229,6 +229,13 @@ mod status_report;
 mod sync_cli;
 mod sync_cli_render;
 mod sync_key_cli;
+/// The `version` verb: its identity line, and the `--check` request against the
+/// installed skill marker and the published release.
+mod version_check;
+/// The one release-metadata request the version check makes.
+mod version_check_release;
+/// The version text a release tag carries, and its ordering.
+mod version_check_semver;
 
 use std::env;
 use std::process::ExitCode;
@@ -260,7 +267,8 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
 /// Routing both through one function is what keeps the two from disagreeing.
 fn dispatch(cmd: &str, trailing: Vec<String>) -> ExitCode {
     match cmd {
-        "version" | "--version" | "-V" => {
+        "version" => version_check::version(&trailing),
+        "--version" | "-V" => {
             if wants_help(&trailing) {
                 return print_version_help();
             }

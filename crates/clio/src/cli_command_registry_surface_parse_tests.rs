@@ -211,34 +211,59 @@ fn the_ops_dispatcher_keeps_its_refusal_and_help_exits() {
     );
 }
 
-/// The version and health dispatch ignores its trailing arguments: a stray
-/// token or an unknown flag is accepted and left unread, and the command still
-/// answers. A help spelling renders the record's help instead.
+/// The health dispatch ignores its trailing arguments: a stray token or an
+/// unknown flag is accepted and left unread, and the command still answers. A
+/// help spelling renders the record's help instead.
+///
+/// The version verb is the exception: it reads its own flags, so what it does
+/// not declare is refused rather than dropped.
 #[test]
-fn version_and_health_accept_trailing_tokens_and_answer() {
-    for name in ["version", "health"] {
+fn health_accepts_trailing_tokens_and_the_version_verb_fails_closed() {
+    let name = "health";
+    assert_eq!(
+        dispatched(name, &[]),
+        ExitCode::SUCCESS,
+        "health with no trailing arguments runs"
+    );
+    assert_eq!(
+        dispatched(name, &["stray"]),
+        ExitCode::SUCCESS,
+        "health ignores a stray token"
+    );
+    assert_eq!(
+        dispatched(name, &["--frobnicate"]),
+        ExitCode::SUCCESS,
+        "health ignores an unknown flag"
+    );
+    for help in ["--help", "-h"] {
         assert_eq!(
-            dispatched(name, &[]),
+            dispatched(name, &[help]),
             ExitCode::SUCCESS,
-            "{name} with no trailing arguments runs"
+            "{help} prints {name}'s record help"
         );
+    }
+    assert_eq!(
+        dispatched("version", &[]),
+        ExitCode::SUCCESS,
+        "a bare version print the identity line"
+    );
+    for refused in [
+        vec!["stray"],
+        vec!["--frobnicate"],
+        vec!["--harness", "claude"],
+    ] {
         assert_eq!(
-            dispatched(name, &["stray"]),
-            ExitCode::SUCCESS,
-            "{name} ignores a stray token"
+            dispatched("version", &refused),
+            ExitCode::from(2),
+            "version refuses {refused:?} rather than ignoring it"
         );
+    }
+    for help in ["--help", "-h"] {
         assert_eq!(
-            dispatched(name, &["--frobnicate"]),
+            dispatched("version", &[help]),
             ExitCode::SUCCESS,
-            "{name} ignores an unknown flag"
+            "{help} prints version's record help"
         );
-        for help in ["--help", "-h"] {
-            assert_eq!(
-                dispatched(name, &[help]),
-                ExitCode::SUCCESS,
-                "{help} prints {name}'s record help"
-            );
-        }
     }
 }
 
