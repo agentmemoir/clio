@@ -124,3 +124,7 @@ pub(crate) fn io_failure(action: &str, path: &Path, error: &std::io::Error) -> U
         detail: format!("failed to {action} {}: {error}", path.display()),
     }
 }
+
+#[cfg(test)]
+#[path = "skill_uninstall_guard_tests.rs"]
+mod tests;
