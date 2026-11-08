@@ -13,8 +13,8 @@
 //!   positional, which names the command whose help opens
 //! - The `setup` record's pinned usage line; its documented flags are the
 //!   accepted set `setup_flags::parse_setup_args` reads
-//! - The `install` record's optional `--harness` flag and the required
-//!   `--harness` flag `uninstall` keeps
+//! - The `install` record's optional `--harness` flag, its `--force` flag, and
+//!   the required `--harness` flag `uninstall` keeps
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche that lists these records and the flag facts its
@@ -50,6 +50,14 @@ const HARNESS_REQUIRED: Flag = Flag {
 /// The optional `--harness` flag of `install`: with no flag it writes the
 /// portable skill package and skips registration.
 const HARNESS_OPTIONAL: Flag = Flag::text("harness", "<name>", "Harness `install_cli` resolves.");
+
+/// The `--force` flag of `install`: it replaces the skill assets Clio recorded,
+/// and only those, so a conflicting package can be reinstalled without deleting
+/// anything Clio does not own.
+const INSTALL_FORCE: Flag = Flag::toggle(
+    "force",
+    "Replaces the skill assets Clio recorded, and only those; a locally edited asset, a missing asset, or an unexpected file in the package directory refuses the install without it. Never deletes an unowned file or a skill root.",
+);
 
 /// The `--json` flag of `help`, one of the two boolean flags the help dispatch
 /// reads.
@@ -251,14 +259,15 @@ pub(crate) const SETUP: CommandSpec = CommandSpec {
 };
 
 /// `clio install`: register the clio MCP server with an agent harness, or
-/// write the portable skill package when no harness is named.
+/// write the portable skill package when no harness is named. `--force`
+/// replaces a conflicting skill package instead of refusing it.
 pub(crate) const INSTALL: CommandSpec = CommandSpec {
     name: "install",
     aliases: &[],
     summary: "Register the clio MCP server with a supported agent harness (see `clio install --help` for the supported harnesses)",
     notes: &[],
     positionals: &[],
-    documented: &[HARNESS_OPTIONAL],
+    documented: &[HARNESS_OPTIONAL, INSTALL_FORCE],
     accepted_extra: RESERVED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,

@@ -240,7 +240,7 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
         "clio retention set [--bank BANK] [--scope bank|deployment] --profile JSON \
          [--profile-file FILE] [--profiles FILE]",
     ),
-    ("install", "clio install [--harness <name>]"),
+    ("install", "clio install [--harness <name>] [--force]"),
     ("uninstall", "clio uninstall --harness <name>"),
 ];
 

@@ -3,14 +3,15 @@
 //
 //! # Responsibility
 //!
-//! This module tests the skill installer: the assets written, byte identity with the embedded table, idempotent re-runs, refusal on a blocked path, the failure text, and the order of the skill step before registration. The root each harness selects is tested in `skill_install_roots_tests`.
+//! This module tests the skill installer: the assets written, byte identity with the embedded table, idempotent re-runs, the failure text, and the order of the skill step before registration. The root each harness selects is tested in `skill_install_roots_tests`, and the marker, conflict, and `--force` contract in `skill_install_marker_tests`.
 //!
 //! ## Owns
-//! - The `Scratch` unique temp directory guard and every assertion over `install`, `outcome_text`, and `failure_message`
+//! - The `Scratch` unique temp directory guard and every assertion over `install`, the outcome text, and the failure text
 //! - The wiring assertions over the install flow's skill step
 //!
 //! ## Does not own
 //! - The installer implementation under test (`skill_install`)
+//! - The marker, conflict, and forced-write contract (`skill_install_marker_tests`)
 //! - The harness registry (`agent_harness`) or the home seam (`agent_harness_targets`)
 //!
 //! ## Boundary
@@ -20,7 +21,8 @@
 use super::*;
 use crate::agent_harness::{self, HarnessRecord};
 use crate::agent_harness_targets::{DirectWriteEnv, OsLayout};
-use crate::install_cli::{Verb, run_with_skills};
+use crate::install_cli::run_with_skills;
+use crate::install_cli_decide::Verb;
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,15 +71,19 @@ fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|item| (*item).to_owned()).collect()
 }
 
-/// The package directory of the first written root.
+/// The package directory of the first written or already-current root.
 fn first_dir(outcome: &SkillOutcome) -> &Path {
-    &outcome.roots[0].dir
+    match outcome {
+        SkillOutcome::Written { roots } => &roots[0].dir,
+        SkillOutcome::Unchanged { roots } => &roots[0],
+        SkillOutcome::Refused { .. } => panic!("a refusal names no package directory to report"),
+    }
 }
 
 #[test]
 fn every_asset_is_written_byte_identical_to_the_embedded_table() {
     let scratch = Scratch::new("bytes");
-    let outcome = install_portable(&env(&scratch.root)).expect("the assets install");
+    let outcome = install_portable(&env(&scratch.root), false).expect("the assets install");
     let dir = first_dir(&outcome);
     for (name, text) in SKILL_ASSETS {
         let bytes = fs::read(dir.join(name)).expect("the asset exists");
@@ -94,11 +100,22 @@ fn every_asset_is_written_byte_identical_to_the_embedded_table() {
 #[test]
 fn a_second_run_writes_nothing() {
     let scratch = Scratch::new("idempotent");
-    let first = install_portable(&env(&scratch.root)).expect("the first run writes");
-    assert_eq!(first.roots[0].written, 18);
-    let second = install_portable(&env(&scratch.root)).expect("the second run is safe");
-    assert_eq!(second.roots[0].written, 0);
-    assert!(portable_outcome_text(&second).contains("nothing written"));
+    let first = install_portable(&env(&scratch.root), false).expect("the first run writes");
+    assert!(
+        matches!(first, SkillOutcome::Written { .. }),
+        "the first run writes the package: {first:?}"
+    );
+    let second = install_portable(&env(&scratch.root), false).expect("the second run is safe");
+    assert!(
+        matches!(second, SkillOutcome::Unchanged { .. }),
+        "the second run is a no-op: {second:?}"
+    );
+    let text = portable_outcome_text(&second);
+    assert!(
+        text.contains("unchanged") && text.contains("nothing written"),
+        "{text}"
+    );
+    assert!(!text.contains("wrote"), "{text}");
 }
 
 #[test]
@@ -111,10 +128,9 @@ fn unrelated_files_outside_the_skill_directory_survive() {
     fs::create_dir_all(&other).expect("the other skill directory can be created");
     fs::write(other.join("SKILL.md"), b"other").expect("the other skill can be written");
 
-    install(record("claude"), &env(&scratch.root)).expect("the assets install");
-
+    install(record("claude"), &env(&scratch.root), false).expect("the assets install");
     assert_eq!(
-        fs::read(skills.join("keep.txt")).expect("the marker remains"),
+        fs::read(skills.join("keep.txt")).expect("the unrelated file remains"),
         b"keep"
     );
     assert_eq!(
@@ -131,17 +147,17 @@ fn a_write_failure_names_the_failing_path_and_cause() {
     fs::write(skills.join(SKILL_DIR_NAME), b"not a directory")
         .expect("the blocking file can be written");
 
-    let error = install(record("claude"), &env(&scratch.root))
-        .expect_err("a file at the package path blocks the directory");
+    let error = install(record("claude"), &env(&scratch.root), false)
+        .expect_err("a file at the package path cannot be scanned as a directory");
     let message = failure_message(record("claude"), &error);
     assert!(message.contains(SKILL_DIR_NAME), "{message}");
-    assert!(message.contains("failed to create"), "{message}");
+    assert!(message.contains("failed to read"), "{message}");
 }
 
 #[test]
 fn the_outcome_line_names_the_absolute_directory_and_the_count() {
     let scratch = Scratch::new("text");
-    let outcome = install_portable(&env(&scratch.root)).expect("the assets install");
+    let outcome = install_portable(&env(&scratch.root), false).expect("the assets install");
     let text = portable_outcome_text(&outcome);
     assert!(
         text.contains(&first_dir(&outcome).display().to_string()),
@@ -154,22 +170,27 @@ fn the_outcome_line_names_the_absolute_directory_and_the_count() {
 #[test]
 fn no_harness_install_writes_only_the_portable_root() {
     let scratch = Scratch::new("portable");
-    let outcome = install_portable(&env(&scratch.root)).expect("the portable assets install");
+    let outcome =
+        install_portable(&env(&scratch.root), false).expect("the portable assets install");
+    let SkillOutcome::Written { roots } = &outcome else {
+        panic!("the first portable install writes: {outcome:?}");
+    };
+    assert_eq!(roots.len(), 1, "the portable install writes one root");
     assert_eq!(
-        outcome.roots.len(),
-        1,
-        "the portable install writes one root"
-    );
-    assert_eq!(
-        first_dir(&outcome),
+        roots[0].dir,
         scratch
             .root
             .join(".agents")
             .join("skills")
             .join(SKILL_DIR_NAME)
     );
-    assert_eq!(outcome.assets, 18);
-    assert_eq!(outcome.roots[0].written, 18);
+    assert_eq!(SKILL_ASSETS.len(), 18, "the package holds 18 assets");
+    assert_eq!(
+        roots[0].written.len(),
+        SKILL_ASSETS.len() + 1,
+        "18 assets and then the marker: {:?}",
+        roots[0].written
+    );
     assert!(
         !scratch.root.join(".claude").exists(),
         "no harness-native root is written"
@@ -179,7 +200,8 @@ fn no_harness_install_writes_only_the_portable_root() {
 #[test]
 fn the_portable_outcome_line_names_the_absolute_directory_and_the_count() {
     let scratch = Scratch::new("portable-text");
-    let outcome = install_portable(&env(&scratch.root)).expect("the portable assets install");
+    let outcome =
+        install_portable(&env(&scratch.root), false).expect("the portable assets install");
     let text = portable_outcome_text(&outcome);
     assert!(
         text.contains(&first_dir(&outcome).display().to_string()),
@@ -197,18 +219,19 @@ fn a_portable_write_failure_names_the_failing_path_and_cause() {
     fs::write(skills.join(SKILL_DIR_NAME), b"not a directory")
         .expect("the blocking file can be written");
 
-    let error = install_portable(&env(&scratch.root))
-        .expect_err("a file at the package path blocks the directory");
+    let error = install_portable(&env(&scratch.root), false)
+        .expect_err("a file at the package path cannot be scanned as a directory");
     let message = portable_failure_message(&error);
     assert!(message.contains(SKILL_DIR_NAME), "{message}");
-    assert!(message.contains("failed to create"), "{message}");
+    assert!(message.contains("failed to read"), "{message}");
 }
 
 #[test]
 fn the_skill_step_runs_before_registration() {
     let scratch = Scratch::new("order");
     let order = RefCell::new(Vec::new());
-    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv| {
+    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv, force: bool| {
+        assert!(!force, "a plain install carries no force");
         order.borrow_mut().push("skill");
         Ok(())
     };
@@ -234,8 +257,9 @@ fn the_skill_step_runs_before_registration() {
 #[test]
 fn a_skill_failure_stops_registration() {
     let scratch = Scratch::new("stop");
-    let skill =
-        |_: Option<&HarnessRecord>, _: &DirectWriteEnv| Err("skill write failed".to_owned());
+    let skill = |_: Option<&HarnessRecord>, _: &DirectWriteEnv, _: bool| {
+        Err("skill write failed".to_owned())
+    };
 
     let code = run_with_skills(
         Verb::Install,
@@ -258,7 +282,7 @@ fn unknown_home_env() -> DirectWriteEnv {
 #[test]
 fn install_and_report_succeeds_for_a_resolved_root() {
     let scratch = Scratch::new("report");
-    install_and_report(record("claude"), &env(&scratch.root)).expect("the assets install");
+    install_and_report(record("claude"), &env(&scratch.root), false).expect("the assets install");
     assert!(
         scratch
             .root
@@ -272,7 +296,7 @@ fn install_and_report_succeeds_for_a_resolved_root() {
 
 #[test]
 fn install_and_report_names_the_unknown_home_failure() {
-    let message = install_and_report(record("claude"), &unknown_home_env())
+    let message = install_and_report(record("claude"), &unknown_home_env(), false)
         .expect_err("an unknown home cannot resolve a skill root");
     assert!(
         message.contains("could not install the claude skill assets"),
@@ -287,7 +311,7 @@ fn install_and_report_names_the_unknown_home_failure() {
 #[test]
 fn install_portable_and_report_succeeds_for_a_resolved_root() {
     let scratch = Scratch::new("portable-report");
-    install_portable_and_report(&env(&scratch.root)).expect("the portable assets install");
+    install_portable_and_report(&env(&scratch.root), false).expect("the portable assets install");
     assert!(
         scratch
             .root
@@ -301,7 +325,7 @@ fn install_portable_and_report_succeeds_for_a_resolved_root() {
 
 #[test]
 fn install_portable_and_report_names_the_unknown_home_failure() {
-    let message = install_portable_and_report(&unknown_home_env())
+    let message = install_portable_and_report(&unknown_home_env(), false)
         .expect_err("an unknown home cannot resolve the portable root");
     assert!(
         message.contains("could not install the portable clio-mcp skill assets"),
@@ -315,7 +339,7 @@ fn install_portable_and_report_names_the_unknown_home_failure() {
 
 #[test]
 fn an_unknown_home_fails_install_with_a_plain_message() {
-    let error = install(record("claude"), &unknown_home_env())
+    let error = install(record("claude"), &unknown_home_env(), false)
         .expect_err("an unknown home cannot resolve a skill root");
     let message = failure_message(record("claude"), &error);
     assert!(
@@ -326,7 +350,7 @@ fn an_unknown_home_fails_install_with_a_plain_message() {
 
 #[test]
 fn an_unknown_home_fails_the_portable_install_with_a_plain_message() {
-    let error = install_portable(&unknown_home_env())
+    let error = install_portable(&unknown_home_env(), false)
         .expect_err("an unknown home cannot resolve the portable root");
     let message = portable_failure_message(&error);
     assert!(
@@ -336,7 +360,7 @@ fn an_unknown_home_fails_the_portable_install_with_a_plain_message() {
 }
 
 #[test]
-fn a_blocked_reference_directory_names_the_create_failure() {
+fn a_blocked_reference_directory_is_refused_by_default_and_fails_a_forced_write() {
     let scratch = Scratch::new("blocked-parent");
     let dir = scratch
         .root
@@ -347,8 +371,15 @@ fn a_blocked_reference_directory_names_the_create_failure() {
     fs::write(dir.join("references"), b"not a directory")
         .expect("the blocking file can be written");
 
-    let error = install(record("claude"), &env(&scratch.root))
-        .expect_err("a file at the reference path blocks the directory");
+    let refused = install(record("claude"), &env(&scratch.root), false)
+        .expect("a refusal is a decision, not a write failure");
+    assert!(
+        matches!(refused, SkillOutcome::Refused { .. }),
+        "the unowned `references` file refuses the install: {refused:?}"
+    );
+
+    let error = install(record("claude"), &env(&scratch.root), true)
+        .expect_err("a file at the reference path blocks the forced write");
     let message = failure_message(record("claude"), &error);
     assert!(message.contains("failed to create"), "{message}");
     assert!(message.contains("references"), "{message}");
@@ -364,7 +395,7 @@ fn a_directory_at_an_asset_path_names_the_replace_failure() {
         .join(SKILL_DIR_NAME);
     fs::create_dir_all(dir.join("SKILL.md")).expect("the blocking directory can be created");
 
-    let error = install(record("claude"), &env(&scratch.root))
+    let error = install(record("claude"), &env(&scratch.root), false)
         .expect_err("a directory at the asset path blocks the replace");
     let message = failure_message(record("claude"), &error);
     assert!(message.contains("failed to replace"), "{message}");

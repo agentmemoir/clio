@@ -358,13 +358,16 @@ fn setup_states_its_accepted_set_and_matches_its_parser() {
     assert_eq!(helped.get("help").map(String::as_str), Some("true"));
 }
 
-/// `install` takes `--harness` as optional and `uninstall` requires it, and
-/// the record-derived name list gates the flag through the shared parser in
-/// both value spellings.
+/// `install` takes `--harness` as optional and accepts `--force`, `uninstall`
+/// requires `--harness` and documents no `--force`, and the record-derived name
+/// list gates the flag through the shared parser in both value spellings.
 #[test]
 fn install_takes_harness_as_optional_and_uninstall_requires_it() {
     let install = record("install");
-    assert_eq!(install.usage_line(), "clio install [--harness <name>]");
+    assert_eq!(
+        install.usage_line(),
+        "clio install [--harness <name>] [--force]"
+    );
     assert!(
         install.required_flags().is_empty(),
         "install must accept a call with no --harness"
@@ -373,14 +376,22 @@ fn install_takes_harness_as_optional_and_uninstall_requires_it() {
     assert_eq!(uninstall.usage_line(), "clio uninstall --harness <name>");
     assert_eq!(uninstall.required_flags(), ["harness"]);
 
-    for name in ["install", "uninstall"] {
-        let parser = record(name).parser_spec();
-        assert_eq!(
-            parser.value_flags(),
-            ["db", "backend", "bank", "actor", "output", "harness"]
-        );
-        assert_eq!(parser.bool_flags(), ["no-input", "yes"]);
-    }
+    let install_parser = install.parser_spec();
+    assert_eq!(
+        install_parser.value_flags(),
+        ["db", "backend", "bank", "actor", "output", "harness"]
+    );
+    assert_eq!(
+        install_parser.bool_flags(),
+        ["no-input", "yes", "force"],
+        "install documents --force as its own boolean flag"
+    );
+    let uninstall_parser = record("uninstall").parser_spec();
+    assert_eq!(
+        uninstall_parser.bool_flags(),
+        ["no-input", "yes"],
+        "uninstall documents no --force"
+    );
 
     let names = crate::cli_top_level::record_flag_names("install");
     let bare =

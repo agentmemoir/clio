@@ -261,9 +261,12 @@ fn each_reason_names_the_file_it_is_about() {
         ConflictReason::Unrecorded {
             path: "d".to_owned(),
         },
+        ConflictReason::UnreadableMarker {
+            path: "e".to_owned(),
+        },
     ];
     let paths: Vec<&str> = reasons.iter().map(ConflictReason::path).collect();
-    assert_eq!(paths, vec!["a", "b", "c", "d"]);
+    assert_eq!(paths, vec!["a", "b", "c", "d", "e"]);
 }
 
 #[test]

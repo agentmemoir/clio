@@ -3,28 +3,39 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for installing the embedded `clio-mcp` skill package from the binary into every skill root the selected harness reads, and for rendering the skill outcome.
+//! This module is responsible for installing the embedded `clio-mcp` skill package from the binary into every skill root the selected harness reads.
 //!
 //! ## Owns
 //! - Resolving every skill root for a harness through the injectable `DirectWriteEnv` seam
-//! - Writing every embedded asset into each `<root>/clio-mcp/`, creating the directories it needs
-//! - Byte comparison so a re-run rewrites nothing that already matches, and a count of what changed
-//! - The skill outcome line, one line per root, and the portable-root reason line
+//! - Reading each package directory and its provenance marker, so every root is planned before any root is written
+//! - Writing the planned assets, then the marker last, creating the directories it needs
+//! - Leaving an already-current root untouched: no asset write, no marker write, no timestamp change
+//! - The skill outcome value: written, unchanged, or refused with every conflict reason
 //!
 //! ## Does not own
 //! - The embedded asset table (`clio_mcp::skill_assets`)
+//! - What the marker records or how its digest is taken (`skill_marker`)
+//! - The decision between no-op, write, and conflict (`skill_install_plan`)
+//! - The outcome text and the failure messages (`skill_install_text`)
 //! - Which root a harness uses (`agent_harness`) or joining it to the home directory (`agent_harness_targets`)
 //! - Registering the MCP server, which runs after this step
 //!
 //! ## Boundary
 //!
-//! Changes to where skill assets are written or how their outcome is reported should normally require changes here. Changes to the asset text belong in `skills/clio-mcp`, and changes to the harness registry belong in `agent_harness`.
+//! Changes to where skill assets are written, in what order, or when a root is left alone should normally require changes here. Changes to the asset text belong in `skills/clio-mcp`, changes to the harness registry belong in `agent_harness`, and changes to the words printed belong in `skill_install_text`.
+//!
+//! Every root is planned from a scan and a marker read before the first byte is written, so a conflict in one root cannot leave another root half written.
 //!
 //! Keep this module focused on writing the embedded skill package.
 
 use crate::agent_harness::{self, HarnessRecord, SkillRoot};
 use crate::agent_harness_targets::{DirectWriteEnv, resolve_skill_root};
 use crate::agent_harness_write::WriteError;
+use crate::skill_install_plan::{ConflictReason, InstallPlan, plan_install, scan_package_dir};
+use crate::skill_install_text::{
+    failure_message, outcome_text, portable_failure_message, portable_outcome_text, refused,
+};
+use crate::skill_marker::{self, SKILL_MARKER_FILE, SkillMarker};
 use clio_mcp::skill_assets::{SKILL_ASSETS, references};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,212 +46,289 @@ pub(crate) const SKILL_DIR_NAME: &str = "clio-mcp";
 /// The portable root alone, used when `clio install` names no harness.
 const PORTABLE_ROOTS: &[SkillRoot] = &[SkillRoot::Portable];
 
-/// The hermes reason line: its client has no documented native skill mechanism, so it receives the portable copy.
-const PORTABLE_REASON: &str =
-    "note: hermes has no documented native skill mechanism, so the portable skill root is used";
-
-/// What one target root received.
+/// One root's result: what it wrote, and what it kept.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SkillRootOutcome {
     /// The absolute package directory, `<root>/clio-mcp`.
-    pub dir: PathBuf,
-    /// The number of files whose bytes were created or changed in this root. Zero means the root was already current.
-    pub written: usize,
+    pub(crate) dir: PathBuf,
+    /// Every package-relative path written in this root, in write order, with the marker last. An empty list means the root was already current.
+    pub(crate) written: Vec<String>,
+    /// The unowned paths inside the package directory, kept exactly as they were.
+    pub(crate) preserved_foreign: Vec<String>,
 }
 
-/// What a successful skill install left behind.
+/// One root that refused, with every reason it refused.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct SkillOutcome {
-    /// One entry per written root, in mapping order.
-    pub roots: Vec<SkillRootOutcome>,
-    /// The number of embedded assets in the package, the same for every root.
-    pub assets: usize,
+pub(crate) struct RootConflict {
+    /// The absolute package directory that refused.
+    pub(crate) dir: PathBuf,
+    /// Every reason for the refusal, in path order.
+    pub(crate) reasons: Vec<ConflictReason>,
 }
 
-/// Install every embedded skill asset for `record` and print the skill outcome text, one line per root. Returns `Err` with a plain message when the write fails, and the caller must then skip registration.
+/// What one installation run did. The caller distinguishes a no-op from a write from a refusal without comparing bytes.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SkillOutcome {
+    /// Every root already held the incoming payload and its marker: nothing was written in any root and no modification time changed.
+    Unchanged { roots: Vec<PathBuf> },
+    /// At least one root was written. A root that was already current appears with an empty `written` list.
+    Written { roots: Vec<SkillRootOutcome> },
+    /// At least one root refused, so nothing was written in any root.
+    Refused { conflicts: Vec<RootConflict> },
+}
+
+/// Install every embedded skill asset for `record` and print the skill outcome text, one line per root. With `force`, a conflict is replaced instead of refused. Returns `Err` with a plain message when a root refuses or the write fails, and the caller must then skip registration.
 pub(crate) fn install_and_report(
     record: &HarnessRecord,
     env: &DirectWriteEnv,
+    force: bool,
 ) -> Result<(), String> {
-    let outcome = install(record, env).map_err(|error| failure_message(record, &error))?;
-    println!("{}", outcome_text(record, &outcome));
-    Ok(())
+    let outcome = install(record, env, force).map_err(|error| failure_message(record, &error))?;
+    report(outcome_text(record, &outcome), &outcome)
 }
 
-/// Install the portable skill package with no harness selected, and print its
-/// outcome text. Returns `Err` with a plain message when the write fails, and
-/// the caller must then report the failure and skip registration.
-pub(crate) fn install_portable_and_report(env: &DirectWriteEnv) -> Result<(), String> {
-    let outcome = install_portable(env).map_err(|error| portable_failure_message(&error))?;
-    println!("{}", portable_outcome_text(&outcome));
-    Ok(())
+/// Install the portable skill package with no harness selected, and print its outcome text. Returns `Err` with a plain message when a root refuses or the write fails, and the caller must then report the failure and skip registration.
+pub(crate) fn install_portable_and_report(env: &DirectWriteEnv, force: bool) -> Result<(), String> {
+    let outcome = install_portable(env, force).map_err(|error| portable_failure_message(&error))?;
+    report(portable_outcome_text(&outcome), &outcome)
 }
 
-/// Write every embedded asset into every skill root `record` reads. A file whose bytes already match is left untouched, so a re-run is safe and reports zero written for that root.
+/// Plan every skill root `record` reads, then write the roots that need it. A refusal in any root leaves every root untouched.
 ///
 /// # Errors
-/// A skill root cannot be resolved, a directory cannot be created, or a file cannot be replaced.
+/// A skill root cannot be resolved, a package directory cannot be read, a directory cannot be created, or a file cannot be written.
 pub(crate) fn install(
     record: &HarnessRecord,
     env: &DirectWriteEnv,
+    force: bool,
 ) -> Result<SkillOutcome, WriteError> {
     let missing = format!(
         "cannot resolve a skill root for `{}` because the home directory is unknown",
         record.name
     );
-    write_into_all(agent_harness::skill_roots(record.name), env, &missing)
+    write_into_all(
+        agent_harness::skill_roots(record.name),
+        env,
+        &missing,
+        force,
+    )
 }
 
-/// Write the embedded assets into the portable cross-client root. Used when
-/// `clio install` names no harness.
+/// Plan every portable skill root with no harness selected, then write the roots that need it.
 ///
 /// # Errors
-/// The home directory is unknown, a directory cannot be created, or a file
-/// cannot be replaced.
-pub(crate) fn install_portable(env: &DirectWriteEnv) -> Result<SkillOutcome, WriteError> {
+/// The home directory is unknown, a package directory cannot be read, a directory cannot be created, or a file cannot be written.
+pub(crate) fn install_portable(
+    env: &DirectWriteEnv,
+    force: bool,
+) -> Result<SkillOutcome, WriteError> {
     let missing = "cannot resolve the portable skill root because the home directory is unknown";
-    write_into_all(PORTABLE_ROOTS, env, missing)
+    write_into_all(PORTABLE_ROOTS, env, missing, force)
 }
 
-/// Resolve every target root and write the package into each. A root that
-/// resolves to a path already in the set is written once, so a harness whose
-/// native root equals the portable root never gets a duplicate write.
+/// Plan every root, then write. Planning reads each package directory and its marker and runs no write, so a conflict in one root is known before another root is touched.
 fn write_into_all(
     roots: &[SkillRoot],
     env: &DirectWriteEnv,
     missing: &str,
+    force: bool,
 ) -> Result<SkillOutcome, WriteError> {
-    let mut dirs: Vec<PathBuf> = Vec::with_capacity(roots.len());
+    let mut work = Vec::with_capacity(roots.len());
+    let mut conflicts = Vec::new();
+    for package in resolve_packages(roots, env, missing)? {
+        match plan_package(&package, force)? {
+            Ok(plan) => work.push((package, plan)),
+            Err(reasons) => conflicts.push(RootConflict {
+                dir: package,
+                reasons,
+            }),
+        }
+    }
+    if !conflicts.is_empty() {
+        return Ok(SkillOutcome::Refused { conflicts });
+    }
+    if work
+        .iter()
+        .all(|(_, plan)| matches!(plan, RootWork::Current))
+    {
+        return Ok(SkillOutcome::Unchanged {
+            roots: work.into_iter().map(|(package, _)| package).collect(),
+        });
+    }
+    let mut roots = Vec::with_capacity(work.len());
+    for (package, plan) in work {
+        roots.push(match plan {
+            RootWork::Current => SkillRootOutcome {
+                dir: package,
+                written: Vec::new(),
+                preserved_foreign: Vec::new(),
+            },
+            RootWork::Write {
+                files,
+                preserved_foreign,
+            } => write_package(&package, &files, preserved_foreign)?,
+        });
+    }
+    Ok(SkillOutcome::Written { roots })
+}
+
+/// Every package directory, `<root>/clio-mcp`, in mapping order. A root that resolves to a path already in the set is kept once, so a harness whose native root equals the portable root never gets a duplicate.
+fn resolve_packages(
+    roots: &[SkillRoot],
+    env: &DirectWriteEnv,
+    missing: &str,
+) -> Result<Vec<PathBuf>, WriteError> {
+    let mut packages: Vec<PathBuf> = Vec::with_capacity(roots.len());
     for root in roots {
         let path = resolve_skill_root(*root, env).ok_or_else(|| WriteError::Io {
             detail: missing.to_owned(),
         })?;
-        if !dirs.contains(&path) {
-            dirs.push(path);
+        let package = path.join(SKILL_DIR_NAME);
+        if !packages.contains(&package) {
+            packages.push(package);
         }
     }
-    let mut outcomes = Vec::with_capacity(dirs.len());
-    for root in &dirs {
-        outcomes.push(write_into(root)?);
-    }
-    Ok(SkillOutcome {
-        roots: outcomes,
-        assets: SKILL_ASSETS.len(),
+    Ok(packages)
+}
+
+/// One root's planned work, decided before any root is written.
+enum RootWork {
+    /// The root already holds the incoming payload and its marker.
+    Current,
+    /// These assets must be written. `preserved_foreign` is reported and kept.
+    Write {
+        files: Vec<String>,
+        preserved_foreign: Vec<String>,
+    },
+}
+
+/// The marker beside the assets in one package directory.
+enum InstalledMarker {
+    /// No marker file is there.
+    Absent,
+    /// The marker file is there and this program cannot read it.
+    Unreadable,
+    /// The marker the file holds.
+    Read(SkillMarker),
+}
+
+/// Plan one package directory: scan it, read its marker, and let the plan decide.
+///
+/// An unreadable marker is its own conflict and is refused even with `force`: without the record of which files this program owns, no file's bytes can be attributed to it, so replacing anything would be a guess.
+fn plan_package(
+    package: &Path,
+    force: bool,
+) -> Result<Result<RootWork, Vec<ConflictReason>>, WriteError> {
+    let on_disk = scan_package_dir(package)?;
+    let marker = match installed_marker(package)? {
+        InstalledMarker::Absent => None,
+        InstalledMarker::Read(marker) => Some(marker),
+        InstalledMarker::Unreadable => {
+            return Ok(Err(vec![ConflictReason::UnreadableMarker {
+                path: SKILL_MARKER_FILE.to_owned(),
+            }]));
+        }
+    };
+    Ok(
+        match plan_install(marker.as_ref(), SKILL_ASSETS, &on_disk, force) {
+            InstallPlan::Conflict { reasons } => Err(reasons),
+            InstallPlan::NoOp => Ok(RootWork::Current),
+            InstallPlan::Write {
+                files,
+                preserved_foreign,
+            } => Ok(RootWork::Write {
+                files,
+                preserved_foreign,
+            }),
+        },
+    )
+}
+
+/// The marker `package` holds, if any.
+fn installed_marker(package: &Path) -> Result<InstalledMarker, WriteError> {
+    let path = package.join(SKILL_MARKER_FILE);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(InstalledMarker::Absent);
+        }
+        Err(error) => return Err(io_error("read", &path, &error)),
+    };
+    Ok(match SkillMarker::from_bytes(&bytes) {
+        Ok(marker) => InstalledMarker::Read(marker),
+        Err(_) => InstalledMarker::Unreadable,
     })
 }
 
-/// Write every embedded asset into `<root>/clio-mcp/`. The references go first
-/// and the router goes last, so a failure on a reference leaves no loadable
-/// router that points at a missing file.
-fn write_into(root: &Path) -> Result<SkillRootOutcome, WriteError> {
-    let dir = root.join(SKILL_DIR_NAME);
-    std::fs::create_dir_all(&dir).map_err(|error| io_error("create", &dir, &error))?;
-    let mut written = 0;
+/// Write the planned assets into `package`, then the marker last.
+///
+/// The references go first and the router goes last, so a failure on a reference leaves no loadable router that points at a missing file. The marker is built from the incoming assets, never from what the directory holds, and it is written only when its bytes differ from the one already there.
+fn write_package(
+    package: &Path,
+    files: &[String],
+    preserved_foreign: Vec<String>,
+) -> Result<SkillRootOutcome, WriteError> {
+    std::fs::create_dir_all(package).map_err(|error| io_error("create", package, &error))?;
+    let planned = |name: &str| files.iter().any(|file| file == name);
+    let mut written = Vec::with_capacity(files.len() + 1);
     for (name, text) in references() {
-        written += write_asset(&dir, name, text)?;
+        if planned(name) {
+            write_asset(package, name, text)?;
+            written.push((*name).to_owned());
+        }
     }
     // The router is the first embedded asset; `references()` starts after it.
     let (name, text) = SKILL_ASSETS[0];
-    written += write_asset(&dir, name, text)?;
-    Ok(SkillRootOutcome { dir, written })
+    if planned(name) {
+        write_asset(package, name, text)?;
+        written.push(name.to_owned());
+    }
+    if write_marker(package)? {
+        written.push(SKILL_MARKER_FILE.to_owned());
+    }
+    Ok(SkillRootOutcome {
+        dir: package.to_path_buf(),
+        written,
+        preserved_foreign,
+    })
 }
 
-/// Write one asset into `dir`, skipping it when its bytes already match.
-fn write_asset(dir: &Path, name: &str, text: &str) -> Result<usize, WriteError> {
-    let path = dir.join(name);
+/// Write one asset into `package`, creating the parent directory a reference needs.
+fn write_asset(package: &Path, name: &str, text: &str) -> Result<(), WriteError> {
+    let path = package.join(name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| io_error("create", parent, &error))?;
     }
-    if std::fs::read(&path).is_ok_and(|bytes| bytes == text.as_bytes()) {
-        return Ok(0);
-    }
-    write_bytes_atomic(&path, text.as_bytes())?;
-    Ok(1)
+    write_bytes_atomic(&path, text.as_bytes())
 }
 
-/// The skill outcome text: one line per written root naming its absolute
-/// directory and the asset count, plus whether anything changed there. A
-/// harness that receives the portable copy also gets the reason line. The text
-/// never claims a client loaded the skill.
-pub(crate) fn outcome_text(record: &HarnessRecord, outcome: &SkillOutcome) -> String {
-    let lines = outcome_lines(outcome);
-    match portable_reason(record) {
-        Some(reason) => format!("{lines}\n{reason}"),
-        None => lines,
-    }
-}
-
-/// The outcome text for the portable-only install, which names no harness.
-pub(crate) fn portable_outcome_text(outcome: &SkillOutcome) -> String {
-    outcome_lines(outcome)
-}
-
-/// One line per written root, so every directory is named.
-fn outcome_lines(outcome: &SkillOutcome) -> String {
-    outcome
-        .roots
-        .iter()
-        .map(|root| root_line(root, outcome.assets))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// The shared root line: the absolute directory and the asset count, plus
-/// whether anything changed in that root.
-fn root_line(root: &SkillRootOutcome, assets: usize) -> String {
-    if root.written == 0 {
-        format!(
-            "skill assets already current in {} ({} assets, nothing written)",
-            root.dir.display(),
-            assets
-        )
-    } else {
-        format!(
-            "installed {} skill assets into {} ({} written)",
-            assets,
-            root.dir.display(),
-            root.written
-        )
-    }
-}
-
-/// The plain failure message for a skill write: the harness, the failing path, and the cause. `WriteError` already carries the path in its detail.
-pub(crate) fn failure_message(record: &HarnessRecord, error: &WriteError) -> String {
-    match error {
-        WriteError::Io { detail } => {
-            format!(
-                "could not install the {} skill assets: {detail}",
-                record.name
-            )
-        }
-        WriteError::Unparseable { path, snippet } => format!(
-            "could not install the {} skill assets: {} {snippet}",
-            record.name,
+/// Write the marker the incoming assets record, unless the package already holds exactly those bytes. Returns whether it wrote, so a root whose marker is current reports no marker write.
+fn write_marker(package: &Path) -> Result<bool, WriteError> {
+    let path = package.join(SKILL_MARKER_FILE);
+    let marker = SkillMarker::from_assets(SKILL_ASSETS, &skill_marker::catalog_hash());
+    let bytes = marker.to_bytes().map_err(|error| WriteError::Io {
+        detail: format!(
+            "failed to serialize the skill marker for {}: {error:?}",
             path.display()
         ),
+    })?;
+    if std::fs::read(&path).is_ok_and(|existing| existing == bytes) {
+        return Ok(false);
     }
+    write_bytes_atomic(&path, &bytes)?;
+    Ok(true)
 }
 
-/// The plain failure message for the portable-only write: the failing path and
-/// the cause. `WriteError` already carries the path in its detail.
-pub(crate) fn portable_failure_message(error: &WriteError) -> String {
-    match error {
-        WriteError::Io { detail } => {
-            format!("could not install the portable clio-mcp skill assets: {detail}")
-        }
-        WriteError::Unparseable { path, snippet } => format!(
-            "could not install the portable clio-mcp skill assets: {} {snippet}",
-            path.display()
-        ),
+/// Print `text`, or return it as the failure message when the outcome was a refusal. A refusal is not an I/O error, but it must still stop the command and fail it.
+fn report(text: String, outcome: &SkillOutcome) -> Result<(), String> {
+    if refused(outcome) {
+        return Err(text);
     }
+    println!("{text}");
+    Ok(())
 }
 
-/// The portable-copy reason for a harness that has no documented native skill mechanism.
-fn portable_reason(record: &HarnessRecord) -> Option<&'static str> {
-    (record.name == "hermes").then_some(PORTABLE_REASON)
-}
-
-/// Replace `path` with `bytes` through a same-directory temp sibling and a rename. No backup is made: the assets are generated from the binary and a re-run restores them.
+/// Replace `path` with `bytes` through a same-directory temp sibling and a rename. No backup is made: the assets are generated from the binary and a re-run restores them. A file whose bytes already match is never rewritten, which is what keeps a repeated install free of timestamp changes.
 fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
     let tmp = temp_sibling(path);
     std::fs::write(&tmp, bytes).map_err(|error| io_error("write", &tmp, &error))?;
@@ -278,3 +366,11 @@ mod tests;
 #[cfg(test)]
 #[path = "skill_install_roots_tests.rs"]
 mod roots_tests;
+
+#[cfg(test)]
+#[path = "skill_install_marker_tests.rs"]
+mod marker_tests;
+
+#[cfg(test)]
+#[path = "skill_install_test_support.rs"]
+mod test_support;

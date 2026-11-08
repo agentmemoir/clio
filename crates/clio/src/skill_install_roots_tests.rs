@@ -5,8 +5,9 @@
 //!
 //! This module tests which skill roots the installer writes for each harness:
 //! a native root plus the portable root where the harness documents one, the
-//! portable root alone otherwise, the router-last write order, and idempotence
-//! per root.
+//! portable root alone otherwise, the router-last write order, idempotence per
+//! root, and the refusal and forced rewrite of a root whose recorded asset
+//! changed.
 //!
 //! ## Owns
 //! - The per-harness root mapping assertions over `install`
@@ -16,6 +17,7 @@
 //! ## Does not own
 //! - The installer implementation under test (`skill_install`)
 //! - The failure text and the portable-only flow (`skill_install_tests`)
+//! - The marker, conflict, and `--force` matrix (`skill_install_marker_tests`)
 //! - The harness registry (`agent_harness`)
 //!
 //! ## Boundary
@@ -89,40 +91,56 @@ fn assert_all_assets(dir: &Path) {
     }
 }
 
+/// The roots a first install wrote, or a panic naming the outcome it got instead.
+fn written(outcome: &SkillOutcome) -> &[SkillRootOutcome] {
+    match outcome {
+        SkillOutcome::Written { roots } => roots,
+        other => panic!("a first install writes every root: {other:?}"),
+    }
+}
+
 #[test]
 fn claude_writes_the_native_and_portable_roots() {
     let scratch = Scratch::new("claude-both");
-    let outcome = install(record("claude"), &env(&scratch.root)).expect("the assets install");
+    let outcome =
+        install(record("claude"), &env(&scratch.root), false).expect("the assets install");
     let native = package(&scratch.root, &[".claude", "skills"]);
     let portable = package(&scratch.root, &[".agents", "skills"]);
-    assert_eq!(outcome.roots.len(), 2, "claude reads two roots");
-    assert_eq!(outcome.roots[0].dir, native);
-    assert_eq!(outcome.roots[1].dir, portable);
+    let roots = written(&outcome);
+    assert_eq!(roots.len(), 2, "claude reads two roots");
+    assert_eq!(roots[0].dir, native);
+    assert_eq!(roots[1].dir, portable);
     assert_all_assets(&native);
     assert_all_assets(&portable);
-    assert_eq!(outcome.assets, 18);
+    assert!(
+        outcome_text(record("claude"), &outcome).contains("18 skill assets"),
+        "the embedded payload still reads as 18 assets: {}",
+        outcome_text(record("claude"), &outcome)
+    );
 }
 
 #[test]
 fn the_claude_code_alias_writes_the_native_and_portable_roots() {
     let scratch = Scratch::new("claude-code-alias");
-    let outcome = install(record("claude-code"), &env(&scratch.root)).expect("the assets install");
+    let outcome =
+        install(record("claude-code"), &env(&scratch.root), false).expect("the assets install");
     let native = package(&scratch.root, &[".claude", "skills"]);
     let portable = package(&scratch.root, &[".agents", "skills"]);
-    assert_eq!(outcome.roots.len(), 2, "the alias resolves to claude");
-    assert_eq!(outcome.roots[0].dir, native);
-    assert_eq!(outcome.roots[1].dir, portable);
+    assert_eq!(written(&outcome).len(), 2, "the alias resolves to claude");
+    assert_eq!(written(&outcome)[0].dir, native);
+    assert_eq!(written(&outcome)[1].dir, portable);
 }
 
 #[test]
 fn antigravity_writes_the_gemini_and_portable_roots() {
     let scratch = Scratch::new("antigravity-both");
-    let outcome = install(record("antigravity"), &env(&scratch.root)).expect("the assets install");
+    let outcome =
+        install(record("antigravity"), &env(&scratch.root), false).expect("the assets install");
     let native = package(&scratch.root, &[".gemini", "config", "skills"]);
     let portable = package(&scratch.root, &[".agents", "skills"]);
-    assert_eq!(outcome.roots.len(), 2, "antigravity reads two roots");
-    assert_eq!(outcome.roots[0].dir, native);
-    assert_eq!(outcome.roots[1].dir, portable);
+    assert_eq!(written(&outcome).len(), 2, "antigravity reads two roots");
+    assert_eq!(written(&outcome)[0].dir, native);
+    assert_eq!(written(&outcome)[1].dir, portable);
     assert_all_assets(&native);
     assert_all_assets(&portable);
 }
@@ -130,10 +148,14 @@ fn antigravity_writes_the_gemini_and_portable_roots() {
 #[test]
 fn codex_writes_only_the_portable_root() {
     let scratch = Scratch::new("codex-portable");
-    let outcome = install(record("codex"), &env(&scratch.root)).expect("the assets install");
+    let outcome = install(record("codex"), &env(&scratch.root), false).expect("the assets install");
     let portable = package(&scratch.root, &[".agents", "skills"]);
-    assert_eq!(outcome.roots.len(), 1, "codex reads the portable root only");
-    assert_eq!(outcome.roots[0].dir, portable);
+    assert_eq!(
+        written(&outcome).len(),
+        1,
+        "codex reads the portable root only"
+    );
+    assert_eq!(written(&outcome)[0].dir, portable);
     assert!(
         !scratch.root.join(".codex").exists(),
         "no codex-native root is written"
@@ -145,14 +167,14 @@ fn codex_writes_only_the_portable_root() {
 fn github_copilot_writes_only_the_portable_root() {
     let scratch = Scratch::new("copilot-portable");
     let outcome =
-        install(record("github copilot"), &env(&scratch.root)).expect("the assets install");
+        install(record("github copilot"), &env(&scratch.root), false).expect("the assets install");
     let portable = package(&scratch.root, &[".agents", "skills"]);
     assert_eq!(
-        outcome.roots.len(),
+        written(&outcome).len(),
         1,
         "github copilot reads the portable root only"
     );
-    assert_eq!(outcome.roots[0].dir, portable);
+    assert_eq!(written(&outcome)[0].dir, portable);
     assert!(
         !scratch.root.join(".copilot").exists(),
         "no copilot-native root is written"
@@ -166,14 +188,15 @@ fn github_copilot_writes_only_the_portable_root() {
 #[test]
 fn hermes_uses_the_portable_root_and_states_the_reason() {
     let scratch = Scratch::new("hermes-portable");
-    let outcome = install(record("hermes"), &env(&scratch.root)).expect("the assets install");
+    let outcome =
+        install(record("hermes"), &env(&scratch.root), false).expect("the assets install");
     let portable = package(&scratch.root, &[".agents", "skills"]);
     assert_eq!(
-        outcome.roots.len(),
+        written(&outcome).len(),
         1,
         "hermes reads the portable root only"
     );
-    assert_eq!(outcome.roots[0].dir, portable);
+    assert_eq!(written(&outcome)[0].dir, portable);
     let text = outcome_text(record("hermes"), &outcome);
     assert!(
         text.contains("no documented native skill mechanism"),
@@ -190,8 +213,8 @@ fn a_reference_failure_leaves_no_router_in_either_root() {
     fs::write(native.join("references"), b"not a directory")
         .expect("the blocking file can be written");
 
-    let error = install(record("claude"), &env(&scratch.root))
-        .expect_err("a file at the reference path blocks the package");
+    let error = install(record("claude"), &env(&scratch.root), true)
+        .expect_err("a file at the reference path blocks the forced write");
     assert!(
         failure_message(record("claude"), &error).contains("failed to create"),
         "{error:?}"
@@ -210,9 +233,13 @@ fn a_reference_failure_leaves_no_router_in_either_root() {
 #[test]
 fn the_outcome_text_names_every_written_root() {
     let scratch = Scratch::new("roots-text");
-    let outcome = install(record("claude"), &env(&scratch.root)).expect("the assets install");
+    let outcome =
+        install(record("claude"), &env(&scratch.root), false).expect("the assets install");
     let text = outcome_text(record("claude"), &outcome);
-    for root in &outcome.roots {
+    let SkillOutcome::Written { roots } = &outcome else {
+        panic!("the first install writes both roots: {outcome:?}");
+    };
+    for root in roots {
         assert!(
             text.contains(&root.dir.display().to_string()),
             "the text must name {}: {text}",
@@ -224,20 +251,40 @@ fn the_outcome_text_names_every_written_root() {
 }
 
 #[test]
-fn a_changed_root_rewrites_only_the_differing_files() {
+fn a_locally_edited_root_is_refused_and_a_forced_run_rewrites_only_that_file() {
     let scratch = Scratch::new("rewrite");
-    install(record("codex"), &env(&scratch.root)).expect("the first run writes");
+    install(record("codex"), &env(&scratch.root), false).expect("the first run writes");
     let dir = package(&scratch.root, &[".agents", "skills"]);
     let target = dir.join("references").join("01-retrieval.md");
     fs::write(&target, b"stale").expect("the asset can be changed");
 
-    let second = install(record("codex"), &env(&scratch.root)).expect("the second run rewrites");
-    assert_eq!(
-        second.roots[0].written, 1,
-        "only the changed file is written"
+    let refused =
+        install(record("codex"), &env(&scratch.root), false).expect("a refusal is planned");
+    let text = portable_outcome_text(&refused);
+    assert!(
+        matches!(refused, SkillOutcome::Refused { .. }),
+        "a local edit is refused by default: {refused:?}"
     );
-    let text = portable_outcome_text(&second);
-    assert!(text.contains("1 written"), "{text}");
+    assert!(
+        text.contains("references/01-retrieval.md") && text.contains("local edit"),
+        "{text}"
+    );
+    assert_eq!(
+        fs::read(&target).expect("the edited asset is readable"),
+        b"stale",
+        "a refusal must not restore the file"
+    );
+
+    let forced =
+        install(record("codex"), &env(&scratch.root), true).expect("the forced run rewrites");
+    let SkillOutcome::Written { roots } = &forced else {
+        panic!("a forced run writes: {forced:?}");
+    };
+    assert_eq!(
+        roots[0].written,
+        ["references/01-retrieval.md"],
+        "only the changed file is written; the marker already matches"
+    );
     let expected = SKILL_ASSETS
         .iter()
         .find(|(name, _)| *name == "references/01-retrieval.md")
@@ -246,23 +293,29 @@ fn a_changed_root_rewrites_only_the_differing_files() {
     assert_eq!(
         fs::read(&target).expect("the asset is readable"),
         expected.as_bytes(),
-        "the changed file is restored to the embedded bytes"
+        "the forced run restores the embedded bytes"
     );
 }
 
 #[test]
 fn a_second_run_writes_nothing_in_either_root() {
     let scratch = Scratch::new("idempotent-roots");
-    install(record("claude"), &env(&scratch.root)).expect("the first run writes");
-    let second = install(record("claude"), &env(&scratch.root)).expect("the second run is safe");
-    assert_eq!(second.roots.len(), 2);
-    for root in &second.roots {
-        assert_eq!(root.written, 0, "{} is already current", root.dir.display());
-    }
+    install(record("claude"), &env(&scratch.root), false).expect("the first run writes");
+    let second =
+        install(record("claude"), &env(&scratch.root), false).expect("the second run is safe");
+    let SkillOutcome::Unchanged { roots } = &second else {
+        panic!("an identical second run is a no-op: {second:?}");
+    };
+    assert_eq!(roots.len(), 2);
     let text = outcome_text(record("claude"), &second);
+    assert_eq!(
+        text.matches("unchanged").count(),
+        2,
+        "every root says it is unchanged: {text}"
+    );
     assert_eq!(
         text.matches("nothing written").count(),
         2,
-        "every root says it is current: {text}"
+        "every root says nothing was written: {text}"
     );
 }

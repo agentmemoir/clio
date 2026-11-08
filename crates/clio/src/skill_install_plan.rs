@@ -65,6 +65,9 @@ pub(crate) enum ConflictReason {
     /// The package directory holds a file, and no marker says this program put
     /// it there.
     Unrecorded { path: String },
+    /// The package directory holds a marker this program cannot read, so no file
+    /// it holds can be attributed to this program.
+    UnreadableMarker { path: String },
 }
 
 impl ConflictReason {
@@ -75,7 +78,8 @@ impl ConflictReason {
             Self::LocalEdit { path }
             | Self::MissingOwned { path }
             | Self::UnexpectedFile { path }
-            | Self::Unrecorded { path } => path,
+            | Self::Unrecorded { path }
+            | Self::UnreadableMarker { path } => path,
         }
     }
 }
