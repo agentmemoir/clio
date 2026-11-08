@@ -9,6 +9,8 @@
 //!
 //! ## Owns
 //! - The marker file name and the exact set of facts a marker records
+//! - The install state carried beside those facts: the harnesses that reference
+//!   the copy and whether the installation created the package directory
 //! - The payload digest, taken over the embedded assets and never the marker
 //! - The canonical byte form, so the same installation always serializes alike
 //! - The SHA-256 hex convention the marker and the installation plan share
@@ -32,7 +34,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The marker file, written inside the installed package directory beside the
 /// assets it describes.
@@ -61,6 +63,12 @@ pub(crate) struct SkillMarker {
     /// Every file the installation owns: relative path, then the SHA-256 of its
     /// recorded bytes.
     pub files: BTreeMap<String, String>,
+    /// Whether this installation created the package directory it wrote into.
+    #[serde(default)]
+    pub(crate) created_package_dir: bool,
+    /// Every harness whose roots reference this package directory.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) harnesses: BTreeSet<String>,
 }
 
 /// Why a marker could not be produced or read.
@@ -82,7 +90,39 @@ impl SkillMarker {
             catalog_hash: catalog_hash.to_owned(),
             payload_digest: payload_digest(assets),
             files: owned_files(assets),
+            created_package_dir: true,
+            harnesses: BTreeSet::new(),
         }
+    }
+
+    /// This marker with the install state recorded beside its assets: whether
+    /// this installation created the package directory, and which harnesses
+    /// reference it.
+    ///
+    /// A marker that `recorded` describes keeps the state it already carries, so
+    /// a rewrite never forgets the directory's origin or a harness that installed
+    /// earlier. With no recorded marker, the state comes from `dir_existed`, which
+    /// is false only when this installation made the directory. The `harness` is
+    /// added to the set when one is given.
+    #[must_use]
+    pub(crate) fn with_install_state(
+        self,
+        recorded: Option<&Self>,
+        harness: Option<&str>,
+        dir_existed: bool,
+    ) -> Self {
+        let mut marker = self;
+        match recorded {
+            Some(existing) => {
+                marker.created_package_dir = existing.created_package_dir;
+                marker.harnesses.clone_from(&existing.harnesses);
+            }
+            None => marker.created_package_dir = !dir_existed,
+        }
+        if let Some(harness) = harness {
+            let _ = marker.harnesses.insert(harness.to_owned());
+        }
+        marker
     }
 
     /// The canonical bytes of this marker.
@@ -115,17 +155,32 @@ impl SkillMarker {
 /// the payload without it.
 #[must_use]
 pub(crate) fn payload_digest(assets: &[(&str, &str)]) -> String {
-    let mut named: Vec<&(&str, &str)> = assets
+    let bytes: Vec<(&str, &[u8])> = assets
+        .iter()
+        .map(|(name, text)| (*name, text.as_bytes()))
+        .collect();
+    payload_digest_of_bytes(&bytes)
+}
+
+/// The digest of a payload given as bytes: every asset's name and bytes, each
+/// length-prefixed and taken in sorted name order, so neither a renamed asset nor
+/// a shifted boundary can produce the digest of a different payload.
+///
+/// The marker file is skipped, so a payload that carries one still digests as the
+/// payload without it.
+#[must_use]
+pub(crate) fn payload_digest_of_bytes(assets: &[(&str, &[u8])]) -> String {
+    let mut named: Vec<&(&str, &[u8])> = assets
         .iter()
         .filter(|(name, _)| *name != SKILL_MARKER_FILE)
         .collect();
     named.sort_by(|left, right| left.0.cmp(right.0));
     let mut hasher = Sha256::new();
-    for (name, text) in named {
+    for (name, bytes) in named {
         hasher.update((name.len() as u64).to_le_bytes());
         hasher.update(name.as_bytes());
-        hasher.update((text.len() as u64).to_le_bytes());
-        hasher.update(text.as_bytes());
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
     }
     hex_of(&hasher.finalize())
 }
