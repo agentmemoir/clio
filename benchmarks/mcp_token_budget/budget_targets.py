@@ -31,7 +31,7 @@ BASELINE_FORMAT = "clio_mcp_frozen_baseline"
 BASELINE_FORMAT_VERSION = 1
 
 #: Digest of the frozen baseline every target was derived from.
-PINNED_BASELINE_SHA256 = "d94fbfa8db884d75baf26da5a921bb2b124eb18f3846c670a76b50b9b8e47e82"
+PINNED_BASELINE_SHA256 = "e7ea252179adaad444b3c1a674cecddc7b4739c1e50ddd6fc6941ebc44c9b0a0"
 BASELINE_PATH = "benchmarks/mcp_token_budget/baseline/frozen-v1.json"
 
 #: The tokenizer every token target is counted with, namable without importing it.

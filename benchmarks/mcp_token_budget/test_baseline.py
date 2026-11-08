@@ -23,23 +23,23 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import activated_row
 import baseline_replay
 import baseline_validate
 import offline_tokenizer
 
-REPO_ROOT = HERE.parents[1]
 RECORD = HERE / "baseline" / "frozen-v1.json"
 FIXTURES = HERE / "baseline" / "clients"
 
 #: Digest of the committed record file. An edit or an append changes this value.
-FROZEN_V1_SHA256 = "d94fbfa8db884d75baf26da5a921bb2b124eb18f3846c670a76b50b9b8e47e82"
+FROZEN_V1_SHA256 = "e7ea252179adaad444b3c1a674cecddc7b4739c1e50ddd6fc6941ebc44c9b0a0"
 
 LABELS = frozenset(
     {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}
 )
-RETIRED_SHA256 = (
-    "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80"
-)
+RETIRED_SHA256 = "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80"
+ACTIVATED_ROW = baseline_validate.ACTIVATED_ROW
+ACTIVATED_SHA256 = activated_row.CONTENT_SHA256
 
 
 def load_record():
@@ -64,6 +64,20 @@ def mutated_record(mutate):
         path = temp_dir / "frozen-v1.json"
         path.write_text(json.dumps(record), encoding="utf-8")
         yield path
+
+
+def refusals(mutate):
+    """Return the validator errors for one mutation of the real record."""
+    with mutated_record(mutate) as path:
+        return baseline_validate.validate(path)
+
+
+def changed_field(row_id, key, value):
+    """Return the validator errors after one row field is changed."""
+    def change(record):
+        row_by_id(record, row_id)[key] = value
+
+    return refusals(change)
 
 
 def row_by_id(record, row_id):
@@ -93,15 +107,13 @@ class BaselineTests(unittest.TestCase):
         def blank_version(record):
             record["clients"][0]["client_version"] = ""
 
-        with mutated_record(blank_version) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(blank_version)
         self.assertTrue(any("AC1" in error for error in errors), errors)
 
         def bad_delivery(record):
             record["clients"][0]["delivery"] = "later"
 
-        with mutated_record(bad_delivery) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(bad_delivery)
         self.assertTrue(any("AC1" in error for error in errors), errors)
 
     def test_ac2_eager_and_on_demand_fixtures_exist_and_are_measured(self):
@@ -117,31 +129,26 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(fixture["provenance"], "synthetic-mock")
             self.assertEqual(fixture["delivery"], client["delivery"])
             self.assertEqual(
-                hashlib.sha256(path.read_bytes()).hexdigest(),
-                client["fixture"]["sha256"],
+                hashlib.sha256(path.read_bytes()).hexdigest(), client["fixture"]["sha256"]
             )
             fixtures[client["delivery"]] = fixture
             for turn in (entry["turn"] for entry in client["turns"]):
                 for unit in ("bytes", "tokens"):
-                    row = row_by_id(
-                        record, f"client/{client['client']}/turn/{turn}/{unit}"
-                    )
+                    row = row_by_id(record, f"client/{client['client']}/turn/{turn}/{unit}")
                     self.assertEqual(row["label"], "Measured")
         self.assertEqual(set(fixtures), {"eager", "on_demand"})
 
         def bad_digest(record):
             record["clients"][0]["fixture"]["sha256"] = "not-a-digest"
 
-        with mutated_record(bad_digest) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(bad_digest)
         self.assertTrue(any("AC2" in error for error in errors), errors)
 
     def test_ac2_wrong_fixture_digest_is_refused(self):
         def zero_digest(record):
             record["clients"][0]["fixture"]["sha256"] = "0" * 64
 
-        with mutated_record(zero_digest) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(zero_digest)
         self.assertTrue(any("AC2" in error and "fixture sha256" in error for error in errors), errors)
 
     def test_ac3_each_turn_has_separate_bytes_and_tokens_rows(self):
@@ -149,31 +156,19 @@ class BaselineTests(unittest.TestCase):
         for client in record["clients"]:
             for turn in (entry["turn"] for entry in client["turns"]):
                 for unit in ("bytes", "tokens"):
-                    rows = [
-                        row
-                        for row in record["rows"]
-                        if row["row"] == f"client/{client['client']}/turn/{turn}/{unit}"
-                    ]
+                    wanted_id = f"client/{client['client']}/turn/{turn}/{unit}"
+                    rows = [row for row in record["rows"] if row["row"] == wanted_id]
                     self.assertEqual(len(rows), 1)
                     self.assertIn(rows[0]["label"], LABELS)
                     self.assertEqual(rows[0]["unit"], unit)
 
         def drop_tokens_row(record):
-            record["rows"] = [
-                row
-                for row in record["rows"]
-                if row["row"] != "client/synthetic-eager-client/turn/1/tokens"
-            ]
+            dropped = "client/synthetic-eager-client/turn/1/tokens"
+            record["rows"] = [row for row in record["rows"] if row["row"] != dropped]
 
-        with mutated_record(drop_tokens_row) as path:
-            errors = baseline_validate.validate(path)
-        self.assertTrue(
-            any(
-                "AC3" in error and "synthetic-eager-client" in error
-                for error in errors
-            ),
-            errors,
-        )
+        errors = refusals(drop_tokens_row)
+        wanted = [error for error in errors if "AC3" in error and "synthetic-eager-client" in error]
+        self.assertTrue(wanted, errors)
 
     def test_ac3_turn_values_match_recomputed_measurement(self):
         require_tokenizer()
@@ -183,26 +178,15 @@ class BaselineTests(unittest.TestCase):
             fixture = load_fixture(client["fixture"]["name"])
             for result in baseline_replay.replay(fixture, tokenizer):
                 for unit, key in (("bytes", "canonical_bytes"), ("tokens", "tokens")):
-                    row = row_by_id(
-                        record,
-                        f"client/{client['client']}/turn/{result['turn']}/{unit}",
-                    )
-                    self.assertEqual(row["value"], result[key])
+                    row_id = f"client/{client['client']}/turn/{result['turn']}/{unit}"
+                    self.assertEqual(row_by_id(record, row_id)["value"], result[key])
 
         def wrong_bytes(record):
             row_by_id(record, "client/synthetic-eager-client/turn/1/bytes")["value"] += 1
 
-        with mutated_record(wrong_bytes) as path:
-            errors = baseline_validate.validate(path)
-        self.assertTrue(
-            any(
-                "AC3" in error
-                and "synthetic-eager-client" in error
-                and "turn 1" in error
-                for error in errors
-            ),
-            errors,
-        )
+        errors = refusals(wrong_bytes)
+        wanted = [error for error in errors if "AC3" in error and "synthetic-eager-client" in error]
+        self.assertTrue(any("turn 1" in error for error in wanted), errors)
 
     def test_ac4_ranking_names_its_sort_figure(self):
         record = load_record()
@@ -213,8 +197,7 @@ class BaselineTests(unittest.TestCase):
         def sort_by_bytes(record):
             record["per_tool_ranking"]["sorted_by"] = "tool_bytes"
 
-        with mutated_record(sort_by_bytes) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(sort_by_bytes)
         self.assertTrue(any("AC4" in error for error in errors), errors)
 
     def test_ac4_ranking_order_matches_named_figure(self):
@@ -229,8 +212,7 @@ class BaselineTests(unittest.TestCase):
             items = record["per_tool_ranking"]["items"]
             items[0], items[1] = items[1], items[0]
 
-        with mutated_record(swap_first_two) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(swap_first_two)
         self.assertTrue(any("AC4" in error for error in errors), errors)
 
     def test_ac5_every_row_has_one_date_and_one_label(self):
@@ -243,14 +225,12 @@ class BaselineTests(unittest.TestCase):
         def drop_date(record):
             record["rows"][0].pop("date")
 
-        with mutated_record(drop_date) as path:
-            self.assertTrue(any("AC5" in error for error in baseline_validate.validate(path)))
+        self.assertTrue(any("AC5" in error for error in refusals(drop_date)))
 
         def bad_label(record):
             record["rows"][0]["label"] = "Guess"
 
-        with mutated_record(bad_label) as path:
-            self.assertTrue(any("AC5" in error for error in baseline_validate.validate(path)))
+        self.assertTrue(any("AC5" in error for error in refusals(bad_label)))
 
     def test_ac5_unverified_entry_requires_reason(self):
         record = load_record()
@@ -263,21 +243,16 @@ class BaselineTests(unittest.TestCase):
         def blank_reason(record):
             record["unobserved"][0]["reason"] = ""
 
-        with mutated_record(blank_reason) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(blank_reason)
         self.assertTrue(any("AC5" in error and "reason" in error for error in errors), errors)
 
         def add_value(record):
             record["unobserved"][0]["value"] = 1
 
-        with mutated_record(add_value) as path:
-            errors = baseline_validate.validate(path)
-        self.assertTrue(any("AC5" in error for error in errors), errors)
+        self.assertTrue(any("AC5" in error for error in refusals(add_value)))
 
     def test_ac6_record_bytes_are_pinned(self):
-        self.assertEqual(
-            hashlib.sha256(RECORD.read_bytes()).hexdigest(), FROZEN_V1_SHA256
-        )
+        self.assertEqual(hashlib.sha256(RECORD.read_bytes()).hexdigest(), FROZEN_V1_SHA256)
         record = load_record()
         record["rows"].append(copy.deepcopy(record["rows"][0]))
         appended = (json.dumps(record) + "\n").encode("utf-8")
@@ -298,8 +273,7 @@ class BaselineTests(unittest.TestCase):
                 }
             )
 
-        with mutated_record(append_row) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(append_row)
         self.assertTrue(errors)
         self.assertTrue(any(appended_id in error for error in errors), errors)
 
@@ -315,13 +289,7 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(row["label"], "Measured")
             self.assertEqual(row["unit"], row_id.rsplit("/", 1)[1])
 
-        def bad_digest(record):
-            row_by_id(record, "retired_skill_entry_point/bytes")[
-                "content_sha256"
-            ] = "0" * 64
-
-        with mutated_record(bad_digest) as path:
-            errors = baseline_validate.validate(path)
+        errors = changed_field("retired_skill_entry_point/bytes", "content_sha256", "0" * 64)
         self.assertTrue(any("AC7" in error for error in errors), errors)
 
     def test_ac7_deleting_retired_row_fails_validation(self):
@@ -330,9 +298,59 @@ class BaselineTests(unittest.TestCase):
         def delete_row(record):
             record["rows"] = [row for row in record["rows"] if row["row"] != missing]
 
-        with mutated_record(delete_row) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(delete_row)
         self.assertTrue(any("AC7" in error and missing in error for error in errors), errors)
+
+    def test_ac7_activated_skill_body_row_is_frozen(self):
+        row = row_by_id(load_record(), ACTIVATED_ROW)
+        self.assertEqual(row["role"], activated_row.ROLE)
+        self.assertEqual(row["file"], "skills/clio-mcp/SKILL.md")
+        self.assertEqual(row["content_sha256"], ACTIVATED_SHA256)
+        self.assertEqual(row["tokenizer_ref"], "pinned")
+        self.assertEqual(row["label"], "Measured")
+        self.assertEqual(row["unit"], "tokens")
+        self.assertGreater(row["value"], 0)
+        self.assertEqual(row["factor"], 1.0)
+        self.assertIsInstance(row["factor"], float)
+
+    def test_ac7_deleting_activated_row_fails_validation(self):
+        def delete_row(record):
+            record["rows"] = [row for row in record["rows"] if row["row"] != ACTIVATED_ROW]
+
+        errors = refusals(delete_row)
+        self.assertTrue(any("AC7" in error and ACTIVATED_ROW in error for error in errors), errors)
+
+    def test_ac7_activated_row_fields_and_factor_are_pinned(self):
+        cases = (
+            ("factor", 1.5),
+            ("factor", 1),
+            ("factor", "1.0"),
+            ("role", "other-role"),
+            ("file", "skills/other/SKILL.md"),
+            ("content_sha256", "0" * 64),
+        )
+        for key, value in cases:
+            with self.subTest(field=key, value=value):
+                errors = changed_field(ACTIVATED_ROW, key, value)
+                wanted = [error for error in errors if ACTIVATED_ROW in error and key in error]
+                self.assertTrue(wanted, errors)
+
+    def test_ac7_duplicate_activated_row_fails_validation(self):
+        def duplicate(record):
+            record["rows"].append(copy.deepcopy(row_by_id(record, ACTIVATED_ROW)))
+
+        errors = refusals(duplicate)
+        wanted = [error for error in errors if "exactly one" in error and ACTIVATED_ROW in error]
+        self.assertTrue(wanted, errors)
+
+    def test_ac7_retired_rows_keep_their_own_values(self):
+        record = load_record()
+        self.assertEqual(row_by_id(record, "retired_skill_entry_point/bytes")["value"], 6393)
+        self.assertEqual(row_by_id(record, "retired_skill_entry_point/tokens")["value"], 1518)
+        for row_id in baseline_validate.RETIRED_ROWS:
+            row = row_by_id(record, row_id)
+            self.assertEqual(row["content_sha256"], RETIRED_SHA256)
+            self.assertNotEqual(row["content_sha256"], ACTIVATED_SHA256)
 
     def test_ac8_measured_token_rows_use_pinned_encoding(self):
         require_tokenizer()
@@ -351,94 +369,72 @@ class BaselineTests(unittest.TestCase):
             if row["row"].startswith("client/"):
                 _, client_name, _, turn, _ = row["row"].split("/")
                 fixture = load_fixture(clients[client_name]["fixture"]["name"])
-                result = next(
-                    item
-                    for item in baseline_replay.replay(fixture, tokenizer)
-                    if item["turn"] == int(turn)
-                )
+                replayed = baseline_replay.replay(fixture, tokenizer)
+                result = next(item for item in replayed if item["turn"] == int(turn))
                 self.assertEqual(row["value"], result["tokens"])
             else:
                 self.assertEqual(row.get("tokenizer_ref"), "pinned")
 
         def mark_estimate(record):
-            row_by_id(record, "client/synthetic-eager-client/turn/1/tokens")[
-                "estimated"
-            ] = True
+            row_by_id(record, "client/synthetic-eager-client/turn/1/tokens")["estimated"] = True
 
-        with mutated_record(mark_estimate) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(mark_estimate)
         self.assertTrue(any("AC8" in error for error in errors), errors)
 
     def test_ac8_measured_row_without_provenance_is_refused(self):
         def drop_input_digest(record):
-            row_by_id(
-                record, "client/synthetic-eager-client/turn/1/bytes"
-            ).pop("input_sha256")
+            row_by_id(record, "client/synthetic-eager-client/turn/1/bytes").pop("input_sha256")
 
-        with mutated_record(drop_input_digest) as path:
-            errors = baseline_validate.validate(path)
         wanted = "client/synthetic-eager-client/turn/1/bytes"
+        errors = refusals(drop_input_digest)
         self.assertTrue(any("AC8" in error and wanted in error for error in errors), errors)
 
         def drop_receipt(record):
-            row_by_id(
-                record, "retired_skill_entry_point/bytes"
-            ).pop("receipt_id")
+            row_by_id(record, "retired_skill_entry_point/bytes").pop("receipt_id")
 
-        with mutated_record(drop_receipt) as path:
-            errors = baseline_validate.validate(path)
         wanted = "retired_skill_entry_point/bytes"
+        errors = refusals(drop_receipt)
         self.assertTrue(any("AC8" in error and wanted in error for error in errors), errors)
 
     def test_ac8_fallback_estimate_cannot_be_labelled_measured(self):
         for flag in ("estimated", "fallback"):
-            def add_flag(record, flag=flag):
-                row_by_id(record, "client/synthetic-eager-client/turn/1/tokens")[
-                    flag
-                ] = True
-
-            with mutated_record(add_flag) as path:
-                errors = baseline_validate.validate(path)
-            self.assertTrue(any("AC8" in error for error in errors), errors)
+            with self.subTest(flag=flag):
+                errors = changed_field("client/synthetic-eager-client/turn/1/tokens", flag, True)
+                self.assertTrue(any("AC8" in error for error in errors), errors)
 
     def test_ac8_tokenizer_identity_is_enforced(self):
         for key, value in (("version", "9.9.9"), ("implementation", "guesser")):
             def change(record, key=key, value=value):
                 record["tokenizer"][key] = value
 
-            with mutated_record(change) as path:
-                errors = baseline_validate.validate(path)
+            errors = refusals(change)
             self.assertTrue(any("AC8" in error and key in error for error in errors), errors)
 
     def test_pack_identity_is_enforced(self):
         def bad_bytes(record):
             record["pack"]["canonical_bytes"] = 1
 
-        with mutated_record(bad_bytes) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(bad_bytes)
         self.assertTrue(any("AC3" in error and "canonical_bytes" in error for error in errors), errors)
 
     def test_validator_rejects_absolute_path(self):
         def add_path(record):
             record["unobserved"][0]["reason"] = "/absolute/path"
 
-        with mutated_record(add_path) as path:
-            errors = baseline_validate.validate(path)
+        errors = refusals(add_path)
         self.assertTrue(any("path boundary" in error for error in errors), errors)
 
         def add_relative_path(record):
             record["unobserved"][0]["reason"] = "relative/path"
 
-        with mutated_record(add_relative_path) as path:
-            self.assertEqual(baseline_validate.validate(path), [])
+        self.assertEqual(refusals(add_relative_path), [])
 
     def test_path_guard_refuses_absolute_and_parent_paths(self):
         for marker in ("C:\\data\\file", "folder/../file"):
             def add_path(record, marker=marker):
                 record["unobserved"][0]["reason"] = marker
 
-            with mutated_record(add_path) as path:
-                errors = baseline_validate.validate(path)
+            errors = refusals(add_path)
             self.assertTrue(any("path boundary" in error for error in errors), errors)
 
     def test_validator_accepts_the_committed_record(self):

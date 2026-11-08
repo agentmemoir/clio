@@ -269,16 +269,24 @@ def cost(rows):
 
 
 def _record_date(path):
-    """Return the single row date of one frozen record, or raise BudgetError."""
+    """Return the date the record's served surface rows share, or raise BudgetError.
+
+    A row measured after the capture states its own date, so the surface rows
+    decide the capture date and a later addition cannot move it.
+    """
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise BudgetError(f"cannot read pre-flag record {path.name}: {exc}") from None
-    dates = {
-        row.get("date")
+    rows = [
+        row
         for row in document.get("rows", [])
         if isinstance(row, dict) and row.get("date")
-    }
+    ]
+    surface = [
+        row for row in rows if "row" not in row or str(row["row"]).startswith("client/")
+    ]
+    dates = {row["date"] for row in (surface or rows)}
     if len(dates) != 1:
         raise BudgetError(f"pre-flag record {path.name} has no single row date")
     return dates.pop()

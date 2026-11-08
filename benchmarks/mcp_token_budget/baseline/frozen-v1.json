@@ -23,6 +23,14 @@
       "version": "0.14.0",
       "recomputable_from_public_inputs": false,
       "note": "measured once with the pinned encoding on the record date; public CI can check shape and digest only"
+    },
+    "pinned-local-run-2026-11-08": {
+      "measured_on": "2026-11-08",
+      "encoding": "cl100k_base",
+      "implementation": "tiktoken",
+      "version": "0.14.0",
+      "recomputable_from_public_inputs": false,
+      "note": "the shipped activated skill body measured locally with the pinned offline tokenizer"
     }
   },
   "pack": {
@@ -131,6 +139,20 @@
       "date": "2026-11-05",
       "input_sha256": "b74300cb6c0b124af2a000579179ef0470bc4682f709e063ba3a4771b0947e12",
       "recomputable": true
+    },
+    {
+      "row": "activated_skill_body/tokens",
+      "value": 594,
+      "unit": "tokens",
+      "label": "Measured",
+      "date": "2026-11-08",
+      "content_sha256": "09b61130277acd22823f2ad5d3fd3c5f329df1e34f69bf5c07084b9b0a407866",
+      "tokenizer_ref": "pinned",
+      "receipt_id": "pinned-local-run-2026-11-08",
+      "recomputable": false,
+      "role": "shipped-activated-skill-body",
+      "file": "skills/clio-mcp/SKILL.md",
+      "factor": 1.0
     },
     {
       "row": "retired_skill_entry_point/bytes",

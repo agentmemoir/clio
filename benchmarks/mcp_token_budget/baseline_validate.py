@@ -17,6 +17,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import activated_row
 import baseline_provenance
 
 RECORD_FORMAT = "clio_mcp_frozen_baseline"
@@ -35,6 +36,7 @@ RETIRED_SKILL_SHA256 = (
     "51ec302b11becd64c388c25b88495a95bcf7705ba06142519a275c0b76acba80"
 )
 RETIRED_ROWS = ("retired_skill_entry_point/bytes", "retired_skill_entry_point/tokens")
+ACTIVATED_ROW = activated_row.ROW_ID
 
 ALLOWED_TOP_LEVEL = frozenset(
     {
@@ -273,7 +275,7 @@ def check_record(record, base_dir) -> list:
                 f"declared {sorted(seen)}, rows {sorted(row_turns)}"
             )
 
-    expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS)
+    expected_ids = _expected_client_ids(record) | set(RETIRED_ROWS) | {ACTIVATED_ROW}
     seen_ids = []
     for row in _rows(record):
         row_id = row.get("row")
@@ -333,6 +335,8 @@ def check_record(record, base_dir) -> list:
             errors.append(f"AC7: {row.get('row')} content_sha256 does not match the pinned digest")
         if not _is_int(row.get("value")) or row["value"] <= 0:
             errors.append(f"AC7: {row.get('row')} value must be greater than zero")
+
+    errors.extend(activated_row.check(record))
 
     if not isinstance(ranking, dict):
         errors.append("AC4: per_tool_ranking must be an object")
