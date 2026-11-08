@@ -4,15 +4,16 @@
 //! # Responsibility
 //!
 //! This module proves the `version` verb's process contract over the real `clio`
-//! binary: that the plain line is unchanged, that `--check` prints exactly one
-//! JSON line over a home the test owns, and that a flag without its pair is a
-//! usage refusal.
+//! binary: that the identity line is unchanged for all three spellings, that a
+//! check over a home holding no marker answers unavailable, and that a flag
+//! without its pair is a usage refusal.
 //!
 //! ## Owns
-//! - The identity line's bytes, as a reader sees them
-//! - The one-line JSON contract at the process boundary, with the recorded
-//!   skill version the marker states
-//! - The unavailable answer for a home holding no marker, and its exit code
+//! - The identity line's bytes, as a reader sees them, for `version`,
+//!   `--version` and `-V`
+//! - The one-line JSON contract at the process boundary when no installation
+//!   evidence exists, and the nulls it carries
+//! - The unavailable answer's exit code, and that it writes nothing to stderr
 //!
 //! ## Does not own
 //! - The check's own logic and its request (`version_check_tests`)
@@ -23,6 +24,12 @@
 //! Tests here break when the verb's process-visible contract changes; they never
 //! change it. Every child runs with `HOME` pointing at a directory this test
 //! created, so no test reads or writes the caller's home.
+//!
+//! No test here owns an endpoint, and none may open a socket: the production
+//! endpoint is hard-wired inside the binary, so a home with no marker is the only
+//! evidence state a process test can drive without a request. The skipped request
+//! is proven where the endpoint is an argument instead: `version_check_tests`
+//! counts what its own loopback listener receives.
 //!
 //! Keep this module focused on the version verb's process contract.
 
@@ -54,18 +61,6 @@ impl Scratch {
     fn home(&self) -> &Path {
         &self.root
     }
-
-    /// Install the marker a completed installation leaves behind, recording
-    /// `package_version` as the skill version.
-    fn install_marker(&self, package_version: &str) {
-        let package = self.root.join(".agents/skills/clio-mcp");
-        std::fs::create_dir_all(&package).expect("the package directory can be created");
-        let marker = format!(
-            "{{\"installer\":\"clio\",\"package_version\":\"{package_version}\",\
-             \"catalog_hash\":\"fnv1a64:abcd\",\"payload_digest\":\"\",\"files\":{{}}}}"
-        );
-        std::fs::write(package.join(".clio-skill.json"), marker).expect("the marker is written");
-    }
 }
 
 impl Drop for Scratch {
@@ -93,91 +88,62 @@ fn stdout_of(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("the child writes UTF-8")
 }
 
-/// The identity line is exactly `clio <version>`, and nothing else is added.
+/// The identity line is exactly `clio <version>`, and nothing else is added, for
+/// the verb and for both of its flags.
 #[test]
 fn the_plain_version_line_is_unchanged() {
     let scratch = Scratch::new("plain");
-    let output = clio(scratch.home(), &["version"]);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        stdout_of(&output),
-        format!("clio {}\n", env!("CARGO_PKG_VERSION"))
-    );
+    for args in [&["version"][..], &["--version"][..], &["-V"][..]] {
+        let output = clio(scratch.home(), args);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            stdout_of(&output),
+            format!("clio {}\n", env!("CARGO_PKG_VERSION")),
+            "{args:?}"
+        );
+    }
 }
 
-/// `version --check` over a home with a valid marker prints exactly one JSON
-/// line, reporting the version the marker recorded rather than the binary's own,
-/// and exits 0 or 1 according to the release answer.
+/// A home with no marker is unavailable, which prints one line of four keys with
+/// nulls, exits 1, and leaves stderr empty. No request is made, because there is
+/// no installed version to compare a release against.
 #[test]
-fn version_check_prints_one_json_line_over_a_valid_marker() {
-    let scratch = Scratch::new("check");
-    scratch.install_marker("0.0.7");
+fn version_check_without_a_marker_is_unavailable() {
+    let scratch = Scratch::new("no-marker");
     let output = clio(scratch.home(), &["version", "--check"]);
     let stdout = stdout_of(&output);
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 1, "exactly one line: {stdout:?}");
+    assert_eq!(
+        lines[0],
+        "{\"skillVersion\":null,\"catalogHash\":null,\
+         \"releaseStatus\":\"unavailable\",\"latestVersion\":null}",
+        "the four keys, in order, with nulls"
+    );
     let report: serde_json::Value = serde_json::from_str(lines[0]).expect("the line is JSON");
-    let mut keys: Vec<&str> = Vec::new();
     for key in [
         "skillVersion",
         "catalogHash",
         "releaseStatus",
         "latestVersion",
     ] {
-        assert!(
-            report.get(key).is_some(),
-            "the line carries {key}: {stdout}"
-        );
-        keys.push(key);
+        assert!(report.get(key).is_some(), "the line carries {key}");
     }
-    assert_eq!(
-        keys,
-        [
-            "skillVersion",
-            "catalogHash",
-            "releaseStatus",
-            "latestVersion"
-        ]
-    );
-    assert_eq!(
-        report["skillVersion"], "0.0.7",
-        "the recorded skill version, not the binary's: {stdout}"
-    );
-    assert_eq!(report["catalogHash"], "fnv1a64:abcd");
-    let status = report["releaseStatus"].as_str().expect("a status");
-    let code = output.status.code();
-    if status == "unavailable" {
-        assert_eq!(report["latestVersion"], serde_json::Value::Null, "{stdout}");
-        assert_eq!(code, Some(1), "unavailable exits 1: {stdout}");
-    } else {
-        assert!(
-            status == "current" || status == "newer",
-            "an established answer is current or newer: {stdout}"
-        );
-        assert!(report["latestVersion"].is_string(), "{stdout}");
-        assert_eq!(code, Some(0), "current and newer exit 0: {stdout}");
+    assert_eq!(report["releaseStatus"], "unavailable");
+    for key in ["skillVersion", "catalogHash", "latestVersion"] {
+        assert_eq!(report[key], serde_json::Value::Null, "{key} is null");
     }
-}
-
-/// A home with no marker is unavailable, which prints the line with nulls and
-/// exits 1 rather than guessing.
-#[test]
-fn version_check_without_a_marker_is_unavailable() {
-    let scratch = Scratch::new("no-marker");
-    let output = clio(scratch.home(), &["version", "--check"]);
-    let stdout = stdout_of(&output);
-    assert_eq!(
-        stdout.trim(),
-        "{\"skillVersion\":null,\"catalogHash\":null,\"releaseStatus\":\"unavailable\",\"latestVersion\":null}",
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "",
+        "the line goes to stdout only"
+    );
 }
 
 /// `--harness` without `--check` is a usage refusal at the process boundary.

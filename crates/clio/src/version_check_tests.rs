@@ -24,8 +24,11 @@
 //!
 //! ## Boundary
 //!
-//! Test-only. Never compiled into production builds. Every endpoint is a
-//! listener this test owns on port 0, so no test reaches the real network.
+//! Test-only. Never compiled into production builds. Every endpoint these tests
+//! pass is a listener this test owns on port 0, so nothing in this module reaches
+//! the real network. The process suite (`version_check_harness`) cannot name an
+//! endpoint at all, so it runs only over a home holding no marker, which makes no
+//! request.
 //!
 //! Keep this module focused on the check's evidence, comparison, and flags.
 
