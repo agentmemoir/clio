@@ -15,7 +15,7 @@ The default `minimal` preset does not list this group, so `tools/list` may not s
 `export` writes `destination` inside the export root and is refused unless the call names a `harness` or `system` `actor`, while `import` reads `source` from the server process working directory.
 
 ```
-export({"destination": "demo-bundle.json", "actor": "harness"})
+export({"destination": "demo-bundle.json"})
 import({"source": "demo-bundle.json", "dry_run": true})
 ```
 
