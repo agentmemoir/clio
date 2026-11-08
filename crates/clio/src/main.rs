@@ -221,6 +221,8 @@ mod skill_install;
 mod skill_install_plan;
 mod skill_install_text;
 mod skill_marker;
+mod skill_uninstall;
+mod skill_uninstall_text;
 mod status_cli;
 mod status_report;
 mod sync_cli;
@@ -332,6 +334,10 @@ mod cli_flags_test_support;
 #[cfg(test)]
 #[path = "help_flags_test_support.rs"]
 mod help_flags_test_support;
+
+#[cfg(test)]
+#[path = "skill_uninstall_test_support.rs"]
+pub(crate) mod skill_uninstall_test_support;
 
 #[cfg(test)]
 #[path = "main_tests.rs"]

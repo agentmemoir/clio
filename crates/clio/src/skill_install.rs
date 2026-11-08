@@ -345,7 +345,7 @@ fn report(text: String, outcome: &SkillOutcome) -> Result<(), String> {
 }
 
 /// Replace `path` with `bytes` through a same-directory temp sibling and a rename. No backup is made: the assets are generated from the binary and a re-run restores them. A file whose bytes already match is never rewritten, which is what keeps a repeated install free of timestamp changes.
-fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
+pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
     let tmp = temp_sibling(path);
     std::fs::write(&tmp, bytes).map_err(|error| io_error("write", &tmp, &error))?;
     if let Err(error) = std::fs::rename(&tmp, path) {

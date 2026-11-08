@@ -241,7 +241,10 @@ const SURFACE_USAGE: &[(&str, &str)] = &[
          [--profile-file FILE] [--profiles FILE]",
     ),
     ("install", "clio install [--harness <name>] [--force]"),
-    ("uninstall", "clio uninstall --harness <name>"),
+    (
+        "uninstall",
+        "clio uninstall [--harness <name>] [--skill-only]",
+    ),
 ];
 
 #[cfg(test)]

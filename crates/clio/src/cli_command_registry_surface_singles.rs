@@ -14,7 +14,7 @@
 //! - The `setup` record's pinned usage line; its documented flags are the
 //!   accepted set `setup_flags::parse_setup_args` reads
 //! - The `install` record's optional `--harness` flag, its `--force` flag, and
-//!   the required `--harness` flag `uninstall` keeps
+//!   the optional `--harness` and `--skill-only` flags `uninstall` documents
 //!
 //! ## Does not own
 //! - The `SURFACE` tranche that lists these records and the flag facts its
@@ -41,15 +41,16 @@ use crate::cli_command_spec::{CommandSpec, Example, Flag, Positional, Section};
 /// documents `--db`, `--backend`, and `--output`.
 const STATUS_UNDOCUMENTED_GLOBALS: &[&str] = &["bank", "actor", "no-input", "yes"];
 
-/// The required `--harness` flag of `uninstall`.
-const HARNESS_REQUIRED: Flag = Flag {
-    required: true,
-    ..Flag::text("harness", "<name>", "Harness `install_cli` resolves.")
-};
-
 /// The optional `--harness` flag of `install`: with no flag it writes the
 /// portable skill package and skips registration.
 const HARNESS_OPTIONAL: Flag = Flag::text("harness", "<name>", "Harness `install_cli` resolves.");
+
+/// The `--skill-only` flag of `uninstall`: it removes only the installed skill
+/// package and leaves the harness registration alone.
+const UNINSTALL_SKILL_ONLY: Flag = Flag::toggle(
+    "skill-only",
+    "Removes only the installed clio-mcp skill package; keeps the harness registration.",
+);
 
 /// The `--force` flag of `install`: it replaces the files the installed skill
 /// package owns — the assets Clio recorded, and, for a package an earlier Clio
@@ -292,14 +293,15 @@ pub(crate) const INSTALL: CommandSpec = CommandSpec {
     section: Section::Reserved,
 };
 
-/// `clio uninstall`: remove the clio MCP server registration.
+/// `clio uninstall`: remove the clio MCP server registration, or with
+/// `--skill-only` the installed skill package alone.
 pub(crate) const UNINSTALL: CommandSpec = CommandSpec {
     name: "uninstall",
     aliases: &[],
     summary: "Remove the clio MCP server registration from a supported agent harness (see `clio uninstall --help` for the supported harnesses)",
     notes: &[],
     positionals: &[],
-    documented: &[HARNESS_REQUIRED],
+    documented: &[HARNESS_OPTIONAL, UNINSTALL_SKILL_ONLY],
     accepted_extra: RESERVED_GLOBALS,
     flag_aliases: &[],
     usage_override: None,
