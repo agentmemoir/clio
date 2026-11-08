@@ -42,8 +42,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::group_references::{EXAMPLES_HEADING, TOOLS_HEADING};
 use crate::body_under;
+use crate::group_references::{EXAMPLES_HEADING, TOOLS_HEADING};
 
 /// The references directory, resolved from this crate's manifest directory so
 /// the check reads the files beside the sources it was built from.
@@ -165,9 +165,9 @@ fn validators() -> &'static BTreeMap<String, jsonschema::Validator> {
                 .get("name")
                 .and_then(Value::as_str)
                 .expect("every published tool has a name");
-            let schema = tool.get("inputSchema").unwrap_or_else(|| {
-                panic!("the exported pack publishes no `{name}` inputSchema")
-            });
+            let schema = tool
+                .get("inputSchema")
+                .unwrap_or_else(|| panic!("the exported pack publishes no `{name}` inputSchema"));
             let validator = jsonschema::options()
                 .offline()
                 .build(schema)
@@ -222,14 +222,16 @@ fn examples(label: &str, text: &str) -> Result<Vec<(String, Value)>, String> {
         })?;
     let mut calls = Vec::new();
     for example in block.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        let (tool, rest) = example.split_once('(').ok_or_else(|| {
-            format!("the example `{example}` in {label} is not a call")
-        })?;
-        let args = rest.strip_suffix(')').ok_or_else(|| {
-            format!("the example `{example}` in {label} does not close its call")
-        })?;
+        let (tool, rest) = example
+            .split_once('(')
+            .ok_or_else(|| format!("the example `{example}` in {label} is not a call"))?;
+        let args = rest
+            .strip_suffix(')')
+            .ok_or_else(|| format!("the example `{example}` in {label} does not close its call"))?;
         let parsed = serde_json::from_str::<Value>(args).map_err(|error| {
-            format!("the example `{example}` in {label} passes `{args}`, which is not JSON: {error}")
+            format!(
+                "the example `{example}` in {label} passes `{args}`, which is not JSON: {error}"
+            )
         })?;
         if !parsed.is_object() {
             return Err(format!(
@@ -280,8 +282,7 @@ fn every_reference_example_validates_against_the_exported_pack() {
         let label = format!("the reference `{name}`");
         let calls = examples(&label, &text).unwrap_or_else(|error| panic!("{error}"));
         for (tool, args) in calls {
-            validate_example(&tool, &args)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            validate_example(&tool, &args).unwrap_or_else(|error| panic!("{label}: {error}"));
             validated += 1;
         }
     }
