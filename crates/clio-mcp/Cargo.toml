@@ -29,6 +29,9 @@ base64 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[build-dependencies]
+clio-types = { workspace = true }
+
 [dev-dependencies]
 # Schema-pack tests compile every emitted schema offline, so a reference that
 # only resolves over the network fails the suite instead of a client.
