@@ -102,7 +102,8 @@ pub(crate) enum ReleaseStatus {
 pub(crate) enum Missing {
     /// No selected root holds an installed marker.
     NoMarker,
-    /// A marker is there and cannot be read, or records no version.
+    /// A marker is there and cannot be read, or records no version or no catalog
+    /// hash.
     UnreadableMarker,
     /// Two selected roots hold markers that disagree.
     ConflictingMarkers,
@@ -240,7 +241,15 @@ pub(crate) fn installation_evidence(
         }
         match installed_marker(&package) {
             Ok(InstalledMarker::Absent) => {}
-            Ok(InstalledMarker::Read(marker)) if marker.package_version.trim().is_empty() => {
+            // A marker that records no version, or no catalog hash, states only
+            // one of the two facts this command reports. A blank field is
+            // unknown, not the empty string, so nothing is read from it: the
+            // run answers unavailable instead of claiming `current` with half
+            // the evidence it names.
+            Ok(InstalledMarker::Read(marker))
+                if marker.package_version.trim().is_empty()
+                    || marker.catalog_hash.trim().is_empty() =>
+            {
                 return Err(Missing::UnreadableMarker);
             }
             Ok(InstalledMarker::Read(marker)) => {

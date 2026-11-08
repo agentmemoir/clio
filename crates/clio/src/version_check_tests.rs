@@ -306,20 +306,36 @@ fn an_installed_version_above_the_release_is_current() {
     assert_eq!(report.exit_code(), 0);
 }
 
-/// An empty recorded catalog hash is unknown, so it is reported as null.
+/// A blank recorded catalog hash is unknown evidence, exactly like a blank
+/// recorded version: the run cannot state one of the two facts it reports, so it
+/// answers unavailable with nulls and exits 1, and it asks nothing. A hash that
+/// is recorded is reported as recorded, which the current-version case holds.
 #[test]
-fn an_empty_recorded_catalog_hash_is_null() {
-    let scratch = Scratch::new("empty-hash");
-    write_marker(
-        &package(scratch.home(), &[".agents", "skills"]),
-        "1.2.3",
-        "",
-    );
-    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v1.2.3\"}")));
-    let report = check(None, &env(scratch.home()), &server.url("/latest"));
-    assert_eq!(server.stop_and_count(), 1);
-    assert_eq!(report.catalog_hash, None);
-    assert_eq!(report.release_status, ReleaseStatus::Current);
+fn a_blank_recorded_catalog_hash_is_unavailable() {
+    for recorded in ["", "   "] {
+        let scratch = Scratch::new("blank-hash");
+        write_marker(
+            &package(scratch.home(), &[".agents", "skills"]),
+            "1.2.3",
+            recorded,
+        );
+        assert_eq!(
+            installation_evidence(None, &env(scratch.home())),
+            Err(Missing::UnreadableMarker),
+            "{recorded:?}"
+        );
+        let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v1.2.3\"}")));
+        let report = check(None, &env(scratch.home()), &server.url("/latest"));
+        assert_eq!(server.stop_and_count(), 0, "no request may be made");
+        assert_eq!(
+            report.line(),
+            "{\"skillVersion\":null,\"catalogHash\":null,\
+             \"releaseStatus\":\"unavailable\",\"latestVersion\":null}",
+            "{recorded:?}"
+        );
+        assert_eq!(keys_of(&report.line()), KEYS);
+        assert_eq!(report.exit_code(), 1, "{recorded:?}");
+    }
 }
 
 /// The unavailable line states four keys, in order, and every one of them is
