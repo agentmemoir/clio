@@ -15,6 +15,8 @@
 //! - The server argv builder (`<exe> mcp stdio`) and the vendor add/remove
 //!   argv builders and manual install snippet per harness
 //! - The user-scope config file name and read-back shape of each harness
+//! - The skill roots each harness reads agent skills from: its documented
+//!   native root where one exists, and the portable cross-client root
 //! - The direct-write mechanism and the per-record lookup that resolves a
 //!   direct-write harness's config file target (the resolution itself, and
 //!   its injectable environment, live in `agent_harness_targets`)
@@ -63,6 +65,16 @@ pub(crate) enum ReadBack {
     /// A YAML config with the server under a top-level `mcp_servers:` map,
     /// checked as text.
     YamlServerMap,
+}
+
+/// Where a harness reads agent skills from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SkillRoot {
+    /// A documented native root, home-relative.
+    Native(&'static str),
+    /// The portable cross-client root, `~/.agents/skills`, for a harness with
+    /// no documented native skill mechanism.
+    Portable,
 }
 
 /// One supported agent harness.
@@ -157,6 +169,42 @@ static CANONICAL_NAMES: &[&str] = &[
 
 /// Shared accepted aliases, each mapping to a canonical name.
 static NAME_ALIASES: &[(&str, &str)] = &[("vs code", "github copilot"), ("claude-code", "claude")];
+
+/// The portable root alone, for a harness with no documented native mechanism
+/// and for an unknown name, which gets the shared fallback.
+const PORTABLE_ONLY: &[SkillRoot] = &[SkillRoot::Portable];
+
+/// The skill roots each supported harness reads agent skills from, in write
+/// order: a documented native root where one exists, then the portable
+/// cross-client root. A harness with no native mechanism gets the portable root
+/// alone, so no root is written twice.
+static SKILL_ROOTS: &[(&str, &[SkillRoot])] = &[
+    (
+        "claude",
+        &[SkillRoot::Native(".claude/skills"), SkillRoot::Portable],
+    ),
+    ("codex", PORTABLE_ONLY),
+    ("opencode", PORTABLE_ONLY),
+    (
+        "antigravity",
+        &[
+            SkillRoot::Native(".gemini/config/skills"),
+            SkillRoot::Portable,
+        ],
+    ),
+    ("hermes", PORTABLE_ONLY),
+    ("cursor", PORTABLE_ONLY),
+    ("github copilot", PORTABLE_ONLY),
+];
+
+/// The skill roots the canonical `name` reads agent skills from, in write order.
+/// An unknown name gets the portable root, because that is the shared fallback.
+pub(crate) fn skill_roots(name: &str) -> &'static [SkillRoot] {
+    SKILL_ROOTS
+        .iter()
+        .find_map(|(candidate, roots)| (*candidate == name).then_some(*roots))
+        .unwrap_or(PORTABLE_ONLY)
+}
 
 /// Resolve an accepted name to its canonical form, case-insensitively: the
 /// canonical names first, then the shared aliases, then each record's own

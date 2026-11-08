@@ -80,6 +80,32 @@ fn antigravity_record_names_the_cli_global_config_file() {
 }
 
 #[test]
+fn claude_and_antigravity_read_a_native_root_and_the_portable_root() {
+    for name in ["claude", "antigravity"] {
+        let roots = skill_roots(name);
+        assert_eq!(roots.len(), 2, "resolving {name}");
+        assert!(matches!(roots[0], SkillRoot::Native(_)), "{name}");
+        assert_eq!(roots[1], SkillRoot::Portable, "{name}");
+    }
+}
+
+#[test]
+fn a_harness_without_a_native_mechanism_reads_only_the_portable_root() {
+    for name in ["codex", "opencode", "hermes", "cursor", "github copilot"] {
+        let roots = skill_roots(name);
+        assert_eq!(roots.len(), 1, "resolving {name}");
+        assert_eq!(roots[0], SkillRoot::Portable, "resolving {name}");
+    }
+}
+
+#[test]
+fn an_unknown_name_gets_the_portable_root() {
+    let roots = skill_roots("not-a-harness");
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0], SkillRoot::Portable);
+}
+
+#[test]
 fn supported_names_lists_the_registry_in_order() {
     assert_eq!(
         supported_names(),

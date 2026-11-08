@@ -3,9 +3,7 @@
 //
 //! # Responsibility
 //!
-//! This module is responsible for resolving where a direct-write harness's
-//! config file lives on this machine, and the entry shape that file uses:
-//! one descriptor per harness, computed from an injectable environment.
+//! This module is responsible for resolving where a direct-write harness's config file lives on this machine, and the entry shape that file uses: one descriptor per harness, computed from an injectable environment. It also joins a harness's skill root to that same environment.
 //!
 //! ## Owns
 //! - The `DirectWriteConfig` descriptor: the config file path, the top-level
@@ -15,6 +13,7 @@
 //! - The per-harness resolution: Cursor's home-joined global config, and
 //!   GitHub Copilot's VS Code profile file with its Copilot fallback file
 //!   used only when the profile cannot be resolved
+//! - The skill root a harness's record names, joined to the home directory
 //!
 //! ## Does not own
 //! - The harness records, their mechanisms, and name resolution (see
@@ -28,9 +27,13 @@
 //! entries are shaped, should normally require changes here. Changes to
 //! which harnesses exist, or how a config file is written, should not.
 //!
-//! Keep this module focused on direct-write config resolution.
+//! Keep this module focused on direct-write config and skill-root resolution.
 
+use crate::agent_harness::SkillRoot;
 use std::path::{Path, PathBuf};
+
+/// The portable cross-client skill root, home-relative.
+pub(crate) const PORTABLE_SKILL_ROOT: &str = ".agents/skills";
 
 /// The JSON config file a direct-write harness reads, and the entry shape
 /// Clio writes into it.
@@ -117,6 +120,16 @@ impl DirectWriteEnv {
         self.copilot_home
             .clone()
             .or_else(|| self.under_home(".copilot"))
+    }
+}
+
+/// The skill root a record names, joined to the home directory. `None` when
+/// the home is unknown, so the caller refuses rather than writing to a
+/// relative path.
+pub(crate) fn resolve_skill_root(root: SkillRoot, env: &DirectWriteEnv) -> Option<PathBuf> {
+    match root {
+        SkillRoot::Native(relative) => env.under_home(relative),
+        SkillRoot::Portable => env.under_home(PORTABLE_SKILL_ROOT),
     }
 }
 

@@ -8,16 +8,18 @@
 //! resolution, delegate-outcome mapping, and exit codes.
 //!
 //! ## Owns
-//! - The `clio install|uninstall` entry points and their flags (`--harness`)
+//! - The `clio install|uninstall` entry points and their flags (`--harness`,
+//!   optional for install and required for uninstall)
 //! - The parse-and-decide step both verbs share, so they cannot drift
+//! - The install flow's order: write the embedded skill assets, then register;
+//!   with no `--harness`, write the portable package only and skip registration
 //! - The `clio` executable lookup, with an injected seam for tests
 //! - The direct-write path: resolving the harness's config file through the
 //!   injectable `DirectWriteEnv` seam and mapping the write outcome to
 //!   messages and exit codes
 //! - The mapping from delegate outcomes to messages and exit codes
-//! - The surface help, including the supported-harness list
 //! - The success text, including a harness's config-surface note naming the
-//!   file that received the entry
+//!   file that received the entry (see `install_cli_help`)
 //!
 //! ## Does not own
 //! - Running any harness command or writing any harness config; the delegate
@@ -37,9 +39,10 @@
 //! - `0`: success; the delegate reported the change.
 //! - `1`: a precondition failed (the clio executable could not be resolved, the
 //!   harness binary is missing, the harness command exited non-zero, the
-//!   change could not be verified, or the harness's config file could not be
-//!   read, parsed, or written).
-//! - `2`: unknown or missing `--harness`, or any other flag error.
+//!   change could not be verified, the harness's config file could not be
+//!   read, parsed, or written, or the portable skill write failed).
+//! - `2`: an unknown `--harness`, a missing `--harness` on uninstall, or any
+//!   other flag error.
 //!
 //! Keep this module focused on the install and uninstall command surfaces.
 
@@ -54,20 +57,24 @@ use crate::cli_error::CliError;
 use crate::cli_top_level::{
     parse_flags, record_flag_names, report_surface_usage_error, wants_help,
 };
+use crate::install_cli_help::{
+    known_but_unsupported, missing_harness, print_help, success_text, supported_hint,
+    unknown_harness,
+};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// The two verbs, so the parse-decide-report flow runs once for both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Verb {
+pub(crate) enum Verb {
     Install,
     Uninstall,
 }
 
 impl Verb {
     /// The command name a user sees.
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Verb::Install => "install",
             Verb::Uninstall => "uninstall",
@@ -75,7 +82,7 @@ impl Verb {
     }
 
     /// What the verb does, for the help text.
-    fn purpose(self) -> &'static str {
+    pub(crate) fn purpose(self) -> &'static str {
         match self {
             Verb::Install => "Register the clio MCP server with a supported agent harness.",
             Verb::Uninstall => {
@@ -89,10 +96,14 @@ impl Verb {
 #[derive(Debug)]
 enum Decision {
     Help,
+    /// `clio install` with no `--harness`: write the portable skill package
+    /// only and skip server registration.
+    Portable,
     Run(&'static HarnessRecord),
 }
 
-/// `clio install`: register the clio MCP server with the named harness.
+/// `clio install`: register the clio MCP server with the named harness, or
+/// write the portable skill package when no harness is named.
 pub fn install(args: &[String]) -> ExitCode {
     run(Verb::Install, args)
 }
@@ -102,11 +113,7 @@ pub fn uninstall(args: &[String]) -> ExitCode {
     run(Verb::Uninstall, args)
 }
 
-/// One flow for both verbs: parse, decide, resolve the executable (install
-/// only), then run the record's mechanism — the delegate for vendor-CLI
-/// harnesses, the direct writer for direct-write harnesses — and map the
-/// outcome to an exit code. The production delegate calls and environment
-/// are built here; the delegate owns every spawned process.
+/// One flow for both verbs: parse, decide, resolve the executable (install only), then run the record's mechanism — the delegate for vendor-CLI harnesses, the direct writer for direct-write harnesses — and map the outcome to an exit code. The production delegate calls and environment are built here; the delegate owns every spawned process.
 fn run(verb: Verb, args: &[String]) -> ExitCode {
     let install = |record: &HarnessRecord, exe: &Path| -> Result<String, DelegateError> {
         agent_harness_delegate::install(record, SERVER_NAME, exe, &DelegateEnv::production())
@@ -114,19 +121,28 @@ fn run(verb: Verb, args: &[String]) -> ExitCode {
     let uninstall = |record: &HarnessRecord| -> Result<String, DelegateError> {
         agent_harness_delegate::uninstall(record, SERVER_NAME, &DelegateEnv::production())
     };
-    run_with(
+    run_with_skills(
         verb,
         args,
         &current_exe,
         &|| DirectWriteEnv::production(),
         &install,
         &uninstall,
+        &|record, skill_env| match record {
+            Some(record) => crate::skill_install::install_and_report(record, skill_env),
+            None => crate::skill_install::install_portable_and_report(skill_env),
+        },
     )
 }
 
-/// [`run`] with the executable lookup, the direct-write environment, and both
-/// delegate calls injected, so a test can decide outcomes without spawning a
-/// process or touching the host environment (the `mcp_options_with` pattern).
+/// The skill step: write the embedded skill assets before registration. `None`
+/// means `clio install` named no harness and only the portable package is
+/// written.
+pub(crate) type SkillStep<'a> =
+    &'a dyn Fn(Option<&HarnessRecord>, &DirectWriteEnv) -> Result<(), String>;
+
+/// [`run_with_skills`] with the skill step left out. Test-only: a test that injects the executable lookup and both delegate calls must never write into a real home directory.
+#[cfg(test)]
 fn run_with(
     verb: Verb,
     args: &[String],
@@ -135,7 +151,29 @@ fn run_with(
     install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
     uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
 ) -> ExitCode {
-    let decision = match decide(args) {
+    let skill_step = |_: Option<&HarnessRecord>, _: &DirectWriteEnv| Ok(());
+    run_with_skills(
+        verb,
+        args,
+        exe,
+        direct_write_env,
+        install_call,
+        uninstall_call,
+        &skill_step,
+    )
+}
+
+/// [`run`] with the executable lookup, the direct-write environment, both delegate calls, and the skill step injected, so a test can decide outcomes without spawning a process or touching the host environment (the `mcp_options_with` pattern).
+pub(crate) fn run_with_skills(
+    verb: Verb,
+    args: &[String],
+    exe: &dyn Fn() -> std::io::Result<PathBuf>,
+    direct_write_env: &dyn Fn() -> DirectWriteEnv,
+    install_call: &dyn Fn(&HarnessRecord, &Path) -> Result<String, DelegateError>,
+    uninstall_call: &dyn Fn(&HarnessRecord) -> Result<String, DelegateError>,
+    skill_step: SkillStep<'_>,
+) -> ExitCode {
+    let decision = match decide(verb, args) {
         Ok(decision) => decision,
         Err(error) => return report_surface_usage_error(&error, args),
     };
@@ -144,29 +182,37 @@ fn run_with(
             print_help(verb);
             ExitCode::SUCCESS
         }
-        Decision::Run(record) => match record.mechanism {
-            Mechanism::DirectWrite => run_direct_write(verb, record, exe, direct_write_env),
-            Mechanism::Delegate => match verb {
-                Verb::Install => {
-                    let path = match exe() {
-                        Ok(path) => path,
-                        Err(error) => return fail(verb, &exe_failure_message(&error)),
-                    };
-                    report(verb, record, install_call(record, &path))
-                }
-                Verb::Uninstall => report(verb, record, uninstall_call(record)),
-            },
-        },
+        Decision::Portable => {
+            if let Err(message) = skill_step(None, &direct_write_env()) {
+                return fail(verb, &message);
+            }
+            println!("{}", supported_hint());
+            ExitCode::SUCCESS
+        }
+        Decision::Run(record) => {
+            if verb == Verb::Install
+                && let Err(message) = skill_step(Some(record), &direct_write_env())
+            {
+                return fail(verb, &message);
+            }
+            match record.mechanism {
+                Mechanism::DirectWrite => run_direct_write(verb, record, exe, direct_write_env),
+                Mechanism::Delegate => match verb {
+                    Verb::Install => {
+                        let path = match exe() {
+                            Ok(path) => path,
+                            Err(error) => return fail(verb, &exe_failure_message(&error)),
+                        };
+                        report(verb, record, install_call(record, &path))
+                    }
+                    Verb::Uninstall => report(verb, record, uninstall_call(record)),
+                },
+            }
+        }
     }
 }
 
-/// The direct-write path: resolve the harness's config file for this machine,
-/// build the server argv from the resolved executable, and map the write
-/// outcome to a message and exit code. Install needs the executable, because
-/// the written entry and the refusal snippet name it. Uninstall removes by
-/// name, so a failed executable lookup is not fatal: the lookup only feeds
-/// the refusal snippet, and uninstall proceeds without it rather than failing
-/// an otherwise valid removal.
+/// The direct-write path: resolve the harness's config file for this machine, build the server argv from the resolved executable, and map the write outcome to a message and exit code. Install needs the executable, because the written entry and the refusal snippet name it. Uninstall removes by name, so a failed executable lookup is not fatal: the lookup only feeds the refusal snippet, and uninstall proceeds without it rather than failing an otherwise valid removal.
 fn run_direct_write(
     verb: Verb,
     record: &HarnessRecord,
@@ -199,10 +245,7 @@ fn run_direct_write(
     }
 }
 
-/// Perform the direct-write install or uninstall and render its message: the
-/// success text on `Ok`, the plain failure text on `Err`. The message is
-/// returned rather than printed, so a test can check it and the file effects
-/// together without capturing stdout.
+/// Perform the direct-write install or uninstall and render its message: the success text on `Ok`, the plain failure text on `Err`. The message is returned rather than printed, so a test can check it and the file effects together without capturing stdout.
 fn direct_write_outcome_text(
     verb: Verb,
     record: &HarnessRecord,
@@ -259,10 +302,7 @@ fn direct_write_uninstall_text(config: &DirectWriteConfig, outcome: &RemoveOutco
     }
 }
 
-/// The plain message for a direct-write failure. An unparseable file was not
-/// changed, so the message carries the manual snippet the user can paste by
-/// hand; the writer already combined the entry snippet with the offending
-/// line's number.
+/// The plain message for a direct-write failure. An unparseable file was not changed, so the message carries the manual snippet the user can paste by hand; the writer already combined the entry snippet with the offending line's number.
 fn write_error_message(error: &WriteError) -> String {
     match error {
         WriteError::Unparseable { path, snippet } => format!(
@@ -280,21 +320,20 @@ fn current_exe() -> std::io::Result<PathBuf> {
 }
 
 /// Parse the arguments and decide what the verb should do. Pure: no lookup, no
-/// delegate call, no output.
-fn decide(args: &[String]) -> Result<Decision, CliError> {
+/// delegate call, no output. A missing `--harness` is the portable-only install
+/// when the verb is install, and a usage error when it is uninstall.
+fn decide(verb: Verb, args: &[String]) -> Result<Decision, CliError> {
     if wants_help(args) {
         return Ok(Decision::Help);
     }
-    // The flags the verb accepts are the ones its registry record documents;
-    // any other flag is a usage error rather than a silently ignored token.
-    // Both verbs' records document the same single flag, and the tranche tests
-    // pin them equal, so one record's names gate both parsers.
+    // The flags the verb accepts are the ones its registry record documents; any other flag is a usage error rather than a silently ignored token. Both verbs' records document the same single flag, and the tranche tests pin them equal, so one record's names gate both parsers.
     let flags = parse_flags(args.iter().cloned(), &record_flag_names("install"))?;
     if flags.contains_key("help") {
         return Ok(Decision::Help);
     }
     let name = match flags.get("harness") {
         Some(name) => name.as_str(),
+        None if verb == Verb::Install => return Ok(Decision::Portable),
         None => return Err(missing_harness()),
     };
     match agent_harness::resolve(name) {
@@ -304,35 +343,6 @@ fn decide(args: &[String]) -> Result<Decision, CliError> {
             None => Err(unknown_harness(name)),
         },
     }
-}
-
-/// The supported-harness list, generated from the registry so the help and the
-/// usage errors cannot drift apart.
-fn supported_hint() -> String {
-    format!(
-        "supported harnesses: {}",
-        agent_harness::supported_names().join(", ")
-    )
-}
-
-/// A call with no `--harness` flag.
-fn missing_harness() -> CliError {
-    CliError::usage("--harness is required").with_hint(supported_hint())
-}
-
-/// A call naming a harness the registry does not know.
-fn unknown_harness(name: &str) -> CliError {
-    CliError::usage(format!("unknown harness `{name}`")).with_hint(supported_hint())
-}
-
-/// A call naming a harness the registry recognizes by name but does not yet
-/// implement, such as `cursor` or the Copilot alias `vs code`. The name is
-/// understood, so the refusal says so rather than calling it unknown.
-fn known_but_unsupported(canonical: &str) -> CliError {
-    CliError::usage(format!(
-        "harness `{canonical}` is known but not yet supported"
-    ))
-    .with_hint(supported_hint())
 }
 
 /// Why the executable lookup failed, for a plain failure message.
@@ -359,29 +369,6 @@ fn failure_message(error: &DelegateError) -> String {
     }
 }
 
-/// The config-surface note for a harness whose entry lands in a vendor-owned
-/// file the user may not expect. The delegate writes the Antigravity CLI
-/// global config, so the note names that file. Only Antigravity has a note
-/// today, so no other harness gets one.
-fn config_surface_note(record: &HarnessRecord) -> Option<String> {
-    (record.name == "antigravity").then(|| {
-        format!(
-            "note: antigravity writes the CLI global config (~/{})",
-            record.config_file
-        )
-    })
-}
-
-/// The text a successful install or uninstall prints for this harness: the
-/// delegate's message, with the config-surface note appended when the harness
-/// has one. Pure, so a test can check the note without capturing stdout.
-fn success_text(record: &HarnessRecord, message: &str) -> String {
-    match config_surface_note(record) {
-        Some(note) => format!("{message}\n{note}"),
-        None => message.to_owned(),
-    }
-}
-
 /// Map a delegate outcome: the message on stdout and exit 0, or a plain
 /// failure message on stderr and exit 1.
 fn report(verb: Verb, record: &HarnessRecord, outcome: Result<String, DelegateError>) -> ExitCode {
@@ -400,37 +387,13 @@ fn fail(verb: Verb, message: &str) -> ExitCode {
     ExitCode::from(1)
 }
 
-/// The surface help: the usage line, what the verb does, the supported list
-/// from the registry, and one example.
-fn print_help(verb: Verb) {
-    println!("{}", help_text(verb));
-}
-
-/// The full help text, split from `print_help` so a test can read it without
-/// capturing stdout. The Antigravity config-surface note is included because
-/// help lists every supported harness, and an Antigravity user needs to know
-/// which file received the entry.
-fn help_text(verb: Verb) -> String {
-    let usage = crate::cli_help_usage::usage_line(verb.label()).unwrap_or_else(|| match verb {
-        Verb::Install => "clio install --harness <name>".to_owned(),
-        Verb::Uninstall => "clio uninstall --harness <name>".to_owned(),
-    });
-    let mut text = format!(
-        "{usage}\n\n{}\n\n{}\n\nExample: clio {} --harness claude",
-        verb.purpose(),
-        supported_hint(),
-        verb.label(),
-    );
-    if let Some(note) = agent_harness::resolve("antigravity").and_then(config_surface_note) {
-        text.push_str("\n\n");
-        text.push_str(&note);
-    }
-    text
-}
-
 #[cfg(test)]
 #[path = "install_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "install_cli_portable_tests.rs"]
+mod portable_tests;
 
 #[cfg(test)]
 #[path = "install_cli_direct_write_tests.rs"]

@@ -24,7 +24,8 @@
 //! Test-only. Never compiled into production builds.
 
 use super::*;
-use crate::agent_harness_targets::DirectWriteEnv;
+use crate::agent_harness_targets::{DirectWriteEnv, OsLayout};
+use crate::install_cli_help::{help_text, success_text};
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
@@ -53,6 +54,19 @@ pub(super) fn fake_exe() -> PathBuf {
 /// ran instead.
 fn never_direct_write_env() -> DirectWriteEnv {
     panic!("a delegate record must not consult the direct-write environment");
+}
+
+/// A harmless environment for an install test: the install skill step needs a
+/// direct-write environment even when the harness registers through a
+/// delegate, and this one names no real home directory and touches no file.
+fn unused_env() -> DirectWriteEnv {
+    DirectWriteEnv::with(
+        OsLayout::Linux,
+        PathBuf::from("unused-home"),
+        None,
+        None,
+        None,
+    )
 }
 
 #[test]
@@ -85,43 +99,15 @@ fn uninstall_also_answers_help() {
 fn help_with_an_explicit_value_is_answered_through_parse_flags() {
     // `--help=x` is not one of the exact tokens `wants_help` matches, so it
     // must reach the help decision through the parsed `help` flag instead.
-    let decision = decide(&args(&["--help=x"])).expect("--help=x is a valid help spelling");
+    let decision =
+        decide(Verb::Install, &args(&["--help=x"])).expect("--help=x is a valid help spelling");
     assert!(matches!(decision, Decision::Help), "{decision:?}");
 }
 
 #[test]
-fn missing_harness_is_a_usage_error_before_the_delegate_runs() {
-    let code = run_with(
-        Verb::Install,
-        &args(&[]),
-        &|| Ok(fake_exe()),
-        &never_direct_write_env,
-        &never_install,
-        &never_uninstall,
-    );
-    assert_eq!(
-        code,
-        ExitCode::from(2),
-        "a missing --harness must fail with the usage code"
-    );
-}
-
-#[test]
-fn missing_harness_usage_error_lists_all_five_supported_harnesses() {
-    let error = decide(&args(&[])).expect_err("a missing --harness must be refused");
-    assert_eq!(error.exit_code(), ExitCode::from(2));
-    let hint = error.hint().unwrap_or_default();
-    assert!(
-        hint.contains(
-            "supported harnesses: claude, codex, opencode, antigravity, hermes, cursor, github copilot"
-        ),
-        "the hint must name the exact registry list: {hint:?}"
-    );
-}
-
-#[test]
 fn unknown_harness_is_refused_with_the_supported_list() {
-    let error = decide(&args(&["--harness", "vim"])).expect_err("vim is not supported");
+    let error =
+        decide(Verb::Install, &args(&["--harness", "vim"])).expect_err("vim is not supported");
     assert_eq!(error.exit_code(), ExitCode::from(2));
     assert!(
         error.message().contains("unknown harness `vim`"),
@@ -132,7 +118,7 @@ fn unknown_harness_is_refused_with_the_supported_list() {
 
 #[test]
 fn gh_copilot_is_an_unknown_harness_usage_error_with_the_supported_list() {
-    let error = decide(&args(&["--harness", "gh-copilot"]))
+    let error = decide(Verb::Install, &args(&["--harness", "gh-copilot"]))
         .expect_err("gh-copilot is not an accepted name");
     assert_eq!(error.exit_code(), ExitCode::from(2));
     assert!(
@@ -150,7 +136,8 @@ fn gh_copilot_is_an_unknown_harness_usage_error_with_the_supported_list() {
 
 #[test]
 fn cursor_resolves_to_an_installable_direct_write_record() {
-    let decision = decide(&args(&["--harness", "cursor"])).expect("cursor is supported");
+    let decision =
+        decide(Verb::Install, &args(&["--harness", "cursor"])).expect("cursor is supported");
     assert!(
         matches!(decision, Decision::Run(record) if record.mechanism == Mechanism::DirectWrite),
         "{decision:?}"
@@ -159,7 +146,8 @@ fn cursor_resolves_to_an_installable_direct_write_record() {
 
 #[test]
 fn vs_code_alias_resolves_to_the_github_copilot_direct_write_record() {
-    let decision = decide(&args(&["--harness", "vs code"])).expect("the vs code alias resolves");
+    let decision = decide(Verb::Install, &args(&["--harness", "vs code"]))
+        .expect("the vs code alias resolves");
     assert!(
         matches!(decision, Decision::Run(record) if record.name == "github copilot"
             && record.mechanism == Mechanism::DirectWrite),
@@ -169,8 +157,8 @@ fn vs_code_alias_resolves_to_the_github_copilot_direct_write_record() {
 
 #[test]
 fn github_copilot_resolves_to_an_installable_direct_write_record() {
-    let decision =
-        decide(&args(&["--harness", "github copilot"])).expect("github copilot is supported");
+    let decision = decide(Verb::Install, &args(&["--harness", "github copilot"]))
+        .expect("github copilot is supported");
     assert!(
         matches!(decision, Decision::Run(record) if record.mechanism == Mechanism::DirectWrite),
         "{decision:?}"
@@ -215,13 +203,15 @@ fn harness_with_no_value_is_a_usage_error_before_the_delegate_runs() {
 
 #[test]
 fn canonical_name_resolves_to_its_record() {
-    let decision = decide(&args(&["--harness", "claude"])).expect("claude is supported");
+    let decision =
+        decide(Verb::Install, &args(&["--harness", "claude"])).expect("claude is supported");
     assert!(matches!(decision, Decision::Run(record) if record.name == "claude"));
 }
 
 #[test]
 fn alias_and_capitalization_resolve_to_the_canonical_record() {
-    let decision = decide(&args(&["--harness", "Claude-Code"])).expect("alias must resolve");
+    let decision =
+        decide(Verb::Install, &args(&["--harness", "Claude-Code"])).expect("alias must resolve");
     assert!(matches!(decision, Decision::Run(record) if record.name == "claude"));
 }
 
@@ -238,7 +228,7 @@ fn install_success_passes_the_record_and_exe_to_the_delegate_and_exits_0() {
         Verb::Install,
         &args(&["--harness", "claude"]),
         &|| Ok(fake_exe()),
-        &never_direct_write_env,
+        &unused_env,
         &install,
         &never_uninstall,
     );
@@ -254,7 +244,7 @@ fn a_failing_exe_lookup_fails_before_the_delegate_runs() {
         &|| -> std::io::Result<PathBuf> {
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, "gone"))
         },
-        &never_direct_write_env,
+        &unused_env,
         &never_install,
         &never_uninstall,
     );
@@ -277,7 +267,7 @@ fn binary_missing_maps_to_exit_1() {
         Verb::Install,
         &args(&["--harness", "claude"]),
         &|| Ok(fake_exe()),
-        &never_direct_write_env,
+        &unused_env,
         &install,
         &never_uninstall,
     );
@@ -296,7 +286,7 @@ fn command_failed_maps_to_exit_1() {
         Verb::Install,
         &args(&["--harness", "claude"]),
         &|| Ok(fake_exe()),
-        &never_direct_write_env,
+        &unused_env,
         &install,
         &never_uninstall,
     );
@@ -314,7 +304,7 @@ fn verification_failed_maps_to_exit_1() {
         Verb::Install,
         &args(&["--harness", "claude"]),
         &|| Ok(fake_exe()),
-        &never_direct_write_env,
+        &unused_env,
         &install,
         &never_uninstall,
     );
