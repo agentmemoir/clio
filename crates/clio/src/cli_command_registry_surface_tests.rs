@@ -146,13 +146,16 @@ fn every_record_answers_the_lookups_with_the_authored_row_bytes() {
     }
 }
 
-/// `version` and `health` carry their help prose on the record and accept no
-/// flag of their own: every extra they name is a declared global.
+/// `version` and `health` carry their help prose on the record. `health`
+/// accepts no flag of its own, `version` documents the two flags its check
+/// reads, and every extra they name is a declared global.
 #[test]
-fn version_and_health_carry_their_help_prose_and_no_own_flags() {
+fn version_and_health_carry_their_help_prose_and_only_their_own_flags() {
     assert_eq!(
         record("version").notes,
-        ["Prints the package name and version. Takes no flags."]
+        [
+            "Prints the package name and version. With --check it prints one JSON line instead: the version and catalog hash the installed skill marker recorded, whether a newer release exists, and exits 1 whenever that answer cannot be established."
+        ]
     );
     assert_eq!(
         record("health").notes,
@@ -160,9 +163,18 @@ fn version_and_health_carry_their_help_prose_and_no_own_flags() {
             "Prints the machine-readable health JSON: name and version only.\nIt opens no database and checks no service."
         ]
     );
+    let version_flags: Vec<&str> = record("version")
+        .documented
+        .iter()
+        .map(|flag| flag.long)
+        .collect();
+    assert_eq!(version_flags, ["check", "harness"]);
+    assert!(
+        record("health").documented.is_empty(),
+        "health documents no flag"
+    );
     for name in ["version", "health"] {
         let spec = record(name);
-        assert!(spec.documented.is_empty(), "{name} documents no flag");
         for extra in spec.accepted_extra {
             assert!(
                 crate::cli_command_registry::global_flag(extra).is_some(),

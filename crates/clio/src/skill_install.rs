@@ -210,8 +210,9 @@ enum RootWork {
     },
 }
 
-/// The marker beside the assets in one package directory.
-enum InstalledMarker {
+/// The marker beside the assets in one package directory. Read by the install
+/// plan, and by the version check, so both classify the file the same way.
+pub(crate) enum InstalledMarker {
     /// No marker file is there.
     Absent,
     /// The marker file is there and this program cannot read it.
@@ -261,7 +262,7 @@ fn plan_package(
 }
 
 /// The marker `package` holds, if any.
-fn installed_marker(package: &Path) -> Result<InstalledMarker, WriteError> {
+pub(crate) fn installed_marker(package: &Path) -> Result<InstalledMarker, WriteError> {
     let path = package.join(SKILL_MARKER_FILE);
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
