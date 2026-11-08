@@ -20,6 +20,8 @@
 //! - The release request and its bounds (`version_check_release`)
 //! - Which harnesses exist or which roots each one reads (`agent_harness`)
 //! - Reading the marker file itself (`skill_install`, which reads it for install)
+//! - Whether a path on the way to a marker may be followed at all
+//!   (`skill_uninstall_guard`)
 //! - Flag parsing (`cli_top_level::parse_flags`) or the verb dispatch (`main`)
 //!
 //! ## Boundary
@@ -35,6 +37,12 @@
 //! call entirely, so the command never asks about a release it cannot compare
 //! against.
 //!
+//! A marker reached through a symbolic link is not evidence either, and it is
+//! refused before it is read: a link can point at any file on the machine, so a
+//! version read through one would describe something this package does not hold.
+//! The refusal reuses the guard the removal path applies to the same file, so
+//! what may be trusted is decided in one place.
+//!
 //! Keep this module focused on the `version` verb's check request.
 
 use crate::agent_harness::{self, SkillRoot};
@@ -44,6 +52,8 @@ use crate::cli_top_level::{
     parse_flags, print_version_help, record_flag_names, report_usage_error,
 };
 use crate::skill_install::{InstalledMarker, SKILL_DIR_NAME, installed_marker};
+use crate::skill_marker::SKILL_MARKER_FILE;
+use crate::skill_uninstall_guard::symlink_component;
 use crate::version_check_release;
 use crate::version_check_semver::Version;
 use serde::Serialize;
@@ -190,6 +200,14 @@ pub(crate) fn installation_evidence(
     }
     let mut found: Vec<Evidence> = Vec::new();
     for package in packages {
+        // A marker reached through a symbolic link is not this installation's
+        // evidence: a link can name any file, so a version read through one would
+        // describe something the package does not hold. The removal path refuses
+        // the same link, and this reuses its guard rather than growing a second
+        // one. A path the guard cannot inspect is refused the same way.
+        if !matches!(symlink_component(&package, SKILL_MARKER_FILE), Ok(false)) {
+            return Err(Missing::UnreadableMarker);
+        }
         match installed_marker(&package) {
             Ok(InstalledMarker::Absent) => {}
             Ok(InstalledMarker::Read(marker)) if marker.package_version.trim().is_empty() => {

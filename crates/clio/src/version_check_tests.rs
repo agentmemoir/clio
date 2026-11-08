@@ -9,7 +9,8 @@
 //!
 //! ## Owns
 //! - The root-selection and evidence cases: portable default, harness roots,
-//!   missing marker, disagreeing markers, unknown harness
+//!   missing marker, disagreeing markers, unknown harness, a marker reached
+//!   through a symbolic link
 //! - The evidence cases that must make no request at all
 //! - The comparison cases: current and newer, the line each one reports, and the
 //!   exit code it maps to
@@ -33,6 +34,7 @@
 //! Keep this module focused on the check's evidence, comparison, and flags.
 
 use super::{Missing, ReleaseStatus, check, installation_evidence, version};
+use crate::skill_marker::SKILL_MARKER_FILE;
 use crate::version_check::test_support::{
     KEYS, Reply, Scratch, Server, env, json_reply, keys_of, package, write_marker,
 };
@@ -91,6 +93,37 @@ fn a_missing_marker_is_missing_evidence() {
         installation_evidence(None, &env(scratch.home())),
         Err(Missing::NoMarker)
     );
+}
+
+/// A marker reached through a symbolic link is not evidence: the link can name a
+/// file the package does not hold, so the check refuses it before reading, asks
+/// nothing, and reports unavailable with nulls.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_marker_is_unavailable_without_a_request() {
+    let scratch = Scratch::new("symlink-marker");
+    let package = package(scratch.home(), &[".agents", "skills"]);
+    std::fs::create_dir_all(&package).expect("the package directory can be created");
+    let foreign = scratch.home().join("foreign");
+    write_marker(&foreign, "9.9.9", "foreign");
+    std::os::unix::fs::symlink(
+        foreign.join(SKILL_MARKER_FILE),
+        package.join(SKILL_MARKER_FILE),
+    )
+    .expect("the marker can be linked");
+    assert_eq!(
+        installation_evidence(None, &env(scratch.home())),
+        Err(Missing::UnreadableMarker)
+    );
+    let server = Server::start(Reply::Bytes(json_reply("{\"tag_name\":\"v9.9.9\"}")));
+    let report = check(None, &env(scratch.home()), &server.url("/latest"));
+    assert_eq!(server.stop_and_count(), 0, "no request may be made");
+    assert_eq!(report.release_status, ReleaseStatus::Unavailable);
+    assert_eq!(
+        report.line(),
+        "{\"skillVersion\":null,\"catalogHash\":null,\"releaseStatus\":\"unavailable\",\"latestVersion\":null}"
+    );
+    assert_eq!(report.exit_code(), 1);
 }
 
 /// Two roots that disagree are conflicting evidence; two that agree are used.
