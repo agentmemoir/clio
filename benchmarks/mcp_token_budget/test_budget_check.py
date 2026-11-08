@@ -253,9 +253,13 @@ class ArmTests(unittest.TestCase):
         self.assertEqual(
             list(report),
             ["format", "format_version", "baseline", "candidate", "allowance",
-             "arms", "skill", "targets", "failures", "verdict"],
+             "arms", "skill", "activated", "targets", "failures", "verdict"],
         )
         self.assertEqual(report["skill"]["status"], "not-measured")
+        self.assertEqual(report["activated"]["status"], "not-measured")
+        self.assertEqual(report["activated"]["row"], "activated_skill_body/tokens")
+        self.assertEqual(report["activated"]["ceiling"], 594)
+        self.assertEqual(report["activated"]["failures"], [])
         self.assertIsNone(report["targets"])
         self.assertEqual(report["format"], "clio_mcp_budget_check")
         self.assertEqual(report["format_version"], 1)

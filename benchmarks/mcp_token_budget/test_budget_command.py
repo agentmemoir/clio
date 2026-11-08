@@ -3,14 +3,17 @@
 
 The check is driven through `main` on the committed fixture pack, so the document
 the build prints is the one asserted here: both pack arms, the skill truth when
-no path is given, the preset targets that are reported but not enforced yet, and
-every exit code. A test that measures tokens needs the pinned tokenizer and skips
-with a named reason when tiktoken is absent.
+no path is given, the activated body that is always measured, the preset targets
+that are reported but not enforced yet, and every exit code. A test that measures
+tokens needs the pinned tokenizer and skips with a named reason when tiktoken is
+absent.
 """
 
 import contextlib
+import hashlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -28,6 +31,10 @@ REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
 FIXTURE_DIGEST = "a43d52ea02d81517f478cbebe88b87d193477c90ebe80a33332e0ac7e27586e2"
+
+ACTIVATED_ROW = "activated_skill_body/tokens"
+ACTIVATED_TOKENS = 594
+BODY = "Clio MCP activated skill body.\n" * 2
 
 
 def require_tokenizer():
@@ -84,7 +91,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(
             list(report),
             ["format", "format_version", "baseline", "candidate", "allowance",
-             "arms", "skill", "targets", "failures", "verdict"],
+             "arms", "skill", "activated", "targets", "failures", "verdict"],
         )
         self.assertEqual(report["skill"]["status"], "not-measured")
         self.assertEqual(report["skill"]["reason"], budget_check.NO_SKILL_PATH)
@@ -134,6 +141,89 @@ class CommandTests(unittest.TestCase):
             code, text = self.run_main(["--pack", str(path)])
         self.assertEqual(code, 2)
         self.assertEqual(text, "")
+
+
+class ActivatedCommandTests(unittest.TestCase):
+    """The activated body is measured on every run, against its frozen row."""
+
+    def run_main(self, argv):
+        out = io.StringIO()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = budget_check.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def measured(self, text):
+        return json.loads(text)["activated"]
+
+    def test_the_shipped_body_is_measured_with_no_flag(self):
+        require_tokenizer()
+        code, text, err = self.run_main(["--pack", str(PACK)])
+        self.assertEqual(code, 0, text + err)
+        activated = self.measured(text)
+        self.assertEqual(activated["status"], "measured")
+        self.assertEqual(activated["row"], ACTIVATED_ROW)
+        self.assertEqual(activated["file"], "skills/clio-mcp/SKILL.md")
+        self.assertEqual(activated["tokens"], ACTIVATED_TOKENS)
+        self.assertEqual(activated["ceiling"], ACTIVATED_TOKENS)
+        self.assertEqual(activated["failures"], [])
+        self.assertTrue(activated["digest_matches"])
+        self.assertEqual(json.loads(text)["failures"], [])
+
+    def test_the_shipped_body_is_measured_from_another_directory(self):
+        require_tokenizer()
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                code, text, err = self.run_main(["--pack", str(PACK)])
+            finally:
+                os.chdir(previous)
+        self.assertEqual(code, 0, text + err)
+        self.assertEqual(self.measured(text)["tokens"], ACTIVATED_TOKENS)
+
+    def test_an_activated_skill_path_overrides_the_shipped_body(self):
+        require_tokenizer()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "body.md"
+            path.write_text(BODY, encoding="utf-8")
+            expected = hashlib.sha256(path.read_bytes()).hexdigest()
+            code, text, err = self.run_main(
+                ["--pack", str(PACK), "--activated-skill", str(path)]
+            )
+        self.assertEqual(code, 0, text + err)
+        activated = self.measured(text)
+        self.assertEqual(activated["sha256"], expected)
+        self.assertEqual(activated["bytes"], len(BODY.encode("utf-8")))
+        self.assertLess(activated["tokens"], ACTIVATED_TOKENS)
+        self.assertFalse(activated["digest_matches"])
+
+    def test_activated_body_growth_exits_one(self):
+        require_tokenizer()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "body.md"
+            path.write_text("a " * 1600, encoding="utf-8")
+            code, text, err = self.run_main(
+                ["--pack", str(PACK), "--activated-skill", str(path)]
+            )
+        self.assertEqual(code, 1, text + err)
+        report = json.loads(text)
+        self.assertEqual(report["verdict"], "fail")
+        activated = report["activated"]
+        self.assertEqual(report["failures"], activated["failures"])
+        self.assertEqual(
+            activated["failures"],
+            [
+                f"{ACTIVATED_ROW}: candidate {activated['tokens']} exceeds baseline "
+                f"{ACTIVATED_TOKENS} by {activated['tokens'] - ACTIVATED_TOKENS}"
+            ],
+        )
+
+    def test_an_explicitly_empty_activated_skill_path_exits_two(self):
+        code, text, err = self.run_main(["--pack", str(PACK), "--activated-skill", ""])
+        self.assertEqual(code, 2, text + err)
+        self.assertEqual(text, "")
+        self.assertEqual(err, "mcp-budget-check: --activated-skill path is empty\n")
 
 
 if __name__ == "__main__":

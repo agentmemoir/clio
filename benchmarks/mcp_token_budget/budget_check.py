@@ -26,6 +26,11 @@ shows both frozen skill rows, read through the same named-row lookup, instead of
 reporting zero. An explicitly empty ``--skill`` path is an unusable input and
 exits 2, because it is a wiring mistake, not a decision to skip the arm.
 
+The activated skill body is always measured, against the one frozen row that
+carries its token count and the factor that count is multiplied by. The bound is
+token growth alone, so a body whose bytes or digest moved without growing its
+count passes and the two digests are reported side by side.
+
 The preset targets are reported beside the arms. They are not enforced yet, so a
 target miss appears in the report and leaves the exit code alone; a targets file
 that cannot be trusted is an unusable input, not a silent skip.
@@ -42,6 +47,7 @@ import json
 import sys
 from pathlib import Path
 
+import activated_budget
 import baseline_provenance
 import budget_allowances
 import budget_targets
@@ -291,19 +297,21 @@ def _arm(measure, baseline, candidate, records) -> dict:
 
 
 def check_pack(
-    baseline, candidate, allowances, skill=None, targets=None, skill_rows=None
+    baseline, candidate, allowances, skill=None, activated=None, targets=None,
+    skill_rows=None,
 ) -> dict:
     """Return the report for one measured candidate against ``baseline``.
 
     ``baseline`` holds the resolved ceilings, the baseline file digest, and the
     repo-relative path. ``allowances`` is a validated allowance document or a bare
     record list; a document's declared baseline digest must match ``baseline``.
-    ``skill`` is the comparison returned by `check_skill`, and ``targets`` the one
-    returned by `budget_targets.compare`; neither contributes a failure while the
-    preset targets stay unenforced. When no skill was measured the ``skill`` entry
-    still names both frozen rows through ``skill_rows`` — or, when the caller
-    passes none, through the frozen record itself — so a reader never mistakes an
-    unmeasured arm for a zero cost.
+    ``skill`` is the comparison returned by `check_skill`, ``activated`` the one
+    returned by `activated_budget.check`, and ``targets`` the one returned by
+    `budget_targets.compare`; the preset targets stay unenforced, and the
+    activated body is reported even when its digest differs. When no skill was
+    measured the ``skill`` entry still names both frozen rows through
+    ``skill_rows`` — or, when the caller passes none, through the frozen record
+    itself — so a reader never mistakes an unmeasured arm for a zero cost.
     """
     digest = baseline.get("sha256")
     records = _allowance_records(allowances, digest)
@@ -312,8 +320,11 @@ def check_pack(
         if skill_rows is None:
             skill_rows = skill_row_values(load_baseline()[0])
         skill = skill_not_measured(skill_rows)
+    if activated is None:
+        activated = activated_budget.not_measured(load_baseline()[0])
     failures = [arm["failure"] for arm in arms if "failure" in arm]
     failures.extend(skill.get("failures", []))
+    failures.extend(activated["failures"])
     if targets is not None:
         failures.extend(targets["failures"])
     return {
@@ -326,6 +337,7 @@ def check_pack(
         "allowance": next((arm["allowance"] for arm in arms if arm["allowance"]), None),
         "arms": arms,
         "skill": skill,
+        "activated": activated,
         "targets": targets,
         "failures": failures,
         "verdict": "fail" if failures else "pass",
@@ -342,24 +354,12 @@ def render(report) -> str:
         "allowance": report["allowance"],
         "arms": report["arms"],
         "skill": report["skill"],
+        "activated": report["activated"],
         "targets": report["targets"],
         "failures": report["failures"],
         "verdict": report["verdict"],
     }
     return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
-
-
-def _allowances(path, digest):
-    """Return the validated allowance document at ``path``; an absent file allows no growth."""
-    path = Path(path)
-    if not path.exists():
-        return {
-            "format": budget_allowances.FORMAT,
-            "format_version": budget_allowances.FORMAT_VERSION,
-            "baseline": {"sha256": digest},
-            "records": [],
-        }
-    return budget_allowances.load_document(path)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -394,11 +394,19 @@ def main(argv=None) -> int:
         default=None,
         help="always-loaded skill file to compare; not measured when omitted",
     )
+    parser.add_argument(
+        "--activated-skill",
+        metavar="PATH",
+        default=None,
+        help="activated skill body to compare; defaults to the shipped body",
+    )
     args = parser.parse_args(argv)
 
     try:
         if args.skill == "":
             raise BudgetError("--skill path is empty")
+        if args.activated_skill == "":
+            raise BudgetError("--activated-skill path is empty")
         pack = _parse_pack(_read_pack(args.pack))
         record, digest = load_baseline()
         baseline = arms_from(record, digest)
@@ -407,7 +415,11 @@ def main(argv=None) -> int:
         skill = None
         if args.skill:
             skill = check_skill(record, measure_skill(args.skill, tokenizer))
-        allowances = _allowances(args.allowances or ALLOWANCES_PATH, digest)
+        body = args.activated_skill or activated_budget.DEFAULT_PATH
+        activated = activated_budget.check(record, measure_skill(body, tokenizer))
+        allowances = budget_allowances.load_or_empty(
+            args.allowances or ALLOWANCES_PATH, digest
+        )
         targets = budget_targets.compare(
             budget_targets.load(TARGETS_FILE), baseline_rows(record), candidate
         )
@@ -416,6 +428,7 @@ def main(argv=None) -> int:
             candidate,
             allowances,
             skill=skill,
+            activated=activated,
             targets=targets,
             skill_rows=skill_row_values(record),
         )
