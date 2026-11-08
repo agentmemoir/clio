@@ -51,7 +51,7 @@ macro_rules! reference {
 
 /// Every reference file the router table currently points at, paired with its
 /// name, read at compile time so no run can see another copy.
-const REFERENCES: [(&str, &str); 12] = [
+const REFERENCES: [(&str, &str); 15] = [
     reference!("01-retrieval.md"),
     reference!("02-item-write.md"),
     reference!("03-item-read.md"),
@@ -64,6 +64,9 @@ const REFERENCES: [(&str, &str); 12] = [
     reference!("10-hygiene.md"),
     reference!("11-portability.md"),
     reference!("12-ops.md"),
+    reference!("13-retention.md"),
+    reference!("14-config.md"),
+    reference!("15-ranking.md"),
 ];
 
 /// Words that state an argument schema: a type declaration, a properties map,
