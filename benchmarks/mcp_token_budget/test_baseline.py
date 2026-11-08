@@ -32,7 +32,7 @@ RECORD = HERE / "baseline" / "frozen-v1.json"
 FIXTURES = HERE / "baseline" / "clients"
 
 #: Digest of the committed record file. An edit or an append changes this value.
-FROZEN_V1_SHA256 = "e7ea252179adaad444b3c1a674cecddc7b4739c1e50ddd6fc6941ebc44c9b0a0"
+FROZEN_V1_SHA256 = "484b46ac9ee2703920ee7f21f7f1eb16a00feca36336269489bf10e718e3be40"
 
 LABELS = frozenset(
     {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}
@@ -263,14 +263,8 @@ class BaselineTests(unittest.TestCase):
 
         def append_row(record):
             record["rows"].append(
-                {
-                    "row": appended_id,
-                    "value": 1,
-                    "unit": "bytes",
-                    "label": "Measured",
-                    "date": "2026-11-05",
-                    "input_sha256": "0" * 64,
-                }
+                {"row": appended_id, "value": 1, "unit": "bytes", "label": "Measured",
+                 "date": "2026-11-05", "input_sha256": "0" * 64}
             )
 
         errors = refusals(append_row)
@@ -302,16 +296,21 @@ class BaselineTests(unittest.TestCase):
         self.assertTrue(any("AC7" in error and missing in error for error in errors), errors)
 
     def test_ac7_activated_skill_body_row_is_frozen(self):
-        row = row_by_id(load_record(), ACTIVATED_ROW)
+        record = load_record()
+        row = row_by_id(record, ACTIVATED_ROW)
         self.assertEqual(row["role"], activated_row.ROLE)
         self.assertEqual(row["file"], "skills/clio-mcp/SKILL.md")
         self.assertEqual(row["content_sha256"], ACTIVATED_SHA256)
+        self.assertEqual(row["input_sha256"], ACTIVATED_SHA256)
+        self.assertIs(row["recomputable"], True)
         self.assertEqual(row["tokenizer_ref"], "pinned")
         self.assertEqual(row["label"], "Measured")
         self.assertEqual(row["unit"], "tokens")
         self.assertGreater(row["value"], 0)
         self.assertEqual(row["factor"], 1.0)
         self.assertIsInstance(row["factor"], float)
+        receipt = record["receipts"][row["receipt_id"]]
+        self.assertIs(receipt["recomputable_from_public_inputs"], True)
 
     def test_ac7_deleting_activated_row_fails_validation(self):
         def delete_row(record):
@@ -328,6 +327,8 @@ class BaselineTests(unittest.TestCase):
             ("role", "other-role"),
             ("file", "skills/other/SKILL.md"),
             ("content_sha256", "0" * 64),
+            ("input_sha256", "0" * 64),
+            ("recomputable", False),
         )
         for key, value in cases:
             with self.subTest(field=key, value=value):

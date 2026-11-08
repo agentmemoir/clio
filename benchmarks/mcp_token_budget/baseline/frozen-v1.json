@@ -29,8 +29,8 @@
       "encoding": "cl100k_base",
       "implementation": "tiktoken",
       "version": "0.14.0",
-      "recomputable_from_public_inputs": false,
-      "note": "the shipped activated skill body measured locally with the pinned offline tokenizer"
+      "recomputable_from_public_inputs": true,
+      "note": "measured locally with the pinned offline tokenizer; the recorded input digest and the committed pinned rank table let public CI recompute the count"
     }
   },
   "pack": {
@@ -147,9 +147,10 @@
       "label": "Measured",
       "date": "2026-11-08",
       "content_sha256": "09b61130277acd22823f2ad5d3fd3c5f329df1e34f69bf5c07084b9b0a407866",
+      "input_sha256": "09b61130277acd22823f2ad5d3fd3c5f329df1e34f69bf5c07084b9b0a407866",
       "tokenizer_ref": "pinned",
       "receipt_id": "pinned-local-run-2026-11-08",
-      "recomputable": false,
+      "recomputable": true,
       "role": "shipped-activated-skill-body",
       "file": "skills/clio-mcp/SKILL.md",
       "factor": 1.0
