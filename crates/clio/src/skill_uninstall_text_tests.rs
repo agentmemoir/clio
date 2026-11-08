@@ -67,7 +67,7 @@ fn a_removed_outcome_leaves_out_the_directory_sentence_when_the_directory_stays(
     };
     assert_eq!(
         outcome_text(&[outcome]),
-        "removed the clio-mcp skill package from /home/me/.claude/skills/clio-mcp; removed 1 files and the marker"
+        "removed the clio-mcp skill package from /home/me/.claude/skills/clio-mcp; removed 1 file and the marker"
     );
 }
 
@@ -146,12 +146,6 @@ fn every_local_refusal_reason_prints_its_path_and_its_own_words() {
             RefusalReason::Conflict(ConflictReason::UnreadableMarker {
                 path: String::from(".clio-skill.json"),
             }),
-            "unreadable marker",
-        ),
-        (
-            RefusalReason::AbsentMarker {
-                path: String::from(".clio-skill.json"),
-            },
             "unreadable marker",
         ),
         (

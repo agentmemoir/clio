@@ -12,6 +12,7 @@
 //! - The install state carried beside those facts: the harnesses that reference
 //!   the copy and whether the installation created the package directory
 //! - The payload digest, taken over the embedded assets and never the marker
+//! - The rule that every recorded path is a plain relative path inside the package directory
 //! - The canonical byte form, so the same installation always serializes alike
 //! - The SHA-256 hex convention the marker and the installation plan share
 //!
@@ -32,6 +33,7 @@
 //!
 //! Keep this module focused on the recorded facts of one installation.
 
+use crate::skill_uninstall_guard::marker_key_is_relative;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,13 +139,25 @@ impl SkillMarker {
 
     /// The marker `bytes` hold.
     ///
+    /// Every recorded path must be a plain relative path inside the package
+    /// directory. An absolute path, a parent step, a current step, an empty
+    /// string, or the marker's own name is refused, because joining one to the
+    /// package directory would leave it or name the marker twice.
+    ///
     /// # Errors
-    /// The bytes are not a marker, or they carry a field this version does not
-    /// know.
+    /// The bytes are not a marker, they carry a field this version does not
+    /// know, or a recorded path is not a plain relative path.
     pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, MarkerError> {
-        serde_json::from_slice(bytes).map_err(|error| MarkerError::Malformed {
-            detail: error.to_string(),
-        })
+        let marker: Self =
+            serde_json::from_slice(bytes).map_err(|error| MarkerError::Malformed {
+                detail: error.to_string(),
+            })?;
+        if let Some(key) = marker.files.keys().find(|key| !marker_key_is_relative(key)) {
+            return Err(MarkerError::Malformed {
+                detail: format!("recorded path is not a plain relative path: {key}"),
+            });
+        }
+        Ok(marker)
     }
 }
 

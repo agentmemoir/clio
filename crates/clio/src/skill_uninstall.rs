@@ -6,8 +6,7 @@
 //! This module is responsible for removing an installed `clio-mcp` skill package only when its provenance marker proves that clio installed exactly the files on disk, and for retaining a shared copy while another harness still references it.
 //!
 //! ## Owns
-//! - Resolving the package directories the selected harness reads, or the portable root when no harness is named
-//! - Reading the marker and refusing a package whose installer, payload digest, or file bytes do not match it, and a package reached through a symbolic link
+//! - Reading the marker and refusing a package whose installer, payload digest, or file bytes do not match it
 //! - Collecting every refusal reason for one directory before anything is deleted
 //! - The removal outcome: removed, retained with its remaining harness names, or a no-op
 //! - Deleting only the recorded files, pruning their empty parent directories, and removing the package directory only when this installation created it
@@ -16,29 +15,27 @@
 //! - What the marker records, or how its digest is taken (`skill_marker`)
 //! - The install-time plan and its conflict reasons (`skill_install_plan`)
 //! - The words these outcomes print (`skill_uninstall_text`)
-//! - Which root a harness reads, or how a root is joined to the home directory (`agent_harness`, `agent_harness_targets`)
+//! - Which root a harness reads, how a root is joined to the home directory, and whether a path on the way to a package is a symbolic link (`agent_harness`, `agent_harness_targets`, `skill_uninstall_guard`)
 //! - Registering or unregistering the MCP server
 //!
 //! ## Boundary
 //!
-//! Changes to which files may be deleted, or to when a package is retained, should normally require changes here. Changes to what a marker records belong in `skill_marker`, and changes to the printed words belong in `skill_uninstall_text`.
+//! Changes to which files may be deleted, or to when a package is retained, should normally require changes here. Changes to what a marker records belong in `skill_marker`, changes to the printed words belong in `skill_uninstall_text`, and changes to which paths may be trusted belong in `skill_uninstall_guard`.
 //!
 //! Keep this module focused on removing one recorded skill package.
 
-use crate::agent_harness::{self, HarnessRecord, SkillRoot};
-use crate::agent_harness_targets::{DirectWriteEnv, resolve_skill_root};
+use crate::agent_harness::HarnessRecord;
+use crate::agent_harness_targets::DirectWriteEnv;
 use crate::agent_harness_write::WriteError;
-use crate::skill_install::{SKILL_DIR_NAME, write_bytes_atomic};
+use crate::skill_install::write_bytes_atomic;
 use crate::skill_install_plan::{ConflictReason, scan_package_dir};
 use crate::skill_marker::{
     SKILL_INSTALLER, SKILL_MARKER_FILE, SkillMarker, payload_digest_of_bytes, sha256_hex,
 };
+use crate::skill_uninstall_guard::{ancestor_symlink, io_failure, package_dirs, symlink_component};
 use crate::skill_uninstall_text::{failure_message, outcome_text};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-
-/// The portable root alone, used when `clio uninstall --skill-only` names no harness.
-const PORTABLE_ROOTS: &[SkillRoot] = &[SkillRoot::Portable];
 
 /// What one removal run did to one package directory.
 #[derive(Debug, PartialEq, Eq)]
@@ -54,7 +51,7 @@ pub(crate) enum RemovalOutcome {
         dir: PathBuf,
         remaining: BTreeSet<String>,
     },
-    /// No package directory or no marker was there.
+    /// No package directory, or an empty package directory with no marker, was there.
     NoOp { dir: PathBuf },
 }
 
@@ -69,8 +66,6 @@ pub(crate) enum RefusalReason {
     PayloadDigest { recorded: String, found: String },
     /// A path this removal would read or delete is a symbolic link.
     Symlink { path: String },
-    /// The marker path is a symbolic link whose target is gone.
-    AbsentMarker { path: String },
 }
 
 impl RefusalReason {
@@ -79,7 +74,7 @@ impl RefusalReason {
         match self {
             Self::Conflict(reason) => reason.path(),
             Self::ForeignInstaller { .. } | Self::PayloadDigest { .. } => SKILL_MARKER_FILE,
-            Self::Symlink { path } | Self::AbsentMarker { path } => path,
+            Self::Symlink { path } => path,
         }
     }
 }
@@ -111,17 +106,28 @@ pub(crate) fn uninstall_skill_only_and_report(
 
 /// Remove the recorded skill package for every root `record` reads, or the portable root when `record` is `None`.
 ///
-/// Every directory is inspected first, so a refusal returns before any directory is changed. A directory with no package or no marker becomes a no-op. A package that another harness still names is retained and its marker drops the harness this run removed.
+/// Every directory is inspected first, so a refusal returns before any directory is changed. A directory that holds no package, or an empty directory that holds no marker, becomes a no-op; a non-empty directory with no marker refuses. A package that another harness still names is retained and its marker drops the harness this run removed.
 ///
 /// # Errors
-/// A skill root cannot be resolved, a directory refuses, or a file system call fails.
+/// A skill root cannot be resolved, a path below the home is a symbolic link, a directory refuses, or a file system call fails.
 pub(crate) fn uninstall_skill_only(
     record: Option<&HarnessRecord>,
     env: &DirectWriteEnv,
 ) -> Result<Vec<RemovalOutcome>, UninstallError> {
     let harness = record.map(|record| record.name);
+    let home = env.home().ok_or_else(|| UninstallError::Io {
+        detail: String::from("cannot resolve a skill root because the home directory is unknown"),
+    })?;
     let mut inspected = Vec::new();
     for dir in package_dirs(record, env)? {
+        if let Some(link) = ancestor_symlink(home, &dir)? {
+            return Err(refused(
+                &dir,
+                RefusalReason::Symlink {
+                    path: link.display().to_string(),
+                },
+            ));
+        }
         inspected.push(inspect_dir(&dir)?);
     }
     let mut outcomes = Vec::with_capacity(inspected.len());
@@ -152,37 +158,6 @@ enum FoundMarker {
     Read(SkillMarker),
 }
 
-/// Every package directory, `<root>/clio-mcp`, in mapping order. A root that resolves to a path already in the set is kept once, so a harness whose native root equals the portable root never gets a duplicate.
-fn package_dirs(
-    record: Option<&HarnessRecord>,
-    env: &DirectWriteEnv,
-) -> Result<Vec<PathBuf>, UninstallError> {
-    let roots = match record {
-        Some(record) => agent_harness::skill_roots(record.name),
-        None => PORTABLE_ROOTS,
-    };
-    let missing = match record {
-        Some(record) => format!(
-            "cannot resolve a skill root for `{}` because the home directory is unknown",
-            record.name
-        ),
-        None => String::from(
-            "cannot resolve the portable skill root because the home directory is unknown",
-        ),
-    };
-    let mut packages: Vec<PathBuf> = Vec::with_capacity(roots.len());
-    for root in roots {
-        let path = resolve_skill_root(*root, env).ok_or_else(|| UninstallError::Io {
-            detail: missing.clone(),
-        })?;
-        let package = path.join(SKILL_DIR_NAME);
-        if !packages.contains(&package) {
-            packages.push(package);
-        }
-    }
-    Ok(packages)
-}
-
 /// Inspect one package directory and either report a no-op, refuse with every reason, or return it ready for removal.
 fn inspect_dir(dir: &Path) -> Result<Inspected, UninstallError> {
     let metadata = match std::fs::symlink_metadata(dir) {
@@ -199,11 +174,7 @@ fn inspect_dir(dir: &Path) -> Result<Inspected, UninstallError> {
         return Err(refused(dir, RefusalReason::Symlink { path }));
     }
     let marker = match read_marker(dir) {
-        FoundMarker::Absent => {
-            return Ok(Inspected::NoOp {
-                dir: dir.to_path_buf(),
-            });
-        }
+        FoundMarker::Absent => return inspect_markerless(dir),
         FoundMarker::Refused(reason) => return Err(refused(dir, reason)),
         FoundMarker::Read(marker) => marker,
     };
@@ -228,21 +199,40 @@ fn inspect_dir(dir: &Path) -> Result<Inspected, UninstallError> {
     })
 }
 
+/// What a package directory with no marker means: an empty directory is a no-op, and any entry is refused as a package an earlier clio installed without a record of what it owns.
+fn inspect_markerless(dir: &Path) -> Result<Inspected, UninstallError> {
+    let on_disk = scan_package_dir(dir).map_err(write_failure)?;
+    if on_disk.is_empty() {
+        return Ok(Inspected::NoOp {
+            dir: dir.to_path_buf(),
+        });
+    }
+    let reasons = on_disk
+        .keys()
+        .map(|path| RefusalReason::Conflict(ConflictReason::EarlierInstall { path: path.clone() }))
+        .collect();
+    Err(UninstallError::Refused {
+        dir: dir.to_path_buf(),
+        reasons,
+    })
+}
+
 /// The marker `dir` holds, if any. A marker this program cannot read is a refusal, because without it nothing proves which files clio owns.
 fn read_marker(dir: &Path) -> FoundMarker {
     let path = dir.join(SKILL_MARKER_FILE);
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return FoundMarker::Refused(RefusalReason::Symlink {
+                path: SKILL_MARKER_FILE.to_owned(),
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FoundMarker::Absent,
+        Err(_) => return FoundMarker::Refused(unreadable_marker()),
+    }
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return match std::fs::symlink_metadata(&path) {
-                Ok(metadata) if metadata.file_type().is_symlink() => {
-                    FoundMarker::Refused(RefusalReason::AbsentMarker {
-                        path: SKILL_MARKER_FILE.to_owned(),
-                    })
-                }
-                _ => FoundMarker::Absent,
-            };
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FoundMarker::Absent,
         Err(_) => return FoundMarker::Refused(unreadable_marker()),
     };
     match SkillMarker::from_bytes(&bytes) {
@@ -318,30 +308,9 @@ fn inspect(dir: &Path, marker: &SkillMarker) -> Result<Vec<RefusalReason>, Unins
     Ok(reasons)
 }
 
-/// Whether any path component from `dir.join(relative)` up to `dir` is a symbolic link. A component that is missing is not a link; the hash comparison reports it as a missing owned file.
-fn symlink_component(dir: &Path, relative: &str) -> Result<bool, UninstallError> {
-    let path = dir.join(relative);
-    let mut current = Some(path.as_path());
-    while let Some(candidate) = current {
-        let metadata = match std::fs::symlink_metadata(candidate) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(io_failure("inspect", candidate, &error)),
-        };
-        if metadata.file_type().is_symlink() {
-            return Ok(true);
-        }
-        if candidate == dir {
-            break;
-        }
-        current = candidate.parent();
-    }
-    Ok(false)
-}
-
 /// Remove `dir` or retain it for another harness.
 ///
-/// The recorded harness set drops `harness` when one is named. A non-empty remainder retains every asset and rewrites the marker with that remainder, so the shared copy keeps naming the harnesses that still read it. Otherwise only the recorded files, their now-empty parent directories, and the marker are deleted, and the package directory goes only when this installation created it and it holds no entry.
+/// The recorded harness set drops `harness` when one is named. A non-empty remainder retains every asset and rewrites the marker with that remainder, so the shared copy keeps naming the harnesses that still read it. Otherwise only the recorded files, their now-empty parent directories strictly inside the package directory, and the marker are deleted, and the package directory goes only when this installation created it and it holds no entry.
 fn remove_owned(
     dir: &Path,
     marker: &SkillMarker,
@@ -367,7 +336,7 @@ fn remove_owned(
     for relative in marker.files.keys() {
         let path = dir.join(relative);
         std::fs::remove_file(&path).map_err(|error| io_failure("remove", &path, &error))?;
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path.parent().filter(|parent| *parent != dir) {
             let _ = parents.insert(parent.to_path_buf());
         }
         files.push(relative.clone());
@@ -377,7 +346,10 @@ fn remove_owned(
     for parent in ordered {
         let mut current = Some(parent.as_path());
         while let Some(candidate) = current {
-            if candidate == dir || std::fs::remove_dir(candidate).is_err() {
+            if candidate == dir
+                || !candidate.starts_with(dir)
+                || std::fs::remove_dir(candidate).is_err()
+            {
                 break;
             }
             current = candidate.parent();
@@ -423,12 +395,6 @@ fn refused(dir: &Path, reason: RefusalReason) -> UninstallError {
     UninstallError::Refused {
         dir: dir.to_path_buf(),
         reasons: vec![reason],
-    }
-}
-
-fn io_failure(action: &str, path: &Path, error: &std::io::Error) -> UninstallError {
-    UninstallError::Io {
-        detail: format!("failed to {action} {}: {error}", path.display()),
     }
 }
 

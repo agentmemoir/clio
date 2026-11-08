@@ -55,10 +55,11 @@ fn outcome_line(outcome: &RemovalOutcome) -> String {
             files,
             removed_dir,
         } => {
+            let count = files.len();
+            let noun = if count == 1 { "file" } else { "files" };
             let mut line = format!(
-                "removed the clio-mcp skill package from {}; removed {} files and the marker",
-                dir.display(),
-                files.len()
+                "removed the clio-mcp skill package from {}; removed {count} {noun} and the marker",
+                dir.display()
             );
             if *removed_dir {
                 line.push_str("; removed the package directory");
@@ -124,8 +125,7 @@ fn reason_text(reason: &RefusalReason) -> &'static str {
         RefusalReason::Conflict(ConflictReason::EarlierInstall { .. }) => {
             "installed by an earlier clio without a marker"
         }
-        RefusalReason::Conflict(ConflictReason::UnreadableMarker { .. })
-        | RefusalReason::AbsentMarker { .. } => "unreadable marker",
+        RefusalReason::Conflict(ConflictReason::UnreadableMarker { .. }) => "unreadable marker",
         RefusalReason::ForeignInstaller { .. } => "installed by",
         RefusalReason::PayloadDigest { .. } => "payload digest differs",
         RefusalReason::Symlink { .. } => "symbolic link",

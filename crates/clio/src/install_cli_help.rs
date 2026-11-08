@@ -96,7 +96,7 @@ const FORCE_PARAGRAPH: &str = "--force replaces the files the skill package owns
 const PACKAGE_IDENTITY_PARAGRAPH: &str = "The skill package directory is clio-mcp, and the same name is the name field in that package's SKILL.md frontmatter.";
 
 /// What `uninstall --skill-only` removes and what it leaves alone.
-const SKILL_ONLY_PARAGRAPH: &str = "With --skill-only, remove only the installed clio-mcp skill package and keep the server registration. With no --harness it targets ~/.agents/skills/clio-mcp and removes that copy only when no harness still references it.";
+const SKILL_ONLY_PARAGRAPH: &str = "With --skill-only, remove only the installed clio-mcp skill package and keep the server registration. With no --harness it targets ~/.agents/skills/clio-mcp and removes that copy only when no harness still references it. When a path from the home directory to the package, or the marker itself, is a symbolic link, the copy is left untouched and nothing is removed.";
 
 /// The surface help: the usage line, what the verb does, the supported list
 /// from the registry, and one example.

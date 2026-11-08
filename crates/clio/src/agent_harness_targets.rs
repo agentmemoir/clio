@@ -9,7 +9,8 @@
 //! - The `DirectWriteConfig` descriptor: the config file path, the top-level
 //!   key that holds server entries, and the entry `type` field
 //! - The `DirectWriteEnv` seam: the OS layout and the directories the
-//!   layouts read, injectable for tests
+//!   layouts read, injectable for tests, and the home directory it resolves
+//!   roots under
 //! - The per-harness resolution: Cursor's home-joined global config, and
 //!   GitHub Copilot's VS Code profile file with its Copilot fallback file
 //!   used only when the profile cannot be resolved
@@ -107,6 +108,11 @@ impl DirectWriteEnv {
             appdata,
             copilot_home,
         }
+    }
+
+    /// The home directory this environment resolves roots under, when it is known.
+    pub(crate) fn home(&self) -> Option<&Path> {
+        (!self.home.as_os_str().is_empty()).then_some(self.home.as_path())
     }
 
     /// A directory under the home, when the home is known.

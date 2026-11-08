@@ -222,6 +222,7 @@ mod skill_install_plan;
 mod skill_install_text;
 mod skill_marker;
 mod skill_uninstall;
+mod skill_uninstall_guard;
 mod skill_uninstall_text;
 mod status_cli;
 mod status_report;

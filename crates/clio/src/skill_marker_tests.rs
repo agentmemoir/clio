@@ -133,6 +133,33 @@ fn bytes_that_are_not_a_marker_are_refused() {
 }
 
 #[test]
+fn a_marker_that_names_a_path_outside_the_package_is_refused() {
+    let marker = SkillMarker::from_assets(&assets(), CATALOG);
+    for key in [
+        "/etc/passwd",
+        "../sibling/SKILL.md",
+        "references/../../escape",
+        ".",
+        "",
+        SKILL_MARKER_FILE,
+    ] {
+        let mut value = serde_json::to_value(&marker).expect("the marker is a JSON value");
+        value["files"]
+            .as_object_mut()
+            .expect("the marker records a file map")
+            .insert(key.to_owned(), serde_json::json!("outside"));
+        let bytes = serde_json::to_vec(&value).expect("the value serializes");
+        assert!(
+            matches!(
+                SkillMarker::from_bytes(&bytes),
+                Err(MarkerError::Malformed { .. })
+            ),
+            "{key:?} must be refused"
+        );
+    }
+}
+
+#[test]
 fn a_field_this_version_does_not_know_is_refused() {
     let marker = SkillMarker::from_assets(&assets(), CATALOG);
     let mut value = serde_json::to_value(&marker).expect("the marker is a JSON value");

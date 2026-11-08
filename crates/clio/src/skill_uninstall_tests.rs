@@ -3,7 +3,7 @@
 //
 //! # Responsibility
 //!
-//! This module tests the skill remover's path and retention decisions: the happy path with and without the directory this installation created, retention for a harness set, the no-op cases, the boundaries of a recorded file set, and the flow that never touches the server registration. Every refusal case lives in `skill_uninstall_refusal_tests`.
+//! This module tests the skill remover's path and retention decisions: the happy path with and without the directory this installation created, retention for a harness set, the empty-directory no-op, the boundaries of a recorded file set, and the flow that never touches the server registration. Every refusal case lives in `skill_uninstall_refusal_tests`.
 //!
 //! ## Owns
 //! - Assertions over `uninstall_skill_only` and its outcome text
@@ -24,11 +24,12 @@ use super::*;
 use crate::agent_harness::{HarnessRecord, resolve};
 use crate::agent_harness_targets::DirectWriteEnv;
 use crate::skill_install::install;
+use crate::skill_install_plan::ConflictReason;
 use crate::skill_marker::SKILL_MARKER_FILE;
 use crate::skill_uninstall_test_support::{
-    Scratch, env, native_package, portable_package, read_marker, write_marker,
+    Scratch, env, native_package, portable_package, read_marker, refused, write_marker,
 };
-use crate::skill_uninstall_text::outcome_text;
+use crate::skill_uninstall_text::{failure_message, outcome_text};
 use std::fs;
 use std::process::ExitCode;
 
@@ -210,7 +211,7 @@ fn a_second_run_reports_a_no_op() {
 }
 
 #[test]
-fn an_absent_marker_reports_a_no_op() {
+fn an_absent_marker_over_a_non_empty_package_refuses() {
     let scratch = Scratch::new("no-marker");
     let env = env(&scratch.root);
     write_package(claude(), &env);
@@ -221,14 +222,91 @@ fn an_absent_marker_reports_a_no_op() {
         fs::remove_file(dir.join(SKILL_MARKER_FILE)).expect("the marker is removed");
     }
 
-    let outcomes = uninstall_skill_only(Some(claude()), &env).expect("an absent marker is a no-op");
+    let (dir, reasons) = refused(
+        uninstall_skill_only(Some(claude()), &env).expect_err("assets without a marker refuse"),
+    );
 
+    assert_eq!(dir, native_package(&scratch.root));
+    assert_eq!(
+        reasons.len(),
+        clio_mcp::skill_assets::SKILL_ASSETS.len(),
+        "every unrecorded asset is a reason"
+    );
+    assert!(
+        reasons.iter().all(|reason| matches!(
+            reason,
+            RefusalReason::Conflict(ConflictReason::EarlierInstall { .. })
+        )),
+        "{reasons:?}"
+    );
+    assert!(
+        native_package(&scratch.root).join("SKILL.md").is_file(),
+        "nothing is removed"
+    );
+    let text = failure_message(&UninstallError::Refused { dir, reasons });
+    assert!(
+        text.contains("installed by an earlier clio without a marker"),
+        "{text}"
+    );
+}
+
+#[test]
+fn an_empty_package_directory_is_a_no_op() {
+    let scratch = Scratch::new("empty-dir");
+    let env = env(&scratch.root);
+    for dir in [
+        native_package(&scratch.root),
+        portable_package(&scratch.root),
+    ] {
+        fs::create_dir_all(&dir).expect("the empty package directory is created");
+    }
+
+    let outcomes =
+        uninstall_skill_only(Some(claude()), &env).expect("empty directories are a no-op");
+
+    assert_eq!(outcomes.len(), 2);
     assert!(
         outcomes
             .iter()
             .all(|outcome| matches!(outcome, RemovalOutcome::NoOp { .. }))
     );
-    assert!(native_package(&scratch.root).join("SKILL.md").is_file());
+    assert!(
+        native_package(&scratch.root).is_dir(),
+        "the empty directory stays"
+    );
+}
+
+#[test]
+fn an_uncreated_empty_package_directory_survives_removal() {
+    let scratch = Scratch::new("empty-uncreated");
+    let env = env(&scratch.root);
+    write_package(claude(), &env);
+    let portable = portable_package(&scratch.root);
+    let mut marker = read_marker(&portable);
+    marker.created_package_dir = false;
+    marker.harnesses.clear();
+    write_marker(&portable, &marker);
+
+    let outcomes = uninstall_skill_only(None, &env).expect("the portable copy is removed");
+
+    assert!(matches!(
+        &outcomes[0],
+        RemovalOutcome::Removed {
+            removed_dir: false,
+            ..
+        }
+    ));
+    assert!(
+        portable.is_dir(),
+        "pruning never removes the package directory itself"
+    );
+    assert!(
+        fs::read_dir(&portable)
+            .expect("the directory reads")
+            .next()
+            .is_none(),
+        "it survives empty"
+    );
 }
 
 #[test]
