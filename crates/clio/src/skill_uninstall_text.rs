@@ -131,3 +131,7 @@ fn reason_text(reason: &RefusalReason) -> &'static str {
         RefusalReason::Symlink { .. } => "symbolic link",
     }
 }
+
+#[cfg(test)]
+#[path = "skill_uninstall_text_tests.rs"]
+mod tests;
