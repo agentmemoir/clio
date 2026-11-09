@@ -9,7 +9,8 @@
 //! modules assert with.
 //!
 //! ## Owns
-//! - The candidate fixture revision pin and the live-server helper
+//! - The live-server helpers, including the one that serves the seeded
+//!   domain-read state
 //! - The candidate conditional-header builders and the POST helper
 //! - The success, error, discovery, and removed-method checkers
 //!
@@ -31,17 +32,13 @@ use crate::http::HttpConfig;
 use crate::http::http_test_support_tests::{Response, post_json, request as raw_request};
 use crate::http_auth::CredentialStore;
 use crate::http_candidate::serve_candidate;
-use crate::stateless_fixtures::state;
+use crate::runtime::McpState;
+use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, domain_state, state};
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
 use serde_json::{Value, json};
 use std::net::TcpListener;
-
-/// The candidate fixture pin: the revision a future activation test expects.
-///
-/// This is a test expectation, not a live protocol setting. The active pin
-/// stays [`crate::MCP_PROTOCOL_REVISION`].
-pub(crate) const CANDIDATE_FIXTURE_REVISION: &str = "2026-07-28";
+use std::sync::Arc;
 
 /// Serve the candidate endpoint on an OS-assigned port and return that port.
 ///
@@ -57,7 +54,24 @@ pub(crate) fn spawn_candidate() -> u16 {
 
 /// Serve the candidate endpoint with `cfg` on an OS-assigned port.
 pub(crate) fn spawn_candidate_with(cfg: HttpConfig) -> u16 {
-    let state = state();
+    spawn_candidate_state(state(), cfg)
+}
+
+/// Serve the candidate endpoint on an OS-assigned port over the seeded
+/// domain-read state, so a read scenario reaches a store that holds the one
+/// fixture item.
+pub(crate) fn spawn_domain_candidate() -> u16 {
+    spawn_candidate_state(
+        domain_state(),
+        HttpConfig {
+            insecure_no_auth: true,
+            ..HttpConfig::default()
+        },
+    )
+}
+
+/// Serve `state` with `cfg` on an OS-assigned port and return that port.
+fn spawn_candidate_state(state: Arc<McpState>, cfg: HttpConfig) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
@@ -118,74 +132,11 @@ pub(crate) fn body(response: &Response) -> Value {
     serde_json::from_str(&response.body).expect("the response body is JSON")
 }
 
-/// A success envelope: JSON-RPC 2.0, the request id, one result, and no error.
-pub(crate) fn check_success_envelope(envelope: &Value, id: i64) -> Result<(), String> {
-    if envelope["jsonrpc"] != json!("2.0") {
-        return Err(format!("not JSON-RPC 2.0: {envelope}"));
-    }
-    if envelope.get("result").is_none() {
-        return Err(format!("a success envelope carries a result: {envelope}"));
-    }
-    if envelope.get("error").is_some() {
-        return Err(format!("a success envelope carries no error: {envelope}"));
-    }
-    if envelope["id"] != json!(id) {
-        return Err(format!("the envelope id is not `{id}`: {envelope}"));
-    }
-    Ok(())
-}
-
-/// An error envelope: JSON-RPC 2.0, the request id, one error, no result, and
-/// no result type anywhere.
-pub(crate) fn check_error_envelope(envelope: &Value, id: i64) -> Result<(), String> {
-    if envelope["jsonrpc"] != json!("2.0") {
-        return Err(format!("not JSON-RPC 2.0: {envelope}"));
-    }
-    if envelope.get("error").is_none() {
-        return Err(format!("an error envelope carries an error: {envelope}"));
-    }
-    if envelope.get("result").is_some() {
-        return Err(format!("an error envelope carries no result: {envelope}"));
-    }
-    if envelope["id"] != json!(id) {
-        return Err(format!("the envelope id is not `{id}`: {envelope}"));
-    }
-    let raw = serde_json::to_string(envelope).expect("an envelope serializes");
-    if raw.contains("resultType") {
-        return Err(format!(
-            "an error envelope claims no result type: {envelope}"
-        ));
-    }
-    Ok(())
-}
-
-/// A complete result: the revision's one completeness marker.
-pub(crate) fn check_complete_result(result: &Value) -> Result<(), String> {
-    if result["resultType"] != json!("complete") {
-        return Err(format!("the result is not complete: {result}"));
-    }
-    Ok(())
-}
-
-/// Discovery identity lives in `result._meta` and never at the top of the
-/// result.
-pub(crate) fn check_discovery_identity(result: &Value) -> Result<(), String> {
-    if result.get("serverInfo").is_some() {
-        return Err(format!(
-            "identity is never a top-level result field: {result}"
-        ));
-    }
-    let info = &result["_meta"]["io.modelcontextprotocol/serverInfo"];
-    if info["name"] != json!(env!("CARGO_PKG_NAME")) {
-        return Err(format!("the identity name is the crate name: {result}"));
-    }
-    if info["version"] != json!(env!("CARGO_PKG_VERSION")) {
-        return Err(format!(
-            "the identity version is the crate version: {result}"
-        ));
-    }
-    Ok(())
-}
+/// The envelope and discovery checkers the candidate tests assert with, shared
+/// with the stdio scenarios so both transports check one definition.
+pub(crate) use crate::stateless_fixtures::{
+    check_complete_result, check_discovery_identity, check_error_envelope, check_success_envelope,
+};
 
 /// A removed method's answer: HTTP `404`, an error envelope with the not-found
 /// code and a message naming the method, and no result at all.

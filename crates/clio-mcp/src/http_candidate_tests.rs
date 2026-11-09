@@ -4,14 +4,14 @@
 //! # Responsibility
 //!
 //! This module is responsible for the candidate `2026-07-28` scenario
-//! registry and the metadata, discovery, and envelope scenarios driven through
-//! the real HTTP adapter.
+//! registry and the metadata, discovery, envelope, and domain-read scenarios
+//! driven through the real HTTP adapter.
 //!
 //! ## Owns
 //! - The scenario registry: each candidate HTTP scenario's id, implementation
 //!   owner, and bounded check receipt
-//! - The required and optional metadata, discovery identity, and result/error
-//!   envelope scenarios
+//! - The required and optional metadata, discovery identity, result/error
+//!   envelope, and domain-read scenarios
 //!
 //! ## Does not own
 //! - The candidate HTTP seam (`http_candidate`), its guards
@@ -26,15 +26,18 @@
 //! Changes to a registered candidate HTTP scenario should normally require
 //! changes here. Changes to the active transport or the active pin should not.
 //!
-//! Keep this module focused on the registry and the metadata and envelope
-//! scenarios.
+//! Keep this module focused on the registry and the metadata, envelope, and
+//! domain-read scenarios.
 
 use crate::http_candidate_fixtures::{
-    CANDIDATE_FIXTURE_REVISION, body, check_complete_result, check_discovery_identity,
-    check_error_envelope, check_success_envelope, headers, post, spawn_candidate,
+    body, check_complete_result, check_discovery_identity, check_error_envelope,
+    check_success_envelope, headers, name_headers, post, spawn_candidate, spawn_domain_candidate,
 };
 use crate::stateless::CANDIDATE_REVISION;
-use crate::stateless_fixtures::{full_meta, request, required_meta};
+use crate::stateless_fixtures::{
+    CANDIDATE_FIXTURE_REVISION, DOMAIN_ITEM_ID, check_domain_listing, check_gist_read, full_meta,
+    read_call, request, required_meta,
+};
 use serde_json::json;
 
 /// One candidate HTTP scenario and the bounded check that proves it.
@@ -125,6 +128,16 @@ const SCENARIOS: &[Scenario] = &[
         receipt: "cargo test -p clio-mcp --lib http_missing_and_present_credentials_are_gated",
     },
     Scenario {
+        id: "http/domain-read",
+        owner: "read tools",
+        receipt: "cargo test -p clio-mcp --lib http_domain_read_payloads",
+    },
+    Scenario {
+        id: "http/listing-pagination",
+        owner: "tool listing paging",
+        receipt: "cargo test -p clio-mcp --lib http_listing_pagination",
+    },
+    Scenario {
         id: "harness/successful-removed-response",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_successful_response_to_a_removed_method_fails_the_candidate_check",
@@ -133,6 +146,11 @@ const SCENARIOS: &[Scenario] = &[
         id: "harness/wrong-result-shape",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_result_shape_fails_the_http_checkers",
+    },
+    Scenario {
+        id: "harness/tampered-listing-walk",
+        owner: "conformance harness",
+        receipt: "cargo test -p clio-mcp --lib a_tampered_listing_walk_fails_the_checker",
     },
 ];
 
@@ -159,7 +177,7 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
         );
         ids.push(scenario.id);
     }
-    assert_eq!(ids.len(), 17, "every covered scenario is registered");
+    assert_eq!(ids.len(), 20, "every covered scenario is registered");
 }
 
 #[test]
@@ -319,6 +337,37 @@ fn http_error_envelope_shape() {
     let answer = body(&response);
     check_error_envelope(&answer, 7).expect("an unserved request is an error envelope");
     assert_eq!(answer["error"]["code"], json!(-32601), "{answer}");
+}
+
+/// The domain read pair served by the real HTTP adapter: the transport's success
+/// envelope around the payloads the shared read checkers accept.
+#[test]
+fn http_domain_read_payloads() {
+    let port = spawn_domain_candidate();
+    let meta = required_meta(CANDIDATE_FIXTURE_REVISION);
+
+    let gist = post(
+        port,
+        &read_call(&meta, "get_gist", json!({ "item_id": DOMAIN_ITEM_ID })),
+        &name_headers("tools/call", "get_gist"),
+    );
+    assert_eq!(gist.status, 200, "the candidate serves a domain read");
+    let answer = body(&gist);
+    check_success_envelope(&answer, 7).expect("the candidate serves a domain read");
+    check_gist_read(&answer["result"]).expect("the read carries the stored gist");
+
+    let listing = post(
+        port,
+        &read_call(&meta, "inspect", json!({})),
+        &name_headers("tools/call", "inspect"),
+    );
+    assert_eq!(
+        listing.status, 200,
+        "the candidate serves the domain listing"
+    );
+    let answer = body(&listing);
+    check_success_envelope(&answer, 7).expect("the candidate serves the domain listing");
+    check_domain_listing(&answer["result"]).expect("the listing carries the stored item");
 }
 
 #[test]

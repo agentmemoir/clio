@@ -100,3 +100,7 @@ mod stdio_tests;
 #[cfg(test)]
 #[path = "stdio_candidate_tests.rs"]
 mod stdio_candidate_tests;
+
+#[cfg(test)]
+#[path = "stdio_candidate_listing_tests.rs"]
+mod stdio_candidate_listing_tests;

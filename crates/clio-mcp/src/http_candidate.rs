@@ -88,3 +88,7 @@ mod http_candidate_tests;
 #[cfg(test)]
 #[path = "http_candidate_guard_tests.rs"]
 mod http_candidate_guard_tests;
+
+#[cfg(test)]
+#[path = "http_candidate_listing_tests.rs"]
+mod http_candidate_listing_tests;
