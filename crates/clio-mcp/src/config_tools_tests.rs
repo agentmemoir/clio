@@ -27,6 +27,7 @@
 use crate::runtime::{McpOpenOptions, McpState};
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Duration;
 
 fn state() -> Arc<McpState> {
     McpState::open_with_effective(&McpOpenOptions::default(), &serde_json::json!({}))
@@ -335,5 +336,50 @@ fn config_set_schema_states_session_default() {
         tool["inputSchema"]["properties"]["scope"]["default"],
         serde_json::json!("session"),
         "{tool}"
+    );
+}
+
+/// A profile change through the live runtime publishes one tool-view change,
+/// and an immediate repeat publishes nothing.
+#[test]
+fn announce_after_profile_change_publishes_once() {
+    let state = state();
+    let subscriber = state
+        .tool_signals
+        .register("announce", "seed".to_owned())
+        .expect("register");
+    {
+        let mut rt: std::sync::MutexGuard<'_, clio_config::Runtime> =
+            state.config.lock().expect("config runtime mutex poisoned");
+        crate::read_tools::tool_result_value(rt.config_profile_apply("coding_local"))
+            .expect("apply");
+    }
+    assert!(
+        state.announce_tool_view(),
+        "a real profile change announces the new view"
+    );
+    assert_eq!(
+        subscriber.wait(Duration::from_millis(50)),
+        1,
+        "the registered listener sees one change"
+    );
+    assert!(
+        !state.announce_tool_view(),
+        "an immediate repeat announces nothing"
+    );
+    assert_eq!(
+        subscriber.wait(Duration::from_millis(50)),
+        1,
+        "the repeat moves no counter"
+    );
+}
+
+/// An announce with no registered listener returns false and does not panic.
+#[test]
+fn announce_without_a_subscriber_is_quiet() {
+    let state = state();
+    assert!(
+        !state.announce_tool_view(),
+        "the first announce only seeds the baseline"
     );
 }

@@ -158,6 +158,7 @@ pub struct McpState {
     pub pipeline: PipelineStatus,
     /// Wakes the background index sweeper after a write (non-blocking nudge).
     pub(crate) index_wake: Arc<(std::sync::Mutex<bool>, Condvar)>,
+    pub(crate) tool_signals: Arc<crate::tool_signals::ToolSignals>,
     /// Whether a `consolidate` trigger joins its wave instead of queueing it.
     ///
     /// False is the long-lived-binding default: the caller gets `accepted` and

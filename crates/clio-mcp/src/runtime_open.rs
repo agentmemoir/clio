@@ -285,6 +285,7 @@ impl McpState {
                 extract_available,
             },
             index_wake: Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new())),
+            tool_signals: Arc::new(crate::tool_signals::ToolSignals::default()),
             maintenance_trigger: Arc::new(
                 crate::maintenance_trigger::MaintenanceTriggerState::default(),
             ),

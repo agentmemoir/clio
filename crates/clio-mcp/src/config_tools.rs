@@ -13,6 +13,7 @@
 //! - The runtime lock (config tools serialize on `McpState.config`)
 //! - The apply call after an applied `ranking_env_set` or a successful
 //!   `config_profile_apply`, made only once the runtime guard is released
+//! - The tool-view announce after a mutation that can change the visible list
 //!
 //! ## Does not own
 //! - Config resolution, validation, or ranking math (`clio-config` owns those;
@@ -57,16 +58,25 @@ pub(crate) fn dispatch_write(state: &McpState, name: &str, args: &Value) -> Resu
             let path = args.get("path").and_then(Value::as_str).unwrap_or("");
             let value = args.get("value").cloned().unwrap_or(Value::Null);
             let scope = ConfigScope::parse(scope_of(args))?;
-            tool_result_value(rt.config_set(path, value, scope))
+            let outcome = tool_result_value(rt.config_set(path, value, scope));
+            // The announce reads the same runtime, so the guard must be gone
+            // before it runs. A failed set changes no tool view.
+            drop(rt);
+            if outcome.is_ok() {
+                state.announce_tool_view();
+            }
+            outcome
         }
         "config_profile_apply" => {
             let name = args.get("name").and_then(Value::as_str).unwrap_or_default();
             let outcome = tool_result_value(rt.config_profile_apply(name));
             // The apply path locks the same runtime, so the guard must be gone
-            // before it runs. A failed apply changes no ranking environment.
+            // before it runs. A failed apply changes no ranking environment
+            // and no tool view.
             drop(rt);
             if outcome.is_ok() {
                 state.apply_ranking_policy();
+                state.announce_tool_view();
             }
             outcome
         }

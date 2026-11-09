@@ -271,6 +271,28 @@ fn cursor_integer(value: &Value) -> Result<usize, RpcError> {
         .map_err(|_| invalid_params("tools/list cursor carries an out-of-range field"))
 }
 
+/// The digest of the view the live configuration advertises now.
+///
+/// It reads the same snapshot `tools/list` pages, so a listener and a paging
+/// caller agree on what changed.
+pub(crate) fn current_view_digest(state: &McpState) -> Result<String, RpcError> {
+    let (view, tools) = visible_view(state)?;
+    Ok(visible_digest(&tools, &view))
+}
+
+impl McpState {
+    /// Announce the current tool-view digest to every live listener.
+    ///
+    /// Returns true when the published digest changed. A digest that cannot be
+    /// computed publishes nothing and returns false.
+    pub(crate) fn announce_tool_view(&self) -> bool {
+        match current_view_digest(self) {
+            Ok(digest) => self.tool_signals.publish(&digest),
+            Err(_) => false,
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "tools_page_tests.rs"]
 mod tools_page_tests;
