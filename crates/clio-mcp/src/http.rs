@@ -441,7 +441,7 @@ mod http_request_bounds_tests;
 mod http_start_auth_tests;
 #[cfg(test)]
 #[path = "http_test_support_tests.rs"]
-mod http_test_support_tests;
+pub(crate) mod http_test_support_tests;
 #[cfg(test)]
 #[path = "http_tests.rs"]
 mod http_tests;

@@ -110,6 +110,10 @@ mod write_tools_handlers;
 #[cfg(test)]
 mod conditional_http;
 #[cfg(test)]
+mod http_candidate;
+#[cfg(test)]
+mod http_candidate_fixtures;
+#[cfg(test)]
 mod lib_tests;
 #[cfg(test)]
 mod method_guard;
