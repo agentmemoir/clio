@@ -55,16 +55,17 @@ const SUPERSEDED_CLAIMS: [&str; 8] = [
 ];
 
 /// The `repair` refusal, in the short form the schema publishes: a plan the
-/// credential's grant excludes is not found, and a call with neither a bank
-/// nor a plan fails without acting.
-const REPAIR_OUT_OF_GRANT: &str = "Plan outside grant: not found";
-const REPAIR_NO_SCOPE: &str = "no bank/plan fails";
+/// credential's grant excludes is not found, an unbound caller keeps its own
+/// `bank` argument, and no action mutates when there is no scope.
+const REPAIR_OUT_OF_GRANT: &str = "Outside grant: not found";
+const REPAIR_UNBOUND: &str = "unbound uses bank";
+const REPAIR_NO_MUTATION: &str = "no mutation";
 
 /// The omitted-`bank` default each scoped tool publishes: the server's default
 /// bank, reachable only when the credential's grant covers it. Matched as the
 /// short words the schema carries, not as one long sentence.
 const OMITTED_BANK_DEFAULT: &str = "omitted=server default";
-const OMITTED_BANK_GRANT: &str = "credential grant must cover";
+const OMITTED_BANK_GRANT: &str = "grant must cover";
 
 /// One operator tool definition from the published pack.
 fn def(name: &str) -> ToolDef {
@@ -128,16 +129,32 @@ fn every_operator_tool_publishes_the_bank_scope_its_arm_reads() {
 }
 
 /// A plan registered for a bank outside the credential's grant is answered as
-/// not found, whatever `bank` the request also carries, and a call with
-/// neither a bank nor a plan fails without acting. `repair` has to keep both.
+/// not found, whatever `bank` the request also carries; an unbound caller keeps
+/// its own `bank` argument; and no action mutates when there is no scope.
 #[test]
 fn repair_states_the_out_of_grant_plan_refusal() {
     let repair = def("repair");
     let clause = bank_clause(&repair).expect("repair publishes a bank clause");
     assert!(clause.contains(REPAIR_OUT_OF_GRANT), "repair: {clause}");
-    assert!(clause.contains(REPAIR_NO_SCOPE), "repair: {clause}");
+    assert!(clause.contains(REPAIR_UNBOUND), "repair: {clause}");
+    assert!(clause.contains(REPAIR_NO_MUTATION), "repair: {clause}");
     assert!(clause.contains("credential"), "repair: {clause}");
     assert!(clause.contains("grant"), "repair: {clause}");
+}
+
+/// `reindex` keeps two reaches: a caller without a credential sweeps every
+/// indexable bank, and the call is rejected while the shared bank surface is
+/// disabled. The bounded default still names the server default.
+#[test]
+fn reindex_states_the_unbound_sweep_and_shared_bank_refusal() {
+    let reindex = def("reindex");
+    let clause = bank_clause(&reindex).expect("reindex publishes a bank clause");
+    assert!(clause.contains("Without a credential"), "reindex: {clause}");
+    assert!(clause.contains("every indexable bank"), "reindex: {clause}");
+    assert!(
+        clause.contains("shared bank off rejects"),
+        "reindex: {clause}"
+    );
 }
 
 /// An omitted `bank` is the server default bank for every scoped tool that
@@ -204,12 +221,12 @@ fn no_operator_tool_claims_the_whole_store_for_an_omitted_bank() {
                 "{name} still claims `{claim}`: {text}"
             );
         }
-        if text.contains("whole store") || text.contains("every indexable bank") {
+        if lowered.contains("whole store") || lowered.contains("every indexable bank") {
             assert!(
-                text.contains("without a credential"),
+                lowered.contains("without a credential"),
                 "{name}: only an unbound caller may reach the whole store: {text}"
             );
-            assert!(text.contains("grant"), "{name}: {text}");
+            assert!(lowered.contains("grant"), "{name}: {text}");
         }
         if text.contains("omitted") {
             assert!(

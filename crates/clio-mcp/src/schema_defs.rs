@@ -169,7 +169,7 @@ pub(crate) fn context_prop() -> (&'static str, Value) {
         json!({
             "type": "string",
             "maxLength": 4096,
-            "description": "Optional source context; not searchable. Non-empty, max 4096 bytes, never truncated."
+            "description": "Optional source context; not searchable. Non-empty, max 4096 UTF-8 bytes, never truncated."
         }),
     )
 }

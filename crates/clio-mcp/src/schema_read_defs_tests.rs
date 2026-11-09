@@ -182,8 +182,8 @@ fn the_published_schema_documents_the_provenance_floor_rungs() {
     );
     let doc = floor.to_string();
     assert!(
-        doc.contains("Weakest provenance rung kept"),
-        "the schema states the weakest kept rung is the contract: {doc}"
+        doc.contains("Floor verified > stated > third_party > inferred"),
+        "the schema states the rung order the floor accepts: {doc}"
     );
     let tool = crate::schema_read_defs::read_defs()
         .into_iter()
@@ -202,10 +202,7 @@ fn the_published_schema_documents_the_provenance_floor_rungs() {
 fn the_published_provenance_floor_promises_membership_and_nothing_else() {
     let doc = published_prop("provenance_floor").to_string();
     for (claim, needle) in [
-        (
-            "a hit below the floor is removed",
-            "hits below it are removed",
-        ),
+        ("a hit below the floor is removed", "below-floor removed"),
         ("removal replaces a lower rank", "removed, not ranked lower"),
     ] {
         assert!(doc.contains(needle), "the schema states {claim}: {doc}");
@@ -213,12 +210,15 @@ fn the_published_provenance_floor_promises_membership_and_nothing_else() {
 }
 
 /// The property is optional, so the published description states what an
-/// omitted value means: the bank's own default decides the floor.
+/// omitted value means: the bank's own default decides the floor, and a bank
+/// that states no default leaves every rung.
 #[test]
 fn the_published_provenance_floor_states_the_omitted_default() {
     let doc = published_prop("provenance_floor").to_string();
-    assert!(
-        doc.contains("Omitted uses the bank default"),
-        "the schema states omitting the floor uses the bank default: {doc}"
-    );
+    for (claim, needle) in [
+        ("omitting the floor uses the bank default", "Bank default"),
+        ("a bank with no default means no floor", "none=no floor"),
+    ] {
+        assert!(doc.contains(needle), "the schema states {claim}: {doc}");
+    }
 }

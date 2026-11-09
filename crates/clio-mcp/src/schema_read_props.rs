@@ -69,7 +69,7 @@ pub(crate) fn min_scores_prop() -> Value {
 /// omitted meaning instead.
 pub(crate) fn provenance_floor_prop() -> Value {
     en(
-        "Weakest provenance rung kept; hits below it are removed, not ranked lower. Omitted uses the bank default.",
+        "Floor verified > stated > third_party > inferred; below-floor removed, not ranked lower. Bank default; none=no floor.",
         &["verified", "stated", "third_party", "inferred"],
     )
 }
@@ -97,7 +97,7 @@ pub(crate) fn entity_summary_prop() -> Value {
 /// property states the policy a caller must know to use the field safely.
 pub(crate) fn include_exact_prop() -> Value {
     b(&format!(
-        "Attach hits[].exact_render, a bounded snapshot (default false, max {EXACT_RENDER_MAX_BYTES} bytes, never truncated); see get_snapshot."
+        "Attach hits[].exact_render whole or omitted, never a prefix (default false, max {EXACT_RENDER_MAX_BYTES} bytes); see get_snapshot."
     ))
 }
 

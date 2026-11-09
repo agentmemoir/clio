@@ -179,9 +179,10 @@ fn catalog_hash_definition() -> Value {
 }
 
 /// The published bound for one tool or argument description: both limits, the
-/// unit they are counted in, the tokenizer the token count comes from, and the
-/// scope rule that says what is measured. It ships in every pack, beside the
-/// hash definition, so the check reads the bound from the pack it measures.
+/// unit they are counted in, the tokenizer the token count comes from, the
+/// frozen names that scope the check, and the rule that says what is measured.
+/// It ships in every pack, beside the hash definition, so a reader can compare
+/// the pack's own claim with the product rule the check enforces.
 #[must_use]
 fn description_bound_definition() -> Value {
     json!({
@@ -190,7 +191,9 @@ fn description_bound_definition() -> Value {
         "unit": "one description, counted as Unicode scalar values and cl100k_base tokens",
         "tokenizer": "cl100k_base",
         "tokenizer_version": "0.14.0",
-        "scope_rule": "Each description in the frozen in-scope manifest is measured on its own, and a value at or below both limits passes."
+        "scope_rule": "Every JSON path listed in locations is resolved inside its tool object, and each one that holds a description is measured on its own; a value at or below both limits passes.",
+        "target_names": ["min_score", "min_scores", "provenance_floor", "include_exact", "fidelity", "context", "bank", "actor", "explain", "allow_duplicate"],
+        "tool_descriptions": ["maintenance_status"]
     })
 }
 

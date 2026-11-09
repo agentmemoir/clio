@@ -97,7 +97,7 @@ pub(crate) fn read_defs() -> Vec<ToolDef> {
         ),
         read(
             "maintenance_status",
-            "Report leaf queryability, dirty/refreshing ancestors, pressure and trigger blocks; failures are reported, not fatal.",
+            "Leaf queryability, dirty ancestors, pressure/trigger fields; 256 per band; gaps unavailable/incomplete, not fatal.",
             &[],
             vec![
                 ("item_id", s("Optional item id.")),

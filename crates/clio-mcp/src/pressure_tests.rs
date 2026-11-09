@@ -416,19 +416,25 @@ fn the_published_description_names_pressure_trigger_and_failure_reporting() {
         .iter()
         .find(|def| def.name == "maintenance_status")
         .expect("maintenance_status def");
-    // The archive-scan budget is enforced by the pressure module; the short
-    // description promises the two blocks the response carries instead.
+    // The description names the two blocks the response carries.
     assert!(
         def.description.contains("pressure") && def.description.contains("trigger"),
         "{}",
         def.description
     );
-    // A failed block is reported and does not abort the whole status read.
+    // The published archive-scan cap and the gap markers are the contract.
     assert!(
-        def.description.contains("failures are reported, not fatal"),
-        "{}",
+        def.description.contains("256 per band"),
+        "the description must state the 256-per-band scan cap: {}",
         def.description
     );
+    assert!(
+        def.description.contains("unavailable") && def.description.contains("incomplete"),
+        "the description must name both gap markers: {}",
+        def.description
+    );
+    // A failed block is reported and does not abort the whole status read.
+    assert!(def.description.contains("not fatal"), "{}", def.description);
     // The schema declares the timestamp argument the handler honours.
     assert!(
         def.props.iter().any(|(key, _)| *key == "timestamp"),

@@ -25,11 +25,10 @@
 
 use crate::schema_defs::{ToolDef, arr, b, en, s};
 
-/// The omitted-`bank` wording `verify`, `doctor` and `reindex` share: the
-/// argument then means the server default bank, and the credential's grant has
-/// to cover that bank or the call is refused. A caller without a credential has
-/// no default to fall back on, so each of those tools states that reach itself,
-/// while `diagnose` publishes its own sentence.
+/// The omitted-`bank` wording `verify` and `doctor` share: the argument then
+/// means the server default bank, and the credential's grant has to cover that
+/// bank or the call is refused. `reindex` adds the reach a caller without a
+/// credential keeps, and `diagnose` publishes its own sentence.
 const OMITTED_BANK: &str = "Bank; omitted=server default the credential grant must cover.";
 
 /// `diagnose`'s own `bank` clause: the shared omitted-bank sentence, then the
@@ -41,10 +40,10 @@ fn diagnose_bank_clause() -> String {
 
 /// The `repair` scope, which is the plan's when a plan is registered, so the
 /// grant has to cover the scope the tool acts on and not only the argument. A
-/// plan outside the grant is answered as not found, in the words below, and an
-/// unbound caller keeps the plan-or-argument reach it had before the grant.
-const REPAIR_BANK: &str = "Bank; omitted=plan's bank or credential default. Plan outside grant: \
-                           not found; no bank/plan fails.";
+/// plan outside the grant is answered as not found, an unbound caller keeps its
+/// own `bank` argument, and no scope means no action mutates.
+const REPAIR_BANK: &str = "Bank; omitted=plan's bank or credential default. Outside grant: \
+                           not found; unbound uses bank; no mutation.";
 
 /// `reindex`'s `dry_run` clause: absent, it follows `confirm`, and a `false`
 /// with nothing confirming it is refused as an unconfirmed mutating rebuild.
@@ -136,9 +135,10 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 ),
                 (
                     "bank",
-                    s(&format!(
-                        "{OMITTED_BANK} Unbound sweeps indexes; MCP rejects if shared bank off."
-                    )),
+                    s(
+                        "Bank; omitted=server default; grant must cover. Without a credential=\
+                       every indexable bank; shared bank off rejects.",
+                    ),
                 ),
                 ("dry_run", b(REINDEX_DRY_RUN)),
                 ("confirm", b("Start the live rebuild; default false.")),

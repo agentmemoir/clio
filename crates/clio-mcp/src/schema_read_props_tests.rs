@@ -80,19 +80,19 @@ fn the_published_include_exact_property_states_the_rendering_policy() {
 
 /// The cap bounds bytes, so an oversized snapshot is dropped whole rather than
 /// shortened. A caller who reads a shortened value as the stored one would take
-/// a prefix for the record, so the published text says the bound never
-/// truncates.
+/// a prefix for the record, so the published text says the rendering is whole
+/// or absent and never a prefix.
 #[test]
 fn the_published_include_exact_property_never_truncates_an_oversized_snapshot() {
     let doc = published_prop("retrieve", "include_exact").to_string();
     for (claim, needle) in [
         (
-            "the property says the rendering is bounded",
-            "a bounded snapshot",
+            "the property says the rendering is whole or absent",
+            "whole or omitted",
         ),
         (
-            "the property says the bound never truncates",
-            "never truncated",
+            "the property says the bound never yields a prefix",
+            "never a prefix",
         ),
         ("the property points at the exact read", "see get_snapshot"),
     ] {
