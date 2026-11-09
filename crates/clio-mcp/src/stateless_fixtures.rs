@@ -16,6 +16,8 @@
 //!   error message, and server identity
 //! - The success, error, completeness, discovery, and domain-read result
 //!   checkers both candidate transports assert with
+//! - The advertised catalogue names and the check a multi-page listing walk
+//!   answers to
 //!
 //! ## Does not own
 //! - Any scenario or the choice of assertion (see `stateless_tests`,
@@ -325,6 +327,92 @@ pub(super) fn check_domain_listing(result: &Value) -> Result<(), String> {
     if payload["include_discarded"] != json!(false) {
         return Err(format!(
             "a default listing excludes discarded rows: {payload}"
+        ));
+    }
+    Ok(())
+}
+
+/// The advertised catalogue: every tool name the visible view lists, in the
+/// order the view lists it.
+///
+/// The names come from the production view, so a walked listing is compared
+/// with what the dispatcher advertises rather than with its own pages.
+pub(super) fn catalogue_names(state: &McpState) -> Vec<String> {
+    let view = crate::protocol::McpHandler::tools_list_visible(state)
+        .expect("the fixture configuration advertises a tool view");
+    view["tools"]
+        .as_array()
+        .expect("a tool view lists tools")
+        .iter()
+        .map(|tool| {
+            tool["name"]
+                .as_str()
+                .expect("an advertised tool has a name")
+                .to_owned()
+        })
+        .collect()
+}
+
+/// A whole listing walk: more than one page, every catalogue tool exactly once
+/// in catalogue order, a distinct non-empty cursor on every page but the last,
+/// and no cursor on the last.
+pub(super) fn check_listing_walk(pages: &[Value], catalogue: &[String]) -> Result<(), String> {
+    if pages.len() < 2 {
+        return Err(format!(
+            "a walk covers more than one page, not {}",
+            pages.len()
+        ));
+    }
+    let last = pages.len() - 1;
+    let mut walked: Vec<String> = Vec::new();
+    let mut cursors: Vec<String> = Vec::new();
+    for (index, page) in pages.iter().enumerate() {
+        let tools = page["tools"]
+            .as_array()
+            .ok_or_else(|| format!("page {index} lists tools: {page}"))?;
+        if tools.is_empty() {
+            return Err(format!("page {index} of a walk lists no tools: {page}"));
+        }
+        for tool in tools {
+            let name = tool["name"]
+                .as_str()
+                .ok_or_else(|| format!("page {index} names its tools: {tool}"))?;
+            walked.push(name.to_owned());
+        }
+        let cursor = page.get("nextCursor");
+        if index == last {
+            if let Some(cursor) = cursor {
+                return Err(format!(
+                    "the terminal page carries the cursor `{cursor}`: {page}"
+                ));
+            }
+            continue;
+        }
+        let Some(cursor) = cursor.and_then(Value::as_str).filter(|c| !c.is_empty()) else {
+            return Err(format!(
+                "page {index} carries no usable `nextCursor`: {page}"
+            ));
+        };
+        if cursors.iter().any(|seen| seen == cursor) {
+            return Err(format!("page {index} repeats the cursor `{cursor}`"));
+        }
+        cursors.push(cursor.to_owned());
+    }
+    for (index, name) in walked.iter().enumerate() {
+        if walked[..index].contains(name) {
+            return Err(format!("`{name}` appears twice in the walk"));
+        }
+    }
+    if walked.len() != catalogue.len() {
+        return Err(format!(
+            "the walk covers {} of the {} catalogue tools: {walked:?}",
+            walked.len(),
+            catalogue.len()
+        ));
+    }
+    if walked.as_slice() != catalogue {
+        return Err(format!(
+            "the walk is not the catalogue order: {walked:?} against {catalogue:?}"
         ));
     }
     Ok(())

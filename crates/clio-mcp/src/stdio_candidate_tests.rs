@@ -91,6 +91,11 @@ const SCENARIOS: &[Scenario] = &[
         receipt: "cargo test -p clio-mcp --lib stdio_domain_read_payloads",
     },
     Scenario {
+        id: "stdio/listing-pagination",
+        owner: "tool listing paging",
+        receipt: "cargo test -p clio-mcp --lib stdio_listing_pagination",
+    },
+    Scenario {
         id: "harness/wrong-header",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_header_value_fails_the_checker",
@@ -153,7 +158,7 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
         );
         ids.push(scenario.id);
     }
-    assert_eq!(ids.len(), 10, "every covered scenario is registered");
+    assert_eq!(ids.len(), 11, "every covered scenario is registered");
 }
 
 #[test]

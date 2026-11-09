@@ -134,6 +134,11 @@ const SCENARIOS: &[Scenario] = &[
         receipt: "cargo test -p clio-mcp --lib http_domain_read_payloads",
     },
     Scenario {
+        id: "http/listing-pagination",
+        owner: "tool listing paging",
+        receipt: "cargo test -p clio-mcp --lib http_listing_pagination",
+    },
+    Scenario {
         id: "harness/successful-removed-response",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_successful_response_to_a_removed_method_fails_the_candidate_check",
@@ -142,6 +147,11 @@ const SCENARIOS: &[Scenario] = &[
         id: "harness/wrong-result-shape",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_result_shape_fails_the_http_checkers",
+    },
+    Scenario {
+        id: "harness/tampered-listing-walk",
+        owner: "conformance harness",
+        receipt: "cargo test -p clio-mcp --lib a_tampered_listing_walk_fails_the_checker",
     },
 ];
 
@@ -168,7 +178,7 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
         );
         ids.push(scenario.id);
     }
-    assert_eq!(ids.len(), 18, "every covered scenario is registered");
+    assert_eq!(ids.len(), 20, "every covered scenario is registered");
 }
 
 #[test]
