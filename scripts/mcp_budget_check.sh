@@ -47,7 +47,7 @@ if ! "$bin" mcp schema-export >"$tmp"; then
   exit 2
 fi
 
-args=(--pack "$tmp")
+args=(--pack "$tmp" --preset-bin "$bin")
 if [[ -n "${CLIO_SKILL_ENTRY_POINT:-}" ]]; then
   args+=(--skill "$CLIO_SKILL_ENTRY_POINT")
 fi

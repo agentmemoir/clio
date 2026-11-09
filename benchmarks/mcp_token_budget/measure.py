@@ -14,6 +14,10 @@ performs no network I/O, downloads nothing, and never substitutes an estimate.
 The whole document is built in memory and written to stdout once, so a failure
 can never leave partial rows behind: every failure exits 2 with
 ``mcp-token-budget: <message>`` on stderr and zero bytes on stdout.
+
+The same module exposes the measurement helpers the gate reuses for a candidate
+pack and for a skill file, so one canonicalizer and one tokenizer serve every
+arm.
 """
 
 import argparse
@@ -43,6 +47,33 @@ def canonical_bytes(value) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
+
+
+def measure_candidate(pack, tokenizer) -> dict:
+    """Return the digest, canonical byte length, and token count of ``pack``."""
+    canonical = canonical_bytes(pack["tools"])
+    return {
+        "sha256": hashlib.sha256(canonical).hexdigest(),
+        "bytes": len(canonical),
+        "tokens": tokenizer.count(canonical.decode("utf-8")),
+    }
+
+
+def measure_skill(path, tokenizer) -> dict:
+    """Return the digest, raw byte length, and token count of the file at ``path``."""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise BudgetError(f"budget: cannot read skill file: {exc}") from None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BudgetError(f"budget: skill file is not valid UTF-8: {exc}") from None
+    return {
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "bytes": len(raw),
+        "tokens": tokenizer.count(text),
+    }
 
 
 def _read_pack(path):

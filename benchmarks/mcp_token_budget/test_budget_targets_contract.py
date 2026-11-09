@@ -110,11 +110,13 @@ class ContractTests(unittest.TestCase):
         value["policy"].pop("foreign_tokenizer")
         self.assert_refused(value, "policy keys must be exactly")
 
-    def test_claiming_per_preset_measurements_is_refused(self):
+    def test_denying_per_preset_measurements_is_refused(self):
         value = document()
-        value["basis"]["per_preset_measurement"] = True
+        value["basis"]["per_preset_measurement"] = False
         self.assert_refused(
-            value, "basis.per_preset_measurement is True, expected False"
+            value,
+            "basis.per_preset_measurement is False: every preset pack is exported "
+            "by the built binary and measured as a candidate on every run",
         )
 
     def test_denying_the_shared_row_is_refused(self):
@@ -202,7 +204,26 @@ class ContractTests(unittest.TestCase):
         )
         value = document()
         entry(value, "all", "bytes")["factor"] = 99
-        self.assert_refused(value, "target all/bytes factor is 99, expected 80")
+        self.assert_refused(
+            value, "adjustment preset 'all' bytes factor is 80, target row states 99"
+        )
+
+    def test_an_adjustment_factor_that_ignores_the_decision_is_refused(self):
+        for unit, factor, decided, baseline_value in (
+            ("tokens", 60, 70, 21691),
+            ("bytes", 90, 80, 105632),
+        ):
+            with self.subTest(unit=unit):
+                value = document()
+                adjustment = value["target_adjustment"][0]
+                adjustment["initial"]["factor"][unit] = factor
+                adjustment["initial"]["target"][unit] = baseline_value * factor // 100
+                entry(value, "all", unit)["factor"] = factor
+                self.assert_refused(
+                    value,
+                    f"adjustment preset 'all' {unit} initial factor is {factor}, "
+                    f"expected {decided} from factor_decision",
+                )
 
     def test_the_factor_decision_keys_must_be_exact(self):
         value = document()
@@ -272,6 +293,20 @@ class ContractTests(unittest.TestCase):
         entry(value, "coding", "bytes")["label"] = "Measured"
         self.assert_refused(value, "label is 'Measured', expected 'Inferred'")
 
+    def test_an_adjusted_row_is_labelled_decision(self):
+        targets = budget_targets.load(TARGETS)
+        adjusted = [item for item in targets if item["preset"] == "all"]
+        self.assertEqual([item["label"] for item in adjusted], ["Decision", "Decision"])
+        value = document()
+        entry(value, "all", "tokens")["label"] = "Inferred"
+        self.assert_refused(value, "label is 'Inferred', expected 'Decision'")
+
+    def test_a_changed_final_ceiling_is_refused(self):
+        value = document()
+        entry(value, "all", "tokens")["target"] = 15183
+        entry(value, "all", "tokens")["headroom"] = 21691 - 15183
+        self.assert_refused(value, "expected the recorded final ceiling 30004")
+
     def test_a_target_entry_with_the_wrong_keys_is_refused(self):
         value = document()
         value["targets"][0]["extra"] = 1
@@ -281,7 +316,7 @@ class ContractTests(unittest.TestCase):
         self.assert_refused(value, "target 0 keys must be exactly")
 
     def test_the_committed_record_still_satisfies_every_block(self):
-        self.assertEqual(len(budget_targets.load(TARGETS)), 6)
+        self.assertEqual(len(budget_targets.load(TARGETS)), 8)
 
 
 if __name__ == "__main__":

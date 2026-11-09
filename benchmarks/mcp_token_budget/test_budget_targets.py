@@ -2,9 +2,9 @@
 """Tests for the MCP preset target record and its comparison.
 
 The record is validated as data, so every rule is refused without the tokenizer.
-The comparison is driven with the frozen baseline's own row values, so a miss,
-its reported headroom, and the unenforced switch are proven without measuring
-anything.
+The comparison is driven with the frozen baseline's own row values, so every
+preset's comparison, its reported headroom, and the reporting switch are proven
+without measuring anything.
 """
 
 import copy
@@ -50,6 +50,12 @@ def candidate(**overrides):
     return item
 
 
+def candidates(**overrides):
+    """Return one candidate per preset, so every target has a measurement."""
+    measured = candidate(**overrides)
+    return {preset: dict(measured) for preset in budget_targets.TARGET_PRESETS}
+
+
 class RecordTests(unittest.TestCase):
     """Every malformed target file is refused with one named line."""
 
@@ -67,9 +73,9 @@ class RecordTests(unittest.TestCase):
         self.assertIn(expected, message)
         return message
 
-    def test_the_committed_record_loads_its_six_targets(self):
+    def test_the_committed_record_loads_its_eight_targets(self):
         targets = budget_targets.load(TARGETS)
-        self.assertEqual(len(targets), 6)
+        self.assertEqual(len(targets), 8)
         self.assertEqual(
             [(item["preset"], item["unit"]) for item in targets],
             [(preset, unit) for preset in budget_targets.TARGET_PRESETS
@@ -83,14 +89,17 @@ class RecordTests(unittest.TestCase):
             coding_tokens["baseline_row"], "client/synthetic-eager-client/turn/1/tokens"
         )
 
-    def test_the_committed_record_carries_no_target_for_the_smallest_preset(self):
-        self.assertNotIn("minimal", [item["preset"] for item in document()["targets"]])
-        for item in budget_targets.load(TARGETS):
-            with self.subTest(preset=item["preset"]):
-                self.assertIn(item["preset"], budget_targets.TARGET_PRESETS)
+    def test_every_preset_has_both_targets(self):
+        targets = budget_targets.load(TARGETS)
+        pairs = {(item["preset"], item["unit"]) for item in targets}
+        self.assertEqual(
+            pairs,
+            {(preset, unit) for preset in budget_targets.TARGET_PRESETS
+             for unit in budget_targets.UNITS},
+        )
 
-    def test_the_record_is_not_enforcing_yet(self):
-        self.assertFalse(budget_targets.PRESET_TARGETS_ENFORCED)
+    def test_the_record_is_enforced(self):
+        self.assertTrue(budget_targets.PRESET_TARGETS_ENFORCED)
 
     def test_the_wrong_format_or_version_is_refused(self):
         value = document()
@@ -132,13 +141,8 @@ class RecordTests(unittest.TestCase):
         entry(duplicate, "ops", "tokens")["preset"] = "coding"
         self.assert_refused(duplicate, "duplicate target for preset 'coding' and unit 'tokens'")
         missing = document()
-        missing["targets"].pop()
-        self.assert_refused(missing, "missing targets for all/bytes")
-
-    def test_a_target_for_the_smallest_preset_is_refused_by_name(self):
-        value = document()
-        entry(value, "coding", "tokens")["preset"] = "minimal"
-        self.assert_refused(value, "preset is 'minimal'")
+        missing["targets"].pop(1)
+        self.assert_refused(missing, "missing targets for minimal/bytes")
 
     def test_a_kind_other_than_ceiling_is_refused(self):
         value = document()
@@ -188,7 +192,7 @@ class RecordTests(unittest.TestCase):
         value["targets"][0].pop("label")
         self.assert_refused(value, "target 0 keys must be exactly")
         value = document()
-        value["targets"][0] = 1
+        value["targets"][2] = 1
         self.assert_refused(value, "must be an object")
         value = document()
         value["targets"] = {}
@@ -212,11 +216,16 @@ class CompareTests(unittest.TestCase):
     def targets(self):
         return budget_targets.load(TARGETS)
 
-    def test_every_target_is_compared_and_a_miss_is_reported(self):
-        result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidate())
+    def test_every_preset_is_compared_and_a_miss_is_reported(self):
+        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
+            result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
         self.assertFalse(result["enforced"])
         self.assertEqual(result["failures"], [])
-        self.assertEqual(len(result["comparisons"]), 6)
+        self.assertEqual(len(result["comparisons"]), 8)
+        self.assertEqual(
+            {item["preset"] for item in result["comparisons"]},
+            {"minimal", "coding", "ops", "all"},
+        )
         first = result["comparisons"][0]
         self.assertEqual(
             list(first), ["preset", "unit", "target", "measured", "headroom", "verdict"]
@@ -224,7 +233,7 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(
             first,
             {
-                "preset": "coding",
+                "preset": "minimal",
                 "unit": "tokens",
                 "target": 15183,
                 "measured": 21691,
@@ -232,10 +241,35 @@ class CompareTests(unittest.TestCase):
                 "verdict": "miss",
             },
         )
-        self.assertTrue(all(item["verdict"] == "miss" for item in result["comparisons"]))
+        self.assertEqual(
+            [item["verdict"] for item in result["comparisons"]],
+            ["miss", "miss", "miss", "miss", "miss", "miss", "pass", "pass"],
+        )
+
+    def test_the_all_target_uses_the_recorded_final_ceiling(self):
+        result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
+        adjusted = {
+            item["unit"]: item
+            for item in result["comparisons"]
+            if item["preset"] == "all"
+        }
+        self.assertEqual(adjusted["tokens"]["target"], 30004)
+        self.assertEqual(adjusted["bytes"]["target"], 140559)
+        self.assertEqual(adjusted["tokens"]["headroom"], 30004 - 21691)
+        self.assertEqual(adjusted["bytes"]["headroom"], 140559 - 105632)
+
+    def test_the_final_ceiling_is_not_recomputed(self):
+        targets = self.targets()
+        all_tokens = next(
+            item for item in targets
+            if item["preset"] == "all" and item["unit"] == "tokens"
+        )
+        self.assertEqual(all_tokens["target"], 30004)
+        self.assertNotEqual(all_tokens["target"], 15183)
+        self.assertEqual(all_tokens["label"], "Decision")
 
     def test_the_coding_headroom_matches_the_frozen_rows(self):
-        result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidate())
+        result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
         by_unit = {
             item["unit"]: item
             for item in result["comparisons"]
@@ -247,15 +281,31 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(by_unit["bytes"]["headroom"], -21127)
 
     def test_a_measured_value_at_or_under_target_passes(self):
-        measured = {"sha256": "ab" * 32, "bytes": 84505, "tokens": 15183}
+        measured = {}
+        for preset in budget_targets.TARGET_PRESETS:
+            if preset == "all":
+                measured[preset] = {
+                    "sha256": "ab" * 32, "bytes": 140559, "tokens": 30004
+                }
+            else:
+                measured[preset] = {
+                    "sha256": "ab" * 32, "bytes": 84505, "tokens": 15183
+                }
         result = budget_targets.compare(self.targets(), FROZEN_ROWS, measured)
         self.assertTrue(all(item["verdict"] == "pass" for item in result["comparisons"]))
         self.assertTrue(all(item["headroom"] == 0 for item in result["comparisons"]))
         self.assertEqual(result["failures"], [])
 
+    def test_before_the_flip_a_miss_prints_and_does_not_fail(self):
+        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", False):
+            result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
+        self.assertFalse(result["enforced"])
+        self.assertTrue(any(item["verdict"] == "miss" for item in result["comparisons"]))
+        self.assertEqual(result["failures"], [])
+
     def test_enforcing_turns_each_miss_into_a_failure(self):
         with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
-            result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidate())
+            result = budget_targets.compare(self.targets(), FROZEN_ROWS, candidates())
         self.assertTrue(result["enforced"])
         self.assertEqual(len(result["failures"]), 6)
         tokens = next(
@@ -265,13 +315,33 @@ class CompareTests(unittest.TestCase):
         )
         for expected in ("coding", "tokens", "15183", "21691", "-6508"):
             self.assertIn(expected, tokens)
-        self.assertTrue(all(item["verdict"] == "miss" for item in result["comparisons"]))
+        self.assertFalse(any("'all'" in failure for failure in result["failures"]))
+
+    def test_an_adjusted_preset_still_fails_above_its_final_ceiling(self):
+        measured = {
+            preset: {"sha256": "ab" * 32, "bytes": 84505, "tokens": 15183}
+            for preset in budget_targets.TARGET_PRESETS
+        }
+        measured["all"] = {"sha256": "ab" * 32, "bytes": 140560, "tokens": 30005}
+        with mock.patch.object(budget_targets, "PRESET_TARGETS_ENFORCED", True):
+            result = budget_targets.compare(self.targets(), FROZEN_ROWS, measured)
+        self.assertEqual(len(result["failures"]), 2)
+        for failure in result["failures"]:
+            self.assertIn("'all'", failure)
+            self.assertIn("30005" if "tokens" in failure else "140560", failure)
+
+    def test_a_missing_preset_measurement_raises(self):
+        measured = candidates()
+        measured.pop("ops")
+        with self.assertRaises(budget_targets.TargetError) as caught:
+            budget_targets.compare(self.targets(), FROZEN_ROWS, measured)
+        self.assertIn("targets: no measured candidate for preset 'ops'", str(caught.exception))
 
     def test_a_missing_baseline_row_raises_instead_of_comparing_zero(self):
         rows = dict(FROZEN_ROWS)
         rows.pop("client/synthetic-eager-client/turn/1/tokens")
         with self.assertRaises(budget_targets.TargetError) as caught:
-            budget_targets.compare(self.targets(), rows, candidate())
+            budget_targets.compare(self.targets(), rows, candidates())
         message = str(caught.exception)
         self.assertIn("targets: missing baseline row", message)
         self.assertIn("client/synthetic-eager-client/turn/1/tokens", message)
@@ -281,20 +351,24 @@ class CompareTests(unittest.TestCase):
         rows = dict(FROZEN_ROWS)
         rows["client/synthetic-eager-client/turn/1/bytes"] = 105631
         with self.assertRaises(budget_targets.TargetError) as caught:
-            budget_targets.compare(self.targets(), rows, candidate())
+            budget_targets.compare(self.targets(), rows, candidates())
         message = str(caught.exception)
         self.assertIn("in the frozen record", message)
         self.assertIn("105631", message)
 
     def test_a_candidate_without_a_measure_raises(self):
+        measured = candidates()
+        measured["coding"] = {"sha256": "ab" * 32}
         with self.assertRaises(budget_targets.TargetError) as caught:
-            budget_targets.compare(self.targets(), FROZEN_ROWS, {"sha256": "ab" * 32})
-        self.assertIn("candidate tokens is not a non-negative integer", str(caught.exception))
+            budget_targets.compare(self.targets(), FROZEN_ROWS, measured)
+        message = str(caught.exception)
+        self.assertIn("preset 'coding' candidate tokens", message)
+        self.assertIn("not a non-negative integer", message)
 
     def test_the_comparison_does_not_mutate_the_record(self):
         targets = self.targets()
         before = copy.deepcopy(targets)
-        budget_targets.compare(targets, FROZEN_ROWS, candidate())
+        budget_targets.compare(targets, FROZEN_ROWS, candidates())
         self.assertEqual(targets, before)
 
 

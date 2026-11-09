@@ -34,9 +34,8 @@ import re
 import sys
 from pathlib import Path
 
-import budget_check
 import probe_pack_shape
-from measure import _parse_pack
+from measure import _parse_pack, measure_candidate
 from offline_tokenizer import BudgetError, load
 
 HERE = Path(__file__).resolve().parent
@@ -110,7 +109,7 @@ def measure(path, tokenizer) -> dict:
     except OSError as exc:
         _fail(f"cannot read candidate pack {path}: {exc}")
     pack = _parse_pack(raw)
-    return budget_check.measure_candidate(pack, tokenizer)
+    return measure_candidate(pack, tokenizer)
 
 
 def measure_candidates(tokenizer) -> dict:

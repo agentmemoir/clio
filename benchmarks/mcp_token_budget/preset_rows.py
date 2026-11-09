@@ -158,6 +158,30 @@ def measure(binary, fixtures, tokenizer, date):
     return rows
 
 
+def measure_presets(binary, tokenizer, presets=PRESETS):
+    """Export each preset live and return its measured sha256, bytes, and tokens.
+
+    This is the target arm's candidate measurement: it exports every preset with
+    the same command the recorder uses, keeps nothing, and returns the numbers a
+    target is compared against. A committed pack is never the candidate here, so
+    a live regression cannot pass behind a stale fixture.
+    """
+    resolved = _binary(binary)
+    measured = {}
+    with tempfile.TemporaryDirectory(prefix="clio-preset-targets-") as staging:
+        for preset in presets:
+            staged = Path(staging) / f"{preset}.json"
+            _export(resolved, preset, staged)
+            pack = _parse_pack(staged.read_bytes(), preset)
+            row = _row(preset, pack, tokenizer, "")
+            measured[preset] = {
+                "sha256": row["input_sha256"],
+                "bytes": row["bytes"],
+                "tokens": row["tokens"],
+            }
+    return measured
+
+
 def _render(out_path, rows, tokenizer) -> str:
     """Return the complete record document as one string."""
     try:
