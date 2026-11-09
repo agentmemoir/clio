@@ -84,11 +84,7 @@ fn a_matching_supported_version_reaches_dispatch() {
 
 #[test]
 fn a_matching_unsupported_version_is_refused() {
-    let (status, body) = refused(
-        &state(),
-        &headers("2025-11-25"),
-        &list_frame("2025-11-25"),
-    );
+    let (status, body) = refused(&state(), &headers("2025-11-25"), &list_frame("2025-11-25"));
     assert_eq!(status, 400, "{body}");
     assert_eq!(code(&body), -32022, "{body}");
     assert_eq!(
@@ -193,10 +189,7 @@ fn the_served_pin_and_live_route_stay_off_the_candidate_surface() {
     assert_eq!(SUPPORTED_REVISIONS.len(), 1);
     assert_eq!(SUPPORTED_REVISIONS[0], CANDIDATE_REVISION);
     assert_ne!(CANDIDATE_REVISION, crate::MCP_PROTOCOL_REVISION);
-    assert_eq!(
-        McpHandler::new(state()).protocol_revision(),
-        "2025-11-25"
-    );
+    assert_eq!(McpHandler::new(state()).protocol_revision(), "2025-11-25");
     let lib = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("the crate root is readable");
     assert!(
