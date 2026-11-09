@@ -10,10 +10,10 @@ check reads the limits from this file and never from the pack it measures.
 The in-scope locations are frozen data in ``description_scope.json``, recorded
 from the pack as it stood before the wording changed: each entry names one tool
 and a JSON path inside that tool object, which reaches a property description,
-a nested ``$defs`` property description, or the tool's own description. The
-manifest also holds the frozen target names, and the pack must publish the same
-names. A location that is absent from the pack fails instead of being skipped,
-and a description that was never in scope is never measured.
+a property description nested in array items, or the tool's own description.
+The manifest also holds the frozen target names, and the pack must publish the
+same names. A location that is absent from the pack fails instead of being
+skipped, and a description that was never in scope is never measured.
 
 Unicode scalar values are counted as the length of the decoded string, which
 counts code points exactly. Tokens come from the repo-pinned offline tokenizer,

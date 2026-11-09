@@ -31,6 +31,7 @@ use crate::schema_ops_defs::ops_defs;
 use crate::schema_portability_defs::portability_defs;
 use crate::schema_request_defs::request_defs;
 use crate::schema_retention_defs::retention_defs;
+use crate::schema_shape::{PackShape, SHIPPED_PACK_SHAPE};
 use crate::schema_sync_defs::sync_defs;
 use serde_json::{Value, json};
 
@@ -65,18 +66,19 @@ pub fn catalog_def(name: &str) -> Option<ToolDef> {
     catalog_defs().into_iter().find(|def| def.name == name)
 }
 
-/// Build the complete `tool_schema` pack for the bound catalog.
+/// Build the complete `tool_schema` pack for the bound catalog, in the shape
+/// this build ships.
 ///
 /// The pack carries the pinned MCP revision, a deterministic catalog hash,
 /// and the published definition of that hash, so drift between the schema pack
 /// and the registered tool set is detectable and the digest is recomputable.
 #[must_use]
 pub fn schema_pack() -> Value {
-    let tools: Vec<Value> = catalog_defs().iter().map(ToolDef::to_tool).collect();
-    pack_of(&tools)
+    pack_document(&catalog_defs(), SHIPPED_PACK_SHAPE)
 }
 
-/// Build the `tool_schema` pack holding only the tools `groups` select.
+/// Build the `tool_schema` pack holding only the tools `groups` select, in the
+/// shape this build ships.
 ///
 /// The selection resolves through [`clio_types::tools_of`], the same derivation
 /// a preset resolves through, so a narrowed pack and a listing made under that
@@ -85,16 +87,37 @@ pub fn schema_pack() -> Value {
 #[must_use]
 pub fn schema_pack_for_groups(groups: &[clio_types::ToolGroup]) -> Value {
     let names = clio_types::tools_of(groups);
-    let tools: Vec<Value> = catalog_defs()
-        .iter()
+    let tools: Vec<ToolDef> = catalog_defs()
+        .into_iter()
         .filter(|def| names.contains(&def.name))
+        .collect();
+    pack_document(&tools, SHIPPED_PACK_SHAPE)
+}
+
+/// Build the pack document for `tools` in exactly one shape.
+///
+/// The document is assembled once: every tool is emitted, resolved to `shape`,
+/// hashed as emitted, and wrapped. One call yields one document, so a caller
+/// cannot be handed both shapes at once and the shipped build paths can only
+/// emit the shape they name.
+///
+/// The shape parameter is not part of the crate's public surface: the only
+/// shape an outside caller can reach is the one [`schema_pack`] and
+/// [`schema_pack_for_groups`] ship.
+#[must_use]
+pub(crate) fn pack_document(tools: &[ToolDef], shape: PackShape) -> Value {
+    let tools: Vec<Value> = tools
+        .iter()
         .map(ToolDef::to_tool)
+        .map(|tool| shape.tool(&tool))
         .collect();
     pack_of(&tools)
 }
 
 /// Assemble the pack document around `tools`, so the object shape is written
-/// once and a narrowed pack cannot drift from the full one.
+/// once and a narrowed pack cannot drift from the full one. `tools` arrives
+/// already resolved to the shape the pack ships, so the hash covers exactly
+/// what the pack publishes.
 fn pack_of(tools: &[Value]) -> Value {
     json!({
         "format": PACK_FORMAT,
@@ -265,3 +288,7 @@ mod schema_hash_tests;
 #[cfg(test)]
 #[path = "schema_local_defs_tests.rs"]
 mod schema_local_defs_tests;
+
+#[cfg(test)]
+#[path = "schema_pack_reference_tests.rs"]
+mod schema_pack_reference_tests;

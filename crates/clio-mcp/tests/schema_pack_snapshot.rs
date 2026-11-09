@@ -4,15 +4,19 @@
 //! # Responsibility
 //!
 //! This module is responsible for holding the committed `tool_schema` pack to
-//! the pack the registry builds today, so a tool parameter or description
-//! change cannot land without the snapshot changing with it.
+//! the pack the registry builds today, so neither a tool change nor a shape
+//! change can land without a fixture change.
 //!
 //! ## Owns
 //! - `the_committed_schema_pack_matches_the_registry`
+//! - `the_shipped_pack_holds_no_reference_and_no_definitions`
 //! - The committed fixture's one-tool-per-line layout
 //!
 //! ## Does not own
 //! - The pack document itself (`clio-mcp` `schema`)
+//! - Which shape ships (`clio-mcp` `schema_shape`)
+//! - The reference-shape candidate, which only the crate can emit (the crate's
+//!   internal pack-reference tests)
 //! - Per-tool parameter definitions (`clio-mcp` `schema_defs` and friends)
 //!
 //! ## Boundary
@@ -21,11 +25,10 @@
 //! normally require the fixture to be regenerated here. A change to how the
 //! pack is assembled should not: this test compares whole documents, not
 //! fields.
-//
-//! The fixture is embedded with `include_str!` rather than read from disk, so
-//! the test opens no path, has no working-directory dependency, and holds no
-//! clock or environment input. It is a pure comparison and passes in any order
-//! and in parallel.
+//!
+//! The shipped fixture is embedded with `include_str!` rather than read from
+//! disk, so the comparison opens no path and holds no clock or environment
+//! input.
 
 use clio_mcp::schema::schema_pack;
 use serde_json::Value;
@@ -41,7 +44,7 @@ const REGENERATE: &str = concat!(
     "crates/clio-mcp/tests/fixtures/schema_pack.json` and commit the result",
 );
 
-/// Guard: the committed fixture keeps one `tools` array element per line, the
+/// Guard: a committed fixture keeps one `tools` array element per line, the
 /// layout the export writer produces, so a compacted fixture fails the gate.
 fn assert_one_tool_per_line(raw: &str) {
     let mut lines = raw.lines();
@@ -84,4 +87,41 @@ fn the_committed_schema_pack_matches_the_registry() {
 
     assert_eq!(committed, schema_pack(), "{REGENERATE}");
     assert_one_tool_per_line(COMMITTED_PACK);
+}
+
+/// How many `keyword` keys appear anywhere in `value`.
+fn count(value: &Value, keyword: &str) -> usize {
+    match value {
+        Value::Object(map) => {
+            usize::from(map.contains_key(keyword))
+                + map
+                    .values()
+                    .map(|child| count(child, keyword))
+                    .sum::<usize>()
+        }
+        Value::Array(items) => items.iter().map(|item| count(item, keyword)).sum(),
+        _ => 0,
+    }
+}
+
+/// The shipped pack resolves every local reference, so it holds neither a
+/// `$ref` nor the `$defs` a reference would resolve against: each tool schema
+/// is complete on its own, and the committed fixture is that same document.
+#[test]
+fn the_shipped_pack_holds_no_reference_and_no_definitions() {
+    let shipped = schema_pack();
+    assert_eq!(
+        count(&shipped, "$ref"),
+        0,
+        "the shipped pack holds no `$ref`"
+    );
+    assert_eq!(
+        count(&shipped, "$defs"),
+        0,
+        "the shipped pack holds no `$defs`"
+    );
+    let committed: Value =
+        serde_json::from_str(COMMITTED_PACK).expect("the committed pack is JSON");
+    assert_eq!(count(&committed, "$ref"), 0, "{REGENERATE}");
+    assert_eq!(count(&committed, "$defs"), 0, "{REGENERATE}");
 }
