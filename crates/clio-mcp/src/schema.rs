@@ -102,6 +102,7 @@ fn pack_of(tools: &[Value]) -> Value {
         "mcp_protocol_revision": MCP_PROTOCOL_REVISION,
         "catalog_hash": catalog_hash(tools),
         "catalog_hash_definition": catalog_hash_definition(),
+        "description_bound_definition": description_bound_definition(),
         "tools": tools
     })
 }
@@ -174,6 +175,22 @@ fn catalog_hash_definition() -> Value {
         "concatenation": "adjacent bytes, no separator",
         "rendered_form": "fnv1a64:{hash:016x}",
         "rendered_form_is_external_contract": true
+    })
+}
+
+/// The published bound for one tool or argument description: both limits, the
+/// unit they are counted in, the tokenizer the token count comes from, and the
+/// scope rule that says what is measured. It ships in every pack, beside the
+/// hash definition, so the check reads the bound from the pack it measures.
+#[must_use]
+fn description_bound_definition() -> Value {
+    json!({
+        "max_unicode_scalar_values": 120,
+        "max_tokens": 25,
+        "unit": "one description, counted as Unicode scalar values and cl100k_base tokens",
+        "tokenizer": "cl100k_base",
+        "tokenizer_version": "0.14.0",
+        "scope_rule": "Each description in the frozen in-scope manifest is measured on its own, and a value at or below both limits passes."
     })
 }
 
