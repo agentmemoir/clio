@@ -263,7 +263,8 @@ class ArmTests(unittest.TestCase):
         self.assertEqual(
             list(report),
             ["format", "format_version", "baseline", "candidate", "allowance",
-             "arms", "skill", "activated", "targets", "failures", "verdict"],
+             "arms", "skill", "activated", "targets", "descriptions", "failures",
+             "verdict"],
         )
         self.assertEqual(report["skill"]["status"], "not-measured")
         self.assertEqual(report["activated"]["status"], "not-measured")

@@ -39,8 +39,8 @@ DERIVED_FROM = {
     "record": "benchmarks/mcp_token_budget/presets/frozen-v1.json",
     "record_id": "preset-surface-v1",
     "row": "minimal",
-    "catalog_hash": "fnv1a64:61637a63ede0e509",
-    "input_sha256": "d4a27cc35dc8f0ee1786e2fdc4c5badebfa543633fca1b24f08153b64906a799",
+    "catalog_hash": "fnv1a64:b7a8f5d67479619b",
+    "input_sha256": "e20c9cc9a80acb54318ac7b15ddc6796cd2cd0c12c7f9fbff586ea8aa0461824",
 }
 
 
@@ -83,18 +83,18 @@ class CommittedRecordTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         decision = records[0]
         self.assertEqual(list(decision), list(budget_decisions.RECORD_KEYS))
-        self.assertEqual(decision["decision_id"], "mcp-minimal-preset-size-2026-11-06")
-        self.assertEqual(decision["date"], "2026-11-06")
+        self.assertEqual(decision["decision_id"], "mcp-minimal-preset-size-2026-11-09")
+        self.assertEqual(decision["date"], "2026-11-09")
         self.assertEqual(decision["label"], "Decision")
         self.assertEqual(decision["judgement"], "derived")
         self.assertEqual(decision["preset"], "minimal")
-        self.assertEqual(decision["bytes"], 17321)
-        self.assertEqual(decision["tokens"], 3652)
+        self.assertEqual(decision["bytes"], 13224)
+        self.assertEqual(decision["tokens"], 2803)
         self.assertEqual(decision["derived_from"], DERIVED_FROM)
         self.assertEqual(
-            decision["base_commit"], "0352da7084042f04f1cc7a6db15379705009bf52"
+            decision["base_commit"], "ef53c2590bb306367d4fff90c4fdafe0aa4d6b20"
         )
-        self.assertIn("17321 bytes and 3652 tokens", decision["reason"])
+        self.assertIn("13224 bytes and 2803 tokens", decision["reason"])
         self.assertTrue(
             decision["reason"].startswith(
                 "The minimal preset is the six tools in the retrieval and graph groups"
@@ -281,7 +281,7 @@ class RecordTests(unittest.TestCase):
         value = document()
         value["records"].append(copy.deepcopy(record(value)))
         self.assert_refused(
-            value, "duplicate decision_id: 'mcp-minimal-preset-size-2026-11-06'"
+            value, "duplicate decision_id: 'mcp-minimal-preset-size-2026-11-09'"
         )
 
     def test_records_out_of_date_order_are_refused(self):
@@ -292,7 +292,7 @@ class RecordTests(unittest.TestCase):
         value["records"].append(earlier)
         message = self.assert_refused(value, "records are not ordered by date")
         self.assertIn("2026-11-05", message)
-        self.assertIn("2026-11-06", message)
+        self.assertIn("2026-11-09", message)
 
     def test_keys_must_be_exact_at_every_level(self):
         extra = document()

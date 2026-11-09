@@ -30,7 +30,7 @@ import budget_targets
 REPO_ROOT = HERE.parents[1]
 PACK = REPO_ROOT / "crates" / "clio-mcp" / "tests" / "fixtures" / "schema_pack.json"
 
-FIXTURE_DIGEST = "a43d52ea02d81517f478cbebe88b87d193477c90ebe80a33332e0ac7e27586e2"
+FIXTURE_DIGEST = "ec9192b3666f93520df106d8416c385f46a63ab16a10e6dea637b5d02d01ca1f"
 
 ACTIVATED_ROW = "activated_skill_body/tokens"
 ACTIVATED_TOKENS = 594
@@ -66,19 +66,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(report["format"], "clio_mcp_budget_check")
         self.assertEqual(report["verdict"], "pass")
         expected_allowance = {
-            "decision_id": "mcp-admission-candidate-def-2026-11-06",
-            "date": "2026-11-06",
-            "base_commit": "f3ebd67c8eb99b0f6dbadda927ba234cd0fbfd96",
-            "max_bytes": 148729,
-            "max_tokens": 31691,
+            "decision_id": "mcp-description-shortening-2026-11-09",
+            "date": "2026-11-09",
+            "base_commit": "ef53c2590bb306367d4fff90c4fdafe0aa4d6b20",
+            "max_bytes": 139703,
+            "max_tokens": 29831,
         }
         self.assertEqual(report["allowance"], expected_allowance)
         self.assertEqual(report["failures"], [])
         self.assertEqual(
             report["candidate"],
-            {"sha256": FIXTURE_DIGEST, "bytes": 148729, "tokens": 31691},
+            {"sha256": FIXTURE_DIGEST, "bytes": 139703, "tokens": 29831},
         )
-        self.assertEqual([arm["delta"] for arm in report["arms"]], [43097, 10000])
+        self.assertEqual([arm["delta"] for arm in report["arms"]], [34071, 8140])
         for arm in report["arms"]:
             self.assertEqual(arm["verdict"], "pass")
             self.assertEqual(arm["allowance"], expected_allowance)
@@ -91,7 +91,8 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(
             list(report),
             ["format", "format_version", "baseline", "candidate", "allowance",
-             "arms", "skill", "activated", "targets", "failures", "verdict"],
+             "arms", "skill", "activated", "targets", "descriptions", "failures",
+             "verdict"],
         )
         self.assertEqual(report["skill"]["status"], "not-measured")
         self.assertEqual(report["skill"]["reason"], budget_check.NO_SKILL_PATH)
