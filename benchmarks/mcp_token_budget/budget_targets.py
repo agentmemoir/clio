@@ -168,13 +168,17 @@ def _policy(value) -> dict:
 
 
 def _basis(value) -> dict:
-    """Return the basis block, or refuse one that claims per-preset measurements."""
+    """Return the basis block, or refuse one that denies per-preset measurement."""
     value = _object(value, "basis", BASIS_KEYS)
     for key in ("shared_row", "per_preset_measurement"):
         if not isinstance(value[key], bool):
             _fail(f"basis.{key} is {value[key]!r}, expected a boolean")
     _expect(value["shared_row"], "basis.shared_row", True)
-    _expect(value["per_preset_measurement"], "basis.per_preset_measurement", False)
+    if value["per_preset_measurement"] is not True:
+        _fail(
+            "basis.per_preset_measurement is False: every preset pack is exported "
+            "by the built binary and measured as a candidate on every run"
+        )
     _nonempty(value["reason"], "basis.reason")
     return dict(value)
 

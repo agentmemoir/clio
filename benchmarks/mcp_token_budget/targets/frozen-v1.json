@@ -9,8 +9,8 @@
   },
   "basis": {
     "shared_row": true,
-    "per_preset_measurement": false,
-    "reason": "Every preset now carries both targets, each derived from the shared full-surface row. The value is a ceiling on the preset's own live measurement, not a chosen value: per-preset packs are exported by the built binary and measured as candidates on every run. A measured value above its target fails the run. The all preset cannot reach the shared-derived ceiling without removing shipped tools, so it carries one explicit recorded final ceiling in target_adjustment."
+    "per_preset_measurement": true,
+    "reason": "Every preset carries both targets. The minimal, coding, and ops targets derive from the shared full-surface row. The all preset cannot reach that shared-derived ceiling without removing shipped tools, so it carries one explicit recorded final ceiling in target_adjustment. Each value is a ceiling on the preset's own live measurement, not a chosen value: every preset pack is exported by the built binary and measured as a candidate on every run. A measured value above its target fails the run."
   },
   "tokenizer": {
     "encoding": "cl100k_base",

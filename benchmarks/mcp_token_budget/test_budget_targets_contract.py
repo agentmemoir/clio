@@ -110,11 +110,13 @@ class ContractTests(unittest.TestCase):
         value["policy"].pop("foreign_tokenizer")
         self.assert_refused(value, "policy keys must be exactly")
 
-    def test_claiming_per_preset_measurements_is_refused(self):
+    def test_denying_per_preset_measurements_is_refused(self):
         value = document()
-        value["basis"]["per_preset_measurement"] = True
+        value["basis"]["per_preset_measurement"] = False
         self.assert_refused(
-            value, "basis.per_preset_measurement is True, expected False"
+            value,
+            "basis.per_preset_measurement is False: every preset pack is exported "
+            "by the built binary and measured as a candidate on every run",
         )
 
     def test_denying_the_shared_row_is_refused(self):
