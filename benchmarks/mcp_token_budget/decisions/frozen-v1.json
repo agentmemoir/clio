@@ -8,22 +8,22 @@
   },
   "records": [
     {
-      "decision_id": "mcp-minimal-preset-size-2026-11-06",
-      "date": "2026-11-06",
+      "decision_id": "mcp-minimal-preset-size-2026-11-09",
+      "date": "2026-11-09",
       "label": "Decision",
       "judgement": "derived",
       "preset": "minimal",
-      "bytes": 17321,
-      "tokens": 3652,
+      "bytes": 13224,
+      "tokens": 2803,
       "derived_from": {
         "record": "benchmarks/mcp_token_budget/presets/frozen-v1.json",
         "record_id": "preset-surface-v1",
         "row": "minimal",
-        "catalog_hash": "fnv1a64:61637a63ede0e509",
-        "input_sha256": "d4a27cc35dc8f0ee1786e2fdc4c5badebfa543633fca1b24f08153b64906a799"
+        "catalog_hash": "fnv1a64:b7a8f5d67479619b",
+        "input_sha256": "e20c9cc9a80acb54318ac7b15ddc6796cd2cd0c12c7f9fbff586ea8aa0461824"
       },
-      "reason": "The minimal preset is the six tools in the retrieval and graph groups, and that is what a default turn needs; keeping its measured size costs 17321 bytes and 3652 tokens, so a larger set would spend context on tools the default turn never calls.",
-      "base_commit": "0352da7084042f04f1cc7a6db15379705009bf52"
+      "reason": "The minimal preset is the six tools in the retrieval and graph groups, and that is what a default turn needs; keeping its measured size costs 13224 bytes and 2803 tokens, so a larger set would spend context on tools the default turn never calls.",
+      "base_commit": "f36a0723f36c2dcf592428f50d36b7ee44cb75d1"
     }
   ]
 }

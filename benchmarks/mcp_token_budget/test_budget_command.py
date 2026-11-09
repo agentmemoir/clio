@@ -68,7 +68,7 @@ class CommandTests(unittest.TestCase):
         expected_allowance = {
             "decision_id": "mcp-description-shortening-2026-11-09",
             "date": "2026-11-09",
-            "base_commit": "ef53c2590bb306367d4fff90c4fdafe0aa4d6b20",
+            "base_commit": "f36a0723f36c2dcf592428f50d36b7ee44cb75d1",
             "max_bytes": 139703,
             "max_tokens": 29831,
         }

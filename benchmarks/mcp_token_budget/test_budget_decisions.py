@@ -92,7 +92,7 @@ class CommittedRecordTests(unittest.TestCase):
         self.assertEqual(decision["tokens"], 2803)
         self.assertEqual(decision["derived_from"], DERIVED_FROM)
         self.assertEqual(
-            decision["base_commit"], "ef53c2590bb306367d4fff90c4fdafe0aa4d6b20"
+            decision["base_commit"], "f36a0723f36c2dcf592428f50d36b7ee44cb75d1"
         )
         self.assertIn("13224 bytes and 2803 tokens", decision["reason"])
         self.assertTrue(

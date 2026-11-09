@@ -41,6 +41,15 @@
       "candidate_sha256": "a43d52ea02d81517f478cbebe88b87d193477c90ebe80a33332e0ac7e27586e2",
       "max_bytes": 148729,
       "max_tokens": 31691
+    },
+    {
+      "decision_id": "mcp-description-shortening-2026-11-09",
+      "date": "2026-11-09",
+      "reason": "The in-scope argument and tool descriptions were shortened under the published bound, so the canonical tools array fell to 139703 bytes and 29831 cl100k_base tokens. This record covers the new candidate digest at a ceiling below the previous record's 148729 bytes and 31691 tokens.",
+      "base_commit": "f36a0723f36c2dcf592428f50d36b7ee44cb75d1",
+      "candidate_sha256": "ec9192b3666f93520df106d8416c385f46a63ab16a10e6dea637b5d02d01ca1f",
+      "max_bytes": 139703,
+      "max_tokens": 29831
     }
   ]
 }
