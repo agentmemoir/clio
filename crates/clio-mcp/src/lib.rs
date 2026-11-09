@@ -112,6 +112,8 @@ mod conditional_http;
 #[cfg(test)]
 mod lib_tests;
 #[cfg(test)]
+mod method_guard;
+#[cfg(test)]
 mod stateless;
 #[cfg(test)]
 mod stateless_fixtures;
