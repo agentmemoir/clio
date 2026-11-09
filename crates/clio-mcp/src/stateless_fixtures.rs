@@ -9,6 +9,7 @@
 //! transport test modules assert with.
 //!
 //! ## Owns
+//! - The one candidate fixture revision pin every candidate test module sends
 //! - The fixture runtime state, its registered bank, and the seeded domain-read
 //!   state
 //! - The request envelopes and `_meta` variants the candidate tests send
@@ -39,9 +40,20 @@ use crate::tools_page::PAGE_SIZE_KEY;
 
 pub(super) const BANK: &str = "fixture-bank";
 
-/// The one stored item the domain-read fixtures seed, and the gist it carries.
+/// The candidate fixture pin: the revision the candidate scenarios send.
+///
+/// It is the dispatcher's own pin rather than a restated literal, so an
+/// activation bump moves the fixtures with it and cannot leave a scenario on a
+/// stale revision that still passes. This is a test expectation, not a live
+/// protocol setting; the active pin stays [`crate::MCP_PROTOCOL_REVISION`].
+pub(crate) const CANDIDATE_FIXTURE_REVISION: &str = crate::stateless::CANDIDATE_REVISION;
+
+/// The one stored item the domain-read fixtures seed: its id, the gist its read
+/// carries, and the category and epistemic kind its listing row carries.
 pub(super) const DOMAIN_ITEM_ID: &str = "fixture-item-1";
 pub(super) const DOMAIN_GIST: &str = "the canonical fixture gist";
+pub(super) const DOMAIN_CATEGORY: &str = "task_spec";
+pub(super) const DOMAIN_EPISTEMIC_KIND: &str = "fact";
 const DOMAIN_TS: &str = "2024-01-01T00:00:00Z";
 
 pub(super) fn state() -> Arc<McpState> {
@@ -70,8 +82,8 @@ pub(super) fn domain_state() -> Arc<McpState> {
                 "gist": DOMAIN_GIST,
                 "snapshot": { "entity": "fixture", "amount": 1, "date": "2024-01-01" }
             },
-            "category": "task_spec",
-            "epistemic_kind": "fact",
+            "category": DOMAIN_CATEGORY,
+            "epistemic_kind": DOMAIN_EPISTEMIC_KIND,
             "source_text": "The fixture states the canonical gist (1 note since 2024-01-01).",
             "bank": BANK,
             "actor": "agent",
@@ -306,22 +318,34 @@ pub(super) fn check_gist_read(result: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The `inspect` domain listing: exactly the one seeded item, with the echo of
-/// the filter the store applied.
+/// The `inspect` domain listing: exactly the one seeded item, whose row carries
+/// that item's seeded category and epistemic kind, with a total that counts the
+/// rows it lists, and the echo of the filter the store applied.
+///
+/// The row's content is checked, not only its identity, so a listing that lists
+/// the right id beside a blank or foreign row cannot pass.
 pub(super) fn check_domain_listing(result: &Value) -> Result<(), String> {
     check_read_ok(result)?;
     let payload = read_payload(result)?;
     let items = payload["items"]
         .as_array()
         .ok_or_else(|| format!("a listing carries an item array: {payload}"))?;
-    if items.len() != 1 || payload["total"] != json!(1) {
+    let total = payload["total"].as_u64();
+    if items.len() != 1 || total != Some(items.len() as u64) {
         return Err(format!(
-            "the listing holds exactly the one seeded item: {payload}"
+            "the listing holds exactly the one seeded item, and its total counts its rows: {payload}"
         ));
     }
     if items[0]["item_id"] != json!(DOMAIN_ITEM_ID) {
         return Err(format!(
             "the listed row is the seeded item `{DOMAIN_ITEM_ID}`: {payload}"
+        ));
+    }
+    if items[0]["category"] != json!(DOMAIN_CATEGORY)
+        || items[0]["epistemic_kind"] != json!(DOMAIN_EPISTEMIC_KIND)
+    {
+        return Err(format!(
+            "the listed row is a `{DOMAIN_CATEGORY}`/{DOMAIN_EPISTEMIC_KIND} row: {payload}"
         ));
     }
     if payload["include_discarded"] != json!(false) {

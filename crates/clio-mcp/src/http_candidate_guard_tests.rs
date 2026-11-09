@@ -32,10 +32,10 @@
 use crate::http::HttpConfig;
 use crate::http::http_test_support_tests::request as raw_request;
 use crate::http_candidate_fixtures::{
-    CANDIDATE_FIXTURE_REVISION, body, check_error_envelope, check_removed_method_refusal, headers,
-    name_headers, post, raw_post, single_record_store, spawn_candidate, spawn_candidate_with,
+    body, check_error_envelope, check_removed_method_refusal, headers, name_headers, post,
+    raw_post, single_record_store, spawn_candidate, spawn_candidate_with,
 };
-use crate::stateless_fixtures::{request, required_meta};
+use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, request, required_meta};
 use serde_json::json;
 use std::sync::Arc;
 

@@ -9,16 +9,17 @@
 //! rejected.
 //!
 //! ## Owns
-//! - The `spawn_candidate` and `post` listing walk, page by page, following
-//!   `nextCursor`
+//! - The HTTP listing walk over the fixtures' live candidate server, page by
+//!   page, following `nextCursor`
 //! - The negative self-check of the shared walk checker
 //!
 //! ## Does not own
 //! - The candidate HTTP scenario registry, or the metadata, envelope, and
 //!   domain-read scenarios (see `http_candidate_tests`)
 //! - The candidate HTTP seam and its guards (`http_candidate`, `method_guard`)
-//! - The live-server fixtures (`http_candidate_fixtures`) and the shared walk
-//!   checker (`stateless_fixtures`)
+//! - The live-server fixtures (`http_candidate_fixtures`), including the
+//!   `spawn_candidate` and `post` helpers, and the shared walk checker
+//!   (`stateless_fixtures`)
 //!
 //! ## Boundary
 //!
@@ -27,11 +28,10 @@
 //!
 //! Keep this module focused on the candidate's HTTP listing walk.
 
-use crate::http_candidate_fixtures::{
-    CANDIDATE_FIXTURE_REVISION, body, headers, post, spawn_candidate,
-};
+use crate::http_candidate_fixtures::{body, headers, post, spawn_candidate};
 use crate::stateless_fixtures::{
-    catalogue_names, check_listing_walk, check_success_envelope, paged_list, required_meta, state,
+    CANDIDATE_FIXTURE_REVISION, catalogue_names, check_listing_walk, check_success_envelope,
+    paged_list, required_meta, state,
 };
 use serde_json::{Value, json};
 
@@ -64,7 +64,26 @@ fn http_listing_pagination() {
         "the walk reaches a terminal page in {} page(s)",
         pages.len()
     );
+    assert_page_sizes(&pages, size);
     check_listing_walk(&pages, &catalogue).unwrap_or_else(|error| panic!("the http walk: {error}"));
+}
+
+/// The walker's requested page size is honoured: every page but the last is
+/// exactly `size` tools long, so a page that silently ignores the request and
+/// answers the default size cannot pass.
+fn assert_page_sizes(pages: &[Value], size: usize) {
+    assert!(
+        pages.len() > 1,
+        "the walk covers more than one page, not {}",
+        pages.len()
+    );
+    let last = pages.len() - 1;
+    for (index, page) in pages[..last].iter().enumerate() {
+        let tools = page["tools"]
+            .as_array()
+            .expect("a listed page carries tools");
+        assert_eq!(tools.len(), size, "page {index} holds {size} tools: {page}");
+    }
 }
 
 /// A two-page synthetic walk in the shape a listing page carries: the tools each

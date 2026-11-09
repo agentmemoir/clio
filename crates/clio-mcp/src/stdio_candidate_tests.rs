@@ -28,20 +28,15 @@
 use super::serve_candidate;
 use crate::conditional_http::MCP_METHOD_HEADER;
 use crate::runtime::McpState;
-use crate::stateless::{CANDIDATE_REVISION, PROTOCOL_VERSION_HEADER, admit};
+use crate::stateless::{PROTOCOL_VERSION_HEADER, admit};
 use crate::stateless_fixtures::{
-    DOMAIN_ITEM_ID, check_complete_result, check_discovery_identity, check_domain_listing,
-    check_error_envelope, check_gist_read, check_success_envelope, domain_state, full_meta,
-    read_call, request, required_meta, state,
+    CANDIDATE_FIXTURE_REVISION, DOMAIN_CATEGORY, DOMAIN_EPISTEMIC_KIND, DOMAIN_ITEM_ID,
+    check_complete_result, check_discovery_identity, check_domain_listing, check_error_envelope,
+    check_gist_read, check_success_envelope, domain_state, full_meta, read_call, request,
+    required_meta, state,
 };
 use serde_json::{Value, json};
 use std::io::Cursor;
-
-/// The candidate fixture pin: the revision a future activation test expects.
-///
-/// This is a test expectation, not a live protocol setting. The active pin
-/// stays [`crate::MCP_PROTOCOL_REVISION`].
-const CANDIDATE_FIXTURE_REVISION: &str = "2026-07-28";
 
 /// One candidate wire scenario and the bounded check that proves it.
 struct Scenario {
@@ -159,24 +154,6 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
         ids.push(scenario.id);
     }
     assert_eq!(ids.len(), 11, "every covered scenario is registered");
-}
-
-#[test]
-fn the_candidate_fixture_pin_is_a_future_expectation() {
-    assert_eq!(
-        CANDIDATE_FIXTURE_REVISION, CANDIDATE_REVISION,
-        "the fixture pin follows the candidate dispatcher"
-    );
-    assert_eq!(
-        crate::MCP_PROTOCOL_REVISION,
-        "2025-11-25",
-        "the live pin does not move"
-    );
-    assert_ne!(
-        CANDIDATE_FIXTURE_REVISION,
-        crate::MCP_PROTOCOL_REVISION,
-        "the candidate pin is not a second live protocol setting"
-    );
 }
 
 #[test]
@@ -367,6 +344,32 @@ fn a_deliberately_wrong_domain_payload_fails_the_read_checkers() {
     assert!(
         check_domain_listing(&extra_rows).is_err(),
         "a listing that is not the one seeded row fails the check"
+    );
+
+    // One row carrying the seeded category and epistemic kind, so each of these
+    // fails on the one field it varies and not on a row the checker would reject
+    // anyway.
+    let one_row = |item_id: &str, total: u64| {
+        json!({
+            "isError": false,
+            "structuredContent": {
+                "items": [{
+                    "item_id": item_id,
+                    "category": DOMAIN_CATEGORY,
+                    "epistemic_kind": DOMAIN_EPISTEMIC_KIND
+                }],
+                "total": total,
+                "include_discarded": false
+            }
+        })
+    };
+    assert!(
+        check_domain_listing(&one_row("another-item", 1)).is_err(),
+        "a listing that names another item fails the check"
+    );
+    assert!(
+        check_domain_listing(&one_row(DOMAIN_ITEM_ID, 2)).is_err(),
+        "a listing whose total disagrees with its row fails the check"
     );
 }
 

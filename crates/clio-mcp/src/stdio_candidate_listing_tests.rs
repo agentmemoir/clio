@@ -28,14 +28,11 @@
 use super::serve_candidate;
 use crate::runtime::McpState;
 use crate::stateless_fixtures::{
-    catalogue_names, check_listing_walk, check_success_envelope, paged_list, required_meta, state,
+    CANDIDATE_FIXTURE_REVISION, catalogue_names, check_listing_walk, check_success_envelope,
+    paged_list, required_meta, state,
 };
 use serde_json::Value;
 use std::io::Cursor;
-
-/// The candidate fixture pin: the revision the candidate scenarios expect, not a
-/// live protocol setting.
-const CANDIDATE_FIXTURE_REVISION: &str = "2026-07-28";
 
 /// Serve one frame over the real candidate stdio adapter and return its answer.
 fn serve_one(state: &McpState, frame: &Value) -> Value {
@@ -78,6 +75,25 @@ fn stdio_listing_pagination() {
         "the walk reaches a terminal page in {} page(s)",
         pages.len()
     );
+    assert_page_sizes(&pages, size);
     check_listing_walk(&pages, &catalogue)
         .unwrap_or_else(|error| panic!("the stdio walk: {error}"));
+}
+
+/// The walker's requested page size is honoured: every page but the last holds
+/// exactly `size` tools, so a page that ignores the request and answers the
+/// default size cannot pass.
+fn assert_page_sizes(pages: &[Value], size: usize) {
+    assert!(
+        pages.len() > 1,
+        "the walk covers more than one page, not {}",
+        pages.len()
+    );
+    let last = pages.len() - 1;
+    for (index, page) in pages[..last].iter().enumerate() {
+        let tools = page["tools"]
+            .as_array()
+            .expect("a listed page carries tools");
+        assert_eq!(tools.len(), size, "page {index} holds {size} tools: {page}");
+    }
 }

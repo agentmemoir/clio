@@ -30,14 +30,13 @@
 //! domain-read scenarios.
 
 use crate::http_candidate_fixtures::{
-    CANDIDATE_FIXTURE_REVISION, body, check_complete_result, check_discovery_identity,
-    check_error_envelope, check_success_envelope, headers, name_headers, post, spawn_candidate,
-    spawn_domain_candidate,
+    body, check_complete_result, check_discovery_identity, check_error_envelope,
+    check_success_envelope, headers, name_headers, post, spawn_candidate, spawn_domain_candidate,
 };
 use crate::stateless::CANDIDATE_REVISION;
 use crate::stateless_fixtures::{
-    DOMAIN_ITEM_ID, check_domain_listing, check_gist_read, full_meta, read_call, request,
-    required_meta,
+    CANDIDATE_FIXTURE_REVISION, DOMAIN_ITEM_ID, check_domain_listing, check_gist_read, full_meta,
+    read_call, request, required_meta,
 };
 use serde_json::json;
 

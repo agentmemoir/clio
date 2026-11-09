@@ -9,8 +9,8 @@
 //! modules assert with.
 //!
 //! ## Owns
-//! - The candidate fixture revision pin and the live-server helpers, including
-//!   the one that serves the seeded domain-read state
+//! - The live-server helpers, including the one that serves the seeded
+//!   domain-read state
 //! - The candidate conditional-header builders and the POST helper
 //! - The success, error, discovery, and removed-method checkers
 //!
@@ -33,18 +33,12 @@ use crate::http::http_test_support_tests::{Response, post_json, request as raw_r
 use crate::http_auth::CredentialStore;
 use crate::http_candidate::serve_candidate;
 use crate::runtime::McpState;
-use crate::stateless_fixtures::{domain_state, state};
+use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, domain_state, state};
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
 use clio_types::Actor;
 use serde_json::{Value, json};
 use std::net::TcpListener;
 use std::sync::Arc;
-
-/// The candidate fixture pin: the revision a future activation test expects.
-///
-/// This is a test expectation, not a live protocol setting. The active pin
-/// stays [`crate::MCP_PROTOCOL_REVISION`].
-pub(crate) const CANDIDATE_FIXTURE_REVISION: &str = "2026-07-28";
 
 /// Serve the candidate endpoint on an OS-assigned port and return that port.
 ///
