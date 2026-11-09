@@ -122,6 +122,53 @@ fn a_missing_capability_the_request_needs_is_refused_at_admission() {
 }
 
 #[test]
+fn an_absent_method_header_is_refused_at_admission() {
+    let msg = tool_call(&required_meta(CANDIDATE_REVISION), json!({}));
+    let supplied = vec![(PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION)];
+    let (status, body) = refused(&state(), &supplied, &frame(&msg));
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32020, "{body}");
+    assert!(
+        message(&body).contains("Mcp-Method"),
+        "names the header: {body}"
+    );
+}
+
+#[test]
+fn a_mismatched_name_header_is_refused_at_admission() {
+    let msg = tool_call(&required_meta(CANDIDATE_REVISION), json!({}));
+    let supplied = vec![
+        (MCP_METHOD_HEADER, "tools/call"),
+        (MCP_NAME_HEADER, "summarize"),
+        (PROTOCOL_VERSION_HEADER, CANDIDATE_REVISION),
+    ];
+    let (status, body) = refused(&state(), &supplied, &frame(&msg));
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32020, "{body}");
+    assert!(
+        message(&body).contains("Mcp-Name"),
+        "names the header: {body}"
+    );
+}
+
+#[test]
+fn the_method_guard_runs_before_the_version_header_check() {
+    let frame = list_frame(CANDIDATE_REVISION);
+    let supplied = vec![(MCP_METHOD_HEADER, "tools/call")];
+    let (status, body) = refused(&state(), &supplied, &frame);
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(code(&body), -32020, "{body}");
+    assert!(
+        message(&body).contains("Mcp-Method"),
+        "names the method header: {body}"
+    );
+    assert!(
+        !message(&body).contains("MCP-Protocol-Version"),
+        "answers the method guard, not the version header: {body}"
+    );
+}
+
+#[test]
 fn an_unequal_header_and_body_version_is_refused() {
     let (status, body) = refused(
         &state(),
