@@ -41,6 +41,9 @@ pub(crate) struct CandidatePost;
 
 impl PostRoute for CandidatePost {
     fn respond(&self, ctx: PostContext<'_>) -> PostResponse {
+        if let Some(response) = crate::tool_listen::intercept(ctx.state, ctx.req) {
+            return response;
+        }
         match crate::stateless::admit(ctx.state, |header| ctx.req.get(header), ctx.req.body.trim())
         {
             Ok(Some(response)) => {
@@ -78,3 +81,7 @@ mod http_candidate_guard_tests;
 #[cfg(test)]
 #[path = "http_candidate_listing_tests.rs"]
 mod http_candidate_listing_tests;
+
+#[cfg(test)]
+#[path = "http_candidate_subscription_tests.rs"]
+mod http_candidate_subscription_tests;

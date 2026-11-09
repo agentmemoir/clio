@@ -30,7 +30,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 /// The most listeners one server holds at the same time.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const MAX_SUBSCRIPTIONS: usize = 8;
 
 /// One listener's view of the change counter.
@@ -42,7 +41,6 @@ pub(crate) struct Subscriber {
     ready: Condvar,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Subscriber {
     /// A subscriber that starts from `seen`.
     fn new(seen: u64) -> Self {
@@ -52,21 +50,37 @@ impl Subscriber {
         }
     }
 
+    /// The change count this subscriber currently holds.
+    pub(crate) fn observed(&self) -> u64 {
+        *self.seen.lock().expect("subscriber mutex poisoned")
+    }
+
     /// Wait until the change count differs from the last observed value.
     ///
     /// Returns the observed count when it differs, or the unchanged count when
     /// `timeout` expires. A spurious wake loops and costs nothing.
+    #[cfg(test)]
     pub(crate) fn wait(&self, timeout: Duration) -> u64 {
+        self.wait_from(self.observed(), timeout)
+    }
+
+    /// Wait until the count differs from `last`.
+    ///
+    /// A change published before this call returns at once, so a listener
+    /// never waits a full timeout for a change it already holds.
+    pub(crate) fn wait_from(&self, last: u64, timeout: Duration) -> u64 {
         let mut seen: std::sync::MutexGuard<'_, u64> =
             self.seen.lock().expect("subscriber mutex poisoned");
-        let baseline = *seen;
         loop {
+            if *seen != last {
+                return *seen;
+            }
             let (guard, outcome) = self
                 .ready
                 .wait_timeout(seen, timeout)
                 .expect("subscriber mutex poisoned");
             seen = guard;
-            if *seen != baseline || outcome.timed_out() {
+            if *seen != last || outcome.timed_out() {
                 return *seen;
             }
         }
@@ -90,7 +104,6 @@ impl ToolSignals {
     /// The first registration seeds the published baseline and notifies
     /// nobody. A repeated identifier returns the subscriber already registered.
     /// A full registry refuses a new identifier with [`NotRegistered::Capacity`].
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn register(
         &self,
         id: &str,
@@ -122,7 +135,6 @@ impl ToolSignals {
     }
 
     /// Drop one listener, if it is registered.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn unregister(&self, id: &str) {
         self.subscribers
             .lock()
@@ -178,7 +190,6 @@ impl ToolSignals {
 }
 
 /// Why the registry refused a registration.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NotRegistered {
     /// The registry already holds [`MAX_SUBSCRIPTIONS`] listeners.

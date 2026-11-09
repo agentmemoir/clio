@@ -40,7 +40,7 @@ Config and export consumers that carry the same value: `crates/clio-config/src/c
 
 ## Routing and dispatcher wiring
 
-HTTP: `crates/clio-mcp/src/http.rs` installs `CandidatePost` as the POST strategy in `serve_with_listener` (via `serve_with_listener_and`), and `route` refuses every verb but `POST` through `method_guard::refuse` before the Origin, auth, path, and media-type gates run, so a `GET` is a 405 with no body and there is no server-initiated SSE stream.
+HTTP: `crates/clio-mcp/src/http.rs` installs `CandidatePost` as the POST strategy in `serve_with_listener` (via `serve_with_listener_and`), and `route` refuses every verb but `POST` through `method_guard::refuse` before the Origin, auth, path, and media-type gates run, so a `GET` is a 405 with no body, and a POST `subscriptions/listen` request answers with a `text/event-stream` body.
 
 HTTP POST strategy: `crates/clio-mcp/src/http_candidate.rs` holds `CandidatePost` and `method_not_found_status` as live code, compiled unconditionally, and `crates/clio-mcp/src/http_post.rs` keeps only the `PostRoute` trait and the request-scoped `PostContext` (`state` and `req`) that the strategy reads. `crates/clio-mcp/src/method_guard.rs` is compiled unconditionally and owns the POST-only verb refusal.
 

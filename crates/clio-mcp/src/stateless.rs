@@ -277,6 +277,15 @@ pub(crate) fn dispatch(state: &McpState, msg: &Value) -> Option<Value> {
             None,
         ),
         "tools/call" => delegate(id, state, msg),
+        // This arm is reached only by the stdio path, which has one synchronous
+        // channel and cannot carry a stream; the HTTP POST path intercepts the
+        // method before dispatch.
+        "subscriptions/listen" => reject(
+            id,
+            ERR_INVALID_REQUEST,
+            "subscriptions/listen is served only over the HTTP POST transport",
+            None,
+        ),
         other => not_found(id, other),
     })
 }
@@ -371,7 +380,7 @@ fn discover() -> Value {
     json!({
         "resultType": "complete",
         "supportedVersions": SUPPORTED_REVISIONS,
-        "capabilities": { "tools": { "listChanged": false } },
+        "capabilities": { "tools": { "listChanged": true } },
         "ttlMs": CACHE_HINTS.ttl_ms,
         "cacheScope": CACHE_HINTS.scope,
         "_meta": result_meta()

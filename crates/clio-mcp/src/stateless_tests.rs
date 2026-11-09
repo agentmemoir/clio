@@ -71,7 +71,7 @@ fn discover_reports_the_candidate_revision_and_its_capabilities() {
     assert_eq!(result["supportedVersions"], json!([REVISION]));
     assert_eq!(
         result["capabilities"]["tools"],
-        json!({ "listChanged": false })
+        json!({ "listChanged": true })
     );
     assert_eq!(result["ttlMs"], json!(CACHE_HINTS.ttl_ms));
     assert_eq!(result["cacheScope"], json!(CACHE_HINTS.scope));

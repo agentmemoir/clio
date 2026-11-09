@@ -75,9 +75,6 @@ impl EventStream {
 }
 
 /// One SSE frame carrying `json` as its `data` line, shared by both callers.
-///
-/// The unit tests are the only caller until a route answers with a stream.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn frame(json: &str) -> Vec<u8> {
     format!("event: message\ndata: {json}\n\n").into_bytes()
 }

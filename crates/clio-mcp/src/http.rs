@@ -293,8 +293,8 @@ where
     P: PostRoute,
 {
     // One verb is served. A `GET` is refused with the same 405 as any other
-    // verb: no server-initiated SSE stream is offered, so there is nothing for
-    // it to open.
+    // verb: every answer belongs to a POST, so there is nothing for a `GET`
+    // to open.
     if let Some(refusal) = crate::method_guard::refuse(&req.method) {
         let extra = refusal
             .headers

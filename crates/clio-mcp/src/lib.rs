@@ -109,6 +109,7 @@ pub mod store_write;
 pub mod subject_request_tools;
 mod summarize_tools;
 pub mod sync_tools;
+mod tool_listen;
 mod tool_signals;
 mod tools_page;
 pub mod write_tools;

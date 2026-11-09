@@ -36,10 +36,6 @@ pub(crate) enum PostBody {
     /// A buffered JSON body, sent with its length.
     Buffered(String),
     /// A streamed SSE body, sent until the peer or the source ends it.
-    ///
-    /// The write path serves it; the tests are the builders until a route
-    /// answers with one.
-    #[cfg_attr(not(test), allow(dead_code))]
     Stream(EventStream),
 }
 
