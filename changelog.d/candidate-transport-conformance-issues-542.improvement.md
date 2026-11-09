@@ -1,0 +1,1 @@
+The candidate revision's admission and dispatch rules now run through both the HTTP and stdio transports in test builds, sharing the live HTTP gates (Origin, auth, path, media types, and GET) and answering unimplemented methods with the spec's 404 and `-32601`, with recorded scenarios for required and optional metadata, discovery identity, and the success and error envelopes.

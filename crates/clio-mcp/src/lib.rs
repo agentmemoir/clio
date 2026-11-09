@@ -48,6 +48,7 @@ mod export_destination;
 pub mod http;
 pub mod http_auth;
 mod http_guard;
+mod http_post;
 mod http_read;
 pub mod hygiene_tools;
 pub mod index_drain;
@@ -109,6 +110,10 @@ mod write_tools_handlers;
 
 #[cfg(test)]
 mod conditional_http;
+#[cfg(test)]
+mod http_candidate;
+#[cfg(test)]
+mod http_candidate_fixtures;
 #[cfg(test)]
 mod lib_tests;
 #[cfg(test)]

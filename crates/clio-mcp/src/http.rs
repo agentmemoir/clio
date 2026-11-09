@@ -46,7 +46,8 @@
 use crate::conn_pool::{ConnPool, MAX_CONNECTIONS};
 use crate::http::http_start_guard::{BindRefusal, bind_refusal};
 use crate::http_auth::{AuthOutcome, CredentialStore, authorize_request};
-use crate::http_guard::{HttpShared, check_origin, handle_delete, mint_session};
+use crate::http_guard::{HttpShared, check_origin, handle_delete};
+use crate::http_post::{LivePost, PostContext, PostRoute, scoped_state};
 use crate::http_read::{HttpRequest, read_request};
 use crate::protocol::McpHandler;
 use crate::runtime::McpState;
@@ -145,15 +146,26 @@ pub fn serve(state: Arc<McpState>, cfg: HttpConfig) -> std::io::Result<()> {
 }
 
 /// Serve MCP over an already-bound listener (testable entrypoint).
-///
-/// # Errors
-/// Accept or per-connection I/O failures are logged and the loop continues.
 #[allow(clippy::needless_pass_by_value)]
 pub fn serve_with_listener(
     state: Arc<McpState>,
     cfg: HttpConfig,
     listener: TcpListener,
 ) -> std::io::Result<()> {
+    serve_with_listener_and(state, cfg, listener, Arc::new(LivePost))
+}
+
+/// Serve over an already-bound listener with the given POST dispatch strategy.
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn serve_with_listener_and<P>(
+    state: Arc<McpState>,
+    cfg: HttpConfig,
+    listener: TcpListener,
+    post: Arc<P>,
+) -> std::io::Result<()>
+where
+    P: PostRoute + Send + Sync + 'static,
+{
     let loopback = listener.local_addr().is_ok_and(|a| a.ip().is_loopback());
     if let Some(refusal) = bind_refusal(&cfg, loopback) {
         // A store with no record authorizes nothing, so it is not a source. Each
@@ -187,12 +199,13 @@ pub fn serve_with_listener(
         let handler = Arc::clone(&handler);
         let cfg = cfg.clone();
         let shared = Arc::clone(&shared);
+        let post = Arc::clone(&post);
         std::thread::spawn(move || {
             // The slot guard is held for the whole connection and released by
             // Drop on every exit path: success, client error, server error,
             // write failure, timeout, or panic.
             let _slot = slot;
-            let _ = handle_conn(handler, cfg, shared, stream);
+            let _ = handle_conn(handler, cfg, shared, post, stream);
         });
     }
     Ok(())
@@ -209,12 +222,16 @@ fn refuse_over_cap(stream: &mut TcpStream) {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn handle_conn(
+fn handle_conn<P>(
     handler: Arc<McpHandler>,
     cfg: HttpConfig,
     shared: Arc<HttpShared>,
+    post: Arc<P>,
     mut stream: TcpStream,
-) -> std::io::Result<()> {
+) -> std::io::Result<()>
+where
+    P: PostRoute,
+{
     // Total request deadline, measured from the first accepted byte (accept
     // hands the connection over immediately) and bounding the read. A per-read
     // timeout alone does not bound a client that drips bytes. Nothing checks it
@@ -231,7 +248,7 @@ fn handle_conn(
             return write_simple(&mut stream, status, &message);
         }
     };
-    let (status, body, extra) = route(&handler, &cfg, &shared, &req);
+    let (status, body, extra) = route(&handler, &cfg, &shared, &req, &*post);
     let mut response = String::new();
     let _ = write!(response, "HTTP/1.1 {status}\r\n");
     for (k, v) in extra {
@@ -253,12 +270,16 @@ fn handle_conn(
 
 /// Core request routing; returns `(status, body, extra_headers)`.
 #[must_use]
-fn route(
+fn route<P>(
     handler: &Arc<McpHandler>,
     cfg: &HttpConfig,
     shared: &HttpShared,
     req: &HttpRequest,
-) -> (u16, String, Vec<(String, String)>) {
+    post: &P,
+) -> (u16, String, Vec<(String, String)>)
+where
+    P: PostRoute,
+{
     if req.method == "GET" {
         // Server-initiated SSE stream is not offered under this write surface;
         // the pinned revision allows a 405 refusal.
@@ -322,20 +343,15 @@ fn route(
     // one instance rather than a per-request fork. `Unbound` is the loopback dev
     // default: the base state, unchanged.
     let request_state = scoped_state(handler, principal);
-    let Some(response) = handler.handle_frame_with_state(&request_state, req.body.trim()) else {
-        // Notification-only POST: 202 with no body (pinned revision rule).
-        return (202, String::new(), vec![]);
-    };
-    let mut extra = Vec::new();
-    if cfg.sessions_enabled && request_method == "initialize" {
-        let id = mint_session(shared, identity.as_deref());
-        extra.push(("MCP-Session-Id".into(), id));
-    }
-    (
-        200,
-        serde_json::to_string(&response).unwrap_or_default(),
-        extra,
-    )
+    post.respond(PostContext {
+        handler,
+        state: &request_state,
+        cfg,
+        shared,
+        req,
+        identity: identity.as_deref(),
+        request_method: &request_method,
+    })
 }
 
 /// Whether this config authorizes anyone over the network.
@@ -347,21 +363,7 @@ pub fn has_credential_source(cfg: &HttpConfig) -> bool {
     cfg.credentials.as_ref().is_some_and(|c| !c.is_empty())
 }
 
-/// The state one request dispatches against: a shallow clone of the base state
-/// carrying this request's principal.
-///
-/// The clone is the point. Every field that must stay single and unforked is
-/// already behind an `Arc` on `McpState`, so a per-request copy shares the store
-/// engines, the index drain, the retention store, and the config runtime instead
-/// of duplicating them.
-fn scoped_state(handler: &Arc<McpHandler>, principal: AuthOutcome) -> McpState {
-    let base = handler.state();
-    match principal {
-        AuthOutcome::Bound(principal) => base.with_principal(principal),
-        AuthOutcome::Unbound => base.as_ref().clone(),
-    }
-}
-
+/// Whether an `Accept` header admits a JSON answer.
 fn accepts_json(accept: &str) -> bool {
     accept.is_empty()
         || accept.contains("application/json")
@@ -441,7 +443,7 @@ mod http_request_bounds_tests;
 mod http_start_auth_tests;
 #[cfg(test)]
 #[path = "http_test_support_tests.rs"]
-mod http_test_support_tests;
+pub(crate) mod http_test_support_tests;
 #[cfg(test)]
 #[path = "http_tests.rs"]
 mod http_tests;
