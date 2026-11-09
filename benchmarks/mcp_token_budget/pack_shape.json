@@ -4,7 +4,7 @@
   "record_id": "pack-shape-v1",
   "probe": {
     "status": "not_run",
-    "reason": "the baseline-captured payload holds no shared schema reference, so client support for shared schema references is unobserved",
+    "reason": "the baseline-captured payload holds no shared schema reference; a captured payload can refute reference resolution but cannot establish it, so client support for shared schema references is unobserved",
     "receipt_id": "pack-shape-probe-bf68dea714b90dbe-not_run",
     "client": {
       "fixture": "benchmarks/mcp_token_budget/baseline/clients/eager_all_defs.json",
@@ -14,21 +14,25 @@
       "provenance": "synthetic-mock",
       "fixture_version": 1
     },
+    "capture_available": true,
     "refs_observed": 0,
     "defs_observed": 0,
     "unresolved_refs": 0,
+    "stripped_schemas": 0,
     "fixtures_examined": [
       {
         "fixture": "benchmarks/mcp_token_budget/baseline/clients/eager_all_defs.json",
         "refs_observed": 0,
         "defs_observed": 0,
-        "unresolved_refs": 0
+        "unresolved_refs": 0,
+        "stripped_schemas": 0
       },
       {
         "fixture": "benchmarks/mcp_token_budget/baseline/clients/on_demand_deferred.json",
         "refs_observed": 0,
         "defs_observed": 0,
-        "unresolved_refs": 0
+        "unresolved_refs": 0,
+        "stripped_schemas": 0
       }
     ]
   },

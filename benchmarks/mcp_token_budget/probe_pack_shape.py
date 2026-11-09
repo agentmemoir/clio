@@ -1,25 +1,41 @@
 #!/usr/bin/env python3
-"""Probe whether the baseline-captured client resolves shared schema references.
+"""Probe what the baseline-captured payloads show about shared schema references.
 
 The pack ships exactly one shape, and which one it ships is decided by evidence
 rather than by preference. This probe produces that evidence: it reads the
-client captures the frozen baseline names, and it reports what those captures
-actually show about shared schema references, meaning local `#/...` pointers and
-the `$defs` objects they resolve against.
+client captures the frozen baseline names and reports what those captures
+actually show about local `#/...` pointers and the `$defs` objects they resolve
+against.
 
-The receipt it emits says only what was observed. A capture holding no local
-`$ref` and no `$defs` gives the probe nothing to observe, so the status is
-``not_run``: the client's support for shared references is unobserved, and an
-unobserved client never counts as a pass. ``passed`` needs at least one local
-`$ref` whose every target resolves inside the captured document, and ``failed``
-is a local `$ref` whose target does not. The receipt names the fixture it read,
-the client identity that fixture carries, its provenance, and the counts behind
-the verdict, so a reader can tell a synthetic capture from a real client.
+A capture is bytes a server sent to a client. Those bytes can *refute* that the
+client resolves shared schema references — a local `$ref` whose target is absent,
+or a schema observably stripped of the content it should carry, shows the client
+did not receive a resolvable document. They cannot *establish* support: nothing
+in the bytes records whether the client followed a pointer, and the specification
+mandates JSON Schema 2020-12 for schemas without `$schema`, permits local
+`$ref`/`$defs`, and forbids network dereference, so a well-formed capture is also
+what a client that ignores references would receive. This module therefore never
+infers support from a capture:
 
-Nothing here runs a client, reaches the network, or reads the pack: it reads
-committed capture bytes and hashes them, so two runs on one checkout agree. Any
-unusable input exits 2 with ``pack-shape-probe: <message>`` on stderr, which is
-never a pass, and a receipt prints to stdout once with ``--json``.
+- ``failed`` only when the capture refutes support: a local `$ref` is present
+  and its target does not resolve inside the captured document, or a captured
+  schema is present with no content at all (``{}`` or ``null``).
+- ``not_run`` in every other case, explicitly including a capture whose local
+  `$ref`s are present and all resolve. The reason says a captured payload can
+  refute reference resolution but cannot establish it, so support is unobserved.
+- ``passed`` stays an allowed status in the receipt format and in `choose()`, so
+  a future observation path can report one, but no capture path produces it.
+
+An unavailable capture — a missing or unreadable fixture, a capture that is not
+JSON, or one whose digest does not match the digest the baseline recorded — is
+also ``not_run``. The receipt names what was unavailable, carries whatever client
+identity the baseline record states, and is still printed and recorded, so "if
+unavailable, record Not run and ship the flattened candidate" covers that case
+too. A run that honestly records ``not_run`` is a successful run and exits 0;
+only a usage error exits 2.
+
+Nothing here runs a client, reaches the network, or reads the pack, so two runs
+on one checkout agree; the id derives from the fixture digest and status.
 """
 
 import argparse
@@ -44,6 +60,18 @@ STATUSES = (STATUS_NOT_RUN, STATUS_PASSED, STATUS_FAILED)
 #: Provenance stated for a capture this probe did not take from a live client.
 PROVENANCE_SYNTHETIC = "synthetic-mock"
 SYNTHETIC_CAPTURE = "synthetic-replay"
+
+#: Why no capture can ever establish support; every non-failure receipt says it.
+REFUTE_ONLY = (
+    "a captured payload can refute reference resolution but cannot establish it, "
+    "so client support for shared schema references is unobserved"
+)
+
+#: The members of a captured tool definition that carry a schema document.
+SCHEMA_MEMBERS = ("inputSchema", "outputSchema")
+
+#: The receipt-id token used when not even a recorded fixture digest is known.
+UNKNOWN_CLIENT = "unknown-client"
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -103,10 +131,8 @@ def _local(reference) -> bool:
 def _observe(payload) -> dict:
     """Return the shared-reference counts one captured payload shows.
 
-    A local reference is resolved against the captured payload and against every
-    object above it that carries a `$defs`, so a schema that defines its own
-    shared objects is read the way a client reads it. A reference none of those
-    scopes resolve is the only thing counted as unresolved.
+    A local reference resolves against the payload and every enclosing object
+    that carries a `$defs`, the way a client reads it.
     """
     refs = 0
     defs = 0
@@ -136,6 +162,26 @@ def _observe(payload) -> dict:
     }
 
 
+def _stripped(payload) -> int:
+    """Return how many captured schemas carry no content at all.
+
+    A schema member that is ``null`` or ``{}`` holds none of the keys a schema
+    should carry, so the capture is observably stripped of content.
+    """
+    count = 0
+    stack = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in SCHEMA_MEMBERS and (value is None or value == {}):
+                    count += 1
+                stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(node)
+    return count
+
+
 def _provenance(capture) -> str:
     """The provenance stated for a capture kind; never a claim about a client."""
     if capture == SYNTHETIC_CAPTURE:
@@ -160,7 +206,7 @@ def _read_fixture(path, expected):
     try:
         raw = path.read_bytes()
     except OSError as exc:
-        _fail(f"cannot read capture {path.name}: {exc}")
+        _fail(f"capture {path.name} is unavailable: {exc}")
     digest = hashlib.sha256(raw).hexdigest()
     if digest != expected:
         _fail(
@@ -198,7 +244,7 @@ def load_baseline(path=BASELINE_FILE) -> dict:
     try:
         raw = Path(path).read_bytes()
     except OSError as exc:
-        _fail(f"cannot read the baseline record: {exc}")
+        _fail(f"the baseline record is unavailable: {exc}")
     try:
         record = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError as exc:
@@ -210,21 +256,21 @@ def load_baseline(path=BASELINE_FILE) -> dict:
     return record
 
 
-def _status(observation) -> tuple:
-    """Return the status and its plain-words reason for one observation."""
-    refs = observation["refs_observed"]
-    if refs == 0:
-        observed_defs = observation["defs_observed"]
-        extra = (
-            f" and {observed_defs} local definition object(s)"
-            if observed_defs
-            else ""
-        )
+def _status(observation, stripped=0) -> tuple:
+    """Return the status and its plain-words reason for one observation.
+
+    Only a refutation produces ``failed``. A capture that is merely silent, or
+    whose local references all resolve, is ``not_run``, never ``passed``, because
+    a capture cannot establish that a client follows a pointer.
+    """
+    if stripped:
         return (
-            STATUS_NOT_RUN,
-            "the baseline-captured payload holds no shared schema reference"
-            f"{extra}, so client support for shared schema references is unobserved",
+            STATUS_FAILED,
+            f"the baseline-captured payload holds {stripped} schema(s) with no "
+            "content at all, so the capture is observably stripped of content it "
+            "should carry and cannot carry shared schema references",
         )
+    refs = observation["refs_observed"]
     if observation["unresolved_refs"]:
         return (
             STATUS_FAILED,
@@ -232,29 +278,82 @@ def _status(observation) -> tuple:
             f"{observation['unresolved_refs']} of them do not resolve inside the "
             "captured document",
         )
-    return (
-        STATUS_PASSED,
-        f"the baseline-captured payload holds {refs} local reference(s) and every "
-        "one resolves inside the captured document",
-    )
+    if refs == 0:
+        observed_defs = observation["defs_observed"]
+        extra = (
+            f" and {observed_defs} local definition object(s)"
+            if observed_defs
+            else ""
+        )
+        detail = "the baseline-captured payload holds no shared schema reference" + extra
+    else:
+        detail = (
+            f"the baseline-captured payload holds {refs} local reference(s) and "
+            "every one resolves inside the captured document"
+        )
+    return (STATUS_NOT_RUN, f"{detail}; {REFUTE_ONLY}")
 
 
 def receipt_id(client, status) -> str:
-    """Return the stable receipt id derived from a fixture digest and a status."""
-    return f"pack-shape-probe-{client['sha256'][:16]}-{status}"
+    """Return the stable receipt id derived from a fixture digest and a status.
+
+    No clock value and no environment value enters this id, so the same capture
+    and the same status always produce the same receipt.
+    """
+    digest = client.get("sha256") if isinstance(client, dict) else None
+    token = digest[:16] if isinstance(digest, str) and digest else UNKNOWN_CLIENT
+    return f"pack-shape-probe-{token}-{status}"
+
+
+def _unavailable(detail, client=None) -> dict:
+    """Return a ``not_run`` receipt for a capture the probe could not read.
+
+    ``client`` carries whatever identity the baseline stated, including the
+    digest it expected, so a reader sees which capture went missing.
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "reason": f"{detail}; {REFUTE_ONLY}",
+        "receipt_id": receipt_id(client, STATUS_NOT_RUN),
+        "client": client,
+        "capture_available": False,
+        "refs_observed": 0,
+        "defs_observed": 0,
+        "unresolved_refs": 0,
+        "stripped_schemas": 0,
+        "fixtures_examined": [],
+    }
 
 
 def probe(path=BASELINE_FILE) -> dict:
-    """Return the receipt for the client captures the baseline record names."""
-    record = load_baseline(path)
-    clients = _clients(record)
+    """Return the receipt for the client captures the baseline record names.
+
+    An unavailable baseline record or capture never raises: the receipt is
+    ``not_run`` naming what was unavailable, so the record can still be written.
+    """
+    try:
+        record = load_baseline(path)
+        clients = _clients(record)
+    except ProbeError as exc:
+        return _unavailable(str(exc))
+
     examined = []
     identity = None
-    total = {"refs_observed": 0, "defs_observed": 0, "unresolved_refs": 0}
+    total = {
+        "refs_observed": 0,
+        "defs_observed": 0,
+        "unresolved_refs": 0,
+        "stripped_schemas": 0,
+    }
     for client in clients:
         fixture = Path(path).parent / "clients" / client["fixture"]["name"]
-        payload, digest = _read_fixture(fixture, client["fixture"]["sha256"])
+        stated = _client_identity(client, fixture, client["fixture"]["sha256"])
+        try:
+            payload, digest = _read_fixture(fixture, client["fixture"]["sha256"])
+        except ProbeError as exc:
+            return _unavailable(str(exc), stated)
         observation = _observe(payload)
+        stripped = _stripped(payload)
         if identity is None:
             identity = _client_identity(client, fixture, digest)
         examined.append(
@@ -263,19 +362,24 @@ def probe(path=BASELINE_FILE) -> dict:
                 "refs_observed": observation["refs_observed"],
                 "defs_observed": observation["defs_observed"],
                 "unresolved_refs": observation["unresolved_refs"],
+                "stripped_schemas": stripped,
             }
         )
         for key, value in observation.items():
             total[key] += value
-    status, reason = _status(total)
+        total["stripped_schemas"] += stripped
+
+    status, reason = _status(total, total["stripped_schemas"])
     return {
         "status": status,
         "reason": reason,
         "receipt_id": receipt_id(identity, status),
         "client": identity,
+        "capture_available": True,
         "refs_observed": total["refs_observed"],
         "defs_observed": total["defs_observed"],
         "unresolved_refs": total["unresolved_refs"],
+        "stripped_schemas": total["stripped_schemas"],
         "fixtures_examined": examined,
     }
 
@@ -294,46 +398,47 @@ class _Parser(argparse.ArgumentParser):
 
 
 def main(argv=None) -> int:
-    """Probe the baseline captures and print the receipt; return the exit code."""
+    """Probe the baseline captures and print the receipt; return the exit code.
+
+    A receipt with status ``not_run`` is an honest observation and exits 0; only
+    a usage error exits 2, so an unavailable capture still yields a receipt.
+    """
     parser = _Parser(
         prog="probe_pack_shape.py",
-        description=(
-            "Report whether the baseline-captured client resolves shared "
-            "schema references."
-        ),
+        description="Report what the baseline captures show about shared references.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="print the receipt as JSON; the default prints one line per field",
+        help="print only the JSON receipt, so stdout can be piped",
     )
     parser.add_argument(
         "--baseline",
         metavar="PATH",
         default=None,
-        help="baseline capture record to read; defaults to the frozen record",
+        help="baseline capture record the probe reads",
     )
     args = parser.parse_args(argv)
 
-    try:
-        result = probe(args.baseline or BASELINE_FILE)
-    except ProbeError as exc:
-        sys.stderr.write(f"{exc}\n")
-        return 2
+    result = probe(args.baseline or BASELINE_FILE)
 
     if args.json:
         sys.stdout.write(render(result))
     else:
+        client = result["client"] or {}
         sys.stdout.write(
             f"status: {result['status']}\n"
             f"reason: {result['reason']}\n"
             f"receipt: {result['receipt_id']}\n"
-            f"client: {result['client']['name']} {result['client']['version']} "
-            f"({result['client']['provenance']})\n"
-            f"fixture: {result['client']['fixture']}\n"
+            f"client: {client.get('name', 'unknown')} "
+            f"{client.get('version', 'unknown')} "
+            f"({client.get('provenance', 'unknown')})\n"
+            f"fixture: {client.get('fixture', 'unknown')}\n"
+            f"capture: {'available' if result['capture_available'] else 'unavailable'}\n"
             f"observed: {result['refs_observed']} reference(s), "
             f"{result['defs_observed']} definition object(s), "
-            f"{result['unresolved_refs']} unresolved\n"
+            f"{result['unresolved_refs']} unresolved, "
+            f"{result['stripped_schemas']} stripped schema(s)\n"
         )
     sys.stdout.flush()
     return 0

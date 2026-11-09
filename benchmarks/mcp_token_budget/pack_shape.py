@@ -11,7 +11,9 @@ uses, by the pinned offline tokenizer.
 The choice reads one input, the probe receipt: a probe that passed ships the
 reference candidate, and a probe that failed or could not run ships the
 flattened one. An unrun probe never counts as a pass, because an unobserved
-client is not evidence of support.
+client is not evidence of support. A capture the probe could not read is itself
+recorded as `not_run` (naming what was unavailable), so the record is still
+written and the flattened candidate still ships.
 
 The record this writes, `benchmarks/mcp_token_budget/pack_shape.json`, is that
 one record: the receipt, both measurements, and the shape the build actually
@@ -20,8 +22,10 @@ the crate's own constant ships, and an existing record that names a different
 shipped shape is refused instead of being rewritten, so the record cannot drift
 away from the build by accident.
 
-Every error is one line prefixed ``pack-shape:`` and exits 2; nothing is written
-on a failure, because the record is built in memory and written once.
+Every error is one line prefixed ``pack-shape:`` and exits 2, and nothing is
+written on such a failure. A run that writes a record whose probe honestly says
+`not_run` is a success and exits 0; only a failure to measure, choose, or write
+is an error exit.
 """
 
 import argparse
