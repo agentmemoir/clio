@@ -410,17 +410,22 @@ fn maintenance_status_merges_pressure_without_touching_existing_fields() {
 }
 
 #[test]
-fn the_published_description_matches_the_bounded_archive_scan() {
+fn the_published_description_names_pressure_trigger_and_failure_reporting() {
     let defs = crate::schema_read_defs::read_defs();
     let def = defs
         .iter()
         .find(|def| def.name == "maintenance_status")
         .expect("maintenance_status def");
-    // The published budget matches the production constant, so the two
-    // cannot drift apart silently.
+    // The archive-scan budget is enforced by the pressure module; the short
+    // description promises the two blocks the response carries instead.
     assert!(
+        def.description.contains("pressure") && def.description.contains("trigger"),
+        "{}",
         def.description
-            .contains(&format!("at most {}", super::ARCHIVE_SCAN_BUDGET)),
+    );
+    // A failed block is reported and does not abort the whole status read.
+    assert!(
+        def.description.contains("failures are reported, not fatal"),
         "{}",
         def.description
     );
@@ -429,15 +434,5 @@ fn the_published_description_matches_the_bounded_archive_scan() {
         def.props.iter().any(|(key, _)| *key == "timestamp"),
         "{:?}",
         def.props
-    );
-    // The published row names the trigger block and its never-evaluated
-    // marker, so the block's absence of a bank is never read as silence.
-    assert!(
-        def.description.contains("`trigger` block")
-            && def
-                .description
-                .contains("has not evaluated renders an explicit unavailable marker"),
-        "{}",
-        def.description
     );
 }

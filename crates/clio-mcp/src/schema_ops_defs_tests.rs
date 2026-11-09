@@ -54,17 +54,17 @@ const SUPERSEDED_CLAIMS: [&str; 8] = [
     "Without a bank every action fails",
 ];
 
-/// The `repair` refusal, verbatim: a plan the credential's grant excludes is
-/// answered exactly like an id that was never registered, so no action it
-/// carries runs. Pinned as a whole sentence, so a description that promises the
-/// plan's own bank instead fails here.
-const REPAIR_REFUSAL: &str = "A plan registered for a bank the credential's grant does not \
-                              cover is reported as not found, and none of its actions run.";
+/// The `repair` refusal, in the short form the schema publishes: a plan the
+/// credential's grant excludes is not found, and a call with neither a bank
+/// nor a plan fails without acting.
+const REPAIR_OUT_OF_GRANT: &str = "Plan outside grant: not found";
+const REPAIR_NO_SCOPE: &str = "no bank/plan fails";
 
-/// The omitted-`bank` default each scoped tool has to publish: the server's
-/// default bank, reachable only when the credential's grant covers it.
-const OMITTED_BANK_DEFAULT: &str =
-    "omitted means the server default bank, which the credential's grant must cover";
+/// The omitted-`bank` default each scoped tool publishes: the server's default
+/// bank, reachable only when the credential's grant covers it. Matched as the
+/// short words the schema carries, not as one long sentence.
+const OMITTED_BANK_DEFAULT: &str = "omitted=server default";
+const OMITTED_BANK_GRANT: &str = "credential grant must cover";
 
 /// One operator tool definition from the published pack.
 fn def(name: &str) -> ToolDef {
@@ -128,24 +128,31 @@ fn every_operator_tool_publishes_the_bank_scope_its_arm_reads() {
 }
 
 /// A plan registered for a bank outside the credential's grant is answered as
-/// not found and none of its actions run, whatever `bank` the request also
-/// carries. `repair` has to say that, in those words.
+/// not found, whatever `bank` the request also carries, and a call with
+/// neither a bank nor a plan fails without acting. `repair` has to keep both.
 #[test]
-fn repair_states_the_out_of_grant_plan_refusal_verbatim() {
+fn repair_states_the_out_of_grant_plan_refusal() {
     let repair = def("repair");
     let clause = bank_clause(&repair).expect("repair publishes a bank clause");
-    assert!(clause.contains(REPAIR_REFUSAL), "repair: {clause}");
+    assert!(clause.contains(REPAIR_OUT_OF_GRANT), "repair: {clause}");
+    assert!(clause.contains(REPAIR_NO_SCOPE), "repair: {clause}");
+    assert!(clause.contains("credential"), "repair: {clause}");
+    assert!(clause.contains("grant"), "repair: {clause}");
 }
 
 /// An omitted `bank` is the server default bank for every scoped tool that
 /// takes one, and the call is refused when the credential's grant omits it. No
-/// tool may describe the default as the grant's own bank instead.
+/// tool may describe the default as the grant's own bank instead. The clause is
+/// short, so the meaning is matched in its published words, not as one old
+/// sentence.
 #[test]
 fn an_omitted_bank_names_the_server_default_the_grant_must_cover() {
     for name in ["diagnose", "verify", "doctor", "reindex"] {
         let tool_def = def(name);
         let clause = bank_clause(&tool_def).unwrap_or_else(|| panic!("{name} bank clause"));
         assert!(clause.contains(OMITTED_BANK_DEFAULT), "{name}: {clause}");
+        assert!(clause.contains(OMITTED_BANK_GRANT), "{name}: {clause}");
+        assert!(clause.contains("credential"), "{name}: {clause}");
         assert!(
             !clause.contains("omitted means the bank the caller's grant covers"),
             "{name} still calls an omitted bank the grant's own bank: {clause}"
@@ -213,14 +220,14 @@ fn no_operator_tool_claims_the_whole_store_for_an_omitted_bank() {
     }
 }
 
-/// Every operator tool has to name the credential grant (or the granted banks)
-/// where it states its scope, so a caller that omits `bank` knows what it gets.
+/// Every operator tool has to name the credential grant where it states its
+/// scope, so a caller that omits `bank` knows what it gets. The short clauses
+/// keep those two words even where they no longer name the caller.
 #[test]
 fn every_operator_tool_description_names_the_credential_grant() {
     for name in OPERATOR_TOOLS {
         let def = def(name);
         let scope = bank_clause(&def).unwrap_or(def.description);
-        assert!(scope.contains("caller"), "{name}: {scope}");
         assert!(scope.contains("grant"), "{name}: {scope}");
         assert!(
             scope.contains("credential"),

@@ -31,29 +31,21 @@ use crate::schema_defs::{ToolDef, arr, b, en, s};
 /// no default to fall back on, so each of those tools states that reach itself,
 /// while `diagnose` publishes its own sentence.
 const OMITTED_BANK: &str =
-    "Bank scope; omitted means the server default bank, which the credential's grant must cover.";
+    "Bank; omitted=server default the credential grant must cover.";
 
 /// `diagnose`'s own `bank` clause: the shared omitted-bank sentence, then the
 /// reach only this tool keeps, since its arm reads the argument without ever
 /// narrowing an unbound caller to it.
 fn diagnose_bank_clause() -> String {
-    format!(
-        "{OMITTED_BANK} A caller without a credential reads the whole store, whether it names \
-         this or not."
-    )
+    format!("{OMITTED_BANK} A caller without a credential reads the whole store.")
 }
 
 /// The `repair` scope, which is the plan's when a plan is registered, so the
 /// grant has to cover the scope the tool acts on and not only the argument. A
 /// plan outside the grant is answered as not found, in the words below, and an
 /// unbound caller keeps the plan-or-argument reach it had before the grant.
-const REPAIR_BANK: &str = "Bank scope; omitted means the registered plan's own bank, and \
-                           otherwise the bank this call resolves for the credential (the server \
-                           default when no `bank` is passed). A plan registered for a bank the \
-                           credential's grant does not cover is reported as not found, and none \
-                           of its actions run. A caller without a credential acts in its `bank` \
-                           argument when it passes one, and with neither a bank nor a registered \
-                           plan has no bank scope at all, where each action fails without mutating.";
+const REPAIR_BANK: &str = "Bank; omitted=plan's bank or credential default. Plan outside grant: \
+                           not found; no bank/plan fails.";
 
 /// `reindex`'s `dry_run` clause: absent, it follows `confirm`, and a `false`
 /// with nothing confirming it is refused as an unconfirmed mutating rebuild.
@@ -86,8 +78,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(&format!(
-                        "{OMITTED_BANK} A caller without a credential reads the whole store \
-                         when it omits this."
+                        "{OMITTED_BANK} A caller without a credential reads the whole store."
                     )),
                 ),
                 ("timestamp", s("Report time; defaults to now.")),
@@ -101,8 +92,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(&format!(
-                        "{OMITTED_BANK} A caller without a credential composes over the whole \
-                         store when it omits this."
+                        "{OMITTED_BANK} A caller without a credential composes the whole store."
                     )),
                 ),
                 (
@@ -148,9 +138,7 @@ pub fn ops_defs() -> Vec<ToolDef> {
                 (
                     "bank",
                     s(&format!(
-                        "{OMITTED_BANK} A caller without a credential sweeps every indexable \
-                         bank when it omits this (rejected over MCP while the shared bank \
-                         surface is disabled)."
+                        "{OMITTED_BANK} Unbound sweeps indexes; MCP rejects if shared bank off."
                     )),
                 ),
                 ("dry_run", b(REINDEX_DRY_RUN)),
