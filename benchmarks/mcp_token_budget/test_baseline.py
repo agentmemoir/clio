@@ -32,7 +32,7 @@ RECORD = HERE / "baseline" / "frozen-v1.json"
 FIXTURES = HERE / "baseline" / "clients"
 
 #: Digest of the committed record file. An edit or an append changes this value.
-FROZEN_V1_SHA256 = "484b46ac9ee2703920ee7f21f7f1eb16a00feca36336269489bf10e718e3be40"
+FROZEN_V1_SHA256 = "90e36e7224645e3d6584fb7834b0f95b0f1d275f50a41fa60444f399e7ca62a2"
 
 LABELS = frozenset(
     {"Measured", "Vendor-measured", "External", "Inferred", "Decision", "Unverified"}

@@ -67,7 +67,11 @@ fn initialize_frame() -> String {
 #[test]
 fn t08_bad_origin_is_403() {
     let (port, _) = spawn_server(HttpConfig::default());
-    let res = post_served(port, "server/discover", "Origin: http://evil.example.com\r\n");
+    let res = post_served(
+        port,
+        "server/discover",
+        "Origin: http://evil.example.com\r\n",
+    );
     assert_eq!(res.status, 403);
     let ok = post_served(port, "server/discover", "Origin: http://localhost:5173\r\n");
     assert_eq!(ok.status, 200);

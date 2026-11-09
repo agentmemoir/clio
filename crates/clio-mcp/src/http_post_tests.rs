@@ -88,7 +88,7 @@ fn a_removed_method_is_answered_with_404() {
     assert_eq!(status, 404, "{body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
     assert_eq!(value["error"]["code"], json!(-32601), "{value}");
-    assert!(extra.is_empty());
+    assert!(extra.is_empty(), "{extra:?}");
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn a_stateless_listing_is_served_with_200() {
     assert_eq!(status, 200, "{body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("a JSON answer");
     assert!(value["result"]["tools"].is_array(), "{value}");
-    assert!(extra.is_empty());
+    assert!(extra.is_empty(), "{extra:?}");
 }
 
 #[test]

@@ -24,7 +24,9 @@
 use super::*;
 use crate::http_candidate_fixtures::{headers as admission_headers, name_headers};
 use crate::runtime::{McpOpenOptions, McpState};
-use crate::stateless_fixtures::{CANDIDATE_FIXTURE_REVISION, request as fixture_request, required_meta};
+use crate::stateless_fixtures::{
+    CANDIDATE_FIXTURE_REVISION, request as fixture_request, required_meta,
+};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;

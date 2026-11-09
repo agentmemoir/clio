@@ -352,7 +352,8 @@ fn initialize_reports_pin_for_mismatched_client_revision() {
         }),
     );
     assert_eq!(res["error"]["code"], json!(-32022), "{res}");
-    assert_eq!(res["error"]["data"]["supported"], json!([MCP_PROTOCOL_REVISION]));
+    let supported = json!([MCP_PROTOCOL_REVISION]);
+    assert_eq!(res["error"]["data"]["supported"], supported, "{res}");
     assert!(res.get("result").is_none(), "{res}");
 }
 

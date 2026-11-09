@@ -26,7 +26,10 @@ use std::time::Duration;
 pub fn conditional_headers(body: &str) -> String {
     let frame: Value = serde_json::from_str(body).unwrap_or(Value::Null);
     let method = frame["method"].as_str().unwrap_or_default();
-    let name = frame.pointer("/params/name").and_then(Value::as_str).unwrap_or("");
+    let name = frame
+        .pointer("/params/name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let revision = clio_mcp::MCP_PROTOCOL_REVISION;
     format!("Mcp-Protocol-Version: {revision}\r\nMcp-Method: {method}\r\nMcp-Name: {name}\r\n")
 }

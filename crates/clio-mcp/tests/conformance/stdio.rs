@@ -150,8 +150,5 @@ fn stdio_removed_handshake_is_unknown_and_notifications_are_silent() {
         refused["error"]["data"]["supported"],
         json!([clio_mcp::MCP_PROTOCOL_REVISION])
     );
-    assert_eq!(
-        refused["error"]["data"]["requested"],
-        json!("2025-11-25")
-    );
+    assert_eq!(refused["error"]["data"]["requested"], json!("2025-11-25"));
 }

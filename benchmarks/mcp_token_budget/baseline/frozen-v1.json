@@ -40,7 +40,7 @@
     "mcp_protocol_revision": "2026-07-28",
     "tools_count": 86,
     "canonical_bytes": 105771,
-    "canonical_sha256": "c4c04a1d0613f35e6e5fa4072a9aca0cea2d80c052816af35aa9fe9d5edaab43"
+    "canonical_sha256": "031feeabd4898b64bd5ceea7d2ac86be39f59bd7801f86a4917a2da8d43b889d"
   },
   "clients": [
     {

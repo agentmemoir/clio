@@ -350,7 +350,6 @@ fn http_help_names_the_store_source_without_printing_a_secret_value() {
     assert!(!help.contains(secret), "help printed the secret: {help}");
 }
 
-
 // The credential-store load has its own file, because a module's own tests
 // are not limited to one file: see `mcp_cli_credentials_tests`.
 

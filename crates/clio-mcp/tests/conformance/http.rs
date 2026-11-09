@@ -77,15 +77,22 @@ fn http_request(addr: &SocketAddr, raw: &str) -> (u16, String, Value) {
 
 /// The conditional headers one admitted request carries.
 fn admitted_headers(method: &str, name: Option<&str>) -> String {
-    let mut headers = format!("Mcp-Protocol-Version: {MCP_PROTOCOL_REVISION}\r\nMcp-Method: {method}\r\n");
+    let mut headers =
+        format!("Mcp-Protocol-Version: {MCP_PROTOCOL_REVISION}\r\nMcp-Method: {method}\r\n");
     if let Some(name) = name {
-        headers.push_str(&format!("Mcp-Name: {name}\r\n"));
+        headers = format!("{headers}Mcp-Name: {name}\r\n");
     }
     headers
 }
 
 /// POST `body` as `method`, carrying the conditional headers and `extra`.
-fn post_admitted(addr: &SocketAddr, method: &str, name: Option<&str>, body: &str, extra: &str) -> (u16, Value) {
+fn post_admitted(
+    addr: &SocketAddr,
+    method: &str,
+    name: Option<&str>,
+    body: &str,
+    extra: &str,
+) -> (u16, Value) {
     let req = format!(
         "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n{}{extra}\r\n{body}",
         body.len(),

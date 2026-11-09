@@ -3,7 +3,7 @@
   "format_version": 1,
   "baseline": {
     "path": "benchmarks/mcp_token_budget/baseline/frozen-v1.json",
-    "sha256": "484b46ac9ee2703920ee7f21f7f1eb16a00feca36336269489bf10e718e3be40"
+    "sha256": "90e36e7224645e3d6584fb7834b0f95b0f1d275f50a41fa60444f399e7ca62a2"
   },
   "records": [
     {
