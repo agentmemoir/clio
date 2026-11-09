@@ -27,9 +27,13 @@
 //!
 //! Keep this module free of test functions.
 
-use crate::http::http_test_support_tests::{Response, post_json};
+use crate::http::HttpConfig;
+use crate::http::http_test_support_tests::{Response, post_json, request as raw_request};
+use crate::http_auth::CredentialStore;
 use crate::http_candidate::serve_candidate;
 use crate::stateless_fixtures::state;
+use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};
+use clio_types::Actor;
 use serde_json::{Value, json};
 use std::net::TcpListener;
 
@@ -40,14 +44,37 @@ use std::net::TcpListener;
 pub(crate) const CANDIDATE_FIXTURE_REVISION: &str = "2026-07-28";
 
 /// Serve the candidate endpoint on an OS-assigned port and return that port.
+///
+/// The config opts out of the start-time credential requirement, so a scenario
+/// that is not about auth keeps the credential-free loopback server. Per-request
+/// auth still applies when the config carries a store.
 pub(crate) fn spawn_candidate() -> u16 {
+    spawn_candidate_with(HttpConfig {
+        insecure_no_auth: true,
+        ..HttpConfig::default()
+    })
+}
+
+/// Serve the candidate endpoint with `cfg` on an OS-assigned port.
+pub(crate) fn spawn_candidate_with(cfg: HttpConfig) -> u16 {
     let state = state();
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
-        serve_candidate(&state, &listener);
+        serve_candidate(state, cfg, listener);
     });
     port
+}
+
+/// A credential store with one record whose secret is `secret-token`.
+pub(crate) fn single_record_store() -> CredentialStore {
+    CredentialStore::from_records(vec![AuthTokenRecord {
+        label: "ci".into(),
+        secret_sha256: digest_hex("secret-token"),
+        actor: Actor::Harness,
+        banks: vec!["demo".into()],
+        created_at: "2026-01-01T00:00:00Z".into(),
+    }])
 }
 
 /// The candidate conditional headers for one method, ending the header block.
@@ -66,6 +93,24 @@ pub(crate) fn name_headers(method: &str, name: &str) -> String {
 pub(crate) fn post(port: u16, frame: &Value, extra: &str) -> Response {
     let body = serde_json::to_string(frame).expect("a fixture serializes");
     post_json(port, &body, extra)
+}
+
+/// POST one candidate frame with an explicit path, content type, and `Accept`
+/// value, so a gate scenario can vary each of them.
+pub(crate) fn raw_post(
+    port: u16,
+    path: &str,
+    content_type: &str,
+    accept: &str,
+    extra: &str,
+    frame: &Value,
+) -> Response {
+    let body = serde_json::to_string(frame).expect("a fixture serializes");
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: {content_type}\r\nAccept: {accept}\r\nContent-Length: {}\r\n{extra}\r\n{body}",
+        body.len()
+    );
+    raw_request(port, &req)
 }
 
 /// Parse a response body as JSON.
@@ -142,9 +187,21 @@ pub(crate) fn check_discovery_identity(result: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// A removed method's answer: an error envelope with the not-found code and a
-/// message naming the method, and no result at all.
-pub(crate) fn check_removed_method_refusal(envelope: &Value, method: &str) -> Result<(), String> {
+/// A removed method's answer: HTTP `404`, an error envelope with the not-found
+/// code and a message naming the method, and no result at all.
+///
+/// The status is checked here, not only in a scenario, so a `200` success for a
+/// method this server does not implement cannot pass the check.
+pub(crate) fn check_removed_method_refusal(
+    status: u16,
+    envelope: &Value,
+    method: &str,
+) -> Result<(), String> {
+    if status != 404 {
+        return Err(format!(
+            "`{method}`: status {status} is not 404 Not Found: {envelope}"
+        ));
+    }
     if envelope.get("result").is_some() {
         return Err(format!("`{method}` was served: {envelope}"));
     }

@@ -32,7 +32,7 @@
 use crate::conditional_http::{ERR_HEADER_MISMATCH, Refusal, check_headers, refusal};
 use crate::protocol::{
     ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND, ERR_PARSE,
-    McpHandler, RpcError, invalid_params,
+    McpHandler, RpcError, error_response, invalid_params,
 };
 use crate::runtime::McpState;
 use serde_json::{Map, Value, json};
@@ -162,6 +162,22 @@ where
         return Err(refusal(&body, &err));
     }
     Ok(dispatch(state, &body))
+}
+
+/// Admit one candidate frame on a transport with no header layer.
+///
+/// The stdio transport has no headers, so there is nothing to compare. The
+/// frame is parsed and then answered through [`dispatch`], which applies the
+/// same required-metadata, supported-revision, and client-capability rules the
+/// HTTP admission applies after its header checks. A frame that is not JSON
+/// answers the JSON-RPC parse error.
+#[cfg(test)]
+pub(crate) fn admit_stdio(state: &McpState, frame: &str) -> Option<Value> {
+    let Ok(body) = serde_json::from_str::<Value>(frame) else {
+        let err = RpcError::new(ERR_PARSE, "Parse error: invalid JSON");
+        return Some(error_response(None, &err));
+    };
+    dispatch(state, &body)
 }
 
 /// The refusal for a request whose version header is absent or empty.

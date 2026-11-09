@@ -72,10 +72,9 @@ where
 
 /// Serve candidate-revision frames over the real stdio framing.
 ///
-/// The stdio transport carries no HTTP headers, so this seam reads the values
-/// the candidate admission compares out of each frame: the method, the tool
-/// name, and the per-request protocol version. The admission then runs its
-/// production checks and dispatch exactly as the HTTP transport does.
+/// The stdio transport carries no HTTP headers, so this seam parses each frame
+/// and runs the candidate dispatcher's metadata, revision, capability, and
+/// removed-method rules. No header is read or required here.
 ///
 /// # Errors
 /// Propagates I/O failures from the reader or writer.
@@ -89,40 +88,9 @@ where
     I: BufRead,
     O: std::io::Write,
 {
-    serve_frames(input, output, |frame| candidate_answer(state, frame))
-}
-
-/// Answer one candidate frame, mapping a refusal to its JSON-RPC error body.
-#[cfg(test)]
-fn candidate_answer(state: &McpState, frame: &str) -> Option<Value> {
-    let body = serde_json::from_str::<Value>(frame).ok();
-    let method = body
-        .as_ref()
-        .and_then(|body| body.get("method"))
-        .and_then(Value::as_str);
-    let name = body
-        .as_ref()
-        .and_then(|body| body.pointer("/params/name"))
-        .and_then(Value::as_str);
-    let version = body
-        .as_ref()
-        .and_then(|body| body.get("params"))
-        .and_then(|params| params.get("_meta"))
-        .and_then(|meta| meta.get("io.modelcontextprotocol/protocolVersion"))
-        .and_then(Value::as_str);
-    match crate::stateless::admit(
-        state,
-        |header| match header {
-            crate::conditional_http::MCP_METHOD_HEADER => method,
-            crate::conditional_http::MCP_NAME_HEADER => name,
-            crate::stateless::PROTOCOL_VERSION_HEADER => version,
-            _ => None,
-        },
-        frame,
-    ) {
-        Ok(response) => response,
-        Err((_, body)) => serde_json::from_str(&body).ok(),
-    }
+    serve_frames(input, output, |frame| {
+        crate::stateless::admit_stdio(state, frame)
+    })
 }
 
 #[cfg(test)]

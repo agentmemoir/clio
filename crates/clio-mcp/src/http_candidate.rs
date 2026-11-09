@@ -4,133 +4,81 @@
 //! # Responsibility
 //!
 //! This module is responsible for a non-activated candidate Streamable HTTP
-//! entry point: the real listener and request reading, the candidate POST-only
-//! verb guard, and routing of each POST body through the candidate revision's
-//! conditional-header and metadata admission.
+//! entry point. It supplies the candidate POST strategy to the live accept
+//! loop, so the candidate runs every gate the active transport runs (verbs,
+//! Origin, auth, path, media types, and sessions) and differs only in how an
+//! admitted POST body is answered.
 //!
 //! ## Owns
-//! - The candidate accept loop and per-connection handling
-//! - The candidate route: the verb guard first, then the candidate admission
-//! - The response framing the route answers with
-//!
-//! It mints no session identifier and requires none, so every request is
-//! served as the first request of its own connection.
+//! - The candidate POST dispatch strategy: the candidate admission, and the
+//!   status each of its outcomes answers with
 //!
 //! ## Does not own
+//! - The accept loop, request reading, and every request gate (see `http`)
 //! - The verb decision, the conditional headers, and the admission rules (see
 //!   `method_guard`, `conditional_http`, and `stateless`)
-//! - Request reading and its bounds (see `http_read`)
-//! - The live route, its sessions, auth, and Origin check (see `http`)
+//! - The candidate revision's request rules (see `stateless`)
 //! - Activation: only this crate's tests compile and reach this module
 //!
 //! ## Boundary
 //!
-//! Changes to how the candidate guards compose over HTTP should normally
+//! Changes to how the candidate answers an admitted POST should normally
 //! require changes here. Changes to the live transport or a tool should not.
 //!
-//! Keep this module focused on the candidate's HTTP composition.
+//! Keep this module focused on the candidate's POST strategy.
 
-use crate::http::DEFAULT_DEADLINE_SECS;
-use crate::http_read::{HttpRequest, read_request};
-use crate::method_guard::Response;
+use crate::http::{HttpConfig, serve_with_listener_and};
+use crate::http_post::{PostContext, PostResponse, PostRoute};
+use crate::protocol::ERR_METHOD_NOT_FOUND;
 use crate::runtime::McpState;
-use crate::stateless::admit;
-use std::fmt::Write as _;
-use std::io::Write;
-use std::net::{Shutdown, TcpListener, TcpStream};
+use serde_json::Value;
+use std::net::TcpListener;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-/// Longest single blocking write wait, mirroring the live writer's bound.
-const WRITE_SLICE: Duration = Duration::from_secs(5);
+/// HTTP status for a request whose method this server does not implement.
+///
+/// The 2026-07-28 transport answers `404 Not Found` with a JSON-RPC `-32601`
+/// body, which tells a modern client apart from a legacy endpoint that is not
+/// hosted at all.
+const METHOD_NOT_FOUND_STATUS: u16 = 404;
 
 /// Serve the candidate endpoint over an already-bound listener until it fails.
 ///
-/// Each connection is handled on its own thread, as the live transport does.
-/// The function never returns on its own; a test binds `127.0.0.1:0`, reads the
-/// port back, and drives it from another thread.
-pub(crate) fn serve_candidate(state: &Arc<McpState>, listener: &TcpListener) {
-    for stream in listener.incoming() {
-        let Ok(mut stream) = stream else { continue };
-        let state = Arc::clone(state);
-        std::thread::spawn(move || {
-            let _ = handle_conn(&state, &mut stream);
-        });
-    }
+/// The listener, the gates, and the writer are the live transport's; only the
+/// POST strategy is the candidate's.
+pub(crate) fn serve_candidate(state: Arc<McpState>, cfg: HttpConfig, listener: TcpListener) {
+    let _ = serve_with_listener_and(state, cfg, listener, Arc::new(CandidatePost));
 }
 
-/// Read one request and answer it through the candidate route.
-fn handle_conn(state: &McpState, stream: &mut TcpStream) -> std::io::Result<()> {
-    stream.set_write_timeout(Some(WRITE_SLICE))?;
-    let deadline = Instant::now() + Duration::from_secs(DEFAULT_DEADLINE_SECS);
-    let req = match read_request(stream, deadline, DEFAULT_DEADLINE_SECS) {
-        Ok(Some(req)) => req,
-        Ok(None) => return Ok(()),
-        Err((status, message)) => return write_error(stream, status, &message),
-    };
-    let (status, body, extra) = route(state, &req);
-    write_response(stream, status, &body, &extra)
-}
+/// The candidate POST strategy: the candidate admission answers every body.
+struct CandidatePost;
 
-/// The candidate route: refuse every verb but `POST`, then admit the body.
-///
-/// The verb guard runs before any body parser. An admitted request answers its
-/// JSON-RPC envelope; a notification answers 202 with no body; a refused
-/// admission answers its status and JSON-RPC error body. No session identifier
-/// is read, required, or minted.
-fn route(state: &McpState, req: &HttpRequest) -> Response {
-    crate::method_guard::endpoint(&req.method, || {
-        match admit(state, |header| req.get(header), req.body.trim()) {
-            Ok(Some(response)) => (
-                200,
-                serde_json::to_string(&response).unwrap_or_default(),
-                Vec::new(),
-            ),
+impl PostRoute for CandidatePost {
+    fn respond(&self, ctx: PostContext<'_>) -> PostResponse {
+        match crate::stateless::admit(ctx.state, |header| ctx.req.get(header), ctx.req.body.trim())
+        {
+            Ok(Some(response)) => {
+                let status = method_not_found_status(&response);
+                (
+                    status,
+                    serde_json::to_string(&response).unwrap_or_default(),
+                    Vec::new(),
+                )
+            }
             Ok(None) => (202, String::new(), Vec::new()),
             Err((status, body)) => (status, body, Vec::new()),
         }
-    })
+    }
 }
 
-/// Write one response: the status line, extra headers, the JSON content
-/// headers, and the body.
-///
-/// This mirrors the live writer's framing, which stays private to `http`
-/// because that file is at its line cap. The candidate tests read the bytes
-/// back through the live request parser, so a framing difference fails a test.
-fn write_response(
-    stream: &mut TcpStream,
-    status: u16,
-    body: &str,
-    extra: &[(String, String)],
-) -> std::io::Result<()> {
-    let mut response = String::new();
-    let _ = write!(response, "HTTP/1.1 {status}\r\n");
-    for (name, value) in extra {
-        let _ = write!(response, "{name}: {value}\r\n");
-    }
-    let _ = write!(
-        response,
-        "Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(response.as_bytes())?;
-    if !body.is_empty() {
-        stream.write_all(body.as_bytes())?;
-    }
-    stream.flush()?;
-    let _ = stream.shutdown(Shutdown::Write);
-    Ok(())
-}
-
-/// Answer a read failure with the live transport's error body shape.
-fn write_error(stream: &mut TcpStream, status: u16, message: &str) -> std::io::Result<()> {
-    let body = if message.is_empty() {
-        String::new()
+/// The HTTP status for one admitted answer: `404` when this server does not
+/// implement the requested method, `200` otherwise.
+fn method_not_found_status(response: &Value) -> u16 {
+    if response["error"]["code"].as_i64() == Some(ERR_METHOD_NOT_FOUND) {
+        METHOD_NOT_FOUND_STATUS
     } else {
-        format!("{{\"error\":\"{message}\"}}")
-    };
-    write_response(stream, status, &body, &[])
+        200
+    }
 }
 
 #[cfg(test)]

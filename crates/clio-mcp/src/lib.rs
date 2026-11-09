@@ -48,6 +48,7 @@ mod export_destination;
 pub mod http;
 pub mod http_auth;
 mod http_guard;
+mod http_post;
 mod http_read;
 pub mod hygiene_tools;
 pub mod index_drain;

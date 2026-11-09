@@ -7,6 +7,7 @@
 use super::http_test_support_tests::{INIT, post_json, request, spawn_server};
 use super::*;
 use crate::conn_pool::MAX_CONNECTIONS;
+use crate::http_guard::mint_session;
 use crate::http_guard::origin_host_allowed;
 use crate::runtime::McpOpenOptions;
 use clio_config::auth_tokens::{AuthTokenRecord, digest_hex};

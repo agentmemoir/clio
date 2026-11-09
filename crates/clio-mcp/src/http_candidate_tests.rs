@@ -100,9 +100,39 @@ const SCENARIOS: &[Scenario] = &[
         receipt: "cargo test -p clio-mcp --lib http_removed_methods_are_refused",
     },
     Scenario {
+        id: "http/origin-gate",
+        owner: "HTTP gate",
+        receipt: "cargo test -p clio-mcp --lib http_disallowed_origin_is_403",
+    },
+    Scenario {
+        id: "http/path-gate",
+        owner: "HTTP gate",
+        receipt: "cargo test -p clio-mcp --lib http_wrong_path_is_404",
+    },
+    Scenario {
+        id: "http/content-type-gate",
+        owner: "HTTP gate",
+        receipt: "cargo test -p clio-mcp --lib http_wrong_media_type_is_415",
+    },
+    Scenario {
+        id: "http/accept-gate",
+        owner: "HTTP gate",
+        receipt: "cargo test -p clio-mcp --lib http_unacceptable_accept_is_406",
+    },
+    Scenario {
+        id: "http/auth-gate",
+        owner: "HTTP gate",
+        receipt: "cargo test -p clio-mcp --lib http_missing_and_present_credentials_are_gated",
+    },
+    Scenario {
         id: "harness/successful-removed-response",
         owner: "conformance harness",
         receipt: "cargo test -p clio-mcp --lib a_successful_response_to_a_removed_method_fails_the_candidate_check",
+    },
+    Scenario {
+        id: "harness/wrong-result-shape",
+        owner: "conformance harness",
+        receipt: "cargo test -p clio-mcp --lib a_deliberately_wrong_result_shape_fails_the_http_checkers",
     },
 ];
 
@@ -129,7 +159,7 @@ fn every_scenario_records_one_owner_and_one_bounded_check() {
         );
         ids.push(scenario.id);
     }
-    assert_eq!(ids.len(), 11, "every covered scenario is registered");
+    assert_eq!(ids.len(), 17, "every covered scenario is registered");
 }
 
 #[test]
@@ -285,8 +315,46 @@ fn http_error_envelope_shape() {
         &request("resources/list", &required_meta(CANDIDATE_FIXTURE_REVISION)),
         &headers("resources/list"),
     );
-    assert_eq!(response.status, 200);
+    assert_eq!(response.status, 404);
     let answer = body(&response);
     check_error_envelope(&answer, 7).expect("an unserved request is an error envelope");
     assert_eq!(answer["error"]["code"], json!(-32601), "{answer}");
+}
+
+#[test]
+fn a_deliberately_wrong_result_shape_fails_the_http_checkers() {
+    let partial = json!({ "resultType": "partial" });
+    assert!(
+        check_complete_result(&partial).is_err(),
+        "a result that is not complete fails the HTTP check"
+    );
+
+    let missing_identity = json!({ "resultType": "complete", "_meta": {} });
+    assert!(
+        check_discovery_identity(&missing_identity).is_err(),
+        "a result without identity fails the HTTP check"
+    );
+
+    let top_level_identity = json!({
+        "resultType": "complete",
+        "serverInfo": { "name": "wrong", "version": "0" }
+    });
+    assert!(
+        check_discovery_identity(&top_level_identity).is_err(),
+        "a top-level identity fails the HTTP check"
+    );
+
+    let ambiguous = json!({
+        "jsonrpc": "2.0", "id": 7,
+        "result": {},
+        "error": { "code": -32601, "message": "refused" }
+    });
+    assert!(
+        check_success_envelope(&ambiguous, 7).is_err(),
+        "an envelope carrying an error is no success"
+    );
+    assert!(
+        check_error_envelope(&ambiguous, 7).is_err(),
+        "an envelope carrying a result is no error"
+    );
 }

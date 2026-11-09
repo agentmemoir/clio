@@ -235,8 +235,8 @@ fn stdio_required_metadata_refusal() {
         (
             "absent _meta",
             json!({ "jsonrpc": "2.0", "id": 7, "method": "server/discover", "params": {} }),
-            -32020,
-            "MCP-Protocol-Version",
+            -32602,
+            "params._meta",
         ),
         (
             "absent protocolVersion",
@@ -244,8 +244,8 @@ fn stdio_required_metadata_refusal() {
                 "jsonrpc": "2.0", "id": 7, "method": "server/discover",
                 "params": { "_meta": { "io.modelcontextprotocol/clientCapabilities": {} } }
             }),
-            -32020,
-            "MCP-Protocol-Version",
+            -32602,
+            "protocolVersion",
         ),
         (
             "absent clientCapabilities",
