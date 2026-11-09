@@ -217,10 +217,8 @@ fn the_published_provenance_floor_promises_membership_and_nothing_else() {
 #[test]
 fn the_published_provenance_floor_states_the_omitted_default() {
     let doc = published_prop("provenance_floor").to_string();
-    for (claim, needle) in [(
-        "omitting the floor uses the bank default",
-        "Omitted uses the bank default",
-    )] {
-        assert!(doc.contains(needle), "the schema states {claim}: {doc}");
-    }
+    assert!(
+        doc.contains("Omitted uses the bank default"),
+        "the schema states omitting the floor uses the bank default: {doc}"
+    );
 }

@@ -97,8 +97,7 @@ pub(crate) fn entity_summary_prop() -> Value {
 /// property states the policy a caller must know to use the field safely.
 pub(crate) fn include_exact_prop() -> Value {
     b(&format!(
-        "Attach hits[].exact_render, a bounded snapshot (default false, max {} bytes, never truncated); see get_snapshot.",
-        EXACT_RENDER_MAX_BYTES
+        "Attach hits[].exact_render, a bounded snapshot (default false, max {EXACT_RENDER_MAX_BYTES} bytes, never truncated); see get_snapshot."
     ))
 }
 
@@ -108,9 +107,7 @@ pub(crate) fn include_exact_prop() -> Value {
 /// bank default that resolves them.
 pub(crate) fn fidelity_prop() -> Value {
     en(
-        &format!(
-            "Composed hit channel: flow (default) reads gist before rendering, exact the reverse. Omitted uses the bank default."
-        ),
+        "Composed hit channel: flow (default) reads gist before rendering, exact the reverse. Omitted uses the bank default.",
         &[
             PackFidelityDefault::Flow.as_str(),
             PackFidelityDefault::Exact.as_str(),
